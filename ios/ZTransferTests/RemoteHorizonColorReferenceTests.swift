@@ -19,7 +19,7 @@ final class RemoteHorizonColorReferenceTests: XCTestCase {
         for sample in fixture.samples {
             let start = try XCTUnwrap(UInt32(sample.start, radix: 16))
             let end = try XCTUnwrap(UInt32(sample.end, radix: 16))
-            var animation = RemoteHorizonColorAnimation(start)
+            var animation = ZTransferColorAnimation(start)
             animation.retarget(end)
             animation.advance(0)
             if sample.interruptedAtMs != 0 {

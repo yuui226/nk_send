@@ -37,11 +37,12 @@ struct DetentWheel<Option: Hashable>: View {
     var onContentAnchorChange: ((CGRect) -> Void)? = nil
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @State private var position: CGFloat
-    @State private var dragStart: CGFloat
     @State private var dragging = false
-    @State private var suppressNextTap = false
+    @State private var dragSession: DetentWheelDragSession<Option>
     @GestureState private var gestureActive = false
     @GestureState private var pressing = false
+    @State private var longPressFeedback = ZTransferLongPressFeedback()
+    private let longPressDurationMilliseconds = 450
 
     init(label: String, options: [Option], selected: Option,
          optionLabel: @escaping (Option) -> String,
@@ -81,7 +82,8 @@ struct DetentWheel<Option: Hashable>: View {
         self.contentAnchorSpace = contentAnchorSpace
         self.onContentAnchorChange = onContentAnchorChange
         let initial = options.firstIndex(of: selected) ?? 0
-        _position = State(initialValue: CGFloat(initial)); _dragStart = State(initialValue: CGFloat(initial))
+        _position = State(initialValue: CGFloat(initial))
+        _dragSession = State(initialValue: DetentWheelDragSession(configuration: .init(options: options, rowHeight: rowHeight, enabled: enabled, readOnly: readOnly)))
     }
 
     private var selectedIndex: Int { options.firstIndex(of: selected) ?? 0 }
@@ -150,13 +152,13 @@ struct DetentWheel<Option: Hashable>: View {
                     surface
                 }
             }
+            .id(gestureConfiguration)
             .contentShape(Rectangle())
             // A normal tap keeps the control clickable without installing a
             // second high-priority recognizer that can delay the enclosing
             // page's vertical drag.
-            .onTapGesture { activate() }
+            .gesture(clickGesture)
             .simultaneousGesture(pressGesture)
-            .simultaneousGesture(longPressGesture)
             .scaleEffect(prominentPressFeedback && pressing ? 0.96 : 1)
             .brightness(prominentPressFeedback && pressing ? -0.035 : 0)
             .animation(.easeOut(duration: pressing ? 0.07 : 0.16), value: pressing)
@@ -180,7 +182,21 @@ struct DetentWheel<Option: Hashable>: View {
         .accessibilityHint(Text(readOnly ? AppLocalized.text("只读") : AppLocalized.resource("photo_effects_wheel_hint")))
         .accessibilityAddTraits(.isButton)
         .onChange(of: selected) { value in sync(value: value) }
-        .onChange(of: options) { _ in sync(value: selected) }
+        .onChange(of: gestureConfiguration) { _ in
+            // Android restarts pointerInput for these keys. Invalidate queued
+            // callbacks as well as replacing the recognizer, including ABA changes.
+            longPressFeedback.end()
+            dragSession.update(configuration: gestureConfiguration)
+            dragging = false
+            position = CGFloat(selectedIndex)
+        }
+        .onChange(of: pressing) { active in
+            if !active { longPressFeedback.end() }
+        }
+        .onChange(of: dragging) { active in
+            if active { longPressFeedback.cancel() }
+        }
+        .onDisappear { longPressFeedback.end() }
         .onPreferenceChange(DetentWheelContentAnchorPreferenceKey.self) { frame in
             guard frame != .zero else { return }
             onContentAnchorChange?(frame)
@@ -191,6 +207,7 @@ struct DetentWheel<Option: Hashable>: View {
             // release clears `dragging` in onEnded first, so only cancellation
             // reaches this rollback path.
             if !active, dragging {
+                dragSession.invalidate()
                 dragging = false
                 position = CGFloat(selectedIndex)
             }
@@ -198,10 +215,17 @@ struct DetentWheel<Option: Hashable>: View {
     }
 
     @ViewBuilder private func wheelRows(center: CGFloat) -> some View {
-        let centerIndex = min(max(Int(position.rounded()), 0), options.count - 1)
-        let indices = dragging ? Array(max(0, Int(floor(position)) - 1)...min(options.count - 1, Int(ceil(position)) + 1)) : [centerIndex]
+        // Android ReleaseCommitWheel renders accepted identity while idle.
+        // A rejected/deferred request must never become the displayed value.
+        // Configuration changes also hide stale preview before onChange runs.
+        let previewing = dragging && dragSession.configuration == gestureConfiguration
+        let displayPosition = previewing ? position : CGFloat(selectedIndex)
+        let centerIndex = min(max(Int(displayPosition.rounded()), 0), options.count - 1)
+        // A shorter list can render before onChange rolls back the old preview.
+        let boundedPosition = min(max(displayPosition, 0), CGFloat(options.count - 1))
+        let indices = previewing ? Array(max(0, Int(floor(boundedPosition)) - 1)...min(options.count - 1, Int(ceil(boundedPosition)) + 1)) : [centerIndex]
         ForEach(indices, id: \.self) { index in
-            let distance = abs(CGFloat(index) - position); let active = distance < 0.5
+            let distance = abs(CGFloat(index) - displayPosition); let active = distance < 0.5
             let baseColor = emphasized && active ? accent : (optionTextColor ?? ZTransferColors.primaryText)
             let color = baseColor
                 .opacity(active ? 1 : (dark ? 0.50 : 0.38))
@@ -231,27 +255,37 @@ struct DetentWheel<Option: Hashable>: View {
             // ZStack already centers each row. Only move neighboring rows by
             // their detent delta; adding a second center offset puts the value
             // at the bottom of the wheel.
-            .offset(y: (CGFloat(index) - position) * rowHeight)
+            .offset(y: (CGFloat(index) - displayPosition) * rowHeight)
         }
     }
 
+    private var gestureConfiguration: DetentWheelConfiguration<Option> {
+        DetentWheelConfiguration(options: options, rowHeight: rowHeight, enabled: enabled, readOnly: readOnly)
+    }
+
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: canDrag ? 2 : .infinity)
+        let revision = dragSession.revision
+        return DragGesture(minimumDistance: canDrag ? 2 : .infinity)
             .updating($gestureActive) { _, active, _ in active = true }
             .onChanged { value in
-                guard enabled, !readOnly, canDrag else { return }
-                if !dragging { dragging = true; dragStart = CGFloat(selectedIndex) }
-                let next = min(max(dragStart - value.translation.height / max(rowHeight, 1), 0), CGFloat(options.count - 1))
+                guard revision == dragSession.revision, enabled, !readOnly, canDrag else { return }
+                if !dragging {
+                    guard dragSession.begin(revision: revision, selectedIndex: selectedIndex) else { return }
+                    dragging = true
+                }
+                guard let next = dragSession.preview(revision: revision, translation: value.translation.height) else { return }
                 if Int(next.rounded()) != Int(position.rounded()) { emitDetent() }; position = next
             }
             .onEnded { value in
-                guard enabled, !readOnly, canDrag else {
+                guard revision == dragSession.revision else { return }
+                guard dragging, enabled, !readOnly, canDrag else {
+                    dragSession.invalidate()
                     dragging = false
                     position = CGFloat(selectedIndex)
                     return
                 }
-                let raw = dragStart - value.translation.height / max(rowHeight, 1)
-                let target = min(max(Int(raw.rounded()), 0), options.count - 1); dragging = false
+                guard let target = dragSession.release(revision: revision, translation: value.translation.height) else { return }
+                dragging = false
                 withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
                 if target != selectedIndex { onCommit(options[target]) }
             }
@@ -259,7 +293,6 @@ struct DetentWheel<Option: Hashable>: View {
 
     private func activate() {
         guard enabled, !readOnly else { return }
-        if suppressNextTap { suppressNextTap = false; return }
         if let onActivated { onActivated(); return }
         let target = (selectedIndex + 1) % options.count
         guard target != selectedIndex else { return }
@@ -270,28 +303,39 @@ struct DetentWheel<Option: Hashable>: View {
         onCommit(options[target])
     }
 
-    private var longPressGesture: some Gesture {
-        // Controls without a long-click action still need to expose their
-        // surface to the parent pager. An effectively disabled recognizer is
-        // preferable to a no-op long press that can hold the touch arena.
-        LongPressGesture(minimumDuration: onLongClick == nil ? .infinity : 0.45).onEnded { _ in
-            guard enabled, !readOnly, onLongClick != nil else { return }
-            suppressNextTap = true
-            onLongClick?()
-            // SwiftUI does not expose combinedClickable's consumed-up event;
-            // clear the guard after the gesture sequence so a long press can
-            // never suppress a later, unrelated tap.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                suppressNextTap = false
-            }
+    private var clickGesture: AnyGesture<Void> {
+        guard onLongClick != nil else {
+            return AnyGesture(TapGesture().onEnded { activate() })
         }
+        // One touch sequence chooses exactly one action. A completed long
+        // press consumes its own release; the next touch has a fresh choice.
+        // Unlike a timer-based tap guard, cancellation leaves no delayed state.
+        return AnyGesture(
+            LongPressGesture(minimumDuration: Double(longPressDurationMilliseconds) / 1_000)
+                .exclusively(before: TapGesture())
+                .onEnded { result in
+                    guard enabled, !readOnly else { return }
+                    switch result {
+                    case .first(let completed):
+                        if completed { longPressFeedback.trigger { onLongClick?() } }
+                    case .second:
+                        activate()
+                    }
+                }
+                .map { _ in () }
+        )
     }
 
     private var pressGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .updating($pressing) { _, active, _ in
-                if prominentPressFeedback && enabled && !readOnly { active = true }
+                if (prominentPressFeedback || onLongClick != nil) && enabled && !readOnly { active = true }
             }
+            .onChanged { _ in
+                guard onLongClick != nil, enabled, !readOnly, !dragging else { return }
+                longPressFeedback.begin(durationMilliseconds: longPressDurationMilliseconds)
+            }
+            .onEnded { _ in longPressFeedback.end() }
     }
 
     private func sync(value: Option) {
@@ -315,5 +359,52 @@ private struct DetentWheelContentAnchorPreferenceKey: PreferenceKey {
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
         let next = nextValue()
         if next != .zero { value = next }
+    }
+}
+
+/// Android pointerInput cancellation invalidates the whole drag, even if its
+/// configuration later returns to the original value. Selected-value changes
+/// alone keep the active start index, matching rememberUpdatedState on Android.
+struct DetentWheelConfiguration<Option: Hashable>: Hashable {
+    let options: [Option]
+    let rowHeight: CGFloat
+    let enabled: Bool
+    let readOnly: Bool
+
+    var canDrag: Bool { enabled && !readOnly && options.count > 3 }
+}
+
+struct DetentWheelDragSession<Option: Hashable> {
+    private(set) var configuration: DetentWheelConfiguration<Option>
+
+    mutating func update(configuration: DetentWheelConfiguration<Option>) {
+        guard configuration != self.configuration else { return }
+        self.configuration = configuration
+        invalidate()
+    }
+
+    private(set) var revision: UInt64 = 0
+    private var startIndex: Int?
+
+    mutating func invalidate() {
+        revision &+= 1
+        startIndex = nil
+    }
+
+    mutating func begin(revision: UInt64, selectedIndex: Int) -> Bool {
+        guard revision == self.revision, configuration.canDrag else { return false }
+        startIndex = selectedIndex
+        return true
+    }
+
+    func preview(revision: UInt64, translation: CGFloat) -> CGFloat? {
+        guard revision == self.revision, let startIndex, configuration.canDrag else { return nil }
+        return min(max(CGFloat(startIndex) - translation / max(configuration.rowHeight, 1), 0), CGFloat(configuration.options.count - 1))
+    }
+
+    mutating func release(revision: UInt64, translation: CGFloat) -> Int? {
+        guard let position = preview(revision: revision, translation: translation) else { return nil }
+        startIndex = nil
+        return Int(position.rounded())
     }
 }

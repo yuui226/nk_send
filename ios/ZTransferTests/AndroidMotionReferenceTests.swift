@@ -35,7 +35,10 @@ final class AndroidMotionReferenceTests: XCTestCase {
 
     private func spec(_ name: String) throws -> ZTransferAndroidMotion {
         let parts = name.split(separator: "-")
-        if parts[0] == "tween" { return .tween(milliseconds: try XCTUnwrap(Int64(parts[1]))) }
+        if parts[0] == "tween" {
+            return .tween(milliseconds: try XCTUnwrap(Int64(parts[1])),
+                          delayMilliseconds: parts.count == 4 ? try XCTUnwrap(Int64(parts[3])) : 0)
+        }
         if parts[2] == "1" { return .criticallyDampedSpring(stiffness: try XCTUnwrap(Float(parts[1]))) }
         return .underdampedSpring(stiffness: try XCTUnwrap(Float(parts[1])),
                                   dampingRatio: try XCTUnwrap(Float(parts[2])))
@@ -51,9 +54,9 @@ final class AndroidMotionReferenceTests: XCTestCase {
         }
     }
 
-    func testAll90SpecsMatchComposeValuesVelocitiesAndDurations() throws {
+    func testAllSpecsMatchComposeValuesVelocitiesAndDurations() throws {
         let cases = try fixture().cases
-        XCTAssertEqual(cases.count, 100)
+        XCTAssertEqual(cases.count, 140)
         for item in cases {
             let spec = try spec(item.spec)
             let start = try float(item.start), target = try float(item.target), velocity = try float(item.velocity)

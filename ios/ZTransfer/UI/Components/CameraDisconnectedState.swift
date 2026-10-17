@@ -115,3 +115,44 @@ private struct OfflineSignalBreath<Content: View>: View {
             }
     }
 }
+
+
+/// FileListSignalPill: a 120 ms FastOutSlowIn pulse followed by Motion.bouncy.
+/// Retriggering interrupts from the displayed value, independently of breath.
+struct PhotoListSignalAttentionMotion {
+    private(set) var scale = ZTransferScalarAnimation(value: 1)
+    private var returning = false
+    mutating func trigger() {
+        returning = false
+        scale.retarget(1.15, using: .tween(milliseconds: 120), force: true)
+    }
+    mutating func advance(_ nanos: Int64) {
+        scale.advance(frameNanos: nanos)
+        if !scale.isRunning, !returning {
+            returning = true
+            scale.retarget(1, using: .underdampedSpring(stiffness: 400, dampingRatio: 0.5))
+        }
+    }
+}
+
+@MainActor
+final class PhotoListSignalAttentionClock: NSObject, ObservableObject {
+    @Published private(set) var motion = PhotoListSignalAttentionMotion()
+    private var link: CADisplayLink?
+    func trigger() {
+        motion.trigger()
+        guard link == nil else { return }
+        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        link = next
+        next.add(to: .main, forMode: .common)
+    }
+    @objc private func frame(_ sender: CADisplayLink) {
+        motion.advance(Int64(sender.timestamp * 1_000_000_000))
+        if !motion.scale.isRunning { stop() }
+    }
+    func stop() {
+        link?.invalidate()
+        link = nil
+        motion = PhotoListSignalAttentionMotion()
+    }
+}

@@ -1,0 +1,6284 @@
+{
+  "cases": [
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        4.00000048,
+        0.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        4.00000048,
+        0.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        4.00000048,
+        0.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        13,
+        19
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        19.0,
+        15.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        4.00000048,
+        0.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        14,
+        20
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        20.0,
+        16.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        2.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        2.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        2.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        13,
+        19
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        19.0,
+        15.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        2.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        14,
+        20
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        20.0,
+        16.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        8.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        8.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        8.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        13,
+        19
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        19.0,
+        15.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        8.0,
+        8.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        14,
+        20
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        20.0,
+        16.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        800.0,
+        1200.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        800.0,
+        1200.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        800.0,
+        1200.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        13,
+        19
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        19.0,
+        15.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        800.0,
+        1200.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        14,
+        20
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        20.0,
+        16.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        32.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        32.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        32.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        13,
+        19
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        19.0,
+        15.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        32.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        14,
+        20
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        20.0,
+        16.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        0.0,
+        9.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        1,
+        1
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        0.0,
+        9.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        0.0,
+        9.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        13,
+        19
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        19.0,
+        15.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1,
+        1
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        12,
+        18
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        1.0,
+        1.0
+      ],
+      "scaledSigma": [
+        0.0,
+        9.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        14,
+        20
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        20.0,
+        16.0
+      ],
+      "steps": [
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        2.00000024,
+        0.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        8
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        7.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        2.00000024,
+        0.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        9
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        8.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        2.00000024,
+        0.0
+      ],
+      "blurBounds": [
+        -3,
+        4,
+        8,
+        25
+      ],
+      "reexpandBounds": [
+        0.5,
+        0.0,
+        10.5,
+        21.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        2.00000024,
+        0.0
+      ],
+      "blurBounds": [
+        -4,
+        3,
+        9,
+        26
+      ],
+      "reexpandBounds": [
+        1.5,
+        1.0,
+        11.5,
+        22.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        8
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        7.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        9
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        8.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        -3,
+        4,
+        8,
+        25
+      ],
+      "reexpandBounds": [
+        0.5,
+        0.0,
+        10.5,
+        21.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        -4,
+        3,
+        9,
+        26
+      ],
+      "reexpandBounds": [
+        1.5,
+        1.0,
+        11.5,
+        22.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        3
+      ],
+      "scale": [
+        0.5,
+        0.428571433
+      ],
+      "scaledSigma": [
+        4.0,
+        3.42857146
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        4
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        3.0
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        3
+      ],
+      "scale": [
+        0.5,
+        0.428571433
+      ],
+      "scaledSigma": [
+        4.0,
+        3.42857146
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        5
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        4.0
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        3
+      ],
+      "scale": [
+        0.5,
+        0.428571433
+      ],
+      "scaledSigma": [
+        4.0,
+        3.42857146
+      ],
+      "blurBounds": [
+        -3,
+        2,
+        8,
+        12
+      ],
+      "reexpandBounds": [
+        0.5,
+        0.285714149,
+        10.5,
+        9.28571415
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        3
+      ],
+      "scale": [
+        0.5,
+        0.428571433
+      ],
+      "scaledSigma": [
+        4.0,
+        3.42857146
+      ],
+      "blurBounds": [
+        -4,
+        1,
+        9,
+        13
+      ],
+      "reexpandBounds": [
+        1.5,
+        1.28571415,
+        11.5,
+        10.2857141
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.5,
+        0.142857149
+      ],
+      "scaledSigma": [
+        400.0,
+        171.428574
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.5,
+        0.142857149
+      ],
+      "scaledSigma": [
+        400.0,
+        171.428574
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.5,
+        0.142857149
+      ],
+      "scaledSigma": [
+        400.0,
+        171.428574
+      ],
+      "blurBounds": [
+        -3,
+        1,
+        8,
+        5
+      ],
+      "reexpandBounds": [
+        0.5,
+        0.428571463,
+        10.5,
+        3.4285717
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.5,
+        0.142857149
+      ],
+      "scaledSigma": [
+        400.0,
+        171.428574
+      ],
+      "blurBounds": [
+        -4,
+        0,
+        9,
+        6
+      ],
+      "reexpandBounds": [
+        1.5,
+        1.42857146,
+        11.5,
+        4.4285717
+      ],
+      "steps": [
+        [
+          1,
+          4
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        16.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        8
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        7.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        16.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        9
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        8.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        16.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        -3,
+        4,
+        8,
+        25
+      ],
+      "reexpandBounds": [
+        0.5,
+        0.0,
+        10.5,
+        21.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        7
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        16.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        -4,
+        3,
+        9,
+        26
+      ],
+      "reexpandBounds": [
+        1.5,
+        1.0,
+        11.5,
+        22.0
+      ],
+      "steps": [
+        [
+          1,
+          7
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": false,
+      "rescaled": [
+        2,
+        3
+      ],
+      "scale": [
+        1.0,
+        0.428571433
+      ],
+      "scaledSigma": [
+        0.0,
+        3.85714293
+      ],
+      "blurBounds": [
+        1,
+        1,
+        3,
+        4
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        2.0,
+        3.0
+      ],
+      "steps": [
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        2,
+        7
+      ],
+      "padded": true,
+      "rescaled": [
+        2,
+        3
+      ],
+      "scale": [
+        1.0,
+        0.428571433
+      ],
+      "scaledSigma": [
+        0.0,
+        3.85714293
+      ],
+      "blurBounds": [
+        0,
+        0,
+        4,
+        5
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        3.0,
+        4.0
+      ],
+      "steps": [
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": false,
+      "rescaled": [
+        2,
+        3
+      ],
+      "scale": [
+        1.0,
+        0.428571433
+      ],
+      "scaledSigma": [
+        0.0,
+        3.85714293
+      ],
+      "blurBounds": [
+        -6,
+        2,
+        14,
+        12
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.285714149,
+        20.0,
+        9.28571415
+      ],
+      "steps": [
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        2,
+        7
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        13,
+        24
+      ],
+      "padded": true,
+      "rescaled": [
+        2,
+        3
+      ],
+      "scale": [
+        1.0,
+        0.428571433
+      ],
+      "scaledSigma": [
+        0.0,
+        3.85714293
+      ],
+      "blurBounds": [
+        -7,
+        1,
+        15,
+        13
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.28571415,
+        21.0,
+        10.2857141
+      ],
+      "steps": [
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          3
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": false,
+      "rescaled": [
+        18,
+        13
+      ],
+      "scale": [
+        0.947368443,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947425,
+        0.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        19,
+        14
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        18.0,
+        13.0
+      ],
+      "steps": [
+        [
+          18,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": true,
+      "rescaled": [
+        18,
+        13
+      ],
+      "scale": [
+        0.947368443,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947425,
+        0.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        20,
+        15
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        19.0,
+        14.0
+      ],
+      "steps": [
+        [
+          18,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": false,
+      "rescaled": [
+        18,
+        13
+      ],
+      "scale": [
+        0.947368443,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947425,
+        0.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        30,
+        31
+      ],
+      "reexpandBounds": [
+        0.368421078,
+        0.0,
+        35.421051,
+        27.0
+      ],
+      "steps": [
+        [
+          18,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": true,
+      "rescaled": [
+        18,
+        13
+      ],
+      "scale": [
+        0.947368443,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947425,
+        0.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        31,
+        32
+      ],
+      "reexpandBounds": [
+        1.36842108,
+        1.0,
+        36.421051,
+        28.0
+      ],
+      "steps": [
+        [
+          18,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": false,
+      "rescaled": [
+        9,
+        13
+      ],
+      "scale": [
+        0.473684222,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947377,
+        2.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        10,
+        14
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        9.0,
+        13.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          9,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": true,
+      "rescaled": [
+        9,
+        13
+      ],
+      "scale": [
+        0.473684222,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947377,
+        2.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        11,
+        15
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        10.0,
+        14.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          9,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": false,
+      "rescaled": [
+        9,
+        13
+      ],
+      "scale": [
+        0.473684222,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947377,
+        2.0
+      ],
+      "blurBounds": [
+        -3,
+        4,
+        16,
+        31
+      ],
+      "reexpandBounds": [
+        0.684210539,
+        0.0,
+        18.2105255,
+        27.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          9,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": true,
+      "rescaled": [
+        9,
+        13
+      ],
+      "scale": [
+        0.473684222,
+        1.0
+      ],
+      "scaledSigma": [
+        3.78947377,
+        2.0
+      ],
+      "blurBounds": [
+        -4,
+        3,
+        17,
+        32
+      ],
+      "reexpandBounds": [
+        1.68421054,
+        1.0,
+        19.2105255,
+        28.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          9,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": false,
+      "rescaled": [
+        9,
+        6
+      ],
+      "scale": [
+        0.473684222,
+        0.461538464
+      ],
+      "scaledSigma": [
+        3.78947377,
+        3.69230771
+      ],
+      "blurBounds": [
+        1,
+        1,
+        10,
+        7
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        9.0,
+        6.0
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          9,
+          6
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": true,
+      "rescaled": [
+        9,
+        6
+      ],
+      "scale": [
+        0.473684222,
+        0.461538464
+      ],
+      "scaledSigma": [
+        3.78947377,
+        3.69230771
+      ],
+      "blurBounds": [
+        0,
+        0,
+        11,
+        8
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        10.0,
+        7.0
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          9,
+          6
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": false,
+      "rescaled": [
+        9,
+        6
+      ],
+      "scale": [
+        0.473684222,
+        0.461538464
+      ],
+      "scaledSigma": [
+        3.78947377,
+        3.69230771
+      ],
+      "blurBounds": [
+        -3,
+        2,
+        16,
+        15
+      ],
+      "reexpandBounds": [
+        0.684210539,
+        0.384615421,
+        18.2105255,
+        12.8461542
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          9,
+          6
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": true,
+      "rescaled": [
+        9,
+        6
+      ],
+      "scale": [
+        0.473684222,
+        0.461538464
+      ],
+      "scaledSigma": [
+        3.78947377,
+        3.69230771
+      ],
+      "blurBounds": [
+        -4,
+        1,
+        17,
+        16
+      ],
+      "reexpandBounds": [
+        1.68421054,
+        1.38461542,
+        19.2105255,
+        13.8461542
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          9,
+          6
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.0526315793,
+        0.0769230798
+      ],
+      "scaledSigma": [
+        42.1052628,
+        92.3076935
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.0526315793,
+        0.0769230798
+      ],
+      "scaledSigma": [
+        42.1052628,
+        92.3076935
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.0526315793,
+        0.0769230798
+      ],
+      "scaledSigma": [
+        42.1052628,
+        92.3076935
+      ],
+      "blurBounds": [
+        0,
+        1,
+        3,
+        4
+      ],
+      "reexpandBounds": [
+        0.631578922,
+        0.230769277,
+        2.57894754,
+        2.30769229
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.0526315793,
+        0.0769230798
+      ],
+      "scaledSigma": [
+        42.1052628,
+        92.3076935
+      ],
+      "blurBounds": [
+        -1,
+        0,
+        4,
+        5
+      ],
+      "reexpandBounds": [
+        1.63157892,
+        1.23076928,
+        3.57894754,
+        3.30769229
+      ],
+      "steps": [
+        [
+          10,
+          7
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": false,
+      "rescaled": [
+        2,
+        13
+      ],
+      "scale": [
+        0.105263159,
+        1.0
+      ],
+      "scaledSigma": [
+        3.36842108,
+        0.0299999993
+      ],
+      "blurBounds": [
+        1,
+        1,
+        3,
+        14
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        2.0,
+        13.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          5,
+          13
+        ],
+        [
+          3,
+          13
+        ],
+        [
+          2,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": true,
+      "rescaled": [
+        2,
+        13
+      ],
+      "scale": [
+        0.105263159,
+        1.0
+      ],
+      "scaledSigma": [
+        3.36842108,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        0,
+        4,
+        15
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        3.0,
+        14.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          5,
+          13
+        ],
+        [
+          3,
+          13
+        ],
+        [
+          2,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": false,
+      "rescaled": [
+        2,
+        13
+      ],
+      "scale": [
+        0.105263159,
+        1.0
+      ],
+      "scaledSigma": [
+        3.36842108,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        4,
+        5,
+        31
+      ],
+      "reexpandBounds": [
+        0.263157904,
+        0.0,
+        4.15789509,
+        27.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          5,
+          13
+        ],
+        [
+          3,
+          13
+        ],
+        [
+          2,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": true,
+      "rescaled": [
+        2,
+        13
+      ],
+      "scale": [
+        0.105263159,
+        1.0
+      ],
+      "scaledSigma": [
+        3.36842108,
+        0.0299999993
+      ],
+      "blurBounds": [
+        -1,
+        3,
+        6,
+        32
+      ],
+      "reexpandBounds": [
+        1.26315784,
+        1.0,
+        5.15789509,
+        28.0
+      ],
+      "steps": [
+        [
+          10,
+          13
+        ],
+        [
+          5,
+          13
+        ],
+        [
+          3,
+          13
+        ],
+        [
+          2,
+          13
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": false,
+      "rescaled": [
+        19,
+        5
+      ],
+      "scale": [
+        1.0,
+        0.384615391
+      ],
+      "scaledSigma": [
+        0.0,
+        3.46153855
+      ],
+      "blurBounds": [
+        1,
+        1,
+        20,
+        6
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        19.0,
+        5.0
+      ],
+      "steps": [
+        [
+          19,
+          7
+        ],
+        [
+          19,
+          5
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        19,
+        13
+      ],
+      "padded": true,
+      "rescaled": [
+        19,
+        5
+      ],
+      "scale": [
+        1.0,
+        0.384615391
+      ],
+      "scaledSigma": [
+        0.0,
+        3.46153855
+      ],
+      "blurBounds": [
+        0,
+        0,
+        21,
+        7
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        20.0,
+        6.0
+      ],
+      "steps": [
+        [
+          19,
+          7
+        ],
+        [
+          19,
+          5
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": false,
+      "rescaled": [
+        19,
+        5
+      ],
+      "scale": [
+        1.0,
+        0.384615391
+      ],
+      "scaledSigma": [
+        0.0,
+        3.46153855
+      ],
+      "blurBounds": [
+        -6,
+        2,
+        31,
+        13
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.153846264,
+        37.0,
+        10.5384617
+      ],
+      "steps": [
+        [
+          19,
+          7
+        ],
+        [
+          19,
+          5
+        ]
+      ]
+    },
+    {
+      "size": [
+        19,
+        13
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        30,
+        30
+      ],
+      "padded": true,
+      "rescaled": [
+        19,
+        5
+      ],
+      "scale": [
+        1.0,
+        0.384615391
+      ],
+      "scaledSigma": [
+        0.0,
+        3.46153855
+      ],
+      "blurBounds": [
+        -7,
+        1,
+        32,
+        14
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.15384626,
+        38.0,
+        11.5384617
+      ],
+      "steps": [
+        [
+          19,
+          7
+        ],
+        [
+          19,
+          5
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": false,
+      "rescaled": [
+        190,
+        97
+      ],
+      "scale": [
+        0.994764388,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905803,
+        0.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        191,
+        98
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        190.0,
+        97.0
+      ],
+      "steps": [
+        [
+          190,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": true,
+      "rescaled": [
+        190,
+        97
+      ],
+      "scale": [
+        0.994764388,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905803,
+        0.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        192,
+        99
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        191.0,
+        98.0
+      ],
+      "steps": [
+        [
+          190,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": false,
+      "rescaled": [
+        190,
+        97
+      ],
+      "scale": [
+        0.994764388,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905803,
+        0.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        202,
+        115
+      ],
+      "reexpandBounds": [
+        0.0366492271,
+        0.0,
+        207.942413,
+        111.0
+      ],
+      "steps": [
+        [
+          190,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": true,
+      "rescaled": [
+        190,
+        97
+      ],
+      "scale": [
+        0.994764388,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905803,
+        0.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        203,
+        116
+      ],
+      "reexpandBounds": [
+        1.03664923,
+        1.0,
+        208.942413,
+        112.0
+      ],
+      "steps": [
+        [
+          190,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": false,
+      "rescaled": [
+        95,
+        97
+      ],
+      "scale": [
+        0.497382194,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905755,
+        2.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        96,
+        98
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        95.0,
+        97.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          95,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": true,
+      "rescaled": [
+        95,
+        97
+      ],
+      "scale": [
+        0.497382194,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905755,
+        2.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        97,
+        99
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        96.0,
+        98.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          95,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": false,
+      "rescaled": [
+        95,
+        97
+      ],
+      "scale": [
+        0.497382194,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905755,
+        2.0
+      ],
+      "blurBounds": [
+        -3,
+        4,
+        102,
+        115
+      ],
+      "reexpandBounds": [
+        0.518324614,
+        0.0,
+        104.471207,
+        111.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          95,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": true,
+      "rescaled": [
+        95,
+        97
+      ],
+      "scale": [
+        0.497382194,
+        1.0
+      ],
+      "scaledSigma": [
+        3.97905755,
+        2.0
+      ],
+      "blurBounds": [
+        -4,
+        3,
+        103,
+        116
+      ],
+      "reexpandBounds": [
+        1.51832461,
+        1.0,
+        105.471207,
+        112.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          95,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": false,
+      "rescaled": [
+        95,
+        48
+      ],
+      "scale": [
+        0.497382194,
+        0.494845361
+      ],
+      "scaledSigma": [
+        3.97905755,
+        3.95876288
+      ],
+      "blurBounds": [
+        1,
+        1,
+        96,
+        49
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        95.0,
+        48.0
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          95,
+          48
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": true,
+      "rescaled": [
+        95,
+        48
+      ],
+      "scale": [
+        0.497382194,
+        0.494845361
+      ],
+      "scaledSigma": [
+        3.97905755,
+        3.95876288
+      ],
+      "blurBounds": [
+        0,
+        0,
+        97,
+        50
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        96.0,
+        49.0
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          95,
+          48
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": false,
+      "rescaled": [
+        95,
+        48
+      ],
+      "scale": [
+        0.497382194,
+        0.494845361
+      ],
+      "scaledSigma": [
+        3.97905755,
+        3.95876288
+      ],
+      "blurBounds": [
+        -3,
+        2,
+        102,
+        58
+      ],
+      "reexpandBounds": [
+        0.518324614,
+        0.484536171,
+        104.471207,
+        55.4123726
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          95,
+          48
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": true,
+      "rescaled": [
+        95,
+        48
+      ],
+      "scale": [
+        0.497382194,
+        0.494845361
+      ],
+      "scaledSigma": [
+        3.97905755,
+        3.95876288
+      ],
+      "blurBounds": [
+        -4,
+        1,
+        103,
+        59
+      ],
+      "reexpandBounds": [
+        1.51832461,
+        1.48453617,
+        105.471207,
+        56.4123726
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          95,
+          48
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.00523560215,
+        0.010309278
+      ],
+      "scaledSigma": [
+        4.18848181,
+        12.3711338
+      ],
+      "blurBounds": [
+        1,
+        1,
+        2,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          48,
+          25
+        ],
+        [
+          24,
+          13
+        ],
+        [
+          12,
+          7
+        ],
+        [
+          6,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.00523560215,
+        0.010309278
+      ],
+      "scaledSigma": [
+        4.18848181,
+        12.3711338
+      ],
+      "blurBounds": [
+        0,
+        0,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        2.0,
+        2.0
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          48,
+          25
+        ],
+        [
+          24,
+          13
+        ],
+        [
+          12,
+          7
+        ],
+        [
+          6,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": false,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.00523560215,
+        0.010309278
+      ],
+      "scaledSigma": [
+        4.18848181,
+        12.3711338
+      ],
+      "blurBounds": [
+        0,
+        1,
+        3,
+        3
+      ],
+      "reexpandBounds": [
+        0.963350773,
+        0.0309277773,
+        2.05759168,
+        1.17525768
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          48,
+          25
+        ],
+        [
+          24,
+          13
+        ],
+        [
+          12,
+          7
+        ],
+        [
+          6,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": true,
+      "rescaled": [
+        1,
+        1
+      ],
+      "scale": [
+        0.00523560215,
+        0.010309278
+      ],
+      "scaledSigma": [
+        4.18848181,
+        12.3711338
+      ],
+      "blurBounds": [
+        -1,
+        0,
+        4,
+        4
+      ],
+      "reexpandBounds": [
+        1.96335077,
+        1.03092778,
+        3.05759168,
+        2.17525768
+      ],
+      "steps": [
+        [
+          96,
+          49
+        ],
+        [
+          48,
+          25
+        ],
+        [
+          24,
+          13
+        ],
+        [
+          12,
+          7
+        ],
+        [
+          6,
+          4
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": false,
+      "rescaled": [
+        23,
+        97
+      ],
+      "scale": [
+        0.120418847,
+        1.0
+      ],
+      "scaledSigma": [
+        3.85340309,
+        0.0299999993
+      ],
+      "blurBounds": [
+        1,
+        1,
+        24,
+        98
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        23.0,
+        97.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          48,
+          97
+        ],
+        [
+          24,
+          97
+        ],
+        [
+          23,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": true,
+      "rescaled": [
+        23,
+        97
+      ],
+      "scale": [
+        0.120418847,
+        1.0
+      ],
+      "scaledSigma": [
+        3.85340309,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        0,
+        25,
+        99
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        24.0,
+        98.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          48,
+          97
+        ],
+        [
+          24,
+          97
+        ],
+        [
+          23,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": false,
+      "rescaled": [
+        23,
+        97
+      ],
+      "scale": [
+        0.120418847,
+        1.0
+      ],
+      "scaledSigma": [
+        3.85340309,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        4,
+        26,
+        115
+      ],
+      "reexpandBounds": [
+        0.157068074,
+        0.0,
+        25.3246078,
+        111.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          48,
+          97
+        ],
+        [
+          24,
+          97
+        ],
+        [
+          23,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": true,
+      "rescaled": [
+        23,
+        97
+      ],
+      "scale": [
+        0.120418847,
+        1.0
+      ],
+      "scaledSigma": [
+        3.85340309,
+        0.0299999993
+      ],
+      "blurBounds": [
+        -1,
+        3,
+        27,
+        116
+      ],
+      "reexpandBounds": [
+        1.15706801,
+        1.0,
+        26.3246078,
+        112.0
+      ],
+      "steps": [
+        [
+          96,
+          97
+        ],
+        [
+          48,
+          97
+        ],
+        [
+          24,
+          97
+        ],
+        [
+          23,
+          97
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": false,
+      "rescaled": [
+        191,
+        43
+      ],
+      "scale": [
+        1.0,
+        0.443298966
+      ],
+      "scaledSigma": [
+        0.0,
+        3.98969078
+      ],
+      "blurBounds": [
+        1,
+        1,
+        192,
+        44
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        191.0,
+        43.0
+      ],
+      "steps": [
+        [
+          191,
+          49
+        ],
+        [
+          191,
+          43
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        191,
+        97
+      ],
+      "padded": true,
+      "rescaled": [
+        191,
+        43
+      ],
+      "scale": [
+        1.0,
+        0.443298966
+      ],
+      "scaledSigma": [
+        0.0,
+        3.98969078
+      ],
+      "blurBounds": [
+        0,
+        0,
+        193,
+        45
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        192.0,
+        44.0
+      ],
+      "steps": [
+        [
+          191,
+          49
+        ],
+        [
+          191,
+          43
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": false,
+      "rescaled": [
+        191,
+        43
+      ],
+      "scale": [
+        1.0,
+        0.443298966
+      ],
+      "scaledSigma": [
+        0.0,
+        3.98969078
+      ],
+      "blurBounds": [
+        -6,
+        2,
+        203,
+        52
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.329896927,
+        209.0,
+        49.5360832
+      ],
+      "steps": [
+        [
+          191,
+          49
+        ],
+        [
+          191,
+          43
+        ]
+      ]
+    },
+    {
+      "size": [
+        191,
+        97
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        202,
+        114
+      ],
+      "padded": true,
+      "rescaled": [
+        191,
+        43
+      ],
+      "scale": [
+        1.0,
+        0.443298966
+      ],
+      "scaledSigma": [
+        0.0,
+        3.98969078
+      ],
+      "blurBounds": [
+        -7,
+        1,
+        204,
+        53
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.32989693,
+        210.0,
+        50.5360832
+      ],
+      "steps": [
+        [
+          191,
+          49
+        ],
+        [
+          191,
+          43
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": false,
+      "rescaled": [
+        1023,
+        513
+      ],
+      "scale": [
+        0.999023438,
+        1.0
+      ],
+      "scaledSigma": [
+        3.99609423,
+        0.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        1024,
+        514
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1023.0,
+        513.0
+      ],
+      "steps": [
+        [
+          1023,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": true,
+      "rescaled": [
+        1023,
+        513
+      ],
+      "scale": [
+        0.999023438,
+        1.0
+      ],
+      "scaledSigma": [
+        3.99609423,
+        0.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        1025,
+        515
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        1024.0,
+        514.0
+      ],
+      "steps": [
+        [
+          1023,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": false,
+      "rescaled": [
+        1023,
+        513
+      ],
+      "scale": [
+        0.999023438,
+        1.0
+      ],
+      "scaledSigma": [
+        3.99609423,
+        0.0
+      ],
+      "blurBounds": [
+        -6,
+        4,
+        1035,
+        531
+      ],
+      "reexpandBounds": [
+        0.0068359375,
+        0.0,
+        1040.98926,
+        527.0
+      ],
+      "steps": [
+        [
+          1023,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        4.000000476837158,
+        0
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": true,
+      "rescaled": [
+        1023,
+        513
+      ],
+      "scale": [
+        0.999023438,
+        1.0
+      ],
+      "scaledSigma": [
+        3.99609423,
+        0.0
+      ],
+      "blurBounds": [
+        -7,
+        3,
+        1036,
+        532
+      ],
+      "reexpandBounds": [
+        1.00683594,
+        1.0,
+        1041.98926,
+        528.0
+      ],
+      "steps": [
+        [
+          1023,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": false,
+      "rescaled": [
+        512,
+        513
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        513,
+        514
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        512.0,
+        513.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": true,
+      "rescaled": [
+        512,
+        513
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        514,
+        515
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        513.0,
+        514.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": false,
+      "rescaled": [
+        512,
+        513
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        -3,
+        4,
+        519,
+        531
+      ],
+      "reexpandBounds": [
+        0.5,
+        0.0,
+        521.5,
+        527.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        2
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": true,
+      "rescaled": [
+        512,
+        513
+      ],
+      "scale": [
+        0.5,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        2.0
+      ],
+      "blurBounds": [
+        -4,
+        3,
+        520,
+        532
+      ],
+      "reexpandBounds": [
+        1.5,
+        1.0,
+        522.5,
+        528.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": false,
+      "rescaled": [
+        512,
+        256
+      ],
+      "scale": [
+        0.5,
+        0.499025345
+      ],
+      "scaledSigma": [
+        4.0,
+        3.99220276
+      ],
+      "blurBounds": [
+        1,
+        1,
+        513,
+        257
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        512.0,
+        256.0
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          512,
+          256
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": true,
+      "rescaled": [
+        512,
+        256
+      ],
+      "scale": [
+        0.5,
+        0.499025345
+      ],
+      "scaledSigma": [
+        4.0,
+        3.99220276
+      ],
+      "blurBounds": [
+        0,
+        0,
+        514,
+        258
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        513.0,
+        257.0
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          512,
+          256
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": false,
+      "rescaled": [
+        512,
+        256
+      ],
+      "scale": [
+        0.5,
+        0.499025345
+      ],
+      "scaledSigma": [
+        4.0,
+        3.99220276
+      ],
+      "blurBounds": [
+        -3,
+        2,
+        519,
+        266
+      ],
+      "reexpandBounds": [
+        0.5,
+        0.497076035,
+        521.5,
+        263.483429
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          512,
+          256
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        8,
+        8
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": true,
+      "rescaled": [
+        512,
+        256
+      ],
+      "scale": [
+        0.5,
+        0.499025345
+      ],
+      "scaledSigma": [
+        4.0,
+        3.99220276
+      ],
+      "blurBounds": [
+        -4,
+        1,
+        520,
+        267
+      ],
+      "reexpandBounds": [
+        1.5,
+        1.49707603,
+        522.5,
+        264.483429
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          512,
+          256
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": false,
+      "rescaled": [
+        5,
+        1
+      ],
+      "scale": [
+        0.0048828125,
+        0.00194931775
+      ],
+      "scaledSigma": [
+        3.90625,
+        2.33918142
+      ],
+      "blurBounds": [
+        1,
+        1,
+        6,
+        2
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        5.0,
+        1.0
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          256,
+          129
+        ],
+        [
+          128,
+          65
+        ],
+        [
+          64,
+          33
+        ],
+        [
+          32,
+          17
+        ],
+        [
+          16,
+          9
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": true,
+      "rescaled": [
+        5,
+        1
+      ],
+      "scale": [
+        0.0048828125,
+        0.00194931775
+      ],
+      "scaledSigma": [
+        3.90625,
+        2.33918142
+      ],
+      "blurBounds": [
+        0,
+        0,
+        7,
+        3
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        6.0,
+        2.0
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          256,
+          129
+        ],
+        [
+          128,
+          65
+        ],
+        [
+          64,
+          33
+        ],
+        [
+          32,
+          17
+        ],
+        [
+          16,
+          9
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": false,
+      "rescaled": [
+        5,
+        1
+      ],
+      "scale": [
+        0.0048828125,
+        0.00194931775
+      ],
+      "scaledSigma": [
+        3.90625,
+        2.33918142
+      ],
+      "blurBounds": [
+        0,
+        1,
+        7,
+        3
+      ],
+      "reexpandBounds": [
+        0.965820312,
+        0.00584793091,
+        6.05371094,
+        1.03313828
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          256,
+          129
+        ],
+        [
+          128,
+          65
+        ],
+        [
+          64,
+          33
+        ],
+        [
+          32,
+          17
+        ],
+        [
+          16,
+          9
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        800,
+        1200
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": true,
+      "rescaled": [
+        5,
+        1
+      ],
+      "scale": [
+        0.0048828125,
+        0.00194931775
+      ],
+      "scaledSigma": [
+        3.90625,
+        2.33918142
+      ],
+      "blurBounds": [
+        -1,
+        0,
+        8,
+        4
+      ],
+      "reexpandBounds": [
+        1.96582031,
+        1.00584793,
+        7.05371094,
+        2.03313828
+      ],
+      "steps": [
+        [
+          512,
+          257
+        ],
+        [
+          256,
+          129
+        ],
+        [
+          128,
+          65
+        ],
+        [
+          64,
+          33
+        ],
+        [
+          32,
+          17
+        ],
+        [
+          16,
+          9
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          1
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": false,
+      "rescaled": [
+        128,
+        513
+      ],
+      "scale": [
+        0.125,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        1,
+        1,
+        129,
+        514
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        128.0,
+        513.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ],
+        [
+          256,
+          513
+        ],
+        [
+          128,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": true,
+      "rescaled": [
+        128,
+        513
+      ],
+      "scale": [
+        0.125,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        0,
+        130,
+        515
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        129.0,
+        514.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ],
+        [
+          256,
+          513
+        ],
+        [
+          128,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": false,
+      "rescaled": [
+        128,
+        513
+      ],
+      "scale": [
+        0.125,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        0,
+        4,
+        131,
+        531
+      ],
+      "reexpandBounds": [
+        0.125,
+        0.0,
+        130.375,
+        527.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ],
+        [
+          256,
+          513
+        ],
+        [
+          128,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        32,
+        0.03
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": true,
+      "rescaled": [
+        128,
+        513
+      ],
+      "scale": [
+        0.125,
+        1.0
+      ],
+      "scaledSigma": [
+        4.0,
+        0.0299999993
+      ],
+      "blurBounds": [
+        -1,
+        3,
+        132,
+        532
+      ],
+      "reexpandBounds": [
+        1.125,
+        1.0,
+        131.375,
+        528.0
+      ],
+      "steps": [
+        [
+          512,
+          513
+        ],
+        [
+          256,
+          513
+        ],
+        [
+          128,
+          513
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": false,
+      "rescaled": [
+        1024,
+        228
+      ],
+      "scale": [
+        1.0,
+        0.444444448
+      ],
+      "scaledSigma": [
+        0.0,
+        4.0
+      ],
+      "blurBounds": [
+        1,
+        1,
+        1025,
+        229
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.0,
+        1024.0,
+        228.0
+      ],
+      "steps": [
+        [
+          1024,
+          257
+        ],
+        [
+          1024,
+          228
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        0,
+        0,
+        1024,
+        513
+      ],
+      "padded": true,
+      "rescaled": [
+        1024,
+        228
+      ],
+      "scale": [
+        1.0,
+        0.444444448
+      ],
+      "scaledSigma": [
+        0.0,
+        4.0
+      ],
+      "blurBounds": [
+        0,
+        0,
+        1026,
+        230
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.0,
+        1025.0,
+        229.0
+      ],
+      "steps": [
+        [
+          1024,
+          257
+        ],
+        [
+          1024,
+          228
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": false,
+      "rescaled": [
+        1024,
+        228
+      ],
+      "scale": [
+        1.0,
+        0.444444448
+      ],
+      "scaledSigma": [
+        0.0,
+        4.0
+      ],
+      "blurBounds": [
+        -6,
+        2,
+        1036,
+        237
+      ],
+      "reexpandBounds": [
+        0.0,
+        0.333333492,
+        1042.0,
+        234.555557
+      ],
+      "steps": [
+        [
+          1024,
+          257
+        ],
+        [
+          1024,
+          228
+        ]
+      ]
+    },
+    {
+      "size": [
+        1024,
+        513
+      ],
+      "sigma": [
+        0,
+        9
+      ],
+      "destination": [
+        -7,
+        3,
+        1035,
+        530
+      ],
+      "padded": true,
+      "rescaled": [
+        1024,
+        228
+      ],
+      "scale": [
+        1.0,
+        0.444444448
+      ],
+      "scaledSigma": [
+        0.0,
+        4.0
+      ],
+      "blurBounds": [
+        -7,
+        1,
+        1037,
+        238
+      ],
+      "reexpandBounds": [
+        1.0,
+        1.33333349,
+        1043.0,
+        235.555557
+      ],
+      "steps": [
+        [
+          1024,
+          257
+        ],
+        [
+          1024,
+          228
+        ]
+      ]
+    }
+  ]
+}

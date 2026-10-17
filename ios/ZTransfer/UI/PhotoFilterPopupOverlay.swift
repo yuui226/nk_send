@@ -12,6 +12,7 @@ struct PhotoFilterPopupOverlay: View {
     let availableStorageSlots: [UInt32]
     let suggestedDate: String?
     let ratingProgress: PhotoRatingScan
+    let showProtectionFilter: Bool
     let onChange: (PhotoFilterState) -> Void
 
     @State private var working: PhotoFilterState
@@ -26,6 +27,7 @@ struct PhotoFilterPopupOverlay: View {
          initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
          suggestedDate: String?, ratingProgress: PhotoRatingScan = PhotoRatingScan(),
+         showProtectionFilter: Bool = true,
          onChange: @escaping (PhotoFilterState) -> Void) {
         _isPresented = isPresented
         self.anchor = anchor
@@ -34,6 +36,7 @@ struct PhotoFilterPopupOverlay: View {
         self.availableStorageSlots = availableStorageSlots
         self.suggestedDate = suggestedDate
         self.ratingProgress = ratingProgress
+        self.showProtectionFilter = showProtectionFilter
         self.onChange = onChange
         _working = State(initialValue: initial)
     }
@@ -73,9 +76,21 @@ struct PhotoFilterPopupOverlay: View {
                 .frame(width: width, alignment: .top)
                 .padding(.leading, left)
                     .padding(.top, top)
+                .allowsHitTesting(!showRatingTip)
 
-                if showRatingTip, ratingTipFrame != .zero {
-                    ratingHelpBubble(in: proxy, anchor: ratingTipFrame)
+                if showRatingTip {
+                    // Android AnchorPopup owns its own transparent input layer:
+                    // outside taps dismiss only help, and drags cannot reach
+                    // the filter controls or the photo list underneath.
+                    Color.clear
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { showRatingTip = false }
+                        .gesture(DragGesture(minimumDistance: 1).onChanged { _ in })
+                        .zIndex(1)
+                    if ratingTipFrame != .zero {
+                        ratingHelpBubble(in: proxy, anchor: ratingTipFrame)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -89,7 +104,8 @@ struct PhotoFilterPopupOverlay: View {
             if isPresented { resetDraft() }
         }
         .onChange(of: isPresented) { presented in
-            if presented { resetDraft(); showRatingTip = false }
+            showRatingTip = false
+            if presented { resetDraft() }
         }
         .onChange(of: initial) { value in
             // Android's remember(current) follows an external clear while the
@@ -154,7 +170,9 @@ struct PhotoFilterPopupOverlay: View {
             }
             divider
             HStack(spacing: 8) {
-                FilterChip(label: AppLocalized.resource("filter_protected"), selected: working.protectedOnly, systemImage: "key.fill") { commit(working.togglingProtected()) }
+                if showProtectionFilter {
+                    FilterChip(label: AppLocalized.resource("filter_protected"), selected: working.protectedOnly, systemImage: "key.fill") { commit(working.togglingProtected()) }
+                }
                 FilterChip(label: AppLocalized.resource("burst_label"), selected: working.burstOnly, burstIcon: true) { commit(working.togglingBurst()) }
                 FilterChip(label: AppLocalized.resource("filter_untransferred"), selected: working.untransferredOnly, systemImage: "arrow.down.to.line") { commit(working.togglingUntransferred()) }
             }
@@ -333,13 +351,15 @@ struct PhotoFilterPopupOverlay: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(ZTransferColors.primaryText.opacity(0.12), lineWidth: 1))
                 .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { }
+        .gesture(DragGesture(minimumDistance: 1).onChanged { _ in })
         .position(
             x: proxy.size.width - 18 - width / 2,
             y: anchor.maxY + 8 + (ratingTipSize.height > 0 ? ratingTipSize.height / 2 : 48)
         )
         .transition(.opacity)
         .zIndex(2)
-        .onTapGesture { showRatingTip = false }
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: showRatingTip ? 0.34 : 0.26), value: showRatingTip)
     }
 
@@ -439,6 +459,7 @@ private struct FilterClearButton: View {
 /// Opening the filter popup itself must not parse or initialize date drafts.
 @MainActor
 private struct PhotoFilterDateEditor: View {
+    private let dates = PhotoFilterDates()
     let onBack: () -> Void
     let onApply: (PhotoDateRange?) -> Void
     @State private var startDate: Date
@@ -448,18 +469,15 @@ private struct PhotoFilterDateEditor: View {
          onBack: @escaping () -> Void, onApply: @escaping (PhotoDateRange?) -> Void) {
         self.onBack = onBack
         self.onApply = onApply
-        let initialDate = Self.date(from: current?.end)
-            ?? Self.date(from: suggestedDate)
-            ?? Calendar.current.startOfDay(for: Date())
-        _startDate = State(initialValue: Self.date(from: current?.start) ?? initialDate)
+        let initialDate = dates.date(from: current?.end)
+            ?? dates.date(from: suggestedDate)
+            ?? dates.calendar.startOfDay(for: Date())
+        _startDate = State(initialValue: dates.date(from: current?.start) ?? initialDate)
         _endDate = State(initialValue: initialDate)
     }
 
     var body: some View {
-        let calendar = Calendar.current
-        let startYear = calendar.component(.year, from: startDate)
-        let endYear = calendar.component(.year, from: endDate)
-        let years = Array(min(1990, startYear, endYear)...max(1990, calendar.component(.year, from: Date()) + 1, startYear, endYear))
+        let years = dates.years(start: startDate, end: endDate)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Button { onBack() } label: {
@@ -478,12 +496,7 @@ private struct PhotoFilterDateEditor: View {
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11, panel: true))
                 .frame(maxWidth: .infinity, minHeight: 40)
                 Button(AppLocalized.resource("done")) {
-                    let cal = Calendar.current
-                    let a = cal.startOfDay(for: min(startDate, endDate))
-                    let b = cal.startOfDay(for: max(startDate, endDate))
-                    onApply(PhotoDateRange(
-                        start: Self.dateKey(from: a), end: Self.dateKey(from: b)
-                    ))
+                    onApply(dates.range(start: startDate, end: endDate))
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(
                     cornerRadius: 11,
@@ -502,25 +515,6 @@ private struct PhotoFilterDateEditor: View {
         }
     }
 
-    private static func date(from value: String?) -> Date? {
-        guard let value, value.count >= 8,
-              let year = Int(value.prefix(4)),
-              let month = Int(value.dropFirst(4).prefix(2)),
-              let day = Int(value.dropFirst(6).prefix(2)) else { return nil }
-        return filterCalendar.date(from: DateComponents(year: year, month: month, day: day))
-    }
-
-    private static func dateKey(from date: Date) -> String {
-        let components = filterCalendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d%02d%02d",
-                      components.year ?? 0, components.month ?? 0, components.day ?? 0)
-    }
-
-    private static let filterCalendar: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .current
-        return calendar
-    }()
 }
 
 private extension PhotoFilterState {

@@ -37,12 +37,14 @@ struct PhotoFrameBrandIdentity: Equatable, Sendable {
 }
 
 func photoFrameBrandIdentity(make: String?, model: String?) -> PhotoFrameBrandIdentity {
-    let full = [make, model].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }.joined(separator: " ")
-    guard let brand = PhotoFrameBrand.resolve(full) else { return PhotoFrameBrandIdentity(brand: nil, remainingModel: full) }
-    let upper = full.uppercased()
-    let prefix = brand == .nikon && upper.hasPrefix("NIKON CORPORATION") ? "NIKON CORPORATION"
-        : brand == .nikon ? "NIKON" : brand.rawValue.uppercased()
-    return PhotoFrameBrandIdentity(brand: brand, remainingModel: String(full.dropFirst(min(prefix.count, full.count))).trimmingCharacters(in: .whitespacesAndNewlines))
+    // Presentation has already applied visibility and model-derived Make.
+    // Match Android's normalized Make eligibility; a model alone must never
+    // resurrect a hidden brand or repeat the manufacturer beside its logo.
+    let metadata = PhotoFrameMetadata(make: make, model: model, lensModel: nil, focalLength: nil,
+                                      aperture: nil, shutter: nil, iso: nil,
+                                      exposureCompensation: nil, dateTime: nil)
+    guard let brand = PhotoFrameBrand(rawValue: metadata.normalizedMake.lowercased()) else {
+        return PhotoFrameBrandIdentity(brand: nil, remainingModel: metadata.identity)
+    }
+    return PhotoFrameBrandIdentity(brand: brand, remainingModel: metadata.normalizedModel)
 }
-
-private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }

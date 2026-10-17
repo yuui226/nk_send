@@ -30,7 +30,7 @@ enum STACandidateResult: Sendable {
 /// CameraViewModel.tryConnectStaCandidate: bounded retries per identity, followed
 /// by one alternate-identity attempt. The outer discovery owns scan retries.
 actor STAConnectionCoordinator {
-    typealias Connect = @Sendable (PTPIPCandidate, STAInitiatorIdentity, String?,
+    typealias Connect = @Sendable (PTPIPCandidate, STAInitiatorIdentity, String?, Bool,
         @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> STAConnectedCamera
     private let profiles: STAProfileStore
     private let connect: Connect
@@ -50,12 +50,14 @@ actor STAConnectionCoordinator {
         var known = profiles.isKnown(ip: candidate.ip)
         var reachedStorage = false
         var pairingReconnectUsed = false
+        var pairingRecoveryUsed = false
         var readinessRetryUsed = false
         while true {
             try Task.checkCancellation()
             if pairingStage { pairingStage = false; await onStage(.connecting) }
             do {
-                let camera = try await connect(candidate, preferred, expectedGUID, reportStage)
+                let camera = try await connect(candidate, preferred, expectedGUID,
+                    pairingReconnectUsed && preferred == .pairedComputer, reportStage)
                 guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
                 reachedStorage = true
                 if let guid = camera.guid { known = profiles.isKnown(ip: candidate.ip, guid: guid) }
@@ -80,6 +82,12 @@ actor STAConnectionCoordinator {
                     profiles.remember(guid: failed.guid, ip: candidate.ip, identity: .pairedComputer, model: failed.model)
                     lastFailure = nil
                     try await sleep(6_600_000_000)
+                } else if case STAConnectionError.pairingNotConfirmed = failed.cause {
+                    guard !pairingRecoveryUsed else { break }
+                    pairingRecoveryUsed = true
+                    pairingReconnectUsed = false
+                    lastFailure = nil
+                    try await sleep(6_600_000_000)
                 } else if Self.isTransientReadinessFailure(failed.cause), !readinessRetryUsed {
                     readinessRetryUsed = true
                     lastFailure = nil
@@ -92,7 +100,8 @@ actor STAConnectionCoordinator {
         try await sleep(900_000_000)
         try Task.checkCancellation()
         do {
-            let camera = try await connect(candidate, alternate, expectedGUID, reportStage)
+            let camera = try await connect(candidate, alternate, expectedGUID,
+                pairingReconnectUsed && alternate == .pairedComputer, reportStage)
             guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
             guard profiles.isPaired(camera.guid) else {
                 lastFailure = STAConnectionFailure(cause: STAConnectionError.pairingRequired, knownCamera: known)
@@ -150,7 +159,7 @@ actor STAConnectionCoordinator {
     /// Failed attempts always retire both sockets before the next identity or
     /// candidate starts. An established camera is handed to the session owner.
     static func open(candidate: PTPIPCandidate, identity: STAInitiatorIdentity, expectedGUID: String?,
-                     profiles: STAProfileStore,
+                     profiles: STAProfileStore, verifyPairingCompletion: Bool = false,
                      onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> STAConnectedCamera {
         let socket: PTPIPSocketTransport
         do {
@@ -162,7 +171,8 @@ actor STAConnectionCoordinator {
         } catch { throw STAAttemptFailure(cause: error, guid: nil, model: nil, storageProbeReached: false) }
         let session = PTPSession(transport: socket, firstTransactionID: 0, defaultTimeoutNanoseconds: 60_000_000_000)
         let browsing = STABrowsingSession(session: session, guid: socket.responderGUID, identity: identity,
-            profiles: profiles, onStage: onStage, waitForPairingEvent: { await socket.waitForPairingEvent() })
+            profiles: profiles, verifyPairingCompletion: verifyPairingCompletion,
+            onStage: onStage, waitForPairingEvent: { await socket.waitForPairingEvent() })
         do {
             let album = try await browsing.open()
             try Task.checkCancellation()

@@ -40,7 +40,7 @@ struct CameraDownloadResult: Sendable {
 extension PhotoFrameMetadata {
     static func cameraSnapshot(_ header: Data) -> PhotoFrameMetadata? {
         guard let exif = PhotoExifParser.parse(header) else { return nil }
-        let metadata = PhotoFrameMetadata(exif)
+        let metadata = PhotoFrameMetadata(exif).boundedForQueue()
         let cameraFields = [metadata.make, metadata.model, metadata.aperture, metadata.shutter,
                             metadata.iso, metadata.focalLength, metadata.lensModel, metadata.dateTime]
         let hasField = cameraFields.contains { !($0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
@@ -64,6 +64,7 @@ enum CameraDownloadError: Error, Equatable, LocalizedError, Sendable {
     case save(String)
     case response(UInt16)
     case write(String)
+    case photoExceedsSingleRequestLimit
 
     var errorDescription: String? {
         switch self {
@@ -77,6 +78,9 @@ enum CameraDownloadError: Error, Equatable, LocalizedError, Sendable {
             return AppLocalized.formattedResource("error_write_file", ["%1$s": reason])
         case .response(let code):
             return AppLocalized.formattedResource("error_transfer_failed_reason", ["%1$s": Self.responseMessage(code)])
+        case .photoExceedsSingleRequestLimit:
+            // NikonCamera's IOException is surfaced unchanged by friendlyError.
+            return "Photo exceeds single-request size limit"
         }
     }
 

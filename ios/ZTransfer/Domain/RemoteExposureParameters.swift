@@ -32,6 +32,8 @@ enum RemoteProperty: UInt32, CaseIterable, Sendable {
     case movieExposureCompensation = 0xD1AB
     case liveViewSelector = 0xD1A6
     case liveViewImageSize = 0xD1AC
+    /// Packed D0A0 movie format (UINT64 on supported Nikon bodies).
+    case movieFormat = 0xD0A0
     case applicationMode = 0xD1F0
     case nikonLightMeter = 0xD10A
     case nikonExposureIndicate = 0xD1B1
@@ -115,23 +117,34 @@ enum RemoteExposureParameters {
     /// increases the physical value, regardless of enum ordering.
     static func downStepSign(for property: RemoteProperty, values: [UInt64]) -> Int {
         guard values.count > 1 else { return -1 }
-        func metric(_ raw: UInt64) -> Double {
-            switch property {
-            case .nikonShutter, .movieShutter:
-                switch raw {
-                case 0xFFFF_FFFF, 0xFFFF_FFFE, 0xFFFF_FFFD: return 0
-                default:
-                    let numerator = Double((raw >> 16) & 0xFFFF)
-                    let denominator = Double(raw & 0xFFFF)
-                    return numerator > 0 ? denominator / numerator : 0
-                }
-            case .fNumber, .movieFNumber: return -Double(raw)
-            case .iso, .nikonISOEx, .nikonISOControlSensitivity, .movieISO: return Double(raw)
-            case .exposureCompensation, .nikonExposureCompensation, .movieExposureCompensation: return Double(Int64(bitPattern: raw))
-            default: return Double(raw)
+        return metric(property, values.last!) > metric(property, values.first!) ? 1 : -1
+    }
+
+    /// RemoteScreen.paramAnchorIdx, also used by stepParam: a non-enum value
+    /// stays visible, but dragging starts at its nearest physical detent.
+    static func anchorIndex(for property: RemoteProperty, values: [UInt64], current: UInt64) -> Int {
+        if let exact = values.firstIndex(of: current) { return exact }
+        let currentMetric = metric(property, current)
+        return values.indices.min {
+            abs(metric(property, values[$0]) - currentMetric) < abs(metric(property, values[$1]) - currentMetric)
+        } ?? -1
+    }
+
+    private static func metric(_ property: RemoteProperty, _ raw: UInt64) -> Double {
+        switch property {
+        case .nikonShutter, .movieShutter:
+            switch raw {
+            case 0xFFFF_FFFF, 0xFFFF_FFFE, 0xFFFF_FFFD: return 0
+            default:
+                let numerator = Double((raw >> 16) & 0xFFFF)
+                let denominator = Double(raw & 0xFFFF)
+                return numerator > 0 ? denominator / numerator : 0
             }
+        case .fNumber, .movieFNumber: return -Double(raw)
+        case .iso, .nikonISOEx, .nikonISOControlSensitivity, .movieISO: return Double(raw)
+        case .exposureCompensation, .nikonExposureCompensation, .movieExposureCompensation: return Double(Int64(bitPattern: raw))
+        default: return Double(raw)
         }
-        return metric(values.last!) > metric(values.first!) ? 1 : -1
     }
 
     /// Prefer a writable descriptor with a value domain; retain the first readable descriptor as
@@ -146,6 +159,16 @@ enum RemoteExposureParameters {
         case .nikonISOEx: return .iso
         case .exposureTimeStandard: return .nikonShutter
         default: return property
+        }
+    }
+
+    /// RemoteLab.rcFormat differs from diagnostic fmtVal for ISO and EV.
+    static func monitorFormat(_ property: RemoteProperty, raw: UInt64) -> String {
+        switch property {
+        case .iso, .nikonISOEx, .nikonISOControlSensitivity, .movieISO: return String(raw)
+        case .exposureCompensation, .nikonExposureCompensation, .movieExposureCompensation:
+            return String(format: "%+.1f", Double(Int64(bitPattern: raw)) / 1000)
+        default: return format(property, raw: raw)
         }
     }
 
@@ -184,6 +207,7 @@ enum RemoteExposureParameters {
             return [0: "AF-S", 1: "AF-C", 2: "AF-F", 3: "MF (fixed)", 4: "MF", 5: "AF-A"][raw]
                 ?? String(format: "0x%llx", raw)
         case .angleLevel: return String(format: "%.1f°", Double(Int64(bitPattern: raw)) / 65536)
+        case .movieFormat: return RemoteMonitorTelemetry.movieFormatLabel(dataType: 0x0008, raw: raw) ?? "—"
         case .liveViewImageSize, .applicationMode, .nikonLightMeter, .nikonExposureIndicate, .whiteBalance, .movieWhiteBalance,
              .movieWhiteBalanceAlternate, .focusArea, .liveViewFocusArea, .movieFocusArea: return String(raw)
         }

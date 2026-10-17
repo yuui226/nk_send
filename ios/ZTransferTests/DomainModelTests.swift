@@ -1,12 +1,1080 @@
 import XCTest
+import Combine
 import SwiftUI
 import UIKit
 import ImageIO
 import CryptoKit
 import UniformTypeIdentifiers
+import Darwin
 @testable import ZTransfer
 
+func previewTestPhysicalFootprint() throws -> UInt64 {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+    let result = withUnsafeMutablePointer(to: &info) { pointer in
+        pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+        }
+    }
+    XCTAssertEqual(result, KERN_SUCCESS)
+    return info.phys_footprint
+}
+
 final class DomainModelTests: XCTestCase {
+    func testLargeCameraPreviewSequentialDecodeWithFiveRetainedPages() async throws {
+        @Sendable func footprint() throws -> UInt64 { try previewTestPhysicalFootprint() }
+        let data: Data = try autoreleasepool {
+            let context = try XCTUnwrap(CGContext(data: nil, width: 6000, height: 4000,
+                bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            for x in stride(from: 0, to: 6000, by: 100) {
+                context.setFillColor(UIColor(hue: CGFloat(x) / 6000, saturation: 0.8, brightness: 0.7, alpha: 1).cgColor)
+                context.fill(CGRect(x: x, y: 0, width: 100, height: 4000))
+            }
+            let output = NSMutableData()
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+            return output as Data
+        }
+        let baseline = try footprint()
+        let sampler = Task.detached(priority: .utility) { () throws -> (peak: UInt64, samples: Int) in
+            var peak = baseline
+            var samples = 0
+            while !Task.isCancelled {
+                peak = max(peak, try footprint())
+                samples += 1
+                do { try await Task.sleep(nanoseconds: 2_000_000) }
+                catch { break }
+            }
+            return (peak, samples)
+        }
+        defer { sampler.cancel() }
+        let mainThreadProbe = Task { @MainActor () -> (ticks: Int, maximumGap: TimeInterval) in
+            var ticks = 0
+            var previous = ProcessInfo.processInfo.systemUptime
+            var maximumGap: TimeInterval = 0
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 5_000_000) }
+                catch { break }
+                XCTAssertTrue(Thread.isMainThread)
+                let now = ProcessInfo.processInfo.systemUptime
+                maximumGap = max(maximumGap, now - previous)
+                previous = now
+                ticks += 1
+            }
+            return (ticks, maximumGap)
+        }
+        defer { mainThreadProbe.cancel() }
+        var peak = baseline
+        var retained: [CameraPhotoPreviewContent] = []
+        var maximumDuration: TimeInterval = 0
+        for _ in 0..<24 {
+            let start = ProcessInfo.processInfo.systemUptime
+            let loaded = try await loadCameraPhotoPreviewContent(data)
+            let content = try XCTUnwrap(loaded)
+            maximumDuration = max(maximumDuration, ProcessInfo.processInfo.systemUptime - start)
+            XCTAssertEqual(content.image.cgImage?.width, 1920)
+            XCTAssertEqual(content.image.cgImage?.height, 1280)
+            XCTAssertNotNil(content.histogram)
+            retained.append(content)
+            if retained.count > 5 { retained.removeFirst() }
+            peak = max(peak, try footprint())
+            let retainedBytes = retained.reduce(0) { $0 + ($1.image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0) }
+            XCTAssertLessThanOrEqual(retainedBytes, 5 * 1920 * 1280 * 4)
+        }
+        mainThreadProbe.cancel()
+        let responsiveness = await mainThreadProbe.value
+        XCTAssertGreaterThan(responsiveness.ticks, 24)
+        sampler.cancel()
+        let inFlight = try await sampler.value
+        peak = max(peak, inFlight.peak)
+        XCTAssertGreaterThan(inFlight.samples, 24)
+        // Polling can miss spikes shorter than its interval; report observed peak,
+        // not an absolute allocation bound or a device performance contract.
+        print("F046 24x24MP decode: baseline=\(baseline), sampledPeak=\(peak), delta=\(peak - baseline), maxSeconds=\(maximumDuration), inFlightSamples=\(inFlight.samples), requestedIntervalMs=2")
+        print("F046 main-thread probe: ticks=\(responsiveness.ticks), maximumGapSeconds=\(responsiveness.maximumGap), requestedIntervalMs=5")
+    }
+
+    @MainActor
+    func testFrameFavoriteCapturesUpdatesAndAppliesOnlyPresentationParameters() throws {
+        for scope: PhotoEffectsStore.Scope in [.cameraTransfer, .localPhotos] {
+            let suite = "favorite-apply-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            var metadata = PhotoFrameMetadataSettings.defaults(for: .mist)
+            metadata.widthPercent = 60
+            metadata.backgroundBlurPercent = 0
+            metadata.backgroundMaskPercent = 200
+            var watermark = PhotoFrameWatermark()
+            watermark.text = "Historical text"
+            var favorite = PhotoFrameFavorite(preset: .mist, watermark: watermark, metadata: metadata)
+            XCTAssertEqual(favorite.frameWidthPercent, 60)
+            XCTAssertEqual(favorite.backgroundBlurPercent, 0)
+            XCTAssertEqual(favorite.backgroundMaskPercent, 200)
+            metadata.widthPercent = 200
+            metadata.backgroundBlurPercent = 180
+            metadata.backgroundMaskPercent = 0
+            favorite.updateFrameMetadata(metadata)
+            let store = PhotoEffectsStore(defaults: defaults, scope: scope, premiumAccess: PremiumAccess(.lifetime))
+            var settings = store.settings
+            settings.favoriteFrameEffects = [favorite]
+            store.updateFromEditor(settings)
+            let restored = try XCTUnwrap(PhotoEffectsStore(defaults: defaults, scope: scope,
+                premiumAccess: PremiumAccess(.lifetime)).settings.favoriteFrameEffects.first)
+            var currentMetadata = PhotoFrameMetadataSettings.defaults(for: .mist)
+            currentMetadata.showDate = false
+            currentMetadata.datePattern = "MM-dd-yyyy"
+            let applied = restored.applying(to: currentMetadata)
+            XCTAssertEqual(applied.widthPercent, 200)
+            XCTAssertEqual(applied.backgroundBlurPercent, 180)
+            XCTAssertEqual(applied.backgroundMaskPercent, 0)
+            XCTAssertFalse(applied.showDate)
+            XCTAssertEqual(applied.datePattern, "MM-dd-yyyy")
+            watermark.text = "Current text"
+            watermark.imageHash = String(repeating: "b", count: 64)
+            let appliedWatermark = try XCTUnwrap(restored.applying(to: watermark))
+            XCTAssertEqual(appliedWatermark.text, "Current text")
+            XCTAssertEqual(appliedWatermark.imageHash, watermark.imageHash)
+        }
+    }
+
+    @MainActor
+    func testFrameFavoriteLegacyWidthAndBackdropFormatsRoundTrip() throws {
+        let base = "MIST,true,TEXT,CALLIGRAPHY,100,AUTO,ADAPTIVE,100,AUTO"
+        for (suffix, width, blur, mask) in [("", 100, 100, 100), (",60", 60, 100, 100),
+                                          (",200,0,200", 200, 0, 200), (",140,0,180", 140, 0, 180)] {
+            let suite = "frame-favorite-codec-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            defaults.set(false, forKey: "photo_frame_enabled")
+            defaults.set(base + suffix, forKey: "favorite_frame_effects_v1")
+            let store = PhotoEffectsStore(defaults: defaults)
+            let favorite = try XCTUnwrap(store.settings.favoriteFrameEffects.first)
+            XCTAssertEqual(favorite.frameWidthPercent, width)
+            XCTAssertEqual(favorite.backgroundBlurPercent, blur)
+            XCTAssertEqual(favorite.backgroundMaskPercent, mask)
+            let expected = base + ",\(width)" + (blur == 100 && mask == 100 ? "" : ",\(blur),\(mask)")
+            XCTAssertEqual(defaults.string(forKey: "favorite_frame_effects_v1"), expected)
+            XCTAssertEqual(PhotoEffectsStore(defaults: defaults).settings.favoriteFrameEffects, [favorite])
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(favorite)) as? [String: Any])
+            for key in ["frameWidthPercent", "backgroundBlurPercent", "backgroundMaskPercent"] { json.removeValue(forKey: key) }
+            let legacy = try JSONDecoder().decode(PhotoFrameFavorite.self, from: JSONSerialization.data(withJSONObject: json))
+            XCTAssertEqual(legacy.frameWidthPercent, 100)
+            XCTAssertEqual(legacy.backgroundBlurPercent, 100)
+            XCTAssertEqual(legacy.backgroundMaskPercent, 100)
+        }
+    }
+
+    func testModuleToggleMatchesAndroidForEveryNonemptyMask() {
+        for mask in 1...allPhotoEffectModules {
+            for module in PhotoEffectModule.allCases {
+                let pro = togglePhotoEffectModule(mask, module: module, isPro: true)
+                XCTAssertEqual(pro, mask == module.rawValue ? mask : mask ^ module.rawValue)
+                XCTAssertTrue((1...15).contains(pro))
+                let free = togglePhotoEffectModule(mask, module: module, isPro: false)
+                XCTAssertTrue((1...15).contains(free))
+                XCTAssertEqual(photoEffectModuleIsVisible(free, .frame), photoEffectModuleIsVisible(free, .watermark))
+                let current = effectivePhotoEffectModules(mask, isPro: false)
+                if current == 12 && (module == .frame || module == .watermark) {
+                    XCTAssertEqual(free, current)
+                }
+            }
+        }
+        XCTAssertEqual(togglePhotoEffectModule(13, module: .watermark, isPro: false), 1)
+        XCTAssertEqual(togglePhotoEffectModule(1, module: .frame, isPro: false), 13)
+        XCTAssertEqual(togglePhotoEffectModule(1, module: .filter, isPro: false), 1)
+        XCTAssertEqual(togglePhotoEffectModule(0, module: .filter, isPro: true), 14)
+    }
+
+    func testQueueFlightHoldsOnlyDownloadsAndNeverDelayRealCompletion() {
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 10,
+                              fileName: "A.JPG", captureDate: nil, isProtected: false)
+        var items = (0..<12).map { _ in TransferQueueItem(id: UUID(), file: file) }
+        XCTAssertEqual(QueuePillTaskSummary(items: items).displayRemaining(heldCount: 2), 10)
+        items[0].status = .completed
+        let concurrent = QueuePillTaskSummary(items: items)
+        XCTAssertEqual(concurrent.displayRemaining(heldCount: 2), 9)
+        XCTAssertEqual(concurrent.displayRemaining(heldCount: 1), 10)
+        XCTAssertEqual(concurrent.displayRemaining(heldCount: 99), 0)
+        XCTAssertFalse(concurrent.allDone)
+        for index in items.indices { items[index].status = .completed }
+        items[0].isGeneratingFrame = true
+        let generation = QueuePillTaskSummary(items: items)
+        XCTAssertEqual(generation.displayRemaining(heldCount: 2), 1)
+        XCTAssertFalse(generation.allDone)
+        items[0].isGeneratingFrame = false
+        XCTAssertTrue(QueuePillTaskSummary(items: items).allDone)
+        XCTAssertEqual(QueuePillTaskSummary(items: items).displayRemaining(heldCount: 2), 0)
+    }
+
+    func testPhotoHistogramPreferencesRestoreWithoutChangingMonitorScope() throws {
+        let suite = "photo-histogram-\(UUID().uuidString)"
+        let store = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { store.removePersistentDomain(forName: suite) }
+        store.set(true, forKey: "preview_histogram_enabled")
+        store.set("RGB", forKey: "remote_histogram_mode")
+        let preferences = PhotoPreviewHistogramPreferences(store: store)
+        XCTAssertEqual(preferences.mode, .luma)
+        preferences.mode = preferences.mode.next
+        XCTAssertEqual(store.string(forKey: "preview_histogram_mode"), "OFF")
+        XCTAssertTrue(store.bool(forKey: "preview_histogram_enabled"))
+        for expected in [RemoteHistogramMode.rgb, .luma, .off] {
+            preferences.mode = preferences.mode.next
+            let reopened = PhotoPreviewHistogramPreferences(store: store)
+            XCTAssertEqual(reopened.mode, expected)
+            XCTAssertEqual(store.string(forKey: "remote_histogram_mode"), "RGB")
+        }
+    }
+
+    @MainActor
+    func testCachedHistogramReplacesPendingThumbnailWithoutReanalysis() async {
+        let gate = PreviewHistogramTestGate()
+        let model = PhotoPreviewHistogramModel { _ in PhotoPreviewHistogram(luma: await gate.calculate()) }
+        model.load(fileID: 7, image: UIImage())
+        while await gate.count < 1 { await Task.yield() }
+        let cached = PhotoPreviewHistogram(luma: [0.9], rgb: [[0.2], [0.4], [0.6]])
+        model.show(fileID: 7, cached: cached)
+        await gate.finish(0, bars: [0.1])
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(model.bars, [0.9])
+        XCTAssertEqual(model.result.rgb, cached.rgb)
+        model.clear()
+        model.show(fileID: 7, cached: cached)
+        XCTAssertEqual(model.fileID, 7)
+        XCTAssertEqual(model.result.rgb, cached.rgb)
+        let calls = await gate.count
+        XCTAssertEqual(calls, 1, "Cached presentation must not analyse or decode again")
+    }
+
+    func testJPEGHistogramAnalysisIsBoundedAndScansTinyHighlights() async throws {
+        for edge in [256, 512, 513, 1920, 4096] {
+            let context = try XCTUnwrap(CGContext(data: nil, width: edge, height: edge,
+                bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            context.setFillColor(UIColor.black.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: edge, height: edge))
+            context.setFillColor(UIColor.white.cgColor)
+            context.fill(CGRect(x: 1, y: 1, width: 1, height: 1))
+            let image = UIImage(cgImage: try XCTUnwrap(context.makeImage()))
+            let data = try XCTUnwrap(image.jpegData(compressionQuality: 1))
+            let analysis = try XCTUnwrap(decodePhotoPreviewAnalysisImage(data))
+            let expected = [256: 256, 512: 512, 513: 257, 1920: 480, 4096: 512][edge]!
+            let cg = try XCTUnwrap(analysis.cgImage)
+            if edge == 513 {
+                // ImageIO may round an odd JPEG's sampled dimension down.
+                // The ceil division is a decode budget, not an output promise.
+                XCTAssertTrue((256...expected).contains(cg.width))
+                XCTAssertEqual(cg.width, cg.height)
+            } else {
+                XCTAssertEqual(cg.width, expected)
+                XCTAssertEqual(cg.height, expected)
+            }
+            let content = try await loadCameraPhotoPreviewContent(data)
+            let histogram = try XCTUnwrap(content?.histogram)
+            XCTAssertEqual(histogram.rgb.count, 3)
+            XCTAssertEqual(histogram.luma.count, 256)
+            if edge <= 512 {
+                XCTAssertGreaterThan(histogram.luma[200...255].reduce(0, +), 0,
+                                     "Exhaustive analysis must retain an isolated bright pixel")
+            }
+        }
+        XCTAssertNil(decodePhotoPreviewAnalysisImage(Data()))
+    }
+
+    func testPhotoHistogramModeMigrationAndCycle() {
+        XCTAssertEqual(RemoteHistogramMode.off.next, .rgb)
+        XCTAssertEqual(RemoteHistogramMode.rgb.next, .luma)
+        XCTAssertEqual(RemoteHistogramMode.luma.next, .off)
+        for old in [false, true] {
+            for raw in [nil, "", "invalid", "rgb"] as [String?] {
+                XCTAssertEqual(RemoteHistogramMode.restore(saved: raw, previouslyEnabled: old), old ? .luma : .off)
+            }
+            for mode in RemoteHistogramMode.allCases {
+                XCTAssertEqual(RemoteHistogramMode.restore(saved: mode.rawValue, previouslyEnabled: old), mode)
+            }
+        }
+    }
+
+    func testPhotoHistogramRGBUsesSharedPeak() throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 4, height: 1,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        for (x, color) in [UIColor.red, .red, .green, .blue].enumerated() {
+            context.setFillColor(color.cgColor)
+            context.fill(CGRect(x: x, y: 0, width: 1, height: 1))
+        }
+        let image = UIImage(cgImage: try XCTUnwrap(context.makeImage()))
+        let result = calculatePhotoPreviewHistogram(image)
+        XCTAssertEqual(result.rgb.count, 3)
+        XCTAssertEqual(result.rgb[0][255], 2.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(result.rgb[1][255], 1.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(result.rgb[2][255], 1.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(result.luma[53], 1)
+        XCTAssertEqual(result.luma[182], 0.5)
+        XCTAssertEqual(result.luma[18], 0.5)
+    }
+
+    func testPhotoHistogramExcludesVideoCoversAndCollections() {
+        for video in [".mov", ".MOV", ".mp4", ".MP4"] {
+            XCTAssertFalse(photoPreviewHistogramCanAnalyze(enabled: true, fileExtension: video))
+        }
+        XCTAssertFalse(photoPreviewHistogramCanAnalyze(enabled: true, fileExtension: nil))
+        for photo in [".jpg", ".JPEG", ".nef", ".NEF"] {
+            XCTAssertTrue(photoPreviewHistogramCanAnalyze(enabled: true, fileExtension: photo))
+            XCTAssertFalse(photoPreviewHistogramCanAnalyze(enabled: false, fileExtension: photo))
+        }
+    }
+
+    @MainActor
+    func testHistogramReplacementAndExitDiscardLateResults() async throws {
+        let gate = PreviewHistogramTestGate()
+        let model = PhotoPreviewHistogramModel { _ in PhotoPreviewHistogram(luma: await gate.calculate()) }
+        let image = UIImage()
+        model.load(fileID: 1, image: image)
+        while await gate.count < 1 { await Task.yield() }
+        // Same handle, new image: file identity alone cannot reject the old result.
+        model.load(fileID: 1, image: image)
+        while await gate.count < 2 { await Task.yield() }
+        await gate.finish(1, bars: [0.8])
+        for _ in 0..<1000 where model.fileID == nil { await Task.yield() }
+        XCTAssertEqual(model.bars, [0.8])
+        await gate.finish(0, bars: [0.2])
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(model.bars, [0.8])
+        model.load(fileID: 2, image: image)
+        while await gate.count < 3 { await Task.yield() }
+        model.clear()
+        await gate.finish(2, bars: [1])
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertNil(model.fileID)
+        XCTAssertTrue(model.bars.isEmpty)
+    }
+
+    @MainActor
+    func testBackgroundCameraPreviewReturnsBoundedPixelsAndRejectsCancellation() async throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 2560, height: 1440,
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let source = try XCTUnwrap(context.makeImage())
+        let data = try XCTUnwrap(UIImage(cgImage: source).jpegData(compressionQuality: 0.8))
+        let decoded = try await loadCameraPhotoPreview(data)
+        XCTAssertEqual(decoded?.cgImage?.width, 1920)
+        XCTAssertEqual(decoded?.cgImage?.height, 1080)
+        let invalid = try await loadCameraPhotoPreview(Data())
+        XCTAssertNil(invalid)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await loadCameraPhotoPreview(data)
+        }
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled decode must not publish a result")
+        } catch is CancellationError {} catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+    }
+
+    func testCameraPreviewBoundsLargeJPEGWithoutUpscalingOrHonoringOrientation() throws {
+        let dimensions = [(640, 480, 640, 480), (1920, 1080, 1920, 1080),
+                          (2560, 1440, 1920, 1080), (4096, 3072, 1920, 1440),
+                          (3072, 4096, 1440, 1920)]
+        for (width, height, expectedWidth, expectedHeight) in dimensions {
+            try autoreleasepool {
+                let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height,
+                    bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                context.setFillColor(UIColor.red.cgColor)
+                context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+                let sourceImage = try XCTUnwrap(context.makeImage())
+                let data = NSMutableData()
+                let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil))
+                CGImageDestinationAddImage(destination, sourceImage, [kCGImagePropertyOrientation: 6] as CFDictionary)
+                XCTAssertTrue(CGImageDestinationFinalize(destination))
+                let image = try XCTUnwrap(decodeCameraPhotoPreview(data as Data))
+                XCTAssertEqual(image.cgImage?.width, expectedWidth)
+                XCTAssertEqual(image.cgImage?.height, expectedHeight)
+                XCTAssertEqual(image.imageOrientation, .up)
+                XCTAssertLessThanOrEqual(max(image.size.width, image.size.height), 1920)
+            }
+        }
+    }
+
+    func testCameraPreviewIgnoresJPEGExifOrientationAndKeepsManualRotationPixels() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let raw = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 32), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 24, height: 16))
+            UIColor.green.setFill(); context.fill(CGRect(x: 24, y: 0, width: 24, height: 16))
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 16, width: 24, height: 16))
+            UIColor.yellow.setFill(); context.fill(CGRect(x: 24, y: 16, width: 24, height: 16))
+        }
+        func rendered(_ image: UIImage, quarterTurns: Int) -> Data? {
+            let size = quarterTurns.isMultiple(of: 2) ? CGSize(width: 48, height: 32) : CGSize(width: 32, height: 48)
+            return UIGraphicsImageRenderer(size: size, format: format).image { context in
+                context.cgContext.translateBy(x: size.width / 2, y: size.height / 2)
+                context.cgContext.rotate(by: -CGFloat(quarterTurns) * .pi / 2)
+                image.draw(in: CGRect(x: -24, y: -16, width: 48, height: 32))
+            }.pngData()
+        }
+        var reference: [Data] = []
+        for orientation in 1...8 {
+            let data = NSMutableData()
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, try XCTUnwrap(raw.cgImage), [
+                kCGImagePropertyOrientation: orientation,
+                kCGImageDestinationLossyCompressionQuality: 1
+            ] as CFDictionary)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(data, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+            XCTAssertEqual((properties[kCGImagePropertyOrientation as String] as? NSNumber)?.intValue, orientation)
+            let content = try await loadCameraPhotoPreviewContent(data as Data)
+            XCTAssertEqual(content?.orientation, orientation)
+            XCTAssertEqual(content?.image.imageOrientation, .up)
+            let preview = try XCTUnwrap(decodeCameraPhotoPreview(data as Data))
+            XCTAssertEqual(preview.imageOrientation, .up)
+            XCTAssertEqual(preview.size, CGSize(width: 48, height: 32))
+            for turn in 0..<4 {
+                let pixels = try XCTUnwrap(rendered(preview, quarterTurns: turn))
+                if orientation == 1 { reference.append(pixels) }
+                else { XCTAssertEqual(pixels, reference[turn], "EXIF \(orientation), turn \(turn)") }
+            }
+            let ordinaryUIKit = try XCTUnwrap(UIImage(data: data as Data))
+            XCTAssertEqual(ordinaryUIKit.imageOrientation == .up, orientation == 1,
+                           "Effect-preview decoding must retain its independent EXIF behavior")
+        }
+        XCTAssertNil(decodeCameraPhotoPreview(Data()))
+    }
+
+    func testPhotoFilterDateEditorKeepsGregorianComponentsAcrossSystemCalendars() throws {
+        for identifier: Calendar.Identifier in [.gregorian, .buddhist, .chinese, .islamicCivil] {
+            for zone in ["Asia/Shanghai", "America/Los_Angeles"] {
+                var system = Calendar(identifier: identifier)
+                system.timeZone = try XCTUnwrap(TimeZone(identifier: zone))
+                let dates = PhotoFilterDates(systemCalendar: system)
+                XCTAssertEqual(dates.calendar.identifier, .gregorian)
+                XCTAssertEqual(dates.calendar.timeZone, system.timeZone)
+                let leap = try XCTUnwrap(dates.date(from: "20240229"))
+                XCTAssertEqual(dates.calendar.component(.year, from: leap), 2024)
+                XCTAssertEqual(dates.calendar.component(.month, from: leap), 2)
+                XCTAssertEqual(dates.calendar.component(.day, from: leap), 29)
+                XCTAssertEqual(dates.calendar.range(of: .day, in: .month, for: leap)?.count, 29)
+                XCTAssertEqual(dates.shortDate(leap), "24/02/29")
+                XCTAssertEqual(dates.key(leap), "20240229")
+                XCTAssertEqual(dates.key(dates.clamped(year: 2023, month: 2, day: 29)), "20230228")
+                XCTAssertEqual(dates.key(dates.clamped(year: 2024, month: 4, day: 31)), "20240430")
+                let later = dates.clamped(year: 2024, month: 3, day: 31)
+                XCTAssertEqual(dates.range(start: later, end: leap), PhotoDateRange(start: "20240229", end: "20240331"))
+                let now = try XCTUnwrap(dates.date(from: "20261016"))
+                XCTAssertEqual(dates.years(start: leap, end: later, now: now), Array(1990...2027))
+                let old = try XCTUnwrap(dates.date(from: "19801231"))
+                let future = try XCTUnwrap(dates.date(from: "20300101"))
+                XCTAssertEqual(dates.years(start: old, end: future, now: now), Array(1980...2030))
+            }
+        }
+    }
+
+    func testWorkspaceDiscoveryRemainsPausedUntilReturnSettles() {
+        var state = WorkspaceDiscoveryState()
+        XCTAssertFalse(state.shouldPause)
+        state.request(1)
+        XCTAssertTrue(state.shouldPause)
+        state.begin(1)
+        state.settle(1)
+        state.request(0)
+        XCTAssertTrue(state.shouldPause)
+        state.begin(0)
+        XCTAssertTrue(state.shouldPause)
+        state.settle(0)
+        XCTAssertFalse(state.shouldPause)
+    }
+
+    func testWorkspaceDiscoveryHandlesCancelledGesturesAndQueuedReversal() {
+        var state = WorkspaceDiscoveryState()
+        state.request(1)
+        state.request(0) // request withdrawn before the native transition begins
+        XCTAssertFalse(state.shouldPause)
+        state.begin(1)
+        XCTAssertTrue(state.shouldPause)
+        state.settle(0) // cancelled entry
+        XCTAssertFalse(state.shouldPause)
+        state.request(1)
+        state.begin(1)
+        state.request(0) // reverse request before entry has finished
+        XCTAssertTrue(state.shouldPause)
+        state.settle(1)
+        XCTAssertTrue(state.shouldPause)
+        state.begin(0)
+        state.request(1) // cancelled return or queued reentry
+        state.settle(0)
+        XCTAssertTrue(state.shouldPause)
+        state.begin(1)
+        state.settle(1)
+        state.request(0)
+        state.begin(0)
+        state.request(1)
+        state.settle(1) // cancelled return remains on workbench
+        XCTAssertTrue(state.shouldPause)
+    }
+
+    func testQueueItemPlacementUsesPhysicalPixelSpringAndPreservesPositionOnInterruption() {
+        var motion = QueueItemPlacementMotion()
+        motion.place(at: CGPoint(x: 12, y: 100), scale: 3)
+        XCTAssertEqual(motion.offset, .zero)
+        XCTAssertFalse(motion.isRunning)
+        motion.place(at: CGPoint(x: 12, y: 200), scale: 3)
+        XCTAssertEqual(motion.offset, CGSize(width: 0, height: -100))
+        motion.advance(0)
+        motion.advance(100_000_000)
+        let omega = sqrt(500.0)
+        let expectedPixels = floor(-300 * (1 + omega * 0.1) * exp(-omega * 0.1) + 0.5)
+        XCTAssertEqual(motion.offset.height, expectedPixels / 3)
+        // Unchanged content coordinates (including ordinary scrolling) must
+        // not restart a placement spring.
+        var uninterrupted = motion
+        motion.place(at: CGPoint(x: 12, y: 200), scale: 3)
+        motion.advance(150_000_000)
+        uninterrupted.advance(150_000_000)
+        XCTAssertEqual(motion.offset, uninterrupted.offset)
+        let displayedY = 200 + motion.offset.height
+        motion.place(at: CGPoint(x: 32, y: 150), scale: 3)
+        XCTAssertEqual(150 + motion.offset.height, displayedY, accuracy: 0.00001)
+        XCTAssertEqual(32 + motion.offset.width, 12)
+        motion.advance(2_000_000_000)
+        XCTAssertEqual(motion.offset, .zero)
+        XCTAssertFalse(motion.isRunning)
+        motion.reset()
+        motion.place(at: CGPoint(x: 12, y: 900), scale: 3)
+        XCTAssertEqual(motion.offset, .zero)
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testQueueItemPlacementSamplesShortAxisUntilVectorFinishes() {
+        var motion = QueueItemPlacementMotion()
+        motion.place(at: .zero, scale: 1)
+        motion.place(at: CGPoint(x: 10, y: 300), scale: 1)
+        motion.advance(0)
+        motion.advance(200_000_000)
+        // x alone has already crossed the 1px finish threshold. IntOffset's
+        // vector duration is set by y, so x still samples -0.625... -> -1px.
+        XCTAssertTrue(motion.isRunning)
+        XCTAssertEqual(motion.offset.width, -1)
+        let omega = sqrt(500.0)
+        let velocity = 10 * 500 * 0.2 * exp(-omega * 0.2)
+        motion.place(at: CGPoint(x: 20, y: 300), scale: 1)
+        XCTAssertEqual(motion.offset.width, -11)
+        motion.advance(250_000_000)
+        let displacement = -11.0
+        let expected = floor((displacement + (velocity + omega * displacement) * 0.05)
+                             * exp(-omega * 0.05) + 0.5)
+        XCTAssertEqual(motion.offset.width, expected)
+        motion.advance(2_000_000_000)
+        XCTAssertEqual(motion.offset, .zero)
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testQueueCardContentSizeUses250msAndRoundedInterruption() {
+        var motion = QueueCardContentSizeMotion()
+        motion.measure(CGSize(width: 100, height: 92), scale: 3)
+        XCTAssertEqual(motion.size, CGSize(width: 100, height: 92))
+        XCTAssertFalse(motion.isRunning)
+        motion.measure(CGSize(width: 120, height: 150), scale: 3)
+        motion.advance(0)
+        motion.advance(125_000_000)
+        // FastOutSlowIn(.5)=.7755613, rounded independently in physical pixels.
+        XCTAssertEqual(motion.size, CGSize(width: 347.0 / 3, height: 137))
+        let before = motion.size
+        motion.measure(CGSize(width: 100, height: 100), scale: 3)
+        XCTAssertEqual(motion.size, before)
+        motion.advance(250_000_000)
+        XCTAssertEqual(motion.size, CGSize(width: 311.0 / 3, height: 325.0 / 3))
+        motion.advance(375_000_000)
+        XCTAssertEqual(motion.size, CGSize(width: 100, height: 100))
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testQueueCardContentSizeRetainedNodeRestartsAfterDetachment() {
+        var motion = QueueCardContentSizeMotion()
+        motion.measure(CGSize(width: 100, height: 92), scale: 3)
+        motion.measure(CGSize(width: 120, height: 150), scale: 3)
+        motion.advance(0)
+        motion.advance(125_000_000)
+        let displayed = motion.size
+        motion.suspend()
+        XCTAssertEqual(motion.size, displayed)
+        XCTAssertFalse(motion.isRunning)
+        motion.advance(10_000_000_000)
+        XCTAssertEqual(motion.size, displayed)
+        // Same natural target must restart, despite no new preference value.
+        motion.measure(CGSize(width: 120, height: 150), scale: 3)
+        XCTAssertTrue(motion.isRunning)
+        motion.advance(20_000_000_000)
+        XCTAssertEqual(motion.size, displayed)
+        motion.advance(20_125_000_000)
+        XCTAssertEqual(motion.size, CGSize(width: 119, height: 147))
+        motion.advance(20_250_000_000)
+        XCTAssertEqual(motion.size, CGSize(width: 120, height: 150))
+        XCTAssertFalse(motion.isRunning)
+        motion.suspend()
+        motion.measure(CGSize(width: 120, height: 150), scale: 3)
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testLiquidPathUsesFloatPixelControlPoints() {
+        // Independent C reference: 370.2 x 113.1 px, 43%, phase .19,
+        // seed .63, amplitude 6px, eight segments; contraction disabled.
+        let expected: [(Float, Float)] = [
+            (0,0),(157.064056,0),
+            (157.064056,0),(157.878906,7.0687499),
+            (158.693756,14.1374998),(159.761948,21.2062492),
+            (160.830139,28.2749996),(161.400085,35.34375),
+            (161.970016,42.4124985),(162.425018,49.4812469),
+            (162.880005,56.5499992),(160.32196,63.6187515),
+            (157.763901,70.6875),(156.263474,77.7562485),
+            (154.763046,84.8249969),(156.309875,91.8937531),
+            (157.856689,98.9625015),(157.951355,106.03125),
+            (158.046036,113.099998),(158.046036,113.099998),(0,113.099998)
+        ]
+        let rect = CGRect(x: 2.25, y: -3.5, width: 123.4, height: 37.7)
+        let path = LiquidTransferShape(progress: 0.43, phase: 0.19, seed: 0.63,
+            amplitude: 2, segments: 8, spatialScale: 1, pixelScale: 3).path(in: rect)
+        var points: [CGPoint] = []
+        var closed = false
+        path.cgPath.applyWithBlock { pointer in
+            let element = pointer.pointee
+            switch element.type {
+            case .moveToPoint, .addLineToPoint: points.append(element.points[0])
+            case .addQuadCurveToPoint:
+                points.append(element.points[0]); points.append(element.points[1])
+            case .closeSubpath: closed = true
+            default: XCTFail("Unexpected curve type")
+            }
+        }
+        XCTAssertTrue(closed)
+        XCTAssertEqual(points.count, expected.count)
+        for (point, expected) in zip(points, expected) {
+            // SwiftUI Path stores point-space coordinates as Float; converting
+            // back to pixels can add a second rounding. Compare at its boundary.
+            XCTAssertEqual(point.x, CGFloat(Float(rect.minX + CGFloat(expected.0) / 3)))
+            XCTAssertEqual(point.y, CGFloat(Float(rect.minY + CGFloat(expected.1) / 3)))
+        }
+    }
+
+    func testLiquidHarmonicsFloatReferenceClampsAndCycleContinuity() {
+        // Independent C ordered-float reference, contraction disabled.
+        let samples: [(Float, Float, Float, Float, UInt32)] = [
+            (0, 0, 0, 1, 0x00000000), (0.25, 0.19, 0.63, 1, 0x3e9acf0c),
+            (0.75, 0.63, 0.19, 0.55, 0x3ed8c4c0), (1, 1, 1, 0.55, 0xbe9a1f8a),
+            (-0.2, 0.4, 0.3, 1, 0xbf0ed4bd), (1.2, 0.4, 0.3, 1, 0xbf4712d6),
+            (0.5, 0.4, 0.3, -1, 0xbf0ed4bd)
+        ]
+        for (y, phase, seed, scale, expected) in samples {
+            XCTAssertEqual(liquidProgressWaveUnitOffset(normalizedY: y, phaseTurns: phase,
+                seedTurns: seed, spatialScale: scale).bitPattern, expected)
+        }
+        // Android LiquidProgressWaveTest's full nominal-domain sweep.
+        for scale: Float in [0.55, 1] {
+            for seed: Float in [0, 0.19, 0.63, 1] {
+                for step in 0...40 {
+                    let y = Float(step) / 40
+                    let start = liquidProgressWaveUnitOffset(normalizedY: y, phaseTurns: 0,
+                        seedTurns: seed, spatialScale: scale)
+                    let end = liquidProgressWaveUnitOffset(normalizedY: y, phaseTurns: 1,
+                        seedTurns: seed, spatialScale: scale)
+                    XCTAssertEqual(start, end, accuracy: 0.0001)
+                    for phaseStep in 0...20 {
+                        let value = liquidProgressWaveUnitOffset(normalizedY: y,
+                            phaseTurns: Float(phaseStep) / 20, seedTurns: seed, spatialScale: scale)
+                        XCTAssertLessThanOrEqual(abs(value), 1.0001)
+                    }
+                }
+            }
+        }
+    }
+
+    func testLiquidEnvelopeUsesAndroidFloatRounding() {
+        // Independent C float reference, clang -O0 -ffp-contract=off;
+        // same ordered arithmetic as LiquidProgressFill.kt smoothStep.
+        let samples: [(Double, UInt32)] = [
+            (0.05, 0x00000000), (0.06, 0x3d0c7761), (0.08, 0x3e84bd9f),
+            (0.10, 0x3f153edb), (0.13, 0x3f773889), (0.14, 0x3f800000),
+            (0.90, 0x3f800000), (0.91, 0x3f74fffa), (0.94, 0x3f000000),
+            (0.97, 0x3d2fffe0), (0.98, 0x00000000)
+        ]
+        for (progress, expected) in samples {
+            XCTAssertEqual(Float(liquidProgressWaveEnvelope(progress)).bitPattern, expected,
+                           "progress=\(progress)")
+        }
+        for invalid in [Double.nan, .infinity, -.infinity] {
+            XCTAssertEqual(liquidProgressWaveEnvelope(invalid), 0)
+        }
+    }
+
+    func testQueuePillSummarySeparatesCropGenerationAndProgressOwnership() {
+        func item(_ id: UInt32, _ status: TransferStatus, generating: Bool = false) -> TransferQueueItem {
+            var item = TransferQueueItem(id: UUID(), file: CameraFile(id: id, storageID: 1, format: 0x3801,
+                size: 2048, fileName: "TEST.JPG", captureDate: nil, isProtected: false))
+            item.status = status
+            item.isGeneratingFrame = generating
+            return item
+        }
+        let waiting = item(1, .waiting)
+        let crop = item(2, .transferring, generating: true)
+        let download = item(3, .transferring)
+        let cancelled = item(4, .cancelled)
+        let cropOnly = QueuePillTaskSummary(items: [crop])
+        XCTAssertEqual(cropOnly.downloadRemaining, 0)
+        XCTAssertEqual(cropOnly.generationRemaining, 1)
+        XCTAssertNil(cropOnly.activeDownload)
+        XCTAssertEqual(cropOnly.progressOwner?.id, crop.id)
+        XCTAssertTrue(cropOnly.hasActive)
+        let mixed = QueuePillTaskSummary(items: [waiting, crop, download, cancelled])
+        XCTAssertEqual(mixed.downloadRemaining, 2)
+        XCTAssertEqual(mixed.generationRemaining, 1)
+        XCTAssertEqual(mixed.activeDownload?.id, download.id)
+        XCTAssertEqual(mixed.progressOwner?.id, download.id)
+        XCTAssertTrue(mixed.hasCancelled)
+        var completedGeneration = crop
+        completedGeneration.status = .completed
+        let generating = QueuePillTaskSummary(items: [waiting, completedGeneration])
+        XCTAssertEqual(generating.progressOwner?.id, crop.id)
+        XCTAssertEqual(generating.downloadRemaining, 1)
+        let waitingOnly = QueuePillTaskSummary(items: [waiting])
+        XCTAssertEqual(waitingOnly.progressOwner?.id, waiting.id)
+        XCTAssertFalse(waitingOnly.hasActive)
+        let terminal = QueuePillTaskSummary(items: [cancelled])
+        XCTAssertNil(terminal.progressOwner)
+        XCTAssertFalse(terminal.hasActive)
+    }
+
+    func testLiquidWavePhaseStartsOnFirstFrameAndRestartsAfterRemount() {
+        var phase = LiquidWavePhaseMotion()
+        phase.advance(9_000_000_000, cycleMilliseconds: 2200)
+        XCTAssertEqual(phase.phase, 0)
+        phase.advance(10_100_000_000, cycleMilliseconds: 2200)
+        XCTAssertEqual(phase.phase, 0.5)
+        phase.advance(11_200_000_000, cycleMilliseconds: 2200)
+        XCTAssertEqual(phase.phase, 0)
+        phase.advance(11_750_000_000, cycleMilliseconds: 2200)
+        XCTAssertEqual(phase.phase, 0.25)
+        phase.advance(11_750_000_001, cycleMilliseconds: 2200)
+        XCTAssertEqual(phase.phase, CGFloat(Float(550_000_001) / Float(2_200_000_000)))
+        phase = .init()
+        phase.advance(30_000_000_000, cycleMilliseconds: 2600)
+        XCTAssertEqual(phase.phase, 0)
+        phase.advance(31_300_000_000, cycleMilliseconds: 2600)
+        XCTAssertEqual(phase.phase, 0.5)
+    }
+
+    func testLiquidProgressDisabledWaveIsRectangularAndEnvelopeHasQuietEdges() {
+        XCTAssertEqual(liquidProgressWaveEnvelope(.nan), 0)
+        XCTAssertEqual(liquidProgressWaveEnvelope(0.05), 0)
+        XCTAssertEqual(liquidProgressWaveEnvelope(0.14), 1, accuracy: 0.000001)
+        XCTAssertEqual(liquidProgressWaveEnvelope(0.98), 0)
+        let rect = CGRect(x: 0, y: 0, width: 200, height: 36)
+        for phase: CGFloat in [0, 0.25, 0.75] {
+            let path = LiquidTransferShape(progress: 0.5, phase: phase, amplitude: 0).path(in: rect)
+            XCTAssertEqual(path.boundingRect, CGRect(x: 0, y: 0, width: 100, height: 36))
+            XCTAssertTrue(path.contains(CGPoint(x: 99.9, y: 18)))
+            XCTAssertFalse(path.contains(CGPoint(x: 100.1, y: 18)))
+        }
+    }
+
+    func testQueuePillSameModeDataChangeRetargetsWithoutRemounting() {
+        var motion = QueuePillContentMotion(.init(mode: .paused, count: 8, speed: nil))
+        motion.update(.init(mode: .counting, count: 8, speed: "1.0 MB/s"))
+        motion.advance(0)
+        motion.advance(100_000_000)
+        let before = motion.layers.last!.fade.alpha
+        motion.update(.init(mode: .counting, count: 7, speed: "2.0 MB/s"))
+        XCTAssertEqual(motion.layers.map(\.id), [.paused, .counting])
+        // Retarget samples the spring at t=0; Float subtraction/addition can round by one ULP.
+        XCTAssertEqual(motion.layers.last!.fade.alpha.value, before.value, accuracy: before.value.ulp)
+        motion.advance(120_000_000)
+        let r = sqrt(1500.0)
+        let delta = Double(before.value) - 1
+        let expected = 1 + (delta + (Double(before.velocity) + r * delta) * 0.02) * exp(-r * 0.02)
+        XCTAssertEqual(Double(motion.layers.last!.fade.alpha.value), expected, accuracy: 0.00001)
+        XCTAssertEqual(motion.layers.last!.presentation.count, 7)
+    }
+
+    func testQueuePillParentSegmentRebuildsUnchangedExitTarget() {
+        var fade = QueuePillFadeMotion(initiallyVisible: true)
+        fade.setVisible(false)
+        fade.advance(0)
+        fade.advance(50_000_000)
+        let value = Double(fade.alpha.value)
+        let velocity = Double(fade.alpha.velocity)
+        fade.setVisible(false, atFrameNanos: 50_000_000, force: true)
+        XCTAssertEqual(Double(fade.alpha.value), value, accuracy: 0.000001)
+        fade.advance(70_000_000)
+        let r = sqrt(1500.0)
+        let expected = (value + (velocity + r * value) * 0.02) * exp(-r * 0.02)
+        XCTAssertEqual(Double(fade.alpha.value), expected, accuracy: 0.00001)
+    }
+
+    func testQueuePillCountRetainsIntermediateNumbersAndReusesReversal() {
+        var motion = QueuePillCountMotion(count: 10, heightPixels: 60)
+        XCTAssertFalse(motion.isRunning)
+        motion.update(9)
+        motion.advance(0)
+        motion.advance(50_000_000)
+        motion.update(8)
+        XCTAssertEqual(motion.layers.map(\.count), [10, 9, 8])
+        motion.advance(70_000_000)
+        let before = motion.layers[1].motion.offset.value
+        motion.update(9)
+        XCTAssertEqual(motion.layers.map(\.count), [10, 9, 8])
+        XCTAssertEqual(motion.layers[1].motion.offset.value, floor(before + 0.5))
+        let oldTarget = motion.layers[0].motion.offset.target
+        motion.update(12)
+        XCTAssertEqual(motion.layers[0].motion.offset.target, oldTarget,
+                       "An older exiting number must retain its original exit direction")
+        motion.advance(3_000_000_000)
+        XCTAssertEqual(motion.layers.map(\.count), [12])
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testQueuePillCountSlideUsesIntegerHalfHeightAndOutlivesFade() {
+        var entering = QueuePillCountLayerMotion(initiallyVisible: false, heightPixels: 61, direction: 1)
+        XCTAssertEqual(entering.displayedOffsetPixels, 30)
+        entering.setVisible(true, direction: 1)
+        entering.advance(0)
+        entering.advance(50_000_000)
+        let expected = 30.0 * (1 + 20 * 0.05) * exp(-20 * 0.05)
+        XCTAssertEqual(Double(entering.offset.value), expected, accuracy: 0.00001)
+        XCTAssertEqual(entering.displayedOffsetPixels, Float(floor(expected + 0.5)))
+        let increasing = QueuePillCountLayerMotion(initiallyVisible: false, heightPixels: 61, direction: -1)
+        XCTAssertEqual(increasing.displayedOffsetPixels, -30)
+
+        var exiting = QueuePillCountLayerMotion(initiallyVisible: true, heightPixels: 61, direction: 1)
+        exiting.setVisible(false, direction: 1)
+        exiting.advance(0)
+        exiting.advance(120_000_000)
+        XCTAssertEqual(exiting.fade.alpha.value, 0)
+        XCTAssertTrue(exiting.offset.isRunning)
+        XCTAssertFalse(exiting.exitFinished)
+        exiting.advance(2_000_000_000)
+        XCTAssertTrue(exiting.exitFinished)
+        XCTAssertEqual(exiting.displayedOffsetPixels, -30)
+    }
+
+    func testQueuePillFadeDelayExitAndReverseSpring() {
+        var entry = QueuePillFadeMotion(initiallyVisible: false)
+        entry.setVisible(true)
+        entry.advance(0)
+        entry.advance(35_000_000)
+        XCTAssertEqual(entry.alpha.value, 0)
+        entry.advance(145_000_000)
+        XCTAssertGreaterThan(entry.alpha.value, 0)
+        XCTAssertLessThan(entry.alpha.value, 1)
+        entry.advance(255_000_000)
+        XCTAssertEqual(entry.alpha.value, 1)
+        XCTAssertFalse(entry.alpha.isRunning)
+
+        var exit = QueuePillFadeMotion(initiallyVisible: true)
+        exit.setVisible(false)
+        exit.advance(0)
+        exit.advance(50_000_000)
+        let value = Double(exit.alpha.value)
+        let velocity = Double(exit.alpha.velocity)
+        exit.setVisible(true)
+        XCTAssertEqual(Double(exit.alpha.value), value, accuracy: 0.000001)
+        exit.advance(70_000_000)
+        let t = 0.02
+        let delta = value - 1
+        let expected = 1 + (delta + (velocity + 20 * delta) * t) * exp(-20 * t)
+        XCTAssertEqual(Double(exit.alpha.value), expected, accuracy: 0.00001)
+        XCTAssertFalse(exit.exitFinished)
+
+        var completedExit = QueuePillFadeMotion(initiallyVisible: true)
+        completedExit.setVisible(false)
+        completedExit.advance(0)
+        completedExit.advance(160_000_000)
+        XCTAssertEqual(completedExit.alpha.value, 0)
+        XCTAssertTrue(completedExit.exitFinished)
+    }
+
+    func testQueuePillInterruptedEntryUsesDefaultFloatSpring() {
+        var fade = QueuePillFadeMotion(initiallyVisible: false)
+        fade.setVisible(true)
+        fade.advance(0)
+        fade.advance(145_000_000)
+        let value = Double(fade.alpha.value)
+        let velocity = Double(fade.alpha.velocity)
+        fade.setVisible(false)
+        XCTAssertEqual(Double(fade.alpha.value), value, accuracy: 0.000001)
+        XCTAssertEqual(Double(fade.alpha.velocity), velocity, accuracy: 0.000001)
+        fade.advance(165_000_000)
+        let r = sqrt(1500.0)
+        let t = 0.02
+        let expected = (value + (velocity + r * value) * t) * exp(-r * t)
+        XCTAssertEqual(Double(fade.alpha.value), expected, accuracy: 0.00001)
+        XCTAssertFalse(fade.exitFinished)
+        fade.advance(2_000_000_000)
+        XCTAssertTrue(fade.exitFinished)
+    }
+
+    func testQueuePillContentRetainsOutgoingSnapshotAndCleansFinishedLayers() {
+        let downloading = QueuePillPresentation(mode: .counting, count: 3, speed: "9.9 MB/s")
+        var motion = QueuePillContentMotion(downloading)
+        let done = QueuePillPresentation(mode: .done, count: 0, speed: nil)
+        motion.update(done)
+        XCTAssertEqual(motion.layers.first?.presentation, downloading)
+        motion.advance(0)
+        motion.advance(160_000_000)
+        XCTAssertEqual(motion.layers.map(\.id), [.done])
+        XCTAssertTrue(motion.isRunning)
+        motion.advance(255_000_000)
+        XCTAssertFalse(motion.isRunning)
+        let resumed = QueuePillPresentation(mode: .counting, count: 8, speed: "1.0 MB/s")
+        motion.update(resumed)
+        motion.advance(300_000_000)
+        motion.advance(350_000_000)
+        let before = motion.layers.last!.fade.alpha.value
+        motion.update(.init(mode: .counting, count: 7, speed: "2.0 MB/s"))
+        XCTAssertEqual(motion.layers.last!.fade.alpha.value, before)
+        XCTAssertEqual(motion.layers.last!.presentation.count, 7)
+        motion.update(done)
+        XCTAssertEqual(motion.layers.count, 2, "Reverse reuses the retained Done layer")
+        XCTAssertEqual(motion.layers.last!.presentation.count, 7)
+    }
+
+    func testQueuePillWidthFirstMeasureAndInterruptedSpring() {
+        var motion = QueueTopPillWidthMotion()
+        motion.update(width: 40, scale: 3)
+        XCTAssertEqual(motion.width, 40)
+        XCTAssertFalse(motion.isRunning)
+        motion.update(width: 100, scale: 3)
+        motion.advance(0)
+        motion.advance(50_000_000)
+        // Independent solution of x'' + 20x' + 400(x-target) = 0.
+        let t = 0.05
+        let omega = sqrt(300.0)
+        let decay = exp(-10 * t)
+        let expected = 100 - 60 * decay * (cos(omega * t) + 10 / omega * sin(omega * t))
+        XCTAssertEqual(Double(motion.width!), expected, accuracy: 0.0001)
+        let before = motion.width!
+        motion.update(width: 60, scale: 3)
+        XCTAssertEqual(motion.width!, before, accuracy: 0.00001)
+        motion.advance(51_000_000)
+        XCTAssertGreaterThan(motion.width!, before, "Retarget must preserve the outward velocity")
+        motion.advance(3_000_000_000)
+        XCTAssertEqual(motion.width!, 60, accuracy: 0.00001)
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testQueuePillWidthCategoriesReleasePreviousMaximum() {
+        let base = QueuePillWidthKey(mode: .counting, speedText: "1.0 MB/s", count: 99)
+        XCTAssertEqual(base, .init(mode: .counting, speedText: "9.9 MB/s", count: 99))
+        for key in [
+            QueuePillWidthKey(mode: .counting, speedText: "999.9 KB/s", count: 99),
+            .init(mode: .counting, speedText: "10.0 MB/s", count: 99),
+            .init(mode: .counting, speedText: "1.0 MB/s", count: 100),
+            .init(mode: .counting, speedText: nil, count: 99),
+            .init(mode: .paused, speedText: nil, count: 99)
+        ] { XCTAssertNotEqual(base, key) }
+        var measurement = QueuePillWidthMeasurement()
+        measurement.measure(120, key: base)
+        measurement.measure(110, key: base)
+        XCTAssertEqual(measurement.width, 120)
+        let narrower = QueuePillWidthKey(mode: .counting, speedText: nil, count: 9)
+        measurement.measure(48, key: narrower)
+        XCTAssertEqual(measurement.width, 48)
+        measurement.measure(.nan, key: base)
+        XCTAssertEqual(measurement.key, narrower)
+        let paused = QueuePillWidthKey(mode: .paused, speedText: nil, count: 9)
+        measurement.measure(60, key: paused)
+        measurement.measure(48, key: paused)
+        XCTAssertEqual(measurement.width, 48)
+    }
+
+    func testQueueEmptyMarkRevealAndReverseBreathing() {
+        let initial = QueueEmptyMarkMotion.sample(elapsedNanos: 0)
+        XCTAssertEqual(initial.opacity, 0)
+        XCTAssertEqual(initial.scale, 0.985, accuracy: 0.000001)
+        let entering = QueueEmptyMarkMotion.sample(elapsedNanos: 170_000_000)
+        XCTAssertGreaterThan(entering.opacity, 0)
+        XCTAssertLessThan(entering.opacity, 0.42)
+        let peak = QueueEmptyMarkMotion.sample(elapsedNanos: 2_400_000_000)
+        XCTAssertEqual(peak.opacity, 0.54, accuracy: 0.000001)
+        XCTAssertEqual(peak.scale, 1.015, accuracy: 0.000001)
+        let trough = QueueEmptyMarkMotion.sample(elapsedNanos: 4_800_000_000)
+        XCTAssertEqual(trough.opacity, 0.42, accuracy: 0.000001)
+        XCTAssertEqual(trough.scale, 0.985, accuracy: 0.000001)
+        // Reverse must retrace the same curve; endpoint swapping is different.
+        let outward = QueueEmptyMarkMotion.sample(elapsedNanos: 600_000_000)
+        let returning = QueueEmptyMarkMotion.sample(elapsedNanos: 4_200_000_000)
+        XCTAssertEqual(outward.opacity, returning.opacity)
+        XCTAssertEqual(outward.scale, returning.scale)
+        let repeated = QueueEmptyMarkMotion.sample(elapsedNanos: 5_400_000_000)
+        XCTAssertEqual(outward.opacity, repeated.opacity)
+        XCTAssertEqual(outward.scale, repeated.scale)
+    }
+
+    private func androidGenieRow(progress: CGFloat, fraction: CGFloat,
+                                  anchor: CGRect, panel: CGRect,
+                                  mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth,
+                                  mirroredAlready: Bool = false) -> GeniePopupMotion.Row {
+        let p = min(max(progress.isFinite ? progress : 0, 0), 1)
+        let v = min(max(fraction.isFinite ? fraction : 0, 0), 1)
+        if p == 1 {
+            return .init(left: panel.minX, right: panel.maxX,
+                         y: panel.minY + panel.height * v)
+        }
+        if !mirroredAlready && anchor.midX > panel.midX {
+            let mirrored = CGRect(x: panel.minX + panel.maxX - anchor.maxX,
+                                  y: anchor.minY, width: anchor.width, height: anchor.height)
+            let row = androidGenieRow(progress: p, fraction: v, anchor: mirrored,
+                                      panel: panel, mouthWidth: mouthWidth,
+                                      mirroredAlready: true)
+            return .init(left: panel.minX + panel.maxX - row.right,
+                         right: panel.minX + panel.maxX - row.left,
+                         y: row.y, tilt: -row.tilt)
+        }
+        let dockX = anchor.midX - panel.minX
+        let dockY = anchor.maxY - panel.minY
+        let length = p * (2 - p)
+        let spread = pow(p, 0.85 + 2.1 * (1 - v) * (1 - v))
+        let seedWidth = min(anchor.width, panel.width,
+                            mouthWidth.isFinite && mouthWidth > 0 ? mouthWidth : anchor.width * 0.5)
+        let width = seedWidth + (panel.width - seedWidth) * spread
+        let envelope = 16 * p * p * (1 - p) * (1 - p)
+        let drift = seedWidth * 0.22 * envelope * (1 - spread) * (0.35 + 0.65 * v)
+        let center = dockX + (panel.width / 2 - dockX) * spread + drift
+        let bowPhase = max(0, sin(.pi * v))
+        let bow = min(min(panel.width * 0.075, min(anchor.width * 0.5, width * 0.2)) * envelope * bowPhase * bowPhase,
+                      (width - seedWidth) * 0.3)
+        let left = center - width / 2 + bow
+        let right = center + width / 2 - bow * 0.15
+        let bentV = v + 0.4 * (1 - p) * (v * v - v)
+        let mouthTilt = min(seedWidth * 0.14, panel.width * 0.045) * (1 - length)
+        let bodyTilt = min(min((right - left) * 0.07, panel.width * 0.035),
+                           panel.height * length * 0.12) * envelope * v * v
+        let tilt = min(min(mouthTilt + bodyTilt, (right - left) * 0.14), panel.width * 0.045)
+        let y = dockY * (1 - length) + panel.height * length * bentV + mouthTilt / 2
+        return .init(left: panel.minX + left, right: panel.minX + right,
+                     y: panel.minY + y, tilt: tilt)
+    }
+
+    private func androidCubicBezier(_ x: Double, x1: Double, y1: Double,
+                                    x2: Double, y2: Double) -> CGFloat {
+        func cubic(_ t: Double, _ a: Double, _ b: Double) -> Double {
+            let u = 1 - t
+            return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t
+        }
+        var low = 0.0
+        var high = 1.0
+        for _ in 0..<24 {
+            let t = (low + high) / 2
+            if cubic(t, x1, x2) < x { low = t } else { high = t }
+        }
+        return CGFloat(cubic((low + high) / 2, y1, y2))
+    }
+
     @MainActor
     func testGenieCloseBeforeFirstFrameNotifiesAndAboveAnchorMirrorsInlet() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
@@ -29,13 +1097,343 @@ final class DomainModelTests: XCTestCase {
         popup.configure(target: 1, anchorX: 0.5, anchorWidth: 0.1, anchorGap: 8, opensAbove: true)
         popup.layoutIfNeeded()
         let layers = try XCTUnwrap(popup.subviews.last?.layer.sublayers)
-        XCTAssertEqual(layers[24].transform.m42, 108, accuracy: 0.001)
+        XCTAssertEqual(layers.count, GeniePopupMotion.renderBandCount * 2)
+        XCTAssertTrue(layers.compactMap { $0.sublayers?.first?.transform.m42 }
+            .allSatisfy(\.isFinite))
         XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
     }
 
-    func testPreparedGenieGeometryMatchesOriginalCurve() {
-        // Frozen pre-optimization equations: preparation must not approximate
-        // the curve, including padded rows outside the visible panel bounds.
+    @MainActor
+    func testGenieProgressFollowsRenderedFramesThroughReversal() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        let popup = GeniePopupHostView(frame: CGRect(x: 10, y: 10, width: 200, height: 100))
+        defer { popup.stop(); window.isHidden = true }
+        popup.host.rootView = AnyView(Color.red.frame(width: 200, height: 100))
+        root.view.addSubview(popup)
+        root.view.layoutIfNeeded()
+        var frames: [CGFloat] = []
+        popup.onProgress = { frames.append($0) }
+        func target(_ value: CGFloat) {
+            popup.configure(target: value, anchorX: 0.8, anchorWidth: 0.15,
+                            anchorGap: 12, opensAbove: true)
+            popup.layoutIfNeeded()
+        }
+        target(1)
+        for _ in 0..<100 {
+            if frames.contains(where: { $0 > 0 && $0 < 1 }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(frames.contains { $0 > 0 && $0 < 1 })
+        // Reverse from an actual rendered intermediate frame, then reopen
+        // before the next display frame. No old zero endpoint may leak out.
+        let reversal = frames.count
+        target(0)
+        XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
+        XCTAssertTrue(popup.host.view.accessibilityElementsHidden)
+        target(1)
+        XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
+        XCTAssertTrue(popup.host.view.accessibilityElementsHidden)
+        for _ in 0..<100 {
+            if frames.last == 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(frames.last, 1)
+        XCTAssertFalse(frames.dropFirst(reversal).contains(0))
+        XCTAssertTrue(popup.host.view.isUserInteractionEnabled)
+        XCTAssertFalse(popup.host.view.accessibilityElementsHidden)
+        target(0)
+        XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
+        XCTAssertTrue(popup.host.view.accessibilityElementsHidden)
+        for _ in 0..<100 {
+            if frames.last == 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(frames.last, 0)
+        XCTAssertTrue(popup.host.view.accessibilityElementsHidden)
+        XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
+        XCTAssertTrue(frames.allSatisfy { (0...1).contains($0) })
+    }
+
+    func testQueueFabVisibilitySpringRetainsExitAndReversesWithVelocity() {
+        let initiallyVisible = QueueFabVisibilityMotion(visible: true)
+        XCTAssertEqual(initiallyVisible.alpha.value, 1)
+        XCTAssertEqual(initiallyVisible.scale.value, 1)
+        XCTAssertFalse(initiallyVisible.isRunning)
+        var motion = QueueFabVisibilityMotion()
+        motion.setVisible(true)
+        motion.advance(0)
+        motion.advance(100_000_000)
+        // Critical spring x(t)=target+(start-target)*(1+20t)*exp(-20t).
+        let remaining = Float(3 * exp(-2.0))
+        XCTAssertEqual(motion.alpha.value, 1 - remaining, accuracy: 0.00001)
+        XCTAssertEqual(motion.scale.value, 1 - 0.4 * remaining, accuracy: 0.00001)
+        let alpha = motion.alpha.value, velocity = motion.alpha.velocity
+        motion.setVisible(false)
+        XCTAssertEqual(motion.alpha.value, alpha)
+        XCTAssertEqual(motion.alpha.velocity, velocity)
+        XCTAssertTrue(motion.retained)
+        motion.advance(180_000_000)
+        let reversingValue = motion.alpha.value
+        motion.setVisible(true)
+        XCTAssertEqual(motion.alpha.value, reversingValue)
+        for tick in 19...150 { motion.advance(Int64(tick) * 10_000_000) }
+        XCTAssertEqual(motion.alpha.value, 1)
+        XCTAssertEqual(motion.scale.value, 1)
+        motion.setVisible(false)
+        motion.advance(1_600_000_000)
+        XCTAssertTrue(motion.retained)
+        for tick in 161...250 { motion.advance(Int64(tick) * 10_000_000) }
+        XCTAssertFalse(motion.retained)
+        XCTAssertEqual(motion.alpha.value, 0)
+        XCTAssertEqual(motion.scale.value, 0.6)
+    }
+
+    func testQueueFabReversalSharesFrameWhenScaleFinishesBeforeOpacity() {
+        var motion = QueueFabVisibilityMotion(visible: true)
+        motion.setVisible(false)
+        motion.advance(0)
+        motion.advance(300_000_000)
+        XCTAssertTrue(motion.alpha.isRunning)
+        XCTAssertFalse(motion.scale.isRunning)
+        motion.setVisible(true)
+        motion.advance(310_000_000)
+        let expected = Float(0.6 + 0.4 * (1 - 1.2 * exp(-0.2)))
+        XCTAssertEqual(motion.scale.value, expected, accuracy: 0.00001)
+        XCTAssertGreaterThan(motion.scale.value, 0.6)
+    }
+
+    @MainActor
+    func testQueueCardColorTweenDurationAndInterruption() {
+        let blue: UInt32 = 0xff0277bd, green: UInt32 = 0xff2e7d32, red: UInt32 = 0xffd32f2f
+        var motion = ZTransferColorAnimation(blue, durationMilliseconds: 300)
+        XCTAssertEqual(motion.value, blue)
+        motion.retarget(green)
+        motion.advance(0)
+        motion.advance(150_000_000)
+        XCTAssertTrue(motion.isRunning)
+        XCTAssertNotEqual(motion.value, blue)
+        XCTAssertNotEqual(motion.value, green)
+        motion.retarget(red)
+        motion.advance(300_000_000)
+        XCTAssertTrue(motion.isRunning)
+        motion.advance(450_000_000)
+        XCTAssertEqual(motion.value, red)
+        XCTAssertFalse(motion.isRunning)
+        motion.retarget(red)
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testQueuePillWidthUsesPixelRoundingAnd140msRetargeting() {
+        var motion = QueuePillWidthMotion()
+        motion.measure(30.2, scale: 3)
+        XCTAssertEqual(motion.width!, 91.0 / 3, accuracy: 0.000001)
+        XCTAssertFalse(motion.isRunning)
+        motion.measure(70, scale: 3)
+        motion.advance(0)
+        motion.advance(70_000_000)
+        let displayed = motion.width!
+        XCTAssertGreaterThan(displayed, 30.2)
+        XCTAssertLessThan(displayed, 70)
+        XCTAssertEqual(displayed * 3, (displayed * 3).rounded(), accuracy: 0.000001)
+        motion.measure(40, scale: 3)
+        XCTAssertEqual(motion.width!, displayed)
+        motion.advance(209_000_000)
+        XCTAssertTrue(motion.isRunning)
+        motion.advance(210_000_000)
+        XCTAssertFalse(motion.isRunning)
+        XCTAssertEqual(motion.width!, 40)
+        motion.measure(40, scale: 3)
+        XCTAssertFalse(motion.isRunning)
+        motion.measure(.infinity, scale: 3)
+        XCTAssertEqual(motion.width!, 40)
+        motion.measure(40.3, scale: 2)
+        XCTAssertEqual(motion.width!, 40.5)
+        XCTAssertFalse(motion.isRunning)
+    }
+
+    func testQueueBadgeStartsQuietAndFinishesFadeBeforePop() {
+        var motion = QueueBadgeMotion(state: .waiting)
+        motion.update(.waiting)
+        XCTAssertFalse(motion.isRunning)
+        XCTAssertEqual(motion.layers.count, 1)
+        XCTAssertEqual(motion.scale.value, 1)
+        motion.update(.transferring)
+        XCTAssertEqual(motion.scale.value, 0.62)
+        XCTAssertEqual(motion.scale.velocity, 0)
+        XCTAssertEqual(motion.layers.map(\.state), [.waiting, .transferring])
+        motion.advance(0)
+        motion.advance(100_000_000)
+        // Compose 1.7.6 StiffnessMediumLow=400, MediumBouncy=.5.
+        // Independent equation deliberately does not read production constants.
+        let omega = sqrt(400.0), decay = omega * 0.5, damped = omega * sqrt(0.75)
+        let expected = 1 - 0.38 * exp(-decay * 0.1) *
+            (cos(damped * 0.1) + decay / damped * sin(damped * 0.1))
+        XCTAssertEqual(Double(motion.scale.value), expected, accuracy: 0.000001)
+        XCTAssertEqual(motion.layers.reduce(0) { $0 + $1.alpha.value }, 1, accuracy: 0.000001)
+        motion.advance(180_000_000)
+        XCTAssertEqual(motion.layers.map(\.state), [.transferring])
+        XCTAssertEqual(motion.layers[0].alpha.value, 1)
+        XCTAssertTrue(motion.scale.isRunning)
+        for tick in 19...150 { motion.advance(Int64(tick) * 10_000_000) }
+        XCTAssertFalse(motion.isRunning)
+        XCTAssertEqual(motion.scale.value, 1)
+    }
+
+    func testQueueBadgeInterruptedFadeRetainsLayersAndVelocityButRestartsPop() {
+        var motion = QueueBadgeMotion(state: .waiting)
+        motion.update(.transferring)
+        motion.advance(0)
+        motion.advance(60_000_000)
+        let old = motion.layers[1].alpha
+        let waiting = motion.layers[0].alpha
+        motion.update(.failed)
+        XCTAssertEqual(motion.layers.map(\.state), [.waiting, .transferring, .failed])
+        XCTAssertEqual(motion.layers[0].alpha.value, waiting.value)
+        XCTAssertEqual(motion.layers[1].alpha.value, old.value)
+        XCTAssertEqual(motion.layers[1].alpha.velocity, old.velocity)
+        XCTAssertEqual(motion.scale.value, 0.62)
+        XCTAssertEqual(motion.scale.velocity, 0)
+        motion.advance(80_000_000)
+        let w = sqrt(1500.0), t = 0.02, x = Double(old.value), v = Double(old.velocity)
+        let expected = (x + (v + w * x) * t) * exp(-w * t)
+        XCTAssertEqual(Double(motion.layers[1].alpha.value), expected, accuracy: 0.000001)
+        // WAITING still targets zero, but the whole Transition changed segment.
+        // Compose resetAnimations forces this channel onto the interruption
+        // spring too; merely continuing its old 180ms tween is incorrect.
+        let waitingX = Double(waiting.value), waitingV = Double(waiting.velocity)
+        let expectedWaiting = (waitingX + (waitingV + w * waitingX) * t) * exp(-w * t)
+        XCTAssertEqual(Double(motion.layers[0].alpha.value), expectedWaiting, accuracy: 0.000001)
+        // Returning to a retained key must reuse it rather than duplicate it.
+        let retained = motion.layers[0].alpha.value
+        motion.update(.waiting)
+        XCTAssertEqual(motion.layers.count, 3)
+        XCTAssertEqual(motion.layers[0].alpha.value, retained)
+        let unchanged = motion.layers[0].alpha.velocity
+        motion.update(.waiting)
+        XCTAssertEqual(motion.layers[0].alpha.velocity, unchanged)
+        for tick in 9...150 { motion.advance(Int64(tick) * 10_000_000) }
+        XCTAssertFalse(motion.isRunning)
+        XCTAssertEqual(motion.layers.map(\.state), [.waiting])
+        XCTAssertEqual(motion.layers[0].alpha.value, 1)
+        // Remount/new identity has no inherited fade or pop.
+        motion = .init(state: .failed)
+        XCTAssertFalse(motion.isRunning)
+        XCTAssertEqual(motion.scale.value, 1)
+        XCTAssertEqual(motion.layers.map(\.state), [.failed])
+    }
+
+    func testTransferCardVisualStatePrioritizesActiveWorkOverRetainedError() {
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 10,
+                              fileName: "STATE.JPG", captureDate: nil, isProtected: false)
+        let cases: [(TransferStatus, TransferCardVisualState, TransferCardVisualState)] = [
+            (.waiting, .waiting, .waiting), (.transferring, .transferring, .transferring),
+            (.completed, .completed, .failed), (.failed, .failed, .failed),
+            (.cancelled, .cancelled, .failed)
+        ]
+        for (status, ordinary, withError) in cases {
+            var item = TransferQueueItem(id: UUID(), file: file)
+            item.status = status
+            XCTAssertEqual(TransferCardVisualState(item: item), ordinary)
+            item.frameError = "retained generation error"
+            XCTAssertEqual(TransferCardVisualState(item: item), withError)
+            item.isGeneratingFrame = true
+            XCTAssertEqual(TransferCardVisualState(item: item), .generating)
+        }
+    }
+
+    func testTransferPillResponseOnlyRunsOnRisingEdgeAndCancelsInPlace() {
+        var initial = TransferPillResponseMotion(responding: true)
+        initial.update(true)
+        XCTAssertFalse(initial.scale.isRunning)
+        XCTAssertEqual(initial.scale.value, 1)
+        initial.update(false)
+        initial.update(true)
+        initial.advance(0)
+        initial.advance(105_000_000)
+        XCTAssertEqual(initial.scale.value, 0.94, accuracy: 0.000001)
+        XCTAssertEqual(initial.scale.target, 1)
+        initial.advance(155_000_000)
+        let omega = sqrt(400.0), decay = omega * 0.5, damped = omega * sqrt(0.75)
+        let expected = 1 - 0.06 * exp(-decay * 0.05) *
+            (cos(damped * 0.05) + decay / damped * sin(damped * 0.05))
+        XCTAssertEqual(Double(initial.scale.value), expected, accuracy: 0.000001)
+        let displayed = initial.scale.value
+        initial.update(false)
+        XCTAssertEqual(initial.scale.value, displayed)
+        XCTAssertFalse(initial.scale.isRunning)
+        initial.advance(200_000_000)
+        XCTAssertEqual(initial.scale.value, displayed)
+        initial.update(true)
+        XCTAssertEqual(initial.scale.value, 1)
+        initial.advance(210_000_000)
+        initial.advance(250_000_000)
+        XCTAssertLessThan(initial.scale.value, 1)
+        let velocity = initial.scale.velocity
+        initial.update(true)
+        XCTAssertEqual(initial.scale.velocity, velocity)
+    }
+
+    func testTransferProgressChangesIdentityWithoutDrainOrDelay() {
+        var motion = SmoothTransferProgressMotion()
+        motion.update(target: 0.8, key: "first")
+        motion.advance(0)
+        motion.advance(100_000_000)
+        let omega = sqrt(180.0)
+        let expected = 0.8 * (1 - (1 + omega * 0.1) * exp(-omega * 0.1))
+        XCTAssertEqual(Double(motion.animation.value), expected, accuracy: 0.000001)
+        let velocity = motion.animation.velocity
+        motion.update(target: 0.9, key: "first")
+        XCTAssertEqual(motion.animation.velocity, velocity, accuracy: 0.000001)
+        motion.update(target: 0.2, key: "first")
+        XCTAssertEqual(motion.accepted, 0.9)
+        motion.update(target: .nan, key: "first")
+        XCTAssertEqual(motion.accepted, 0.9)
+
+        motion.update(target: 0.4, key: "second")
+        XCTAssertEqual(motion.animation.value, 0)
+        XCTAssertEqual(motion.animation.velocity, 0)
+        motion.advance(110_000_000)
+        motion.advance(210_000_000)
+        XCTAssertEqual(Double(motion.animation.value), expected / 2, accuracy: 0.000001)
+        XCTAssertGreaterThan(motion.animation.value, 0) // Before the old 220ms reset delay.
+        motion.update(target: .infinity, key: "third")
+        XCTAssertEqual(motion.accepted, 0)
+        XCTAssertFalse(motion.animation.isRunning)
+        motion.update(target: 2, key: "third")
+        XCTAssertEqual(motion.accepted, 1)
+    }
+
+    func testTransferTitleFitsStemAndPreservesExtensionAndStyles() throws {
+        let measure: (TransferFileTitleText) -> CGFloat = { CGFloat($0.full.utf16.count) }
+        XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 13, measure: measure).full, "DSC_12345.JPG")
+        XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 9, measure: measure).full, "DS…45.JPG")
+        XCTAssertEqual(TransferFileTitleText.fit(".hidden", width: 4, measure: measure).full, ".h…n")
+        XCTAssertEqual(TransferFileTitleText.fit("capture.raw.JPG", width: 5, measure: measure).full, "….JPG")
+        XCTAssertEqual(TransferFileTitleText.fit("照片编号12345.NEF", width: 9, measure: measure).full, "照片…45.NEF")
+        let label = TransferFileTitleLabel(frame: CGRect(x: 0, y: 0, width: 140, height: 20))
+        let name = "A_VERY_LONG_CAMERA_FILENAME_123456.JPG"
+        label.configure(name: name, primary: .black, secondary: .gray)
+        label.layoutIfNeeded()
+        let text = try XCTUnwrap(label.attributedText)
+        XCTAssertTrue(text.string.contains("…"))
+        XCTAssertTrue(text.string.hasSuffix(".JPG"))
+        XCTAssertLessThanOrEqual(text.size().width, 140)
+        XCTAssertEqual(label.accessibilityLabel, name)
+        XCTAssertEqual(text.attribute(.foregroundColor, at: text.length - 1, effectiveRange: nil) as? UIColor, .gray)
+        XCTAssertEqual(text.attribute(.font, at: text.length - 1, effectiveRange: nil) as? UIFont,
+                       UIFont.systemFont(ofSize: 14, weight: .regular))
+        label.frame.size.width = 500
+        label.setNeedsLayout(); label.layoutIfNeeded()
+        XCTAssertEqual(label.attributedText?.string, name)
+    }
+
+    func testPreparedGenieGeometryMatchesAndroidCurve() {
+        // Android's production equations are the oracle, including padded rows
+        // outside the visible panel bounds and right-hand inlet mirroring.
         for size in [CGSize(width: 280, height: 193),
                      CGSize(width: 340, height: 399 + 1.0 / 3),
                      CGSize(width: 378, height: 670)] {
@@ -47,17 +1445,14 @@ final class DomainModelTests: XCTestCase {
                     let frame = GeniePopupMotion.FrameGeometry(progress: p, source: source, size: size)
                     for index in 0...48 {
                         let fraction = (CGFloat(index) / 48 * (size.height + 24) - 12) / size.height
-                        let v = min(1, max(0, fraction))
-                        let length = p * (2 - p)
-                        let spread = pow(p, 0.85 + 2.1 * (1 - v) * (1 - v))
-                        let width = source.width + (size.width - source.width) * spread
-                        let center = source.midX + (size.width / 2 - source.midX) * spread
-                        let bent = fraction + 0.4 * (1 - p) * (v * v - v)
                         let row = frame.row(at: .init(fraction: fraction))
-                        XCTAssertEqual(row.left, center - width / 2, accuracy: 1e-9)
-                        XCTAssertEqual(row.right, center + width / 2, accuracy: 1e-9)
-                        XCTAssertEqual(row.y, source.maxY * (1 - length) + size.height * length * bent,
-                                       accuracy: 1e-9)
+                        let expected = androidGenieRow(progress: p, fraction: fraction,
+                                                        anchor: source,
+                                                        panel: CGRect(origin: .zero, size: size))
+                        XCTAssertEqual(row.left, expected.left, accuracy: 1e-9)
+                        XCTAssertEqual(row.right, expected.right, accuracy: 1e-9)
+                        XCTAssertEqual(row.y, expected.y, accuracy: 1e-9)
+                        XCTAssertEqual(row.tilt, expected.tilt, accuracy: 1e-9)
                     }
                 }
             }
@@ -76,9 +1471,12 @@ final class DomainModelTests: XCTestCase {
                 let size = CGSize(width: 340, height: height)
                 for fraction in stride(from: CGFloat(0), through: 1, by: 0.1) {
                     let collapsed = GeniePopupMotion.row(progress: 0, fraction: fraction, source: source, size: size)
-                    XCTAssertEqual(collapsed.left + 31, edge.minX, accuracy: 0.0001)
-                    XCTAssertEqual(collapsed.right + 31, edge.maxX, accuracy: 0.0001)
-                    XCTAssertEqual(collapsed.y + button.maxY + 8, button.maxY, accuracy: 0.0001)
+                    let expectedCollapsed = androidGenieRow(progress: 0, fraction: fraction,
+                                                             anchor: source,
+                                                             panel: CGRect(origin: .zero, size: size))
+                    XCTAssertEqual(collapsed.left, expectedCollapsed.left, accuracy: 0.0001)
+                    XCTAssertEqual(collapsed.right, expectedCollapsed.right, accuracy: 0.0001)
+                    XCTAssertEqual(collapsed.y, expectedCollapsed.y, accuracy: 0.0001)
                     let expanded = GeniePopupMotion.row(progress: 1, fraction: fraction, source: source, size: size)
                     XCTAssertEqual(expanded.left, 0, accuracy: 0.0001)
                     XCTAssertEqual(expanded.right, size.width, accuracy: 0.0001)
@@ -103,20 +1501,72 @@ final class DomainModelTests: XCTestCase {
                 let top = GeniePopupMotion.row(progress: p, fraction: CGFloat(band) / 48, source: source, size: size)
                 let bottom = GeniePopupMotion.row(progress: p, fraction: CGFloat(band + 1) / 48, source: source, size: size)
                 let bandSize = CGSize(width: 340, height: 400.0 / 48)
-                let t = GeniePopupMotion.bandTransform(size: bandSize, top: top, bottom: bottom)
-                for (point, expected) in [
-                    (CGPoint.zero, CGPoint(x: top.left, y: top.y)),
-                    (CGPoint(x: bandSize.width, y: 0), CGPoint(x: top.right, y: top.y)),
-                    (CGPoint(x: 0, y: bandSize.height), CGPoint(x: bottom.left, y: bottom.y)),
-                    (CGPoint(x: bandSize.width, y: bandSize.height), CGPoint(x: bottom.right, y: bottom.y))
+                let upper = GeniePopupMotion.bandTransform(size: bandSize, top: top, bottom: bottom, upper: true)
+                let lower = GeniePopupMotion.bandTransform(size: bandSize, top: top, bottom: bottom, upper: false)
+                for (transform, points) in [
+                    (upper, [(CGPoint.zero, CGPoint(x: top.left, y: top.leftY)),
+                             (CGPoint(x: bandSize.width, y: 0), CGPoint(x: top.right, y: top.rightY)),
+                             (CGPoint(x: 0, y: bandSize.height), CGPoint(x: bottom.left, y: bottom.leftY))]),
+                    (lower, [(CGPoint(x: bandSize.width, y: 0), CGPoint(x: top.right, y: top.rightY)),
+                             (CGPoint(x: bandSize.width, y: bandSize.height), CGPoint(x: bottom.right, y: bottom.rightY)),
+                             (CGPoint(x: 0, y: bandSize.height), CGPoint(x: bottom.left, y: bottom.leftY))])
                 ] {
-                    let denominator = t.m14 * point.x + t.m24 * point.y + t.m44
-                    XCTAssertEqual((t.m11 * point.x + t.m21 * point.y + t.m41) / denominator,
-                                   expected.x, accuracy: 0.0001)
-                    XCTAssertEqual((t.m12 * point.x + t.m22 * point.y + t.m42) / denominator,
-                                   expected.y, accuracy: 0.0001)
+                    for (point, expected) in points {
+                        let denominator = transform.m14 * point.x + transform.m24 * point.y + transform.m44
+                        XCTAssertEqual((transform.m11 * point.x + transform.m21 * point.y + transform.m41) / denominator,
+                                       expected.x, accuracy: 0.0001)
+                        XCTAssertEqual((transform.m12 * point.x + transform.m22 * point.y + transform.m42) / denominator,
+                                       expected.y, accuracy: 0.0001)
+                    }
                 }
                 XCTAssertGreaterThan(bottom.y, top.y)
+            }
+        }
+    }
+
+    func testGenieTimingAndDurationsMatchAndroid() {
+        XCTAssertEqual(GeniePopupMotion.duration(expanding: true), 0.32, accuracy: 1e-12)
+        XCTAssertEqual(GeniePopupMotion.duration(expanding: false), 0.35, accuracy: 1e-12)
+        for fraction in stride(from: 0.0, through: 1.0, by: 0.05) {
+            XCTAssertEqual(GeniePopupMotion.timing(fraction, expanding: true),
+                           androidCubicBezier(fraction, x1: 0.16, y1: 0.40, x2: 0.22, y2: 1), accuracy: 1e-6)
+            XCTAssertEqual(GeniePopupMotion.timing(fraction, expanding: false),
+                           androidCubicBezier(fraction, x1: 0.30, y1: 0.18, x2: 0.60, y2: 1), accuracy: 1e-6)
+        }
+    }
+
+    func testGenieRightHandMirrorPreservesAndroidTiltRules() {
+        let panel = CGRect(x: 0, y: 0, width: 340, height: 400)
+        let leftAnchor = CGRect(x: 40, y: -8, width: 40, height: 0)
+        let rightAnchor = CGRect(x: 260, y: -8, width: 40, height: 0)
+        let left = GeniePopupMotion.row(progress: 0.42, fraction: 0.65,
+                                        anchor: leftAnchor, panel: panel)
+        let right = GeniePopupMotion.row(progress: 0.42, fraction: 0.65,
+                                         anchor: rightAnchor, panel: panel)
+        XCTAssertEqual(right.left, panel.maxX - left.right, accuracy: 1e-9)
+        XCTAssertEqual(right.right, panel.maxX - left.left, accuracy: 1e-9)
+        XCTAssertEqual(right.y, left.y, accuracy: 1e-9)
+        XCTAssertEqual(right.tilt, -left.tilt, accuracy: 1e-9)
+        XCTAssertNotEqual(left.tilt, 0, accuracy: 1e-9)
+    }
+
+    func testGenieAboveAnchorMatchesAndroidReflection() {
+        let panel = CGRect(x: 20, y: 30, width: 220, height: 300)
+        let anchor = CGRect(x: 40, y: 340, width: 36, height: 36)
+        let mirroredAnchor = CGRect(x: anchor.minX, y: -anchor.maxY,
+                                    width: anchor.width, height: anchor.height)
+        let mirroredPanel = CGRect(x: panel.minX, y: -panel.maxY,
+                                   width: panel.width, height: panel.height)
+        for progress in stride(from: CGFloat(0), through: 1, by: 0.1) {
+            for fraction in stride(from: CGFloat(0), through: 1, by: 0.1) {
+                let actual = GeniePopupMotion.rowAbove(progress: progress, fraction: fraction,
+                                                        anchor: anchor, panel: panel)
+                let raw = androidGenieRow(progress: progress, fraction: 1 - fraction,
+                                          anchor: mirroredAnchor, panel: mirroredPanel)
+                XCTAssertEqual(actual.left, raw.left, accuracy: 1e-9)
+                XCTAssertEqual(actual.right, raw.right, accuracy: 1e-9)
+                XCTAssertEqual(actual.y, panel.maxY - raw.y, accuracy: 1e-9)
+                XCTAssertEqual(actual.tilt, -raw.tilt, accuracy: 1e-9)
             }
         }
     }
@@ -138,12 +1588,12 @@ final class DomainModelTests: XCTestCase {
         popup.configure(target: 1, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
         let layers = try XCTUnwrap(popup.subviews.last?.layer.sublayers)
-        XCTAssertEqual(layers.count, 48)
-        let images = layers.compactMap { $0.contents }.map { $0 as! CGImage }
-        XCTAssertEqual(images.count, 48)
+        XCTAssertEqual(layers.count, GeniePopupMotion.renderBandCount * 2)
+        let images = layers.compactMap { $0.sublayers?.first?.contents }.map { $0 as! CGImage }
+        XCTAssertEqual(images.count, GeniePopupMotion.renderBandCount * 2)
         // A transparent first capture made the first animation invisible.
         // Inspect the actual raster used by Core Animation, not a mock image.
-        let bandImage = try XCTUnwrap(images.dropFirst(24).first)
+        let bandImage = try XCTUnwrap(images.dropFirst(GeniePopupMotion.renderBandCount).first)
         var pixel = [UInt8](repeating: 0, count: 4)
         let context = try XCTUnwrap(CGContext(data: &pixel, width: 1, height: 1,
             bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
@@ -153,13 +1603,13 @@ final class DomainModelTests: XCTestCase {
         XCTAssertGreaterThan(pixel[3], 200)
         // A frame skipped because progress is unchanged must still redraw if
         // the button moves in that same frame (e.g. a safe-area/layout update).
-        let originalLeft = layers[24].transform.m41
+        let originalLeft = layers[0].sublayers!.first!.transform.m41
         popup.configure(target: 1, anchorX: 148.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
-        XCTAssertEqual(layers[24].transform.m41, originalLeft + 40, accuracy: 0.0001)
+        XCTAssertEqual(layers[0].sublayers!.first!.transform.m41, originalLeft + 40, accuracy: 0.0001)
         popup.configure(target: 1, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
-        XCTAssertEqual(layers[24].transform.m41, originalLeft, accuracy: 0.0001)
+        XCTAssertEqual(layers[0].sublayers!.first!.transform.m41, originalLeft, accuracy: 0.0001)
         try await Task.sleep(for: .milliseconds(80))
         popup.configure(target: 0, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
@@ -170,7 +1620,7 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(popup.host.view.layer.opacity, 1)
         XCTAssertTrue(popup.host.view.isUserInteractionEnabled)
         XCTAssertTrue(popup.subviews.last?.isHidden == true)
-        XCTAssertTrue(layers.allSatisfy { $0.contents == nil })
+        XCTAssertTrue(layers.allSatisfy { $0.sublayers?.first?.contents == nil })
         XCTAssertTrue(layers.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
         popup.configure(target: 0, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
@@ -999,6 +2449,37 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(collapsedAgain, collapsed)
     }
 
+    func testBurstOpeningSnapshotSelectsMemberWithoutExpandingOtherCollections() {
+        let files = (1...7).map { id in
+            CameraFile(id: UInt32(id), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "DSC_\(id).JPG", captureDate: "20261016T120000", isProtected: false)
+        }
+        let membership: [UInt32: String] = [2: "a", 3: "a", 4: "b", 5: "b", 6: "c", 7: "c"]
+        let gridExpanded: Set<String> = ["a"]
+        let opening = PhotoPreviewOpeningSnapshot(
+            files: files, burstIDByFile: membership, collapseBursts: true,
+            expandedBurstIDs: gridExpanded.union(["b"]), selectedFileID: 4
+        )
+        XCTAssertEqual(gridExpanded, ["a"])
+        XCTAssertEqual(opening.entries.map(\.id), ["photo_1", "preview_burst_a", "photo_2", "photo_3",
+                                                    "preview_burst_b", "photo_4", "photo_5", "preview_burst_c"])
+        XCTAssertEqual(opening.index, 5)
+        XCTAssertEqual(opening.entries[opening.index].file?.id, 4)
+        XCTAssertEqual(photoPreviewCollectionIndex(opening.entries, memberIndex: opening.index), 4)
+        let collapsed = collapsePhotoPreviewBurst(opening.entries, burstID: "b")
+        XCTAssertEqual(collapsed.compactMap(\.file).map(\.id), [1, 2, 3])
+        XCTAssertEqual(opening.entries.count, 8, "Explicit preview changes cannot mutate the opening snapshot")
+
+        let ordinary = PhotoPreviewOpeningSnapshot(files: files, burstIDByFile: membership,
+            collapseBursts: true, expandedBurstIDs: gridExpanded, selectedFileID: 3)
+        XCTAssertEqual(ordinary.entries[ordinary.index].file?.id, 3)
+        XCTAssertFalse(ordinary.entries.contains { $0.file?.id == 4 })
+        let ungrouped = PhotoPreviewOpeningSnapshot(files: files, burstIDByFile: membership,
+            collapseBursts: false, expandedBurstIDs: [], selectedFileID: 7)
+        XCTAssertEqual(ungrouped.entries.compactMap(\.file), files)
+        XCTAssertEqual(ungrouped.index, 6)
+    }
+
     func testPreviewDoesNotTreatNonFirstBurstMemberAsCollectionPage() {
         let files = (200...202).map { n in
             CameraFile(id: UInt32(n), storageID: 1, format: 0x3801, size: 1,
@@ -1040,6 +2521,22 @@ final class DomainModelTests: XCTestCase {
 
         XCTAssertEqual(retainedPhotoPreviewIDs(entries: entries, currentIndex: 3), [2, 5, 6, 7])
         XCTAssertEqual(retainedPhotoPreviewIDs(entries: entries, currentIndex: 0), [1, 2])
+    }
+
+    func testPreviewRetentionChangesWhenBurstExpandsAtUnchangedCurrentIndex() {
+        let files = (1...7).map { number in
+            CameraFile(id: UInt32(number), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "IMG_\(number).JPG", captureDate: nil, isProtected: false)
+        }
+        let group = BurstPhotoGroup(id: "retention-burst", files: Array(files[2...4]))
+        let collapsed: [PhotoPreviewEntry] = [.photo(files[0]), .photo(files[1]), .burst(group), .photo(files[5]), .photo(files[6])]
+        let expanded = expandPhotoPreviewBurst(collapsed, at: 2)
+        XCTAssertEqual(collapsed[1].id, expanded[1].id)
+        XCTAssertEqual(retainedPhotoPreviewIDs(entries: collapsed, currentIndex: 1), [1, 2, 6])
+        // The collection page remains at index 2; only the first member fits the window.
+        XCTAssertEqual(retainedPhotoPreviewIDs(entries: expanded, currentIndex: 1), [1, 2, 3])
+        let restored = collapsePhotoPreviewBurst(expanded, burstID: group.id)
+        XCTAssertEqual(retainedPhotoPreviewIDs(entries: restored, currentIndex: 1), [1, 2, 6])
     }
 
     func testPreviewNeighborsUsePreviousThenNextPageOrder() {
@@ -1136,7 +2633,7 @@ final class DomainModelTests: XCTestCase {
         settings.photoFramePreset = .mist
         XCTAssertEqual(
             androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings),
-            "DSC_0001_frame_mist_w5188c3de1416.jpg"
+            "DSC_0001_frame_mist_wf1e19ec880e4.jpg"
         )
 
         settings.photoFrameBorderEnabled = false
@@ -1148,14 +2645,14 @@ final class DomainModelTests: XCTestCase {
         )
         XCTAssertEqual(
             androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings),
-            "DSC_0001_filter_f42f030dci64.jpg"
+            "DSC_0001_filter_feba63950i64.jpg"
         )
 
         settings.watermark.enabled = true
         settings.photoFrameEnabled = false
         XCTAssertEqual(
             androidPhotoFrameOutputName(sourceName: "DSC_0001.JPG", settings: settings),
-            "DSC_0001_filter_f42f030dci64.jpg"
+            "DSC_0001_filter_feba63950i64.jpg"
         )
     }
 
@@ -1333,9 +2830,14 @@ final class DomainModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let original = directory.appendingPathComponent("DSC_0001.JPG")
         FileManager.default.createFile(atPath: original.path, contents: Data([1]))
-        XCTAssertEqual(transferUniqueOutputURL(directory: directory, fileName: "DSC_0001.JPG").lastPathComponent, "DSC_0001 (1).JPG")
-        FileManager.default.createFile(atPath: directory.appendingPathComponent("DSC_0001 (1).JPG").path, contents: Data([1]))
-        XCTAssertEqual(transferUniqueOutputURL(directory: directory, fileName: "DSC_0001.JPG").lastPathComponent, "DSC_0001 (2).JPG")
+        let temporary = directory.appendingPathComponent(".nkpart_test")
+        for index in 1...2 {
+            try Data([2]).write(to: temporary)
+            let output = try finalizeTransferTemporary(temporary: temporary, directory: directory, fileName: "DSC_0001.JPG")
+            XCTAssertEqual(output.lastPathComponent, "DSC_0001 (\(index)).JPG")
+            XCTAssertEqual(try Data(contentsOf: output), Data([2]))
+        }
+        XCTAssertEqual(try Data(contentsOf: original), Data([1]))
     }
 
     func testTransferDirectoryIndexMatchesNameAndSizeAndKeepsPartialSeparate() throws {
@@ -1389,6 +2891,33 @@ final class DomainModelTests: XCTestCase {
                                          storageIDsBySlot: storageIDsBySlot).map(\.id), [1])
         XCTAssertTrue(PhotoFilter.apply(files, state: state, transferredIDs: [1],
                                         storageIDsBySlot: storageIDsBySlot).isEmpty)
+    }
+
+    func testSTAProtectionFilterIsUnavailableButPreferenceSurvives() {
+        let protected = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 1,
+                                   fileName: "protected.JPG", captureDate: nil, isProtected: true)
+        let unprotected = CameraFile(id: 2, storageID: 1, format: 0x3801, size: 1,
+                                     fileName: "plain.JPG", captureDate: nil, isProtected: false)
+        let state = PhotoFilterState(protectedOnly: true)
+        XCTAssertEqual(PhotoFilter.apply([protected, unprotected], state: state).map(\.id), [protected.id])
+        XCTAssertEqual(PhotoFilter.apply([protected, unprotected], state: state,
+                                         protectionAvailable: false).map(\.id), [protected.id, unprotected.id])
+        XCTAssertTrue(state.protectedOnly)
+        XCTAssertTrue(state.isActive)
+        XCTAssertFalse(state.isActive(protectionAvailable: false))
+    }
+
+    func testProtectionProbeDiagnosticsPreserveExistingCaptureEntries() {
+        PhotoRatingDiagnostics.clear()
+        PhotoRatingDiagnostics.setEnabled(true)
+        PhotoRatingDiagnostics.note("existing")
+        let previous = PhotoRatingDiagnostics.beginProbe(keepExisting: true)
+        PhotoRatingDiagnostics.note("probe")
+        PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
+        let report = PhotoRatingDiagnostics.snapshot()
+        XCTAssertTrue(report.contains("existing"))
+        XCTAssertTrue(report.contains("probe"))
+        PhotoRatingDiagnostics.setEnabled(false)
     }
 
     func testPhotoEffectsUseAndroidDefaultsAndNormalizeWatermarkText() {
@@ -1551,7 +3080,7 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(restored.favoriteFrameEffects[0].watermark.opacityPercent, 1)
         XCTAssertEqual(
             defaults.string(forKey: "favorite_frame_effects_v1"),
-            "MIST,true,TEXT,CALLIGRAPHY,300,AUTO,ADAPTIVE,1,AUTO"
+            "MIST,true,TEXT,CALLIGRAPHY,300,AUTO,ADAPTIVE,1,AUTO,100"
         )
     }
 
@@ -1823,6 +3352,46 @@ private func waitForRemoteLifecycle(
 }
 
 extension DomainModelTests {
+    func testPhotoFramePresetFilmNegativeAndParameterPosterMatchAndroidDefaults() throws {
+        XCTAssertEqual(PhotoFramePreset(rawValue: "FILM_NEGATIVE"), .filmNegative)
+        XCTAssertEqual(PhotoFramePreset(rawValue: "PARAMETER_POSTER"), .parameterPoster)
+        let negative = PhotoFrameMetadataSettings.defaults(for: .filmNegative)
+        XCTAssertTrue(negative.showDate && !negative.showTime)
+        XCTAssertTrue(negative.showFocalLength && negative.showExposure && negative.showBrand && negative.showModel)
+        let poster = PhotoFrameMetadataSettings.defaults(for: .parameterPoster)
+        XCTAssertTrue(poster.showFocalLength && poster.showExposure && poster.showBrand && poster.showModel)
+        XCTAssertFalse(poster.showLensModel || poster.showCoordinates || poster.showCity || poster.showRegion)
+    }
+
+    func testPhotoFramePresetFilmNegativeAndParameterPosterRenderPixelPreservingPhoto() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 50), format: format).image { context in
+            UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 80, height: 50))
+        }
+        let metadata = PhotoFrameMetadata(make: "Nikon", model: "Z 8", lensModel: "24-70mm",
+                                          focalLength: "50mm", aperture: "f/2.8", shutter: "1/125",
+                                          iso: "ISO100", exposureCompensation: nil,
+                                          dateTime: "2026:10:12 01:00:00")
+        for preset in [PhotoFramePreset.filmNegative, .parameterPoster] {
+            var settings = PhotoEffectsSettings()
+            settings.photoFrameEnabled = true
+            settings.photoFrameBorderEnabled = true
+            settings.photoFramePreset = preset
+            settings.watermark.enabled = false
+            settings.metadata = .defaults(for: preset)
+            let output = try PhotoEffectsRenderer.render(source, settings: settings, metadata: metadata)
+            let size = output.cgImage.map { CGSize(width: $0.width, height: $0.height) }
+            XCTAssertNotNil(size)
+            XCTAssertGreaterThan(size?.width ?? 0, 80)
+            XCTAssertGreaterThan(size?.height ?? 0, 50)
+            let expectedWidth: CGFloat = preset == .filmNegative ? 84 : 96
+            let expectedHeight: CGFloat = preset == .filmNegative ? 68 : 97
+            XCTAssertEqual(output.size.width, expectedWidth, accuracy: 0.01)
+            XCTAssertEqual(output.size.height, expectedHeight, accuracy: 0.01)
+        }
+    }
+
     func testRenderedJPEGPreservesExifAndRewritesOrientationDimensionsAndCameraGPS() throws {
         func image(width: Int, height: Int, color: UIColor) -> UIImage {
             let format = UIGraphicsImageRendererFormat()
@@ -2606,12 +4175,265 @@ extension DomainModelTests {
 /// controlled camera/render operations so task-boundary races are repeatable.
 @MainActor
 final class TransferQueueScenarioTests: XCTestCase {
-    private func file(_ id: UInt32) -> CameraFile {
-        CameraFile(id: id, storageID: 1, format: 0x3801, size: 10,
-                   fileName: "DSC_\(id).JPG", captureDate: "20260914T120000", isProtected: false)
+    func testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        let ids = await queue.enqueue([file(1), file(2)])
+        let model = TransferQueueViewModel(queue: queue)
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items[0].status == .transferring }
+        // Same commands used by the card's swipe/accessibility callback,
+        // delivered after its previously-waiting item has become active.
+        model.withdraw(id: ids[0])
+        let activeRemoved = await model.remove(id: ids[0])
+        XCTAssertFalse(activeRemoved)
+        model.withdraw(id: ids[1])
+        _ = try await wait(queue) { $0.items[1].status == .cancelled }
+        let waitingRemoved = await model.remove(id: ids[1])
+        XCTAssertTrue(waitingRemoved)
+        let active = await snapshot(queue)
+        XCTAssertEqual(active.items.map(\.id), [ids[0]])
+        XCTAssertEqual(active.items[0].status, .transferring)
+        await camera.finish(1)
+        let finished = try await wait(queue) { !$0.isTransferring }
+        XCTAssertEqual(finished.items[0].status, .completed)
+        let requests = await camera.requests
+        XCTAssertEqual(requests, [1])
+        let terminalRemoved = await model.remove(id: ids[0])
+        XCTAssertTrue(terminalRemoved)
     }
 
-    private func fixture(renderer: TransferQueue.FrameRenderer? = nil) throws -> (TransferQueue, URL) {
+    func testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog() async throws {
+        let suite = "queue-conflation-\(UUID().uuidString)"
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: suite)!)
+        let first = await queue.snapshots()
+        let second = await queue.snapshots()
+        var a = first.makeAsyncIterator(), b = second.makeAsyncIterator()
+        let initial = await a.next()
+        XCTAssertEqual(initial?.items.count, 0)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 10,
+                              fileName: "A.JPG", captureDate: nil, isProtected: false)
+        for _ in 0..<100 { _ = await queue.enqueue(file) }
+        let latestA = await a.next(), latestB = await b.next()
+        XCTAssertEqual(latestA?.items.count, 100)
+        XCTAssertEqual(latestB?.items.map(\.id), latestA?.items.map(\.id))
+        _ = await queue.enqueue(file)
+        let nextA = await a.next(), nextB = await b.next()
+        XCTAssertEqual(nextA?.items.count, 101, "No old array snapshots may remain queued")
+        XCTAssertEqual(nextB?.items.count, 101)
+    }
+
+    func testLatestTaskIndexIgnoresStatusAndUUIDOrdering() {
+        let statuses: [TransferStatus] = [.waiting, .transferring, .completed, .failed, .cancelled]
+        for olderStatus in statuses {
+            for newerStatus in statuses {
+                let older = TransferQueueItem(id: UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!,
+                                              file: file(1), status: olderStatus)
+                let other = TransferQueueItem(id: UUID(), file: file(2), status: .waiting)
+                let newer = TransferQueueItem(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                                              file: file(1), status: newerStatus)
+                let items = [older, other, newer]
+                let indices = latestTransferTaskIndices(items)
+                XCTAssertEqual(indices[1], 2)
+                XCTAssertEqual(indices[2], 1)
+                XCTAssertNil(indices[3])
+                XCTAssertEqual(indices[1].map { items[$0].id }, newer.id)
+            }
+        }
+        XCTAssertTrue(latestTransferTaskIndices([]).isEmpty)
+    }
+
+    func testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval() async throws {
+        let (queue, _) = try fixture()
+        let model = TransferQueueViewModel(queue: queue)
+        var publicationReads = 0
+        let observation = model.objectWillChange.sink {
+            // Published notifies before replacing snapshot. The public lookup
+            // must still be safe and consistent inside synchronous subscribers.
+            XCTAssertEqual(model.task(for: 1)?.id, model.snapshot.items.last { $0.file.id == 1 }?.id)
+            publicationReads += 1
+        }
+        defer { observation.cancel() }
+        let firstID = await queue.enqueue(file(1))
+        let secondID = await queue.enqueue(file(1))
+        let first = try XCTUnwrap(firstID)
+        let second = try XCTUnwrap(secondID)
+        func waitForTask(_ id: UUID?, status: TransferStatus? = nil) async throws {
+            for _ in 0..<200 {
+                if model.task(for: 1)?.id == id,
+                   status == nil || model.task(for: 1)?.status == status { return }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            XCTFail("The production snapshot observer did not publish the latest task")
+        }
+        try await waitForTask(second, status: .waiting)
+        await queue.withdraw(id: second)
+        try await waitForTask(second, status: .cancelled)
+        XCTAssertEqual(model.snapshot.items.first?.status, .waiting)
+        _ = await queue.remove(id: second)
+        try await waitForTask(first, status: .waiting)
+        await queue.withdraw(id: first)
+        await queue.removeCleared()
+        try await waitForTask(nil)
+        XCTAssertTrue(model.snapshot.items.isEmpty)
+        XCTAssertNil(model.task(for: 2))
+        XCTAssertGreaterThanOrEqual(publicationReads, 5)
+    }
+
+    func testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit() async throws {
+        let (queue, directory) = try fixture()
+        let unknown = CameraFile(id: 991, storageID: 1, format: 0x3801, size: UInt64(UInt32.max),
+                                 fileName: "UNKNOWN.JPG", captureDate: nil, isProtected: false)
+        let camera = UnknownSizeProgressCamera()
+        await queue.enqueue([unknown])
+        await queue.start(session: camera, directory: directory)
+        let active = try await wait(queue) { $0.items.first?.downloadedBytes == 1024 }
+        XCTAssertEqual(active.items.first?.status, .transferring)
+        XCTAssertEqual(TransferQueueCardText(item: try XCTUnwrap(active.items.first)).fileSizeText(), "1 KB")
+        await camera.finish()
+        let done = try await wait(queue) { !$0.isTransferring && $0.items.first?.status == .completed }
+        let item = try XCTUnwrap(done.items.first)
+        let count = try Data(contentsOf: XCTUnwrap(item.outputURL)).count
+        XCTAssertGreaterThan(count, 0)
+        XCTAssertEqual(item.downloadedBytes, UInt64(count))
+        XCTAssertEqual(TransferQueueCardText(item: item).fileSizeText(), "2 KB")
+        var empty = item
+        empty.downloadedBytes = 0
+        XCTAssertEqual(TransferQueueCardText(item: empty).fileSizeText(), "—")
+        let live = TransferActiveProgress(taskID: item.id, fraction: 0, bytesPerSecond: 100,
+                                         retainedBytesPerSecond: 100, downloadedBytes: 2048)
+        XCTAssertEqual(TransferQueueCardText(item: empty).fileSizeText(activeProgress: live), "2 KB")
+        empty.id = UUID()
+        XCTAssertEqual(TransferQueueCardText(item: empty).fileSizeText(activeProgress: live), "—")
+        await queue.enqueue([unknown])
+        await queue.start(session: nil, directory: directory)
+        let local = try await wait(queue) { !$0.isTransferring && $0.items.count == 2 && $0.items.last?.status == .completed }
+        XCTAssertEqual(local.items.last?.downloadedBytes, UInt64(count))
+    }
+
+    func testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped() {
+        var item = TransferQueueItem(id: UUID(), file: file(1))
+        XCTAssertFalse(TransferQueueCardText(item: item).generationWaiting)
+        item.isGeneratingFrame = true
+        XCTAssertTrue(TransferQueueCardText(item: item).generationWaiting)
+        item.frameGenerationStartedAtElapsedMs = 100
+        XCTAssertFalse(TransferQueueCardText(item: item).generationWaiting)
+        item.frameGenerationStartedAtElapsedMs = nil
+        item.frameGenerationAccumulatedMs = 500
+        XCTAssertTrue(TransferQueueCardText(item: item).generationWaiting)
+        item.frameGenerationSkipped = true
+        XCTAssertFalse(TransferQueueCardText(item: item).generationWaiting)
+        item.frameGenerationSkipped = false
+        item.isGeneratingFrame = false
+        XCTAssertFalse(TransferQueueCardText(item: item).generationWaiting)
+    }
+
+    func testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel() {
+        var item = TransferQueueItem(id: UUID(), file: file(1))
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false
+        item.effects = effects
+        XCTAssertEqual(TransferQueueCardText(item: item).effectText,
+                       AppLocalized.resource("photo_frame_watermark_short"))
+        item.status = .failed
+        item.error = "download error"
+        item.frameError = "render error"
+        XCTAssertEqual(TransferQueueCardText(item: item).errorText,
+                       AppLocalized.resource("local_photo_batch_failed") + ": render error")
+        XCTAssertNil(TransferQueueCardText(item: item).effectText)
+        item.frameError = nil
+        XCTAssertEqual(TransferQueueCardText(item: item).errorText, "download error")
+        item.error = nil
+        XCTAssertEqual(TransferQueueCardText(item: item).errorText, AppLocalized.resource("transfer_failed"))
+        item.status = .completed
+        item.frameGenerationSkipped = true
+        XCTAssertEqual(TransferQueueCardText(item: item).effectText, AppLocalized.resource("status_skipped"))
+        item.effects = nil
+        XCTAssertNil(TransferQueueCardText(item: item).effectText)
+        item.error = "stale transfer error"
+        XCTAssertNil(TransferQueueCardText(item: item).errorText)
+        item.frameError = ""
+        XCTAssertEqual(TransferQueueCardText(item: item).errorText,
+                       AppLocalized.resource("local_photo_batch_failed") + ": ")
+    }
+
+    func testQueueActionEligibilityTracksActivityGenerationAndDepartingCards() {
+        var failed = TransferQueueItem(id: UUID(), file: file(1), status: .failed)
+        let waiting = TransferQueueItem(id: UUID(), file: file(2))
+        func visibility(_ items: [TransferQueueItem], running: Bool = false,
+                        excluded: Set<UUID> = [], clearing: Bool = false) -> TransferQueueSnapshot.ActionVisibility {
+            TransferQueueSnapshot(items: items, isTransferring: running, pauseAfterCurrent: false)
+                .actionVisibility(excluding: excluded, suppressAll: clearing)
+        }
+        XCTAssertEqual(visibility([failed, waiting]), .init(hasRetryable: true, hasClearable: true))
+        XCTAssertEqual(visibility([failed, waiting], running: true), .init(hasRetryable: false, hasClearable: true))
+        XCTAssertEqual(visibility([failed, waiting], excluded: [failed.id]), .init(hasRetryable: false, hasClearable: true))
+        XCTAssertEqual(visibility([failed, waiting], clearing: true), .init(hasRetryable: false, hasClearable: false))
+        failed.isGeneratingFrame = true
+        XCTAssertEqual(visibility([failed]), .init(hasRetryable: false, hasClearable: false))
+        failed.isGeneratingFrame = false
+        failed.status = .cancelled
+        XCTAssertEqual(visibility([failed]), .init(hasRetryable: true, hasClearable: true))
+        XCTAssertEqual(visibility([failed], excluded: [failed.id]), .init(hasRetryable: false, hasClearable: false))
+    }
+
+    func testExecutionControlIncludesReservedHandoffAndLastFileStates() {
+        let waiting = TransferQueueItem(id: UUID(), file: file(1))
+        var active = waiting
+        active.status = .transferring
+        var completed = waiting
+        completed.status = .completed
+        var failed = waiting
+        failed.status = .failed
+        var cancelled = waiting
+        cancelled.status = .cancelled
+        var generating = completed
+        generating.isGeneratingFrame = true
+        for pauseRequested in [false, true] {
+            for items in [[], [waiting], [active], [completed], [waiting, completed]] {
+                let running = TransferQueueSnapshot(items: items, isTransferring: true,
+                                                    pauseAfterCurrent: pauseRequested)
+                XCTAssertEqual(running.executionControl, .pause)
+            }
+            for item in [waiting, active, completed, failed, cancelled, generating] {
+                let idle = TransferQueueSnapshot(items: [item], isTransferring: false,
+                                                 pauseAfterCurrent: pauseRequested)
+                XCTAssertEqual(idle.executionControl, item.status == .waiting ? .start : nil)
+            }
+            XCTAssertNil(TransferQueueSnapshot(items: [], isTransferring: false,
+                                               pauseAfterCurrent: pauseRequested).executionControl)
+        }
+    }
+
+    func testLastFileRetainsPauseControlUntilWorkerStops() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        _ = await queue.enqueue(file(1))
+        let waiting = await queue.snapshot()
+        XCTAssertEqual(waiting.executionControl, .start)
+        XCTAssertFalse(waiting.pauseAfterCurrent)
+        await queue.start(session: camera, directory: directory)
+        let running = try await wait(queue) { $0.items[0].status == .transferring }
+        XCTAssertFalse(running.items.contains { $0.status == .waiting })
+        XCTAssertEqual(running.executionControl, .pause)
+        await queue.pauseAfterCurrentFile()
+        let requested = await queue.snapshot()
+        XCTAssertTrue(requested.pauseAfterCurrent)
+        XCTAssertEqual(requested.executionControl, .pause)
+        await camera.finish(1)
+        let finished = try await wait(queue) { !$0.isTransferring }
+        XCTAssertEqual(finished.items[0].status, .completed)
+        XCTAssertNil(finished.executionControl)
+    }
+
+    private func file(_ id: UInt32, name: String? = nil) -> CameraFile {
+        CameraFile(id: id, storageID: 1, format: 0x3801, size: 10,
+                   fileName: name ?? "DSC_\(id).JPG", captureDate: "20260914T120000", isProtected: false)
+    }
+
+    private func fixture(accessOperations: DirectoryAccessOperations = .system, directoryPreparation: TransferDirectoryPreparation = .shared, generationCapacity: Int = 4096, renderer: TransferQueue.FrameRenderer? = nil, cropRenderer: TransferQueue.CropRenderer? = nil) throws -> (TransferQueue, URL) {
         let suite = "TransferQueueScenarioTests.\(UUID().uuidString)"
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -2619,10 +4441,13 @@ final class TransferQueueScenarioTests: XCTestCase {
             UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }
-        if let renderer {
-            return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, premiumAccess: PremiumAccess(.lifetime), renderFrame: renderer), directory)
+        if let cropRenderer {
+            return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, premiumAccess: PremiumAccess(.lifetime), accessOperations: accessOperations, directoryPreparation: directoryPreparation, generationCapacity: generationCapacity, renderCrop: cropRenderer), directory)
         }
-        return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, premiumAccess: PremiumAccess(.lifetime)), directory)
+        if let renderer {
+            return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, premiumAccess: PremiumAccess(.lifetime), accessOperations: accessOperations, directoryPreparation: directoryPreparation, generationCapacity: generationCapacity, renderFrame: renderer), directory)
+        }
+        return (TransferQueue(defaults: UserDefaults(suiteName: suite)!, premiumAccess: PremiumAccess(.lifetime), accessOperations: accessOperations, directoryPreparation: directoryPreparation, generationCapacity: generationCapacity), directory)
     }
 
     private func snapshot(_ queue: TransferQueue) async -> TransferQueueSnapshot {
@@ -2671,9 +4496,10 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertEqual(finished?.items[1].error, AppLocalized.resource("camera_not_connected"))
     }
 
-    func testCompletePartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal() async throws {
+    func testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal() async throws {
         let (queue, directory) = try fixture()
-        let source = file(7)
+        let source = CameraFile(id: 7, storageID: 1, format: 0x300D, size: 10,
+                                fileName: "DSC_7.MP4", captureDate: "20260914T120000", isProtected: false)
         let partialName = transferPartialFileName(
             size: source.size, captureDate: source.captureDate, fileName: source.fileName
         )
@@ -2696,6 +4522,21 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertEqual(item.outputURL?.lastPathComponent, source.fileName)
         XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(source.fileName).path))
+    }
+
+    func testCompleteStillPartialCannotBePublishedByOfflineQueue() async throws {
+        let (queue, directory) = try fixture()
+        let source = file(7)
+        let partial = directory.appendingPathComponent(transferPartialFileName(
+            size: source.size, captureDate: source.captureDate, fileName: source.fileName
+        ))
+        try Data(repeating: 7, count: Int(source.size)).write(to: partial)
+        await queue.enqueue(source)
+        await queue.start(session: nil, directory: directory)
+        let failed = try await wait(queue) { !$0.isTransferring && $0.items.first?.status == .failed }
+        XCTAssertEqual(failed.items.first?.error, AppLocalized.resource("camera_not_connected"))
+        XCTAssertNil(failed.items.first?.outputURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(source.fileName).path))
     }
 
     func testResumeUnavailableDeletesPartAndUsesAndroidFailureText() async throws {
@@ -2814,7 +4655,7 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertEqual(newRequests, [2])
     }
 
-    func testFramesUseTwoWorkersAndClearProtectsActiveAndWaitingRenders() async throws {
+    func testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders() async throws {
         let renderer = ControlledFrameRenderer()
         let (queue, directory) = try fixture { source, _, target, _ in
             try await renderer.render(source: source, directory: target)
@@ -2835,17 +4676,181 @@ final class TransferQueueScenarioTests: XCTestCase {
         let protected = await snapshot(queue)
         XCTAssertEqual(protected.items.count, 3)
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while await renderer.peak < 2, ContinuousClock.now < deadline {
+        while await renderer.peak < 1, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(5))
         }
         await renderer.releaseAll()
         let final = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame } }
         let peak = await renderer.peak
-        XCTAssertEqual(peak, 2)
+        XCTAssertEqual(peak, 1)
         XCTAssertTrue(final.items.allSatisfy { $0.status == .completed && $0.frameURL != nil })
         await queue.removeCleared()
         let cleared = await snapshot(queue)
         XCTAssertTrue(cleared.items.isEmpty)
+    }
+
+    func testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction() async throws {
+        let (queue, directory) = try fixture { source, settings, target, _ in
+            let image = try XCTUnwrap(UIImage(contentsOfFile: source.path))
+            let rendered = try PhotoEffectsRenderer.render(image, settings: settings)
+            let output = target.appendingPathComponent("owned-lut-output.jpg")
+            try XCTUnwrap(rendered.jpegData(compressionQuality: 1)).write(to: output)
+            return output
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        let source = directory.appendingPathComponent("owned-source.jpg")
+        let jpeg = try XCTUnwrap(image.jpegData(compressionQuality: 1))
+        try jpeg.write(to: source)
+        let suite = "lut-queue-prune-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PhotoLUTStore(defaults: defaults, directory: directory.appendingPathComponent("lut"))
+        let old = try CubeLUTParser.parse(Data(("TITLE queued-old\nLUT_3D_SIZE 2\n" + String(repeating: "0 0 0\n", count: 8)).utf8))
+        let new = try CubeLUTParser.parse(Data(("TITLE editor-new\nLUT_3D_SIZE 2\n" + String(repeating: "1 1 1\n", count: 8)).utf8))
+        weak var oldOwner: PhotoLUTSnapshotOwner?
+        func enqueueOld() async throws -> UUID {
+            var effects = PhotoEffectsSettings()
+            effects.photoFilterEnabled = true
+            effects.selectedFilter = try store.selectLUT(old, name: "Old", sourceIdentifier: "old.cube")
+            effects.selectedFilter?.intensityPercent = 100
+            oldOwner = effects.selectedFilter?.snapshotOwner
+            let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(jpeg.count),
+                                  fileName: source.lastPathComponent, captureDate: nil, isProtected: false)
+            let id = await queue.enqueue(file, effects: effects)
+            return try XCTUnwrap(id)
+        }
+        let id = try await enqueueOld()
+        _ = try store.selectLUT(new, name: "New", sourceIdentifier: "new.cube")
+        await store.pruneSnapshots()
+        PhotoLUTRuntime.purgeMemoryCache()
+        let oldFile = store.snapshotDirectory.appendingPathComponent("\(old.digest).bin")
+        XCTAssertNotNil(oldOwner, "Only the queue now holds the old recipe")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldFile.path))
+        await queue.start(session: nil, directory: directory)
+        func finishedOutput() async throws -> URL {
+            let final = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameURL != nil }
+            XCTAssertEqual(final.items[0].effects?.selectedFilter?.preset.id, "cube:\(old.digest)")
+            return try XCTUnwrap(final.items[0].frameURL)
+        }
+        let output = try await finishedOutput()
+        let rendered = try XCTUnwrap(UIImage(contentsOfFile: output.path)?.cgImage)
+        // The old LUT is black, whereas the editor's replacement is white.
+        let bytes = try XCTUnwrap(rendered.dataProvider?.data) as Data
+        XCTAssertLessThan(bytes.prefix(3).max() ?? 255, 10)
+        let removed = await queue.remove(id: id)
+        XCTAssertTrue(removed)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while oldOwner != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNil(oldOwner)
+        await store.pruneSnapshots()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldFile.path))
+        XCTAssertNotNil(store.restoreSelection())
+    }
+
+    func testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe() async throws {
+        let budget = QueueRenderBudgetFixture()
+        let (queue, directory) = try fixture { source, settings, target, _ in
+            let available = await budget.next(settings)
+            let image = try XCTUnwrap(UIImage(contentsOfFile: source.path))
+            let result = try PhotoEffectsRenderer.render(image, settings: settings, availableMemory: { available })
+            let output = target.appendingPathComponent("budget-output.jpg")
+            try XCTUnwrap(result.jpegData(compressionQuality: 1)).write(to: output)
+            return output
+        }
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 16), format: format).image { context in
+            UIColor.orange.setFill(); context.fill(CGRect(x: 0, y: 0, width: 24, height: 16))
+        }
+        let original = try XCTUnwrap(image.jpegData(compressionQuality: 1))
+        let source = directory.appendingPathComponent("budget-source.jpg")
+        try original.write(to: source)
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = false
+        settings.photoFilterEnabled = true
+        settings.selectedFilter = PhotoFilterSelection(preset: settings.orderedFilters[0], intensityPercent: 40)
+        let locked = effectivePhotoEffectsSettings(settings, isPro: true)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(original.count),
+                              fileName: source.lastPathComponent, captureDate: nil, isProtected: false)
+        let enqueued = await queue.enqueue(file, effects: settings)
+        let id = try XCTUnwrap(enqueued)
+        await queue.start(session: nil, directory: directory)
+        let failed = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameError != nil }
+        XCTAssertNil(failed.items[0].frameURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("budget-output.jpg").path))
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        settings.selectedFilter?.intensityPercent = 100
+        let retry = await queue.retry(id: id)
+        XCTAssertNotNil(retry)
+        let done = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameURL != nil }
+        let attempts = await budget.selections
+        XCTAssertEqual(attempts, [locked, locked])
+        XCTAssertNil(done.items[0].frameError)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        let input = try XCTUnwrap(UIImage(contentsOfFile: source.path))
+        let expected = try PhotoEffectsRenderer.render(input, settings: locked, availableMemory: { .max })
+        let actual = try Data(contentsOf: XCTUnwrap(done.items[0].frameURL))
+        XCTAssertEqual(actual, expected.jpegData(compressionQuality: 1))
+        XCTAssertEqual(UIImage(data: actual)?.size, image.size)
+    }
+
+    func testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges() async throws {
+        let renderer = FailOnceFrameRenderer()
+        let (queue, directory) = try fixture { source, settings, target, _ in
+            let output = try await renderer.render(source: source, settings: settings, directory: target)
+            let image = try XCTUnwrap(UIImage(contentsOfFile: source.path))
+            let rendered = try PhotoEffectsRenderer.render(image, settings: settings)
+            try XCTUnwrap(rendered.jpegData(compressionQuality: 1)).write(to: output)
+            return output
+        }
+        let source = directory.appendingPathComponent(file(1).fileName)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4), format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        try XCTUnwrap(image.jpegData(compressionQuality: 1)).write(to: source)
+        let suite = "lut-queue-retry-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PhotoLUTStore(defaults: defaults, directory: directory.appendingPathComponent("lut"))
+        let lut = try CubeLUTParser.parse(Data(("LUT_3D_SIZE 2\n" + String(repeating: "0 0 0\n", count: 8)).utf8))
+        try store.selectLUT(lut, name: "Queue LUT", sourceIdentifier: "original.cube")
+        store.setIntensity(50)
+        store.setAdjustments(.init(contrast: 20, saturation: -100, highlights: 15, shadows: -25))
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = false
+        effects.photoFilterEnabled = true
+        effects.selectedFilter = try XCTUnwrap(store.restoreSelection())
+        let locked = effectivePhotoEffectsSettings(effects, isPro: true)
+        let original = CameraFile(id: 1, storageID: 1, format: 0x3801,
+                                  size: UInt64(try Data(contentsOf: source).count),
+                                  fileName: source.lastPathComponent, captureDate: nil, isProtected: false)
+        let enqueued = await queue.enqueue(original, effects: effects)
+        let id = try XCTUnwrap(enqueued)
+        await queue.start(session: nil, directory: directory)
+        _ = try await wait(queue) { !$0.isTransferring && $0.items[0].frameError != nil && !$0.items[0].isGeneratingFrame }
+        store.setIntensity(100)
+        store.setAdjustments(.init(contrast: -80, saturation: 100))
+        effects.selectedFilter = store.restoreSelection()
+        let retry = await queue.retry(id: id)
+        XCTAssertNotNil(retry)
+        let final = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameURL != nil }
+        let selections = await renderer.selections
+        XCTAssertEqual(selections, [locked, locked])
+        XCTAssertEqual(final.items[0].effects, locked)
+        let input = try XCTUnwrap(UIImage(contentsOfFile: source.path))
+        let expected = try PhotoEffectsRenderer.render(input, settings: locked)
+        let changed = try PhotoEffectsRenderer.render(input, settings: effects)
+        let bytes = try Data(contentsOf: XCTUnwrap(final.items[0].frameURL))
+        XCTAssertEqual(bytes, expected.jpegData(compressionQuality: 1))
+        XCTAssertNotEqual(bytes, changed.jpegData(compressionQuality: 1))
     }
 
     func testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects() async throws {
@@ -2861,7 +4866,9 @@ final class TransferQueueScenarioTests: XCTestCase {
         effects.photoFramePreset = .minimal
         let id = await queue.enqueue(file(1), effects: effects)!
         await queue.start(session: nil, directory: directory)
-        let failed = try await wait(queue) { !$0.isTransferring && $0.items[0].status == .failed && !$0.items[0].isGeneratingFrame }
+        let failed = try await wait(queue) { !$0.isTransferring && $0.items[0].frameError != nil && !$0.items[0].isGeneratingFrame }
+        XCTAssertEqual(failed.items[0].status, .completed)
+        XCTAssertNil(failed.items[0].error)
         XCTAssertEqual(failed.items[0].outputURL, source)
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
         let replacement = await queue.retry(id: id)
@@ -2872,6 +4879,165 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertNil(final.items[0].error)
         let selections = await renderer.selections
         XCTAssertEqual(selections, Array(repeating: effectivePhotoEffectsSettings(effects, isPro: true), count: 2))
+    }
+
+    func testViewModelManualOfflineSingleBatchAndDeferredStart() async throws {
+        for batch in [false, true] {
+            for deferred in [false, true] {
+                let (queue, directory) = try fixture()
+                let model = TransferQueueViewModel(queue: queue)
+                let files = batch ? [file(1), file(2)] : [file(1)]
+                for item in files {
+                    try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(item.fileName))
+                }
+                if deferred {
+                    if batch { model.enqueue(files, storageMode: .unified) }
+                    else { model.enqueue(files[0], storageMode: .unified) }
+                    let waiting = try await wait(queue) { $0.items.count == files.count }
+                    XCTAssertTrue(waiting.items.allSatisfy { $0.status == .waiting })
+                    XCTAssertFalse(waiting.isTransferring)
+                    model.start(session: nil, directory: directory)
+                } else if batch {
+                    model.enqueue(files, autoStart: nil, directory: directory, storageMode: .unified)
+                } else {
+                    model.enqueue(files[0], autoStart: nil, directory: directory, storageMode: .unified)
+                }
+                let final = try await wait(queue) {
+                    $0.items.count == files.count && !$0.isTransferring && $0.items.allSatisfy { $0.status == .completed }
+                }
+                XCTAssertTrue(final.items.allSatisfy { $0.outputURL != nil && $0.skipped })
+                withExtendedLifetime(model) {}
+            }
+        }
+    }
+
+    func testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart() async throws {
+        for deferred in [false, true] {
+            let (queue, directory) = try fixture()
+            let model = TransferQueueViewModel(queue: queue)
+            let (source, task, bytes) = try cropIntegrityFixture(in: directory)
+            let original = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(bytes.count),
+                fileName: source.lastPathComponent, captureDate: nil, isProtected: false)
+            model.enqueueCrop(original, task: task, storageMode: .unified,
+                session: nil, directory: deferred ? nil : directory)
+            if deferred {
+                let waiting = try await wait(queue) { $0.items.count == 1 }
+                XCTAssertEqual(waiting.items[0].status, .waiting)
+                XCTAssertFalse(waiting.isTransferring)
+                model.start(session: nil, directory: directory)
+            }
+            let final = try await wait(queue) {
+                $0.items.count == 1 && !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].cropURL != nil
+            }
+            XCTAssertEqual(final.items[0].status, .completed)
+            XCTAssertEqual(try Data(contentsOf: source), bytes)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(final.items[0].cropURL).path))
+            withExtendedLifetime(model) {}
+        }
+    }
+
+    func testDeferredSelectionResolvesOriginalAfterOfflinePublication() async throws {
+        for deferred in [false, true] {
+            let (queue, directory) = try fixture()
+            let model = TransferQueueViewModel(queue: queue)
+            let (source, _, bytes) = try cropIntegrityFixture(in: directory)
+            let original = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(bytes.count),
+                fileName: source.lastPathComponent, captureDate: nil, isProtected: false)
+            let selection = JpegCropSelection(bounds: .init(left: 0.1, top: 0.1, right: 0.9, bottom: 0.9), orientation: 1)
+            let accepted = await model.acceptCrop(original, selection: selection, storageMode: .unified,
+                session: nil, directory: deferred ? nil : directory)
+            XCTAssertTrue(accepted)
+            let acknowledged = await queue.snapshot()
+            XCTAssertEqual(acknowledged.items.count, 1)
+            XCTAssertEqual(acknowledged.items[0].cropSelection, selection)
+            if deferred {
+                let waiting = try await wait(queue) { $0.items.count == 1 }
+                XCTAssertEqual(waiting.items[0].status, .waiting)
+                XCTAssertFalse(waiting.isTransferring)
+                model.start(session: nil, directory: directory)
+            }
+            let final = try await wait(queue) {
+                $0.items.count == 1 && !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].cropURL != nil
+            }
+            XCTAssertEqual(final.items[0].cropSelection, selection)
+            XCTAssertNil(final.items[0].cropTask)
+            XCTAssertEqual(final.items[0].status, .completed)
+            XCTAssertEqual(try Data(contentsOf: source), bytes)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(final.items[0].cropURL).path))
+            withExtendedLifetime(model) {}
+        }
+    }
+
+    func testCancelledCropAcknowledgementDoesNotCreateTask() async throws {
+        let (queue, _) = try fixture()
+        let model = TransferQueueViewModel(queue: queue)
+        let candidate = file(1)
+        let selection = JpegCropSelection(bounds: .init(left: 0.1, top: 0.1, right: 0.9, bottom: 0.9), orientation: 1)
+        let request = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await model.acceptCrop(candidate, selection: selection, storageMode: .unified)
+        }
+        let accepted = await request.value
+        XCTAssertFalse(accepted)
+        let actorRequest = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await queue.enqueueCrop(candidate, selection: selection, storageMode: .unified)
+        }
+        let actorResult = await actorRequest.value
+        XCTAssertNil(actorResult)
+        let snapshot = await queue.snapshot()
+        XCTAssertTrue(snapshot.items.isEmpty)
+        XCTAssertFalse(snapshot.isTransferring)
+        withExtendedLifetime(model) {}
+    }
+
+    func testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused() async throws {
+        for batch in [false, true] {
+            for clearDirectory in [false, true] {
+                let renderer = FailOnceFrameRenderer()
+                let probe = DirectoryScopeProbe()
+                let (queue, directory) = try fixture(accessOperations: probe.operations) { source, settings, target, _ in
+                    XCTAssertEqual(source.deletingLastPathComponent(), target)
+                    XCTAssertGreaterThan(probe.count(target.deletingLastPathComponent()), 0)
+                    return try await renderer.render(source: source, settings: settings, directory: target)
+                }
+                var effects = PhotoEffectsSettings()
+                effects.photoFrameEnabled = true
+                effects.photoFrameBorderEnabled = false
+                let id = await queue.enqueue(file(1), storageMode: .byType, effects: effects)!
+                let camera = ControlledTransferCamera()
+                await queue.start(session: camera, directory: directory)
+                _ = try await wait(queue) { $0.items[0].status == .transferring }
+                await queue.enqueue(file(2))
+                await queue.pauseAfterCurrentFile()
+                await camera.finish(1)
+                let failed = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameError != nil }
+                let old = failed.items[0]
+                XCTAssertEqual(old.status, .completed)
+                XCTAssertNotNil(old.elapsedMs)
+                let other = directory.appendingPathComponent("new-selection", isDirectory: true)
+                try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+                await queue.attach(session: nil, directory: clearDirectory ? nil : other)
+                if batch { await queue.retryFailed() }
+                else { let replacement = await queue.retry(id: id); XCTAssertNotNil(replacement) }
+                let result = try await wait(queue) { !$0.items[0].isGeneratingFrame && $0.items[0].frameURL != nil }
+                let retried = result.items[0]
+                XCTAssertNotEqual(retried.id, old.id)
+                XCTAssertEqual(retried.status, .completed)
+                XCTAssertEqual(retried.outputURL, old.outputURL)
+                XCTAssertEqual(retried.frameURL?.deletingLastPathComponent(), old.outputURL?.deletingLastPathComponent())
+                XCTAssertEqual(retried.elapsedMs, old.elapsedMs)
+                XCTAssertEqual(retried.downloadMBps, old.downloadMBps)
+                XCTAssertEqual(retried.bytesPerSecond, old.bytesPerSecond)
+                XCTAssertEqual(retried.progress, old.progress)
+                XCTAssertNil(retried.frameError)
+                XCTAssertTrue(result.pauseAfterCurrent)
+                XCTAssertFalse(result.isTransferring)
+                XCTAssertEqual(result.items[1].status, .waiting)
+                XCTAssertEqual(probe.count(directory), 0)
+                XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: other.path).isEmpty)
+            }
+        }
     }
 
     func testNewDownloadRemainsCompletedWhenOnlyItsFrameFails() async throws {
@@ -2889,6 +5055,139 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertNil(final.items[0].error)
         XCTAssertNotNil(final.items[0].frameError)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(file(1).fileName).path))
+    }
+
+    func testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop() async throws {
+        let (queue, directory) = try fixture(cropRenderer: { task, source, directory in
+            let published = try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory)
+            // Deterministic boundary: publication is complete, but the queue
+            // has not yet resumed to record the URL.
+            withUnsafeCurrentTask { $0?.cancel() }
+            return published
+        })
+        let (source, task, bytes) = try cropIntegrityFixture(in: directory)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(bytes.count),
+                              fileName: source.lastPathComponent, captureDate: nil, isProtected: false)
+        _ = await queue.enqueueCrop(file, task: task)
+        await queue.start(session: nil, directory: directory)
+        let cancelled = try await wait(queue) { !$0.isTransferring && $0.items.first?.cropURL != nil && $0.items.first?.isGeneratingFrame == false }
+        XCTAssertEqual(cancelled.items[0].status, .completed)
+        let published = try XCTUnwrap(cancelled.items[0].cropURL)
+        await queue.startPendingTransfers(session: nil, directory: directory)
+        let resumed = try await wait(queue) { !$0.isTransferring && $0.items.first?.status == .completed }
+        XCTAssertEqual(resumed.items[0].cropURL, published)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(),
+                       [source.lastPathComponent, published.lastPathComponent].sorted())
+        XCTAssertEqual(try Data(contentsOf: source), bytes)
+    }
+
+    func testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline() async throws {
+        let (queue, directory) = try fixture()
+        let sourceFile = file(1)
+        let original = directory.appendingPathComponent(sourceFile.fileName)
+        // Use a valid crop recipe against malformed JPEG bytes. The native
+        // bridge must convert libjpeg errors into a failed derived task.
+        let encoded = Data(repeating: 1, count: 10)
+        let source = CameraFile(id: sourceFile.id, storageID: sourceFile.storageID, format: sourceFile.format,
+                                size: UInt64(encoded.count), fileName: sourceFile.fileName,
+                                captureDate: sourceFile.captureDate, isProtected: sourceFile.isProtected)
+        try encoded.write(to: original)
+        let cropSource = JpegCropSource(width: 16, height: 16, mcuWidth: 16, mcuHeight: 16, orientation: 1)
+        let crop = LosslessCropTask(fileID: source.id,
+                                    recipe: JpegCropRecipe(source: cropSource,
+                                                           rect: .init(left: 0, top: 0, right: 16, bottom: 16)))
+        let queuedID = await queue.enqueueCrop(source, task: crop)
+        let id = try XCTUnwrap(queuedID)
+        await queue.start(session: nil, directory: directory)
+        let failed = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameError != nil }
+        XCTAssertEqual(failed.items[0].status, .completed)
+        XCTAssertEqual(failed.items[0].outputURL, original)
+        XCTAssertNil(failed.items[0].cropURL)
+        XCTAssertNotNil(failed.items[0].frameError)
+
+        let replacement = await queue.retry(id: id)
+        XCTAssertNotNil(replacement)
+        let retried = try await wait(queue) { !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameError != nil }
+        XCTAssertEqual(retried.items[0].status, .completed)
+        XCTAssertEqual(retried.items[0].outputURL, original)
+        XCTAssertNil(retried.items[0].cropURL)
+    }
+
+    func testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal() async throws {
+        let renderer = FailOnceFrameRenderer()
+        let (queue, directory) = try fixture { source, settings, target, _ in
+            try await renderer.render(source: source, settings: settings, directory: target)
+        }
+        let (original, _, bytes) = try cropIntegrityFixture(in: directory)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(bytes.count),
+            fileName: original.lastPathComponent, captureDate: nil, isProtected: false)
+        let selection = JpegCropSelection(bounds: .init(left: 0, top: 0, right: 0.75, bottom: 0.75), orientation: 1)
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false
+        let queued = await queue.enqueueCrop(file, selection: selection, storageMode: .unified, effects: effects)
+        let id = try XCTUnwrap(queued)
+        await queue.start(session: nil, directory: directory)
+        let failed = try await wait(queue) {
+            !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameError != nil
+        }
+        let published = try XCTUnwrap(failed.items[0].cropURL)
+        let publishedBytes = try Data(contentsOf: published)
+        // The published derivative is independently usable on retry.
+        try Data(repeating: 0, count: bytes.count).write(to: original)
+        let replacement = await queue.retry(id: id)
+        XCTAssertNotNil(replacement)
+        let completed = try await wait(queue) {
+            !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameURL != nil
+        }
+        XCTAssertEqual(completed.items[0].cropURL, published)
+        XCTAssertEqual(completed.items[0].cropSelection, selection)
+        XCTAssertEqual(try Data(contentsOf: published), publishedBytes)
+        XCTAssertNil(completed.items[0].frameError)
+    }
+
+    func testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry() async throws {
+        let (queue, directory) = try fixture()
+        let (original, _, bytes) = try cropIntegrityFixture(in: directory)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(bytes.count),
+            fileName: original.lastPathComponent, captureDate: nil, isProtected: false)
+        let selection = JpegCropSelection(bounds: .init(left: 0.1, top: 0.2, right: 0.8, bottom: 0.9),
+            orientation: 6, ratioWidth: 3, ratioHeight: 4)
+        let queued = await queue.enqueueCrop(file, selection: selection, storageMode: .unified)
+        let id = try XCTUnwrap(queued)
+        await queue.start(session: nil, directory: directory)
+        let failed = try await wait(queue) {
+            !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].frameError != nil
+        }
+        XCTAssertEqual(failed.items[0].status, .completed)
+        XCTAssertEqual(failed.items[0].cropSelection, selection)
+        XCTAssertNil(failed.items[0].cropURL)
+        XCTAssertEqual(try Data(contentsOf: original), bytes)
+
+        // Simulate the original becoming readable with the captured direction;
+        // retry must use the frozen selection, never a new editor default.
+        let image = try XCTUnwrap(UIImage(data: bytes)?.cgImage)
+        let corrected = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(corrected,
+            UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        try (corrected as Data).write(to: original)
+        let replacement = await queue.retry(id: id)
+        XCTAssertNotNil(replacement)
+        let complete = try await wait(queue) {
+            !$0.isTransferring && !$0.items[0].isGeneratingFrame && $0.items[0].cropURL != nil
+        }
+        XCTAssertEqual(complete.items[0].cropSelection, selection)
+        XCTAssertNil(complete.items[0].frameError)
+        XCTAssertEqual(try Data(contentsOf: original), corrected as Data)
+        let source = try XCTUnwrap(parseJpegCropHeader(corrected as Data))
+        let expected = try selection.resolve(source)
+        let output = try XCTUnwrap(complete.items[0].cropURL)
+        let result = try XCTUnwrap(parseJpegCropHeader(Data(contentsOf: output)))
+        XCTAssertEqual(result.width, expected.rect.width)
+        XCTAssertEqual(result.height, expected.rect.height)
+        XCTAssertEqual(result.orientation, 6)
     }
 
     func testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry() async throws {
@@ -2920,6 +5219,22 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertNil(completed.invalidatedDirectory)
         XCTAssertEqual(completed.items[0].outputURL?.deletingLastPathComponent(), directory)
     }
+}
+
+private actor UnknownSizeProgressCamera: TransferDownloading {
+    private var continuation: CheckedContinuation<Void, Never>?
+    func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)?) async throws -> URL {
+        throw CameraTransportError.unavailable
+    }
+    func downloadWithMetrics(file: CameraFile, to directory: URL,
+                             progress: (@Sendable (TransferDownloadProgress) -> Void)?) async throws -> URL {
+        progress?(.init(fraction: 0, downloaded: 1024, total: 0))
+        await withCheckedContinuation { continuation = $0 }
+        let output = directory.appendingPathComponent(file.fileName)
+        try Data(repeating: 1, count: 2048).write(to: output)
+        return output
+    }
+    func finish() { continuation?.resume(); continuation = nil }
 }
 
 private actor ControlledTransferCamera: TransferDownloading {
@@ -3061,5 +5376,2718 @@ extension DomainModelTests {
         let output = newRoot.appendingPathComponent(file.fileName)
         index.add(output, size: 100, folderName: nil)
         XCTAssertEqual(index.original(for: changedHandle, folderName: nil), output)
+    }
+}
+
+/// Exercises the production reservation and JPEG publisher, rather than the
+/// queue's injected renderer. Android reserves names before publishing copies.
+final class PhotoFramePublicationTests: XCTestCase {
+    func testOverlappingReservationsAndFailureReleasePreserveExistingFiles() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let existing = directory.appendingPathComponent("FRAME.JPG")
+        let original = Data("existing output".utf8)
+        try original.write(to: existing)
+        let preferred = directory.appendingPathComponent("frame.jpg")
+        let names = OutputFileNameReservations()
+        enum Failure: Error { case expected }
+        XCTAssertThrowsError(try names.withReservedName(preferred) { first in
+            XCTAssertEqual(first.lastPathComponent, "frame (1).jpg")
+            // Both names remain reserved before either output exists. This also
+            // proves disk work does not hold the reservation lock.
+            try names.withReservedName(preferred) { second in
+                XCTAssertEqual(second.lastPathComponent, "frame (2).jpg")
+                try Data("second output".utf8).write(to: second)
+            }
+            throw Failure.expected
+        })
+        try names.withReservedName(preferred) { next in
+            XCTAssertEqual(next.lastPathComponent, "frame (1).jpg")
+        }
+        XCTAssertEqual(try Data(contentsOf: existing), original)
+    }
+
+    func testConcurrentRealJPEGExportsKeepExistingOutputAndSource() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let frames = directory.appendingPathComponent("ZTFrames")
+        try FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.jpg")
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        let original = try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        try original.write(to: source)
+        let settings = PhotoEffectsSettings()
+        let existing = frames.appendingPathComponent(androidPhotoFrameOutputName(sourceName: source.lastPathComponent, settings: settings))
+        let previous = Data("previous output must survive".utf8)
+        try previous.write(to: existing)
+        async let first = TransferQueue.renderFrameFile(source: source, settings: settings, directory: directory, metadata: nil)
+        async let second = TransferQueue.renderFrameFile(source: source, settings: settings, directory: directory, metadata: nil)
+        let outputs = try await [first, second]
+        XCTAssertNotEqual(outputs[0], outputs[1])
+        for output in outputs {
+            XCTAssertNotEqual(output, existing)
+            XCTAssertNotNil(UIImage(contentsOfFile: output.path)?.cgImage)
+        }
+        XCTAssertEqual(try Data(contentsOf: existing), previous)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: frames.path).contains { $0.hasPrefix(".nkframe_") })
+    }
+}
+
+final class GalleryMatPhotoIntegrityTests: XCTestCase {
+    func testOriginalExportsKeepEveryPhotoPixelAtAllRequestedWidths() throws {
+        try verify(preview: false)
+    }
+
+    func testPreviewsKeepAllFourCornersAndSourceAspectAtAllRequestedWidths() throws {
+        try verify(preview: true)
+    }
+
+    private func verify(preview: Bool) throws {
+        for size in [CGSize(width: 1000, height: 500), CGSize(width: 500, height: 1000), CGSize(width: 1000, height: 1000)] {
+            for percent in [60, 65, 100, 200] {
+                try autoreleasepool {
+                    let format = UIGraphicsImageRendererFormat()
+                    format.scale = 1
+                    format.opaque = true
+                    let source = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                        for (index, color) in [UIColor.red, .green, .blue, .yellow].enumerated() {
+                            color.setFill()
+                            context.fill(CGRect(x: CGFloat(index % 2) * size.width / 2,
+                                                y: CGFloat(index / 2) * size.height / 2,
+                                                width: size.width / 2, height: size.height / 2))
+                        }
+                    }
+                    var settings = PhotoEffectsSettings()
+                    settings.photoFrameEnabled = true
+                    settings.photoFramePreset = .galleryMat
+                    settings.watermark.enabled = false
+                    settings.metadata.widthPercent = percent
+                    let full = try PhotoEffectsRenderer.render(source, settings: settings)
+                    let output = try preview ? PhotoEffectsRenderer.render(source, settings: settings, previewLongEdge: 480) : full
+                    let cg = try XCTUnwrap(output.cgImage)
+                    let label = "\(size), width=\(percent), preview=\(preview)"
+                    XCTAssertEqual(cg.width, cg.height, label)
+                    if preview { XCTAssertEqual(cg.width, 480, label) }
+                    var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+                    let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+                        bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+                    context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                    var counts = [Int](repeating: 0, count: 4)
+                    var minX = cg.width, maxX = -1, minY = cg.height, maxY = -1
+                    for y in 0..<cg.height {
+                        for x in 0..<cg.width {
+                            let offset = (y * cg.width + x) * 4
+                            let r = bytes[offset], g = bytes[offset + 1], b = bytes[offset + 2]
+                            let index: Int?
+                            if r > 250 && g < 5 && b < 5 { index = 0 }
+                            else if r < 5 && g > 250 && b < 5 { index = 1 }
+                            else if r < 5 && g < 5 && b > 250 { index = 2 }
+                            else if r > 250 && g > 250 && b < 5 { index = 3 }
+                            else { index = nil }
+                            if let index {
+                                counts[index] += 1
+                                minX = min(minX, x); maxX = max(maxX, x)
+                                minY = min(minY, y); maxY = max(maxY, y)
+                            }
+                        }
+                    }
+                    let scale = preview ? 480 / full.size.width : 1
+                    XCTAssertEqual(CGFloat(maxX - minX + 1), size.width * scale, accuracy: preview ? 2 : 0, label)
+                    XCTAssertEqual(CGFloat(maxY - minY + 1), size.height * scale, accuracy: preview ? 2 : 0, label)
+                    for count in counts {
+                        let expected = size.width * size.height * scale * scale / 4
+                        // Preview resampling blends pixels along each quadrant's
+                        // perimeter. Bound that fringe in pixels, not a percentage
+                        // of the area; full-resolution export stays exact.
+                        let fringe = preview ? (size.width + size.height) * scale : 0
+                        XCTAssertEqual(CGFloat(count), expected, accuracy: fringe, label)
+                    }
+                    XCTAssertGreaterThan(minX, 0, label)
+                    XCTAssertGreaterThan(minY, 0, label)
+                    XCTAssertLessThan(maxX, cg.width - 1, label)
+                    XCTAssertLessThan(maxY, cg.height - 1, label)
+                }
+            }
+        }
+    }
+}
+
+final class LosslessCropIntegrityTests: XCTestCase {
+    func testValidHeaderWithTruncatedEntropyFailsNativeAndProcessorThenRetries() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let input = directory.appendingPathComponent("source.jpg")
+        let directOutput = directory.appendingPathComponent("native.jpg")
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 96), format: format).image { context in
+            for y in 0..<96 {
+                for x in 0..<128 {
+                    UIColor(red: CGFloat((x * 37 + y * 71) % 256) / 255,
+                            green: CGFloat((x * 53 + y * 23) % 256) / 255,
+                            blue: CGFloat((x * 13 + y * 41) % 256) / 255, alpha: 1).setFill()
+                    context.fill(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+        }
+        let original = try XCTUnwrap(image.jpegData(compressionQuality: 0.95))
+        let source = try XCTUnwrap(parseJpegCropHeader(original))
+        let rect = CropRect(left: 16, top: 16, right: 80, bottom: 80)
+        let task = LosslessCropTask(fileID: 1, recipe: JpegCropRecipe(source: source, rect: rect))
+        let sos = try XCTUnwrap(original.range(of: Data([0xff, 0xda]))).lowerBound
+        for count in [sos + 16, (sos + original.count) / 2, original.count - 2] {
+            let truncated = Data(original.prefix(count))
+            // The Swift header guard accepts this input; failure must come from
+            // the packaged native coefficient decoder, not malformed SOF data.
+            XCTAssertEqual(parseJpegCropHeader(truncated), source)
+            try truncated.write(to: input)
+            XCTAssertFalse(LosslessJpegBridge.crop(input: input, output: directOutput, source: source, rect: rect))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directOutput.path))
+            XCTAssertThrowsError(try LosslessCropProcessor.process(task: task, sourceURL: input, directory: directory))
+            XCTAssertEqual(try Data(contentsOf: input), truncated)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.jpg"])
+            try original.write(to: input)
+            let output = try LosslessCropProcessor.process(task: task, sourceURL: input, directory: directory)
+            let decoded = try XCTUnwrap(UIImage(contentsOfFile: output.path)?.cgImage)
+            XCTAssertEqual(decoded.width, 64)
+            XCTAssertEqual(decoded.height, 64)
+            XCTAssertEqual(try Data(contentsOf: input), original)
+            try FileManager.default.removeItem(at: output)
+        }
+    }
+}
+
+private func cropIntegrityFixture(in directory: URL) throws -> (URL, LosslessCropTask, Data) {
+    let format = UIGraphicsImageRendererFormat(); format.scale = 1
+    let image = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 96), format: format).image { context in
+        UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 128, height: 96))
+    }
+    let bytes = try XCTUnwrap(image.jpegData(compressionQuality: 0.95))
+    let header = try XCTUnwrap(parseJpegCropHeader(bytes))
+    let task = LosslessCropTask(fileID: 1, recipe: JpegCropRecipe(source: header,
+        rect: CropRect(left: 16, top: 16, right: 80, bottom: 80)))
+    let source = directory.appendingPathComponent("source.jpg")
+    try bytes.write(to: source)
+    return (source, task, bytes)
+}
+
+private final class CropTransformBarrier: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var released = false
+    private var paths: [URL] = []
+    var outputs: [URL] { condition.withLock { paths } }
+    func release() { condition.withLock { released = true; condition.broadcast() } }
+    func transform(_ source: URL, _ output: URL, _ header: JpegCropSource, _ rect: CropRect) -> Bool {
+        let result = LosslessJpegBridge.crop(input: source, output: output, source: header, rect: rect)
+        condition.lock()
+        paths.append(output)
+        while !released { condition.wait() }
+        condition.unlock()
+        return result
+    }
+    func waitForTransforms(_ count: Int) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while outputs.count < count {
+            guard ContinuousClock.now < deadline else { throw CocoaError(.coderInvalidValue) }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+}
+
+final class LosslessCropLifecycleTests: XCTestCase {
+    func testConcurrentCropsOwnSeparateStagingAndPublicationNames() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (source, task, original) = try cropIntegrityFixture(in: directory)
+        let barrier = CropTransformBarrier()
+        defer { barrier.release() }
+        let first = Task { try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, transform: barrier.transform) }
+        let second = Task { try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, transform: barrier.transform) }
+        try await barrier.waitForTransforms(2)
+        XCTAssertEqual(Set(barrier.outputs).count, 2)
+        XCTAssertEqual(TransferDirectoryIndex.removeStaleTemporaryFiles(in: directory), 0)
+        XCTAssertTrue(barrier.outputs.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+        barrier.release()
+        let results = try await [first.value, second.value]
+        XCTAssertNotEqual(results[0], results[1])
+        for result in results { XCTAssertEqual(UIImage(contentsOfFile: result.path)?.cgImage?.width, 64) }
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 3)
+    }
+
+    func testCancellationAfterNativeWorkRemovesOnlyOwnedStaging() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (source, task, original) = try cropIntegrityFixture(in: directory)
+        let existing = LosslessCropProcessor.outputURL(for: source, in: directory)
+        try original.write(to: existing)
+        let barrier = CropTransformBarrier()
+        defer { barrier.release() }
+        let operation = Task { try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, transform: barrier.transform) }
+        try await barrier.waitForTransforms(1)
+        operation.cancel()
+        barrier.release()
+        do { _ = try await operation.value; XCTFail("Cancelled native result was published") }
+        catch is CancellationError {}
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        XCTAssertEqual(try Data(contentsOf: existing), original)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 2)
+    }
+
+    func testPreCancelledCropDoesNotCreateStaging() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (source, task, _) = try cropIntegrityFixture(in: directory)
+        let operation = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory)
+        }
+        do { _ = try await operation.value; XCTFail("Pre-cancelled crop completed") }
+        catch is CancellationError {}
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.jpg"])
+    }
+
+    func testStartupCleanupRemovesOldSessionsButPreservesActiveAndUnknownDirectories() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let active = try LosslessCropTemporaryFiles.create(in: directory)
+        let unknown = directory.appendingPathComponent(".nkcrop_user-folder")
+        try FileManager.default.createDirectory(at: unknown, withIntermediateDirectories: false)
+        for parent in [directory, directory.appendingPathComponent("ZT2026-10-15"), directory.appendingPathComponent("ZT-JPG")] {
+            try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+            let old = parent.appendingPathComponent(".nkcrop_crop-\(UUID().uuidString)_\(UUID().uuidString).part")
+            try FileManager.default.createDirectory(at: old, withIntermediateDirectories: false)
+            try Data([1]).write(to: old.appendingPathComponent("cropped.jpg"))
+        }
+        let legacy = directory.appendingPathComponent(".nkcrop_(UUID().uuidString).part")
+        try Data([1]).write(to: legacy)
+        XCTAssertEqual(TransferDirectoryIndex.removeStaleTemporaryFiles(in: directory), 4)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unknown.path))
+        XCTAssertEqual(TransferDirectoryIndex.removeStaleTemporaryFiles(in: directory), 0)
+    }
+}
+
+/// Independent TIFF fixtures include a real IFD1 JPEG and opaque MakerNote/XMP
+/// bytes. Merely clearing the thumbnail pointer would still fail these checks.
+final class LosslessCropMetadataTests: XCTestCase {
+    private struct Tag {
+        let id: UInt16
+        let type: UInt16
+        let count: UInt32
+        let bytes: [UInt8]
+    }
+    private func number(_ value: UInt32, _ size: Int, little: Bool) -> [UInt8] {
+        (0..<size).map { UInt8(truncatingIfNeeded: value >> ((little ? $0 : size - 1 - $0) * 8)) }
+    }
+    private func read(_ bytes: [UInt8], _ at: Int, _ size: Int, little: Bool) -> UInt32 {
+        (0..<size).reduce(0) { $0 | UInt32(bytes[at + $1]) << ((little ? $1 : size - 1 - $1) * 8) }
+    }
+    private func jpegMarker(_ code: UInt8, _ payload: [UInt8]) -> Data {
+        Data([0xff, code, UInt8((payload.count + 2) >> 8), UInt8((payload.count + 2) & 255)] + payload)
+    }
+    private func segments(_ data: Data, code: UInt8) -> [[UInt8]] {
+        var at = 2, result: [[UInt8]] = []
+        while at + 4 <= data.count, data[at] == 0xff {
+            let marker = data[at + 1]
+            if marker == 0xda || marker == 0xd9 { break }
+            let count = Int(data[at + 2]) * 256 + Int(data[at + 3])
+            guard count >= 2, at + count + 2 <= data.count else { break }
+            if marker == code { result.append(Array(data[(at + 4)..<(at + count + 2)])) }
+            at += count + 2
+        }
+        return result
+    }
+    private func entropyBytes(_ jpeg: Data) throws -> Data {
+        var at = 2
+        while at + 4 <= jpeg.count, jpeg[at] == 0xff {
+            if jpeg[at + 1] == 0xda { return Data(jpeg[at...]) }
+            at += Int(jpeg[at + 2]) * 256 + Int(jpeg[at + 3]) + 2
+        }
+        throw CocoaError(.fileReadCorruptFile)
+    }
+
+    private func removingSourceMetadata(_ jpeg: Data) -> Data {
+        var result = Data(jpeg.prefix(2)), at = 2
+        while at + 4 <= jpeg.count, jpeg[at] == 0xff {
+            let code = jpeg[at + 1]
+            if code == 0xda || code == 0xd9 { break }
+            let length = Int(jpeg[at + 2]) * 256 + Int(jpeg[at + 3])
+            if code != 0xe1 && code != 0xe2 { result.append(jpeg[at..<(at + length + 2)]) }
+            at += length + 2
+        }
+        result.append(jpeg[at...])
+        return result
+    }
+
+    private func fields(_ tiff: [UInt8], at: Int, little: Bool) -> [UInt16: Tag] {
+        var result: [UInt16: Tag] = [:]
+        for index in 0..<Int(read(tiff, at, 2, little: little)) {
+            let offset = at + 2 + index * 12
+            let id = UInt16(read(tiff, offset, 2, little: little))
+            let type = UInt16(read(tiff, offset + 2, 2, little: little))
+            let count = read(tiff, offset + 4, 4, little: little)
+            let unit = [3: 2, 4: 4, 5: 8, 9: 4, 10: 8][Int(type)] ?? 1
+            let length = Int(count) * unit
+            let start = length <= 4 ? offset + 8 : Int(read(tiff, offset + 8, 4, little: little))
+            result[id] = Tag(id: id, type: type, count: count, bytes: Array(tiff[start..<(start + length)]))
+        }
+        return result
+    }
+
+    func testWhitelistRebuildRemovesThumbnailAndPreservesICCOrientationGPSAndDimensions() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (input, _, jpeg) = try cropIntegrityFixture(in: directory)
+        let baseJPEG = removingSourceMetadata(jpeg)
+        let profile = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)?.copyICCData()) as Data
+        let icc = Array("ICC_PROFILE\0".utf8) + [1, 1] + Array(profile)
+        for little in [false, true] {
+            for dimensionsShort in [false, true] {
+                for orientation in 1...8 {
+                    func scalar(_ id: UInt16, _ value: UInt32, short: Bool = true) -> Tag {
+                        Tag(id: id, type: short ? 3 : 4, count: 1, bytes: number(value, short ? 2 : 4, little: little))
+                    }
+                    func text(_ id: UInt16, _ value: String, type: UInt16 = 2) -> Tag {
+                        let bytes = Array(value.utf8) + [0]
+                        return Tag(id: id, type: type, count: UInt32(bytes.count), bytes: bytes)
+                    }
+                    func rational(_ id: UInt16, _ values: [UInt32], signed: Bool = false) -> Tag {
+                        Tag(id: id, type: signed ? 10 : 5, count: UInt32(values.count / 2),
+                            bytes: values.flatMap { number($0, 4, little: little) })
+                    }
+                    let rootTags = [text(0x010f, "Nikon"), text(0x0110, "Crop fixture"), text(0x0131, "Camera software"), text(0x0132, "2026:10:15 12:34:56")]
+                    let exifTags: [Tag] = [
+                        text(0x9003, "2026:10:15 12:34:56"), text(0x9004, "2026:10:15 12:34:56"), text(0x9291, "123"), text(0x9011, "+08:00"),
+                        rational(0x829a, [1, 125]), rational(0x829d, [28, 10]), scalar(0x8827, 100), rational(0x920a, [50, 1]), scalar(0xa405, 75),
+                        text(0xa433, "Nikon"), text(0xa434, "24-70mm"), scalar(0x8822, 3), rational(0x9204, [UInt32.max, 3], signed: true),
+                        scalar(0x9207, 5), scalar(0x9209, 0), scalar(0xa403, 1), scalar(0xa001, 1)
+                    ]
+                    let gpsTags: [Tag] = [
+                        Tag(id: 0, type: 1, count: 4, bytes: [2, 3, 0, 0]), text(1, "N"), rational(2, [31, 1, 0, 1, 0, 1]),
+                        text(3, "E"), rational(4, [121, 1, 0, 1, 0, 1]), Tag(id: 5, type: 1, count: 1, bytes: [0]), rational(6, [100, 1]),
+                        rational(7, [12, 1, 34, 1, 56, 1]), text(29, "2026:10:15"), text(27, "ASCII\0\0\0GPS", type: 7),
+                        text(12, "K"), rational(13, [10, 1]), text(14, "T"), rational(15, [180, 1])
+                    ]
+                    var root = rootTags + [scalar(0x0100, 128, short: dimensionsShort), scalar(0x0101, 96, short: dimensionsShort), scalar(0x0112, UInt32(orientation))]
+                    let exif = exifTags + [scalar(0xa002, 128, short: dimensionsShort), scalar(0xa003, 96, short: dimensionsShort), text(0x927c, "UNCROPPED_MAKERNOTE", type: 7)]
+                    let exifAt = 8 + 2 + (root.count + 2) * 12 + 4
+                    let gpsAt = exifAt + 2 + exif.count * 12 + 4
+                    let thumbAt = gpsAt + 2 + gpsTags.count * 12 + 4
+                    var tiff = [UInt8](repeating: 0, count: thumbAt + 2 + 2 * 12 + 4)
+                    tiff.replaceSubrange(0..<8, with: (little ? [0x49, 0x49] : [0x4d, 0x4d]) + number(42, 2, little: little) + number(8, 4, little: little))
+                    func put(_ values: [Tag], at: Int, next: Int = 0) {
+                        tiff.replaceSubrange(at..<(at + 2), with: number(UInt32(values.count), 2, little: little))
+                        for (index, tag) in values.enumerated() {
+                            let offset = at + 2 + index * 12
+                            let header = number(UInt32(tag.id), 2, little: little) + number(UInt32(tag.type), 2, little: little) + number(tag.count, 4, little: little)
+                            tiff.replaceSubrange(offset..<(offset + 8), with: header)
+                            if tag.bytes.count <= 4 { tiff.replaceSubrange((offset + 8)..<(offset + 8 + tag.bytes.count), with: tag.bytes) }
+                            else {
+                                tiff.replaceSubrange((offset + 8)..<(offset + 12), with: number(UInt32(tiff.count), 4, little: little))
+                                tiff.append(contentsOf: tag.bytes)
+                            }
+                        }
+                        let end = at + 2 + values.count * 12
+                        tiff.replaceSubrange(end..<(end + 4), with: number(UInt32(next), 4, little: little))
+                    }
+                    root += [scalar(0x8769, UInt32(exifAt), short: false), scalar(0x8825, UInt32(gpsAt), short: false)]
+                    put(root, at: 8, next: thumbAt); put(exif, at: exifAt); put(gpsTags, at: gpsAt)
+                    let thumbnailOffset = tiff.count
+                    tiff += Array(jpeg) + Array("UNCROPPED_THUMBNAIL".utf8)
+                    put([scalar(0x0201, UInt32(thumbnailOffset), short: false), scalar(0x0202, UInt32(jpeg.count), short: false)], at: thumbAt)
+                    // ICC precedes APP1, which defeated the old transupp-dependent rewrite.
+                    let fixture = baseJPEG.prefix(2) + jpegMarker(0xe2, icc) + jpegMarker(0xe1, Array("Exif\0\0".utf8) + tiff)
+                        + jpegMarker(0xe1, Array("XMP_UNCROPPED".utf8)) + jpegMarker(0xe2, Array("MPF_UNCROPPED".utf8)) + baseJPEG.dropFirst(2)
+                    XCTAssertEqual(segments(fixture, code: 0xe1).filter { $0.starts(with: Array("Exif\0\0".utf8)) }.count, 1)
+                    try fixture.write(to: input)
+                    let source = try XCTUnwrap(parseJpegCropHeader(fixture))
+                    let task = LosslessCropTask(fileID: 1, recipe: JpegCropRecipe(source: source, rect: CropRect(left: 16, top: 16, right: 80, bottom: 64)))
+                    let output = try LosslessCropProcessor.process(task: task, sourceURL: input, directory: directory)
+                    defer { try? FileManager.default.removeItem(at: output) }
+                    let encoded = try Data(contentsOf: output)
+                    XCTAssertEqual(try Data(contentsOf: input), fixture)
+                    let header = try XCTUnwrap(parseJpegCropHeader(encoded))
+                    XCTAssertEqual(header.width, 64); XCTAssertEqual(header.height, 48); XCTAssertEqual(header.orientation, orientation)
+                    let app1 = segments(encoded, code: 0xe1)
+                    XCTAssertEqual(app1.count, 1)
+                    let rebuilt = Array(try XCTUnwrap(app1.first).dropFirst(6))
+                    let rebuiltRoot = fields(rebuilt, at: 8, little: little)
+                    let rebuiltExif = fields(rebuilt, at: Int(read(try XCTUnwrap(rebuiltRoot[0x8769]).bytes, 0, 4, little: little)), little: little)
+                    let rebuiltGPS = fields(rebuilt, at: Int(read(try XCTUnwrap(rebuiltRoot[0x8825]).bytes, 0, 4, little: little)), little: little)
+                    for (expected, actual) in [(rootTags, rebuiltRoot), (exifTags, rebuiltExif), (gpsTags, rebuiltGPS)] {
+                        for tag in expected {
+                            XCTAssertEqual(actual[tag.id]?.bytes, tag.bytes, "tag \(tag.id)")
+                            XCTAssertEqual(actual[tag.id]?.type, tag.type)
+                        }
+                    }
+                    for (tag, expected) in [(UInt16(0x0100), UInt32(64)), (0x0101, 48)] { XCTAssertEqual(read(try XCTUnwrap(rebuiltRoot[tag]).bytes, 0, 4, little: little), expected) }
+                    for (tag, expected) in [(UInt16(0xa002), UInt32(64)), (0xa003, 48)] { XCTAssertEqual(read(try XCTUnwrap(rebuiltExif[tag]).bytes, 0, 4, little: little), expected) }
+                    XCTAssertEqual(read(rebuilt, 8 + 2 + rebuiltRoot.count * 12, 4, little: little), 0)
+                    XCTAssertEqual(segments(encoded, code: 0xe2), [icc])
+                    XCTAssertNil(encoded.range(of: jpeg))
+                    for forbidden in ["UNCROPPED_MAKERNOTE", "UNCROPPED_THUMBNAIL", "XMP_UNCROPPED", "MPF_UNCROPPED"] {
+                        XCTAssertNil(encoded.range(of: Data(forbidden.utf8)))
+                    }
+                    XCTAssertNotNil(UIImage(contentsOfFile: output.path)?.cgImage)
+                    if !little && !dimensionsShort && orientation == 1 {
+                        let native = directory.appendingPathComponent("native-coefficients.jpg")
+                        let nativeResult = input.path.withCString { from in
+                            native.path.withCString { to in
+                                nativeCropForExifTest(from, to, Int32(source.width), Int32(source.height),
+                                    Int32(source.mcuWidth), Int32(source.mcuHeight), 16, 16, 64, 48)
+                            }
+                        }
+                        XCTAssertEqual(nativeResult, 1)
+                        XCTAssertEqual(try entropyBytes(encoded), try entropyBytes(Data(contentsOf: native)),
+                                       "EXIF replacement must not re-encode the coefficient crop")
+                        try FileManager.default.removeItem(at: native)
+                        var invalid = fixture
+                        let tiffStart = 2 + jpegMarker(0xe2, icc).count + 4 + 6
+                        let gpsPointer = tiffStart + 8 + 2 + (root.count - 1) * 12 + 8
+                        invalid.replaceSubrange(gpsPointer..<(gpsPointer + 4), with: [255, 255, 255, 255])
+                        XCTAssertEqual(parseJpegCropHeader(invalid), source)
+                        try invalid.write(to: input)
+                        XCTAssertFalse(LosslessJpegBridge.crop(input: input, output: native, source: source, rect: task.rect))
+                        XCTAssertFalse(FileManager.default.fileExists(atPath: native.path))
+                        XCTAssertEqual(try Data(contentsOf: input), invalid)
+                        try fixture.write(to: input)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@_silgen_name("zt_lossless_jpeg_crop")
+private func nativeCropForExifTest(_ input: UnsafePointer<CChar>, _ output: UnsafePointer<CChar>,
+                                  _ width: Int32, _ height: Int32, _ mcuWidth: Int32, _ mcuHeight: Int32,
+                                  _ x: Int32, _ y: Int32, _ cropWidth: Int32, _ cropHeight: Int32) -> Int32
+
+final class LosslessCropResourceTests: XCTestCase {
+    func testCompressedSourceLimitIsInclusiveAndHeaderReadIsBounded() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (source, task, original) = try cropIntegrityFixture(in: directory)
+        let handle = try FileHandle(forWritingTo: source)
+        defer { try? handle.close() }
+        try handle.truncate(atOffset: UInt64(LosslessCropInput.maximumSourceBytes) + 1)
+        XCTAssertThrowsError(try LosslessCropInput.sourceHeader(from: source))
+        XCTAssertThrowsError(try LosslessCropProcessor.process(task: task, sourceURL: source, directory: directory, transform: { _, _, _, _ in
+            XCTFail("Oversized input reached native transform")
+            return false
+        }))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [source.lastPathComponent])
+        try handle.truncate(atOffset: UInt64(LosslessCropInput.maximumSourceBytes))
+        let header = try LosslessCropInput.sourceHeader(from: source)
+        XCTAssertEqual(header.count, LosslessCropInput.maximumHeaderBytes)
+        XCTAssertEqual(header.prefix(original.count), original)
+        let output = try LosslessCropProcessor.process(task: task, sourceURL: source, directory: directory)
+        XCTAssertEqual(UIImage(contentsOfFile: output.path)?.cgImage?.width, 64)
+        XCTAssertEqual(try source.resourceValues(forKeys: [.fileSizeKey]).fileSize, LosslessCropInput.maximumSourceBytes)
+    }
+
+    func testOversizedSOFIsRejectedBeforeStagingOrTransform() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (source, _, original) = try cropIntegrityFixture(in: directory)
+        var mutated = original
+        let sof = try XCTUnwrap(mutated.range(of: Data([0xff, 0xc0]))).lowerBound
+        mutated[sof + 5] = UInt8(10000 >> 8); mutated[sof + 6] = UInt8(10000 & 255)
+        mutated[sof + 7] = UInt8(10001 >> 8); mutated[sof + 8] = UInt8(10001 & 255)
+        let parsed = try XCTUnwrap(parseJpegCropHeader(mutated))
+        XCTAssertFalse(LosslessCropInput.accepts(parsed))
+        XCTAssertTrue(LosslessCropInput.accepts(.init(width: 10000, height: 10000, mcuWidth: 16, mcuHeight: 16, orientation: 1)))
+        let task = LosslessCropTask(fileID: 1, recipe: .init(source: parsed, rect: .init(left: 0, top: 0, right: 64, bottom: 64)))
+        try mutated.write(to: source)
+        XCTAssertThrowsError(try LosslessCropProcessor.process(task: task, sourceURL: source, directory: directory, transform: { _, _, _, _ in
+            XCTFail("Oversized pixels reached native transform")
+            return false
+        }))
+        XCTAssertEqual(try Data(contentsOf: source), mutated)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [source.lastPathComponent])
+    }
+}
+
+private actor CropPermitLatch {
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() {
+        opened = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume() }
+    }
+}
+
+final class CropSerialAdmissionTests: XCTestCase {
+    func testFallbackPreviewCancellationReachesDetachedWaiter() async throws {
+        let gate = PhotoEffectsPreviewRenderGate.shared
+        let entered = CropPermitLatch()
+        let release = CropPermitLatch()
+        let owner = Task {
+            try await gate.withPermit {
+                await entered.open()
+                await release.wait()
+            }
+        }
+        await entered.wait()
+        let preview = Task {
+            try await PhotoEffectsPreviewRenderGate.render {
+                XCTFail("Cancelled fallback entered rendering")
+                return 0
+            }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while await gate.pendingCount == 0 && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let queued = await gate.pendingCount
+        XCTAssertEqual(queued, 1)
+        preview.cancel()
+        let finished = expectation(description: "Fallback cancellation propagates without waiting for permit")
+        let observer = Task {
+            do { _ = try await preview.value; XCTFail("Expected cancellation") }
+            catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        await release.open()
+        try await owner.value
+        await observer.value
+        let next = try await PhotoEffectsPreviewRenderGate.render { 42 }
+        XCTAssertEqual(next, 42)
+    }
+
+    func testCancelledWaiterFinishesWhileOwnerStillHoldsPermitAndNextCropSucceeds() async throws {
+        let gate = CancellableSerialWorkGate()
+        let entered = CropPermitLatch()
+        let release = CropPermitLatch()
+        let owner = Task {
+            try await gate.withPermit {
+                await entered.open()
+                await release.wait()
+            }
+        }
+        await entered.wait()
+        let cancelled = Task {
+            try await gate.withPermit {
+                XCTFail("Cancelled waiter entered codec work")
+            }
+        }
+        // Cancellation must finish independently of the still-running owner.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while await gate.pendingCount == 0 && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let queued = await gate.pendingCount
+        XCTAssertEqual(queued, 1, "Exercise cancellation after enqueue, not just before admission")
+        cancelled.cancel()
+        let cancelledFinished = expectation(description: "Cancelled waiter released before owner")
+        let observer = Task {
+            do { try await cancelled.value; XCTFail("Expected cancellation") }
+            catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+            cancelledFinished.fulfill()
+        }
+        await fulfillment(of: [cancelledFinished], timeout: 2)
+        await release.open()
+        try await owner.value
+        await observer.value
+        let value = try await gate.withPermit { 42 }
+        XCTAssertEqual(value, 42)
+    }
+
+    func testParallelProductionCropsPublishDistinctFilesAndPreserveSource() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (source, task, original) = try cropIntegrityFixture(in: directory)
+        let outputs = try await withThrowingTaskGroup(of: URL.self) { group in
+            for _ in 0..<12 {
+                group.addTask {
+                    try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory)
+                }
+            }
+            var result: [URL] = []
+            for try await output in group { result.append(output) }
+            return result
+        }
+        XCTAssertEqual(Set(outputs).count, 12)
+        for output in outputs {
+            XCTAssertEqual(UIImage(contentsOfFile: output.path)?.cgImage?.width, 64)
+        }
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 13)
+    }
+}
+
+private actor CropPermitCounter {
+    private var active = 0
+    func enter() -> Int { active += 1; return active }
+    func leave() { active -= 1 }
+}
+
+extension CropSerialAdmissionTests {
+    func testPermitRemainsExclusiveAcrossSuspensionAndReleasesAfterFailure() async throws {
+        let gate = CancellableSerialWorkGate()
+        let counter = CropPermitCounter()
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<24 {
+                group.addTask {
+                    do {
+                        try await gate.withPermit {
+                            let active = await counter.enter()
+                            XCTAssertEqual(active, 1)
+                            await Task.yield()
+                            await counter.leave()
+                            if index.isMultiple(of: 3) { throw LosslessCropProcessorError.cropFailed }
+                        }
+                    } catch LosslessCropProcessorError.cropFailed {} catch {
+                        XCTFail("Unexpected gate error: \(error)")
+                    }
+                }
+            }
+        }
+        let remaining = await gate.pendingCount
+        XCTAssertEqual(remaining, 0)
+        let next = try await gate.withPermit { true }
+        XCTAssertTrue(next)
+    }
+}
+
+extension TransferQueueScenarioTests {
+    func testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        let extensions = ["J PG", "J/PG", "J\\PG", String(repeating: "X", count: 62), "照片", "J\nPG"]
+        for (index, ext) in extensions.enumerated() {
+            await queue.enqueue(file(UInt32(index + 1), name: "photo." + ext), storageMode: .byType)
+        }
+        await queue.enqueue(file(100), storageMode: .byType)
+        await camera.finish(100)
+        await queue.start(session: camera, directory: directory)
+        let state = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy { $0.status == .failed || $0.status == .completed } }
+        for item in state.items.dropLast() {
+            XCTAssertEqual(item.status, .failed)
+            XCTAssertEqual(item.error, "Invalid transfer folder name: \(item.destinationFolderName!)")
+            XCTAssertNil(item.outputURL)
+        }
+        XCTAssertEqual(state.items.last?.status, .completed)
+        let requests = await camera.requests
+        XCTAssertEqual(requests, [100])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["ZT-JPG"])
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("ZT-JPG/DSC_100.JPG")), Data(repeating: 1, count: 10))
+        let retry = await queue.retry(id: state.items[0].id)
+        XCTAssertNotNil(retry)
+        let retried = try await wait(queue) { !$0.isTransferring && $0.items.first?.status == .failed }
+        XCTAssertEqual(retried.items.first?.destinationFolderName, "ZT-J PG")
+        let afterRetry = await camera.requests
+        XCTAssertEqual(afterRetry, [100])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["ZT-JPG"])
+    }
+
+    func testSafeFolderLengthBoundaryIsAcceptedByActualWorker() async throws {
+        let (queue, directory) = try fixture()
+        let camera = ControlledTransferCamera()
+        let extensionName = String(repeating: "A", count: 61)
+        await queue.enqueue(file(1, name: "photo." + extensionName), storageMode: .byType)
+        await camera.finish(1)
+        await queue.start(session: camera, directory: directory)
+        let state = try await wait(queue) { !$0.isTransferring && $0.items[0].status == .completed }
+        XCTAssertEqual(state.items[0].destinationFolderName?.count, 64)
+        XCTAssertEqual(state.items[0].outputURL?.deletingLastPathComponent().lastPathComponent, "ZT-" + extensionName)
+        for invalid in ["", "../JPG", "ZT-JPG\n", "ZT-JPG\r\n", " ZT-JPG", "ZT-JPG ", String(repeating: "A", count: 65)] {
+            XCTAssertFalse(isValidTransferFolderName(invalid), "\(invalid.debugDescription)")
+        }
+    }
+}
+
+private final class DirectoryScopeProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active: [URL: Int] = [:]
+    private var stops: [URL: Int] = [:]
+    var operations: DirectoryAccessOperations {
+        DirectoryAccessOperations(start: { [self] url in
+            guard url.lastPathComponent != "denied" else { return false }
+            lock.withLock { active[url, default: 0] += 1 }
+            return true
+        }, stop: { [self] url in
+            lock.withLock {
+                active[url, default: 0] -= 1
+                stops[url, default: 0] += 1
+                XCTAssertGreaterThanOrEqual(active[url, default: 0], 0)
+            }
+        })
+    }
+    func count(_ url: URL) -> Int { lock.withLock { active[url, default: 0] } }
+    func stopCount(_ url: URL) -> Int { lock.withLock { stops[url, default: 0] } }
+}
+
+extension TransferQueueScenarioTests {
+    private func scopeStore(_ probe: DirectoryScopeProbe) -> DirectoryAccessStore {
+        let suite = "DirectoryScopeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        return DirectoryAccessStore(defaults: defaults, accessOperations: probe.operations)
+    }
+
+    func testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication() async throws {
+        let probe = DirectoryScopeProbe()
+        let (queue, old) = try fixture(accessOperations: probe.operations)
+        let new = old.appendingPathComponent("new", isDirectory: true)
+        try FileManager.default.createDirectory(at: new, withIntermediateDirectories: true)
+        let store = scopeStore(probe)
+        store.setDirectory(old)
+        XCTAssertEqual(store.directoryURL, old)
+        let camera = ControlledTransferCamera()
+        await queue.enqueue(file(1))
+        await queue.start(session: camera, directory: old)
+        _ = try await wait(queue) { $0.items[0].status == .transferring }
+        XCTAssertEqual(probe.count(old), 2)
+        store.setDirectory(new)
+        await queue.attach(session: camera, directory: new)
+        XCTAssertEqual(store.directoryURL, new)
+        XCTAssertEqual(probe.count(old), 1, "Running worker owns the former selection")
+        await camera.finish(1)
+        let finished = try await wait(queue) { !$0.isTransferring && probe.count(old) == 0 }
+        XCTAssertEqual(finished.items[0].outputURL?.deletingLastPathComponent(), old)
+        XCTAssertEqual(probe.stopCount(old), 2)
+        await queue.enqueue(file(2))
+        await camera.finish(2)
+        await queue.start(session: camera, directory: new)
+        let next = try await wait(queue) { !$0.isTransferring && $0.items[1].status == .completed }
+        XCTAssertEqual(next.items[1].outputURL?.deletingLastPathComponent(), new)
+        store.clear()
+        await queue.attach(session: nil, directory: nil)
+        XCTAssertEqual(probe.count(new), 0)
+        XCTAssertEqual(probe.stopCount(new), 2)
+    }
+
+    func testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure() async throws {
+        let probe = DirectoryScopeProbe()
+        let renderer = ControlledFrameRenderer()
+        let (queue, old) = try fixture(accessOperations: probe.operations, renderer: { source, _, target, _ in
+            XCTAssertGreaterThan(probe.count(target), 0)
+            let output = try await renderer.render(source: source, directory: target)
+            XCTAssertGreaterThan(probe.count(target), 0, "Scope must survive the suspension and disk write")
+            if source.lastPathComponent == "DSC_2.JPG" { throw CocoaError(.fileWriteUnknown) }
+            return output
+        })
+        let store = scopeStore(probe)
+        store.setDirectory(old)
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false
+        let files = [file(1), file(2), file(3)]
+        for file in files { try Data(repeating: 1, count: 10).write(to: old.appendingPathComponent(file.fileName)) }
+        await queue.enqueue(files, effects: effects)
+        await queue.start(session: nil, directory: old)
+        _ = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy(\.isGeneratingFrame) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await renderer.peak < 1, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let activePeak = await renderer.peak
+        XCTAssertEqual(activePeak, 1, "The compute worker must be suspended before clearing the selection")
+        store.clear()
+        await queue.attach(session: nil, directory: nil)
+        XCTAssertNil(store.directoryURL)
+        XCTAssertEqual(probe.count(old), 1, "Frame jobs retain the worker's shared root lease")
+        await renderer.releaseAll()
+        let finished = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame } && probe.count(old) == 0 }
+        XCTAssertNotNil(finished.items[0].frameURL)
+        XCTAssertNotNil(finished.items[1].frameError)
+        XCTAssertNotNil(finished.items[2].frameURL)
+        XCTAssertEqual(probe.stopCount(old), 2)
+    }
+
+    func testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope() throws {
+        let probe = DirectoryScopeProbe()
+        let (_, directory) = try fixture()
+        var store: DirectoryAccessStore? = scopeStore(probe)
+        store?.setDirectory(directory)
+        XCTAssertEqual(probe.count(directory), 1)
+        store = nil
+        XCTAssertEqual(probe.count(directory), 0)
+        XCTAssertEqual(probe.stopCount(directory), 1)
+        let denied = directory.appendingPathComponent("denied")
+        do {
+            let lease = DirectoryAccessLease(url: denied, operations: probe.operations)
+            XCTAssertFalse(lease.isSecurityScoped)
+        }
+        XCTAssertEqual(probe.stopCount(denied), 0)
+    }
+}
+
+private actor CleanupRaceCamera: TransferDownloading {
+    private(set) var part: URL?
+    private let release = CropPermitLatch()
+    func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)?) async throws -> URL {
+        let temporary = directory.appendingPathComponent(".nkpart_live")
+        try Data(repeating: 3, count: Int(file.size)).write(to: temporary)
+        part = temporary
+        await release.wait()
+        return try finalizeTransferTemporary(temporary: temporary, directory: directory, fileName: file.fileName)
+    }
+    func finish() async { await release.open() }
+}
+
+extension TransferQueueScenarioTests {
+    func testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart() async throws {
+        let entered = expectation(description: "Startup cleanup entered")
+        let release = CropPermitLatch()
+        let preparation = TransferDirectoryPreparation { root in
+            entered.fulfill()
+            await release.wait()
+            _ = TransferDirectoryIndex.removeStaleTemporaryFiles(in: root)
+        }
+        let probe = DirectoryScopeProbe()
+        let (queue, directory) = try fixture(accessOperations: probe.operations, directoryPreparation: preparation)
+        let stale = directory.appendingPathComponent(".nkpart_old")
+        try Data([8]).write(to: stale)
+        let suite = "StartupCleanupTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defaults.set(try directory.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil), forKey: "transfer_dir")
+        let store = DirectoryAccessStore(defaults: defaults, accessOperations: probe.operations, preparation: preparation)
+        XCTAssertEqual(store.directoryURL, directory)
+        await fulfillment(of: [entered], timeout: 2)
+        let camera = CleanupRaceCamera()
+        await queue.enqueue(file(1))
+        await queue.start(session: camera, directory: directory)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while preparation.pendingWaiterCount == 0 && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(preparation.pendingWaiterCount, 1)
+        let before = await camera.part
+        XCTAssertNil(before, "The actual camera must not create a new part before cleanup ends")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stale.path))
+        await release.open()
+        let startedDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await camera.part == nil && ContinuousClock.now < startedDeadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let temporary = await camera.part
+        let live = try XCTUnwrap(temporary)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: live.path))
+        // A second store restoration shares the completed startup work instead
+        // of sweeping the file the first queue has just created.
+        let restoredAgain = DirectoryAccessStore(defaults: defaults, accessOperations: probe.operations, preparation: preparation)
+        try await preparation.waitUntilReady(directory)
+        XCTAssertEqual(try Data(contentsOf: live), Data(repeating: 3, count: 10))
+        await camera.finish()
+        let finished = try await wait(queue) { !$0.isTransferring && $0.items[0].status == .completed }
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(finished.items[0].outputURL)), Data(repeating: 3, count: 10))
+        store.clear(); restoredAgain.clear()
+        await queue.attach(session: nil, directory: nil)
+        XCTAssertEqual(probe.count(directory), 0)
+    }
+
+    func testAlreadyUsedRootDoesNotStartDestructiveCleanupLater() async throws {
+        let preparation = TransferDirectoryPreparation { _ in XCTFail("Late cleanup must not run") }
+        let (_, directory) = try fixture()
+        try await preparation.waitUntilReady(directory)
+        let live = directory.appendingPathComponent(".nkpart_live")
+        try Data([3]).write(to: live)
+        preparation.beginCleanup(access: DirectoryAccessLease(url: directory))
+        try await preparation.waitUntilReady(directory)
+        XCTAssertEqual(try Data(contentsOf: live), Data([3]))
+    }
+
+    func testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders() throws {
+        let (_, root) = try fixture()
+        let parents = [root, root.appendingPathComponent("ZT-JPG"), root.appendingPathComponent("ZT2026-10-16")]
+        var protected: [URL] = []
+        for parent in parents {
+            let frames = parent.appendingPathComponent(transferFrameOutputDirectoryName)
+            try FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+            for folder in [parent, frames] {
+                let active = folder.appendingPathComponent(PhotoFrameTemporaryFiles.makeName())
+                let output = folder.appendingPathComponent("keep.jpg")
+                for file in [active, output] { try Data([1]).write(to: file); protected.append(file) }
+                try Data([2]).write(to: folder.appendingPathComponent(".nkframe_old.jpg"))
+            }
+        }
+        XCTAssertEqual(TransferDirectoryIndex.removeStaleTemporaryFiles(in: root), 6)
+        for file in protected { XCTAssertEqual(try Data(contentsOf: file), Data([1])) }
+        XCTAssertEqual(TransferDirectoryIndex.removeStaleTemporaryFiles(in: root), 0)
+    }
+}
+
+extension TransferQueueScenarioTests {
+    func testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot() async throws {
+        let release = CropPermitLatch()
+        let started = expectation(description: "Shared cleanup running")
+        let preparation = TransferDirectoryPreparation { root in
+            started.fulfill()
+            await release.wait()
+            _ = TransferDirectoryIndex.removeStaleTemporaryFiles(in: root)
+        }
+        let (_, directory) = try fixture()
+        let stale = directory.appendingPathComponent(".nkpart_old")
+        try Data([1]).write(to: stale)
+        preparation.beginCleanup(access: DirectoryAccessLease(url: directory))
+        await fulfillment(of: [started], timeout: 2)
+        let waiter = Task { try await preparation.waitUntilReady(directory) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while preparation.pendingWaiterCount == 0 && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(preparation.pendingWaiterCount, 1)
+        waiter.cancel()
+        let cancelled = expectation(description: "Waiter exits while cleanup is held")
+        let observer = Task {
+            do { try await waiter.value; XCTFail("Expected cancellation") }
+            catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+            cancelled.fulfill()
+        }
+        await fulfillment(of: [cancelled], timeout: 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stale.path))
+        let (otherQueue, otherRoot) = try fixture(directoryPreparation: preparation)
+        let camera = ControlledTransferCamera()
+        await camera.finish(1)
+        await otherQueue.enqueue(file(1))
+        await otherQueue.start(session: camera, directory: otherRoot)
+        _ = try await wait(otherQueue) { !$0.isTransferring && $0.items[0].status == .completed }
+        await release.open()
+        try await preparation.waitUntilReady(directory)
+        await observer.value
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertEqual(preparation.pendingWaiterCount, 0)
+    }
+}
+
+final class PhotoGenerationQueueStateTests: XCTestCase {
+    func testCapacityIncludesActiveAndPreparingEntriesAt4096Boundary() {
+        var state = PhotoGenerationQueueState()
+        let ids = (0..<4097).map { _ in UUID() }
+        for (index, id) in ids.prefix(4096).enumerated() {
+            XCTAssertEqual(state.submit(id, ready: index == 0), .accepted)
+        }
+        XCTAssertEqual(state.takeReady(), ids[0])
+        XCTAssertEqual(state.submit(ids[0]), .duplicate)
+        XCTAssertEqual(state.submit(ids[4096]), .full)
+        XCTAssertEqual(state.count, 4096)
+        state.finish(ids[0])
+        XCTAssertEqual(state.submit(ids[4096]), .accepted)
+        XCTAssertEqual(state.takeReady(), ids[4096])
+    }
+
+    func testReadyWorkBypassesPreparingHeadAndDeferralPreservesOriginalOrder() {
+        var state = PhotoGenerationQueueState()
+        let first = UUID(), second = UUID(), third = UUID()
+        XCTAssertEqual(state.submit(first, ready: false), .accepted)
+        XCTAssertEqual(state.submit(second), .accepted)
+        XCTAssertEqual(state.submit(third), .accepted)
+        XCTAssertEqual(state.takeReady(), second)
+        XCTAssertNil(state.takeReady(), "Only one compute slot")
+        state.markReady(first); state.markReady(first)
+        state.finish(second)
+        XCTAssertEqual(state.takeReady(), first)
+        state.deferActive(first)
+        XCTAssertEqual(state.takeReady(), first)
+        state.finish(first)
+        XCTAssertEqual(state.takeReady(), third)
+        state.finish(third)
+        XCTAssertEqual(state.count, 0)
+    }
+
+    func testRuntimeGateReconsiderationAndReadinessDuringDeferralAreNotLost() {
+        var state = PhotoGenerationQueueState()
+        let id = UUID()
+        XCTAssertEqual(state.submit(id, ready: false), .accepted)
+        XCTAssertNil(state.takeReady())
+        XCTAssertEqual(state.takeReady(runWhilePreparing: { $0 == id }), id)
+        state.markReady(id)
+        state.deferActive(id)
+        XCTAssertEqual(state.takeReady(), id)
+        state.finish(id)
+        XCTAssertNil(state.takeReady())
+    }
+
+    func testCloseAbandonsPendingExactlyOnceAndActiveCompletionRetainsOwnership() {
+        var state = PhotoGenerationQueueState()
+        let active = UUID(), preparing = UUID(), pending = UUID()
+        XCTAssertEqual(state.submit(active), .accepted)
+        XCTAssertEqual(state.takeReady(), active)
+        XCTAssertEqual(state.submit(preparing, ready: false), .accepted)
+        XCTAssertEqual(state.submit(pending), .accepted)
+        XCTAssertEqual(state.close(), [preparing, pending])
+        XCTAssertEqual(state.close(), [])
+        XCTAssertEqual(state.active, active)
+        XCTAssertEqual(state.count, 1)
+        XCTAssertEqual(state.submit(UUID()), .closed)
+        state.finish(active)
+        XCTAssertEqual(state.count, 0)
+        XCTAssertNil(state.takeReady())
+    }
+}
+
+extension TransferQueueScenarioTests {
+    func testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased() async throws {
+        let renderer = ControlledFrameRenderer()
+        let (queue, directory) = try fixture(generationCapacity: 2, renderer: { source, _, target, _ in
+            try await renderer.render(source: source, directory: target)
+        })
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false
+        let files = [file(1), file(2), file(3)]
+        for file in files { try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file.fileName)) }
+        await queue.enqueue(files, effects: effects)
+        await queue.start(session: nil, directory: directory)
+        let rejected = try await wait(queue) { !$0.isTransferring && $0.items[2].frameError != nil }
+        XCTAssertTrue(rejected.items[0].isGeneratingFrame)
+        XCTAssertTrue(rejected.items[1].isGeneratingFrame)
+        XCTAssertFalse(rejected.items[2].isGeneratingFrame)
+        XCTAssertEqual(rejected.items[2].frameError, "Photo generation queue capacity reached")
+        XCTAssertEqual(rejected.items[2].status, .completed)
+        await renderer.releaseAll()
+        _ = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame } }
+        let retry = await queue.retry(id: rejected.items[2].id)
+        XCTAssertNotNil(retry)
+        let finished = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy { !$0.isGeneratingFrame && $0.frameURL != nil } }
+        XCTAssertTrue(finished.items.allSatisfy { $0.frameError == nil })
+        let peak = await renderer.peak
+        XCTAssertEqual(peak, 1)
+    }
+
+    func testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto() async throws {
+        let (queue, directory) = try fixture(renderer: { source, _, target, _ in
+            if source.lastPathComponent == "DSC_1.JPG" { throw CancellationError() }
+            if source.lastPathComponent == "DSC_2.JPG" { throw CocoaError(.fileWriteUnknown) }
+            let output = target.appendingPathComponent("success.jpg")
+            try Data([3]).write(to: output)
+            return output
+        })
+        var effects = PhotoEffectsSettings()
+        effects.photoFrameEnabled = true
+        effects.photoFrameBorderEnabled = false
+        let files = [file(1), file(2), file(3)]
+        for file in files { try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file.fileName)) }
+        await queue.enqueue(files, effects: effects)
+        await queue.start(session: nil, directory: directory)
+        let finished = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy { !$0.isGeneratingFrame } }
+        XCTAssertNil(finished.items[0].frameURL)
+        XCTAssertNotNil(finished.items[1].frameError)
+        XCTAssertEqual(finished.items[2].frameURL?.lastPathComponent, "success.jpg")
+    }
+}
+
+private actor PipelineMetadataCamera: TransferDownloading {
+    let header: Data
+    private let release = CropPermitLatch()
+    private let identityRelease: CropPermitLatch?
+    private(set) var identityRequested = false
+    private(set) var metadataRequests: [UInt32] = []
+    private(set) var downloads: [UInt32] = []
+    init(header: Data, holdIdentity: Bool = false) {
+        self.header = header
+        self.identityRelease = holdIdentity ? CropPermitLatch() : nil
+    }
+    func photoMetadataIdentity() async -> PhotoMetadataCameraIdentity? {
+        identityRequested = true
+        await identityRelease?.wait()
+        return nil
+    }
+    func finishIdentity() async { await identityRelease?.open() }
+    func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)?) throws -> URL {
+        downloads.append(file.id)
+        let output = directory.appendingPathComponent(file.fileName)
+        try Data(repeating: 4, count: Int(file.size)).write(to: output)
+        return output
+    }
+    func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
+                        progress: (@Sendable (TransferDownloadProgress) -> Void)?) throws -> CameraDownloadResult {
+        let output = try download(file: file, to: directory, progress: nil)
+        return CameraDownloadResult(url: output, bytes: file.size, transferredBytes: file.size,
+                                    startedAt: .now, headerPrefix: captureHeader ? header : nil)
+    }
+    func frameMetadataHeader(file: CameraFile) async throws -> Data? {
+        metadataRequests.append(file.id)
+        if file.id == 1 { await release.wait() }
+        try Task.checkCancellation()
+        return header
+    }
+    func finishMetadata() async { await release.open() }
+}
+
+private actor PipelineRenderRecorder {
+    private(set) var order: [String] = []
+    func render(source: URL, directory: URL, metadata: PhotoFrameMetadata?) throws -> URL {
+        XCTAssertEqual(metadata?.model, "Pipeline fixture")
+        order.append(source.lastPathComponent)
+        let output = directory.appendingPathComponent(source.lastPathComponent + ".frame.jpg")
+        try Data([3]).write(to: output)
+        return output
+    }
+}
+
+extension TransferQueueScenarioTests {
+    private func pipelineHeader() throws -> Data {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let result = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(result, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(image.cgImage), [
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFModel: "Pipeline fixture"]
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        XCTAssertEqual(PhotoFrameMetadata.cameraSnapshot(result as Data)?.model, "Pipeline fixture")
+        return result as Data
+    }
+
+    private func waitForMetadataRead(_ camera: PipelineMetadataCamera) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await camera.metadataRequests.isEmpty && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let requests = await camera.metadataRequests
+        XCTAssertEqual(requests, [1])
+    }
+
+    func testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration() async throws {
+        let recorder = PipelineRenderRecorder()
+        let (queue, directory) = try fixture(renderer: { source, _, target, metadata in
+            try await recorder.render(source: source, directory: target, metadata: metadata)
+        })
+        let camera = PipelineMetadataCamera(header: try pipelineHeader())
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = true
+        try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
+        await queue.enqueue([file(1), file(2)], effects: effects)
+        await queue.start(session: camera, directory: directory)
+        try await waitForMetadataRead(camera)
+        let bypassed = try await wait(queue) { !$0.isTransferring && $0.items[1].frameURL != nil }
+        XCTAssertTrue(bypassed.items[0].isGeneratingFrame)
+        XCTAssertNil(bypassed.items[0].frameURL)
+        let earlyOrder = await recorder.order
+        let downloaded = await camera.downloads
+        XCTAssertEqual(earlyOrder, ["DSC_2.JPG"])
+        XCTAssertEqual(downloaded, [2])
+        await camera.finishMetadata()
+        let completed = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame && $0.frameURL != nil } }
+        XCTAssertTrue(completed.items.allSatisfy { $0.frameError == nil })
+        let finalOrder = await recorder.order
+        let reads = await camera.metadataRequests
+        XCTAssertEqual(finalOrder, ["DSC_2.JPG", "DSC_1.JPG"])
+        XCTAssertEqual(reads, [1], "Captured metadata must not trigger a second camera read")
+    }
+
+    func testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload() async throws {
+        let recorder = PipelineRenderRecorder()
+        let (queue, directory) = try fixture(generationCapacity: 1, renderer: { source, _, target, metadata in
+            try await recorder.render(source: source, directory: target, metadata: metadata)
+        })
+        let camera = PipelineMetadataCamera(header: try pipelineHeader())
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = true
+        try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
+        await queue.enqueue([file(1), file(2)], effects: effects)
+        await queue.start(session: camera, directory: directory)
+        try await waitForMetadataRead(camera)
+        let full = try await wait(queue) { !$0.isTransferring && $0.items[1].frameError != nil }
+        XCTAssertEqual(full.items[1].status, .completed)
+        XCTAssertEqual(full.items[1].frameError, "Photo generation queue capacity reached")
+        XCTAssertNotNil(full.items[1].outputURL)
+        XCTAssertTrue(full.items[0].isGeneratingFrame)
+        await camera.finishMetadata()
+        _ = try await wait(queue) { $0.items[0].frameURL != nil }
+        let retry = await queue.retry(id: full.items[1].id)
+        XCTAssertNotNil(retry)
+        _ = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy { !$0.isGeneratingFrame && $0.frameURL != nil } }
+    }
+
+    func testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata() async throws {
+        let recorder = PipelineRenderRecorder()
+        let (queue, directory) = try fixture(renderer: { source, _, target, metadata in
+            try await recorder.render(source: source, directory: target, metadata: metadata)
+        })
+        let camera = PipelineMetadataCamera(header: try pipelineHeader())
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = true
+        for id: UInt32 in [1, 2] { try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(id).fileName)) }
+        await queue.enqueue([file(1), file(2)], effects: effects)
+        await queue.start(session: camera, directory: directory)
+        try await waitForMetadataRead(camera)
+        _ = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy(\.isGeneratingFrame) }
+        await queue.closePhotoGeneration(); await queue.closePhotoGeneration()
+        let closed = await queue.snapshot()
+        XCTAssertTrue(closed.items.allSatisfy { !$0.isGeneratingFrame && $0.frameURL == nil })
+        await camera.finishMetadata()
+        // Queue a new original to cross the late callback's actor turn; the
+        // closed generation queue must neither revive old work nor accept it.
+        await queue.enqueue(file(3), effects: effects)
+        await queue.start(session: camera, directory: directory)
+        let final = try await wait(queue) { !$0.isTransferring && $0.items[2].status == .completed }
+        XCTAssertTrue(final.items.allSatisfy { !$0.isGeneratingFrame && $0.frameURL == nil })
+        let order = await recorder.order
+        XCTAssertTrue(order.isEmpty)
+    }
+}
+
+extension TransferQueueScenarioTests {
+    func testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication() async throws {
+        let entered = expectation(description: "Ready second photo owns compute")
+        let release = CropPermitLatch()
+        let (queue, directory) = try fixture(renderer: { source, _, _, _ in
+            entered.fulfill()
+            await release.wait()
+            return source
+        })
+        let camera = PipelineMetadataCamera(header: try pipelineHeader())
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = true
+        try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
+        await queue.enqueue([file(1), file(2)], effects: effects)
+        await queue.start(session: camera, directory: directory)
+        try await waitForMetadataRead(camera)
+        await fulfillment(of: [entered], timeout: 2)
+        await queue.closePhotoGeneration(); await queue.closePhotoGeneration()
+        let closing = await queue.snapshot()
+        XCTAssertFalse(closing.items[0].isGeneratingFrame)
+        XCTAssertTrue(closing.items[1].isGeneratingFrame, "Active worker owns its cancellation boundary")
+        await camera.finishMetadata()
+        await release.open()
+        let ended = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy { !$0.isGeneratingFrame } }
+        XCTAssertTrue(ended.items.allSatisfy { $0.frameURL == nil })
+        XCTAssertTrue(ended.items.allSatisfy { $0.outputURL != nil })
+    }
+}
+
+extension TransferQueueScenarioTests {
+    func testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline() async throws {
+        let recorder = PipelineRenderRecorder()
+        let (queue, directory) = try fixture(renderer: { source, _, target, metadata in
+            try await recorder.render(source: source, directory: target, metadata: metadata)
+        })
+        let camera = PipelineMetadataCamera(header: try pipelineHeader(), holdIdentity: true)
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = true
+        try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
+        await queue.enqueue([file(1), file(2)], effects: effects)
+        await queue.start(session: camera, directory: directory)
+        let downloaded = try await wait(queue) { !$0.isTransferring && $0.items[1].status == .completed }
+        XCTAssertTrue(downloaded.items.allSatisfy(\.isGeneratingFrame))
+        let readsBeforeIdentity = await camera.metadataRequests
+        let downloads = await camera.downloads
+        XCTAssertTrue(readsBeforeIdentity.isEmpty)
+        XCTAssertEqual(downloads, [2])
+        await camera.finishIdentity()
+        try await waitForMetadataRead(camera)
+        _ = try await wait(queue) { $0.items[1].frameURL != nil && $0.items[0].isGeneratingFrame }
+        await camera.finishMetadata()
+        _ = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame && $0.frameURL != nil } }
+        let order = await recorder.order
+        XCTAssertEqual(order, ["DSC_2.JPG", "DSC_1.JPG"])
+    }
+}
+
+private actor PreviewHistogramTestGate {
+    private var continuations: [CheckedContinuation<[CGFloat], Never>] = []
+    var count: Int { continuations.count }
+    func calculate() async -> [CGFloat] {
+        await withCheckedContinuation { continuations.append($0) }
+    }
+    func finish(_ index: Int, bars: [CGFloat]) {
+        continuations[index].resume(returning: bars)
+    }
+}
+
+final class PhotoFilterCategoryParityTests: XCTestCase {
+    func testChooserFavoritesPositionAndOffPreserveRecipe() throws {
+        let first = try XCTUnwrap(Np3FilterCatalog.preset(id: "forest_verdure"))
+        let second = try XCTUnwrap(Np3FilterCatalog.preset(id: "blue_hour"))
+        var settings = PhotoEffectsSettings()
+        settings.favoriteFilterIDs = [second.catalogKey, first.catalogKey]
+        settings.filterIntensities[first.catalogKey] = 42
+        var chooser = PhotoFilterChooserState(isPresented: true, category: .landscape)
+        XCTAssertEqual(Array(chooser.items(in: settings).prefix(2).map(\.id)), [second.id, first.id])
+        chooser.select(first.id, in: &settings)
+        XCTAssertFalse(chooser.isPresented)
+        XCTAssertEqual(settings.selectedFilter?.intensityPercent, 42)
+        XCTAssertEqual(chooser.initialItemID(in: settings), first.id)
+        let recipe = settings.selectedFilter
+        chooser.isPresented = true
+        chooser.select(nil, in: &settings)
+        XCTAssertFalse(settings.photoFilterEnabled)
+        XCTAssertFalse(chooser.isPresented)
+        XCTAssertEqual(settings.selectedFilter, recipe)
+        XCTAssertEqual(chooser.initialItemID(in: settings), second.id)
+        chooser.category = .favorites
+        XCTAssertEqual(chooser.items(in: settings).map(\.id), [second.id, first.id])
+        settings.favoriteFilterIDs = []
+        XCTAssertNil(chooser.initialItemID(in: settings))
+    }
+
+    func testAllFiftyCategoriesMatchAndroidFallbackMetadata() {
+        // Expected membership transcribed from Android CuratedNp3Filters and
+        // PhotoFilterCategory, not derived from iOS localized display names.
+        let expected: [PhotoEffectFilterCategory: [String]] = [
+            .landscape: ["forest_verdure", "blue_hour", "fern_shade", "urban_green", "moss_mood", "sunset_film", "sunset_glow"],
+            .cinematic: ["dusk_ember", "cinema_blue", "cinematic_dusk", "golden_dusk", "teal_and_orange"],
+            .color: ["bleached_silver", "blue_memory", "calm_breeze", "cozy_autumn", "dawn_hues", "soft_harmony", "matte_blue", "green_shadows", "natural_link", "cyan_negative", "red_cyan", "teal_negative", "lemon_negative", "amber_negative", "lime_negative", "pastel_pink", "setouchi_blue", "sky_mist", "soft_glow", "cool_sun_kiss", "warm_sun_kiss", "gentle_clarity", "turquoise_blue", "warm_street", "warm_lowlight", "honey_warm"],
+            .monochrome: ["british_mono"],
+            .portrait: ["love_glow", "clear_portrait", "soft_portrait", "warm_portrait"],
+            .film: ["darkroom_film", "classic_film", "rose_vintage", "soft_film", "vintage_color", "vintage_vibe", "vital_film"],
+        ]
+        XCTAssertEqual(expected.values.flatMap { $0 }.count, 50)
+        XCTAssertEqual(Np3FilterCatalog.presets.count, 50)
+        for preset in Np3FilterCatalog.presets {
+            let category = expected.first { $0.value.contains(preset.legacyID) }?.key
+            XCTAssertNotNil(category, preset.legacyID)
+            for id in [preset.id, preset.catalogKey, preset.legacyID] {
+                // Display language must never change catalog classification.
+                for displayName in [preset.name, preset.fallbackName, "任意显示名称"] {
+                    XCTAssertEqual(PhotoFilterPreset(id: id, name: displayName).category, category, preset.legacyID)
+                }
+            }
+        }
+    }
+}
+
+final class PhotoPreviewFrameCacheTests: XCTestCase {
+    func testCancelledPrefetchWaiterDoesNotCancelPromotedWorkOrRepeatFiltering() async throws {
+        let cache = PhotoPreviewFrameCache<Int>()
+        let entered = CropPermitLatch()
+        let release = CropPermitLatch()
+        let prefetch = Task {
+            try await cache.getOrRender {
+                await entered.open()
+                await release.wait()
+                try Task.checkCancellation()
+                return 42
+            }
+        }
+        await entered.wait()
+        prefetch.cancel()
+        do { _ = try await prefetch.value; XCTFail("Cancelled waiter returned") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        let current = Task {
+            try await cache.getOrRender { XCTFail("Promoted frame repeated filtering"); return 0 }
+        }
+        await release.open()
+        let result = try await current.value
+        XCTAssertEqual(result, 42)
+        let cached = try await cache.getOrRender { XCTFail("Completed hit repeated filtering"); return 0 }
+        XCTAssertEqual(cached, 42)
+        await cache.close()
+    }
+
+    func testFailureCanRetryAndClosedCacheRejectsLateResults() async throws {
+        let cache = PhotoPreviewFrameCache<Int>()
+        do { _ = try await cache.getOrRender { throw CocoaError(.fileReadCorruptFile) }; XCTFail("Expected failure") }
+        catch is CocoaError {} catch { XCTFail("Unexpected error: \(error)") }
+        let entered = CropPermitLatch()
+        let release = CropPermitLatch()
+        let retry = Task {
+            try await cache.getOrRender {
+                await entered.open()
+                await release.wait() // Deliberately ignores cancellation.
+                return 7
+            }
+        }
+        await entered.wait()
+        await cache.close()
+        do { _ = try await retry.value; XCTFail("Closed cache returned") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        await release.open()
+        do { _ = try await cache.getOrRender { 9 }; XCTFail("Closed cache reopened") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+}
+
+final class PhotoPreviewCacheSetTests: XCTestCase {
+    func testDemandChangeCancelsObsoleteWorkAndAllowsItToBeRequestedAgain() async throws {
+        let cache = PhotoPreviewCacheSet<String, Int>()
+        await cache.replaceRequested(["old", "current"])
+        let completed = try await cache.getOrRender(key: "current") { 42 }
+        XCTAssertEqual(completed, 42)
+        let entered = CropPermitLatch(), release = CropPermitLatch()
+        let old = Task {
+            try await cache.getOrRender(key: "old") {
+                await entered.open(); await release.wait()
+                return 1
+            }
+        }
+        await entered.wait()
+        await cache.replaceRequested(["current"])
+        do { _ = try await old.value; XCTFail("Obsolete work returned") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        do { _ = try await cache.getOrRender(key: "old") { 0 }; XCTFail("Unrequested work started") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        await release.open()
+        await cache.replaceRequested(["old"])
+        let promoted = try await cache.getOrRender(key: "old") { 2 }
+        XCTAssertEqual(promoted, 2)
+        await cache.replaceRequested(["current"])
+        let reused = try await cache.getOrRender(key: "current") { XCTFail("Demand changes discarded completed frame"); return 0 }
+        XCTAssertEqual(reused, 42)
+        await cache.close()
+    }
+
+    func testThreeFrameAccessOrderAndIndependentSourceIdentity() async throws {
+        let cache = PhotoPreviewCacheSet<String, Int>()
+        for (key, value) in [("a", 1), ("b", 2), ("c", 3)] {
+            let result = try await cache.getOrRender(key: key) { value }
+            XCTAssertEqual(result, value)
+        }
+        let a = try await cache.getOrRender(key: "a") { XCTFail("Hot frame rendered again"); return 0 }
+        XCTAssertEqual(a, 1)
+        _ = try await cache.getOrRender(key: "d") { 4 }
+        let count = await cache.count
+        XCTAssertEqual(count, 3)
+        let b = try await cache.getOrRender(key: "b") { 22 }
+        XCTAssertEqual(b, 22, "Least recently accessed frame must be evicted")
+        await cache.close()
+        do { _ = try await cache.getOrRender(key: "a") { 9 }; XCTFail("Closed source reused") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        let replacement = PhotoPreviewCacheSet<String, Int>()
+        let fresh = try await replacement.getOrRender(key: "a") { 11 }
+        XCTAssertEqual(fresh, 11, "New source/decoration scope must not inherit old frame")
+        await replacement.close()
+    }
+
+    func testEvictionCancelsActiveEntryAndRejectsLateResult() async throws {
+        let cache = PhotoPreviewCacheSet<String, Int>(capacity: 1)
+        let entered = CropPermitLatch()
+        let release = CropPermitLatch()
+        let old = Task {
+            try await cache.getOrRender(key: "old") {
+                await entered.open()
+                await release.wait()
+                return 1
+            }
+        }
+        await entered.wait()
+        let next = try await cache.getOrRender(key: "new") { 2 }
+        XCTAssertEqual(next, 2)
+        do { _ = try await old.value; XCTFail("Evicted work returned") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        await release.open()
+        let current = try await cache.getOrRender(key: "new") { XCTFail("Late old result displaced new frame"); return 0 }
+        XCTAssertEqual(current, 2)
+        await cache.close()
+    }
+}
+
+@MainActor final class LocalPhotoPreviewCacheTests: XCTestCase {
+    func testReopeningSameSourceAfterCloseRebuildsWithoutInvalidatingOpeningSnapshot() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        var settings = PhotoEffectsSettings()
+        settings.selectFilter(try XCTUnwrap(Np3FilterCatalog.presets.first).id)
+        let cache = LocalPhotoPreviewCache()
+        await cache.configure(image: image, settings: settings, metadata: nil)
+        let opening = try await cache.render(image: image, settings: settings, metadata: nil)
+        let snapshot = LocalExpandedPreviewSnapshot(image: opening.filtered,
+            initialComparison: opening.unfiltered, anchor: CGRect(x: 0, y: 0, width: 300, height: 225))
+        cache.close()
+        await cache.configure(image: image, settings: settings, metadata: nil)
+        let reopened = try await cache.render(image: image, settings: settings, metadata: nil)
+        XCTAssertFalse(opening.filtered === reopened.filtered)
+        XCTAssertEqual(opening.filtered.cgImage?.width, reopened.filtered.cgImage?.width)
+        XCTAssertEqual(opening.filtered.cgImage?.height, reopened.filtered.cgImage?.height)
+        XCTAssertTrue(snapshot.image === opening.filtered)
+        XCTAssertTrue(snapshot.comparison(current: reopened) === opening.unfiltered)
+        let reused = try await cache.render(image: image, settings: settings, metadata: nil)
+        XCTAssertTrue(reused.filtered === reopened.filtered)
+        cache.close()
+    }
+
+    func testRealFramesReuseAndSourceChangesInvalidate() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        var settings = PhotoEffectsSettings()
+        settings.selectFilter(try XCTUnwrap(Np3FilterCatalog.presets.first).id)
+        let cache = LocalPhotoPreviewCache()
+        await cache.configure(image: image, settings: settings, metadata: nil)
+        let first = try await cache.render(image: image, settings: settings, metadata: nil)
+        let reused = try await cache.render(image: image, settings: settings, metadata: nil)
+        XCTAssertTrue(first.filtered === reused.filtered, "A completed frame must return the same image")
+        var neighbor = settings
+        neighbor.selectedFilter = try XCTUnwrap(nextPhotoFilterSelections(for: settings).first)
+        let warmed = try await cache.render(image: image, settings: neighbor, metadata: nil)
+        await cache.configure(image: image, settings: neighbor, metadata: nil)
+        let promoted = try await cache.render(image: image, settings: neighbor, metadata: nil)
+        XCTAssertTrue(warmed.filtered === promoted.filtered, "Promoting a preheated frame must skip filtering and composition")
+        await cache.configure(image: image, settings: settings, metadata: nil)
+        var changed = settings
+        changed.selectedFilter?.intensityPercent = 42
+        await cache.configure(image: image, settings: changed, metadata: nil)
+        let second = try await cache.render(image: image, settings: changed, metadata: nil)
+        XCTAssertFalse(first.filtered === second.filtered)
+        await cache.configure(image: image, settings: settings, metadata: nil)
+        let revisited = try await cache.render(image: image, settings: settings, metadata: nil)
+        XCTAssertTrue(first.filtered === revisited.filtered)
+        let newSource = UIImage(cgImage: try XCTUnwrap(image.cgImage))
+        await cache.configure(image: newSource, settings: settings, metadata: nil)
+        let fresh = try await cache.render(image: newSource, settings: settings, metadata: nil)
+        XCTAssertFalse(first.filtered === fresh.filtered)
+        var decorated = settings
+        decorated.photoFrameEnabled = true
+        decorated.photoFramePreset = .minimal
+        decorated.watermark.enabled = false
+        await cache.configure(image: newSource, settings: decorated, metadata: nil)
+        let frame = try await cache.render(image: newSource, settings: decorated, metadata: nil)
+        var otherFrame = decorated
+        otherFrame.photoFramePreset = .mist
+        await cache.configure(image: newSource, settings: otherFrame, metadata: nil)
+        do { _ = try await cache.render(image: newSource, settings: decorated, metadata: nil); XCTFail("Old decoration scope accepted") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        let replaced = try await cache.render(image: newSource, settings: otherFrame, metadata: nil)
+        XCTAssertFalse(frame.filtered === replaced.filtered)
+        cache.close()
+        do { _ = try await cache.render(image: newSource, settings: settings, metadata: nil); XCTFail("Closed page rendered") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+}
+
+final class PhotoOriginalTiledCompositionTests: XCTestCase {
+    func testFlatWatermarkAndImmersiveMatchPrefilteredCompositionAcrossTileBoundary() throws {
+        try assertTileBoundaryComposition(selection: PhotoFilterSelection(
+            preset: PhotoEffectsSettings().orderedFilters[0], intensityPercent: 80))
+    }
+
+    func testCubeMatchesPrefilteredCompositionAcrossTileBoundary() throws {
+        // Nonconstant channel rotation exercises interpolation on both sides of the seam.
+        var rgb: [Float] = []
+        for blue in 0...1 {
+            for green in 0...1 {
+                for red in 0...1 { rgb += [Float(green), Float(blue), Float(red)] }
+            }
+        }
+        let lut = CubeLUT(size: 2, domainMin: .zero, domainMax: SIMD3(repeating: 1),
+                          rgb: rgb, digest: "f110-cube-seam")
+        PhotoLUTRuntime.register(lut)
+        try assertTileBoundaryComposition(selection: PhotoFilterSelection(
+            preset: PhotoFilterPreset(id: "cube:\(lut.digest)", name: "Seam"), intensityPercent: 60))
+    }
+
+    private func assertTileBoundaryComposition(selection: PhotoFilterSelection) throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 1024, height: 4101), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 1024, height: 4101))
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 4095, width: 1024, height: 6))
+            UIColor.green.setFill(); context.fill(CGRect(x: 512, y: 0, width: 512, height: 4101))
+        }
+        var filterOnly = PhotoEffectsSettings()
+        filterOnly.photoFrameEnabled = false
+        filterOnly.photoFilterEnabled = true
+        filterOnly.selectedFilter = selection
+        let prefiltered = try PhotoEffectsRenderer.render(source, settings: filterOnly, filterExecution: .preview)
+        for mode in 0..<3 {
+            try autoreleasepool {
+                var settings = filterOnly
+                settings.photoFrameEnabled = mode != 0
+                settings.photoFrameBorderEnabled = mode == 2
+                settings.photoFramePreset = .immersive
+                settings.watermark.enabled = mode == 1
+                settings.watermark.text = "Tile boundary"
+                let actual = try PhotoEffectsRenderer.render(source, settings: settings)
+                settings.photoFilterEnabled = false
+                let expected = try PhotoEffectsRenderer.render(prefiltered, settings: settings)
+                XCTAssertEqual(actual.size, source.size)
+                XCTAssertEqual(try bytes(actual), try bytes(expected), "mode=\(mode)")
+            }
+        }
+    }
+
+    func testCubeAndNP3PreserveAllOrientationsAndTransparentPixels() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        format.preferredRange = .standard
+        let raw = UIGraphicsImageRenderer(size: CGSize(width: 17, height: 11), format: format).image { context in
+            UIColor.red.withAlphaComponent(0.5).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 5))
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 8, y: 5, width: 9, height: 6))
+        }
+        let lut = CubeLUT(size: 2, domainMin: .zero, domainMax: SIMD3(repeating: 1),
+                          rgb: [Float](repeating: 0.25, count: 24), digest: "f110-transparency")
+        PhotoLUTRuntime.register(lut)
+        let selections = [
+            PhotoFilterSelection(preset: PhotoEffectsSettings().orderedFilters[0], intensityPercent: 80),
+            PhotoFilterSelection(preset: PhotoFilterPreset(id: "cube:\(lut.digest)", name: "Test"), intensityPercent: 60)
+        ]
+        let orientations: [UIImage.Orientation] = [.up, .upMirrored, .down, .downMirrored,
+                                                  .left, .leftMirrored, .right, .rightMirrored]
+        for selection in selections {
+            for orientation in orientations {
+                let source = UIImage(cgImage: try XCTUnwrap(raw.cgImage), scale: 1, orientation: orientation)
+                var settings = PhotoEffectsSettings()
+                settings.photoFrameEnabled = false
+                settings.photoFilterEnabled = true
+                settings.selectedFilter = selection
+                let expected = try PhotoEffectsRenderer.render(source, settings: settings, filterExecution: .preview)
+                let actual = try PhotoEffectsRenderer.render(source, settings: settings)
+                XCTAssertEqual(actual.size, expected.size)
+                XCTAssertEqual(try bytes(actual), try bytes(expected), "\(selection.preset.id), orientation=\(orientation.rawValue)")
+            }
+        }
+    }
+
+    func testTwelveMegapixelFrameRejectsLowBudgetThenPreservesPhotoPixels() throws {
+        try autoreleasepool {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+            let source = UIGraphicsImageRenderer(size: CGSize(width: 4000, height: 3000), format: format).image { context in
+                UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4000, height: 3000))
+                for y in 0..<8 {
+                    for x in 0..<8 {
+                        (x.isMultiple(of: 2) == y.isMultiple(of: 2) ? UIColor.red : UIColor.blue).setFill()
+                        context.fill(CGRect(x: 1968 + x * 8, y: 1468 + y * 8, width: 8, height: 8))
+                    }
+                }
+            }
+            var settings = PhotoEffectsSettings()
+            settings.photoFrameEnabled = true; settings.photoFramePreset = .plaque
+            settings.metadata.widthPercent = 200; settings.watermark.enabled = false
+            XCTAssertThrowsError(try PhotoEffectsRenderer.render(source, settings: settings, metadata: .empty,
+                availableMemory: { 64 * 1024 * 1024 })) { error in
+                XCTAssertGreaterThan((error as? PhotoAllocationRejected)?.required ?? 0, 4000 * 3000 * 4)
+            }
+            let output = try PhotoEffectsRenderer.render(source, settings: settings, metadata: .empty,
+                availableMemory: { .max })
+            XCTAssertEqual(output.cgImage?.width, 4000)
+            XCTAssertEqual(output.cgImage?.height, 3960)
+            let region = CGRect(x: 1968, y: 1468, width: 64, height: 64)
+            let expected = UIImage(cgImage: try XCTUnwrap(source.cgImage?.cropping(to: region)))
+            let actual = UIImage(cgImage: try XCTUnwrap(output.cgImage?.cropping(to: region)))
+            XCTAssertEqual(try bytes(actual), try bytes(expected))
+        }
+    }
+
+    func testProductionBudgetRejectsThenRetriesWithoutChangingResolution() throws {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 24), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+        }
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = false
+        settings.photoFilterEnabled = true
+        settings.selectedFilter = PhotoFilterSelection(preset: settings.orderedFilters[0], intensityPercent: 80)
+        let original = try bytes(source)
+        var queries = 0
+        XCTAssertThrowsError(try PhotoEffectsRenderer.render(source, settings: settings, availableMemory: {
+            queries += 1
+            return 64 * 1024 * 1024
+        })) { error in
+            guard let rejected = error as? PhotoAllocationRejected else { return XCTFail("Unexpected error: \(error)") }
+            XCTAssertGreaterThan(rejected.required, 32 * 24 * 4)
+            XCTAssertEqual(rejected.available, 64 * 1024 * 1024)
+        }
+        XCTAssertEqual(queries, 1)
+        let output = try PhotoEffectsRenderer.render(source, settings: settings, availableMemory: {
+            queries += 1
+            return .max
+        })
+        XCTAssertEqual(queries, 2)
+        XCTAssertEqual(output.size, source.size)
+        XCTAssertEqual(try bytes(source), original)
+        _ = try PhotoEffectsRenderer.render(source, settings: settings, filterExecution: .preview, availableMemory: {
+            XCTFail("Original export budget must not run for preview")
+            return 0
+        })
+    }
+
+    private func bytes(_ image: UIImage) throws -> Data {
+        let source = try XCTUnwrap(image.cgImage)
+        let context = try XCTUnwrap(CGContext(data: nil, width: source.width, height: source.height,
+            bitsPerComponent: 8, bytesPerRow: source.width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height))
+        return Data(bytes: try XCTUnwrap(context.data), count: source.width * source.height * 4)
+    }
+}
+
+
+final class PhotoAllocationBudgetTests: XCTestCase {
+    func testOversizedMalformedPNGIsRejectedBeforeLoading() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { _ in }
+        var data = try XCTUnwrap(image.pngData())
+        XCTAssertEqual(String(data: data[12..<16], encoding: .ascii), "IHDR")
+        // Keep the tiny compressed payload, but advertise one hundred million pixels.
+        // ImageIO rejects the inconsistent dimensions before returning properties.
+        for offset in [16, 20] {
+            let value: UInt32 = 10_000
+            for byte in 0..<4 { data[offset + byte] = UInt8(truncatingIfNeeded: value >> (24 - byte * 8)) }
+        }
+        var crc: UInt32 = 0xffff_ffff
+        for byte in data[12..<29] {
+            crc ^= UInt32(byte)
+            for _ in 0..<8 { crc = (crc >> 1) ^ (crc & 1 == 0 ? 0 : 0xedb8_8320) }
+        }
+        crc ^= 0xffff_ffff
+        for byte in 0..<4 { data[29 + byte] = UInt8(truncatingIfNeeded: crc >> (24 - byte * 8)) }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try data.write(to: url)
+        XCTAssertThrowsError(try PhotoAllocationBudget.loadOriginalImage(url, availableMemory: { 512 * 1024 * 1024 })) { error in
+            XCTAssertEqual((error as NSError).domain, NSCocoaErrorDomain)
+            XCTAssertEqual((error as NSError).code, CocoaError.fileReadCorruptFile.rawValue)
+        }
+    }
+
+    func testOriginalFileBudgetRejectsBeforeLoadingAndPreservesDimensionsWhenAllowed() throws {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let original = UIGraphicsImageRenderer(size: CGSize(width: 81, height: 63), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 81, height: 63))
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let data = try XCTUnwrap(original.pngData())
+        try data.write(to: url)
+        XCTAssertThrowsError(try PhotoAllocationBudget.loadOriginalImage(url, availableMemory: { 0 })) { error in
+            let rejected = error as? PhotoAllocationRejected
+            XCTAssertEqual(rejected?.required, 81 * 63 * 8 + 8 * 1024 * 1024)
+            XCTAssertEqual(rejected?.available, 0)
+        }
+        let loaded = try PhotoAllocationBudget.loadOriginalImage(url, availableMemory: { .max })
+        XCTAssertEqual(loaded.cgImage?.width, 81)
+        XCTAssertEqual(loaded.cgImage?.height, 63)
+        XCTAssertEqual(try Data(contentsOf: url), data)
+    }
+
+    func testAndroidEstimatesSaturateRatherThanWrapping() {
+        XCTAssertEqual(PhotoAllocationBudget.bytes(width: 6000, height: 4000), 96_000_000)
+        XCTAssertEqual(PhotoAllocationBudget.bytes(width: 6000, height: 4000, copies: 2, extra: 16_000_000), 208_000_000)
+        for value in [PhotoAllocationBudget.bytes(width: .max, height: 2),
+                      PhotoAllocationBudget.bytes(width: 1, height: 1, copies: .max),
+                      PhotoAllocationBudget.bytes(width: 1, height: 1, extra: .max),
+                      PhotoAllocationBudget.bytes(width: 0, height: 4000),
+                      PhotoAllocationBudget.bytes(width: -1, height: 4000),
+                      PhotoAllocationBudget.bytes(width: 1, height: 1, copies: 0),
+                      PhotoAllocationBudget.bytes(width: 1, height: 1, extra: -1)] {
+            XCTAssertEqual(value, .max)
+        }
+    }
+
+    func testAndroidNativeReserveAndBoundaryCases() {
+        let mib: Int64 = 1024 * 1024
+        XCTAssertTrue(PhotoAllocationBudget.fits(required: 494348528, available: 600 * mib, threshold: 100 * mib))
+        XCTAssertTrue(PhotoAllocationBudget.fits(required: 3500 * mib, available: 4096 * mib, threshold: 256 * mib))
+        XCTAssertTrue(PhotoAllocationBudget.fits(required: 384 * mib, available: 512 * mib, threshold: 128 * mib))
+        XCTAssertFalse(PhotoAllocationBudget.fits(required: 384 * mib + 1, available: 512 * mib, threshold: 128 * mib))
+        XCTAssertTrue(PhotoAllocationBudget.fits(required: 1, available: 64 * mib + 1))
+        XCTAssertFalse(PhotoAllocationBudget.fits(required: 1, available: 64 * mib))
+        XCTAssertFalse(PhotoAllocationBudget.fits(required: 1, available: 64 * mib, threshold: .max))
+        XCTAssertFalse(PhotoAllocationBudget.fits(required: .max, available: .max))
+        XCTAssertFalse(PhotoAllocationBudget.fits(required: -1, available: 512 * mib))
+        XCTAssertFalse(PhotoAllocationBudget.fits(required: 1, available: 0))
+        XCTAssertFalse(PhotoAllocationBudget.fits(required: 1, available: 512 * mib, threshold: -1))
+    }
+}
+
+
+private actor QueueRenderBudgetFixture {
+    private(set) var selections: [PhotoEffectsSettings] = []
+    func next(_ settings: PhotoEffectsSettings) -> Int64 {
+        selections.append(settings)
+        return selections.count == 1 ? 64 * 1024 * 1024 : .max
+    }
+}
+
+final class RemoteOrientationSessionTests: XCTestCase {
+    func testInvalidInputAndPauseRejectOldStabilityTickets() throws {
+        var session = RemoteOrientationSession<Int>()
+        let old = try XCTUnwrap(session.observe(1))
+        XCTAssertTrue(session.accepts(old, target: 1))
+        XCTAssertNil(session.observe(nil))
+        XCTAssertFalse(session.accepts(old, target: 1))
+        let replacement = try XCTUnwrap(session.observe(1))
+        XCTAssertFalse(session.accepts(old, target: 1))
+        XCTAssertTrue(session.accepts(replacement, target: 1))
+        session.pause()
+        XCTAssertFalse(session.accepts(replacement, target: 1))
+        let resumed = try XCTUnwrap(session.observe(1))
+        XCTAssertTrue(session.accepts(resumed, target: 1))
+        XCTAssertNil(session.observe(1), "Unchanged input must not restart the260ms timer")
+        XCTAssertTrue(session.accepts(resumed, target: 1))
+    }
+
+    func testManualSuppressionSurvivesPauseUntilDifferentValidDirection() throws {
+        var session = RemoteOrientationSession<Int>()
+        let old = try XCTUnwrap(session.observe(1))
+        session.suppressCurrent()
+        XCTAssertFalse(session.accepts(old, target: 1))
+        session.pause()
+        XCTAssertNil(session.observe(1))
+        XCTAssertNil(session.observe(nil))
+        XCTAssertNil(session.observe(1))
+        let changed = try XCTUnwrap(session.observe(2))
+        XCTAssertTrue(session.accepts(changed, target: 2))
+        XCTAssertNotNil(session.observe(1))
+    }
+
+    func testLatestPendingRequestIncludesReturnAndCanBeDiscardedWhenFrozen() {
+        var session = RemoteOrientationSession<Int>()
+        session.enqueue(2)
+        session.enqueue(0)
+        XCTAssertEqual(session.takePending(), 0, "Return request during fade-out must replace older queued target")
+        XCTAssertNil(session.takePending())
+        session.enqueue(1)
+        session.discardPending()
+        XCTAssertNil(session.takePending())
+        session.enqueue(2)
+        session.pause()
+        XCTAssertEqual(session.takePending(), 2, "Android pause clears candidate but does not drain already queued rotations")
+    }
+}
+
+@MainActor
+final class ScreenAwakeCoordinatorTests: XCTestCase {
+    func testOwnersDoNotRestoreStalePreferenceOrForegroundSnapshots() {
+        var applied: [Bool] = []
+        let coordinator = ScreenAwakeCoordinator { applied.append($0) }
+        coordinator.setForeground(true)
+        coordinator.setPreference(true)
+        let first = coordinator.acquire()
+        coordinator.setPreference(false)
+        XCTAssertEqual(applied.last, true)
+        let second = coordinator.acquire()
+        coordinator.release(first)
+        XCTAssertEqual(applied.last, true)
+        coordinator.setForeground(false)
+        XCTAssertEqual(applied.last, false)
+        coordinator.release(second)
+        XCTAssertEqual(applied.last, false)
+        coordinator.setPreference(true)
+        XCTAssertEqual(applied.last, false)
+        coordinator.setForeground(true)
+        XCTAssertEqual(applied.last, true)
+        coordinator.release(first)
+        XCTAssertEqual(applied.last, true, "Late release cannot override the latest preference")
+    }
+
+    func testTemporaryHoldEndsAgainstLatestPreferenceAndSurvivesForegroundRoundTrip() {
+        var value = false
+        let coordinator = ScreenAwakeCoordinator { value = $0 }
+        coordinator.setForeground(true)
+        let hold = coordinator.acquire()
+        XCTAssertTrue(value)
+        coordinator.setForeground(false)
+        XCTAssertFalse(value)
+        coordinator.setForeground(true)
+        XCTAssertTrue(value)
+        coordinator.setPreference(true)
+        coordinator.release(hold)
+        XCTAssertTrue(value)
+        coordinator.setPreference(false)
+        XCTAssertFalse(value)
+    }
+}
+
+final class AppLanguageResolutionTests: XCTestCase {
+    func testSystemFallbackAndExplicitChoicesUseOneResourceLanguage() {
+        let cases: [([String], String)] = [
+            (["fr-FR", "de-DE"], "en"), (["en-GB"], "en"),
+            (["zh-CN"], "zh"), (["zh-Hans"], "zh"), (["zh-TW"], "hant"),
+            (["zh-HK"], "hant"), (["zh-Hant"], "hant"),
+            (["fr", "zh-Hant"], "hant"), ([], "en")
+        ]
+        for (preferred, expected) in cases {
+            let actual = AppLocalized.resourceLanguage(tag: "system", preferredLanguages: preferred)
+            XCTAssertEqual(actual, expected)
+            XCTAssertEqual(AppLocalized.resource("lut_read_failed", language: actual), AndroidLocalization.byResource["lut_read_failed"]?[expected])
+            XCTAssertEqual(AppLocalized.text("设置", language: actual), AndroidLocalization.byResource["settings"]?[expected])
+        }
+        for (tag, expected) in [("en", "en"), ("zh-Hans", "zh"), ("zh-Hant", "hant")] {
+            XCTAssertEqual(AppLocalized.resourceLanguage(tag: tag, preferredLanguages: ["fr-FR"]), expected)
+        }
+        XCTAssertEqual(AppLocalized.resourceLanguage(tag: "fr-FR", preferredLanguages: ["zh-Hans"]), "en")
+    }
+
+    func testSwiftUILocaleTracksFallbackAndReturningToSystem() {
+        let system = ["fr-FR"]
+        XCTAssertEqual(AppLocalized.locale(for: "zh-Hant", preferredLanguages: system).language.script?.identifier, "Hant")
+        XCTAssertEqual(AppLocalized.locale(for: "system", preferredLanguages: system).language.languageCode?.identifier, "en")
+        XCTAssertEqual(AppLocalized.resourceLanguage(tag: "system", preferredLanguages: system), "en")
+        XCTAssertEqual(AppLocalized.locale(for: "system", preferredLanguages: ["zh-Hans"]).language.script?.identifier, "Hans")
+    }
+}
+
+
+final class DetentWheelDragSessionTests: XCTestCase {
+    private let original = DetentWheelConfiguration(options: [0, 1, 2, 3, 4], rowHeight: 18, enabled: true, readOnly: false)
+
+    func testConfigurationChangesRejectOldGestureEvenAfterRestoringOriginal() {
+        let changes = [
+            DetentWheelConfiguration(options: [4, 3, 2, 1, 0], rowHeight: 18, enabled: true, readOnly: false),
+            DetentWheelConfiguration(options: [0, 1], rowHeight: 18, enabled: true, readOnly: false),
+            DetentWheelConfiguration(options: [0, 1, 2, 3, 4], rowHeight: 30, enabled: true, readOnly: false),
+            DetentWheelConfiguration(options: [0, 1, 2, 3, 4], rowHeight: 18, enabled: false, readOnly: false),
+            DetentWheelConfiguration(options: [0, 1, 2, 3, 4], rowHeight: 18, enabled: true, readOnly: true)
+        ]
+        for changed in changes {
+            var session = DetentWheelDragSession(configuration: original)
+            let old = session.revision
+            XCTAssertTrue(session.begin(revision: old, selectedIndex: 3))
+            XCTAssertEqual(session.preview(revision: old, translation: 18), 2)
+            session.update(configuration: changed)
+            XCTAssertNil(session.release(revision: old, translation: 18))
+            if !changed.canDrag {
+                XCTAssertFalse(session.begin(revision: session.revision, selectedIndex: 0))
+            }
+            session.update(configuration: original)
+            XCTAssertFalse(session.begin(revision: old, selectedIndex: 3))
+            XCTAssertNil(session.release(revision: old, translation: 18))
+            let fresh = session.revision
+            XCTAssertTrue(session.begin(revision: fresh, selectedIndex: 1))
+            XCTAssertEqual(session.release(revision: fresh, translation: -18), 2)
+            XCTAssertNil(session.release(revision: fresh, translation: -18))
+        }
+    }
+
+    func testUnchangedConfigurationPreservesPreviewAndCancellationRejectsRelease() {
+        var session = DetentWheelDragSession(configuration: original)
+        XCTAssertNil(session.release(revision: 0, translation: 0))
+        XCTAssertTrue(session.begin(revision: 0, selectedIndex: 2))
+        session.update(configuration: original)
+        XCTAssertEqual(session.preview(revision: 0, translation: -999), 4)
+        XCTAssertEqual(session.preview(revision: 0, translation: 999), 0)
+        XCTAssertEqual(session.release(revision: 0, translation: 9.2), 1)
+        XCTAssertTrue(session.begin(revision: 0, selectedIndex: 4))
+        session.invalidate()
+        XCTAssertNil(session.release(revision: 0, translation: 18))
+    }
+}
+
+
+extension AppLanguageResolutionTests {
+    func testAndroidEscapesDecodeOnceAndPreserveLiteralBackslashes() {
+        let cases: [(String, String)] = [
+            (#"Don\'t"#, "Don't"),
+            (#"a\nb\tc\rd"#, "a\nb\tc\rd"),
+            (#"say \"yes\""#, "say \"yes\""),
+            (#"\\n"#, #"\n"#),
+            (#"path\\file"#, #"path\file"#),
+            (#"tail\"#, #"tail\"#),
+            (#"unknown\q"#, #"unknown\q"#)
+        ]
+        for (source, expected) in cases {
+            for language in ["en", "zh", "hant"] {
+                XCTAssertEqual(AppLocalized.text(source, language: language), expected)
+            }
+        }
+    }
+
+    func testEffectEntryAndLabelsMatchAndroidResources() {
+        for (language, title, coordinates, strength, kind) in [
+            ("en", "Filter · LUT · Frame · Watermark", "Coordinates", "Intensity", "Type"),
+            ("zh", "滤镜·LUT·边框·水印", "坐标", "强度", "类型"),
+            ("hant", "濾鏡·LUT·邊框·浮水印", "座標", "強度", "類型")
+        ] {
+            XCTAssertEqual(AppLocalized.resource("photo_effects", language: language), title)
+            XCTAssertEqual(AppLocalized.resource("local_photo_effects_entry", language: language), title)
+            XCTAssertEqual(AppLocalized.resource("photo_frame_metadata_coordinates", language: language), coordinates)
+            XCTAssertEqual(AppLocalized.resource("photo_filter_intensity", language: language), strength)
+            XCTAssertEqual(AppLocalized.resource("photo_frame_watermark_content", language: language), kind)
+        }
+    }
+}
+
+
+@MainActor
+final class RemoteToolInputRoutingTests: XCTestCase {
+    private final class Mode: ObservableObject { @Published var movie = false }
+    private struct ButtonSurface: UIViewRepresentable {
+        let movie: Bool
+        func makeUIView(context: Context) -> UIButton {
+            let view = UIButton(type: .custom)
+            view.accessibilityIdentifier = movie ? "movie-action" : "photo-action"
+            return view
+        }
+        func updateUIView(_ uiView: UIButton, context: Context) {}
+    }
+    private struct Host: View {
+        @ObservedObject var mode: Mode
+        var body: some View {
+            RemoteToolModeCrossfade(movie: mode.movie) { movie in
+                ButtonSurface(movie: movie).frame(width: 200, height: 60)
+            }
+        }
+    }
+
+    func testRealCrossfadeHitTestingBlocksOutgoingTopLayerOnReversal() async throws {
+        let mode = Mode()
+        let controller = UIHostingController(rootView: Host(mode: mode))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 240)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(30))
+        func descendants(_ view: UIView) -> [UIView] {
+            [view] + view.subviews.flatMap { descendants($0) }
+        }
+        func hit() -> UIView? {
+            controller.view.layoutIfNeeded()
+            guard let button = descendants(controller.view).first(where: { $0 is UIButton }) else { return nil }
+            let point = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: controller.view)
+            return controller.view.hitTest(point, with: nil)
+        }
+        XCTAssertEqual(hit()?.accessibilityIdentifier, "photo-action")
+        mode.movie = true
+        try await Task.sleep(for: .milliseconds(40))
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(hit()?.accessibilityIdentifier, "movie-action")
+        mode.movie = false
+        try await Task.sleep(for: .milliseconds(30))
+        controller.view.layoutIfNeeded()
+        XCTAssertTrue(hit() is RemoteToolInputShieldView,
+                      "Outgoing movie layer must intercept instead of hitting incoming photo")
+        try await Task.sleep(for: .milliseconds(800))
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(hit()?.accessibilityIdentifier, "photo-action")
+    }
+}
+
+
+final class WorkspacePagingTests: XCTestCase {
+    func testInterruptedEntryUsesNewDragDistanceAndNearestBound() {
+        XCTAssertTrue(shouldEnterWorkspace(distance: 0.8, upwardVelocity: 0, dragTranslation: -20))
+        XCTAssertFalse(shouldEnterWorkspace(distance: 0.8, upwardVelocity: 0, dragTranslation: -56))
+        XCTAssertFalse(shouldEnterWorkspace(distance: 0.2, upwardVelocity: 0, dragTranslation: 20))
+        XCTAssertTrue(shouldEnterWorkspace(distance: 0.2, upwardVelocity: 0, dragTranslation: 56))
+        XCTAssertTrue(shouldEnterWorkspace(distance: 0.7, upwardVelocity: 0, dragTranslation: -501))
+        XCTAssertFalse(shouldEnterWorkspace(distance: 0.3, upwardVelocity: 0, dragTranslation: 501))
+    }
+
+    @MainActor
+    func testContainerCallbacksKeepDiscoveryPausedThroughCancelledReturn() throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 0)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        var discovery = WorkspaceDiscoveryState()
+        pager.began = { discovery.begin($0) }
+        pager.settled = { discovery.request($0); discovery.settle($0) }
+        pager.requestPage(1)
+        XCTAssertTrue(discovery.shouldPause)
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 800
+        XCTAssertTrue(discovery.shouldPause)
+        var target = CGPoint.zero
+        pager.scrollViewWillEndDragging(scroll, withVelocity: .zero, targetContentOffset: &target)
+        scroll.contentOffset = target
+        pager.scrollViewDidEndDecelerating(scroll)
+        XCTAssertTrue(discovery.shouldPause)
+        pager.requestPage(0)
+        XCTAssertFalse(discovery.shouldPause)
+        XCTAssertEqual(discovery.settledPage, 0)
+    }
+
+    @MainActor
+    func testNestedAdmissionUsesTouchedScrollableAndOnlySharesItsPan() throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+        pager.loadViewIfNeeded()
+        let observer = try XCTUnwrap(pager.view.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.first)
+        let first = UIScrollView(frame: CGRect(x: 0, y: 0, width: 200, height: 300))
+        first.contentSize.height = 600
+        let touched = UIView()
+        first.addSubview(touched)
+        let second = UIScrollView(frame: first.frame)
+        second.contentSize.height = 600
+        XCTAssertTrue(pager.prepareNestedDrag(from: touched))
+        XCTAssertTrue(pager.acceptsNestedDirection(CGPoint(x: 10, y: 100)))
+        XCTAssertFalse(pager.acceptsNestedDirection(CGPoint(x: 100, y: 10)))
+        XCTAssertFalse(pager.acceptsNestedDirection(CGPoint(x: 100, y: 100)))
+        XCTAssertTrue(pager.gestureRecognizer(observer, shouldRecognizeSimultaneouslyWith: first.panGestureRecognizer))
+        XCTAssertFalse(pager.gestureRecognizer(observer, shouldRecognizeSimultaneouslyWith: second.panGestureRecognizer))
+        XCTAssertTrue(pager.prepareNestedDrag(from: second))
+        XCTAssertFalse(pager.gestureRecognizer(observer, shouldRecognizeSimultaneouslyWith: first.panGestureRecognizer))
+        XCTAssertTrue(pager.gestureRecognizer(observer, shouldRecognizeSimultaneouslyWith: second.panGestureRecognizer))
+        XCTAssertFalse(pager.prepareNestedDrag(from: UIView()))
+        XCTAssertFalse(pager.acceptsNestedDirection(CGPoint(x: 0, y: 100)))
+        pager.userScrollEnabled = false
+        XCTAssertFalse(pager.prepareNestedDrag(from: first))
+        pager.userScrollEnabled = true
+        pager.requestPage(0)
+        XCTAssertFalse(pager.prepareNestedDrag(from: first))
+    }
+
+    func testEntryUsesComposeVelocityDirectionAndStrictPositionBoundary() {
+        XCTAssertFalse(shouldEnterWorkspace(distance: 0.50, upwardVelocity: 0))
+        XCTAssertTrue(shouldEnterWorkspace(distance: 0.5001, upwardVelocity: 0))
+        XCTAssertFalse(shouldEnterWorkspace(distance: 0.20, upwardVelocity: 399))
+        XCTAssertTrue(shouldEnterWorkspace(distance: 0.20, upwardVelocity: 400))
+        XCTAssertFalse(shouldEnterWorkspace(distance: 0.80, upwardVelocity: -400))
+        XCTAssertTrue(shouldEnterWorkspace(distance: 0.80, upwardVelocity: -399))
+        XCTAssertFalse(shouldEnterWorkspace(distance: 0, upwardVelocity: 5_000))
+        XCTAssertTrue(shouldEnterWorkspace(distance: 1, upwardVelocity: -5_000))
+    }
+
+    @MainActor
+    func testEntryContainerUsesActualDragDistance() throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 0)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        for (position, expected): (CGFloat, CGFloat) in [(500, 0), (501, 1_000)] {
+            pager.scrollViewWillBeginDragging(scroll)
+            scroll.contentOffset.y = position
+            let target = pager.endPageDrag(in: scroll, downwardVelocity: 0, translation: -position)
+            XCTAssertEqual(target.y, expected)
+            scroll.contentOffset = target
+            pager.scrollViewDidEndDecelerating(scroll)
+            pager.requestPage(0)
+        }
+    }
+
+    func testReturnThresholdRequiresDistanceAndDownwardVelocity() {
+        XCTAssertFalse(shouldReturnFromWorkspace(distance: 0.14, downwardVelocity: 5_000))
+        XCTAssertFalse(shouldReturnFromWorkspace(distance: 0.20, downwardVelocity: 1_199))
+        XCTAssertFalse(shouldReturnFromWorkspace(distance: 0.20, downwardVelocity: -2_000))
+        XCTAssertTrue(shouldReturnFromWorkspace(distance: 0.15, downwardVelocity: 1_200))
+        XCTAssertTrue(shouldReturnFromWorkspace(distance: 0.30, downwardVelocity: 0))
+        XCTAssertFalse(shouldReturnFromWorkspace(distance: 0, downwardVelocity: 5_000))
+    }
+
+    @MainActor
+    func testNestedDragConsumesChildDistanceAndRestoresOnReturnOrCancel() throws {
+        for cancelled in [false, true] {
+            let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+            pager.loadViewIfNeeded()
+            pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+            pager.view.layoutIfNeeded()
+            let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+            let inner = UIScrollView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+            inner.contentSize.height = 1_000
+            inner.contentOffset.y = 100
+            pager.beginNestedDrag(in: inner)
+            pager.updateNestedDrag(translation: 90)
+            XCTAssertEqual(scroll.contentOffset.y, 1_000)
+            XCTAssertTrue(inner.isScrollEnabled)
+            pager.updateNestedDrag(translation: 250)
+            XCTAssertEqual(scroll.contentOffset.y, 850)
+            XCTAssertEqual(inner.contentOffset.y, 0)
+            XCTAssertFalse(inner.isScrollEnabled)
+            pager.endNestedDrag(translation: 250, downwardVelocity: 1_200, cancelled: cancelled)
+            XCTAssertEqual(pager.currentPage, cancelled ? 1 : 0)
+            XCTAssertTrue(inner.isScrollEnabled)
+            XCTAssertTrue(scroll.isScrollEnabled)
+        }
+    }
+
+    @MainActor
+    func testNestedResizeAndProgrammaticTakeoverRestoreChild() throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        let inner = UIScrollView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        inner.contentSize.height = 1_000
+        pager.beginNestedDrag(in: inner)
+        pager.updateNestedDrag(translation: 200)
+        pager.view.frame.size.height = 500
+        pager.view.setNeedsLayout()
+        pager.view.layoutIfNeeded()
+        pager.updateNestedDrag(translation: 200)
+        XCTAssertEqual(scroll.contentOffset.y, 400)
+        pager.requestPage(0)
+        XCTAssertTrue(inner.isScrollEnabled)
+        XCTAssertEqual(pager.currentPage, 0)
+        pager.endNestedDrag(translation: 0, downwardVelocity: 0, cancelled: true)
+        XCTAssertEqual(pager.currentPage, 0)
+    }
+
+    @MainActor
+    func testResizePreservesDragFractionThenRetargetsPendingSettlement() async throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        var settlements: [Int] = []
+        pager.settled = { settlements.append($0) }
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 800
+        pager.view.frame.size.height = 500
+        pager.view.setNeedsLayout()
+        pager.view.layoutIfNeeded()
+        XCTAssertEqual(scroll.contentOffset.y, 400, accuracy: 0.01)
+        var target = CGPoint.zero
+        pager.scrollViewWillEndDragging(scroll, withVelocity: .zero, targetContentOffset: &target)
+        XCTAssertEqual(target.y, 500)
+        // Resize again while the native settle is pending, without completing it.
+        pager.view.frame.size.height = 700
+        pager.view.setNeedsLayout()
+        pager.view.layoutIfNeeded()
+        pager.scrollViewDidEndDecelerating(scroll)
+        XCTAssertTrue(settlements.isEmpty)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(scroll.contentOffset.y, 700, accuracy: 0.01)
+        XCTAssertEqual(pager.currentPage, 1)
+        XCTAssertEqual(settlements, [1])
+    }
+
+    @MainActor
+    func testQueuedResizeSettlementCannotOverrideNewDestination() async throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 800
+        var target = CGPoint.zero
+        pager.scrollViewWillEndDragging(scroll, withVelocity: .zero, targetContentOffset: &target)
+        pager.view.frame.size.height = 500
+        pager.view.setNeedsLayout()
+        pager.view.layoutIfNeeded()
+        pager.requestPage(0)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(pager.currentPage, 0)
+        XCTAssertEqual(scroll.contentOffset.y, 0)
+    }
+
+    @MainActor
+    func testProgrammaticReturnTakesOverDragAndRejectsLateDragEnd() throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        var settled: [Int] = []
+        pager.settled = { settled.append($0) }
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 900
+        // Target matches the tentative gesture destination; still must take over now.
+        pager.requestPage(0)
+        XCTAssertEqual(pager.currentPage, 0)
+        XCTAssertEqual(scroll.contentOffset.y, 0)
+        var staleTarget = CGPoint(x: 0, y: 1_000)
+        pager.scrollViewWillEndDragging(scroll, withVelocity: .zero, targetContentOffset: &staleTarget)
+        pager.scrollViewDidEndDragging(scroll, willDecelerate: false)
+        pager.scrollViewDidEndDecelerating(scroll)
+        XCTAssertEqual(staleTarget.y, 0)
+        XCTAssertEqual(settled, [0])
+    }
+
+    @MainActor
+    func testDisablingGestureRollsBackAndDoesNotOverrideNewProgrammaticRequest() async throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 750
+        pager.userScrollEnabled = false
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(pager.currentPage, 1)
+        XCTAssertEqual(scroll.contentOffset.y, 1_000)
+        pager.userScrollEnabled = true
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 750
+        pager.userScrollEnabled = false
+        pager.requestPage(0)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(pager.currentPage, 0)
+        XCTAssertEqual(scroll.contentOffset.y, 0)
+        XCTAssertFalse(scroll.isScrollEnabled)
+    }
+
+    @MainActor
+    func testRealContainerSettlesReturnAndProgrammaticLifecycleOnce() throws {
+        let pager = WorkspacePagingController(pages: [UIViewController(), UIViewController()], initialPage: 1)
+        pager.loadViewIfNeeded()
+        pager.view.frame = CGRect(x: 0, y: 0, width: 400, height: 1_000)
+        pager.view.setNeedsLayout()
+        pager.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(pager.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        XCTAssertEqual(scroll.contentOffset.y, 1_000)
+        var events: [String] = []
+        pager.began = { events.append("begin:\($0)") }
+        pager.settled = { events.append("settle:\($0)") }
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 700
+        var target = CGPoint(x: 0, y: 900)
+        pager.scrollViewWillEndDragging(scroll, withVelocity: .zero, targetContentOffset: &target)
+        XCTAssertEqual(target.y, 0)
+        scroll.contentOffset = target
+        pager.scrollViewDidEndDecelerating(scroll)
+        pager.scrollViewDidEndDecelerating(scroll)
+        XCTAssertEqual(pager.currentPage, 0)
+        XCTAssertEqual(events, ["begin:0", "settle:0"])
+        pager.requestPage(1)
+        XCTAssertEqual(pager.currentPage, 1)
+        XCTAssertEqual(events.suffix(2), ["begin:1", "settle:1"])
+        // An under-threshold return must settle back on the workbench.
+        pager.scrollViewWillBeginDragging(scroll)
+        scroll.contentOffset.y = 800
+        target.y = 0
+        pager.scrollViewWillEndDragging(scroll, withVelocity: .zero, targetContentOffset: &target)
+        XCTAssertEqual(target.y, 1_000)
+        scroll.contentOffset = target
+        pager.scrollViewDidEndDecelerating(scroll)
+        XCTAssertEqual(pager.currentPage, 1)
+    }
+}
+
+
+final class LocalExpandedPreviewSnapshotTests: XCTestCase {
+    func testSnapshotKeepsOpeningImageComparisonAndAnchorAcrossReplacement() {
+        let image = UIImage(), comparison = UIImage(), replacement = UIImage()
+        let anchor = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let snapshot = LocalExpandedPreviewSnapshot(image: image, initialComparison: comparison, anchor: anchor)
+        XCTAssertTrue(snapshot.image === image)
+        XCTAssertEqual(snapshot.anchor, anchor)
+        XCTAssertTrue(snapshot.comparison(current: nil) === comparison)
+        XCTAssertTrue(snapshot.comparison(current: LocalPhotoPreviewImages(filtered: replacement, unfiltered: UIImage())) === comparison)
+    }
+
+    func testLateComparisonOnlyAppliesToTheOpenedImageIdentity() {
+        let image = UIImage(), late = UIImage()
+        let snapshot = LocalExpandedPreviewSnapshot(image: image, initialComparison: nil, anchor: .zero)
+        XCTAssertNil(snapshot.comparison(current: nil))
+        XCTAssertTrue(snapshot.comparison(current: LocalPhotoPreviewImages(filtered: image, unfiltered: late)) === late)
+        XCTAssertNil(snapshot.comparison(current: LocalPhotoPreviewImages(filtered: UIImage(), unfiltered: late)))
+        // Android falls back to the opening comparison, not a late image from another render.
+        XCTAssertNil(snapshot.comparison(current: nil))
+    }
+}
+
+@MainActor final class ExpandedPreviewPresentationLifecycleTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var expanded = false
+        var started = 0
+        var cancelled = 0
+        var disappeared = 0
+        var releaseComparison = false
+        let image = UIImage()
+        @Published var comparison: UIImage?
+    }
+
+    private struct Host: View {
+        @ObservedObject var state: State
+        var body: some View {
+            Color.clear
+                .task {
+                    state.started += 1
+                    do {
+                        while !state.releaseComparison {
+                            try await Task.sleep(for: .milliseconds(20))
+                        }
+                        state.comparison = UIImage()
+                        try await Task.sleep(for: .seconds(30))
+                    }
+                    catch { state.cancelled += 1 }
+                }
+                .onDisappear { state.disappeared += 1 }
+                .fullScreenCover(isPresented: $state.expanded) {
+                    PhotoEffectsExpandedPreview(image: state.image, comparison: state.comparison,
+                        initialAnchor: CGRect(x: 10, y: 20, width: 300, height: 225)) {
+                        state.expanded = false
+                    }
+                }
+        }
+    }
+
+    func testFullScreenPresentationKeepsUnderlyingTaskRunning() async throws {
+        let state = State()
+        let controller = UIHostingController(rootView: Host(state: state))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        for _ in 0..<100 where state.started == 0 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(state.started, 1)
+        state.expanded = true
+        for _ in 0..<100 where controller.presentedViewController == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(controller.presentedViewController)
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertEqual(state.cancelled, 0, "Opening a photo must not cancel its pending comparison")
+        XCTAssertEqual(state.disappeared, 0, "Opening a photo must not close the underlying preview cache")
+        state.releaseComparison = true
+        for _ in 0..<100 where state.comparison == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(state.comparison, "Comparison work must finish while the preview is presented")
+        state.expanded = false
+        for _ in 0..<100 where controller.presentedViewController != nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(controller.presentedViewController)
+        XCTAssertEqual(state.started, 1)
+        XCTAssertEqual(state.cancelled, 0)
+        XCTAssertEqual(state.disappeared, 0)
+    }
+}
+
+
+final class RemoteExposureMeterReadingTests: XCTestCase {
+    func testMissingAndInvalidSamplesHaveNoPointer() {
+        for value in [nil, Double.nan, Double.infinity, -Double.infinity] as [Double?] {
+            let reading = RemoteExposureMeterReading(ev: value)
+            XCTAssertNil(reading.fraction)
+            XCTAssertEqual(reading.overflowDirection, 0)
+            XCTAssertFalse(reading.isBalanced)
+            XCTAssertEqual(reading.accessibilityValue, "—")
+        }
+    }
+
+    func testScaleAndOverflowDirectionPreserveActualValue() {
+        for (ev, fraction, direction) in [(-4.0, 1.0, 1), (-3, 1, 0), (-1.5, 0.75, 0),
+                                         (0, 0.5, 0), (1.5, 0.25, 0), (3, 0, 0), (4, 0, -1)] {
+            let reading = RemoteExposureMeterReading(ev: ev)
+            XCTAssertEqual(reading.fraction, CGFloat(fraction))
+            XCTAssertEqual(reading.overflowDirection, direction)
+        }
+        XCTAssertEqual(RemoteExposureMeterReading(ev: 4).accessibilityValue, "+4.0 EV")
+        XCTAssertEqual(RemoteExposureMeterReading(ev: -4).accessibilityValue, "-4.0 EV")
+        XCTAssertEqual(RemoteExposureMeterReading(ev: -0.0).accessibilityValue, "+0.0 EV")
+    }
+
+    func testBalancedRangeUsesAndroidStrictBoundary() {
+        XCTAssertTrue(RemoteExposureMeterReading(ev: 0).isBalanced)
+        XCTAssertTrue(RemoteExposureMeterReading(ev: -0.08).isBalanced)
+        XCTAssertFalse(RemoteExposureMeterReading(ev: 1.0 / 12).isBalanced)
+        XCTAssertFalse(RemoteExposureMeterReading(ev: -1.0 / 12).isBalanced)
+    }
+}
+
+
+@MainActor final class QueueProgressInvalidationTests: XCTestCase {
+    private final class Selection: ObservableObject {
+        @Published var activeIndex: Int? = 0
+    }
+    private final class Evaluations {
+        var page = 0
+        var rows = Array(repeating: 0, count: 40)
+    }
+    private struct Host: View {
+        @ObservedObject var selection: Selection
+        let progress: TransferQueueProgressViewModel
+        let evaluations: Evaluations
+        var body: some View {
+            let _ = evaluations.page += 1
+            VStack(spacing: 0) {
+                ForEach(0..<40, id: \.self) { index in
+                    QueueProgressScope(model: progress, active: selection.activeIndex == index) { _ in
+                        let _ = evaluations.rows[index] += 1
+                        Color.clear.frame(height: 2)
+                    }
+                }
+            }
+        }
+    }
+
+    func testOnlyActiveScopeReevaluatesAndSubscriptionMovesWithTask() async throws {
+        let selection = Selection(), evaluations = Evaluations()
+        let progress = TransferQueueProgressViewModel()
+        let controller = UIHostingController(rootView: Host(selection: selection,
+            progress: progress, evaluations: evaluations))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(evaluations.rows.allSatisfy { $0 > 0 })
+        for active in [0, 17, -1] {
+            selection.activeIndex = active < 0 ? nil : active
+            try await Task.sleep(for: .milliseconds(100))
+            let before = evaluations.rows, pageBefore = evaluations.page
+            // Use the actual ObservableObject invalidation channel; no setter
+            // exposure or synthetic queue state is needed to measure view scope.
+            for _ in 0..<5 {
+                progress.objectWillChange.send()
+                try await Task.sleep(for: .milliseconds(30))
+            }
+            XCTAssertEqual(evaluations.page, pageBefore)
+            for row in 0..<40 {
+                if row == active { XCTAssertGreaterThan(evaluations.rows[row], before[row]) }
+                else { XCTAssertEqual(evaluations.rows[row], before[row], "Inactive row \(row) reevaluated") }
+            }
+        }
+    }
+}
+
+
+@MainActor final class PhotoPreviewDecodeCancellationTests: XCTestCase {
+    func testCancellationDuringSynchronousDecodeDiscardsLateImageAndAllowsReplacement() async throws {
+        let entered = expectation(description: "Background codec entered")
+        let release = DispatchSemaphore(value: 0)
+        let old = Task {
+            try await loadCameraPhotoPreviewContent(Data([1])) { _ in
+                XCTAssertFalse(Thread.isMainThread)
+                entered.fulfill()
+                guard release.wait(timeout: .now() + 5) == .success else {
+                    XCTFail("Codec gate was not released")
+                    return nil
+                }
+                // Model ImageIO returning pixels even after cancellation.
+                return CameraPhotoPreviewContent(image: UIImage(), histogram: nil, orientation: 6)
+            }
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        old.cancel()
+        let replacement = try await loadCameraPhotoPreviewContent(Data([2])) { _ in
+            XCTAssertFalse(Thread.isMainThread)
+            return CameraPhotoPreviewContent(image: UIImage(), histogram: nil, orientation: 3)
+        }
+        XCTAssertEqual(replacement?.orientation, 3)
+        release.signal()
+        do {
+            _ = try await old.value
+            XCTFail("Cancelled codec result escaped into the caller")
+        } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+}
+
+@MainActor final class PhotoPreviewRetentionLifecycleTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var entries: [PhotoPreviewEntry]
+        @Published var index = 1
+        var cached: Set<UInt32> = []
+        var evictions = 0
+        init(entries: [PhotoPreviewEntry]) { self.entries = entries }
+    }
+    private struct Host: View {
+        @ObservedObject var state: State
+        var body: some View {
+            Color.clear.modifier(PhotoPreviewRetentionObserver(
+                retainedIDs: retainedPhotoPreviewIDs(entries: state.entries, currentIndex: state.index),
+                trim: {
+                    state.cached.formIntersection(retainedPhotoPreviewIDs(entries: state.entries, currentIndex: state.index))
+                    state.evictions += 1
+                }))
+        }
+    }
+
+    func testProductionRetentionObserverHandlesPagingBurstChangesAndInvalidPage() async throws {
+        let files = (1...7).map { number in
+            CameraFile(id: UInt32(number), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "IMG_\(number).JPG", captureDate: nil, isProtected: false)
+        }
+        let group = BurstPhotoGroup(id: "lifecycle", files: Array(files[2...4]))
+        let collapsed: [PhotoPreviewEntry] = [.photo(files[0]), .photo(files[1]), .burst(group), .photo(files[5]), .photo(files[6])]
+        let state = State(entries: collapsed)
+        let all = Set(files.map(\.id))
+        state.cached = all
+        let controller = UIHostingController(rootView: Host(state: state))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = controller; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(state.cached, [1, 2, 6])
+        state.cached = all
+        state.entries = expandPhotoPreviewBurst(collapsed, at: 2)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(state.cached, [1, 2, 3])
+        state.cached = all
+        state.index = 5
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(state.cached, [3, 4, 5, 6, 7])
+        state.cached = all
+        state.entries = collapsed; state.index = 1
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(state.cached, [1, 2, 6])
+        state.index = -1
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(state.cached.isEmpty)
+        XCTAssertGreaterThanOrEqual(state.evictions, 5)
+    }
+}
+
+@MainActor
+final class DetentWheelAcceptedValueRenderingTests: XCTestCase {
+    private final class Selection: ObservableObject {
+        @Published var options = [0, 1, 2, 3]
+        @Published var selected = 0
+    }
+    private struct Host: View {
+        @ObservedObject var selection: Selection
+        var body: some View {
+            DetentWheel(label: "", options: selection.options, selected: selection.selected,
+                optionLabel: { ["AAAA", "BBBB", "CCCC", "DDDD"][$0] },
+                onCommit: { _ in }, showDragHint: false)
+                .frame(width: 200, height: 50)
+                .environment(\.colorScheme, .light)
+        }
+    }
+
+    func testAcceptedIdentityRendersAfterExternalSelectionAndReorder() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let selection = Selection()
+        let host = UIHostingController(rootView: Host(selection: selection))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        func capture(_ view: UIView) throws -> Data {
+            view.layoutIfNeeded()
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { _ in
+                XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+            }
+            return try XCTUnwrap(image.pngData())
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let initial = try capture(host.view)
+        selection.selected = 2
+        try await Task.sleep(for: .milliseconds(30))
+        let accepted = try capture(host.view)
+        XCTAssertNotEqual(initial, accepted)
+        selection.options = [2, 3, 0, 1]
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(try capture(host.view), accepted,
+            "Reordering must keep the accepted identity visible, not the old numeric index")
+        let reference = Selection()
+        reference.selected = 2
+        let referenceHost = UIHostingController(rootView: Host(selection: reference))
+        window.rootViewController = referenceHost
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(accepted, try capture(referenceHost.view),
+            "Updated wheel must render the same accepted label as a fresh wheel")
     }
 }

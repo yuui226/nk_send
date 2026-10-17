@@ -90,6 +90,16 @@ struct RemoteToolModeCrossfade<Content: View>: View {
                 content(mode)
                     .opacity(Double(clock.transition.alpha(mode)))
                     .allowsHitTesting(mode == movie)
+                    // Keep an input surface above an outgoing layer. Merely
+                    // disabling hit testing lets touches reach the next mode.
+                    // Place it outside opacity: UIKit otherwise ignores a
+                    // nearly transparent view before the transition disposes it.
+                    .overlay {
+                        if mode != movie {
+                            RemoteToolInputShield()
+                                .accessibilityHidden(true)
+                        }
+                    }
             }
         }
         .onChange(of: movie) { clock.setTarget($0) }
@@ -97,3 +107,19 @@ struct RemoteToolModeCrossfade<Content: View>: View {
         .onDisappear { clock.reset(movie: movie) }
     }
 }
+
+/// A transparent control owns touches in an outgoing toolbar's bounds without
+/// invoking either toolbar. Its lifetime follows the same retained mode layer.
+struct RemoteToolInputShield: UIViewRepresentable {
+    func makeUIView(context: Context) -> RemoteToolInputShieldView {
+        let view = RemoteToolInputShieldView()
+        view.backgroundColor = .clear
+        view.isMultipleTouchEnabled = true
+        view.isAccessibilityElement = false
+        return view
+    }
+
+    func updateUIView(_ uiView: RemoteToolInputShieldView, context: Context) {}
+}
+
+final class RemoteToolInputShieldView: UIControl {}

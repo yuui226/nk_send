@@ -1,6 +1,15 @@
 import Combine
 import Foundation
 
+/// FileListScreen.buildLatestTaskIndexByHandle: queue order determines the
+/// latest attempt, irrespective of status or the UUID used as its identity.
+func latestTransferTaskIndices(_ items: [TransferQueueItem]) -> [UInt32: Int] {
+    var result: [UInt32: Int] = [:]
+    result.reserveCapacity(items.count)
+    for (index, item) in items.enumerated() { result[item.file.id] = index }
+    return result
+}
+
 /// High-frequency transfer progress has its own invalidation scope. Keeping it
 /// on `TransferQueueViewModel.objectWillChange` caused the entire photo grid to
 /// be recomputed for every 200 ms sample even though only one badge and the
@@ -12,12 +21,17 @@ final class TransferQueueProgressViewModel: ObservableObject {
 
 @MainActor
 final class TransferQueueViewModel: ObservableObject {
-    @Published private(set) var snapshot = TransferQueueSnapshot(items: [], isTransferring: false, pauseAfterCurrent: false)
+    @Published private(set) var snapshot = TransferQueueSnapshot(items: [], isTransferring: false, pauseAfterCurrent: false) {
+        // @Published emits before assignment. Keep the previous index valid
+        // during synchronous subscribers, then replace it with the new snapshot.
+        didSet { latestTaskIndices = latestTransferTaskIndices(snapshot.items) }
+    }
     let progressModel = TransferQueueProgressViewModel()
     var activeProgress: TransferActiveProgress? { progressModel.activeProgress }
     private let queue: TransferQueue
     private var observation: Task<Void, Never>?
     private var progressObservation: Task<Void, Never>?
+    private var latestTaskIndices: [UInt32: Int] = [:]
 
     init(queue: TransferQueue) {
         self.queue = queue
@@ -25,7 +39,8 @@ final class TransferQueueViewModel: ObservableObject {
             let stream = await queue.snapshots()
             for await value in stream {
                 guard !Task.isCancelled else { return }
-                self?.snapshot = value
+                guard let self else { return }
+                self.snapshot = value
             }
         }
         progressObservation = Task { [weak self] in
@@ -40,22 +55,37 @@ final class TransferQueueViewModel: ObservableObject {
     deinit { observation?.cancel(); progressObservation?.cancel() }
 
     func task(for fileID: UInt32) -> TransferQueueItem? {
-        let tasks = snapshot.items.filter { $0.file.id == fileID }
-        return tasks.first { $0.status == .transferring }
-            ?? tasks.first { $0.status == .waiting }
-            ?? tasks.last
+        guard let index = latestTaskIndices[fileID] else { return nil }
+        return snapshot.items[index]
     }
 
     func enqueue(_ file: CameraFile, storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) { Task { _ = await queue.enqueue(file, storageMode: storageMode, effects: effects) } }
     func enqueue(_ file: CameraFile, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
         enqueue(file, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
     }
+    func acceptCrop(_ file: CameraFile, selection: JpegCropSelection, storageMode: TransferStorageMode,
+                    session: CameraSession? = nil, directory: URL? = nil,
+                    effects: PhotoEffectsSettings? = nil) async -> Bool {
+        guard !Task.isCancelled,
+              await queue.enqueueCrop(file, selection: selection, storageMode: storageMode, effects: effects) != nil else { return false }
+        if let directory { Task { await queue.start(session: session, directory: directory) } }
+        return true
+    }
+
+    func enqueueCrop(_ file: CameraFile, selection: JpegCropSelection, storageMode: TransferStorageMode,
+                     session: CameraSession? = nil, directory: URL? = nil,
+                     effects: PhotoEffectsSettings? = nil) {
+        Task {
+            _ = await queue.enqueueCrop(file, selection: selection, storageMode: storageMode, effects: effects)
+            if let directory { await queue.start(session: session, directory: directory) }
+        }
+    }
     func enqueueCrop(_ file: CameraFile, task: LosslessCropTask, storageMode: TransferStorageMode,
                      session: CameraSession? = nil, directory: URL? = nil,
                      effects: PhotoEffectsSettings? = nil) {
         Task {
             _ = await queue.enqueueCrop(file, task: task, storageMode: storageMode, effects: effects)
-            if let session, let directory { await queue.start(session: session, directory: directory) }
+            if let directory { await queue.start(session: session, directory: directory) }
         }
     }
     func enqueueCrop(_ file: CameraFile, task: LosslessCropTask, organizeByDate: Bool = false,
@@ -71,7 +101,7 @@ final class TransferQueueViewModel: ObservableObject {
         guard !files.isEmpty else { return }
         Task {
             await queue.enqueue(files, storageMode: storageMode, effects: effects)
-            if let session, let directory { await queue.start(session: session, directory: directory) }
+            if let directory { await queue.start(session: session, directory: directory) }
         }
     }
     func enqueue(_ files: [CameraFile], autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
@@ -105,7 +135,7 @@ final class TransferQueueViewModel: ObservableObject {
     func enqueue(_ file: CameraFile, autoStart session: CameraSession?, directory: URL?, storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) {
         Task {
             _ = await queue.enqueue(file, storageMode: storageMode, effects: effects)
-            if let session, let directory { await queue.start(session: session, directory: directory) }
+            if let directory { await queue.start(session: session, directory: directory) }
         }
     }
     func enqueue(_ file: CameraFile, autoStart session: CameraSession?, directory: URL?, organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) {
@@ -113,7 +143,7 @@ final class TransferQueueViewModel: ObservableObject {
     }
     func attach(session: CameraSession?, directory: URL?) { Task { await queue.attach(session: session, directory: directory) } }
     func detach() { Task { await queue.detach() } }
-    func start(session: CameraSession, directory: URL) { Task { await queue.startPendingTransfers(session: session, directory: directory) } }
+    func start(session: CameraSession?, directory: URL) { Task { await queue.startPendingTransfers(session: session, directory: directory) } }
     func pause() { Task { await queue.pauseAfterCurrentFile() } }
     func resume() { Task { await queue.resume() } }
     func withdraw(id: UUID) { Task { await queue.withdraw(id: id) } }

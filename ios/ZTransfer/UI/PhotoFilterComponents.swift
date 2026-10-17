@@ -51,7 +51,8 @@ struct DateEndpointEditor: View {
     let label: String
     @Binding var date: Date
     let years: [Int]
-    private let calendar = Calendar.current
+    private let dates = PhotoFilterDates()
+    private var calendar: Calendar { dates.calendar }
     var body: some View {
         let year = calendar.component(.year, from: date)
         let month = calendar.component(.month, from: date)
@@ -61,7 +62,7 @@ struct DateEndpointEditor: View {
             HStack {
                 Text(label).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
                 Spacer(minLength: 0)
-                Text(Self.shortDate(date))
+                Text(dates.shortDate(date))
                     .zTransferText(size: ZTransferMetrics.caption)
                     .foregroundStyle(ZTransferColors.secondaryText)
             }
@@ -69,25 +70,15 @@ struct DateEndpointEditor: View {
                 let available = max(0, geometry.size.width - 16)
                 let unit = available / 3.3
                 HStack(spacing: 8) {
-                    DetentWheel(label: AppLocalized.resource("date_year"), options: years, selected: year, optionLabel: String.init, onCommit: { date = clamped(year: $0, month: month, day: day) }, rowHeight: 18, wheelHeight: 50)
+                    DetentWheel(label: AppLocalized.resource("date_year"), options: years, selected: year, optionLabel: String.init, onCommit: { date = dates.clamped(year: $0, month: month, day: day) }, rowHeight: 18, wheelHeight: 50)
                         .frame(width: unit * 1.3)
-                    DetentWheel(label: AppLocalized.resource("date_month"), options: Array(1...12), selected: month, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = clamped(year: year, month: $0, day: day) }, rowHeight: 18, wheelHeight: 50)
+                    DetentWheel(label: AppLocalized.resource("date_month"), options: Array(1...12), selected: month, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = dates.clamped(year: year, month: $0, day: day) }, rowHeight: 18, wheelHeight: 50)
                         .frame(width: unit)
-                    DetentWheel(label: AppLocalized.resource("date_day"), options: days, selected: day, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = clamped(year: year, month: month, day: $0) }, rowHeight: 18, wheelHeight: 50)
+                    DetentWheel(label: AppLocalized.resource("date_day"), options: days, selected: day, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = dates.clamped(year: year, month: month, day: $0) }, rowHeight: 18, wheelHeight: 50)
                         .frame(width: unit)
                 }
             }
             .frame(height: 50)
         }
-    }
-    private func clamped(year: Int, month: Int, day: Int) -> Date {
-        let maxDay = calendar.range(of: .day, in: .month, for: calendar.date(from: DateComponents(year: year, month: month, day: 1))!)!.count
-        return calendar.date(from: DateComponents(year: year, month: month, day: min(day, maxDay)))!
-    }
-
-    private static func shortDate(_ date: Date) -> String {
-        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%02d/%02d/%02d", (components.year ?? 0) % 100,
-                      components.month ?? 0, components.day ?? 0)
     }
 }

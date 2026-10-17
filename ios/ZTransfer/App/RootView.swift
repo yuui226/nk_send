@@ -3,22 +3,55 @@ import UIKit
 
 enum AppLocalized {
     private static func decodeAndroidEscapes(_ value: String) -> String {
-        value.replacingOccurrences(of: "\\n", with: "\n")
+        var result = ""
+        var characters = value.makeIterator()
+        while let character = characters.next() {
+            guard character == "\\", let escaped = characters.next() else {
+                result.append(character)
+                continue
+            }
+            switch escaped {
+            case "n": result.append("\n")
+            case "t": result.append("\t")
+            case "r": result.append("\r")
+            case "\\", "'", "\"": result.append(escaped)
+            default: result.append("\\"); result.append(escaped)
+            }
+        }
+        return result
     }
 
-    /// Uses the Android string resources as the source of truth. The maps are
-    /// generated from app/src/main/res/values*/strings.xml; do not hand-edit
-    /// or add alternate translations here.
-    static func text(_ value: String) -> String {
-        let tag = UserDefaults.standard.string(forKey: "app_language") ?? "system"
-        let language: String
-        if tag == "en" || (tag == "system" && Locale.current.language.languageCode?.identifier == "en") {
-            language = "en"
-        } else if tag == "zh-Hant" || (tag == "system" && Locale.current.language.script?.identifier == "Hant") {
-            language = "hant"
-        } else {
-            language = "zh"
+    /// Resolve supported resources in preferred-language order, then use Android's
+    /// unqualified English resources. Explicit choices never mutate system locale.
+    static func resourceLanguage(tag: String, preferredLanguages: [String] = Locale.preferredLanguages) -> String {
+        let candidates = tag == "system" ? preferredLanguages : [tag]
+        for candidate in candidates {
+            let locale = Locale(identifier: candidate)
+            switch locale.language.languageCode?.identifier {
+            case "en": return "en"
+            case "zh":
+                let script = locale.language.script?.identifier
+                let traditional = script == "Hant" || (script != "Hans" && ["TW", "HK", "MO"].contains(locale.region?.identifier ?? ""))
+                return traditional ? "hant" : "zh"
+            default: continue
+            }
         }
+        return "en"
+    }
+
+    static func locale(for tag: String, preferredLanguages: [String] = Locale.preferredLanguages) -> Locale {
+        let language = resourceLanguage(tag: tag, preferredLanguages: preferredLanguages)
+        return Locale(identifier: language == "hant" ? "zh-Hant" : language == "zh" ? "zh-Hans" : "en")
+    }
+
+    private static var currentResourceLanguage: String {
+        resourceLanguage(tag: UserDefaults.standard.string(forKey: "app_language") ?? "system")
+    }
+
+    /// Uses the generated Android resources for both text and named lookups.
+    static func text(_ value: String) -> String { text(value, language: currentResourceLanguage) }
+
+    static func text(_ value: String, language: String) -> String {
         switch language {
         case "en": return decodeAndroidEscapes(AndroidLocalization.en[value] ?? value)
         case "hant": return decodeAndroidEscapes(AndroidLocalization.hant[value] ?? value)
@@ -26,17 +59,10 @@ enum AppLocalized {
         }
     }
 
-    static func resource(_ name: String) -> String {
-        let tag = UserDefaults.standard.string(forKey: "app_language") ?? "system"
-        let language: String
-        if tag == "en" || (tag == "system" && Locale.current.language.languageCode?.identifier == "en") {
-            language = "en"
-        } else if tag == "zh-Hant" || (tag == "system" && Locale.current.language.script?.identifier == "Hant") {
-            language = "hant"
-        } else {
-            language = "zh"
-        }
-        return decodeAndroidEscapes(
+    static func resource(_ name: String) -> String { resource(name, language: currentResourceLanguage) }
+
+    static func resource(_ name: String, language: String) -> String {
+        decodeAndroidEscapes(
             IOSLocalization.byResource[name]?[language]
                 ?? AndroidLocalization.byResource[name]?[language]
                 ?? name
@@ -66,7 +92,6 @@ struct RootView: View {
     @State private var transferQueue = TransferQueue()
     @AppStorage("theme_mode") private var themeMode = "SYSTEM"
     @AppStorage("app_language") private var appLanguage = "system"
-    @AppStorage("keep_screen_on") private var keepScreenOn = true
     @AppStorage("skin_preset") private var skinPreset = "FROSTED_GLASS"
     @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
     @Environment(\.scenePhase) private var scenePhase
@@ -78,10 +103,14 @@ struct RootView: View {
     @State private var connectionPhotoListVisible = false
     // Once established, transport loss must not return the user to connection.
     @State private var establishedSession: CameraSession?
+    @State private var workspaceViewID = UUID()
     // The success scene is an entry transition, never a reconnect transition.
     @State private var connectionCelebrationConsumed = false
-    @SceneStorage("camera_workspace_entered") private var workspaceEntered = false
-    @SceneStorage("camera_workspace_monitor") private var monitorPresented = false
+    // Android starts a new task at Home (MainActivity's NavHost). Retain the
+    // workspace on transport loss within this run, never across a cold launch.
+    // SceneStorage restored an offline photo/monitor page before any connection.
+    @State private var workspaceEntered = false
+    @State private var monitorPresented = false
 
     private var workspaceSession: CameraSession? { connectionModel.cameraSession ?? establishedSession }
     private var workspaceConnected: Bool { workspaceSession != nil && connectionModel.cameraSession === workspaceSession }
@@ -89,19 +118,19 @@ struct RootView: View {
         connectionModel.state.presentationMode(transport: nil, isSTA: false)
     }
 
-    private var locale: Locale {
-        switch appLanguage {
-        case "en": return Locale(identifier: "en")
-        case "zh-Hans": return Locale(identifier: "zh-Hans")
-        case "zh-Hant": return Locale(identifier: "zh-Hant")
-        default: return .current
-        }
-    }
+    private var locale: Locale { AppLocalized.locale(for: appLanguage) }
 
     private var gpsBlockedByAPCamera: Bool {
         guard let session = connectionModel.cameraSession else { return false }
         return !session.isUSB && session.wirelessMode == .ap
     }
+    @StateObject private var recordingSaveHint = PhotoListHintState()
+
+    private func presentRecordingSaveFailure() {
+        guard !monitorPresented, let message = RemoteRecordingSaveNotice.shared.take() else { return }
+        recordingSaveHint.show(message, duration: .seconds(3))
+    }
+
     var body: some View {
         Group {
             if workspaceSession != nil || workspaceEntered {
@@ -121,10 +150,9 @@ struct RootView: View {
                                   onTransportLost: { failedSession in
                                       Task { await connectionModel.handleTransportLost(failedSession) }
                                   })
-                    // A recovered transport owns a new CameraSession. Force
-                    // the list model to bind to that session instead of
-                    // retaining the failed repository from the old one.
-                    .id(session.map(ObjectIdentifier.init))
+                    // Same-body recovery keeps page state while its observed
+                    // list model and transport dependencies are replaced.
+                    .id(workspaceViewID)
                     .opacity(connectionCelebrationActive ? (connectionPhotoListVisible ? 1 : 0) : 1)
                     .allowsHitTesting(!connectionCelebrationActive || connectionPhotoListVisible)
                     if connectionCelebrationActive {
@@ -147,9 +175,20 @@ struct RootView: View {
         }
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
-        .fullScreenCover(isPresented: $monitorPresented, onDismiss: RemoteTrialNotice.returnedToList) {
+        .overlay { PhotoListHint(state: recordingSaveHint) }
+        .onReceive(NotificationCenter.default.publisher(for: RemoteRecordingSaveNotice.changed, object: RemoteRecordingSaveNotice.shared)) { _ in
+            presentRecordingSaveFailure()
+        }
+        .fullScreenCover(isPresented: $monitorPresented, onDismiss: {
+            RemoteTrialNotice.returnedToList()
+            presentRecordingSaveFailure()
+        }) {
             let session = workspaceSession
-            let listModel = session.map { PhotoListViewModel.cached(session: $0) }
+            let listModel = session.map { live in
+                PhotoListViewModel.cached(session: live, onTransportLost: {
+                    Task { await connectionModel.handleTransportLost(live) }
+                })
+            }
             RemoteView(session: session, presentationMode: restoredPresentationMode,
                        recordingDirectory: directoryStore.directoryURL,
                        isSessionConnected: workspaceConnected,
@@ -163,23 +202,20 @@ struct RootView: View {
                        })
                 .id(session.map(ObjectIdentifier.init))
         }
+        .task(id: effectsStore.isEnabled) {
+            await transferQueue.setPhotoEffectsEnabled(effectsStore.isEnabled)
+        }
         .task {
             connectionModel.startUSBDiscovery()
             connectionModel.startWiFiDiscovery()
             connectionModel.setGPSConnectionPaused(gpsCoordinator.state.enabled)
         }
-        .onDisappear {
-            // Full-screen routes can make the root temporarily disappear.
-            // Connection ownership remains in the model until its teardown;
-            // navigation must not stop discovery or an accepted USB session.
-            UIApplication.shared.isIdleTimerDisabled = false
-        }
         .onAppear {
+            presentRecordingSaveFailure()
             let restoredSkin = normalizedSkinPreset(UserDefaults.standard.string(forKey: "skin_preset"))
             if skinPreset != restoredSkin { skinPreset = restoredSkin }
             let restoredColumns = normalizedThumbnailColumns(thumbnailColumns)
             if thumbnailColumns != restoredColumns { thumbnailColumns = restoredColumns }
-            UIApplication.shared.isIdleTimerDisabled = keepScreenOn
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if workspaceEntered { connectionCelebrationConsumed = true }
             if connectionModel.cameraSession != nil, !connectionCelebrationConsumed {
@@ -197,6 +233,13 @@ struct RootView: View {
                 if let previous = establishedSession,
                    let replacement = connectionModel.cameraSession,
                    previous !== replacement {
+                    if replacement.recoveredFromSessionID == ObjectIdentifier(previous) {
+                        _ = PhotoListViewModel.cached(session: replacement, onTransportLost: {
+                            Task { await connectionModel.handleTransportLost(replacement) }
+                        })
+                    } else {
+                        workspaceViewID = UUID()
+                    }
                     PhotoListViewModel.evict(session: previous)
                 }
                 establishedSession = connectionModel.cameraSession
@@ -244,11 +287,7 @@ struct RootView: View {
         .onChange(of: gpsCoordinator.state.enabled) { enabled in
             connectionModel.setGPSConnectionPaused(enabled)
         }
-        .onChange(of: keepScreenOn) { enabled in
-            UIApplication.shared.isIdleTimerDisabled = enabled && scenePhase == .active
-        }
         .onChange(of: scenePhase) { phase in
-            UIApplication.shared.isIdleTimerDisabled = keepScreenOn && phase == .active
             connectionModel.setUSBForegroundActive(phase == .active)
             if phase == .active {
                 connectionModel.refreshUSBAuthorization()
@@ -303,6 +342,20 @@ func workspacePagerUserScrollEnabled(
 }
 
 
+/// HomeWorkspacePager.shouldPauseConnectionDiscovery, with an in-flight target
+/// retained while a newer button request is waiting for the native pager.
+struct WorkspaceDiscoveryState {
+    var settledPage = 0
+    var requestedPage = 0
+    var transitionTarget: Int?
+    var shouldPause: Bool {
+        settledPage == 1 || requestedPage == 1 || transitionTarget == 1
+    }
+    mutating func request(_ page: Int) { requestedPage = page }
+    mutating func begin(_ page: Int) { transitionTarget = page }
+    mutating func settle(_ page: Int) { settledPage = page; transitionTarget = nil }
+}
+
 /// Android HomeWorkspacePager equivalent. The workbench is the page below the
 /// connection page; it is never presented as a sheet or a modal route.
 private struct HomeWorkspacePagerIOS: View {
@@ -312,6 +365,7 @@ private struct HomeWorkspacePagerIOS: View {
     let directory: DirectoryAccessStore
     let celebrationStart: Date?
     @State private var page = 0
+    @State private var discovery = WorkspaceDiscoveryState()
     @State private var gpsPanelPresented = false
 
     private var localWorkspaceMustRelease: Bool {
@@ -337,14 +391,15 @@ private struct HomeWorkspacePagerIOS: View {
                     currentPage: page,
                     gpsPanelPresented: gpsPanelPresented
                 ),
-                onInteractiveTransitionBegan: { destination in
-                    if destination == 1, !gpsCoordinator.state.enabled {
-                        connection.setConnectionDiscoveryPaused(true)
-                    }
+                onTransitionBegan: { destination in
+                    discovery.begin(destination)
+                    connection.setConnectionDiscoveryPaused(discovery.shouldPause)
                 },
                 onTransitionSettled: { currentPage in
                     if currentPage != 0 { gpsPanelPresented = false }
-                    connection.setConnectionDiscoveryPaused(currentPage != 0)
+                    discovery.request(page)
+                    discovery.settle(currentPage)
+                    connection.setConnectionDiscoveryPaused(discovery.shouldPause)
                 },
                 firstPage: {
                 ConnectionPage(model: connection,
@@ -374,12 +429,14 @@ private struct HomeWorkspacePagerIOS: View {
             .background(ZTransferColors.background)
             .onChange(of: page) { currentPage in
                 if currentPage != 0 { gpsPanelPresented = false }
-                connection.setConnectionDiscoveryPaused(currentPage != 0)
+                discovery.request(currentPage)
+                connection.setConnectionDiscoveryPaused(discovery.shouldPause)
             }
         }
         .background(ZTransferColors.background.ignoresSafeArea())
         .onAppear {
-            connection.setConnectionDiscoveryPaused(page != 0)
+            discovery.request(page)
+            connection.setConnectionDiscoveryPaused(discovery.shouldPause)
         }
     }
 
@@ -392,161 +449,343 @@ private struct HomeWorkspacePagerIOS: View {
         if gpsPanelPresented { gpsPanelPresented = false }
         // VerticalWorkspacePager owns the native animated transition. A
         // SwiftUI animation transaction only changes the selection value and
-        // makes UIPageViewController jump, which reads as a screen refresh.
+        // keeps the pager transition separate from the SwiftUI state transaction.
+        discovery.request(destination)
+        connection.setConnectionDiscoveryPaused(discovery.shouldPause)
         page = destination
     }
 }
 
-/// A vertical UIPageViewController gives programmatic entry/return the same
-/// full-page movement as a finger-driven swipe. SwiftUI's page-style TabView
-/// does not reliably animate selection changes, even inside withAnimation.
+/// Compose Foundation 1.7.6 final snap: below 400dp/s use the strict 50%
+/// positional threshold; otherwise choose the adjacent bound in fling direction.
+/// This pager has exactly two pages and no inter-page spacing.
+func shouldEnterWorkspace(distance: CGFloat, upwardVelocity: CGFloat,
+                          dragTranslation: CGFloat? = nil, pageHeight: CGFloat = 1_000) -> Bool {
+    guard distance > 0 else { return false }
+    if distance >= 1 { return true }
+    if abs(upwardVelocity) >= 400 { return upwardVelocity > 0 }
+    let height = max(1, pageHeight)
+    let delta = -(dragTranslation ?? -distance * height) / height
+    let forward = delta > 0
+    if abs(delta.truncatingRemainder(dividingBy: 1)) > 0.50 { return forward }
+    if abs(delta) >= min(56, height / 2) / height { return !forward }
+    // A tiny new drag interrupting an existing transition snaps to the nearest
+    // current bound, instead of treating the inherited offset as fresh travel.
+    return distance >= 0.50
+}
+
+/// Android's return decision is positional, with a distance-qualified downward fling.
+func shouldReturnFromWorkspace(distance: CGFloat, downwardVelocity: CGFloat) -> Bool {
+    distance >= 0.30 || (distance >= 0.15 && downwardVelocity >= 1_200)
+}
+
 private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIViewControllerRepresentable {
     @Binding var selection: Int
     let isScrollEnabled: Bool
-    let onInteractiveTransitionBegan: (Int) -> Void
+    let onTransitionBegan: (Int) -> Void
     let onTransitionSettled: (Int) -> Void
     let firstPage: FirstPage
     let secondPage: SecondPage
 
-    init(
-        selection: Binding<Int>,
-        isScrollEnabled: Bool,
-        onInteractiveTransitionBegan: @escaping (Int) -> Void,
-        onTransitionSettled: @escaping (Int) -> Void,
-        @ViewBuilder firstPage: () -> FirstPage,
-        @ViewBuilder secondPage: () -> SecondPage
-    ) {
+    init(selection: Binding<Int>, isScrollEnabled: Bool,
+         onTransitionBegan: @escaping (Int) -> Void, onTransitionSettled: @escaping (Int) -> Void,
+         @ViewBuilder firstPage: () -> FirstPage, @ViewBuilder secondPage: () -> SecondPage) {
         _selection = selection
         self.isScrollEnabled = isScrollEnabled
-        self.onInteractiveTransitionBegan = onInteractiveTransitionBegan
+        self.onTransitionBegan = onTransitionBegan
         self.onTransitionSettled = onTransitionSettled
         self.firstPage = firstPage()
         self.secondPage = secondPage()
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+    func makeUIViewController(context: Context) -> WorkspacePagingController {
+        let controller = WorkspacePagingController(pages: [context.coordinator.first, context.coordinator.second], initialPage: selection)
+        controller.began = { [weak coordinator = context.coordinator] in coordinator?.parent.onTransitionBegan($0) }
+        controller.settled = { [weak coordinator = context.coordinator] page in
+            guard let coordinator else { return }
+            coordinator.requestedPage = page
+            coordinator.parent.selection = page
+            coordinator.parent.onTransitionSettled(page)
+        }
+        controller.userScrollEnabled = isScrollEnabled
+        return controller
     }
-
-    func makeUIViewController(context: Context) -> UIPageViewController {
-        let pager = UIPageViewController(
-            transitionStyle: .scroll,
-            navigationOrientation: .vertical
-        )
-        pager.dataSource = context.coordinator
-        pager.delegate = context.coordinator
-        pager.view.backgroundColor = .clear
-        pager.setViewControllers(
-            [context.coordinator.controller(for: selection)],
-            direction: .forward,
-            animated: false
-        )
-        context.coordinator.visibleIndex = selection
-        updateScrolling(in: pager)
-        return pager
-    }
-
-    func updateUIViewController(_ pager: UIPageViewController, context: Context) {
+    func updateUIViewController(_ controller: WorkspacePagingController, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.first.rootView = firstPage
+        context.coordinator.second.rootView = secondPage
+        controller.userScrollEnabled = isScrollEnabled
         let coordinator = context.coordinator
-        coordinator.parent = self
-        coordinator.first.rootView = firstPage
-        coordinator.second.rootView = secondPage
-        updateScrolling(in: pager)
-
-        let target = min(1, max(0, selection))
-        guard target != coordinator.visibleIndex,
-              !coordinator.transitioning else { return }
-        let direction: UIPageViewController.NavigationDirection =
-            target > coordinator.visibleIndex ? .forward : .reverse
-        coordinator.transitioning = true
-        pager.setViewControllers(
-            [coordinator.controller(for: target)],
-            direction: direction,
-            animated: true
-        ) { finished in
-            DispatchQueue.main.async {
-                coordinator.transitioning = false
-                guard finished else {
-                    coordinator.parent.selection = coordinator.visibleIndex
-                    return
-                }
-                coordinator.visibleIndex = target
-                coordinator.parent.onTransitionSettled(target)
-            }
+        let target = selection
+        guard target != coordinator.requestedPage else { return }
+        coordinator.requestedPage = target
+        // Ignore superseded requests and avoid publishing during SwiftUI update.
+        DispatchQueue.main.async {
+            guard coordinator.requestedPage == target else { return }
+            controller.requestPage(target)
         }
     }
-
-    private func updateScrolling(in pager: UIPageViewController) {
-        for scrollView in pager.view.subviews.compactMap({ $0 as? UIScrollView }) {
-            scrollView.isScrollEnabled = isScrollEnabled
-        }
-    }
-
-    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+    final class Coordinator {
         var parent: VerticalWorkspacePager
+        var requestedPage: Int
         let first: UIHostingController<FirstPage>
         let second: UIHostingController<SecondPage>
-        var visibleIndex: Int
-        var transitioning = false
-
         init(parent: VerticalWorkspacePager) {
             self.parent = parent
+            requestedPage = parent.selection
             first = UIHostingController(rootView: parent.firstPage)
             second = UIHostingController(rootView: parent.secondPage)
-            visibleIndex = min(1, max(0, parent.selection))
-            super.init()
             first.view.backgroundColor = .clear
             second.view.backgroundColor = .clear
         }
+    }
+}
 
-        func controller(for index: Int) -> UIViewController {
-            index == 0 ? first : second
-        }
-
-        private func index(of controller: UIViewController) -> Int? {
-            if controller === first { return 0 }
-            if controller === second { return 1 }
-            return nil
-        }
-
-        func pageViewController(
-            _ pageViewController: UIPageViewController,
-            viewControllerBefore viewController: UIViewController
-        ) -> UIViewController? {
-            index(of: viewController) == 1 ? first : nil
-        }
-
-        func pageViewController(
-            _ pageViewController: UIPageViewController,
-            viewControllerAfter viewController: UIViewController
-        ) -> UIViewController? {
-            index(of: viewController) == 0 ? second : nil
-        }
-
-        func pageViewController(
-            _ pageViewController: UIPageViewController,
-            willTransitionTo pendingViewControllers: [UIViewController]
-        ) {
-            guard let pending = pendingViewControllers.first,
-                  let destination = index(of: pending) else { return }
-            transitioning = true
-            parent.onInteractiveTransitionBegan(destination)
-        }
-
-        func pageViewController(
-            _ pageViewController: UIPageViewController,
-            didFinishAnimating finished: Bool,
-            previousViewControllers: [UIViewController],
-            transitionCompleted completed: Bool
-        ) {
-            transitioning = false
-            guard let current = pageViewController.viewControllers?.first,
-                  let currentIndex = index(of: current) else { return }
-            visibleIndex = currentIndex
-            if parent.selection != currentIndex {
-                parent.selection = currentIndex
+/// Owns the scroll delegate instead of replacing UIPageViewController's private delegate.
+@MainActor
+final class WorkspacePagingController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    private let pages: [UIViewController]
+    private let scroll = UIScrollView()
+    private(set) var currentPage: Int
+    private var destination: Int
+    private enum Motion { case idle, dragging, nested, settling, programmatic, interrupted }
+    private var motion = Motion.idle
+    private var moving = false
+    private var lastHeight: CGFloat = 0
+    private var nestedScroll: UIScrollView?
+    private var nestedStartOffset: CGFloat = 0
+    private var nestedLastTranslation: CGFloat = 0
+    private var nestedClaimed = false
+    private var nestedWasEnabled = true
+    private lazy var nestedPan = UIPanGestureRecognizer(target: self, action: #selector(handleNestedPan(_:)))
+    var began: ((Int) -> Void)?
+    var settled: ((Int) -> Void)?
+    var userScrollEnabled = true {
+        didSet {
+            if !userScrollEnabled, motion == .dragging || motion == .nested {
+                motion = .interrupted
+                // This property is also updated from SwiftUI; settle outside that update.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.motion == .interrupted else { return }
+                    self.restoreNestedScroll()
+                    self.motion = .settling
+                    self.settle(to: self.currentPage, animated: self.view.window != nil)
+                }
             }
-            parent.onTransitionSettled(currentIndex)
+            scroll.isScrollEnabled = userScrollEnabled && !nestedClaimed
+            nestedPan.isEnabled = userScrollEnabled
         }
+    }
+
+    init(pages: [UIViewController], initialPage: Int) {
+        self.pages = pages
+        currentPage = min(1, max(0, initialPage))
+        destination = currentPage
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+        scroll.delegate = self
+        scroll.decelerationRate = .fast
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.showsVerticalScrollIndicator = false
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.bounces = false
+        view.addSubview(scroll)
+        for page in pages {
+            addChild(page)
+            scroll.addSubview(page.view)
+            page.didMove(toParent: self)
+        }
+        nestedPan.delegate = self
+        nestedPan.cancelsTouchesInView = false
+        view.addGestureRecognizer(nestedPan)
+        // A child-scroll gesture is observed first; the outer native pan handles
+        // only gestures for which that observer fails admission.
+        scroll.panGestureRecognizer.require(toFail: nestedPan)
+        scroll.isScrollEnabled = userScrollEnabled
+        nestedPan.isEnabled = userScrollEnabled
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let height = view.bounds.height
+        let fraction = lastHeight > 0 ? scroll.contentOffset.y / lastHeight : CGFloat(currentPage)
+        scroll.frame = view.bounds
+        scroll.contentSize = CGSize(width: view.bounds.width, height: height * 2)
+        for (index, page) in pages.enumerated() {
+            page.view.frame = CGRect(x: 0, y: CGFloat(index) * height, width: view.bounds.width, height: height)
+        }
+        if height != lastHeight {
+            scroll.contentOffset.y = (moving ? fraction : CGFloat(currentPage)) * height
+            if nestedClaimed {
+                nestedStartOffset = nestedLastTranslation - (1 - fraction) * height
+            }
+            lastHeight = height
+            // UIKit's pending deceleration/animation target uses the old bounds.
+            // Re-anchor only after layout, and never override a new drag or request.
+            if height > 0, moving, motion == .settling || motion == .programmatic {
+                let target = destination
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.lastHeight == height, self.moving,
+                          self.destination == target,
+                          self.motion == .settling || self.motion == .programmatic else { return }
+                    self.scroll.setContentOffset(self.scroll.contentOffset, animated: false)
+                    self.settle(to: target, animated: self.view.window != nil)
+                }
+            }
+        }
+    }
+    func requestPage(_ page: Int) {
+        let target = min(1, max(0, page))
+        let takingOverGesture = motion == .dragging || motion == .nested || motion == .interrupted
+        guard takingOverGesture || (moving ? target != destination : target != currentPage) else { return }
+        // Invalidate gesture callbacks before cancelling their recognizers.
+        motion = .programmatic
+        restoreNestedScroll()
+        nestedPan.isEnabled = false
+        scroll.panGestureRecognizer.isEnabled = false
+        nestedPan.isEnabled = userScrollEnabled
+        scroll.panGestureRecognizer.isEnabled = userScrollEnabled
+        scroll.setContentOffset(scroll.contentOffset, animated: false)
+        settle(to: target, animated: view.window != nil)
+    }
+    private func begin(_ target: Int) {
+        let changed = destination != target
+        destination = target
+        if !moving || changed { moving = true; began?(target) }
+    }
+    private func settle(to target: Int, animated: Bool) {
+        begin(target)
+        let offset = CGPoint(x: 0, y: CGFloat(target) * view.bounds.height)
+        if !animated || abs(scroll.contentOffset.y - offset.y) < 0.5 {
+            scroll.setContentOffset(offset, animated: false)
+            finish()
+        } else {
+            scroll.setContentOffset(offset, animated: true)
+        }
+    }
+    private func finish() {
+        guard moving, abs(scroll.contentOffset.y - CGFloat(destination) * view.bounds.height) < 0.5 else { return }
+        currentPage = destination
+        moving = false
+        motion = .idle
+        settled?(currentPage)
+    }
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        guard userScrollEnabled else { return }
+        motion = .dragging
+        begin(1 - currentPage)
+    }
+    func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+                                  targetContentOffset: UnsafeMutablePointer<CGPoint>) {
+        targetContentOffset.pointee = endPageDrag(in: scrollView,
+            downwardVelocity: scrollView.panGestureRecognizer.velocity(in: view).y,
+            translation: scrollView.panGestureRecognizer.translation(in: view).y)
+    }
+    func endPageDrag(in scrollView: UIScrollView, downwardVelocity: CGFloat, translation: CGFloat) -> CGPoint {
+        let height = max(1, scrollView.bounds.height)
+        guard motion == .dragging else { return CGPoint(x: 0, y: CGFloat(destination) * height) }
+        motion = .settling
+        if currentPage == 1 {
+            destination = shouldReturnFromWorkspace(distance: (height - scrollView.contentOffset.y) / height,
+                downwardVelocity: downwardVelocity) ? 0 : 1
+        } else {
+            destination = shouldEnterWorkspace(distance: scrollView.contentOffset.y / height,
+                upwardVelocity: -downwardVelocity, dragTranslation: translation, pageHeight: height) ? 1 : 0
+        }
+        return CGPoint(x: 0, y: CGFloat(destination) * height)
+    }
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard motion == .settling else { return }
+        if !decelerate { settle(to: destination, animated: view.window != nil) }
+    }
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { finish() }
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { finish() }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer === nestedPan, userScrollEnabled, currentPage == 1 else { return false }
+        if nestedPan.numberOfTouches > 0 { return nestedScroll != nil }
+        return prepareNestedDrag(from: touch.view)
+    }
+    func prepareNestedDrag(from touchedView: UIView?) -> Bool {
+        // A tap may fail recognition without an action callback; discard its candidate.
+        restoreNestedScroll()
+        guard userScrollEnabled, currentPage == 1 else { return false }
+        // Capture before slop/child scrolling consumes any part of the touch translation.
+        var candidate = touchedView
+        while let child = candidate, child !== scroll {
+            if let inner = child as? UIScrollView, inner.isScrollEnabled,
+               inner.contentSize.height > inner.bounds.height {
+                beginNestedDrag(in: inner)
+                return true
+            }
+            candidate = child.superview
+        }
+        return false
+    }
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        let accepts = gestureRecognizer === nestedPan && acceptsNestedDirection(nestedPan.velocity(in: view))
+        if !accepts { restoreNestedScroll() }
+        return accepts
+    }
+    func acceptsNestedDirection(_ velocity: CGPoint) -> Bool {
+        userScrollEnabled && currentPage == 1 && nestedScroll != nil && abs(velocity.y) > abs(velocity.x)
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer === nestedPan && otherGestureRecognizer === nestedScroll?.panGestureRecognizer
+    }
+    func beginNestedDrag(in inner: UIScrollView) {
+        guard userScrollEnabled, currentPage == 1 else { return }
+        restoreNestedScroll()
+        nestedScroll = inner
+        nestedStartOffset = max(0, inner.contentOffset.y + inner.adjustedContentInset.top)
+        nestedLastTranslation = 0
+    }
+    func updateNestedDrag(translation: CGFloat) {
+        guard let inner = nestedScroll, motion != .programmatic, motion != .interrupted else { return }
+        nestedLastTranslation = translation
+        let remainder = max(0, translation - nestedStartOffset)
+        if remainder > 0, !nestedClaimed {
+            nestedClaimed = true
+            motion = .nested
+            nestedWasEnabled = inner.isScrollEnabled
+            inner.isScrollEnabled = false
+            inner.contentOffset.y = -inner.adjustedContentInset.top
+            scroll.isScrollEnabled = false
+            begin(0)
+        }
+        if nestedClaimed { scroll.contentOffset.y = max(0, view.bounds.height - remainder) }
+    }
+    func endNestedDrag(translation: CGFloat, downwardVelocity: CGFloat, cancelled: Bool) {
+        guard nestedScroll != nil, motion != .programmatic, motion != .interrupted else { return }
+        let remainder = max(0, translation - nestedStartOffset)
+        let claimed = nestedClaimed
+        let target = !cancelled && shouldReturnFromWorkspace(
+            distance: remainder / max(1, view.bounds.height), downwardVelocity: downwardVelocity) ? 0 : 1
+        restoreNestedScroll()
+        if claimed {
+            motion = .settling
+            settle(to: target, animated: view.window != nil)
+        }
+    }
+    @objc private func handleNestedPan(_ pan: UIPanGestureRecognizer) {
+        switch pan.state {
+        case .began, .changed:
+            updateNestedDrag(translation: pan.translation(in: view).y)
+        case .ended, .cancelled, .failed:
+            endNestedDrag(translation: pan.translation(in: view).y,
+                downwardVelocity: pan.velocity(in: view).y, cancelled: pan.state != .ended)
+        default: break
+        }
+    }
+    private func restoreNestedScroll() {
+        if nestedClaimed { nestedScroll?.isScrollEnabled = nestedWasEnabled }
+        nestedScroll = nil
+        nestedClaimed = false
+        scroll.isScrollEnabled = userScrollEnabled
     }
 }

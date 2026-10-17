@@ -40,10 +40,6 @@ private struct PhotoListTopControlsTransition: AnimatableModifier {
     }
 }
 
-private enum QueueExecutionVisualMode: Hashable {
-    case start, pause
-}
-
 private struct PhotoListWorkspaceTransition: AnimatableModifier {
     var progress: CGFloat
     let horizontalFraction: CGFloat
@@ -168,6 +164,41 @@ private struct PhotoListViewportPreferenceKey: PreferenceKey {
     }
 }
 
+private struct PhotoListScrollItemsPreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+struct PhotoListScrollLayout: Equatable {
+    let sections: [PhotoDaySection]
+    let burstIDs: [UInt32: String]
+    let collapseBursts: Bool
+    let expandedBursts: Set<String>
+    let collapsedDays: Set<String>
+    let collapsingDay: String?
+    let keepCount: Int
+
+    func indices() -> [String: Int] {
+        var result: [String: Int] = [:]
+        var index = 0
+        for section in sections {
+            result["header_\(section.day)"] = index
+            index += 1
+            guard !collapsedDays.contains(section.day) || collapsingDay == section.day else { continue }
+            let entries = photoGridEntries(section.files, burstIDByFile: burstIDs,
+                                           collapse: collapseBursts, expandedIDs: expandedBursts)
+            let count = collapsingDay == section.day ? min(keepCount, entries.count) : entries.count
+            for entry in entries.prefix(count) {
+                result[entry.id] = index
+                index += 1
+            }
+        }
+        return result
+    }
+}
+
 private struct PhotoListTopControlsBoundsPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
@@ -200,8 +231,13 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     return .identity
 }
 
+private struct PhotoListSessionTaskID: Equatable {
+    let session: ObjectIdentifier?
+    let value: Bool
+}
+
 @MainActor struct PhotoListView: View {
-    @StateObject private var model: PhotoListViewModel
+    @ObservedObject private var model: PhotoListViewModel
     @StateObject private var queueModel: TransferQueueViewModel
     @ObservedObject private var directoryStore: DirectoryAccessStore
     let effectsStore: PhotoEffectsStore
@@ -216,6 +252,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
     @State private var previewAnchor: CGRect?
+    @State private var previewExpandedBurstIDs: Set<String> = []
     @Environment(\.displayScale) private var displayScale
     private var remoteEntryAtTop: Bool {
         PhotoListScrollActivity.isAtTop(offset: -photoListScrollOffset, scale: displayScale)
@@ -233,6 +270,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     @SceneStorage("camera_workspace_queue") private var showingQueue = false
     @State private var queueTopControlsVisible = false
     @State private var queueWorkspaceTransitionNonce = 0
+    @State private var queueControlActionNonce: UInt64 = 0
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
     @AppStorage(TransferStorageMode.persistenceKey) private var storageModeRaw = ""
     @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
@@ -259,7 +297,9 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     @State private var burstReflowActive = false
     @State private var activeBurstReflowID: String?
     @State private var burstAnimationTask: Task<Void, Never>?
-    @State private var showTopButton = false
+    @StateObject private var backTop = PhotoListBackTopController()
+    @State private var scrollItemIndices: [String: Int] = [:]
+    @State private var scrollItemFrames: [String: CGRect] = [:]
     @State private var photoListScrollOffset: CGFloat = 0
     @State private var internalShowingRemote = false
     private let remotePresentation: Binding<Bool>?
@@ -278,6 +318,8 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     @State private var showingSettings = false
     @State private var transferDirectoryAttention = false
     @State private var signalExpanded = false
+    @StateObject private var signalAttention = PhotoListSignalAttentionClock()
+    @StateObject private var admissionHint = PhotoListHintState()
     @State private var effectPreviewSource: UIImage?
     @State private var effectPreviewExif: PhotoExif?
     @State private var effectPreviewGeneration = 0
@@ -286,21 +328,22 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     @State private var effectPreviewAttemptKey: String?
     @State private var effectPreviewLoadingKey: String?
     @State private var topControlsVisible = true
-    @State private var cellBounds: [UInt32: CGRect] = [:]
+    @State private var cellBounds: [PhotoListCellID: CGRect] = [:]
     @State private var photoListViewportBounds: CGRect = .zero
     @State private var photoListTopControlsBounds: CGRect = .zero
     @State private var sectionEnqueueBounds: [String: CGRect] = [:]
     @State private var queueTargetBounds: CGRect = .zero
     @State private var queueFlights: [PhotoListQueueFlight] = []
+    @State private var queueFlightTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var flightAdmissions = PhotoListFlightAdmissions()
     @State private var heldFlightCount = 0
-    @State private var heldFlightBaselineRemaining: Int?
     @State private var queueImpact = 0
 
-    init(session: CameraSession?, presentationMode: CameraPresentationMode = .sta, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
-        let listModel = session.map { live in
+    init(session: CameraSession?, listModel suppliedModel: PhotoListViewModel? = nil, presentationMode: CameraPresentationMode = .sta, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
+        let listModel = suppliedModel ?? session.map { live in
             PhotoListViewModel.cached(session: live, onTransportLost: { onTransportLost(live) })
         } ?? PhotoListViewModel(disconnected: presentationMode)
-        _model = StateObject(wrappedValue: listModel)
+        _model = ObservedObject(wrappedValue: listModel)
         self.presentationMode = session.map { CameraPresentationMode(isUSB: $0.isUSB, wirelessMode: $0.wirelessMode) }
             ?? presentationMode
         _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
@@ -318,6 +361,18 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
               count: normalizedThumbnailColumns(thumbnailColumns))
     }
 
+    private var scrollLayout: PhotoListScrollLayout {
+        PhotoListScrollLayout(sections: presentedSections, burstIDs: model.burstIDByFile,
+                              collapseBursts: collapseBurstPhotos, expandedBursts: expandedBurstIDs,
+                              collapsedDays: collapsedDays, collapsingDay: collapsingDay,
+                              keepCount: collapsingDayKeepCount)
+    }
+
+    private func updateBackTopPosition() {
+        backTop.update(frames: scrollItemFrames, indices: scrollItemIndices,
+                       viewport: photoListVisibleViewport, scale: displayScale)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             ZTransferColors.background.ignoresSafeArea()
@@ -326,6 +381,11 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                                   isSessionConnected: isSessionConnected,
                                   onRetrySTA: onRetrySTA,
                                   showsTopControls: false,
+                                  controlActionNonce: queueControlActionNonce,
+                                  hasIndexedOriginal: { item in
+                                      model.hasTransferredOriginal(item.file, folderName: item.destinationFolderName,
+                                                                   directory: directoryStore.directoryURL)
+                                  },
                                   onNavigateBack: dismissQueuePage)
                 .transition(.asymmetric(
                     insertion: .modifier(
@@ -342,12 +402,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             ScrollViewReader { reader in
                 ScrollView(showsIndicators: false) {
                     Color.clear.frame(height: 1).id("photo-list-top")
-                        .background(PhotoListScrollActivity { atTop in
+                        .background(PhotoListScrollActivity(onScroll: { atTop in
                             if !atTop {
                                 remoteIntro.collapse()
                                 remoteExpandedAwayFromTop = false
                             }
-                        })
+                        }, onActivityChanged: { backTop.setScrolling($0) }))
                         .background {
                             GeometryReader { proxy in
                                 Color.clear.preference(key: PhotoListScrollOffsetKey.self,
@@ -412,6 +472,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                                         .frame(width: 40, height: 28)
                                 }
                                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+                                .accessibilityIdentifier("enqueue-day-\(section.day)")
                                 .background {
                                     GeometryReader { proxy in
                                         Color.clear.preference(
@@ -420,6 +481,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                                         )
                                     }
                                 }
+                                }
+                                .background {
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(key: PhotoListScrollItemsPreferenceKey.self,
+                                            value: ["header_\(section.day)": proxy.frame(in: .global)])
+                                    }
                                 }
                                 if !collapsedDays.contains(section.day) || collapsingThis {
                                     LazyVGrid(columns: columns, spacing: 6) {
@@ -437,7 +504,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                                                                    expanded: expandedBurstIDs.contains(group.id),
                                                                    onExpand: { toggleBurst(group.id) },
                                                                    onEnqueue: {
-                                                                       enqueueSection(group.files, source: cellBounds[file.id])
+                                                                       enqueueSection(group.files, source: visiblePhotoListCellBounds(
+                                                                        .burstEnqueue(group.id), bounds: cellBounds, viewport: photoListVisibleViewport))
+                                                                   }, onPreview: {
+                                                                       guard !burstAnimationBusy, collapsingDay == nil,
+                                                                             cameraRemovalAffectedDays.isEmpty else { return }
+                                                                       handleLongPress(entry, file: file)
                                                                    })
                                             } else {
                                             CameraThumbnailView(session: session, file: file,
@@ -446,6 +518,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                                                                     inBurst: model.burstIDByFile[file.id] != nil,
                                                                     queueTask: queueModel.task(for: file.id),
                                                                     progressModel: queueModel.progressModel)
+                                                .accessibilityIdentifier("photo-cell-\(file.id)")
                                             }
                                         }
                                         // The grid proposes a width but may let a
@@ -461,8 +534,10 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                                             GeometryReader { proxy in
                                                 Color.clear.preference(
                                                     key: PhotoListCellBoundsPreferenceKey.self,
-                                                    value: [file.id: proxy.frame(in: .global)]
+                                                    value: [entry.cellID: proxy.frame(in: .global)]
                                                 )
+                                                .preference(key: PhotoListScrollItemsPreferenceKey.self,
+                                                            value: [entry.id: proxy.frame(in: .global)])
                                             }
                                         }
                                         .modifier(PhotoReturnFocusPulse(
@@ -485,7 +560,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                                             minimumDuration: photoPreviewLongPressDuration,
                                             maximumDistance: 12
                                         ) {
-                                            guard !burstAnimationBusy, collapsingDay == nil,
+                                            guard entry.isPhoto, !burstAnimationBusy, collapsingDay == nil,
                                                   cameraRemovalAffectedDays.isEmpty else { return }
                                             handleLongPress(entry, file: file)
                                         }
@@ -534,7 +609,8 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                             case let .failed(message):
                                 Text(message).zTransferText(size: ZTransferMetrics.body).padding()
                             case .loaded:
-                                PhotoListEmptyState(filterActive: model.filter.isActive,
+                                PhotoListEmptyState(filterActive: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled),
+                                                    showNoMatchMessage: model.filter.showsNoMatchMessage(ratingLoading: model.ratingScan.loading),
                                                     usb: (presentationMode == .usb),
                                                     onClearFilter: model.clearFilter)
                                     .frame(maxWidth: .infinity)
@@ -557,9 +633,23 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                             )
                     }
                 }
-                .onAppear { photoListScrollProxy = reader }
+                .onAppear {
+                    photoListScrollProxy = reader
+                    scrollItemIndices = scrollLayout.indices()
+                    updateBackTopPosition()
+                }
+                .onDisappear { backTop.reset() }
+                .onChange(of: scrollLayout) { layout in
+                    scrollItemIndices = layout.indices()
+                    updateBackTopPosition()
+                }
+                .onPreferenceChange(PhotoListScrollItemsPreferenceKey.self) { frames in
+                    scrollItemFrames = frames
+                    updateBackTopPosition()
+                }
                 .onPreferenceChange(PhotoListViewportPreferenceKey.self) { bounds in
                     photoListViewportBounds = bounds
+                    updateBackTopPosition()
                 }
                 .onPreferenceChange(PhotoListCellBoundsPreferenceKey.self) { bounds in
                     // Lazy-grid cells unregister when they leave composition.
@@ -575,16 +665,22 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                 }
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
                     photoListScrollOffset = value
-                    showTopButton = value < -360
-                    if PhotoListScrollActivity.isAtTop(offset: -value, scale: displayScale) { remoteExpandedAwayFromTop = false }
+                    if PhotoListScrollActivity.isAtTop(offset: -value, scale: displayScale) {
+                        remoteExpandedAwayFromTop = false
+                        backTop.finishReturn()
+                    }
                 }
                 // Android's photo grid has no pull-to-refresh action. Adding
                 // SwiftUI refreshable made a downward drag restart the camera
                 // scan and thumbnail pipeline while the user was just scrolling.
                 .overlay(alignment: .bottomTrailing) {
-                    if showTopButton {
+                    if backTop.isVisible {
                         Button {
-                            withAnimation(ZTransferMotion.standard) { reader.scrollTo("photo-list-top", anchor: .top) }
+                            backTop.beginReturn()
+                            // Basic functional return; animation fidelity is deferred.
+                            var transaction = Transaction(animation: nil)
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) { reader.scrollTo("photo-list-top", anchor: .top) }
                         } label: {
                             Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold))
                                 .foregroundStyle(ZTransferColors.primaryText)
@@ -625,9 +721,32 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             if selectedFile != nil { previewOverlay }
             workspaceTopControls
             queueFlightOverlay
+            PhotoListHint(state: admissionHint)
+            DebugPhotoProtectionPanel(
+                isSTA: presentationMode == .sta,
+                files: model.displayedFiles,
+                session: isSessionConnected ? session : nil
+            )
         }
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if ProcessInfo.processInfo.arguments.contains("--list-admission-ui-test") {
+                Text("flights=\(queueFlights.count);held=\(heldFlightCount)")
+                    .font(.system(size: 8)).allowsHitTesting(false)
+                    .accessibilityIdentifier("admission-flight-state")
+            }
+        }
+        #endif
         .onPreferenceChange(PhotoListQueueTargetPreferenceKey.self) { queueTargetBounds = $0 }
-        .task(id: isSessionConnected) {
+        .onChange(of: session.map(ObjectIdentifier.init)) { _ in
+            // Keep the displayed effect sample, but reject work from the old
+            // protocol owner and allow an unfinished request to retry.
+            effectPreviewGeneration &+= 1
+            effectPreviewLoadingKey = nil
+            effectPreviewAttemptKey = nil
+            if effectPreviewRequested { requestEffectPreview() }
+        }
+        .task(id: PhotoListSessionTaskID(session: session.map(ObjectIdentifier.init), value: isSessionConnected)) {
             if showingRemote { showingQueue = false }
             if presentedSections.isEmpty {
                 presentedSections = model.sections
@@ -653,12 +772,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
         // CameraSession, allowing catalog/thumbnail work to compete with the
         // transfer. task(id:) provides the same initial synchronization and
         // cancels a stale write if the busy state flips again immediately.
-        .task(id: queueModel.snapshot.isTransferring) {
+        .task(id: PhotoListSessionTaskID(session: session.map(ObjectIdentifier.init), value: queueModel.snapshot.isTransferring)) {
             let busy = queueModel.snapshot.isTransferring
             model.setTransferBusy(busy)
             await session?.setTransfersBusy(busy)
         }
-        .task(id: !showingQueue && !showingRemote) {
+        .task(id: PhotoListSessionTaskID(session: session.map(ObjectIdentifier.init), value: !showingQueue && !showingRemote)) {
             // Android removes FileListScreen's LaunchedEffect when navigating
             // to queue/remote. These iOS routes keep the parent view alive, so
             // cancel explicitly while hidden instead of spending a reminder.
@@ -666,17 +785,26 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             await remoteIntro.run(onStarted: { remoteIntroHandled = true })
         }
         .onChange(of: showingRemote) { remote in
-            if remote { showingQueue = false }
+            if remote {
+                showingQueue = false
+                cancelListQueueFlights()
+            }
             // MainActivity.shouldPreferHighThroughputTransfers: both files and
             // transfer routes enable this; monitoring disables it.
             Task { await session?.setPreferHighThroughputTransfers(!remote) }
         }
         .onDisappear {
+            cancelListQueueFlights()
+            signalAttention.stop()
+            admissionHint.stop()
             cameraRemovalTask?.cancel()
             dateAnimationTask?.cancel()
             revealWindowTask?.cancel()
             burstAnimationTask?.cancel()
             Task { await session?.setPreferHighThroughputTransfers(false) }
+        }
+        .onChange(of: showingQueue) { visible in
+            if visible { cancelListQueueFlights() }
         }
         .onChange(of: collapseBurstPhotos) { enabled in
             burstAnimationTask?.cancel()
@@ -784,6 +912,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                            // control can request immediate recovery.
                            if let session { onTransportLost(session) }
                        })
+                .id(session.map(ObjectIdentifier.init))
         }
         .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
             if let anchor = anchors[.settings] {
@@ -812,6 +941,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                         ? model.availableStorageSlots : [],
                     suggestedDate: model.latestKnownCaptureDay,
                     ratingProgress: model.ratingScan,
+                    showProtectionFilter: model.protectionFilteringEnabled,
                     onChange: applyFilter
                 )
             }
@@ -829,17 +959,13 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                          storageMode: storageMode,
                          queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds,
                          initialAnchor: previewAnchor,
-                         initialExpandedBurstIDs: expandedBurstIDs,
+                         initialExpandedBurstIDs: previewExpandedBurstIDs,
                          collapseBursts: collapseBurstPhotos,
                          onBurstChanged: { id, expanded in
                              if expanded { expandedBurstIDs.insert(id) }
                              else { expandedBurstIDs.remove(id) }
                          }) { file in
-            guard directoryStore.directoryURL != nil else {
-                selectedFile = nil
-                requestTransferDirectory()
-                return false
-            }
+            guard admitManualTransfer([file], fromPreview: true) else { return false }
             if !deferTransferStart {
                 queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL, storageMode: storageMode, effects: effectsStore.settings)
             } else {
@@ -847,11 +973,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             }
             return true
         } onEnqueueBurst: { burstFiles in
-            guard directoryStore.directoryURL != nil else {
-                selectedFile = nil
-                requestTransferDirectory()
-                return false
-            }
+            guard admitManualTransfer(burstFiles, fromPreview: true) else { return false }
             if !deferTransferStart, let directory = directoryStore.directoryURL {
                 queueModel.enqueue(burstFiles, autoStart: transferSession, directory: directory,
                                    storageMode: storageMode, effects: effectsStore.settings)
@@ -879,12 +1001,23 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                 if previewReturnNonce == nonce { previewReturnFileID = nil }
             }
         } onCropConfirmed: { file, selection in
-            guard let directory = directoryStore.directoryURL,
-                  let task = LosslessCropTaskStore().load().first(where: { $0.fileID == file.id }) else { return }
-            queueModel.enqueueCrop(file, task: task, storageMode: storageMode,
-                                   session: deferTransferStart ? nil : transferSession,
-                                   directory: deferTransferStart ? nil : directory,
-                                   effects: effectsStore.settings)
+            let directory = directoryStore.directoryURL
+            switch CropPreviewAdmission(hasDirectory: directory != nil, connected: isSessionConnected) {
+            case .directoryRequired:
+                selectedFile = nil
+                requestTransferDirectory()
+                return false
+            case .disconnected:
+                signalAttention.trigger()
+                admissionHint.show(AppLocalized.resource("camera_not_connected"))
+                return false
+            case .accepted: break
+            }
+            let accepted = await queueModel.acceptCrop(file, selection: selection, storageMode: storageMode,
+                session: deferTransferStart ? nil : transferSession,
+                directory: deferTransferStart ? nil : directory, effects: effectsStore.settings)
+            if accepted { admissionHint.show(AppLocalized.resource("crop_added")) }
+            return accepted
         }
         .onAppear { model.pauseForPreview() }
         .onDisappear {
@@ -950,6 +1083,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
+            .scaleEffect(CGFloat(signalAttention.motion.scale.value))
 
             let filterPalette = zTransferButtonAccentPalette(
                 skin: .init(storedValue: skinPreset),
@@ -961,8 +1095,8 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                 showingFilter.toggle()
             } label: {
                 PhotoListFilterIcon(
-                    active: model.filter.isActive,
-                    color: model.filter.isActive ? filterPalette.active : filterPalette.inactive
+                    active: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled),
+                    color: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled) ? filterPalette.active : filterPalette.inactive
                 )
                     .frame(width: 20, height: 20)
                     .frame(width: photoListCompactButtonWidth,
@@ -970,10 +1104,10 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             }
             .buttonStyle(ZTransferGlassButtonStyle(
                 cornerRadius: 22,
-                active: model.filter.isActive,
+                active: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled),
                 activeColor: filterPalette.material,
                 activeOutline: true,
-                materialContentColor: model.filter.isActive
+                materialContentColor: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled)
                     ? filterPalette.active
                     : filterPalette.inactive,
                 prominentPressFeedback: true
@@ -1075,6 +1209,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
+            .scaleEffect(CGFloat(signalAttention.motion.scale.value))
         }
         .transition(.opacity)
     }
@@ -1108,18 +1243,20 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     /// one source of truth for start/pause availability and pill animation.
     private var queueTopRightControls: some View {
         HStack(spacing: 8) {
-            let executionMode = queueExecutionMode
+            let executionMode = queueModel.snapshot.executionControl
             if let executionMode {
                 Button {
                     switch executionMode {
                     case .pause:
                         guard !queueModel.snapshot.pauseAfterCurrent else { return }
+                        queueControlActionNonce &+= 1
                         ZTransferHaptics.shared.tick()
                         queueModel.pause()
                     case .start:
-                        guard let session = transferSession, let directory = directoryStore.directoryURL else { return }
+                        guard let directory = directoryStore.directoryURL else { return }
+                        queueControlActionNonce &+= 1
                         ZTransferHaptics.shared.tick()
-                        queueModel.start(session: session, directory: directory)
+                        queueModel.start(session: transferSession, directory: directory)
                     }
                 } label: {
                     ZStack {
@@ -1159,17 +1296,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                 .transition(.opacity.combined(with: .scale(scale: 0.72)))
             }
 
-            Button {
-                    presentQueuePage()
-                } label: {
-                    LiveQueuePill(
-                        snapshot: queueModel.snapshot,
-                        progressModel: queueModel.progressModel,
-                        heldCount: heldFlightCount,
-                        heldBaselineRemaining: heldFlightBaselineRemaining
-                    )
-                }
-                .buttonStyle(QueuePillButtonStyle())
+            LiveQueuePill(
+                    snapshot: queueModel.snapshot,
+                    progressModel: queueModel.progressModel,
+                    heldCount: heldFlightCount,
+                    onClick: presentQueuePage
+                )
                 // Measure the visible capsule itself. Its right edge is fixed
                 // by the trailing HStack even while its width springs, so the
                 // flight cannot drift to a synthetic/fallback anchor.
@@ -1184,36 +1316,6 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
                 .accessibilityLabel(AppLocalized.resource("cd_transfer"))
         }
         .modifier(QueueControlsCatchEffect(trigger: queueImpact))
-    }
-
-    private var queueExecutionMode: QueueExecutionVisualMode? {
-        let waitingCount = queueModel.snapshot.items.reduce(into: 0) { count, item in
-            if item.status == .waiting { count += 1 }
-        }
-        let hasClaimedCurrent = queueModel.snapshot.items.contains { $0.status == .transferring }
-        // Auto-start publishes isTransferring before its serial worker claims
-        // the first item. Product-wise that first item is already the current
-        // transfer, not a user-visible queued item, so never count it as a
-        // reason to show PAUSE.
-        let scheduledCurrentCount = queueModel.snapshot.isTransferring && !hasClaimedCurrent ? 1 : 0
-        // A queued task is not visually available until its flight lands in
-        // the pill. In immediate-transfer mode this suppresses implementation
-        // snapshots without changing the semantics: the transfer has already
-        // started and only tasks behind the current one are "waiting".
-        let actualDownloadRemaining = queueModel.snapshot.items.reduce(into: 0) { count, item in
-            if item.status == .waiting || item.status == .transferring { count += 1 }
-        }
-        let hiddenInFlightCount = queueHiddenFlightCount(actualRemaining: actualDownloadRemaining)
-        let landedWaitingCount = max(
-            0,
-            waitingCount - scheduledCurrentCount - hiddenInFlightCount
-        )
-        guard landedWaitingCount > 0 else { return nil }
-        if queueModel.snapshot.isTransferring { return .pause }
-        // START belongs to a deliberately deferred/paused queue. Automatic
-        // mode owns its worker immediately and must never expose its brief
-        // scheduling snapshot as a manual-start state.
-        return deferTransferStart || queueModel.snapshot.pauseAfterCurrent ? .start : nil
     }
 
     /// Android requests the latest visible file on entering Settings: publish
@@ -1471,10 +1573,9 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             return
         }
 
-        let viewport = UIScreen.main.bounds
+        let viewport = photoListVisibleViewport
         let lastVisible = entries.indices.last { index in
-            guard let bounds = cellBounds[entries[index].firstFile.id] else { return false }
-            return bounds.intersects(viewport)
+            visiblePhotoListCellBounds(entries[index].cellID, bounds: cellBounds, viewport: viewport) != nil
         }
         guard let lastVisible else {
             collapsedDays.insert(section.day)
@@ -1502,10 +1603,9 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     }
 
     private func enqueueSection(_ files: [CameraFile], source: CGRect?) {
-        guard directoryStore.directoryURL != nil else { requestTransferDirectory(); return }
+        guard admitManualTransfer(files) else { return }
         guard let first = files.first else { return }
         ZTransferHaptics.shared.tick()
-        beginQueueFlightHold(files.count)
         startListQueueFlight(for: first, count: files.count, from: source, packFiles: files)
         if deferTransferStart {
             queueModel.enqueue(files, storageMode: storageMode, effects: effectsStore.settings)
@@ -1516,13 +1616,10 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     }
 
     private func handleTap(_ entry: PhotoGridEntry, file: CameraFile) {
-        if case let .burst(group) = entry {
-            toggleBurst(group.id)
-            return
-        }
+        if case .burst = entry { return }
         if tapToPreview {
             ZTransferHaptics.shared.longPress()
-            openPreview(file, anchorFileID: file.id)
+            openPreview(file, anchor: .photo(file.id))
         } else {
             enqueueFileFromList(file)
         }
@@ -1534,33 +1631,45 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     private func handleLongPress(_ entry: PhotoGridEntry, file: CameraFile) {
         if case let .burst(group) = entry {
             ZTransferHaptics.shared.longPress()
-            expandedBurstIDs.insert(group.id)
-            openPreview(group.files[0], anchorFileID: file.id)
+            openPreview(group.files[0], anchor: .burst(group.id), expandingBurst: group.id)
         } else if tapToPreview {
             enqueueFileFromList(file)
         } else {
             ZTransferHaptics.shared.longPress()
-            openPreview(file, anchorFileID: file.id)
+            openPreview(file, anchor: .photo(file.id))
         }
     }
 
     private func enqueueFileFromList(_ file: CameraFile) {
-        if directoryStore.directoryURL == nil {
-            // Android routes a transfer attempt with no valid destination to the
-            // existing settings overlay; it does not enqueue an unusable task.
-            requestTransferDirectory()
-        } else if !deferTransferStart {
+        guard admitManualTransfer([file]) else { return }
+        if !deferTransferStart {
             ZTransferHaptics.shared.tick()
-            beginQueueFlightHold(1)
-            startListQueueFlight(for: file)
+            startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
+                .photo(file.id), bounds: cellBounds, viewport: photoListVisibleViewport))
             queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL,
                                storageMode: storageMode, effects: effectsStore.settings)
         } else {
             ZTransferHaptics.shared.tick()
-            beginQueueFlightHold(1)
-            startListQueueFlight(for: file)
+            startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
+                .photo(file.id), bounds: cellBounds, viewport: photoListVisibleViewport))
             queueModel.enqueue(file, storageMode: storageMode, effects: effectsStore.settings)
         }
+    }
+
+    private func admitManualTransfer(_ files: [CameraFile], fromPreview: Bool = false) -> Bool {
+        guard !files.isEmpty else { return false }
+        guard let directory = directoryStore.directoryURL else {
+            if fromPreview { selectedFile = nil }
+            requestTransferDirectory()
+            return false
+        }
+        guard model.canEnqueueManually(files, connected: isSessionConnected,
+                                      directory: directory, storageMode: storageMode) else {
+            signalAttention.trigger()
+            admissionHint.show(AppLocalized.resource("camera_not_connected"))
+            return false
+        }
+        return true
     }
 
     private func requestTransferDirectory() {
@@ -1578,8 +1687,12 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
         }
     }
 
-    private func openPreview(_ file: CameraFile, anchorFileID: UInt32) {
-        previewAnchor = cellBounds[anchorFileID]
+    private func openPreview(_ file: CameraFile, anchor: PhotoListCellID, expandingBurst: String? = nil) {
+        // FileListScreen.onPreviewBurst expands only the opening snapshot.
+        // The underlying grid is reconciled when returning to a member.
+        previewExpandedBurstIDs = expandedBurstIDs
+        if let expandingBurst { previewExpandedBurstIDs.insert(expandingBurst) }
+        previewAnchor = visiblePhotoListCellBounds(anchor, bounds: cellBounds, viewport: photoListVisibleViewport)
         selectedFile = file
     }
 
@@ -1620,26 +1733,26 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
         }
 
         let viewport = photoListVisibleViewport
-        let initialFrame = cellBounds[file.id]
+        let initialFrame = cellBounds[.photo(file.id)]
         if let initialFrame,
            photoFrameIsFullyVisible(initialFrame, in: viewport) {
             return initialFrame
         }
         guard let reader = photoListScrollProxy else { return nil }
 
-        let visibleEntries = model.sections.flatMap { section -> [(scrollID: String, fileID: UInt32)] in
+        let visibleEntries = model.sections.flatMap { section -> [(scrollID: String, cellID: PhotoListCellID)] in
             guard !collapsedDays.contains(section.day) else { return [] }
             return photoGridEntries(section.files, burstIDByFile: model.burstIDByFile,
                                     collapse: collapseBurstPhotos,
                                     expandedIDs: expandedBurstIDs).map { entry in
-                (entry.id, entry.firstFile.id)
+                (entry.id, entry.cellID)
             }
         }
         guard let targetIndex = visibleEntries.firstIndex(where: { entry in
             entry.scrollID == "photo_\(file.id)"
         }) else { return nil }
         let visibleIndex = visibleEntries.firstIndex { entry in
-            cellBounds[entry.fileID]?.intersects(viewport) == true
+            cellBounds[entry.cellID]?.intersects(viewport) == true
         } ?? targetIndex
         let runway = min(max(thumbnailColumns, 1), 4) * 3
         if abs(targetIndex - visibleIndex) > runway * 2 {
@@ -1666,7 +1779,7 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
         }
         try? await Task.sleep(nanoseconds: 280_000_000)
         await Task.yield()
-        guard let frame = cellBounds[file.id],
+        guard let frame = cellBounds[.photo(file.id)],
               photoFrameIsFullyVisible(frame, in: photoListVisibleViewport) else { return nil }
         return frame
     }
@@ -1691,25 +1804,23 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     private func startListQueueFlight(
         for file: CameraFile,
         count: Int = 1,
-        from source: CGRect? = nil,
+        from source: CGRect?,
         packFiles: [CameraFile] = []
     ) {
         let screen = UIScreen.main.bounds
-        let measuredSource = source ?? cellBounds[file.id]
-        let from = measuredSource.map { frame in
-            frame.isEmpty || frame.isInfinite || frame.isNull
-                ? CGRect(x: screen.midX - 22, y: screen.midY - 22, width: 44, height: 44)
-                : frame
-        } ?? CGRect(x: screen.midX - 22, y: screen.midY - 22, width: 44, height: 44)
+        guard let admission = flightAdmissions.admit(source: source, viewport: photoListVisibleViewport,
+                                                     count: count) else { return }
+        let from = admission.source
         let target = queueTargetBounds.isEmpty || queueTargetBounds.isInfinite || queueTargetBounds.isNull
             ? CGRect(x: screen.maxX - 13, y: 48, width: 1,
                      height: photoListTopControlsHeight)
             : queueTargetBounds
-        let id = UUID()
-        let flightCount = max(1, count)
+        let id = admission.id
+        let flightCount = admission.count
         let visiblePackCandidates = count > 1 ? makeQueueFlightPacks(packFiles) : []
         let topImage = session?.memoryThumbnailImage(file: file)
         let packDuration = visiblePackCandidates.isEmpty ? 0.0 : 0.42
+        beginQueueFlightHold(flightCount)
         queueFlights.append(PhotoListQueueFlight(
             id: id,
             file: file,
@@ -1721,16 +1832,26 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
             packs: visiblePackCandidates,
             image: topImage
         ))
-        Task { @MainActor in
+        queueFlightTasks[id] = Task { @MainActor in
             // startedAt is immutable and 32 ms in the future. The live
             // TimelineView crosses that boundary by itself, so the animation
             // no longer depends on a second parent-state mutation being
             // delivered after insertion.
             try? await Task.sleep(nanoseconds: UInt64((0.032 + packDuration + 0.56) * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            finishQueueFlightHold(flightCount, caught: true)
-            queueFlights.removeAll { $0.id == id }
+            finishListQueueFlight(id, caught: true)
         }
+    }
+
+    private func finishListQueueFlight(_ id: UUID, caught: Bool) {
+        guard let count = flightAdmissions.finish(id) else { return }
+        queueFlights.removeAll { $0.id == id }
+        queueFlightTasks.removeValue(forKey: id)?.cancel()
+        finishQueueFlightHold(count, caught: caught)
+    }
+
+    private func cancelListQueueFlights() {
+        for id in flightAdmissions.activeIDs { finishListQueueFlight(id, caught: false) }
     }
 
     /// Freeze the number already visible before scheduling the real enqueue.
@@ -1739,38 +1860,20 @@ private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> 
     private func beginQueueFlightHold(_ count: Int) {
         let amount = max(0, count)
         guard amount > 0 else { return }
-        if heldFlightCount == 0 { heldFlightBaselineRemaining = queueActualRemaining }
         heldFlightCount += amount
     }
 
     private func finishQueueFlightHold(_ count: Int, caught: Bool) {
         heldFlightCount = max(0, heldFlightCount - max(0, count))
-        if heldFlightCount == 0 { heldFlightBaselineRemaining = nil }
         if caught { queueImpact &+= 1 }
     }
 
-    private var queueActualRemaining: Int {
-        let downloads = queueModel.snapshot.items.reduce(into: 0) { count, item in
-            if item.status == .waiting || item.status == .transferring { count += 1 }
-        }
-        if downloads > 0 { return downloads }
-        return queueModel.snapshot.items.reduce(into: 0) { count, item in
-            if item.isGeneratingFrame { count += 1 }
-        }
-    }
-
-    private func queueHiddenFlightCount(actualRemaining: Int) -> Int {
-        guard heldFlightCount > 0, let baseline = heldFlightBaselineRemaining else { return 0 }
-        return min(heldFlightCount, max(0, actualRemaining - baseline))
-    }
-
     private func makeQueueFlightPacks(_ files: [CameraFile]) -> [PhotoListQueuePackSoul] {
-        let screen = UIScreen.main.bounds
+        let viewport = photoListVisibleViewport
         var candidates: [PhotoListQueuePackSoul] = []
         for file in files {
-            guard let bounds = cellBounds[file.id],
-                  bounds.width > 0, bounds.height > 0,
-                  bounds.intersects(screen) else { continue }
+            guard let bounds = visiblePhotoListCellBounds(.photo(file.id), bounds: cellBounds,
+                                                          viewport: viewport) else { continue }
             candidates.append(PhotoListQueuePackSoul(
                 bounds: bounds,
                 image: session?.memoryThumbnailImage(file: file)
@@ -1967,9 +2070,55 @@ func queueFlightEasedProgress(_ linear: CGFloat) -> CGFloat {
     return 3 * remaining * t * t * 0.35 + t * t * t
 }
 
-private struct PhotoListCellBoundsPreferenceKey: PreferenceKey {
-    static let defaultValue: [UInt32: CGRect] = [:]
-    static func reduce(value: inout [UInt32: CGRect], nextValue: () -> [UInt32: CGRect]) {
+/// Collection cards, their action buttons and member photos have independent
+/// geometry even when the first member shares the collection's display image.
+enum PhotoListCellID: Hashable {
+    case photo(UInt32)
+    case burst(String)
+    case burstEnqueue(String)
+}
+
+func visiblePhotoListCellBounds(_ id: PhotoListCellID, bounds: [PhotoListCellID: CGRect],
+                                viewport: CGRect) -> CGRect? {
+    guard let frame = bounds[id], !frame.isEmpty, !frame.isInfinite, !frame.isNull,
+          frame.intersects(viewport) else { return nil }
+    return frame
+}
+
+/// Flight admission is independent of transfer admission: repeated exports
+/// still enqueue, but missing/offscreen or already-flying sources hold no count.
+func admittedPhotoListFlightSource(_ source: CGRect?, viewport: CGRect, activeSources: [CGRect]) -> CGRect? {
+    guard let source, !source.isEmpty, !source.isNull, !source.isInfinite,
+          source.intersects(viewport), !activeSources.contains(source) else { return nil }
+    return source
+}
+
+struct PhotoListFlightAdmissions {
+    struct Admission {
+        let id: UUID
+        let source: CGRect
+        let count: Int
+    }
+    private var active: [UUID: Admission] = [:]
+    var activeIDs: [UUID] { Array(active.keys) }
+    var heldCount: Int { active.values.reduce(0) { $0 + $1.count } }
+
+    mutating func admit(source: CGRect?, viewport: CGRect, count: Int) -> Admission? {
+        guard count > 0, let source = admittedPhotoListFlightSource(source, viewport: viewport,
+                                    activeSources: active.values.map(\.source)) else { return nil }
+        let admission = Admission(id: UUID(), source: source, count: count)
+        active[admission.id] = admission
+        return admission
+    }
+
+    /// Completion and cancellation consume the same identity exactly once.
+    /// A late callback cannot release a newer flight from the same source.
+    mutating func finish(_ id: UUID) -> Int? { active.removeValue(forKey: id)?.count }
+}
+
+struct PhotoListCellBoundsPreferenceKey: PreferenceKey {
+    static let defaultValue: [PhotoListCellID: CGRect] = [:]
+    static func reduce(value: inout [PhotoListCellID: CGRect], nextValue: () -> [PhotoListCellID: CGRect]) {
         value.merge(nextValue()) { _, latest in latest }
     }
 }
@@ -1983,7 +2132,10 @@ private struct PhotoListSectionEnqueueBoundsPreferenceKey: PreferenceKey {
 
 private struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if !next.isEmpty { value = next }
+    }
 }
 
 /// SignalPill family: USB keeps its dedicated mark, STA shows topology state,
@@ -2114,6 +2266,7 @@ private func formatDateHeader(_ raw: String) -> String {
 
 private struct PhotoListEmptyState: View {
     let filterActive: Bool
+    let showNoMatchMessage: Bool
     let usb: Bool
     let onClearFilter: () -> Void
 
@@ -2127,9 +2280,11 @@ private struct PhotoListEmptyState: View {
                     .font(.system(size: 48, weight: .regular))
                     .foregroundStyle(ZTransferColors.secondaryText.opacity(alpha))
             }
-            Text(AppLocalized.resource(filterActive ? "no_photos_match_filter" : "no_photos_on_camera"))
-                .zTransferText(size: ZTransferMetrics.body)
-                .foregroundStyle(ZTransferColors.secondaryText)
+            if !filterActive || showNoMatchMessage {
+                Text(AppLocalized.resource(filterActive ? "no_photos_match_filter" : "no_photos_on_camera"))
+                    .zTransferText(size: ZTransferMetrics.body)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            }
             if !filterActive && usb {
                 Text(AppLocalized.resource("usb_turn_on_camera_hint"))
                     .zTransferText(size: ZTransferMetrics.caption)
@@ -2156,6 +2311,9 @@ private enum PhotoGridEntry: Identifiable {
     case burst(BurstPhotoGroup)
     var id: String {
         switch self { case let .photo(file): return "photo_\(file.id)"; case let .burst(group): return "burst_\(group.id)" }
+    }
+    var cellID: PhotoListCellID {
+        switch self { case let .photo(file): return .photo(file.id); case let .burst(group): return .burst(group.id) }
     }
     var firstFile: CameraFile {
         switch self { case let .photo(file): return file; case let .burst(group): return group.files[0] }
@@ -2186,22 +2344,113 @@ private func photoGridEntries(_ files: [CameraFile], burstIDByFile: [UInt32: Str
     return entries
 }
 
-private enum QueuePillVisualMode: Hashable, CaseIterable {
-    case icon, done, paused, generating, counting
+
+@MainActor
+private final class QueuePillContentClock: ObservableObject {
+    @Published private(set) var motion: QueuePillContentMotion
+    private var link: CADisplayLink?
+    init(_ initial: QueuePillPresentation) { motion = .init(initial) }
+
+    @MainActor
+    private final class FrameTarget: NSObject {
+        weak var owner: QueuePillContentClock?
+        init(_ owner: QueuePillContentClock) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.frame(link)
+        }
+    }
+
+    func update(_ next: QueuePillPresentation) {
+        motion.update(next)
+        guard motion.isRunning, link == nil else { return }
+        let link = CADisplayLink(target: FrameTarget(self), selector: #selector(FrameTarget.frame(_:)))
+        self.link = link
+        link.add(to: .main, forMode: .common)
+    }
+    private func frame(_ link: CADisplayLink) {
+        motion.advance(Int64(link.timestamp * 1_000_000_000))
+        if !motion.isRunning { stop() }
+    }
+    func mount(_ next: QueuePillPresentation) { stop(); motion = .init(next) }
+    func stop() { link?.invalidate(); link = nil }
+}
+
+private struct QueuePillContentTransition<Content: View>: View {
+    let presentation: QueuePillPresentation
+    let content: (QueuePillPresentation) -> Content
+    @StateObject private var clock: QueuePillContentClock
+
+    init(presentation: QueuePillPresentation, @ViewBuilder content: @escaping (QueuePillPresentation) -> Content) {
+        self.presentation = presentation
+        self.content = content
+        _clock = StateObject(wrappedValue: QueuePillContentClock(presentation))
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            ForEach(clock.motion.layers) { layer in
+                content(layer.id == presentation.mode ? presentation : layer.presentation)
+                    // Android wrapContentWidth(End, unbounded = true): the
+                    // viewport must not squeeze the outgoing text as it shrinks.
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, layer.id == .icon ? 0 : 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .opacity(Double(layer.fade.alpha.value))
+                    .accessibilityHidden(layer.id != presentation.mode)
+            }
+        }
+        .onAppear { clock.mount(presentation) }
+        .onChange(of: presentation) { clock.update($0) }
+        .onDisappear { clock.stop() }
+    }
+}
+
+
+@MainActor
+private final class QueuePillWidthClock: ObservableObject {
+    @Published private(set) var motion = QueueTopPillWidthMotion()
+    private var link: CADisplayLink?
+
+    @MainActor
+    private final class FrameTarget: NSObject {
+        weak var owner: QueuePillWidthClock?
+        init(_ owner: QueuePillWidthClock) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.frame(link)
+        }
+    }
+
+    func update(width: CGFloat, scale: CGFloat) {
+        motion.update(width: width, scale: scale)
+        guard motion.isRunning, link == nil else { return }
+        let link = CADisplayLink(target: FrameTarget(self), selector: #selector(FrameTarget.frame(_:)))
+        self.link = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    private func frame(_ link: CADisplayLink) {
+        motion.advance(Int64(link.timestamp * 1_000_000_000))
+        if !motion.isRunning { stop() }
+    }
+
+    private func stop() { link?.invalidate(); link = nil }
+    func reset() { stop(); motion = .init() }
 }
 
 private struct LiveQueuePill: View {
     let snapshot: TransferQueueSnapshot
     @ObservedObject var progressModel: TransferQueueProgressViewModel
     let heldCount: Int
-    let heldBaselineRemaining: Int?
+    let onClick: () -> Void
 
     var body: some View {
         QueuePill(
             snapshot: snapshot,
             activeProgress: progressModel.activeProgress,
             heldCount: heldCount,
-            heldBaselineRemaining: heldBaselineRemaining
+            onClick: onClick
         )
     }
 }
@@ -2210,7 +2459,18 @@ struct QueuePill: View {
     let snapshot: TransferQueueSnapshot
     let activeProgress: TransferActiveProgress?
     let heldCount: Int
-    let heldBaselineRemaining: Int?
+    let onClick: () -> Void
+
+    private let taskSummary: QueuePillTaskSummary
+
+    init(snapshot: TransferQueueSnapshot, activeProgress: TransferActiveProgress?,
+         heldCount: Int, onClick: @escaping () -> Void = {}) {
+        self.onClick = onClick
+        self.snapshot = snapshot
+        self.activeProgress = activeProgress
+        self.heldCount = heldCount
+        taskSummary = .init(items: snapshot.items)
+    }
 
     @State private var showDoneLabel = false
     @State private var sawActiveBatch = false
@@ -2219,8 +2479,9 @@ struct QueuePill: View {
     @State private var finishProgressVisible = false
     @State private var retainedProgressSeed = "queue"
     @State private var doneTask: Task<Void, Never>?
-    @State private var measuredWidths: [QueuePillVisualMode: CGFloat] = [:]
-    @State private var renderedWidth: CGFloat = 40
+    @State private var widthMeasurement = QueuePillWidthMeasurement()
+    @StateObject private var widthClock = QueuePillWidthClock()
+    @Environment(\.displayScale) private var displayScale
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
@@ -2228,27 +2489,10 @@ struct QueuePill: View {
         ZTransferButtonSkin(storedValue: skinPreset) == .liquidGlass
     }
 
-    private var downloadRemaining: Int {
-        snapshot.items.reduce(into: 0) { count, item in
-            if item.status == .waiting || item.status == .transferring { count += 1 }
-        }
-    }
-
-    private var generationCount: Int {
-        snapshot.items.reduce(into: 0) { count, item in
-            if item.isGeneratingFrame { count += 1 }
-        }
-    }
-
-    private var activeItem: TransferQueueItem? {
-        snapshot.items.first(where: { $0.status == .transferring })
-    }
-
-    private var progressOwner: TransferQueueItem? {
-        activeItem
-            ?? snapshot.items.first(where: { $0.isGeneratingFrame })
-            ?? snapshot.items.first(where: { $0.status == .waiting })
-    }
+    private var downloadRemaining: Int { taskSummary.downloadRemaining }
+    private var generationCount: Int { taskSummary.generationRemaining }
+    private var activeItem: TransferQueueItem? { taskSummary.activeDownload }
+    private var progressOwner: TransferQueueItem? { taskSummary.progressOwner }
 
     private var activeSpeed: Int64 {
         guard snapshot.isTransferring else { return 0 }
@@ -2259,26 +2503,29 @@ struct QueuePill: View {
         activeSpeed > 0 ? speedText(activeSpeed) : nil
     }
 
-    private var displayRemainingCount: Int {
-        max(0, actualRemainingCount - hiddenFlightCount)
-    }
-
-    private var actualRemainingCount: Int {
-        downloadRemaining > 0 ? downloadRemaining : generationCount
-    }
-
-    private var hiddenFlightCount: Int {
-        guard heldCount > 0, let baseline = heldBaselineRemaining else { return 0 }
-        return min(heldCount, max(0, actualRemainingCount - baseline))
-    }
-
-    private var rawAllDone: Bool { downloadRemaining == 0 && generationCount == 0 }
-    private var allDone: Bool { rawAllDone && heldCount == 0 }
+    private var displayRemainingCount: Int { taskSummary.displayRemaining(heldCount: heldCount) }
+    private var allDone: Bool { taskSummary.allDone }
     private var paused: Bool { !snapshot.isTransferring && downloadRemaining > 0 }
-    private var hasCancelled: Bool { snapshot.items.contains { $0.status == .cancelled } }
-    private var hasWorkingTask: Bool { activeItem != nil || generationCount > 0 }
+    private var hasCancelled: Bool { taskSummary.hasCancelled }
+    private var hasWorkingTask: Bool { taskSummary.hasActive }
     private var completionPending: Bool {
         allDone && previousAllDone == false && !hasCancelled
+    }
+    private struct CompletionInput: Equatable {
+        let allDone: Bool
+        let hasCancelled: Bool
+    }
+    private var completionInput: CompletionInput {
+        .init(allDone: allDone, hasCancelled: hasCancelled)
+    }
+    private struct CountVisibilityInput: Equatable {
+        let hasRemaining: Bool
+        let hasWorkingTask: Bool
+        let paused: Bool
+    }
+    private var countVisibilityInput: CountVisibilityInput {
+        .init(hasRemaining: displayRemainingCount > 0,
+              hasWorkingTask: hasWorkingTask, paused: paused)
     }
     private var doneVisible: Bool { showDoneLabel || completionPending }
     private var completionFillVisible: Bool {
@@ -2307,100 +2554,106 @@ struct QueuePill: View {
         }
         return generationCount > 0 ? 1 : 0
     }
+    private var presentation: QueuePillPresentation {
+        .init(mode: visualMode,
+              count: visualMode == .generating ? generationCount : displayRemainingCount,
+              speed: activeSpeedText)
+    }
+    private var widthKey: QueuePillWidthKey {
+        .init(mode: visualMode, speedText: activeSpeedText,
+              count: visualMode == .generating ? generationCount : displayRemainingCount)
+    }
     private var targetWidth: CGFloat {
         guard visualMode != .icon else { return 40 }
         // Hold the previous measured width for the one layout pass needed to
         // measure new content. This prevents text appearing outside a width
         // that is still springing from the icon state.
-        return max(40, measuredWidths[visualMode] ?? measuredWidths.values.max() ?? 40)
+        return widthMeasurement.width
     }
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            if visualMode == .icon || usesNativeLiquidGlass {
-                ZTransferButtonMaterialSurface(
-                    skin: .init(storedValue: skinPreset),
-                    cornerRadius: 22,
-                    textureSeed: 0x2A71E001 // Android QUEUE_ENTRY_BUTTON_TEXTURE_SEED.
-                )
-            } else {
-                // Android speed/count/generating/Done/paused capsule is a
-                // status surface and intentionally ignores button themes.
-                ZTransferGlassSurface(cornerRadius: 22, kind: .button)
-            }
-
-            // Done is a terminal confirmation label, not another progress
-            // phase. Never carry the completed liquid fill underneath it.
-            if visualMode != .done && (!allDone || completionFillVisible) {
-                LiquidTransferProgressFill(
-                    progress: progressFraction,
-                    seed: progressOwner?.id.uuidString ?? retainedProgressSeed,
-                    isCapsule: true,
-                    waveEligible: activeItem != nil || completionFillVisible
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(Capsule())
-            }
-
-            // Keep every content phase inside one fixed clipping viewport.
-            // Persistent layers avoid SwiftUI re-parenting the outgoing label
-            // while the capsule width changes (the old Done label previously
-            // appeared to travel past the right edge during collapse).
-            ZStack(alignment: .trailing) {
-                ForEach(QueuePillVisualMode.allCases, id: \.self) { mode in
-                    pillContent(for: mode)
-                        .padding(.horizontal, mode == .icon ? 0 : 16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity,
-                               alignment: .trailing)
-                        .opacity(mode == visualMode ? 1 : 0)
-                        .accessibilityHidden(mode != visualMode)
+        QueuePillSizingLayout(displayedWidth: widthClock.motion.width, height: photoListTopControlsHeight) {
+            // This host and the outer width clock survive both button branches.
+            SmoothTransferProgress(target: progressFraction,
+                                   resetKey: progressOwner?.id.uuidString ?? retainedProgressSeed) { value in
+                ZStack {
+                    if visualMode == .icon {
+                        Button(action: onClick) {
+                            pillContent(for: presentation)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        }
+                        .buttonStyle(ZTransferGlassButtonStyle(
+                            cornerRadius: 22, textureSeed: 0x2A71E001))
+                    } else {
+                        Button(action: onClick) {
+                            ZStack(alignment: .trailing) {
+                                if usesNativeLiquidGlass {
+                                    ZTransferButtonMaterialSurface(
+                                        skin: .liquidGlass, cornerRadius: 22,
+                                        textureSeed: 0x2A71E001)
+                                } else {
+                                    ZTransferGlassSurface(cornerRadius: 22, kind: .button)
+                                }
+                                if !allDone || completionFillVisible {
+                                    LiquidTransferProgressSurface(
+                                        progress: value,
+                                        seed: progressOwner?.id.uuidString ?? retainedProgressSeed,
+                                        isCapsule: true,
+                                        waveEligible: activeItem != nil || completionFillVisible)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                }
+                                QueuePillContentTransition(presentation: presentation) { displayed in
+                                    pillContent(for: displayed)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                            .frame(height: photoListTopControlsHeight, alignment: .trailing)
+                            .compositingGroup()
+                            .clipShape(Capsule())
+                            .overlay {
+                                if !usesNativeLiquidGlass {
+                                    Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
+                                }
+                            }
+                        }
+                        .buttonStyle(QueuePillButtonStyle())
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            .animation(.easeInOut(duration: 0.18), value: visualMode)
-        }
-        .frame(width: renderedWidth, height: photoListTopControlsHeight, alignment: .trailing)
-        .compositingGroup()
-        .clipShape(Capsule())
-        .background {
+            .frame(height: photoListTopControlsHeight)
+
             measurementContent(for: visualMode)
                 .fixedSize(horizontal: true, vertical: true)
                 .padding(.horizontal, visualMode == .icon ? 0 : 16)
                 .hidden()
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
                 .background {
                     GeometryReader { proxy in
                         Color.clear.preference(
                             key: QueuePillMeasuredWidthPreferenceKey.self,
-                            value: [visualMode: proxy.size.width]
+                            value: [widthKey: proxy.size.width]
                         )
                     }
                 }
         }
         .onPreferenceChange(QueuePillMeasuredWidthPreferenceKey.self) { widths in
-            for (mode, width) in widths where width > 0 {
-                if abs((measuredWidths[mode] ?? 0) - width) > 0.5 {
-                    measuredWidths[mode] = width
-                }
-            }
-        }
-        .overlay {
-            if !usesNativeLiquidGlass {
-                Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
+            if let width = widths[widthKey] {
+                widthMeasurement.measure(width, key: widthKey)
             }
         }
         .onChange(of: targetWidth) { width in
-            // Change only the rendered width. Updating it in a dedicated
-            // transaction prevents the content swap from inheriting the
-            // spring and being translated by SwiftUI's parent layout.
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
-                renderedWidth = width
-            }
+            widthClock.update(width: width, scale: displayScale)
         }
-        .task(id: "\(hasWorkingTask)-\(paused)-\(displayRemainingCount)-\(allDone)") {
-            if paused || hasWorkingTask {
+        .onChange(of: displayScale) { scale in
+            widthClock.update(width: targetWidth, scale: scale)
+        }
+        .task(id: countVisibilityInput) {
+            // Android keys the grace period by remaining > 0, not the count.
+            let input = countVisibilityInput
+            if input.paused || input.hasWorkingTask {
                 countingVisible = true
-            } else if displayRemainingCount > 0 {
+            } else if input.hasRemaining {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 guard !Task.isCancelled else { return }
                 countingVisible = true
@@ -2408,8 +2661,8 @@ struct QueuePill: View {
                 countingVisible = false
             }
         }
-        .onChange(of: progressOwner?.id) { _ in
-            if let id = progressOwner?.id { retainedProgressSeed = id.uuidString }
+        .onChange(of: progressOwner?.id) { id in
+            if let id { retainedProgressSeed = id.uuidString }
         }
         .onChange(of: hasWorkingTask) { active in
             guard active else { return }
@@ -2418,14 +2671,21 @@ struct QueuePill: View {
             finishProgressVisible = false
             showDoneLabel = false
         }
-        .onChange(of: allDone) { done in
+        .onChange(of: completionInput) { input in
+            // Read cancellation from the same new snapshot as the completion edge.
+            // An allDone-only callback can retain the preceding View capture.
+            let done = input.allDone
             guard let previousAllDone else {
                 self.previousAllDone = done
                 return
             }
-            if done && !previousAllDone {
-                let celebrate = !hasCancelled && sawActiveBatch
-                if !hasCancelled {
+            if !done {
+                doneTask?.cancel()
+                showDoneLabel = false
+                finishProgressVisible = false
+            } else if !previousAllDone {
+                let celebrate = !input.hasCancelled && sawActiveBatch
+                if !input.hasCancelled {
                     finishProgressVisible = celebrate
                     showDoneLabel = true
                     if celebrate { ZTransferHaptics.shared.success() }
@@ -2444,15 +2704,25 @@ struct QueuePill: View {
         .onAppear {
             previousAllDone = allDone
             sawActiveBatch = hasWorkingTask
-            renderedWidth = targetWidth
+            widthClock.update(width: targetWidth, scale: displayScale)
             if let id = progressOwner?.id { retainedProgressSeed = id.uuidString }
         }
-        .onDisappear { doneTask?.cancel() }
+        .onDisappear {
+            doneTask?.cancel()
+            widthClock.reset()
+        }
+        .background {
+#if DEBUG
+            Color.clear.preference(key: QueuePillObservationKey.self,
+                value: QueuePillObservation(countingVisible: countingVisible,
+                                           count: displayRemainingCount))
+#endif
+        }
     }
 
     @ViewBuilder
-    private func pillContent(for mode: QueuePillVisualMode) -> some View {
-        switch mode {
+    private func pillContent(for displayed: QueuePillPresentation) -> some View {
+        switch displayed.mode {
         case .icon:
             PhotoListQueueIcon(tint: zTransferMaterialContentColor(
                 skin: .init(storedValue: skinPreset),
@@ -2466,29 +2736,27 @@ struct QueuePill: View {
                 .frame(width: 40, height: photoListTopControlsHeight)
         case .done:
             Text("Done")
-                .font(.system(size: 14, weight: .bold))
+                .monospacedDigit()
+                .zTransferTypography(.labelLarge, weight: .bold)
                 .foregroundStyle(ZTransferColors.statusConnected)
                 .lineLimit(1)
         case .paused:
-            QueuePillRollingCount(count: displayRemainingCount)
+            QueuePillRollingCount(count: displayed.count)
         case .generating:
             HStack(alignment: .center, spacing: 6) {
-                Text(AppLocalized.resource("queue_pill_generating"))
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(ZTransferColors.accentBlue)
-                    .lineLimit(1)
-                QueuePillRollingCount(count: generationCount)
+                generationIcon
+                QueuePillRollingCount(count: displayed.count)
             }
         case .counting:
             HStack(alignment: .center, spacing: 8) {
-                if let activeSpeedText {
-                    Text(activeSpeedText)
-                        .font(.system(size: 12, weight: .bold))
+                if let speed = displayed.speed {
+                    Text(speed)
+                        .zTransferTypography(.labelMedium, weight: .bold)
                         .foregroundStyle(ZTransferColors.accentBlue)
                         .monospacedDigit()
                         .lineLimit(1)
                 }
-                QueuePillRollingCount(count: displayRemainingCount)
+                QueuePillRollingCount(count: displayed.count)
             }
         }
     }
@@ -2499,20 +2767,19 @@ struct QueuePill: View {
         case .icon:
             Color.clear.frame(width: 40, height: photoListTopControlsHeight)
         case .done:
-            Text("Done").font(.system(size: 14, weight: .bold)).lineLimit(1)
+            Text("Done").monospacedDigit().zTransferTypography(.labelLarge, weight: .bold).lineLimit(1)
         case .paused:
             measurementCount(displayRemainingCount)
         case .generating:
             HStack(spacing: 6) {
-                Text(AppLocalized.resource("queue_pill_generating"))
-                    .font(.system(size: 14, weight: .bold)).lineLimit(1)
+                generationIcon
                 measurementCount(generationCount)
             }
         case .counting:
             HStack(spacing: activeSpeedText == nil ? 0 : 8) {
                 if let activeSpeedText {
                     Text(activeSpeedText)
-                        .font(.system(size: 12, weight: .bold))
+                        .zTransferTypography(.labelMedium, weight: .bold)
                         .monospacedDigit().lineLimit(1)
                 }
                 measurementCount(displayRemainingCount)
@@ -2520,9 +2787,19 @@ struct QueuePill: View {
         }
     }
 
+    // FileListScreen.QueuePill GENERATING: Material AutoAwesome, 16dp,
+    // accentPurple; the localized text is an accessibility description only.
+    private var generationIcon: some View {
+        QueueBadgeIcon(state: .generating)
+            .fill(ZTransferColors.accentPurple)
+            .frame(width: 16, height: 16)
+            .accessibilityLabel(AppLocalized.resource("queue_pill_generating"))
+            .accessibilityIdentifier("queue-pill-generation-icon")
+    }
+
     private func measurementCount(_ value: Int) -> some View {
         Text("\(value)")
-            .font(.system(size: 14, weight: .bold))
+            .zTransferTypography(.labelLarge, weight: .bold)
             .monospacedDigit()
             .lineLimit(1)
     }
@@ -2536,70 +2813,206 @@ struct QueuePill: View {
     }
 }
 
+/// The first child draws the capsule; the hidden second child supplies its
+/// unbounded natural width. First layout therefore needs no guessed width.
+/// Later layouts propose only the animated viewport to the visible surface.
+private struct QueuePillSizingLayout: Layout {
+    let displayedWidth: CGFloat?
+    let height: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let natural = subviews[1].sizeThatFits(.unspecified)
+        return CGSize(width: displayedWidth ?? natural.width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+                          proposal: ProposedViewSize(bounds.size))
+        let natural = subviews[1].sizeThatFits(.unspecified)
+        subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                          proposal: ProposedViewSize(natural))
+    }
+}
+
 private struct QueuePillMeasuredWidthPreferenceKey: PreferenceKey {
-    static let defaultValue: [QueuePillVisualMode: CGFloat] = [:]
+    static let defaultValue: [QueuePillWidthKey: CGFloat] = [:]
     static func reduce(
-        value: inout [QueuePillVisualMode: CGFloat],
-        nextValue: () -> [QueuePillVisualMode: CGFloat]
+        value: inout [QueuePillWidthKey: CGFloat],
+        nextValue: () -> [QueuePillWidthKey: CGFloat]
     ) {
         value.merge(nextValue()) { _, latest in latest }
     }
 }
 
+@MainActor
+private final class QueuePillCountClock: ObservableObject {
+    @Published private(set) var motion: QueuePillCountMotion?
+    private var count: Int
+    private var heightPixels: Int?
+    private var density: CGFloat = 1
+    private var link: CADisplayLink?
+    init(count: Int) { self.count = count }
+
+    @MainActor
+    private final class FrameTarget: NSObject {
+        weak var owner: QueuePillCountClock?
+        init(_ owner: QueuePillCountClock) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.frame(link)
+        }
+    }
+
+    func measure(height: CGFloat, scale: CGFloat) {
+        guard height.isFinite, height > 0, scale.isFinite, scale > 0 else { return }
+        let pixels = Int(floor(height * scale + 0.5))
+        if motion == nil || heightPixels != pixels || density != scale {
+            stop()
+            heightPixels = pixels
+            density = scale
+            motion = .init(count: count, heightPixels: pixels)
+        }
+    }
+
+    func update(_ count: Int) {
+        self.count = count
+        motion?.update(count)
+        guard motion?.isRunning == true, link == nil else { return }
+        let link = CADisplayLink(target: FrameTarget(self), selector: #selector(FrameTarget.frame(_:)))
+        self.link = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    private func frame(_ link: CADisplayLink) {
+        motion?.advance(Int64(link.timestamp * 1_000_000_000))
+        if motion?.isRunning != true { stop() }
+    }
+    private func stop() { link?.invalidate(); link = nil }
+    func unmount() { stop(); motion = nil; heightPixels = nil }
+}
+
+private struct QueuePillCountHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 private struct QueuePillRollingCount: View {
     let count: Int
-    @State private var current: Int
-    @State private var outgoing: Int?
-    @State private var direction: CGFloat = 1
-    @State private var progress: CGFloat = 1
-    @State private var animationTask: Task<Void, Never>?
+    @StateObject private var clock: QueuePillCountClock
+    @State private var measuredHeight: CGFloat = 0
+    @Environment(\.displayScale) private var displayScale
 
     init(count: Int) {
         self.count = count
-        _current = State(initialValue: count)
+        _clock = StateObject(wrappedValue: QueuePillCountClock(count: count))
     }
 
     var body: some View {
-        ZStack {
-            if let outgoing {
-                countText(outgoing)
-                    .offset(y: -10 * direction * progress)
-                    .opacity(1 - progress)
+        // SizeTransform(snap, clip=true): only the target number determines
+        // occupancy; outgoing layers are centered within that target viewport.
+        countText(count)
+            .hidden()
+            .accessibilityHidden(true)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: QueuePillCountHeightKey.self, value: proxy.size.height)
+                }
             }
-            countText(current)
-                .offset(y: 10 * direction * (1 - progress))
-                .opacity(progress)
-        }
-        .frame(height: 20)
-        .clipped()
-        .fixedSize(horizontal: true, vertical: false)
-        .onChange(of: count) { value in
-            guard value != current else { return }
-            animationTask?.cancel()
-            direction = value < current ? 1 : -1
-            outgoing = current
-            current = value
-            progress = 0
-            animationTask = Task { @MainActor in
-                // Mount both number layers before advancing the odometer.
-                try? await Task.sleep(nanoseconds: 16_000_000)
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.16)) { progress = 1 }
-                try? await Task.sleep(nanoseconds: 160_000_000)
-                guard !Task.isCancelled else { return }
-                outgoing = nil
-                animationTask = nil
+            .overlay {
+                ZStack {
+                    if let motion = clock.motion {
+                        ForEach(motion.layers) { layer in
+                            countText(layer.count)
+                                .offset(y: CGFloat(layer.motion.displayedOffsetPixels) / displayScale)
+                                .opacity(Double(layer.motion.fade.alpha.value))
+                                .accessibilityHidden(layer.count != count)
+                        }
+                    } else {
+                        countText(count)
+                    }
+                }
             }
-        }
-        .onDisappear { animationTask?.cancel() }
+            .clipped()
+            .fixedSize(horizontal: true, vertical: false)
+            .transaction { $0.animation = nil }
+            .onPreferenceChange(QueuePillCountHeightKey.self) { height in
+                measuredHeight = height
+                clock.measure(height: height, scale: displayScale)
+            }
+            .onChange(of: count) { clock.update($0) }
+            .onChange(of: displayScale) { clock.measure(height: measuredHeight, scale: $0) }
+            .onAppear {
+                clock.update(count)
+                clock.measure(height: measuredHeight, scale: displayScale)
+            }
+            .onDisappear { clock.unmount() }
     }
 
     private func countText(_ value: Int) -> some View {
         Text("\(value)")
-            .font(.system(size: 14, weight: .bold))
+            .zTransferTypography(.labelLarge, weight: .bold)
             .foregroundStyle(ZTransferColors.primaryText)
             .monospacedDigit()
             .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+@MainActor
+private final class QueuePillPressClock: ObservableObject {
+    @Published private(set) var scale: Float = 1
+    private var animation = ZTransferScalarAnimation(value: 1)
+    private var link: CADisplayLink?
+
+    @MainActor
+    private final class FrameTarget: NSObject {
+        weak var owner: QueuePillPressClock?
+        init(_ owner: QueuePillPressClock) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.frame(link)
+        }
+    }
+
+    func update(pressed: Bool, nativeGlass: Bool) {
+        guard !nativeGlass else { reset(); return }
+        animation.retarget(pressed ? 0.95 : 1,
+                           using: pressed ? .tween(milliseconds: 80) : .bouncy)
+        guard animation.isRunning, link == nil else { return }
+        let link = CADisplayLink(target: FrameTarget(self), selector: #selector(FrameTarget.frame(_:)))
+        self.link = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    private func frame(_ link: CADisplayLink) {
+        animation.advance(frameNanos: Int64(link.timestamp * 1_000_000_000))
+        scale = animation.value
+        if !animation.isRunning { stop() }
+    }
+
+    private func stop() { link?.invalidate(); link = nil }
+    func reset() {
+        stop()
+        animation.reset(to: 1)
+        scale = 1
+    }
+}
+
+private struct QueuePillPressEffect: ViewModifier {
+    let pressed: Bool
+    let nativeGlass: Bool
+    @StateObject private var clock = QueuePillPressClock()
+
+    func body(content: Content) -> some View {
+        content
+            // Android graphicsLayer's default transformOrigin is the center.
+            .scaleEffect(CGFloat(clock.scale))
+            .onAppear { clock.update(pressed: pressed, nativeGlass: nativeGlass) }
+            .onChange(of: pressed) { clock.update(pressed: $0, nativeGlass: nativeGlass) }
+            .onChange(of: nativeGlass) { clock.update(pressed: pressed, nativeGlass: $0) }
+            .onDisappear { clock.reset() }
     }
 }
 
@@ -2607,13 +3020,10 @@ private struct QueuePillButtonStyle: ButtonStyle {
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
 
     func makeBody(configuration: Configuration) -> some View {
-        let nativeGlass = ZTransferButtonSkin(storedValue: skinPreset) == .liquidGlass
-        configuration.label
-            .scaleEffect(configuration.isPressed && !nativeGlass ? 0.95 : 1, anchor: .trailing)
-            .animation(configuration.isPressed
-                       ? .easeOut(duration: 0.08)
-                       : .spring(response: 0.34, dampingFraction: 0.72),
-                       value: configuration.isPressed)
+        configuration.label.modifier(QueuePillPressEffect(
+            pressed: configuration.isPressed,
+            nativeGlass: ZTransferButtonSkin(storedValue: skinPreset) == .liquidGlass
+        ))
     }
 }
 
@@ -2634,13 +3044,14 @@ private struct QueueControlsCatchEffect: ViewModifier {
                 task = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 110_000_000)
                     guard !Task.isCancelled else { return }
-                    // Compose Motion.bouncy(): stiffness 200, damping ratio
+                    // Compose Motion.bouncy(): stiffness 400, damping ratio
                     // 0.5. Use the equivalent physical SwiftUI spring rather
                     // than an approximate response/damping pair.
                     withAnimation(.interpolatingSpring(
                         mass: 1,
-                        stiffness: 200,
-                        damping: 2 * 0.5 * sqrt(200)
+                        stiffness: Double(ZTransferAndroidMotion.bouncyStiffness),
+                        damping: 2 * Double(ZTransferAndroidMotion.bouncyDampingRatio)
+                            * sqrt(Double(ZTransferAndroidMotion.bouncyStiffness))
                     )) {
                         scale = 1
                     }
@@ -2765,7 +3176,7 @@ private struct CameraThumbnailView: View {
         .frame(maxWidth: .infinity, minHeight: 0)
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .task(id: allowRemoteThumbnail) {
+        .task(id: PhotoListSessionTaskID(session: session.map(ObjectIdentifier.init), value: allowRemoteThumbnail)) {
             guard let session, let file else { return }
             if session.wirelessMode == .sta {
                 // View lifetime owns only observation. The session's ordered
@@ -2802,6 +3213,7 @@ private struct BurstThumbnailView: View {
     var expanded = false
     var onExpand: () -> Void = {}
     var onEnqueue: () -> Void = {}
+    var onPreview: () -> Void = {}
     var body: some View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
@@ -2811,6 +3223,7 @@ private struct BurstThumbnailView: View {
                     CameraThumbnailView(session: session, file: item.element,
                                         allowRemoteThumbnail: allowRemoteThumbnails,
                                         showsCornerBadges: false)
+                        .accessibilityIdentifier("burst-image-\(item.element.id)")
                         .frame(width: cardSide, height: cardSide)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -2818,6 +3231,13 @@ private struct BurstThumbnailView: View {
                         .offset(x: item.offset == 0 ? 0 : item.offset == 1 ? -side * 0.025 : side * 0.025,
                                 y: item.offset == 0 ? 0 : side * 0.02)
                 }
+                // Match BurstCollectionCell: image-only long press below the
+                // action buttons. Holding either button must not open preview.
+                Color.clear
+                    .frame(width: cardSide, height: cardSide)
+                    .contentShape(Rectangle())
+                    .onLongPressGesture(minimumDuration: photoPreviewLongPressDuration,
+                                        maximumDistance: 12, perform: onPreview)
                 VStack {
                     HStack {
                         HStack(spacing: 4) {
@@ -2831,6 +3251,13 @@ private struct BurstThumbnailView: View {
                     Spacer(minLength: 0)
                     HStack {
                         burstButton("plus", size: side * 0.32, action: onEnqueue)
+                            .accessibilityIdentifier("enqueue-burst-\(group.id)")
+                            .background {
+                                GeometryReader { proxy in
+                                    Color.clear.preference(key: PhotoListCellBoundsPreferenceKey.self,
+                                        value: [.burstEnqueue(group.id): proxy.frame(in: .global)])
+                                }
+                            }
                         Spacer(minLength: 0)
                         burstArrowButton(size: side * 0.32, expanded: expanded, action: onExpand)
                     }
@@ -2928,3 +3355,292 @@ struct TransferredPhotoBadge: View {
             .overlay(Circle().stroke(ZTransferColors.statusConnected.opacity(0.72), lineWidth: 1))
     }
 }
+
+#if DEBUG
+/// Bounded, read-only rating/protection diagnostics. This mirrors Android's
+/// debug panel and is absent from Release builds.
+private struct DebugPhotoProtectionPanel: View {
+    let isSTA: Bool
+    let files: [CameraFile]
+    let session: CameraSession?
+    @State private var open = false
+    @State private var busy = false
+    @State private var revision = 0
+    @State private var copyNotice = false
+    @State private var copyNoticeID = UUID()
+
+    var body: some View {
+        GeometryReader { proxy in
+                ZStack(alignment: .bottom) {
+                    if open {
+                        Color.black.opacity(0.45)
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture { open = false }
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("评级与保护诊断").font(.headline)
+                                    Text("可连续探测两次后复制完整结果")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    UIPasteboard.general.string = PhotoRatingDiagnostics.snapshot()
+                                    let noticeID = UUID()
+                                    copyNoticeID = noticeID
+                                    copyNotice = true
+                                    Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                        guard copyNoticeID == noticeID else { return }
+                                        copyNotice = false
+                                    }
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .accessibilityLabel("复制 Debug 日志")
+                                Button {
+                                    PhotoRatingDiagnostics.clear(); revision += 1
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .accessibilityLabel("清空 Debug 日志")
+                                Button { open = false } label: {
+                                    Image(systemName: "xmark")
+                                }
+                                .accessibilityLabel("关闭")
+                            }
+                            HStack(spacing: 8) {
+                                if !isSTA {
+                                    Button(busy ? "RAW 探测中…" : "探测 RAW 评级") { runRawProbe() }
+                                        .disabled(busy)
+                                } else {
+                                    Button(busy ? "保护头探测中…" : "探测保护头") { runHeaderProbe() }
+                                        .disabled(busy)
+                                    Button(busy ? "属性探测中…" : "探测保护属性") { runPropertyProbe() }
+                                        .disabled(busy)
+                                }
+                            }
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(Array(PhotoRatingDiagnostics.snapshot().split(separator: "\n").enumerated()), id: \.offset) { _, line in
+                                        Text(String(line))
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(diagnosticColor(for: String(line)))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .frame(maxHeight: .infinity)
+                            .id(revision)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, maxHeight: proxy.size.height * 0.82)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.2)))
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                        .overlay(alignment: .bottom) {
+                            if copyNotice {
+                                Text("诊断日志已复制")
+                                    .font(.caption)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(.regularMaterial, in: Capsule())
+                                    .transition(.opacity)
+                                    .padding(.bottom, 18)
+                            }
+                        }
+                    } else {
+                        Button {
+                            open = true
+                        } label: {
+                            Label("诊断日志", systemImage: "timer")
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderedProminent)
+                        .padding(.bottom, 8)
+                    }
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
+            }
+    }
+
+    private func diagnosticColor(for line: String) -> Color {
+        if line.localizedCaseInsensitiveContains("failed") || line.localizedCaseInsensitiveContains("error") {
+            return .orange
+        }
+        if line.localizedCaseInsensitiveContains("saved") {
+            return .green
+        }
+        return .white.opacity(0.82)
+    }
+
+    private func runHeaderProbe() {
+        guard !busy, let session else { return }
+        busy = true
+        let previous = PhotoRatingDiagnostics.beginProbe(keepExisting: true)
+        Task {
+            await session.probeProtectionHeaders(files: files)
+            PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
+            await MainActor.run { busy = false; revision += 1 }
+        }
+    }
+
+    private func runRawProbe() {
+        guard !busy, let session,
+              let raw = files.first(where: { $0.fileExtension == ".nef" || $0.fileExtension == ".nrw" }) else { return }
+        busy = true
+        let previous = PhotoRatingDiagnostics.beginProbe()
+        Task {
+            await session.probeRawRating(file: raw)
+            PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
+            await MainActor.run { busy = false; revision += 1 }
+        }
+    }
+
+    private func runPropertyProbe() {
+        guard !busy, let session else { return }
+        busy = true
+        let previous = PhotoRatingDiagnostics.beginProbe(keepExisting: true)
+        Task {
+            await session.probeProtectionProperties(files: files)
+            PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
+            await MainActor.run { busy = false; revision += 1 }
+        }
+    }
+}
+#else
+private struct DebugPhotoProtectionPanel: View {
+    init(isSTA: Bool, files: [CameraFile], session: CameraSession?) {}
+    var body: some View { EmptyView() }
+}
+#endif
+
+#if DEBUG
+/// Read-only production state for timing verification; absent from release builds.
+private struct QueuePillObservation: Equatable {
+    let countingVisible: Bool
+    let count: Int
+}
+private struct QueuePillObservationKey: PreferenceKey {
+    static let defaultValue: QueuePillObservation? = nil
+    static func reduce(value: inout QueuePillObservation?, nextValue: () -> QueuePillObservation?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
+struct QueuePillGraceHarness: View {
+    @State private var count = 0
+    @State private var started: Double?
+    @State private var firstVisible = "pending"
+    @State private var finished = false
+
+    private var snapshot: TransferQueueSnapshot {
+        let items = (0..<count).map { index in
+            TransferQueueItem(
+                id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 1))!,
+                file: CameraFile(id: UInt32(index + 1), storageID: 1, format: 0x3801,
+                                 size: 2048, fileName: "WAIT_\(index).JPG",
+                                 captureDate: nil, isProtected: false))
+        }
+        return .init(items: items, isTransferring: true, pauseAfterCurrent: false)
+    }
+
+    var body: some View {
+        VStack(spacing: 32) {
+            QueuePill(snapshot: snapshot, activeProgress: nil, heldCount: 0)
+            Button("Start updates") {
+                started = ProcessInfo.processInfo.systemUptime
+                count = 1
+            }
+            .accessibilityIdentifier("grace-start")
+            .disabled(started != nil)
+            Text(firstVisible).accessibilityIdentifier("grace-first-visible")
+            Text(finished ? "finished" : "waiting").accessibilityIdentifier("grace-updates")
+        }
+        .onPreferenceChange(QueuePillObservationKey.self) { observation in
+            guard let observation, observation.countingVisible,
+                  let started, firstVisible == "pending" else { return }
+            let elapsed = ProcessInfo.processInfo.systemUptime - started
+            firstVisible = "\(Int(elapsed * 1000)),\(observation.count)"
+        }
+        .task(id: started) {
+            guard started != nil else { return }
+            for next in 2...11 {
+                do { try await Task.sleep(nanoseconds: 100_000_000) }
+                catch { return }
+                count = next
+            }
+            finished = true
+        }
+    }
+}
+
+/// Real QueuePill and button style, with deterministic snapshots and no camera.
+struct QueueTopPillPresentationHarness: View {
+    @State private var phase = 0
+    @State private var activations = 0
+    @State private var observedProgress = "pending"
+    @State private var observedFrame = "pending"
+    private var snapshot: TransferQueueSnapshot {
+        let count = phase == 0 ? 9 : phase == 1 ? 3 : phase == 2 ? 2 : 1
+        let items = (1...count).map { index in
+            var item = TransferQueueItem(
+                id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + (phase == 0 ? 0 : phase == 1 ? 1000 : 2000)))!,
+                file: CameraFile(id: UInt32(index), storageID: 1, format: 0x3801, size: 2048,
+                                 fileName: "PILL_\(index).JPG", captureDate: nil, isProtected: false))
+            item.status = phase == 3
+                ? (ProcessInfo.processInfo.arguments.contains("--queue-top-pill-success") ? .completed : .cancelled)
+                : phase == 2 ? .transferring : phase == 1 && index == 1 ? .transferring : .waiting
+            item.progress = phase == 1 && index == 1 ? 0.25 : 0
+            item.isGeneratingFrame = phase == 2
+            item.bytesPerSecond = phase == 1 && index == 1 ? 10 * 1024 * 1024 : 0
+            return item
+        }
+        return .init(items: items, isTransferring: phase != 0, pauseAfterCurrent: false)
+    }
+
+    private func recordFrame(_ frame: CGRect) {
+        observedFrame = [frame.minX, frame.minY, frame.width, frame.height]
+            .map { String(format: "%.3f", Double($0)) }.joined(separator: ",")
+    }
+
+    var body: some View {
+        VStack(spacing: 40) {
+            HStack {
+                Spacer()
+                QueuePill(snapshot: snapshot, activeProgress: nil, heldCount: 0,
+                          onClick: { activations += 1 })
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .onAppear { recordFrame(proxy.frame(in: .global)) }
+                                    .onChange(of: proxy.frame(in: .global)) { recordFrame($0) }
+                            }
+                        }
+                .accessibilityIdentifier("queue-top-pill")
+            }
+            .frame(width: 300)
+            Button("Next state") { phase = (phase + 1) % 4 }
+                .accessibilityIdentifier("queue-top-pill-next")
+            Text("\(activations)").accessibilityIdentifier("queue-top-pill-activations")
+            Text(observedFrame).font(.caption2)
+                .accessibilityIdentifier("queue-top-pill-frame")
+            Text(observedProgress).font(.caption2)
+                .accessibilityIdentifier("queue-top-pill-progress")
+        }
+        .onPreferenceChange(SmoothTransferProgressObservationKey.self) { observation in
+            guard let observation else { return }
+            observedProgress = "\(observation.key ?? "nil")|\(String(format: "%.3f", observation.value))"
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ZTransferColors.background)
+    }
+}
+#endif

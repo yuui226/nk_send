@@ -67,11 +67,8 @@ actor CameraConnectionService {
 
     private func performConnect(deviceID: String) async throws -> CameraRepository {
         let transport = self.transport
-        // ImageCaptureCore, unlike Android raw USB, completes OpenSession
-        // before a separate device-ready callback. The transport waits for
-        // that callback and reports its own communication timeout/error;
-        // imposing Android's 5 s wire deadline would reject valid catalog
-        // preparation on cameras containing many objects.
+        // The transport validates public PTP access without opening the system
+        // content catalog (U001). Our repository owns newest-first enumeration.
         try await transport.openSession(for: deviceID)
         try Task.checkCancellation()
         guard let sessionToken = transport.openedSessionToken(for: deviceID) else {
@@ -83,16 +80,10 @@ actor CameraConnectionService {
         let session = PTPSession(transport: SelectedUSBPTPTransport(transport: transport, deviceID: deviceID,
                                                                    sessionToken: sessionToken),
                                  defaultTimeoutNanoseconds: 60_000_000_000)
-        let info = try await session.executeResponse(operation: PTPConstants.getDeviceInfo)
-        guard info.code == PTPConstants.responseOK else {
-            throw PTPSessionError.responseCode(info.code)
-        }
-        // Android accepts an OK response with missing/unparseable info;
-        // model metadata is optional, while the PTP handshake is valid.
         let identity = USBSessionIdentity(token: sessionToken)
         let repository = CameraRepository(session: session, isUSBConnection: true,
-                                           deviceInfo: PTPDatasetParser.parseDeviceInfo(info.data),
-                                           usbSessionIdentity: identity)
+                                           usbSessionIdentity: identity,
+                                           transportCameraIdentifier: deviceID)
         try Task.checkCancellation()
         activeDeviceID = deviceID
         activeSessionToken = sessionToken

@@ -1,11 +1,50 @@
 import Foundation
 
+struct LocalPhotoFailure: Equatable, Sendable {
+    let number: Int
+    let stage: String
+    let kind: String
+    let detail: String
+
+    init(number: Int, error: any Error) {
+        self.number = number
+        let staged = error as? LocalPhotoExportError
+        stage = staged?.stage ?? "render"
+        var chain: [NSError] = []
+        var current: NSError? = (staged?.underlying ?? error) as NSError
+        while let value = current, chain.count < 8 {
+            chain.append(value)
+            current = value.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        func contains(_ domain: String, _ codes: [Int]) -> Bool {
+            chain.contains { $0.domain == domain && codes.contains($0.code) }
+        }
+        if contains(NSPOSIXErrorDomain, [Int(ENOMEM)]) { kind = "memory" }
+        else if contains(NSPOSIXErrorDomain, [Int(EACCES), Int(EPERM)]) ||
+                    contains(NSCocoaErrorDomain, [NSFileReadNoPermissionError, NSFileWriteNoPermissionError]) { kind = "permission" }
+        else if contains(NSPOSIXErrorDomain, [Int(ENOSPC)]) || contains(NSCocoaErrorDomain, [NSFileWriteOutOfSpaceError]) ||
+                    chain.contains(where: { $0.localizedDescription.localizedCaseInsensitiveContains("ENOSPC") }) { kind = "space" }
+        else if contains(NSPOSIXErrorDomain, [Int(ENOENT)]) ||
+                    contains(NSCocoaErrorDomain, [NSFileNoSuchFileError, NSFileReadNoSuchFileError]) { kind = "missing" }
+        else { kind = "unknown" }
+        detail = chain.suffix(2).map {
+            "\($0.domain.prefix(80))(\($0.code)): \($0.localizedDescription.prefix(200))"
+        }.joined(separator: " / ")
+    }
+}
+
+struct LocalPhotoExportError: Error {
+    let stage: String
+    let underlying: any Error
+}
+
 /// Android PhotoEffectsBatch.kt: completed includes failed outputs; total is
 /// the original selection size and never changes while a batch is running.
 struct PhotoEffectsBatchProgress: Equatable, Sendable {
     let total: Int
     var completed = 0
     var saved = 0
+    var failures: [LocalPhotoFailure] = []
     var failed: Int { completed - saved }
 }
 
@@ -77,34 +116,35 @@ enum PhotoEffectsBatchRunner {
         var progress = PhotoEffectsBatchProgress(total: photos.count)
         try Task.checkCancellation()
         await onProgress(progress)
-        return try await withThrowingTaskGroup(of: Bool.self) { group in
+        return try await withThrowingTaskGroup(of: (Bool, LocalPhotoFailure?).self) { group in
             var next = 0
-            func enqueue(_ source: Source) {
+            func enqueue(_ source: Source, number: Int) {
                 group.addTask {
                     try Task.checkCancellation()
                     do {
                         let saved = try await generate(source)
                         try Task.checkCancellation()
-                        return saved
+                        return (saved, saved ? nil : LocalPhotoFailure(number: number, error: CocoaError(.fileWriteUnknown)))
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
                         try Task.checkCancellation()
-                        return false
+                        return (false, LocalPhotoFailure(number: number, error: error))
                     }
                 }
             }
             for _ in 0..<min(2, photos.count) {
-                enqueue(photos[next])
+                enqueue(photos[next], number: next + 1)
                 next += 1
             }
-            while let saved = try await group.next() {
+            while let (saved, failure) = try await group.next() {
                 try Task.checkCancellation()
                 progress.completed += 1
                 if saved { progress.saved += 1 }
+                if let failure, progress.failures.count < 5 { progress.failures.append(failure) }
                 await onProgress(progress)
                 if next < photos.count {
-                    enqueue(photos[next])
+                    enqueue(photos[next], number: next + 1)
                     next += 1
                 }
             }

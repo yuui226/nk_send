@@ -30,13 +30,30 @@ private extension EnvironmentValues {
     }
 }
 
+private struct RemoteToolIconAnchor: ViewModifier {
+    let tool: RemoteTool
+    private var trigger: GeniePopupTrigger? {
+        switch tool {
+        case .grid: .remoteGrid
+        case .whiteBalance: .remoteWhiteBalance
+        case .focusArea: .remoteFocusArea
+        case .focusMode: .remoteFocusMode
+        default: nil
+        }
+    }
+    @ViewBuilder func body(content: Content) -> some View {
+        if let trigger { content.geniePopupAnchor(trigger) }
+        else { content }
+    }
+}
+
 /// Native monitor surface. Transport and frame lifecycle live in
 /// `RemoteViewModel`; this view only renders the camera frame and the controls
 /// that are already present in Android's RemoteScreen.
 struct RemoteView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @ObservedObject private var entitlements = PremiumEntitlementStore.shared
+    @ObservedObject private var entitlements: PremiumEntitlementStore
     private let onStopped: ((Bool) async -> Void)?
     private let onPreparing: (() async -> Void)?
     private let onTransportLost: (() -> Void)?
@@ -55,6 +72,9 @@ struct RemoteView: View {
     @StateObject private var lutMonitor: RemoteLUTMonitorState
     @State private var lutFolderPickerPresented = false
     @State private var lutListPresented = false
+    @State private var lutPickedFolder: URL?
+    @State private var lutFolderAfterMenu = false
+    @State private var lutCategorySelection = PhotoLUTCategorySelection()
     @State private var dispMode: RemoteDispMode = .camera
     @State private var histogramMode: RemoteHistogramMode = .off
     // The developer entry is deliberately scoped to this RemoteView instance.
@@ -64,16 +84,14 @@ struct RemoteView: View {
     @State private var fpsTapCount = 0
     @State private var lastFpsTapAt: TimeInterval = 0
     @State private var developerPanelPresented = false
+    @StateObject private var monitorHintAnimator = RemoteMonitorHintAnimator()
     @State private var developerLogLines: [String] = []
     @State private var persistedFocusDiagnosticReport = ""
-    @State private var focusValidAfterUptime = 0.0
     @State private var signalExpanded = false
     @State private var exposureMode: RemoteExposureAssist = .off
     @State private var batteryExpanded = false
     @State private var layoutOrientation: RemoteLayoutOrientation = .portrait
-    @State private var immersiveFullscreen = false
-    @State private var orientationCandidate: RemoteLayoutOrientation?
-    @State private var manuallySuppressedOrientation: RemoteLayoutOrientation?
+    @State private var orientationSession = RemoteOrientationSession<RemoteLayoutOrientation>()
     @State private var orientationStabilityTask: Task<Void, Never>?
     @State private var rotationTransitionTask: Task<Void, Never>?
     @State private var switchingRotation = false
@@ -85,16 +103,53 @@ struct RemoteView: View {
         RemoteDisplayOptions.normalizedDesqueeze(tools.desqueeze)
     }
 
+    private var monitorStorageStatusText: String? {
+        let entries = monitorStorageStatusItems
+        guard !entries.isEmpty else { return nil }
+        return entries.joined(separator: "   ·   ")
+    }
+
+    private var monitorStorageStatusItems: [String] {
+        let entries = model.monitorStorageFreeBytes.sorted { $0.key < $1.key }
+        guard !entries.isEmpty else { return [] }
+        func capacityLabel(_ bytes: Int64) -> String {
+            String(format: "%.1f GB", locale: Locale.current,
+                   Double(bytes) / 1_000_000_000.0)
+        }
+        return entries.enumerated().map { index, entry in
+            guard model.monitorStorageSlotCount > 1 else { return capacityLabel(entry.value) }
+            let slot = model.monitorStorageSlotByID[entry.key] ?? (index + 1)
+            return AppLocalized.formattedResource("monitor_disp_card", [
+                "%1$d": "\(slot)",
+                "%2$s": capacityLabel(entry.value)
+            ])
+        }
+    }
+
+    private var monitorFocusModeText: String? {
+        guard let descriptor = model.focusModeDescriptor else { return nil }
+        if RemoteFocusMode.manual(property: descriptor.property, value: descriptor.current) { return "MF" }
+        return RemoteFocusMode.label(property: descriptor.property, value: descriptor.current)
+            ?? RemoteExposureParameters.format(descriptor.property, raw: descriptor.current)
+    }
+
+    private var monitorModeText: String? {
+        guard let descriptor = model.exposureProgram else { return nil }
+        return RemoteExposureParameters.format(descriptor.property, raw: descriptor.current)
+    }
+
     init(session: CameraSession?, presentationMode: CameraPresentationMode? = nil, recordingDirectory: URL? = nil,
          isSessionConnected: Bool = true, toolDefaults: UserDefaults = .standard,
-         remoteCamera: (any RemoteCameraControlling)? = nil,
+         remoteCamera: (any RemoteCameraControlling)? = nil, freeUsage: FreeUsageStore = .shared,
+         entitlements: PremiumEntitlementStore = .shared,
          onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
          onStopped: ((Bool) async -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
         let preferences = RemoteToolPreferences(defaults: toolDefaults)
         self.toolDefaults = toolDefaults
+        _entitlements = ObservedObject(wrappedValue: entitlements)
         _tools = StateObject(wrappedValue: preferences)
-        _lutMonitor = StateObject(wrappedValue: RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: toolDefaults)))
+        _lutMonitor = StateObject(wrappedValue: RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: toolDefaults), access: RemoteLUTFolderAccess(defaults: toolDefaults)))
         _dispMode = State(initialValue: preferences.disp)
         _histogramMode = State(initialValue: preferences.histogram)
         _exposureMode = State(initialValue: preferences.exposure)
@@ -114,19 +169,15 @@ struct RemoteView: View {
             ?? DisconnectedRemoteCamera(isUSB: mode == .usb)
         _model = StateObject(wrappedValue: RemoteViewModel(camera: camera,
                                                             recordingDirectory: recordingDirectory,
-                                                            onTransportLost: onTransportLost))
+                                                            onTransportLost: onTransportLost,
+                                                            entitlements: entitlements, freeUsage: freeUsage))
     }
 
     var body: some View {
         ZStack {
             ZTransferColors.background.ignoresSafeArea()
             GeometryReader { proxy in
-                if immersiveFullscreen {
-                    cameraToolOverlay(immersiveRemoteLayout, landscape: true)
-                        .frame(width: proxy.size.height, height: proxy.size.width)
-                        .rotationEffect(.degrees(layoutOrientation.rotationDegrees))
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                } else if layoutOrientation.isLandscape {
+                if layoutOrientation.isLandscape {
                     cameraToolOverlay(landscapeRemoteLayout, landscape: true)
                         // Android keeps the host portrait and rotates a measured
                         // landscape canvas inside it, so system bars stay put.
@@ -141,75 +192,20 @@ struct RemoteView: View {
             }
             .opacity(rotationOpacity)
 
-            if developerPanelPresented {
-                developerPanel
-                    .transition(.opacity)
-                    .zIndex(10)
-            }
         }
         .fileImporter(isPresented: $lutFolderPickerPresented, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
             guard case .success(let urls) = result, let url = urls.first else { return }
-            let access = RemoteLUTFolderAccess(defaults: toolDefaults)
-            do { try access.save(url); lutMonitor.beginScan(url); lutMonitor.scanned(try access.scan(), acquiredFolder: url) }
-            catch { lutMonitor.scanFailed((error as? RemoteLUTFolderAccessError) == .denied ? .denied : .read) }
+            lutPickedFolder = url
         }
-        .sheet(isPresented: $lutListPresented) {
-            NavigationStack {
-                List {
-                    Section("LUT") {
-                        Button("选择文件夹") { lutListPresented = false; lutFolderPickerPresented = true }
-                        ForEach(lutMonitor.files, id: \.identifier) { file in
-                            Button {
-                                lutListPresented = false
-                                let access = RemoteLUTFolderAccess(defaults: toolDefaults)
-                                guard let generation = lutMonitor.beginSelection(file) else { return }
-                                Task {
-                                    do {
-                                        let table = try CubeLUTParser.parse(access.read(file))
-                                        await MainActor.run { lutMonitor.loaded(file, lut: table, generation: generation); lutMonitor.presented(generation: generation) }
-                                    } catch {
-                                        await MainActor.run { lutMonitor.failed(generation: generation, reason: "read") }
-                                    }
-                                }
-                            } label: {
-                                HStack { Text(file.relativePath); Spacer(); if lutMonitor.active?.file.identifier == file.identifier { Image(systemName: "checkmark") } }
-                            }
-                        }
-                    }
-                }
-                .navigationTitle("LUT")
-                .navigationBarTitleDisplayMode(.inline)
-            }
-        }
-        .overlay(alignment: .top) {
-            if !immersiveFullscreen, !developerPanelPresented,
-               let hint = model.interactionHint ?? model.recordingHint ?? model.localRecordingHint ?? lutMonitor.failure {
-                Text(hint)
-                    .font(.system(size: 14, weight: .medium))
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(ZTransferColors.primaryText)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-                    .padding(.horizontal, 20)
-                    .padding(.top, 60)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .top))
-                            .animation(.easeInOut(duration: 0.20)),
-                        removal: .opacity.animation(.easeOut(duration: 0.30))
-                    ))
-            }
-        }
+        .sheet(isPresented: $lutListPresented, onDismiss: {
+            lutMonitor.dismissMenu()
+            if lutFolderAfterMenu { lutFolderAfterMenu = false; lutFolderPickerPresented = true }
+        }) { lutPanel }
         .overlay(alignment: .bottomTrailing) {
-            RemoteTrialBadge(meter: model.usageMeter)
-                .padding(.trailing, 12)
-                .padding(.bottom, 8)
-                .allowsHitTesting(false)
-        }
-        .overlay {
-            if model.movieMode && model.state.capture == .recording {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color(red: 1, green: 0.259, blue: 0.302), lineWidth: 2)
+            if !layoutOrientation.isLandscape {
+                RemoteTrialBadge(meter: model.usageMeter)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
                     .allowsHitTesting(false)
             }
         }
@@ -220,10 +216,15 @@ struct RemoteView: View {
         }
         .onChange(of: scenePhase) { phase in
             model.usageMeter.setActive(phase == .active)
+            model.setExposureMeterForeground(phase == .active)
+            if phase != .active {
+                lutMonitor.suspendRendering()
+                pauseOrientationCandidate()
+            } else {
+                refreshOrientationCandidate()
+            }
         }
-        .animation(.easeInOut(duration: 0.20), value: model.interactionHint)
-        .animation(.easeInOut(duration: 0.20), value: model.recordingHint)
-        .animation(.easeInOut(duration: 0.20), value: model.localRecordingHint)
+        .onChange(of: model.monitorHint.visible) { monitorHintAnimator.setVisible($0) }
         .animation(ZTransferMotion.standard, value: layoutOrientation)
         .statusBarHidden(false)
         .task {
@@ -231,8 +232,24 @@ struct RemoteView: View {
             guard !Task.isCancelled, !stopCleanupStarted, isSessionConnected else { return }
             model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
             model.setHDLiveView(tools.hd)
+            model.setMovieFormatMonitoring(dispMode.showsCameraInformation)
+            model.setStorageMonitoring(dispMode.showsCameraInformation)
+            model.setDisplayDetailsMonitoring(dispMode.showsCameraInformation)
+            configureFrameAnalysis()
+            model.setExposureMeterForeground(scenePhase == .active)
+            model.setExposureMeterVisible(tools.meter)
             model.start()
             model.setLevelVisible(tools.level)
+        }
+        .task(id: lutEnvironment) {
+            guard !stopCleanupStarted else { return }
+            let environment = lutEnvironment
+            lutMonitor.environment(movie: environment.movie, available: environment.available,
+                                   visible: environment.visible)
+            if environment.foreground, !lutFolderPickerPresented, let picked = lutPickedFolder {
+                lutPickedFolder = nil
+                lutMonitor.refreshFolder(replacing: picked)
+            }
         }
         .task(id: model.focusDiagnosticRunning) {
             guard model.focusDiagnosticRunning else { return }
@@ -244,6 +261,15 @@ struct RemoteView: View {
         // of the app stays portrait; this page rotates its own canvas to match
         // the device instead of changing the application's interface size.
         .onAppear {
+            monitorHintAnimator.setVisible(model.monitorHint.visible)
+            lutMonitor.onNotice = { [weak model] key in
+                model?.showMonitorHint(AppLocalized.resource(key), source: .lut)
+            }
+            lutMonitor.onCommit = {
+                if exposureMode == .falseColor { exposureMode = .off; tools.exposure = .off }
+            }
+            lutMonitor.onCloseMenu = { lutListPresented = false }
+            model.recordingDesqueeze = effectiveDesqueeze
             let normalizedDesqueeze = effectiveDesqueeze
             if tools.desqueeze != normalizedDesqueeze { tools.desqueeze = normalizedDesqueeze }
             model.setExposureMeterVisible(tools.meter)
@@ -257,8 +283,14 @@ struct RemoteView: View {
             applyDeviceOrientation(device.orientation)
         }
         .onDisappear {
+            monitorHintAnimator.stop()
+            lutMonitor.close()
+            lutMonitor.onNotice = nil
+            lutMonitor.onCommit = nil
+            lutMonitor.onCloseMenu = nil
             guard !stopCleanupStarted else { return }
             stopCleanupStarted = true
+            model.markMonitorHintHostInactive()
             if orientationNotificationsActive {
                 UIDevice.current.endGeneratingDeviceOrientationNotifications()
                 orientationNotificationsActive = false
@@ -274,22 +306,34 @@ struct RemoteView: View {
             gridMenuPresented = false
             model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
         }
-        .onChange(of: model.movieMode) { _ in focusValidAfterUptime = ProcessInfo.processInfo.systemUptime }
-        .onChange(of: model.focusModeDescriptor?.current) { _ in focusValidAfterUptime = ProcessInfo.processInfo.systemUptime }
+        .onChange(of: dispMode) { mode in
+            model.setMovieFormatMonitoring(mode.showsCameraInformation)
+            model.setStorageMonitoring(mode.showsCameraInformation)
+            model.setDisplayDetailsMonitoring(mode.showsCameraInformation)
+        }
         .onChange(of: model.focusDiagnosticReport) { report in
             guard !report.isEmpty else { return }
             persistedFocusDiagnosticReport = report
             toolDefaults.set(report, forKey: "focus_report_v1")
+        }
+        .onChange(of: model.videoDiagnosticLog) { log in
+            guard !log.isEmpty else { return }
+            developerLogLines.append(contentsOf: log.split(separator: "\n", omittingEmptySubsequences: false).map(String.init))
+        }
+        .onChange(of: model.computerControlLog) { log in
+            if !log.isEmpty { developerLogLines.append(log) }
         }
         .onChange(of: layoutOrientation) { _ in
             gridMenuPresented = false
             model.dismissCameraTool()
             model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
         }
-        .onChange(of: tools.locked) { _ in
-            orientationStabilityTask?.cancel()
-            orientationCandidate = nil
+        .onChange(of: tools.locked) { locked in
+            pauseOrientationCandidate()
+            orientationSession.discardPending()
+            if !locked { refreshOrientationCandidate() }
         }
+        .onChange(of: effectiveDesqueeze) { model.recordingDesqueeze = $0 }
         .onChange(of: tools.hd) { model.setHDLiveView($0) }
         .onChange(of: tools.level) { model.setLevelVisible($0) }
         .onChange(of: tools.meter) { model.setExposureMeterVisible($0) }
@@ -299,20 +343,108 @@ struct RemoteView: View {
             if !stopCleanupStarted { tools.level = visible }
         }
         .onChange(of: histogramMode) { _ in
-            model.setFrameAnalysis(histogram: histogramMode != .off, zebra: exposureMode == .zebra, waveform: tools.waveform, falseColor: exposureMode == .falseColor, histogramRGB: histogramMode == .rgb)
+            configureFrameAnalysis()
         }
-        .onChange(of: exposureMode) { _ in
-            model.setFrameAnalysis(histogram: histogramMode != .off, zebra: exposureMode == .zebra, waveform: tools.waveform, falseColor: exposureMode == .falseColor, histogramRGB: histogramMode == .rgb)
+        .onChange(of: exposureMode) { mode in
+            if mode == .falseColor { lutMonitor.turnOff() }
+            configureFrameAnalysis()
         }
         .onChange(of: tools.waveform) { _ in
-            model.setFrameAnalysis(histogram: histogramMode != .off, zebra: exposureMode == .zebra, waveform: tools.waveform, falseColor: exposureMode == .falseColor, histogramRGB: histogramMode == .rgb)
+            configureFrameAnalysis()
         }
-        .sheet(item: $selectedField) { field in
-            ExposureValueList(field: field, descriptor: model.exposureDescriptors[field]) { value in
-                model.setExposure(field, value: value)
-                selectedField = nil
+    }
+
+    private var lutPanel: some View {
+        let status = RemoteLUTPanelStatus(hasFolder: lutMonitor.folder != nil,
+            failure: lutMonitor.folderFailure, scanning: lutMonitor.scanning, empty: lutMonitor.files.isEmpty)
+        let categories = PhotoLUTCategorySelection.categories(in: lutMonitor.files)
+        let visible = lutMonitor.files.filter { $0.category == lutCategorySelection.category }
+        return NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button {
+                        ZTransferHaptics.shared.tick()
+                        lutMonitor.chooseOff()
+                    } label: {
+                        HStack {
+                            Text(AppLocalized.resource("lut_turn_off"))
+                            if lutMonitor.active == nil { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Spacer()
+                    Button(AppLocalized.resource(status.folderAction)) {
+                        ZTransferHaptics.shared.tick()
+                        lutMonitor.prepareFolderPicker()
+                        lutFolderAfterMenu = true
+                        lutListPresented = false
+                    }
+                }
+                if let guidance = status.guidance { Text(AppLocalized.resource(guidance)).font(.footnote) }
+                if status.showMonitorOnly { Text(AppLocalized.resource("lut_monitor_only")).font(.footnote) }
+                if let notice = lutMonitor.noticeResource, notice != status.guidance {
+                    Text(AppLocalized.resource(notice)).font(.footnote)
+                }
+                if status.accessible && !lutMonitor.files.isEmpty {
+                    if categories.count > 1 {
+                        Picker("", selection: $lutCategorySelection.category) {
+                            ForEach(categories, id: \.self) { category in
+                                Text(category ?? AppLocalized.resource("lut_uncategorized")).tag(category)
+                            }
+                        }.labelsHidden().pickerStyle(.menu)
+                    }
+                    ScrollViewReader { proxy in
+                        List(visible, id: \.identifier) { file in
+                            Button {
+                                ZTransferHaptics.shared.tick()
+                                lutMonitor.select(file)
+                            } label: {
+                                HStack {
+                                    Text(file.label).lineLimit(2)
+                                    Spacer()
+                                    if lutMonitor.loadingIdentifier == file.identifier { ProgressView() }
+                                    if lutMonitor.active?.file.identifier == file.identifier { Image(systemName: "checkmark") }
+                                }
+                            }.id(file.identifier)
+                        }
+                        .onAppear {
+                            if let target = visible.first(where: { $0.identifier == lutMonitor.active?.file.identifier }) ?? visible.first {
+                                proxy.scrollTo(target.identifier, anchor: .top)
+                            }
+                        }
+                    }.id(lutCategorySelection.category)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .navigationTitle("LUT")
+            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: lutMonitor.files) { files in
+                lutCategorySelection.reconcile(files: files, selected: lutMonitor.active?.file.identifier)
+            }
+            .onChange(of: lutMonitor.active?.file.identifier) { selected in
+                lutCategorySelection.reconcile(files: lutMonitor.files, selected: selected)
             }
         }
+    }
+
+    private struct LUTEnvironment: Hashable {
+        let movie: Bool
+        let available: Bool
+        let visible: Bool
+        let foreground: Bool
+        let pickedFolder: URL?
+    }
+
+    private var lutEnvironment: LUTEnvironment {
+        LUTEnvironment(movie: model.movieMode,
+            available: isSessionConnected && model.initialLoaded && model.frameImage != nil &&
+                scenePhase == .active && !lutFolderPickerPresented && !stopCleanupStarted,
+            visible: tools.layout(movie: model.movieMode).visible(.lut),
+            foreground: scenePhase == .active, pickedFolder: lutPickedFolder)
+    }
+
+    private func configureFrameAnalysis() {
+        model.setFrameAnalysis(histogram: histogramMode != .off, zebra: exposureMode == .zebra, waveform: tools.waveform, falseColor: exposureMode == .falseColor, histogramRGB: histogramMode == .rgb)
     }
 
     private var portraitRemoteLayout: some View {
@@ -347,70 +479,52 @@ struct RemoteView: View {
 
     private var landscapeRemoteLayout: some View {
         GeometryReader { proxy in
-            HStack(spacing: 10) {
-                VStack(spacing: 10) {
-                    // Android's landscape monitor keeps the complete tool strip
-                    // under the viewfinder. It is a horizontal strip, never a
-                    // vertical rail beside the image.
-                    remoteViewfinder
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    adaptiveRemoteToolbar
-                        .frame(maxWidth: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                VStack(spacing: 12) {
-                    Spacer(minLength: 28)
-                    exposureGrid
-                        .frame(width: 178)
-                    Spacer(minLength: 12)
-                    shutterButton
-                    Spacer(minLength: 16)
-                }
-                .frame(width: 178, height: proxy.size.height)
+            let layout = RemoteLandscapeLayout(width: proxy.size.width, height: proxy.size.height,
+                                                imageAspect: remoteViewfinderAspect)
+            ZStack(alignment: .topLeading) {
+                remoteViewfinder
+                    .frame(width: layout.image.width, height: layout.image.height)
+                    .offset(x: layout.image.minX, y: layout.image.minY)
+                RemoteLandscapeControls(layout: layout, toolLayout: tools.layout(movie: model.movieMode),
+                    controls: remoteToolControls(movie: model.movieMode), onPanelChange: closeMonitorPanels,
+                    onTick: { model.detentFeedback() }, applyHidden: { hidden in
+                        for tool in hidden { setToolVisible(tool, false) }
+                    }, rotate: AnyView(remoteRotateButton), back: AnyView(remoteBackButton),
+                    disp: AnyView(remoteDispButton), shutter: AnyView(remoteShutter(diameter: layout.shutterSize)),
+                    recorder: AnyView(remoteRecordButton), parameter: { index, height in
+                        AnyView(exposureTile(exposureFields[index], height: height))
+                    })
+                    .frame(width: layout.controls.width, height: layout.controls.height)
+                    .offset(x: layout.controls.minX, y: layout.controls.minY)
+                RemoteMonitorHintAnchor(horizontalInset: 12)
+                    .frame(width: layout.image.width)
+                    .offset(x: layout.image.minX, y: layout.image.minY + layout.image.height * 0.20)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .overlay(alignment: .topTrailing) {
-                landscapeRemoteTopBar
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .overlay(alignment: .bottomTrailing) {
+                RemoteTrialBadge(meter: model.usageMeter, compact: true)
+                    .padding(.trailing, 6).padding(.bottom, 4)
+                    .allowsHitTesting(false)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 4)
     }
 
-    private var immersiveRemoteLayout: some View {
-        ZStack(alignment: .topTrailing) {
-            remoteViewfinder
-                .padding(6)
-            // Android keeps the original top-right return button mounted in
-            // immersive mode. Only its action changes; no second fullscreen-
-            // specific chevron is drawn over the viewfinder.
-            remoteBackButton
-            .padding(12)
-        }
+    private func closeMonitorPanels() {
+        gridMenuPresented = false
+        gridMenuClosing = false
+        model.dismissCameraTool()
+        lutListPresented = false
+        selectedField = nil
+        developerPanelPresented = false
     }
 
     private var remoteTopBar: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 8) {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
                 remoteSignalButton
                 remoteBatteryButton
             }
-            Spacer(minLength: 0)
-            remoteBackButton
-        }
-    }
-
-    /// Android's landscape toolbar keeps all three fixed controls together at
-    /// the trailing edge: signal, battery, then the return button.
-    private var landscapeRemoteTopBar: some View {
-        HStack(spacing: 8) {
-            remoteSignalButton
-            remoteBatteryButton
+            RemoteMonitorHintAnchor(horizontalInset: 6).frame(maxWidth: .infinity)
             remoteBackButton
         }
     }
@@ -423,8 +537,6 @@ struct RemoteView: View {
                 panel.requestClose()
             } else if editingTools {
                 setEditingTools(false)
-            } else if immersiveFullscreen {
-                withAnimation(ZTransferMotion.standard) { immersiveFullscreen = false }
             } else {
                 dismiss()
             }
@@ -435,9 +547,7 @@ struct RemoteView: View {
                 .frame(width: 36, height: 36)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-        .accessibilityLabel(AppLocalized.resource(
-            immersiveFullscreen ? "cd_remote_fullscreen_exit" : "cd_back"
-        ))
+        .accessibilityLabel(AppLocalized.resource("cd_back"))
         .accessibilityIdentifier("remote-monitor-back")
     }
 
@@ -536,7 +646,7 @@ struct RemoteView: View {
                     withAnimation(ZTransferMotion.standard) { developerPanelPresented = true }
                 }
             }
-        }, trailing: remoteFixedToolControls, pinnedEndCount: 2, fixedRecorder: layoutOrientation.isLandscape,
+        }, trailing: remoteFixedToolControls, pinnedEndCount: 1, fixedRecorder: false,
                                 applyHidden: { hidden in
             for tool in hidden { setToolVisible(tool, false) }
         })
@@ -552,26 +662,24 @@ struct RemoteView: View {
                 .accessibilityIdentifier("remote-tools-manage")
             )))
         }
-        controls.append(RemoteFixedToolControl(id: "fullscreen", view: AnyView(
-            remoteToolButton(active: false, accessibilityLabel: AppLocalized.resource("cd_remote_fullscreen_enter"), label: { RemoteFullscreenIcon().frame(width: 17, height: 17) }) {
-                enterImmersiveFullscreen()
-            }.disabled(editingTools || tools.locked)
-        )))
-        controls.append(RemoteFixedToolControl(id: "rotate", view: AnyView(
-            remoteToolButton(active: layoutOrientation.isLandscape, accessibilityLabel: AppLocalized.resource("cd_remote_rotate"), label: { RemoteRotateIcon().frame(width: 20, height: 20) }) {
-                cycleLayoutOrientation()
-            }.disabled(editingTools || tools.locked)
-                .accessibilityIdentifier("remote-tool-rotate")
-        )))
-        controls.append(RemoteFixedToolControl(id: "disp", view: AnyView(
-            remoteToolButton(active: dispMode != .camera,
-                             accessibilityLabel: "DISP",
-                             label: { Text("DISP").font(.system(size: 8, weight: .bold)) }) {
-                dispMode = dispMode.next
-                tools.disp = dispMode
-            }
-        )))
+        controls.append(RemoteFixedToolControl(id: "rotate", view: AnyView(remoteRotateButton)))
         return controls
+    }
+
+    private var remoteRotateButton: some View {
+        remoteToolButton(active: false, enabled: !editingTools && !tools.locked,
+                         accessibilityLabel: AppLocalized.resource("remote_tool_rotate"),
+                         label: { RemoteRotateIcon().frame(width: 19, height: 19) }) {
+            cycleLayoutOrientation()
+        }.accessibilityIdentifier("remote-tool-rotate")
+    }
+
+    private var remoteDispButton: some View {
+        remoteToolButton(active: false, accessibilityLabel: "DISP",
+                         label: { Text("DISP").font(.system(size: 8)) }) {
+            dispMode = dispMode.next
+            tools.disp = dispMode
+        }.accessibilityIdentifier("remote-tool-disp")
     }
 
     // Each entry owns its existing production action; layout order and
@@ -609,7 +717,7 @@ struct RemoteView: View {
                 developerPanelPresented = false
                 if gridMenuPresented { gridMenuClosing = true }
                 else { gridMenuClosing = false; gridMenuPresented = true }
-            }.geniePopupAnchor(.remoteGrid)),
+            }),
             .exposure: AnyView(configuredRemoteToolButton(.exposure, movie: movie, active: exposureMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_zebra"), label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
                 withAnimation(ZTransferMotion.standard) {
                     exposureMode = switch exposureMode {
@@ -628,7 +736,10 @@ struct RemoteView: View {
             .lut: AnyView(configuredRemoteToolButton(.lut, movie: movie, active: lutMonitor.active != nil, accessibilityLabel: "LUT", label: {
                 Text("LUT").font(.system(size: 8, weight: .bold)).frame(width: 21, height: 19)
             }) {
-                if lutMonitor.files.isEmpty { lutFolderPickerPresented = true } else { lutListPresented = true }
+                lutCategorySelection = PhotoLUTCategorySelection()
+                lutCategorySelection.reconcile(files: lutMonitor.files, selected: lutMonitor.active?.file.identifier)
+                lutMonitor.openMenu()
+                lutListPresented = true
             }),
             .desqueeze: AnyView(configuredRemoteToolButton(.desqueeze, movie: movie, active: effectiveDesqueeze > 1.001,
                              accessibilityLabel: "\(RemoteDisplayOptions.label(for: effectiveDesqueeze))×",
@@ -665,6 +776,14 @@ struct RemoteView: View {
                 accessibilityLabel: AppLocalized.resource("remote_tool_lock"), label: {
                     RemoteEditorIcon(kind: tools.locked ? .lock : .lockOpen).frame(width: 19, height: 19)
                 }) { setRotationLocked(!tools.locked, showHint: true) }),
+            .computerControl: AnyView(configuredRemoteToolButton(.computerControl, movie: movie,
+                active: model.computerControlEnabled,
+                enabled: model.computerControlToggleAllowed,
+                accessibilityLabel: AppLocalized.resource("remote_tool_computer_control"), label: {
+                    Text("PC").font(.system(size: 10, weight: .bold)).fixedSize()
+                }) {
+                    model.toggleComputerControl()
+                }),
             .record: AnyView(Group {
                 if editingTools {
                     remoteToolEditButton(.record, movie: movie) {
@@ -678,6 +797,13 @@ struct RemoteView: View {
     private func cameraToolOverlay<Content: View>(_ content: Content, landscape: Bool) -> some View {
         content.overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
             GeometryReader { proxy in
+                if let field = selectedField, let descriptor = model.exposureDescriptors[field] {
+                    RemoteParameterPanel(field: field, descriptor: descriptor,
+                        anchor: anchors[field.popupTrigger].map { proxy[$0] }, hostSize: proxy.size,
+                        landscape: landscape, onSelect: { model.setExposure(field, value: $0) },
+                        onDismiss: { selectedField = nil })
+                        .id(field)
+                }
                 if gridMenuPresented {
                     RemoteGridMenu(tools: tools, anchor: anchors[.remoteGrid].map { proxy[$0] },
                         hostSize: proxy.size, landscape: landscape, closing: $gridMenuClosing,
@@ -695,6 +821,13 @@ struct RemoteView: View {
                 }
             }
         }
+        .overlay {
+            if developerPanelPresented { developerPanel.transition(.opacity) }
+        }
+        .overlayPreferenceValue(RemoteMonitorHintAnchorKey.self) { anchor in
+            RemoteMonitorHintOverlay(anchor: anchor, text: model.monitorHint.text,
+                compact: !landscape, animator: monitorHintAnimator)
+        }
     }
 
     private func cameraToolButton(_ tool: RemoteCameraTool, movie: Bool) -> some View {
@@ -702,12 +835,6 @@ struct RemoteView: View {
         case .whiteBalance: .whiteBalance
         case .focusArea: .focusArea
         case .focusMode: .focusMode
-        }
-        let popupTrigger: GeniePopupTrigger
-        switch tool {
-        case .whiteBalance: popupTrigger = .remoteWhiteBalance
-        case .focusArea: popupTrigger = .remoteFocusArea
-        case .focusMode: popupTrigger = .remoteFocusMode
         }
         return configuredRemoteToolButton(layoutTool, movie: movie, active: false,
             accessibilityLabel: AppLocalized.resource(layoutTool.titleKey), label: {
@@ -735,26 +862,31 @@ struct RemoteView: View {
                 gridMenuPresented = false
                 model.openCameraTool(tool)
             }
-            .geniePopupAnchor(popupTrigger)
     }
 
     private func setEditingTools(_ editing: Bool) {
-        orientationStabilityTask?.cancel()
-        orientationCandidate = nil
+        pauseOrientationCandidate()
+        orientationSession.discardPending()
         selectedField = nil
         model.dismissCameraTool()
         developerPanelPresented = false
         gridMenuPresented = false
         editingTools = editing && !layoutOrientation.isLandscape
+        if !editingTools { refreshOrientationCandidate() }
     }
 
     @ViewBuilder
     private func configuredRemoteToolButton<Label: View>(_ tool: RemoteTool, movie: Bool, active: Bool,
+        enabled: Bool = true,
         accessibilityLabel: String, @ViewBuilder label: @escaping () -> Label, action: @escaping () -> Void) -> some View {
         if editingTools {
             remoteToolEditButton(tool, movie: movie, label: label)
         } else {
-            remoteToolButton(active: active, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: action)
+            RemoteDockToolCell(id: tool.id, title: AppLocalized.resource(tool.titleKey), active: active, enabled: enabled, action: action) {
+                remoteToolButton(active: active, enabled: enabled, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: action)
+                    .modifier(RemoteToolIconAnchor(tool: tool))
+                    .accessibilityIdentifier("remote-tool-\(tool.id)")
+            }
         }
     }
 
@@ -791,7 +923,7 @@ struct RemoteView: View {
 
     private func setRotationLocked(_ locked: Bool, showHint: Bool) {
         orientationStabilityTask?.cancel()
-        orientationCandidate = nil
+        orientationSession.pause()
         if locked { tools.lockedRotation = layoutOrientation.rawValue }
         tools.locked = locked
         if showHint { model.showRotationLockHint(locked) }
@@ -806,6 +938,7 @@ struct RemoteView: View {
             case .record: model.setLocalRecordingToolVisible(false, fixedRecorder: false)
             case .hd: model.setHDLiveView(false)
             case .lock: setRotationLocked(false, showHint: false)
+            case .computerControl: if model.computerControlEnabled { model.setComputerControl(false) }
             case .histogram:
                 histogramMode = .off
                 tools.histogram = .off
@@ -841,9 +974,9 @@ struct RemoteView: View {
         model.stopFocusDiagnostic()
     }
 
-    /// The Android panel also hosts an experimental full camera-capability
-    /// probe. Product direction keeps only the hidden entry and log window on
-    /// iOS; no probing commands or temporary camera-property writes originate here.
+    /// The Android panel's two video probes are read-only compatibility checks.
+    /// The broader capability scan and temporary-property probes remain out of
+    /// the iOS surface.
     private var developerPanel: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
@@ -863,7 +996,9 @@ struct RemoteView: View {
                         developerPanelButton(systemName: "doc.on.doc",
                                              accessibilityLabel: AppLocalized.resource("lab_copy_log")) {
                             let report = model.focusDiagnosticReport.isEmpty ? persistedFocusDiagnosticReport : model.focusDiagnosticReport
-                            UIPasteboard.general.string = (developerLogLines + [report]).filter { !$0.isEmpty }.joined(separator: "\n")
+                            UIPasteboard.general.string = (developerLogLines + [model.recordingErrorReport, report])
+                                .filter { !$0.isEmpty }.joined(separator: "\n")
+                            model.showMonitorHint(AppLocalized.resource("code_copied"))
                         }
                         developerPanelButton(systemName: "xmark",
                                              accessibilityLabel: AppLocalized.resource("cd_close")) {
@@ -886,13 +1021,26 @@ struct RemoteView: View {
                             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
                             .disabled(!model.focusDiagnosticRunning)
                         }
+                        HStack(spacing: 8) {
+                            Button(AppLocalized.resource("probe_video_remaining")) {
+                                model.runLegacyVideoDiagnostic()
+                            }
+                            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
+                            .disabled(model.videoDiagnosticBusy || model.recordingBusy || model.cameraToolWriting)
+                            Button(AppLocalized.resource("probe_movie_format")) {
+                                model.runMovieFormatDiagnostic()
+                            }
+                            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
+                            .disabled(model.videoDiagnosticBusy || model.recordingBusy || model.cameraToolWriting)
+                        }
                     }
 
                     ScrollViewReader { reader in
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 2) {
                                 let report = model.focusDiagnosticReport.isEmpty ? persistedFocusDiagnosticReport : model.focusDiagnosticReport
-                                let lines = developerLogLines + report.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                                let lines = developerLogLines + [model.recordingErrorReport, report]
+                                    .filter { !$0.isEmpty }.flatMap { $0.components(separatedBy: "\n") }
                                 ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                                     Text(line)
                                         .font(.system(size: 10, design: .monospaced))
@@ -942,82 +1090,16 @@ struct RemoteView: View {
     }
 
     private var remoteRecordButton: some View {
-        let phase = model.localRecordingPhase
-        let recording = phase == .recording || phase == .paused
-        let expanded = recording || phase == .finalizing
-        let saved = phase == .saved
-        return ZStack(alignment: .leading) {
-            ZTransferGlassSurface(cornerRadius: 18, kind: .panel)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Button {
-                switch phase {
-                case .idle: model.startLocalRecording()
-                case .recording, .paused: model.stopLocalRecording()
-                case .finalizing, .saved: break
-                }
-            } label: {
-                ZStack {
-                    Circle().fill(Color.white.opacity(0.001))
-                    if saved {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(ZTransferColors.statusConnected)
-                    } else if recording || phase == .finalizing {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(ZTransferColors.statusError)
-                            .frame(width: 12, height: 12)
-                    } else {
-                        Circle().fill(ZTransferColors.statusError).frame(width: 14, height: 14)
-                    }
-                }
-                .frame(width: 28, height: 28)
-            }
-            .buttonStyle(ZTransferGlassButtonStyle(
-                cornerRadius: 14,
-                active: saved,
-                activeColor: ZTransferColors.statusConnected
-            ))
-            .disabled(phase == .finalizing || saved)
-            .opacity(!expanded && !saved && !entitlements.access.isPro ? 0.45 : 1)
-            .padding(.leading, 4)
-
-            if expanded {
-                Button { model.toggleLocalRecordingPause() } label: {
-                    Image(systemName: phase == .paused ? "play.fill" : "pause.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(ZTransferColors.primaryText)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
-                .disabled(phase == .finalizing)
-                .offset(x: 38)
-                .transition(.opacity.combined(with: .scale(scale: 0.7)))
-            } else if saved {
-                Text(AppLocalized.resource("remote_rec_saved_label"))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(ZTransferColors.statusConnected)
-                    .offset(x: 34)
-                    .transition(.opacity.combined(with: .move(edge: .leading)))
-            }
-
-            if recording {
-                Text(String(format: "%d:%02d", model.localRecordingSeconds / 60,
-                            model.localRecordingSeconds % 60))
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.black.opacity(0.62), in: Capsule())
-                    .offset(x: 8, y: -28)
-            }
-        }
-        .frame(width: saved ? 88 : (expanded ? 70 : 36), height: 36, alignment: .leading)
-        .animation(ZTransferMotion.emphasized, value: phase)
-        .accessibilityElement(children: .contain)
+        RemoteRecorderBar(phase: model.localRecordingPhase, elapsedSeconds: model.localRecordingSeconds,
+            enabled: entitlements.access.isPro, compactSaved: layoutOrientation.isLandscape,
+            onStart: { model.startLocalRecording() },
+            onPauseResume: { model.toggleLocalRecordingPause() },
+            onStop: { model.stopLocalRecording() })
     }
 
     private func remoteToolButton<Label: View>(
         active: Bool,
+        enabled: Bool = true,
         accessibilityLabel: String,
         @ViewBuilder label: @escaping () -> Label,
         action: @escaping () -> Void
@@ -1034,23 +1116,38 @@ struct RemoteView: View {
             active: active,
             activeColor: ZTransferColors.accentBlue
         ))
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.48)
         .accessibilityLabel(accessibilityLabel)
     }
 
     private var shutterButton: some View {
+        remoteShutter(diameter: 76)
+    }
+
+    private func remoteShutter(diameter: CGFloat) -> some View {
         RemoteShutterButton(
             capture: model.state.capture,
             movieMode: model.movieMode,
-            enabled: model.state.session == .ready && !model.recordingBusy && !model.cameraToolWriting,
+            enabled: isSessionConnected && !model.cameraToolWriting,
+            focusing: model.halfPressVisualActive,
             onQuickTap: { if model.movieMode { model.toggleRecording() } else { model.capture() } },
             onFocusStart: { model.beginHalfPress() },
-            onRelease: { model.endHalfPress(fire: $0) }
+            onRelease: { model.endHalfPress(fire: $0) },
+            diameter: diameter
         )
+    }
+
+    private var showCameraRecording: Bool {
+        isSessionConnected && model.movieMode && model.state.capture == .recording
     }
 
     private var remoteViewfinder: some View {
         GeometryReader { proxy in
             let image = model.frameImage
+            let meters = RemoteMonitorMeterLayout(size: proxy.size,
+                landscape: layoutOrientation.isLandscape, movie: model.movieMode,
+                showExposure: tools.meter, audioEnabled: isSessionConnected && model.movieMode && tools.audio)
             let aspect = (image.map { $0.size.width / max($0.size.height, 1) } ?? 1.5) * CGFloat(effectiveDesqueeze)
             ZStack {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -1068,8 +1165,10 @@ struct RemoteView: View {
                         model.focus(at: $0, coordinateSize: image.size)
                     }) {
                         ZStack {
-                            if let activeLUT = lutMonitor.active?.lut, let cgImage = image.cgImage {
-                                RemoteLUTMetalView(image: cgImage, lut: activeLUT)
+                            if let cgImage = image.cgImage {
+                                RemoteLUTImage(image: cgImage, monitor: lutMonitor,
+                                    source: RemoteViewfinderImage(image: image, aspect: aspect,
+                                        multiplier: CGFloat(effectiveDesqueeze), size: proxy.size))
                                     .aspectRatio(aspect, contentMode: .fit)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
@@ -1089,33 +1188,12 @@ struct RemoteView: View {
                             if exposureMode == .zebra, let zebraMask = model.frameZebraMask {
                                 IOSZebraOverlay(mask: zebraMask, aspect: aspect)
                             }
-                            if let point = model.state.focus.point, model.state.focus.phase != .idle {
-                                RemoteFocusReticle(phase: model.state.focus.phase, point: point,
-                                    nonce: model.state.focus.nonce, aspect: aspect)
-                            }
-                            IOSLiveViewFocusFramesOverlay(
-                                frames: cameraFrames,
-                                focused: metadata?.focusJudgement == .focused,
-                                phase: model.state.focus.phase,
-                                handoffEligible: model.confirmedFocusMarker != nil &&
-                                    model.frameReceivedAtUptime >= (model.confirmedFocusMarker?.confirmedAtUptime ?? .greatestFiniteMagnitude),
-                                aspect: aspect
-                            )
-                            if let marker = model.confirmedFocusMarker {
-                                let cameraFrame = model.frameReceivedAtUptime >= marker.confirmedAtUptime &&
-                                    (marker.subjectTracking || metadata?.focusJudgement == .focused)
-                                    ? metadata?.selectedFocusFrame : nil
-                                IOSConfirmedFocusReticle(
-                                    marker: marker,
-                                    cameraFrame: cameraFrame,
-                                    visible: cameraFrames.isEmpty && model.state.focus.phase == .idle &&
-                                        !model.halfPressVisualActive &&
-                                        (!marker.subjectTracking || model.state.focus.tracking),
-                                    aspect: aspect
-                                )
-                                .id(marker.nonce)
-                                    .allowsHitTesting(false)
-                            }
+                            RemoteFocusLayers(
+                                frames: cameraFrames, focused: metadata?.focusJudgement == .focused,
+                                phase: model.state.focus.phase, point: model.state.focus.point,
+                                nonce: model.state.focus.nonce, marker: model.confirmedFocusMarker,
+                                frameReceivedAt: model.frameReceivedAtUptime,
+                                halfPressActive: model.halfPressVisualActive, aspect: aspect)
                         }
                     }
                     .onChange(of: model.frameMetadata) { metadata in
@@ -1128,39 +1206,30 @@ struct RemoteView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             .allowsHitTesting(false)
                     }
-                    if tools.meter, let ev = model.exposureMeterEV {
-                        Text(String(format: "%+.1f EV", ev))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(.black.opacity(0.62), in: Capsule())
-                            .padding(10)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    if tools.meter {
+                        RemoteExposureMeterOverlay(ev: model.exposureMeterEV.map(Double.init))
+                            .padding(.top, meters.exposureTop)
+                            .padding(.trailing, 8)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                             .allowsHitTesting(false)
                     }
-                    if histogramMode != .off {
-                        RemoteHistogramOverlay(bins: model.frameHistogram ?? [], rgb: histogramMode == .rgb ? model.frameHistogramRGB : nil)
-                            .frame(width: 150, height: 72)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    }
-                    if tools.waveform != .off, let waveform = model.frameWaveform {
-                        RemoteWaveformOverlay(channels: waveform)
-                            .frame(width: 150, height: 72)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    }
+                    RemoteMonitorScopesOverlay(
+                        histogram: model.frameHistogram, histogramRGB: model.frameHistogramRGB,
+                        waveform: model.frameWaveform, histogramMode: histogramMode,
+                        waveformMode: tools.waveform,
+                        sampleHeight: min(model.frameImage?.cgImage?.height ?? 0, 192),
+                        startInset: meters.scopeStartInset,
+                        informationInset: layoutOrientation.isLandscape && dispMode == .camera && isSessionConnected
+                            ? RemoteDispLayout.informationInset : 0)
                     if model.levelVisible, let roll = model.levelRoll {
                         RemoteHorizonOverlay(roll: Float(roll), pitch: model.levelPitch.map(Float.init))
                             .allowsHitTesting(false)
                     }
-                    if model.movieMode, tools.audio,
-                       let levels = model.frameMetadata?.soundLevels {
+                    if meters.audio.height > 0, let levels = model.frameMetadata?.soundLevels {
                         IOSSoundMeter(levels: levels)
-                            .frame(width: 32, height: 116)
-                            .padding(.leading, 10)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity,
-                                   alignment: .bottomLeading)
+                            .frame(width: meters.audio.width, height: meters.audio.height)
+                            .clipped()
+                            .position(x: meters.audio.midX, y: meters.audio.midY)
                             .allowsHitTesting(false)
                     }
                 } else if tools.grid != .off {
@@ -1178,7 +1247,7 @@ struct RemoteView: View {
                         .padding(10)
                         .allowsHitTesting(false)
                 }
-                if model.state.capture == .recording {
+                if showCameraRecording {
                     HStack(spacing: 5) {
                         Circle()
                             .fill(ZTransferColors.statusError)
@@ -1195,21 +1264,30 @@ struct RemoteView: View {
                     .padding(10)
                     .allowsHitTesting(false)
                 }
-                if model.state.liveViewStable {
-                    HStack(spacing: 4) {
-                        if let program = model.exposureProgram {
-                            RemoteStatusBadge(text: RemoteExposureParameters.format(program.property, raw: program.current), weight: .bold)
-                        }
-                        if let focusMode = model.focusModeDescriptor {
-                            RemoteStatusBadge(text: RemoteExposureParameters.format(focusMode.property, raw: focusMode.current), weight: .semibold)
-                        }
+                if layoutOrientation.isLandscape {
+                    // Android mounts the CAMERA readout as soon as the session
+                    // is connected; storage/detail polling is separately gated
+                    // by initial live-view readiness. Do not hide the shell
+                    // while the first frame is still settling.
+                    if dispMode == .camera, isSessionConnected {
+                        monitorCameraDispOverlay
+                    } else if model.state.liveViewStable, dispMode == .exposure {
+                        monitorExposureSummaryOverlay
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(10)
-                    .allowsHitTesting(false)
+                } else if model.state.liveViewStable {
+                    monitorPortraitStatusOverlay
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                // Android ViewfinderCard owns recording feedback; toolbar
+                // controls are outside this recording surface.
+                if showCameraRecording {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color(red: 1, green: 0.259, blue: 0.302), lineWidth: 2)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay {
                 if !isSessionConnected {
                     Text(AppLocalized.resource("camera_not_connected"))
@@ -1229,6 +1307,96 @@ struct RemoteView: View {
     private var remoteViewfinderAspect: CGFloat {
         guard let image = model.frameImage else { return 1.5 * CGFloat(effectiveDesqueeze) }
         return (image.size.width / max(image.size.height, 1)) * CGFloat(effectiveDesqueeze)
+    }
+
+    private var monitorCameraDispOverlay: some View {
+        let remaining: String? = {
+            guard model.movieMode,
+                  let remainingMs = model.frameMetadata?.remainingVideoTimeMs else { return nil }
+            return RemoteMonitorTelemetry.remainingTimeLabel(seconds: remainingMs / 1000).map { "[\($0)]" }
+        }()
+        let items = RemoteMonitorTelemetry.cameraTopRowItems(
+            storage: monitorStorageStatusItems,
+            movie: model.movieMode,
+            movieFormat: model.movieFormatLabel,
+            remaining: remaining,
+            batteryPercent: model.batteryPercent
+        )
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                Text(items.joined(separator: "   ·   "))
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, RemoteDispLayout.standbyTrailingReservation)
+                if RemoteMonitorTelemetry.cameraShowsStandby(
+                    movie: model.movieMode, recording: model.state.capture == .recording
+                ) {
+                    Text("STBY")
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .fixedSize()
+                }
+            }
+            .shadow(color: .black.opacity(0.85), radius: 2)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: RemoteDispLayout.bottomCellSpacing) {
+                monitorCell(label: "MODE", value: monitorModeText)
+                monitorCell(label: "WB", value: model.displayWhiteBalanceLabel)
+                monitorCell(label: "AF", value: monitorFocusModeText)
+            }
+            .frame(maxWidth: RemoteDispLayout.bottomMaxWidth, alignment: .leading)
+        }
+        .padding(.horizontal, RemoteDispLayout.horizontalInset)
+        .padding(.vertical, RemoteDispLayout.verticalInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
+
+    private var monitorExposureSummaryOverlay: some View {
+        Group {
+            if let mode = monitorModeText {
+                RemoteStatusBadge(text: mode, weight: .bold)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(10)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var monitorPortraitStatusOverlay: some View {
+        HStack(spacing: 4) {
+            if let mode = monitorModeText {
+                RemoteStatusBadge(text: mode, weight: .bold)
+            }
+            if let focus = monitorFocusModeText {
+                RemoteStatusBadge(text: focus, weight: .semibold)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(10)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func monitorCell(label: String, value: String?) -> some View {
+        if let value {
+            HStack(spacing: 5) {
+                Text(label)
+                    .font(.system(size: 9, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.65))
+                Text(value)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .shadow(color: .black.opacity(0.85), radius: 2)
+        }
     }
 
     private struct RemoteBatteryIcon: View {
@@ -1271,9 +1439,9 @@ struct RemoteView: View {
         if !tools.focusFrame { return "blocked=tool-off" }
         if !layout.visible(.focusFrame) { return "blocked=tool-hidden" }
         if !isSessionConnected { return "blocked=disconnected" }
-        if model.frameReceivedAtUptime <= focusValidAfterUptime { return "blocked=before-mode-change" }
+        if model.frameReceivedAtUptime <= model.focusValidAfterUptime { return "blocked=before-mode-change" }
         let age = max(0, now - model.frameReceivedAtUptime)
-        if age >= 0.5 { return "blocked=stale-frame" }
+        if model.focusFrameExpired || age >= 0.5 { return "blocked=stale-frame" }
         if metadata?.focusFrames.isEmpty != false {
             return "blocked=no-box \(metadata?.focusFrameStatus ?? "unsupported-header")"
         }
@@ -1519,31 +1687,46 @@ struct RemoteView: View {
         }
     }
 
+    private func pauseOrientationCandidate() {
+        orientationStabilityTask?.cancel()
+        orientationStabilityTask = nil
+        orientationSession.pause()
+    }
+
+    private func refreshOrientationCandidate() {
+        // Android re-enables its sensor listener after resume/unfreeze. UIDevice
+        // may not emit another notification until the phone moves again.
+        guard orientationNotificationsActive, !stopCleanupStarted else { return }
+        applyDeviceOrientation(UIDevice.current.orientation)
+    }
+
     private func applyDeviceOrientation(_ orientation: UIDeviceOrientation) {
-        guard !editingTools, !tools.locked else { return }
+        guard !stopCleanupStarted, scenePhase == .active, !editingTools, !tools.locked else {
+            pauseOrientationCandidate()
+            return
+        }
         let target: RemoteLayoutOrientation
         switch orientation {
         case .landscapeLeft: target = .landscapeLeft
         case .landscapeRight: target = .landscapeRight
         case .portrait: target = .portrait
         default:
+            pauseOrientationCandidate()
             return
         }
-        guard target != orientationCandidate else { return }
-        orientationCandidate = target
+        guard target != orientationSession.candidate else { return }
         orientationStabilityTask?.cancel()
-        guard target != manuallySuppressedOrientation else { return }
-        manuallySuppressedOrientation = nil
+        guard let ticket = orientationSession.observe(target) else { return }
         orientationStabilityTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(260))
-            guard !Task.isCancelled, orientationCandidate == target else { return }
+            guard !Task.isCancelled, scenePhase == .active, !tools.locked, !editingTools, orientationSession.accepts(ticket, target: target) else { return }
             requestLayoutOrientation(target)
         }
     }
 
     private func cycleLayoutOrientation() {
         guard !switchingRotation, !editingTools, !tools.locked else { return }
-        manuallySuppressedOrientation = orientationCandidate
+        orientationSession.suppressCurrent()
         orientationStabilityTask?.cancel()
         let target: RemoteLayoutOrientation = switch layoutOrientation {
         case .portrait: .landscapeLeft
@@ -1553,13 +1736,12 @@ struct RemoteView: View {
         requestLayoutOrientation(target)
     }
 
-    private func enterImmersiveFullscreen() {
-        if layoutOrientation == .portrait { cycleLayoutOrientation() }
-        withAnimation(ZTransferMotion.standard) { immersiveFullscreen = true }
-    }
-
     private func requestLayoutOrientation(_ target: RemoteLayoutOrientation) {
-        guard target != layoutOrientation, !switchingRotation, !tools.locked, !editingTools else { return }
+        guard !tools.locked, !editingTools else { return }
+        // Android's conflated channel retains only the latest request during a
+        // transition, including a request to return to the pre-transition layout.
+        if switchingRotation { orientationSession.enqueue(target); return }
+        guard target != layoutOrientation else { return }
         switchingRotation = true
         rotationTransitionTask?.cancel()
         rotationTransitionTask = Task { @MainActor in
@@ -1571,6 +1753,8 @@ struct RemoteView: View {
             withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.14)) { rotationOpacity = 1 }
             try? await Task.sleep(for: .milliseconds(140))
             switchingRotation = false
+            guard !Task.isCancelled else { orientationSession.discardPending(); return }
+            if let pending = orientationSession.takePending() { requestLayoutOrientation(pending) }
         }
     }
 
@@ -1582,96 +1766,24 @@ struct RemoteView: View {
                       width: width, height: fitted)
     }
 
+    private var exposureFields: [RemoteExposureField] { [.exposureCompensation, .iso, .aperture, .shutter] }
+
     private var exposureGrid: some View {
-        let fields: [RemoteExposureField] = [.exposureCompensation, .iso, .aperture, .shutter]
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-            ForEach(fields, id: \.self) { field in
-                RemoteExposureTile(field: field, descriptor: model.exposureDescriptors[field],
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+            ForEach(exposureFields, id: \.self) { field in exposureTile(field, height: 54) }
+        }.padding(.horizontal, 14)
+    }
+
+    private func exposureTile(_ field: RemoteExposureField, height: CGFloat) -> some View {
+        RemoteExposureTile(field: field, descriptor: model.exposureDescriptors[field],
                                    onOpenList: { gridMenuPresented = false; model.dismissCameraTool(); selectedField = field },
-                                   onCommit: { model.setExposure(field, value: $0, feedback: false, immediate: false) },
-                                   onDetent: { model.detentFeedback() },
+                                   onStep: { model.stepExposure(field, delta: $0) },
                                    autoEnabled: field == .iso && model.autoISODescriptor != nil ? model.autoISOEnabled : nil,
                                    autoToggle: field == .iso && model.autoISODescriptor != nil ?
                                        { model.setAutoISO(!model.autoISOEnabled) } : nil,
                                    autoBusy: model.autoISOBusy,
-                                   effectiveISO: model.effectiveISO?.current)
-            }
-        }
-        .padding(.horizontal, 14)
-    }
-}
-
-/// Two-stage shutter matching Android's 300 ms quick-tap/half-press split.
-private struct RemoteShutterButton: View {
-    let capture: RemoteCapturePhase
-    let movieMode: Bool
-    let enabled: Bool
-    let onQuickTap: () -> Void
-    let onFocusStart: () -> Void
-    let onRelease: (Bool) -> Void
-    @State private var pressed = false
-    @State private var halfPressStarted = false
-    @State private var timerTask: Task<Void, Never>?
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(ZTransferColors.primaryText.opacity(enabled ? 0.88 : 0.30), lineWidth: 4)
-                .frame(width: 82, height: 82)
-            if capture == .capturing {
-                ProgressView().controlSize(.large)
-            } else {
-                RoundedRectangle(cornerRadius: capture == .recording ? 8 : 41)
-                    .fill(movieMode ? ZTransferColors.statusError : Color.white)
-                    .frame(width: capture == .recording ? 30 : 64,
-                           height: capture == .recording ? 30 : 64)
-                    .scaleEffect(halfPressStarted ? 0.8 : 1)
-                    .animation(ZTransferMotion.emphasized, value: capture)
-            }
-        }
-        .frame(width: 82, height: 82)
-        .scaleEffect(pressed ? 0.95 : 1)
-        .animation(pressed ? .easeOut(duration: 0.1) : ZTransferMotion.emphasized, value: pressed)
-        .contentShape(Circle())
-        .gesture(dragGesture)
-        .opacity(enabled ? 1 : 0.72)
-        .accessibilityLabel(AppLocalized.resource("cd_remote_entry"))
-        .onDisappear {
-            timerTask?.cancel()
-            timerTask = nil
-            pressed = false
-            halfPressStarted = false
-        }
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                guard enabled, !pressed else { return }
-                pressed = true
-                halfPressStarted = false
-                timerTask?.cancel()
-                timerTask = Task { @MainActor in
-                    do { try await Task.sleep(nanoseconds: 300_000_000) }
-                    catch { return }
-                    guard pressed else { return }
-                    halfPressStarted = true
-                    onFocusStart()
-                }
-            }
-            .onEnded { value in
-                timerTask?.cancel()
-                timerTask = nil
-                pressed = false
-                let inside = value.location.x >= 0 && value.location.x <= 82 &&
-                    value.location.y >= 0 && value.location.y <= 82
-                if halfPressStarted {
-                    halfPressStarted = false
-                    onRelease(inside)
-                } else if inside {
-                    onQuickTap()
-                }
-            }
+                                   effectiveISO: model.effectiveISO?.current, tileHeight: height)
+            .geniePopupAnchor(field.popupTrigger)
     }
 }
 
@@ -1686,6 +1798,55 @@ private struct RemoteStatusBadge: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct RemoteFocusLayers: View {
+    let frames: [RemoteLiveViewFocusFrame]
+    let focused: Bool
+    let phase: RemoteFocusPhase
+    let point: RemoteFocusPoint?
+    let nonce: UInt64
+    let marker: RemoteConfirmedFocusMarker?
+    let frameReceivedAt: TimeInterval
+    let halfPressActive: Bool
+    let aspect: CGFloat
+    @State private var handoff = RemoteFocusHandoff()
+    @State private var expiredMarker: UInt64?
+
+    var body: some View {
+        let fallback = marker.flatMap { marker in
+            expiredMarker != marker.nonce ? marker.fallbackPoint(at: ProcessInfo.processInfo.systemUptime) : nil
+        }
+        let feedback: RemoteFocusPhase = phase != .idle ? phase : (fallback != nil && !halfPressActive ? .locked : .idle)
+        let input = RemoteFocusHandoff.Input(nonce: nonce, phase: feedback,
+            eligible: marker.map { frameReceivedAt >= $0.confirmedAtUptime } ?? false,
+            hasCameraFrames: !frames.isEmpty)
+        let visible = handoff.visibility(for: input)
+        ZStack {
+            if let displayPoint = phase != .idle ? point : fallback {
+                RemoteFocusReticle(phase: feedback, point: displayPoint, nonce: nonce, aspect: aspect)
+                    .opacity(visible.tap ? 1 : 0)
+            }
+            IOSLiveViewFocusFramesOverlay(frames: frames, focused: focused,
+                                          visible: visible.camera, aspect: aspect)
+        }
+        .task(id: input) {
+            handoff.update(input)
+            guard input.candidate else { return }
+            do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            guard !Task.isCancelled else { return }
+            handoff.complete(input)
+        }
+        .task(id: marker?.nonce) {
+            guard let marker, !marker.subjectTracking else { return }
+            let remaining = marker.confirmedAtUptime + 3 - ProcessInfo.processInfo.systemUptime
+            if remaining > 0 {
+                do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            expiredMarker = marker.nonce
+        }
     }
 }
 
@@ -1765,15 +1926,17 @@ private func focusCornerPath(center: CGPoint, halfWidth: CGFloat, halfHeight: CG
 /// Camera supplied AF rectangles. The tap feedback remains a separate layer;
 /// this view preserves the Android handoff delay and fades the last camera
 /// geometry instead of flashing a new white marker between packets.
-private struct IOSLiveViewFocusFramesOverlay: View {
+struct IOSLiveViewFocusFramesOverlay: View {
     let frames: [RemoteLiveViewFocusFrame]
     let focused: Bool
-    let phase: RemoteFocusPhase
-    let handoffEligible: Bool
+    let visible: Bool
     let aspect: CGFloat
-    @State private var handedOff = false
-    @State private var lastFrames: [RemoteLiveViewFocusFrame] = []
-    @State private var lastFocused = false
+    private struct Snapshot: Equatable {
+        var frames: [RemoteLiveViewFocusFrame] = []
+        var focused = false
+    }
+    @State private var retained = Snapshot()
+    private var snapshot: Snapshot { Snapshot(frames: frames, focused: focused) }
 
     var body: some View {
         GeometryReader { proxy in
@@ -1782,14 +1945,11 @@ private struct IOSLiveViewFocusFramesOverlay: View {
             let imageRect = CGRect(x: (proxy.size.width - imageWidth) / 2,
                                    y: (proxy.size.height - fitted) / 2,
                                    width: imageWidth, height: fitted)
-            let handoff = phase == .locked && handoffEligible && !frames.isEmpty
-            let suppress = phase == .focusing || phase == .failed ||
-                (phase == .locked && handoffEligible && !handedOff)
-            let visible = !suppress && !frames.isEmpty
-            let drawFrames = frames.isEmpty ? lastFrames : frames
+            let display = frames.isEmpty ? retained : snapshot
+            let drawFrames = display.frames
             let color: Color = drawFrames.count > 1
                 ? Color(red: 1, green: 222.0 / 255, blue: 160.0 / 255)
-                : (lastFocused ? Color(red: 103.0 / 255, green: 229.0 / 255, blue: 139.0 / 255) : .white)
+                : (display.focused ? Color(red: 103.0 / 255, green: 229.0 / 255, blue: 139.0 / 255) : .white)
             Canvas { context, _ in
                 guard imageRect.width > 0, imageRect.height > 0 else { return }
                 for frame in drawFrames {
@@ -1809,21 +1969,89 @@ private struct IOSLiveViewFocusFramesOverlay: View {
             .opacity(visible ? 1 : 0)
             .animation(.easeInOut(duration: 0.16), value: visible)
             .animation(.easeInOut(duration: 0.15), value: color)
-            .task(id: handoff) {
-                handedOff = false
-                guard handoff else { return }
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                guard !Task.isCancelled else { return }
-                handedOff = true
-            }
-            .onChange(of: frames) { next in
-                if !next.isEmpty { lastFrames = next; lastFocused = focused }
+            // Keep geometry and judgement from the same packet. Independent
+            // change callbacks can otherwise overwrite the retained result
+            // when an empty packet and an unfocused judgement arrive together.
+            .onChange(of: snapshot) { next in
+                if !next.frames.isEmpty { retained = next }
             }
             .onAppear {
-                if !frames.isEmpty { lastFrames = frames; lastFocused = focused }
+                if !frames.isEmpty { retained = snapshot }
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Production scope host: data gates and reserved information space stay together.
+struct RemoteMonitorScopesOverlay: View {
+    let histogram: [Int]?
+    let histogramRGB: [[Int]]?
+    let waveform: [[Int]]?
+    let histogramMode: RemoteHistogramMode
+    let waveformMode: RemoteWaveformMode
+    let sampleHeight: Int
+    let startInset: CGFloat
+    let informationInset: CGFloat
+
+    var body: some View {
+        GeometryReader { scopeProxy in
+            // Android MonitorAnalysisOverlays reserves two equal slots,
+            // with a leading lane for the embedded sound meter.
+            let usableWidth = max(2, scopeProxy.size.width - startInset - 8)
+            let chartWidth = min(138, max(1, (usableWidth - 6) / 2))
+            let chartHeight = min(76, max(28, scopeProxy.size.height * 0.29))
+            let hasHistogram = histogramMode != .off && histogram != nil
+            HStack(alignment: .bottom, spacing: 6) {
+                if hasHistogram {
+                    RemoteScopeCard(label: histogramMode == .rgb ? "RGB" : "Y′", range: "0–255") {
+                        RemoteHistogramOverlay(bins: histogram ?? [],
+                            rgb: histogramMode == .rgb ? histogramRGB : nil)
+                    }
+                    .frame(width: chartWidth, height: chartHeight)
+                }
+                if waveformMode != .off, let waveform = waveform {
+                    RemoteScopeCard(label: waveformMode == .rgb ? "RGB" : "Y′", range: "0–100%") {
+                        RemoteWaveformOverlay(channels: waveform,
+                            sampleHeight: sampleHeight)
+                    }
+                    .frame(width: chartWidth, height: chartHeight)
+                }
+            }
+            .padding(.leading, startInset)
+            .padding(.bottom, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        // Padding reduces the GeometryReader proposal, including chart height.
+        .padding(.bottom, informationInset)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Monitor-only labels follow Android ScopeCard; compact cards reserve space for data.
+private struct RemoteScopeCard<Content: View>: View {
+    let label: String
+    let range: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                if proxy.size.height >= 42 {
+                    HStack {
+                        Text(label).font(.system(size: 8, design: .monospaced))
+                        Spacer(minLength: 0)
+                        Text(range).font(.system(size: 7, design: .monospaced))
+                    }
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(height: 10)
+                }
+                content().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+        }
+        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 7))
     }
 }
 
@@ -1832,6 +2060,15 @@ private struct RemoteHistogramOverlay: View {
     let rgb: [[Int]]?
     var body: some View {
         Canvas { context, size in
+            // Android histogram quarter-scale reference lines remain visible
+            // even when the frame has no samples.
+            for quarter in 0...4 {
+                let x = size.width * CGFloat(quarter) / 4
+                var line = Path()
+                line.move(to: CGPoint(x: x, y: 0))
+                line.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+            }
             if let rgb, rgb.count == 3 {
                 let peak = max(1, rgb.flatMap { $0 }.max() ?? 1)
                 for channel in 0..<3 {
@@ -1863,33 +2100,44 @@ private struct RemoteHistogramOverlay: View {
 
 private struct RemoteWaveformOverlay: View {
     let channels: [[Int]]
+    let sampleHeight: Int
     var body: some View {
         Canvas { context, size in
-            guard let first = channels.first, !first.isEmpty else { return }
-            let peak = max(1, channels.flatMap { $0 }.max() ?? 1)
-            let colors: [Color] = channels.count == 3 ? [.red, .green, .blue] : [.white]
-            for (channel, bins) in channels.enumerated() {
-                let color = colors[min(channel, colors.count - 1)]
-                for row in 0..<RemoteExposureAnalysis.waveformHeight {
-                    for column in 0..<RemoteExposureAnalysis.waveformWidth {
-                        let count = bins[row * RemoteExposureAnalysis.waveformWidth + column]
-                        guard count > 0 else { continue }
-                        let alpha = Double(count) / Double(peak)
-                        context.fill(Path(CGRect(
-                            x: size.width * CGFloat(column) / 256,
-                            y: size.height * CGFloat(row) / 128,
-                            width: max(0.5, size.width / 256),
-                            height: max(0.5, size.height / 128)
-                        )), with: .color(color.opacity(alpha)))
-                    }
+            let showLabels = size.height >= 34
+            let plotInset: CGFloat = showLabels ? 15 : 0
+            let plotWidth = max(0, size.width - plotInset)
+            for quarter in 0...4 {
+                let y = CGFloat(quarter) * max(0, size.height - 1) / 4
+                var line = Path()
+                line.move(to: CGPoint(x: plotInset, y: y))
+                line.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(line, with: .color(.white.opacity(quarter == 2 ? 0.18 : 0.10)), lineWidth: 0.5)
+            }
+            if showLabels {
+                for (label, y, anchor) in [("100", CGFloat(0), UnitPoint.topLeading),
+                    ("50", size.height / 2, UnitPoint.leading),
+                    ("0", size.height, UnitPoint.bottomLeading)] {
+                    context.draw(Text(label).font(.system(size: 6, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6)), at: CGPoint(x: 0, y: y), anchor: anchor)
                 }
+            }
+            let pixels = RemoteExposureAnalysis.waveformPixels(channels: channels, sampleHeight: sampleHeight)
+            for (index, pixel) in pixels.enumerated() where pixel != 0 {
+                let row = index / 256, column = index % 256
+                let color = Color(red: Double((pixel >> 16) & 255) / 255,
+                                  green: Double((pixel >> 8) & 255) / 255,
+                                  blue: Double(pixel & 255) / 255,
+                                  opacity: Double(pixel >> 24) / 255)
+                context.fill(Path(CGRect(x: plotInset + plotWidth * CGFloat(column) / 256,
+                    y: size.height * CGFloat(row) / 128,
+                    width: max(0.5, plotWidth / 256), height: max(0.5, size.height / 128))), with: .color(color))
             }
         }
         .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 5))
     }
 }
 
-private struct RemoteFalseColorOverlay: View {
+struct RemoteFalseColorOverlay: View {
     let pixels: [UInt32]
     let width: Int
     let height: Int
@@ -1898,7 +2146,9 @@ private struct RemoteFalseColorOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             Image(decorative: makeImage(), scale: 1, orientation: .up)
-                .resizable().aspectRatio(contentMode: .fit)
+                // Android draws the sampled analysis into the fitted display rectangle,
+                // including desqueeze; its pixel-buffer aspect must not add a second fit.
+                .resizable()
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .clipped()
         }
@@ -2004,83 +2254,41 @@ private struct IOSZebraOverlay: View {
     }
 }
 
-private struct IOSConfirmedFocusReticle: View {
-    let marker: RemoteConfirmedFocusMarker
-    let cameraFrame: RemoteLiveViewFocusFrame?
-    let visible: Bool
-    let aspect: CGFloat
-    @State private var appearScale: CGFloat = 1.12
-    @State private var cachedCameraFrame: RemoteLiveViewFocusFrame?
-
-    var body: some View {
-        GeometryReader { proxy in
-            let fitted = min(proxy.size.width / max(aspect, 0.01), proxy.size.height)
-            let imageWidth = fitted * aspect
-            let imageRect = CGRect(x: (proxy.size.width - imageWidth) / 2,
-                                   y: (proxy.size.height - fitted) / 2,
-                                   width: imageWidth, height: fitted)
-            let displayedFrame = cameraFrame ?? cachedCameraFrame
-            let point = displayedFrame.map {
-                RemoteFocusPoint(x: Double($0.centerX), y: Double($0.centerY))
-            } ?? marker.fallbackPoint
-            let visibilityScale: CGFloat = visible ? 1 : 0.82
-            let rawHalfWidth = displayedFrame.map { imageRect.width * CGFloat($0.width) / 2 } ?? 25
-            let rawHalfHeight = displayedFrame.map { imageRect.height * CGFloat($0.height) / 2 } ?? 25
-            let halfWidth = min(max(rawHalfWidth * appearScale * visibilityScale,
-                                    min(13, imageRect.width / 2)), imageRect.width / 2)
-            let halfHeight = min(max(rawHalfHeight * appearScale * visibilityScale,
-                                     min(13, imageRect.height / 2)), imageRect.height / 2)
-            let requestedCenter = CGPoint(x: imageRect.minX + imageRect.width * CGFloat(point.x),
-                                          y: imageRect.minY + imageRect.height * CGFloat(point.y))
-            let center = CGPoint(
-                x: imageRect.width >= halfWidth * 2
-                    ? min(max(requestedCenter.x, imageRect.minX + halfWidth), imageRect.maxX - halfWidth)
-                    : imageRect.midX,
-                y: imageRect.height >= halfHeight * 2
-                    ? min(max(requestedCenter.y, imageRect.minY + halfHeight), imageRect.maxY - halfHeight)
-                    : imageRect.midY
-            )
-            focusCornerPath(center: center, halfWidth: halfWidth, halfHeight: halfHeight,
-                            cornerLength: min(10, min(halfWidth, halfHeight)))
-                .stroke(ZTransferColors.statusConnected.opacity(visible ? 0.85 : 0),
-                        style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                .animation(.easeInOut(duration: 0.20), value: visible)
-                .onAppear {
-                    cachedCameraFrame = cameraFrame
-                    appearScale = 1.12
-                    withAnimation(.easeOut(duration: 0.16)) { appearScale = 1 }
-                }
-                .onChange(of: cameraFrame) { next in
-                    if let next { cachedCameraFrame = next }
-                }
-        }
-    }
-}
-
-private struct IOSSoundMeter: View {
+struct IOSSoundMeter: View {
     let levels: RemoteLiveViewSoundLevels
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            meter(levels.currentLeft, peak: levels.peakLeft)
-            meter(levels.currentRight, peak: levels.peakRight)
+        HStack(alignment: .bottom, spacing: 3) {
+            meter(levels.currentLeft, peak: levels.peakLeft, label: "L")
+            meter(levels.currentRight, peak: levels.peakRight, label: "R")
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 3)
         .padding(.vertical, 4)
         .background(.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(.white.opacity(0.14), lineWidth: 0.5))
     }
 
-    private func meter(_ current: Int, peak: Int) -> some View {
-        VStack(spacing: 2) {
-            ForEach((0...Int(RemoteLiveViewSoundLevels.maxSegment)).reversed(), id: \.self) { segment in
-                Capsule()
-                    .fill(segment <= peak ? (segment >= 13 ? .red : segment >= 11 ? .yellow : .white.opacity(0.94)) : .white.opacity(0.14))
-                    .frame(width: 7, height: 5)
-                    .opacity(segment <= current ? 1 : 0.68)
+    private func meter(_ current: Int, peak: Int, label: String) -> some View {
+        let channel = RemoteSoundMeterChannel(current: current, peak: peak)
+        return VStack(spacing: 2) {
+            Canvas { context, size in
+                let count = RemoteSoundMeterChannel.segmentCount
+                let height = max(0, (size.height - CGFloat(count - 1)) / CGFloat(count))
+                for segment in 0..<count {
+                    let active = segment < channel.activeCount
+                    let isPeak = segment == channel.peakIndex
+                    let zone: Color = segment >= 13 ? .red : segment >= 11 ? .yellow : .white
+                    let color = active ? zone.opacity(0.94) : isPeak ? zone.opacity(0.68) : .white.opacity(0.14)
+                    let rect = CGRect(x: 0, y: size.height - height - CGFloat(segment) * (height + 1),
+                                      width: size.width, height: height)
+                    context.fill(Path(roundedRect: rect, cornerRadius: height / 2), with: .color(color))
+                }
             }
+            Text(label).font(.system(size: 7, weight: .bold)).foregroundStyle(.white.opacity(0.86))
+                .frame(height: 7)
         }
     }
+
 }
 
 private extension RemoteExposureField {
@@ -2094,39 +2302,84 @@ private extension RemoteExposureField {
     }
 }
 
-private struct ExposureValueList: View {
-    let field: RemoteExposureField
-    let descriptor: RemotePropertyDescriptor?
-    let onSelect: (UInt64) -> Void
-
-    var body: some View {
-        NavigationStack {
-            List(descriptor?.values ?? [], id: \.self) { value in
-                Button(RemoteExposureParameters.format(descriptor?.property ?? .iso, raw: value)) {
-                    onSelect(value)
-                }
-            }
-            .navigationTitle(field.label)
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-
 /// The one-second countdown only invalidates this badge, not the video layout.
 private struct RemoteTrialBadge: View {
     @ObservedObject var meter: RemoteUsageMeter
+    var compact = false
     var body: some View {
         if !meter.isPro {
-            Text(AppLocalized.formattedResource("remote_trial_left", [
-                "%1$s": String(format: "%d:%02d", meter.secondsLeft / 60, meter.secondsLeft % 60)
-            ]))
+            let seconds = max(0, meter.secondsLeft)
+            Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
             .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundStyle(ZTransferColors.secondaryText)
             .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background { ZTransferGlassSurface(cornerRadius: 9, kind: .panel) }
+            .padding(.horizontal, compact ? 0 : 10)
+            .padding(.vertical, compact ? 0 : 5)
+            .background {
+                if !compact { ZTransferGlassSurface(cornerRadius: 9, kind: .panel) }
+            }
+            .accessibilityIdentifier("remote-trial-countdown")
         }
+    }
+}
+
+
+/// Android ExposureMeterOverlay: a missing sample keeps the scale, while an
+/// overflow points beyond its end. Motion styling is deferred by project scope.
+struct RemoteExposureMeterReading {
+    let ev: Double?
+
+    init(ev: Double?) { self.ev = ev.flatMap { $0.isFinite ? $0 : nil } }
+
+    var fraction: CGFloat? { ev.map { CGFloat((3 - min(3, max(-3, $0))) / 6) } }
+    var overflowDirection: Int { guard let ev, abs(ev) > 3 else { return 0 }; return ev > 0 ? -1 : 1 }
+    var isBalanced: Bool { ev.map { abs($0) < 1.0 / 12 } ?? false }
+    var accessibilityValue: String {
+        guard let ev else { return "—" }
+        return String(format: "%+.1f EV", locale: Locale(identifier: "en_US_POSIX"), ev == 0 ? 0 : ev)
+    }
+}
+
+struct RemoteExposureMeterOverlay: View {
+    let ev: Double?
+
+    var body: some View {
+        let reading = RemoteExposureMeterReading(ev: ev)
+        Canvas { context, size in
+            let inset: CGFloat = 7
+            let span = max(0, size.height - inset * 2)
+            let right = size.width - 4
+            for tick in 0...18 {
+                let y = inset + span * CGFloat(tick) / 18
+                let length: CGFloat = tick == 9 ? 7 : (tick.isMultiple(of: 3) ? 6 : 3)
+                var line = Path()
+                line.move(to: CGPoint(x: right - length, y: y))
+                line.addLine(to: CGPoint(x: right, y: y))
+                context.stroke(line, with: .color(.white.opacity(reading.ev == nil ? 0.3 : 0.7)),
+                    style: StrokeStyle(lineWidth: tick == 9 ? 2 : 1, lineCap: .round))
+            }
+            if let fraction = reading.fraction {
+                let y = inset + span * fraction
+                var pointer = Path()
+                if reading.overflowDirection != 0 {
+                    let direction = CGFloat(reading.overflowDirection)
+                    pointer.move(to: CGPoint(x: 6.5, y: y + direction * 3))
+                    pointer.addLine(to: CGPoint(x: 4, y: y - direction * 2))
+                    pointer.addLine(to: CGPoint(x: 9, y: y - direction * 2))
+                } else {
+                    pointer.move(to: CGPoint(x: 9, y: y))
+                    pointer.addLine(to: CGPoint(x: 4, y: y - 3))
+                    pointer.addLine(to: CGPoint(x: 4, y: y + 3))
+                }
+                pointer.closeSubpath()
+                context.fill(pointer, with: .color(reading.isBalanced
+                    ? Color(red: 110 / 255, green: 231 / 255, blue: 183 / 255) : .white))
+            }
+        }
+        .frame(width: 22, height: 120)
+        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 7))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AppLocalized.resource("remote_tool_meter"))
+        .accessibilityValue(reading.accessibilityValue)
     }
 }

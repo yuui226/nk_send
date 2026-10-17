@@ -13,13 +13,16 @@ struct RemoteChoicePopup<Content: View>: View {
     let accessibilityID: String
     let close: () -> Void
     let dismiss: () -> Void
+    var besideAnchor = false
+    var usesFullAnchor = false
     @ViewBuilder var content: (RemoteCameraToolMenuPlacement) -> Content
 
     var body: some View {
         let placement = RemoteCameraToolMenuPlacement(host: hostSize, anchor: anchor,
-            landscape: landscape, width: width, contentHeight: contentHeight ?? hostSize.height)
+            landscape: landscape, width: width, contentHeight: contentHeight ?? hostSize.height, besideAnchor: besideAnchor)
         let source = anchor ?? CGRect(x: placement.frame.minX, y: placement.frame.minY - 6, width: 29.2, height: 0)
-        let gap = placement.opensAbove ? source.minY - placement.frame.maxY : placement.frame.minY - source.maxY
+        let above = usesFullAnchor ? placement.frame.maxY <= source.minY : placement.opensAbove
+        let gap = above ? source.minY - placement.frame.maxY : placement.frame.minY - source.maxY
         ZStack(alignment: .topLeading) {
             Color.clear.contentShape(Rectangle())
                 .onTapGesture(perform: close)
@@ -28,8 +31,9 @@ struct RemoteChoicePopup<Content: View>: View {
             GeniePopupPanel(content: content(placement), trigger: trigger,
                 targetProgress: contentHeight != nil && !closing ? 1 : 0,
                 anchorX: (source.midX - placement.frame.minX) / placement.width,
-                anchorWidth: 29.2 / placement.width, anchorGap: gap,
-                opensAbove: placement.opensAbove, onSettled: { progress in
+                anchorWidth: (usesFullAnchor ? source.width : 29.2) / placement.width, anchorGap: gap,
+                opensAbove: above, usesFunnel: !usesFullAnchor || (anchor != nil && source.width > 0 && source.height > 0 && gap >= 0),
+                onSettled: { progress in
                     if progress == 0 && closing { dismiss() }
                 })
                 .frame(width: placement.width, height: placement.frame.height)

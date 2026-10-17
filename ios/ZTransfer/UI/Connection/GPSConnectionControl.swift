@@ -329,8 +329,9 @@ private struct GPSInlinePanel: View {
             guard let requested = placeBubbleCoordinates else { return }
             if coordinator.placeLookupState.status == .success,
                let name = coordinator.placeLookupState.placeName {
-                let coordinates = "\(formatCoordinate(requested.latitude, latitude: true)), \(formatCoordinate(requested.longitude, latitude: false))"
-                UIPasteboard.general.string = "\(name)\n\(coordinates)"
+                UIPasteboard.general.string = GPSCoordinateFormat.clipboard(
+                    latitude: requested.latitude, longitude: requested.longitude, placeName: name
+                )
             }
             let delay: UInt64
             switch coordinator.placeLookupState.status {
@@ -512,17 +513,14 @@ private struct GPSInlinePanel: View {
 
     private func copyAndLookup() {
         guard let latitude = coordinator.state.latitude, let longitude = coordinator.state.longitude else { return }
-        UIPasteboard.general.string = "\(formatCoordinate(latitude, latitude: true)), \(formatCoordinate(longitude, latitude: false))"
+        UIPasteboard.general.string = GPSCoordinateFormat.clipboard(latitude: latitude, longitude: longitude)
         placeBubbleCoordinates = (latitude, longitude)
         placeBubbleRequestID &+= 1
         coordinator.lookupPlaceName(latitude: latitude, longitude: longitude)
     }
 
     private func formatCoordinate(_ value: Double?, latitude: Bool) -> String {
-        guard let value else { return "--" }
-        let hemisphere: String
-        if latitude { hemisphere = value < 0 ? "S" : "N" } else { hemisphere = value < 0 ? "W" : "E" }
-        return String(format: "%.5f°%@", abs(value), hemisphere)
+        GPSCoordinateFormat.value(value, latitude: latitude) ?? "--"
     }
 
     @ViewBuilder

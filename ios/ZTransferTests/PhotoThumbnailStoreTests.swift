@@ -4,6 +4,119 @@ import XCTest
 #endif
 
 final class PhotoThumbnailStoreTests: XCTestCase {
+    func testSharedPrefetchWaitersReceiveTheSameWriteFailure() async throws {
+        for invalidBytes in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            try Data([1]).write(to: root)
+            let store = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root))
+            let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
+                fileName: "photo.JPG", captureDate: "20261001T120000", isProtected: false)
+            let gate = ThumbnailWriteFailureGate()
+            let first = Task {
+                try await store.prefetchOutcome(file: file, identity: "camera",
+                    validate: { _ in !invalidBytes }) { await gate.wait() }
+            }
+            for _ in 0..<200 {
+                if await store.activeWaiterCount == 1 { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let second = Task {
+                try await store.prefetchOutcome(file: file, identity: "camera",
+                    validate: { _ in !invalidBytes }) {
+                    XCTFail("The second caller must share the first flight")
+                    return Data([2])
+                }
+            }
+            for _ in 0..<200 {
+                if await store.activeWaiterCount == 2 { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let count = await store.activeWaiterCount
+            XCTAssertEqual(count, 2)
+            await gate.release()
+            let firstResult = try await first.value
+            let secondResult = try await second.value
+            XCTAssertEqual(firstResult, .unsettled)
+            XCTAssertEqual(secondResult, .unsettled)
+            let blocked = await store.diskWritesBlocked
+            XCTAssertEqual(blocked, !invalidBytes)
+            let remaining = await store.activeWaiterCount
+            XCTAssertEqual(remaining, 0)
+        }
+    }
+
+    func testDiskWriteFailureBlocksFurtherFetchesUntilNewStoreSession() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // A regular file where the cache directory should be forces real IO failure.
+        try Data([1]).write(to: root)
+        let disk = PhotoThumbnailDiskCache(root: root)
+        let store = PhotoThumbnailStore(disk: disk)
+        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
+            fileName: "photo.JPG", captureDate: "20261001T120000", isProtected: false)
+        let invalid = try await store.prefetchOutcome(file: file, identity: "camera", validate: { _ in false }) { Data([2]) }
+        XCTAssertEqual(invalid, .unsettled)
+        let validationBlocked = await store.diskWritesBlocked
+        XCTAssertFalse(validationBlocked)
+        let failed = try await store.prefetchOutcome(file: file, identity: "camera") { Data([2]) }
+        XCTAssertEqual(failed, .unsettled)
+        let blocked = await store.diskWritesBlocked
+        XCTAssertTrue(blocked)
+        try FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        await store.resetForScan(identity: "camera")
+        let stillBlocked = try await store.prefetchOutcome(file: file, identity: "camera") {
+            XCTFail("Scan resets and repaired storage must not reset this connection's latch")
+            return Data([3])
+        }
+        XCTAssertEqual(stillBlocked, .unsettled)
+        let reconnected = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root))
+        let recovered = try await reconnected.prefetchOutcome(file: file, identity: "camera") { Data([3]) }
+        XCTAssertEqual(recovered, .settled)
+    }
+
+    func testRemovalClearsPendingAndFailedOwnersBeforeHandleReuse() async throws {
+        let file = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 100,
+            fileName: "same.JPG", captureDate: "20261001T120000", isProtected: false)
+        for failed in [false, true] {
+            let queue = PhotoThumbnailFillQueue(sequential: true)
+            await queue.beginScan()
+            await queue.seed([file])
+            if failed {
+                let item = await queue.poll()
+                let work = try XCTUnwrap(item)
+                await queue.finish(work.id, expectedRevision: work.revision, owner: work.owner, settled: false)
+            }
+            await queue.remove([9])
+            let empty = await queue.state()
+            XCTAssertTrue(empty.pending.isEmpty)
+            XCTAssertTrue(empty.failed.isEmpty)
+            XCTAssertTrue(empty.settled.isEmpty)
+            await queue.enqueueNew([file])
+            let replacement = await queue.poll()
+            XCTAssertEqual(replacement?.id, 9)
+        }
+        // Even identical photo metadata cannot make a deleted request own
+        // the next incarnation of the same handle.
+        let queue = PhotoThumbnailFillQueue(sequential: true)
+        await queue.seed([file])
+        let first = await queue.poll()
+        let old = try XCTUnwrap(first)
+        await queue.remove([9])
+        await queue.enqueueNew([file])
+        await queue.finish(9, expectedRevision: old.revision, owner: old.owner, settled: true)
+        let current = await queue.poll()
+        let new = try XCTUnwrap(current)
+        XCTAssertNotEqual(old.owner, new.owner)
+        await queue.returnToFront(9, expectedRevision: old.revision, owner: old.owner)
+        let duplicate = await queue.poll()
+        XCTAssertNil(duplicate)
+        await queue.finish(9, expectedRevision: new.revision, owner: new.owner, settled: true)
+        let completed = await queue.state()
+        XCTAssertEqual(completed.settled, [9])
+    }
+
     func testEnhancedSTAJpegRejectsEveryOldCacheRouteAndReusesNewEntry() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -362,4 +475,18 @@ private final class LockedCounter: @unchecked Sendable {
     private var count = 0
     func increment() { lock.lock(); count += 1; lock.unlock() }
     var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+}
+
+private actor ThumbnailWriteFailureGate {
+    private var released = false
+    private var continuation: CheckedContinuation<Data, Never>?
+    func wait() async -> Data {
+        if released { return Data([2]) }
+        return await withCheckedContinuation { continuation = $0 }
+    }
+    func release() {
+        released = true
+        continuation?.resume(returning: Data([2]))
+        continuation = nil
+    }
 }

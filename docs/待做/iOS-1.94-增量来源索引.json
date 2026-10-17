@@ -1,0 +1,101 @@
+{
+  "baseline": "8138e2dec22aa8c8b998a7a9a7b2fa0b9f3a1ec5",
+  "android": "89d78b451d03e50da965a46f047744aa8a34877c",
+  "iosMerge": "ba3196226301209cd61d8f1303f67c7647ceab99",
+  "version": "1.94",
+  "commits": [
+    {
+      "sha": "35ee8b186aa822a1f3c8e3d6d1380b44c17ab7ef",
+      "subject": "尝试修复鸿蒙传输落盘错误",
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/storage/HarmonyStorageCompatibility.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml"
+      ]
+    },
+    {
+      "sha": "aa24a95a87fec398d4fbdc8e5409cf6dd7816be0",
+      "subject": "给安卓也加上诊断",
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/storage/HarmonyStorageCompatibility.kt",
+        "app/src/main/java/com/ztransfer/storage/PendingPublicationJournal.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "app/src/test/java/com/ztransfer/storage/PendingPublicationJournalTest.kt",
+        "docs/测试与验证/传输原片完整性临时诊断.md",
+        "gradle.properties"
+      ]
+    },
+    {
+      "sha": "2dc140dc4bf80821544686c3835de862fcf5def0",
+      "subject": "fix: persist corruption diagnostic report",
+      "files": [
+        "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+        "docs/测试与验证/传输原片完整性临时诊断.md"
+      ]
+    },
+    {
+      "sha": "e6b476b3ea262aaa23d8939b163050666ad69aeb",
+      "subject": "fix: keep diagnostic report user-visible",
+      "files": [
+        "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+        "docs/测试与验证/传输原片完整性临时诊断.md"
+      ]
+    },
+    {
+      "sha": "a99e9bb7b53e3336a30e98437db83a59a1fdfdcf",
+      "subject": "fix: harden SAF publication against Huawei corruption",
+      "files": [
+        "app/build.gradle.kts",
+        "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+        "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+        "app/src/main/res/values-b+zh+Hant/strings.xml",
+        "app/src/main/res/values-zh/strings.xml",
+        "app/src/main/res/values/strings.xml",
+        "docs/测试与验证/传输原片完整性临时诊断.md",
+        "gradle.properties"
+      ]
+    },
+    {
+      "sha": "89d78b451d03e50da965a46f047744aa8a34877c",
+      "subject": "fix: disable STA protection filtering",
+      "files": [
+        "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+        "app/src/main/java/com/ztransfer/diagnostics/RatingDiagnostics.kt",
+        "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+        "app/src/main/java/com/ztransfer/protocol/PtpConstants.kt",
+        "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+        "app/src/release/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt"
+      ]
+    }
+  ],
+  "files": [
+    "app/build.gradle.kts",
+    "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+    "app/src/main/java/com/ztransfer/diagnostics/RatingDiagnostics.kt",
+    "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+    "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+    "app/src/main/java/com/ztransfer/protocol/PtpConstants.kt",
+    "app/src/main/java/com/ztransfer/storage/HarmonyStorageCompatibility.kt",
+    "app/src/main/java/com/ztransfer/storage/PendingPublicationJournal.kt",
+    "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+    "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+    "app/src/main/res/values-b+zh+Hant/strings.xml",
+    "app/src/main/res/values-zh/strings.xml",
+    "app/src/main/res/values/strings.xml",
+    "app/src/release/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+    "app/src/test/java/com/ztransfer/storage/PendingPublicationJournalTest.kt",
+    "docs/测试与验证/传输原片完整性临时诊断.md",
+    "gradle.properties"
+  ],
+  "excluded": "Harmony-only compatibility, SAF publication journal, R/T/F/L/C transfer corruption diagnostics and packaging flags; retain Android baseline, do not port to iOS."
+}

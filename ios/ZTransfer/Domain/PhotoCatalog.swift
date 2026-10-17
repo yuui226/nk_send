@@ -143,6 +143,28 @@ func collapsedPhotoPreviewEntries(files: [CameraFile], burstIDByFile: [UInt32: S
     return result
 }
 
+/// Immutable opening state shared by the real preview and its functional tests.
+/// Expanding a collection here never changes the list's expansion state.
+struct PhotoPreviewOpeningSnapshot {
+    let entries: [PhotoPreviewEntry]
+    let index: Int
+
+    init(files: [CameraFile], burstIDByFile: [UInt32: String], collapseBursts: Bool,
+         expandedBurstIDs: Set<String>, selectedFileID: UInt32?) {
+        var entries = collapseBursts
+            ? collapsedPhotoPreviewEntries(files: files, burstIDByFile: burstIDByFile)
+            : files.map { PhotoPreviewEntry.photo($0, burstID: burstIDByFile[$0.id]) }
+        for position in entries.indices.reversed() {
+            if case .burst(let group) = entries[position], expandedBurstIDs.contains(group.id) {
+                entries = expandPhotoPreviewBurst(entries, at: position)
+            }
+        }
+        self.entries = entries
+        let selected = selectedFileID ?? files.first?.id
+        index = selected.flatMap { id in entries.firstIndex { $0.file?.id == id } } ?? 0
+    }
+}
+
 func expandPhotoPreviewBurst(_ entries: [PhotoPreviewEntry], at index: Int) -> [PhotoPreviewEntry] {
     guard entries.indices.contains(index), case .burst(let group) = entries[index] else { return entries }
     let members = group.files.map { PhotoPreviewEntry.photo($0, burstID: group.id) }

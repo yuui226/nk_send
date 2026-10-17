@@ -1,23 +1,87 @@
 import Foundation
 
-func parseJpegCropHeader(_ bytes: Data) -> JpegCropSource? {
-    let b = [UInt8](bytes); guard b.count >= 4, b[0] == 0xff, b[1] == 0xd8 else { return nil }
-    var at = 2, orientation = 1, frame: JpegCropSource?
-    func u16(_ i: Int) -> Int { Int(b[i]) << 8 | Int(b[i+1]) }
-    while at + 2 <= b.count {
-        guard b[at] == 0xff else { return nil }; at += 1; while at < b.count && b[at] == 0xff { at += 1 }; guard at < b.count else { return nil }
-        let marker = b[at]; at += 1; if marker == 0xda { return frame.map { JpegCropSource(width: $0.width, height: $0.height, mcuWidth: $0.mcuWidth, mcuHeight: $0.mcuHeight, orientation: orientation) } }; if marker == 0xd9 { return nil }; if marker == 0x01 || (0xd0...0xd7).contains(marker) { continue }
-        guard at + 2 <= b.count else { return nil }; let length = u16(at); guard length >= 2, at + length <= b.count else { return nil }
+/// Android parseJpegCropOrientation can finish at EXIF before SOF/SOS arrives.
+func parseJpegCropOrientation(_ bytes: Data) -> Int? {
+    let b = [UInt8](bytes)
+    guard b.count >= 4, b[0] == 0xff, b[1] == 0xd8 else { return nil }
+    var at = 2
+    while at + 4 <= b.count {
+        guard b[at] == 0xff else { return nil }
+        at += 1
+        while at < b.count && b[at] == 0xff { at += 1 }
+        guard at < b.count else { return nil }
+        let marker = b[at]; at += 1
+        if marker == 0xda || marker == 0xd9 { return 1 }
+        if marker == 0x01 || (0xd0...0xd7).contains(marker) { continue }
+        guard at + 2 <= b.count else { return nil }
+        let length = Int(b[at]) << 8 | Int(b[at + 1])
+        guard length >= 2, length <= b.count - at else { return nil }
         if marker == 0xe1, length >= 8,
-           Array(b[(at + 2)..<(at + 8)]) == [0x45, 0x78, 0x69, 0x66, 0, 0] {
-            orientation = parseJpegExifOrientation(b, start: at + 8, end: at + length) ?? 1
-        }
-        if marker == 0xc0 || marker == 0xc1 || marker == 0xc2 {
-            guard length >= 8, b[at+2] == 8 else { return nil }; let h=u16(at+3), w=u16(at+5), components=Int(b[at+7]); guard w > 0, h > 0, components == 1 || components == 3, length == 8 + components * 3 else { return nil }
-            var maxH=1, maxV=1; for i in 0..<components { maxH=max(maxH,Int(b[at+9+i*3] >> 4)); maxV=max(maxV,Int(b[at+9+i*3] & 15)) }; frame = JpegCropSource(width:w,height:h,mcuWidth:maxH*8,mcuHeight:maxV*8,orientation:orientation)
+           b[(at + 2)..<(at + 8)].elementsEqual([0x45, 0x78, 0x69, 0x66, 0, 0]) {
+            return parseJpegExifOrientation(b, start: at + 8, end: at + length)
         }
         at += length
-    }; return nil
+    }
+    return nil
+}
+
+/// Match Android JpegCropHeader: an incomplete prefix cannot supply confirmed
+/// source geometry, and every component must have a supported sampling factor.
+func parseJpegCropHeader(_ bytes: Data) -> JpegCropSource? {
+    let b = [UInt8](bytes)
+    guard b.count >= 4, b[0] == 0xff, b[1] == 0xd8 else { return nil }
+    var at = 2
+    var orientation = 1
+    var frame: JpegCropSource?
+    func u16(_ index: Int) -> Int { Int(b[index]) << 8 | Int(b[index + 1]) }
+
+    while at + 4 <= b.count {
+        guard b[at] == 0xff else { return nil }
+        at += 1
+        while at < b.count && b[at] == 0xff { at += 1 }
+        guard at < b.count else { return nil }
+        let marker = b[at]
+        at += 1
+        if marker == 0xda {
+            return frame.map {
+                JpegCropSource(width: $0.width, height: $0.height,
+                               mcuWidth: $0.mcuWidth, mcuHeight: $0.mcuHeight,
+                               orientation: orientation)
+            }
+        }
+        if marker == 0xd9 { return nil }
+        if marker == 0x01 || (0xd0...0xd7).contains(marker) { continue }
+        guard at + 2 <= b.count else { return nil }
+        let length = u16(at)
+        guard length >= 2, length <= b.count - at else { return nil }
+        if marker == 0xe1, length >= 8,
+           b[(at + 2)..<(at + 8)].elementsEqual([0x45, 0x78, 0x69, 0x66, 0, 0]) {
+            guard let parsed = parseJpegExifOrientation(b, start: at + 8, end: at + length) else { return nil }
+            orientation = parsed
+        }
+        if marker == 0xc0 || marker == 0xc1 || marker == 0xc2 {
+            guard length >= 8, b[at + 2] == 8 else { return nil }
+            let height = u16(at + 3)
+            let width = u16(at + 5)
+            let components = Int(b[at + 7])
+            guard width > 0, height > 0, components == 1 || components == 3,
+                  length == 8 + components * 3 else { return nil }
+            var maxH = 1, maxV = 1
+            for index in 0..<components {
+                let sampling = b[at + 9 + index * 3]
+                let horizontal = Int(sampling >> 4)
+                let vertical = Int(sampling & 15)
+                guard (1...4).contains(horizontal), (1...4).contains(vertical) else { return nil }
+                maxH = max(maxH, horizontal)
+                maxV = max(maxV, vertical)
+            }
+            frame = JpegCropSource(width: width, height: height,
+                                   mcuWidth: maxH * 8, mcuHeight: maxV * 8,
+                                   orientation: orientation)
+        }
+        at += length
+    }
+    return nil
 }
 
 private func parseJpegExifOrientation(_ b: [UInt8], start: Int, end: Int) -> Int? {

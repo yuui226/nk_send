@@ -2,15 +2,36 @@ import SwiftUI
 
 @main
 struct ZTransferApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("keep_screen_on") private var keepScreenOn = true
     init() {
+        ScreenAwakeCoordinator.shared.setPreference(
+            UserDefaults.standard.object(forKey: "keep_screen_on") as? Bool ?? true)
+        ScreenAwakeCoordinator.shared.setForeground(UIApplication.shared.applicationState == .active)
         // Application-scoped, not owned by a settings/purchase popup.
         StoreKitPurchaseStore.shared.start()
+        PhotoFramePlaceAvailability.shared.start()
+        Task { await PhotoLUTStore().pruneSnapshots() }
     }
 
     var body: some Scene {
         WindowGroup {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--remote-tools-ui-test") {
+            if ProcessInfo.processInfo.arguments.contains("--queue-pill-grace-test") {
+                QueuePillGraceHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--queue-top-pill-test") {
+                QueueTopPillPresentationHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--queue-card-presentation-test") {
+                QueueCardPresentationHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--queue-retry-ui-test") {
+                QueueRetryInteractionHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--queue-swipe-ui-test") {
+                QueueSwipeInteractionHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--list-admission-ui-test") {
+                PhotoListAdmissionHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--effects-master-ui-test") {
+                PhotoEffectsSettingsHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--remote-tools-ui-test") {
                 RemoteToolsInteractionHarness()
             } else if ProcessInfo.processInfo.arguments.contains("--photo-preview-ui-test") {
                 PhotoPreviewInteractionHarness()
@@ -23,5 +44,36 @@ struct ZTransferApp: App {
             RootView()
             #endif
         }
+        .onChange(of: keepScreenOn) { ScreenAwakeCoordinator.shared.setPreference($0) }
+        .onChange(of: scenePhase) { ScreenAwakeCoordinator.shared.setForeground($0 == .active) }
+    }
+}
+
+/// Application preference and temporary batch holds are independent owners.
+/// Releasing a hold recomputes current policy instead of restoring a stale snapshot.
+@MainActor
+final class ScreenAwakeCoordinator {
+    static let shared = ScreenAwakeCoordinator { UIApplication.shared.isIdleTimerDisabled = $0 }
+    private var preference = false
+    private var foreground = false
+    private var holds = Set<UUID>()
+    private var applied: Bool?
+    private let apply: (Bool) -> Void
+
+    init(apply: @escaping (Bool) -> Void) { self.apply = apply }
+    func setPreference(_ enabled: Bool) { preference = enabled; update() }
+    func setForeground(_ active: Bool) { foreground = active; update() }
+    func acquire() -> UUID {
+        let id = UUID()
+        holds.insert(id)
+        update()
+        return id
+    }
+    func release(_ id: UUID) { holds.remove(id); update() }
+    private func update() {
+        let enabled = foreground && (preference || !holds.isEmpty)
+        guard applied != enabled else { return }
+        applied = enabled
+        apply(enabled)
     }
 }

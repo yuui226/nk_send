@@ -7,9 +7,16 @@ import Foundation
 /// Spring cases explicitly distinguish underdamped motion from the critical
 /// spring used when Transition interrupts a tween; overdamping is unsupported.
 enum ZTransferAndroidMotion: Equatable {
-    case tween(milliseconds: Int64)
+    case tween(milliseconds: Int64, delayMilliseconds: Int64 = 0)
     case criticallyDampedSpring(stiffness: Float, threshold: Float = 0.01)
     case underdampedSpring(stiffness: Float, dampingRatio: Float, threshold: Float = 0.01)
+
+    // Motion.kt uses Spring.StiffnessMediumLow, NOT StiffnessLow (200).
+    // Values verified in Compose 1.7.6 VectorizedAnimationSpec.kt.
+    static let bouncyStiffness: Float = 400
+    static let bouncyDampingRatio: Float = 0.5
+    static let bouncy = Self.underdampedSpring(stiffness: bouncyStiffness,
+                                              dampingRatio: bouncyDampingRatio)
 
     struct Sample: Equatable {
         var value: Float
@@ -51,9 +58,9 @@ enum ZTransferAndroidMotion: Equatable {
             }
             // Kotlin Double.toLong maps NaN to zero.
             return time.isFinite ? Int64(time * 1000) * 1_000_000 : 0
-        case .tween(let milliseconds):
-            precondition(milliseconds >= 0)
-            return milliseconds * 1_000_000
+        case .tween(let milliseconds, let delay):
+            precondition(milliseconds >= 0 && delay >= 0)
+            return (milliseconds + delay) * 1_000_000
         case let .underdampedSpring(stiffness, ratio, threshold):
             precondition(stiffness > 0 && ratio > 0 && ratio < 1 && threshold > 0)
             // Division/subtraction take place in Float before conversion,
@@ -86,16 +93,20 @@ enum ZTransferAndroidMotion: Equatable {
             let position = (displacement + coefficient * time) * decay
             return Sample(value: Float(position + Double(target)),
                           velocity: Float(-frequency * position + coefficient * decay))
-        case .tween(let milliseconds):
-            let duration = durationNanos(from: start, to: target, velocity: velocity)
-            let time = min(max(nanos, 0), duration)
+        case .tween(let milliseconds, let delayMilliseconds):
+            let duration = milliseconds * 1_000_000
+            let delay = delayMilliseconds * 1_000_000
+            let time = min(max(nanos - delay, 0), duration)
             func value(_ nanos: Int64) -> Float {
-                let fraction = milliseconds == 0 ? 1 : Float(min(max(nanos, 0), duration)) / Float(duration)
+                let fraction = milliseconds == 0 ? 1 : Float(min(max(nanos - delay, 0), duration)) / Float(duration)
                 let eased = Self.fastOutSlowIn(fraction)
                 return (1 - eased) * start + eased * target
             }
-            let current = value(time)
-            let speed = time == 0 ? velocity : (current - value(time - 1_000_000)) * 1000
+            let current = value(nanos)
+            // FloatTweenSpec 1.7.6 passes its already-clamped play time back
+            // through getValueFromNanos when computing velocity. This applies
+            // delay a second time; preserve that source behavior on interruption.
+            let speed = time == 0 ? velocity : (value(time) - value(time - 1_000_000)) * 1000
             return Sample(value: current, velocity: speed)
         case let .underdampedSpring(stiffness, ratio, threshold):
             precondition(stiffness > 0 && ratio > 0 && ratio < 1 && threshold > 0)

@@ -24,6 +24,7 @@ struct SettingsView: View {
     @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     @ObservedObject private var directory: DirectoryAccessStore
     @ObservedObject private var effectsStore: PhotoEffectsStore
+    @StateObject private var photoLUTStore = PhotoLUTStore(role: .camera)
     @State private var showingPicker = false
     @State private var feedbackHint = false
     @State private var settingsPage: SettingsPage = .main
@@ -35,6 +36,7 @@ struct SettingsView: View {
     @FocusState private var watermarkTextFocused: Bool
     @State private var showingHelp = false
     @State private var showingEffectsHelp = false
+    @State private var showingModuleMenu = false
     @State private var settingsTransitionDirection: CGFloat = 1
     @State private var directoryAttentionProgress: CGFloat = 0
     @AppStorage(TransferStorageMode.persistenceKey) private var storageModeRaw = ""
@@ -150,6 +152,7 @@ struct SettingsView: View {
                                     textFieldFocused: $watermarkTextFocused,
                                     showLocationFields: true,
                                     imageImporting: effectsStore.watermarkImageImporting,
+                                    photoLUTStore: photoLUTStore,
                                     filterChooser: $filterChooser,
                                     onWatermarkTextCommitted: { _ in commitFrameDraft() },
                                     onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
@@ -173,6 +176,8 @@ struct SettingsView: View {
             }
 
         }
+        .modifier(PhotoEffectModuleMenuOverlay(isPresented: $showingModuleMenu,
+            draft: $effectsDraft, lutStore: photoLUTStore, isPro: entitlements.access.isPro))
         .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
             ZStack(alignment: .topLeading) {
                 TipPopupLayer(isPresented: showingHelp && settingsPage == .main) {
@@ -293,11 +298,13 @@ struct SettingsView: View {
                     .frame(width: 30, height: 30)
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12, panel: true))
+            .accessibilityIdentifier("photo-effects-editor-back")
             Text(AppLocalized.resource("photo_effects"))
                 .zTransferText(size: ZTransferMetrics.title, weight: .bold)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             Spacer()
+            PhotoEffectModuleMenuButton(isPresented: $showingModuleMenu)
             TipLightbulbButton(
                 attention: !photoEffectsHelpViewed, size: 28,
                 accessibilityLabel: AppLocalized.resource("photo_effects_info_title"),
@@ -560,44 +567,57 @@ struct SettingsView: View {
             case .image: return AppLocalized.resource("photo_frame_image_watermark")
             }
         }()
-        Button(action: showEffectsSettings) {
-            VStack(spacing: 8) {
-                HStack {
-                    Text(AppLocalized.resource("photo_effects"))
-                        .font(.system(size: ZTransferMetrics.body, weight: .semibold))
-                        .foregroundStyle(ZTransferColors.accentOrange)
-                    Spacer()
+        VStack(spacing: 8) {
+            HStack {
+                Button(action: showEffectsSettings) {
+                    HStack {
+                        Text(AppLocalized.resource("photo_effects"))
+                            .font(.system(size: ZTransferMetrics.body, weight: .semibold))
+                            .foregroundStyle(ZTransferColors.accentOrange)
+                        Spacer()
+                    }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("photo-effects-open-editor")
+                PhotoEffectsMasterSwitch(checked: effectsStore.isEnabled, onCheckedChange: effectsStore.setEnabled)
+                Button(action: showEffectsSettings) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(ZTransferColors.secondaryText)
-                }
-                Divider().opacity(0.35)
-                HStack(spacing: 8) {
-                    PhotoEffectsSummaryTile(
-                        accent: ZTransferColors.accentOrange,
-                        title: AppLocalized.resource("photo_filter"),
-                        values: [filterName] + (filterIntensity.map { [$0] } ?? [])
-                    )
-                    PhotoEffectsSummaryTile(
-                        accent: ZTransferColors.accentBlue,
-                        title: AppLocalized.resource("photo_frame_and_watermark_short"),
-                        values: [
-                            AppLocalized.formattedResource("photo_frame_summary_line", ["%1$s": frameSummary]),
-                            AppLocalized.formattedResource("photo_watermark_summary_line", ["%1$s": watermarkSummary])
-                        ]
-                    )
-                }
+                        .frame(width: 20, height: 20)
+                }.buttonStyle(.plain)
+                 .accessibilityLabel(AppLocalized.resource("photo_effects_open_editor"))
             }
-            .padding(12)
-            .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(ZTransferColors.accentOrange.opacity(0.62), lineWidth: 1.2))
-        }.buttonStyle(.plain)
+            Divider().opacity(0.35)
+            Button(action: showEffectsSettings) {
+              HStack(spacing: 8) {
+                PhotoEffectsSummaryTile(
+                    accent: ZTransferColors.accentOrange,
+                    title: AppLocalized.resource("photo_filter"),
+                    values: [filterName] + (filterIntensity.map { [$0] } ?? [])
+                )
+                PhotoEffectsSummaryTile(
+                    accent: ZTransferColors.accentBlue,
+                    title: AppLocalized.resource("photo_frame_and_watermark_short"),
+                    values: [
+                        AppLocalized.formattedResource("photo_frame_summary_line", ["%1$s": frameSummary]),
+                        AppLocalized.formattedResource("photo_watermark_summary_line", ["%1$s": watermarkSummary])
+                    ]
+                )
+              }
+            }.buttonStyle(.plain)
+             .accessibilityIdentifier("photo-effects-summary")
+        }
+        .padding(12)
+        .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(ZTransferColors.accentOrange.opacity(effectsStore.isEnabled && settings.hasEffect ? 0.56 : 0.30), lineWidth: 1.2))
+        .background { Button(action: showEffectsSettings) { Color.clear }.buttonStyle(.plain) }
     }
 
     private var footer: some View {
         HStack(spacing: 8) {
-                        VersionPlaque(text: AppLocalized.versionText(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.91"))
+                        VersionPlaque(text: AppLocalized.versionText(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.94"))
             Spacer()
             SettingsFooterButton(AppLocalized.resource("feedback")) { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }
@@ -696,7 +716,7 @@ private struct PhotoEffectsHelpBubble: View {
 extension PhotoFramePreset {
     var displayName: String {
         switch self {
-        case .mist: return AppLocalized.resource("photo_frame_mist"); case .cinema: return AppLocalized.resource("photo_frame_cinema"); case .minimal: return AppLocalized.resource("photo_frame_minimal"); case .frosted: return AppLocalized.resource("photo_frame_frosted"); case .plaque: return AppLocalized.resource("photo_frame_plaque"); case .immersive: return AppLocalized.resource("photo_frame_immersive"); case .brandInset: return AppLocalized.resource("photo_frame_brand_inset"); case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery"); case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature"); case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat"); case .colorArchive: return AppLocalized.resource("photo_frame_color_archive"); case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery"); case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
+        case .mist: return AppLocalized.resource("photo_frame_mist"); case .cinema: return AppLocalized.resource("photo_frame_cinema"); case .minimal: return AppLocalized.resource("photo_frame_minimal"); case .frosted: return AppLocalized.resource("photo_frame_frosted"); case .plaque: return AppLocalized.resource("photo_frame_plaque"); case .immersive: return AppLocalized.resource("photo_frame_immersive"); case .brandInset: return AppLocalized.resource("photo_frame_brand_inset"); case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery"); case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature"); case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat"); case .colorArchive: return AppLocalized.resource("photo_frame_color_archive"); case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery"); case .filmEdge: return AppLocalized.resource("photo_frame_film_edge"); case .filmNegative: return AppLocalized.resource("photo_frame_film_negative"); case .parameterPoster: return AppLocalized.resource("photo_frame_parameter_poster")
         }
     }
 }

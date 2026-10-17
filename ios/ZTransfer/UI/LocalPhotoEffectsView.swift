@@ -8,12 +8,13 @@ struct LocalPhotoEffectsView: View {
     let onNavigateUp: () -> Void
     @StateObject private var effectsStore = PhotoEffectsStore(scope: .localPhotos)
     @StateObject private var batch = LocalPhotoBatchViewModel()
-    @StateObject private var photoLUTStore = PhotoLUTStore()
+    @StateObject private var photoLUTStore = PhotoLUTStore(role: .local)
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var watermarkPickerItems: [PhotosPickerItem] = []
     @State private var previewPage = 0
     @State private var showingPicker = false
     @State private var showingHelp = false
+    @State private var showingModuleMenu = false
     @AppStorage("local_photo_effects_help_viewed") private var localPhotoEffectsHelpViewed = false
     @State private var showingWatermarkPicker = false
     @State private var filterChooser = PhotoFilterChooserState()
@@ -33,21 +34,10 @@ struct LocalPhotoEffectsView: View {
                                        textFieldFocused: $watermarkTextFocused,
                                        showLocationFields: false,
                                        imageImporting: effectsStore.watermarkImageImporting,
+                                       photoLUTStore: photoLUTStore,
                                        filterChooser: $filterChooser,
                                        onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
                 .padding(.top, 10).padding(.bottom, 18)
-                PhotoLUTChooser(store: photoLUTStore, onSelect: { id, name, intensity in
-                    var settings = effectsStore.settings
-                    settings.selectedFilter = PhotoFilterSelection(preset: PhotoFilterPreset(id: id, name: name), intensityPercent: intensity)
-                    settings.photoFilterEnabled = true
-                    effectsStore.update(settings)
-                }, onIntensity: { value in
-                    var settings = effectsStore.settings
-                    settings.selectedFilter?.intensityPercent = value
-                    settings.photoFilterEnabled = settings.selectedFilter != nil
-                    effectsStore.update(settings)
-                })
-                    .padding(.bottom, 18)
             }
             .padding(.horizontal, 20).padding(.vertical, 16)
             .frame(maxWidth: 680).frame(maxWidth: .infinity)
@@ -78,6 +68,8 @@ struct LocalPhotoEffectsView: View {
             onNavigateUp()
         })
         .background(ZTransferColors.background.ignoresSafeArea())
+        .modifier(PhotoEffectModuleMenuOverlay(isPresented: $showingModuleMenu,
+            draft: effectsBinding, lutStore: photoLUTStore, isPro: entitlements.access.isPro))
         .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
             ZStack(alignment: .topLeading) {
                 if filterChooser.isPresented {
@@ -99,15 +91,6 @@ struct LocalPhotoEffectsView: View {
             }
         }
         .photoEffectsHint($effectsHint, duration: 2)
-        .onAppear {
-            guard let identifier = photoLUTStore.selectedIdentifier,
-                  identifier.hasPrefix("cube:"),
-                  let table = PhotoLUTRuntime.table(digest: String(identifier.dropFirst(5))) ?? photoLUTStore.restoreSnapshot(digest: String(identifier.dropFirst(5))) else { return }
-            var settings = effectsStore.settings
-            settings.selectedFilter = PhotoFilterSelection(preset: PhotoFilterPreset(id: identifier, name: "LUT \(table.digest.prefix(8))"), intensityPercent: photoLUTStore.intensityPercent)
-            settings.photoFilterEnabled = true
-            effectsStore.update(settings)
-        }
         .photosPicker(isPresented: $showingPicker, selection: $pickerItems,
                       matching: .images, preferredItemEncoding: .current)
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
@@ -133,19 +116,27 @@ struct LocalPhotoEffectsView: View {
     }
 
     private var batchHasFailure: Bool {
-        batch.state.phase == .partial || batch.state.phase == .failed
+        !batch.state.progress.failures.isEmpty
     }
 
     private var batchFailureText: String {
-        let failed = batch.state.progress.failed
+        let failed = max(batch.state.progress.failed, batch.state.progress.failures.count)
         return AppLocalized.formattedResource("local_photo_batch_failure_detail", ["%1$d": "\(failed)"])
     }
 
     @ViewBuilder private var batchFailureView: some View {
         if batchHasFailure {
-            Text(batchFailureText)
-                .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(batchFailureText)
+                    .foregroundStyle(ZTransferColors.secondaryText)
+                ForEach(batch.state.progress.failures, id: \.number) { failure in
+                    Text(localPhotoFailureText(failure))
+                        .foregroundStyle(Color.red)
+                }
+            }
+            .font(.system(size: 12))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
         }
     }
 
@@ -178,12 +169,15 @@ struct LocalPhotoEffectsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             if !batch.state.photos.isEmpty {
                 Button { openPhotoPicker() } label: {
-                    Text(AppLocalized.resource("local_photo_replace")).font(.system(size: 12, weight: .medium))
+                    Text(AppLocalized.formattedResource("local_photo_reselect", ["%1$d": "\(batch.state.photos.count)"])).font(.system(size: 12, weight: .medium))
                         .padding(.horizontal, 10).frame(height: 38)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
                 .disabled(batch.state.generating)
+                .accessibilityLabel(AppLocalized.formattedResource(
+                    "local_photo_reselect", ["%1$d": "\(batch.state.photos.count)"]))
             }
+            PhotoEffectModuleMenuButton(isPresented: $showingModuleMenu)
             TipLightbulbButton(
                 attention: !localPhotoEffectsHelpViewed, size: 38,
                 accessibilityLabel: AppLocalized.resource("photo_effects_info_title")
@@ -236,7 +230,8 @@ struct LocalPhotoEffectsView: View {
                                 LocalEffectPreview(
                                     item: batch.state.photos[index],
                                     settings: previewSettings,
-                                    allowsFilterPrefetch: index == previewPage && !batch.state.generating
+                                    allowsFilterPrefetch: index == previewPage && !batch.state.generating,
+                                    onWillOpen: { watermarkTextFocused = false }
                                 )
                             } else { Color.clear }
                         }.tag(index)
@@ -257,7 +252,10 @@ struct LocalPhotoEffectsView: View {
     private var batchButton: some View {
         Button {
             if batch.state.photos.isEmpty { openPhotoPicker() }
-            else { batch.generate(settings: previewSettings) }
+            else {
+                watermarkTextFocused = false
+                batch.generate(settings: previewSettings)
+            }
         } label: {
             LocalPhotoBatchLabel(
                 state: batch.state,
@@ -280,6 +278,15 @@ struct LocalPhotoEffectsView: View {
         pickerItems = []
         showingPicker = true
     }
+}
+
+/// Android's selectable diagnostic block, including the original photo number.
+func localPhotoFailureText(_ failure: LocalPhotoFailure) -> String {
+    let stage = ["save", "render"].contains(failure.stage) ? failure.stage : "prepare"
+    let kind = ["memory", "permission", "missing", "space"].contains(failure.kind) ? failure.kind : "unknown"
+    return AppLocalized.formattedResource("local_photo_error_item", [
+        "%1$d": String(failure.number), "%2$s": AppLocalized.resource("local_photo_error_\(stage)")
+    ]) + "\n" + AppLocalized.resource("local_photo_error_\(kind)") + "\n" + failure.detail
 }
 
 private struct WorkbenchScrollOffsetKey: PreferenceKey {
@@ -313,7 +320,7 @@ private struct LocalPhotoBatchLabel: View {
                             .transition(.asymmetric(
                                 insertion: .offset(y: -8).combined(with: .opacity).animation(.easeOut(duration: 0.16)),
                                 removal: .offset(y: 8).combined(with: .opacity).animation(.easeOut(duration: 0.12))))
-                        Text("/\(state.progress.total)").fontWeight(.bold).monospacedDigit()
+                        Text(" / \(state.progress.total)").fontWeight(.bold).monospacedDigit()
                     }
                 } else {
                     if let pageLabel, !state.photos.isEmpty, state.phase == .ready {
@@ -347,8 +354,19 @@ private struct LocalPhotoBatchLabel: View {
         default:
             state.photos.isEmpty
                 ? AppLocalized.resource("local_photo_choose_short")
-                : AppLocalized.formattedResource("local_photo_batch_generate", ["%1$d": "\(state.photos.count)"])
+                : AppLocalized.resource("local_photo_generate")
         }
+    }
+}
+
+/// Mirrors Android ExpandedEffectsPreview and its identity-gated comparison provider.
+struct LocalExpandedPreviewSnapshot {
+    let image: UIImage
+    let initialComparison: UIImage?
+    let anchor: CGRect
+
+    func comparison(current: LocalPhotoPreviewImages?) -> UIImage? {
+        current?.filtered === image ? (current?.unfiltered ?? initialComparison) : initialComparison
     }
 }
 
@@ -356,22 +374,19 @@ private struct LocalEffectPreview: View {
     let item: PhotosPickerItem
     let settings: PhotoEffectsSettings
     let allowsFilterPrefetch: Bool
+    let onWillOpen: () -> Void
+    @State private var expandedSnapshot: LocalExpandedPreviewSnapshot?
+    @State private var expanded = false
+    @State private var previewAnchor = CGRect.zero
     @State private var source: UIImage?
     @State private var metadata: PhotoFrameMetadata?
     @State private var images: LocalPhotoPreviewImages?
-    @State private var filteredSource: UIImage?
-    @State private var filteredSourceKey: PhotoFilterSelection?
-    @State private var prefetched: [String: LocalPhotoPreviewImages] = [:]
+    @StateObject private var previewCache = LocalPhotoPreviewCache()
     @State private var lastPreviewSettings: PhotoEffectsSettings?
     @State private var failed = false
     @State private var renderedCanvasKey = ""
     @State private var previewRestoreRevision = 0
     @GestureState private var comparing = false
-
-    private static func settingsKey(_ settings: PhotoEffectsSettings) -> String {
-        let pixels = photoEffectsPreviewPixelSettings(settings)
-        return String(data: (try? JSONEncoder().encode(pixels)) ?? Data(), encoding: .utf8) ?? ""
-    }
 
     private static func differsOnlyInWatermarkText(
         _ previous: PhotoEffectsSettings, _ current: PhotoEffectsSettings
@@ -393,29 +408,6 @@ private struct LocalEffectPreview: View {
                 image: image, settings: settings, metadata: metadata
             )
         } catch { return nil }
-    }
-
-    private static func prefetchedPreviews(
-        image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata?
-    ) async -> [(String, LocalPhotoPreviewImages)] {
-        var results: [(String, LocalPhotoPreviewImages)] = []
-        do {
-            for selection in nextPhotoFilterSelections(for: settings) {
-                try Task.checkCancellation()
-                var next = settings
-                next.photoFilterEnabled = true
-                next.selectedFilter = selection
-                let filtered = try await LocalPhotoOutput.filteredSource(
-                    image: image, selection: selection
-                )
-                let preview = try await LocalPhotoOutput.preview(
-                    image: image, settings: next, metadata: metadata,
-                    filteredSource: filtered
-                )
-                results.append((settingsKey(next), preview))
-            }
-        } catch {}
-        return results
     }
 
     var body: some View {
@@ -446,6 +438,29 @@ private struct LocalEffectPreview: View {
             } else { ProgressView().tint(ZTransferColors.accentBlue) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+        .background(GeometryReader { proxy in
+            Color.clear
+                .onAppear { previewAnchor = proxy.frame(in: .global) }
+                .onChange(of: proxy.frame(in: .global)) { previewAnchor = $0 }
+        })
+        .onTapGesture {
+            guard let images, !comparing else { return }
+            onWillOpen()
+            expandedSnapshot = LocalExpandedPreviewSnapshot(image: images.filtered,
+                initialComparison: images.unfiltered, anchor: previewAnchor)
+            expanded = true
+        }
+        .fullScreenCover(isPresented: $expanded, onDismiss: {
+            expandedSnapshot = nil
+        }) {
+            if let expandedSnapshot {
+                PhotoEffectsExpandedPreview(
+                    image: expandedSnapshot.image,
+                    comparison: expandedSnapshot.comparison(current: images),
+                    initialAnchor: expandedSnapshot.anchor
+                ) { expanded = false }
+            }
+        }
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
             // A zero-distance drag starts competing with the horizontal
             // pager on every touch. Require a small movement after the long
@@ -481,31 +496,9 @@ private struct LocalEffectPreview: View {
                     try Task.checkCancellation()
                     source = image
                 }
-                let filterKey = settings.photoFilterEnabled ? settings.selectedFilter : nil
-                let settingsKey = Self.settingsKey(settings)
-                let preparedSource: UIImage?
-                if let filterKey {
-                    if filteredSourceKey == filterKey, let filteredSource {
-                        preparedSource = filteredSource
-                    } else {
-                        let rendered = try await LocalPhotoOutput.filteredSource(image: image, selection: filterKey)
-                        try Task.checkCancellation()
-                        filteredSource = rendered
-                        filteredSourceKey = filterKey
-                        preparedSource = rendered
-                    }
-                } else {
-                    filteredSource = nil
-                    filteredSourceKey = nil
-                    preparedSource = nil
-                }
-                let next: LocalPhotoPreviewImages
-                if let cached = prefetched.removeValue(forKey: settingsKey) {
-                    next = cached
-                } else {
-                    next = try await LocalPhotoOutput.preview(image: image, settings: settings,
-                                                              metadata: metadata, filteredSource: preparedSource)
-                }
+                await previewCache.configure(image: image, settings: settings, metadata: metadata,
+                                             prefetchEnabled: allowsFilterPrefetch)
+                let next = try await previewCache.render(image: image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
                 renderedCanvasKey = photoEffectsPreviewCanvasKey(settings)
                 images = next
@@ -532,19 +525,21 @@ private struct LocalEffectPreview: View {
             settings: settings,
             enabled: allowsFilterPrefetch && images != nil && source != nil
         )) {
-            guard allowsFilterPrefetch, settings.photoFilterEnabled, images != nil,
-                  let source else { return }
-            let warmedResults = await Self.prefetchedPreviews(
-                image: source, settings: settings, metadata: metadata
-            )
-            guard !Task.isCancelled, allowsFilterPrefetch else { return }
-            for (key, preview) in warmedResults where prefetched[key] == nil {
-                prefetched[key] = preview
-                if prefetched.count > 2, let oldest = prefetched.keys.first {
-                    prefetched.removeValue(forKey: oldest)
+            guard images != nil, let source else { return }
+            await previewCache.configure(image: source, settings: settings, metadata: metadata,
+                                         prefetchEnabled: allowsFilterPrefetch)
+            guard allowsFilterPrefetch, settings.photoFilterEnabled, !Task.isCancelled else { return }
+            do {
+                for selection in nextPhotoFilterSelections(for: settings) {
+                    try Task.checkCancellation()
+                    var next = settings
+                    next.photoFilterEnabled = true
+                    next.selectedFilter = selection
+                    _ = try await previewCache.render(image: source, settings: next, metadata: metadata)
                 }
-            }
+            } catch { /* Cancelled or obsolete prefetch never changes the visible frame. */ }
         }
+        .onDisappear { previewCache.close() }
     }
 
     private var previewUnavailableBadge: some View {

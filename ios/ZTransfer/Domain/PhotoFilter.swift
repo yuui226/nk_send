@@ -1,5 +1,50 @@
 import Foundation
 
+/// Android edits ISO LocalDate values regardless of the user's display calendar.
+/// Keep the local time zone for "today", but never inherit Buddhist/lunar years.
+struct PhotoFilterDates {
+    let calendar: Calendar
+
+    init(systemCalendar: Calendar = .current) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = systemCalendar.timeZone
+        self.calendar = calendar
+    }
+
+    func date(from value: String?) -> Date? {
+        guard let value, value.count >= 8,
+              let year = Int(value.prefix(4)), let month = Int(value.dropFirst(4).prefix(2)),
+              let day = Int(value.dropFirst(6).prefix(2)) else { return nil }
+        return calendar.date(from: DateComponents(year: year, month: month, day: day))
+    }
+
+    func key(_ date: Date) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d%02d%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    func shortDate(_ date: Date) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%02d/%02d/%02d", (parts.year ?? 0) % 100, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    func clamped(year: Int, month: Int, day: Int) -> Date {
+        let first = calendar.date(from: DateComponents(year: year, month: month, day: 1))!
+        let maxDay = calendar.range(of: .day, in: .month, for: first)!.count
+        return calendar.date(from: DateComponents(year: year, month: month, day: min(day, maxDay)))!
+    }
+
+    func years(start: Date, end: Date, now: Date = Date()) -> [Int] {
+        let first = calendar.component(.year, from: start)
+        let last = calendar.component(.year, from: end)
+        return Array(min(1990, first, last)...max(1990, calendar.component(.year, from: now) + 1, first, last))
+    }
+
+    func range(start: Date, end: Date) -> PhotoDateRange {
+        PhotoDateRange(start: key(min(start, end)), end: key(max(start, end)))
+    }
+}
+
 struct PhotoDateRange: Equatable, Sendable, Codable {
     let start: String
     let end: String
@@ -95,8 +140,16 @@ struct PhotoFilterState: Equatable, Sendable, Codable {
     var storageSlot: UInt32?
     var dateRange: PhotoDateRange?
 
-    var isActive: Bool {
-        extensions != nil || protectedOnly || rating != nil || burstOnly || untransferredOnly ||
+    var isActive: Bool { isActive(protectionAvailable: true) }
+
+    /// FileListScreen hides only the no-match sentence while a concrete star
+    /// filter is still being read; the clear-filter action remains available.
+    func showsNoMatchMessage(ratingLoading: Bool) -> Bool {
+        !(ratingEnabled && rating != nil && ratingLoading)
+    }
+
+    func isActive(protectionAvailable: Bool) -> Bool {
+        extensions != nil || (protectionAvailable && protectedOnly) || rating != nil || burstOnly || untransferredOnly ||
             storageSlot != nil || dateRange != nil
     }
 }
@@ -105,14 +158,15 @@ enum PhotoFilter {
     static func apply(_ files: [CameraFile], state: PhotoFilterState,
                       transferredIDs: Set<UInt32> = [],
                       storageIDsBySlot: [UInt32: Set<UInt32>] = [:],
-                      ratingValues: [UInt32: PhotoRatingValue] = [:]) -> [CameraFile] {
+                      ratingValues: [UInt32: PhotoRatingValue] = [:],
+                      protectionAvailable: Bool = true) -> [CameraFile] {
         let burstIDs: Set<UInt32>? = state.burstOnly
             ? Set(PhotoCatalogGrouping.bursts(in: files).flatMap { $0.files.map(\.id) })
             : nil
         return files.filter { file in
             let ext = file.fileExtension.lowercased()
             guard state.extensions == nil || state.extensions!.contains(ext) else { return false }
-            guard !state.protectedOnly || file.isProtected else { return false }
+            guard !protectionAvailable || !state.protectedOnly || file.isProtected else { return false }
             if let rating = state.rating {
                 guard state.ratingEnabled,
                       ratingValues[file.id] == .known(rating) else { return false }
@@ -215,7 +269,7 @@ enum PhotoFilterPersistence {
                                 protectedOnly: defaults.bool(forKey: protectedKey),
                                 ratingEnabled: false,
                                 rating: nil,
-                                ratingDays: normalizedRatingDays(defaults.integer(forKey: ratingDaysKey)),
+                                ratingDays: normalizedRatingDays(defaults.object(forKey: ratingDaysKey) as? Int ?? 3),
                                 burstOnly: defaults.bool(forKey: burstKey),
                                 untransferredOnly: defaults.bool(forKey: untransferredKey),
                                 storageSlot: nil,

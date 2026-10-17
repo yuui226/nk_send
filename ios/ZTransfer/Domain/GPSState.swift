@@ -41,6 +41,32 @@ enum GPSStatus: String, Codable, Sendable {
     case waitingFix = "WAITING_FIX", ready = "READY", apUnavailable = "AP_UNAVAILABLE", error = "ERROR"
 }
 
+/// NikonGpsService.onError separates the displayed camera hint from whether
+/// pairing actually requires an explicit user action.
+struct GPSBluetoothFailurePolicy {
+    let invalidatesIdentity: Bool
+    let waitsForPairing: Bool
+    let message: String
+    let status: GPSStatus
+    let retries: Bool
+
+    init(_ raw: String) {
+        let lower = raw.lowercased()
+        invalidatesIdentity = lower.contains("pairing rejected") || lower.contains("identity expired")
+        waitsForPairing = lower.contains("pairing") || raw.contains("配对")
+        let permission = lower.contains("permission") || lower.contains("unauthorized") || lower.contains("not authorized")
+        let unavailable = lower.contains("bluetooth unavailable")
+        if permission { message = "需要蓝牙权限" }
+        else if lower.contains("not found") || invalidatesIdentity { message = "请在相机上打开蓝牙配对" }
+        else if unavailable || lower.contains("scan failed") { message = "请打开手机蓝牙" }
+        else { message = raw }
+        let permissionError = permission || message.contains("权限")
+        status = permissionError ? .error :
+            (message.contains("配对") || message.lowercased().contains("not found") ? .needsCamera : .error)
+        retries = !permissionError && !waitsForPairing && !unavailable
+    }
+}
+
 struct GPSState: Equatable, Sendable {
     var enabled = false
     var status: GPSStatus = .off
@@ -134,6 +160,13 @@ struct GPSTrustedAltitudeFix: Equatable, Sendable {
     let timestamp: Date
 }
 
+/// Android canReuseGpsAltitude: inclusive age/distance limits and a valid fix time.
+func canReuseGPSAltitude(now: Date, timestamp: Date, distanceMeters: Double) -> Bool {
+    timestamp.timeIntervalSince1970 > 0 &&
+        abs(now.timeIntervalSince(timestamp)) <= 120 &&
+        distanceMeters.isFinite && distanceMeters <= 1_000
+}
+
 func resolvedGPSAltitude(for location: CLLocation,
                          cached: GPSTrustedAltitudeFix?,
                          now: Date = Date()) -> (Double?, GPSTrustedAltitudeFix?) {
@@ -147,10 +180,34 @@ func resolvedGPSAltitude(for location: CLLocation,
         )
         return (location.altitude, fix)
     }
-    guard let cached,
-          abs(now.timeIntervalSince(cached.timestamp)) <= 120 else { return (nil, cached) }
+    guard let cached else { return (nil, cached) }
     let cachedLocation = CLLocation(latitude: cached.latitude, longitude: cached.longitude)
     let distance = cachedLocation.distance(from: location)
-    guard distance.isFinite, distance <= 1_000 else { return (nil, cached) }
+    guard canReuseGPSAltitude(now: now, timestamp: cached.timestamp, distanceMeters: distance) else { return (nil, cached) }
     return (cached.altitudeMeters, cached)
+}
+
+
+/// Android CoordinateFormat.kt: round total thousandths of minutes before
+/// splitting, so a rounded 60.000 carries into the next degree.
+enum GPSCoordinateFormat {
+    static func value(_ value: Double?, latitude: Bool) -> String? {
+        let maximum = latitude ? 90.0 : 180.0
+        guard let value, value.isFinite, abs(value) <= maximum else { return nil }
+        let hemisphere = latitude ? (value < 0 ? "S" : "N") : (value < 0 ? "W" : "E")
+        let total = Int64((abs(value) * 60_000).rounded(.toNearestOrAwayFromZero))
+        return String(format: "%@ %lld°%02lld.%03lld'", locale: Locale(identifier: "en_US_POSIX"),
+                      hemisphere, total / 60_000, (total % 60_000) / 1_000, total % 1_000)
+    }
+
+    static func coordinates(latitude: Double, longitude: Double) -> String? {
+        guard let latitude = value(latitude, latitude: true),
+              let longitude = value(longitude, latitude: false) else { return nil }
+        return "\(latitude), \(longitude)"
+    }
+
+    static func clipboard(latitude: Double, longitude: Double, placeName: String? = nil) -> String? {
+        guard let coordinates = coordinates(latitude: latitude, longitude: longitude) else { return nil }
+        return placeName.map { "\($0)\n\(coordinates)" } ?? coordinates
+    }
 }

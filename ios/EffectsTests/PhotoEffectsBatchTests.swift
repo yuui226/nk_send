@@ -6,6 +6,50 @@ import XCTest
 #endif
 
 final class PhotoEffectsBatchTests: XCTestCase {
+    func testFailureDetailsAreBoundedRetainedAndClearedForNextBatch() async throws {
+        let result = try await PhotoEffectsBatchRunner.generate(photos: Array(1...8), onProgress: { _ in }) { number in
+            if number == 8 { return true }
+            throw LocalPhotoExportError(stage: "save", underlying:
+                NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC),
+                        userInfo: [NSLocalizedDescriptionKey: String(repeating: "x", count: 1000)]))
+        }
+        XCTAssertEqual(result.completed, 8)
+        XCTAssertEqual(result.saved, 1)
+        XCTAssertEqual(result.failures.count, 5)
+        XCTAssertEqual(Set(result.failures.map(\.number)).count, 5)
+        for failure in result.failures {
+            XCTAssertTrue((1...7).contains(failure.number))
+            XCTAssertEqual(failure.stage, "save")
+            XCTAssertEqual(failure.kind, "space")
+            XCTAssertLessThan(failure.detail.count, 300)
+        }
+        var state = LocalPhotoBatchState<Int>()
+        state.select(Array(1...8))
+        let generation = try XCTUnwrap(state.begin())
+        state.finish(result, generation: generation)
+        let terminal = state
+        state.returnToReady(ifUnchanged: terminal)
+        XCTAssertEqual(state.progress.failures, result.failures)
+        _ = state.begin()
+        XCTAssertTrue(state.progress.failures.isEmpty)
+        state.cancel()
+        state.select([9])
+        XCTAssertTrue(state.progress.failures.isEmpty)
+    }
+
+    func testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain() {
+        for (code, kind) in [(ENOMEM, "memory"), (EACCES, "permission"), (ENOSPC, "space"), (ENOENT, "missing"), (EINVAL, "unknown")] {
+            let cause = NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+            let outer = NSError(domain: "Provider", code: 1, userInfo: [NSUnderlyingErrorKey: cause])
+            let failure = LocalPhotoFailure(number: 4, error: LocalPhotoExportError(stage: "prepare", underlying: outer))
+            XCTAssertEqual(failure.kind, kind)
+            XCTAssertEqual(failure.number, 4)
+            XCTAssertEqual(failure.stage, "prepare")
+            XCTAssertTrue(failure.detail.contains("Provider"))
+            XCTAssertTrue(failure.detail.contains(NSPOSIXErrorDomain))
+        }
+    }
+
     func testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating() {
         var state = LocalPhotoBatchState<String>()
         XCTAssertTrue(state.select(["B", "A", "B", "C"]))
@@ -64,7 +108,10 @@ final class PhotoEffectsBatchTests: XCTestCase {
         XCTAssertEqual(evidence.started.sorted(), Array(0..<12))
         XCTAssertEqual(evidence.progress.map(\.completed), Array(0...12))
         XCTAssertTrue(evidence.progress.allSatisfy { $0.total == 12 })
-        XCTAssertEqual(result, .init(total: 12, completed: 12, saved: 8))
+        XCTAssertEqual(result.total, 12)
+        XCTAssertEqual(result.completed, 12)
+        XCTAssertEqual(result.saved, 8)
+        XCTAssertEqual(result.failures.count, 4)
     }
 
     func testEmptySelectionReportsZeroOnce() async throws {

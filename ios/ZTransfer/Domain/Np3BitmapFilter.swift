@@ -3,7 +3,18 @@ import Foundation
 
 enum PhotoEffectsRenderError: Error {
     case unknownFilter
+    case invalidWatermarkImage
     case invalidBitmap
+}
+
+/// Android PhotoFilterRenderer reserves parallel filtering for previews only.
+enum PhotoFilterExecution: Sendable {
+    case original, preview
+
+    func workers(width: Int, height: Int, processors: Int = ProcessInfo.processInfo.activeProcessorCount) -> Int {
+        guard self == .preview, Int64(width) * Int64(height) >= 512 * 512 else { return 1 }
+        return min(max(processors - 1, 1), 2)
+    }
 }
 
 /// `concurrentPerform` requires Sendable captures even though it joins every
@@ -24,7 +35,7 @@ private struct Np3TaskCancellationProbe: @unchecked Sendable {
 /// alpha ARGB values, never misinterpreted premultiplied RGBA bytes.
 enum Np3BitmapFilter {
     static func apply(_ image: CGImage, parameters: Np3FilterParameters,
-                      intensityPercent: Int) throws -> CGImage {
+                      intensityPercent: Int, execution: PhotoFilterExecution = .preview) throws -> CGImage {
         try Task.checkCancellation()
         let (rowBytes, overflow) = image.width.multipliedReportingOverflow(by: 4)
         let (_, sizeOverflow) = rowBytes.multipliedReportingOverflow(by: image.height)
@@ -39,20 +50,14 @@ enum Np3BitmapFilter {
         context.interpolationQuality = .none
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         let engine = Np3FilterEngine(parameters: parameters, intensityPercent: intensityPercent)
-        // Batch generation runs two images concurrently. Four stripes keep
-        // the CPU busy without spawning twelve competing workers on phones.
-        let workerCount = min(max(ProcessInfo.processInfo.activeProcessorCount / 2, 1), 4)
-        let rowChunk = max(1, (image.height + workerCount * 3 - 1) / (workerCount * 3))
-        let chunkCount = (image.height + rowChunk - 1) / rowChunk
-        // Each worker owns disjoint rows. This keeps the exact Android pixel
-        // transform while removing the single-thread bottleneck that made a
-        // 1280px preview appear to ignore filter changes.
+        let workerCount = execution.workers(width: image.width, height: image.height)
+        let rowChunk = max(1, (image.height + workerCount - 1) / workerCount)
         let pixelBuffer = Np3ConcurrentPixelBuffer(
             bytes: data.assumingMemoryBound(to: UInt8.self)
         )
         try withUnsafeCurrentTask { renderTask in
             let cancellation = Np3TaskCancellationProbe(task: renderTask)
-            DispatchQueue.concurrentPerform(iterations: chunkCount) { chunk in
+            let process: @Sendable (Int) -> Void = { chunk in
                 let bytes = pixelBuffer.bytes
                 let firstRow = chunk * rowChunk
                 let lastRow = min(image.height, firstRow + rowChunk)
@@ -66,6 +71,7 @@ enum Np3BitmapFilter {
                     // selected frame for the rest of a full pixel pass.
                     if cancellation.isCancelled { return }
                     for x in 0..<image.width {
+                        if x % 4096 == 0, cancellation.isCancelled { return }
                         let offset = y * rowBytes + x * 4
                         let alpha = UInt32(bytes[offset + 3])
                         guard alpha != 0 else { continue }
@@ -80,6 +86,8 @@ enum Np3BitmapFilter {
                     }
                 }
             }
+            if workerCount == 1 { process(0) }
+            else { DispatchQueue.concurrentPerform(iterations: workerCount, execute: process) }
             if cancellation.isCancelled { throw CancellationError() }
         }
         guard let result = context.makeImage() else { throw PhotoEffectsRenderError.invalidBitmap }

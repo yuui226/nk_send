@@ -8,7 +8,7 @@
 
 状态：待调查 → 调查中 → 实现中 → 复刻完成，待用户验收。只有已完成全部入口、文案、布局、动画、交互、状态、异常/取消/重试、持久化和跨任务接线，才能标记复刻完成；没有写完或依赖未接通不能靠主观判断标完成。验收通过单独由用户确认。实际未运行的测试明确标注未运行；不能用静态阅读或仅有测试代码声称测试通过。各功能记录实现与测试迁移状态；大块完成时记录构建/自动化结果，失败必须保留并处理，真机验收状态独立。
 
-当前进度：26/26（全部任务已完成开发侧复刻与范围核对，统一待用户真机验收）。T26 是范围处置任务，其完成不代表新增 iOS 功能。不得将本次台账与高级版历史 3/8 里程碑混算。
+当前记录进度：5/26，T03、T04、T05、T06、T09、T10、T11、T12、T13、T14、T15、T16、T17、T18、T19、T20、T21、T22、T23、T24、T25 撤回复刻完成状态。2026-10-15 全功能复核确认：安卓 1.91 已有的工作台返回距离/速度阈值未接入 iOS 原生分页器，按钮返回还会在页面落稳前恢复相机发现；旧队列测试不能证明这些交互。详见 [全功能复核 F001/F002](iOS-全功能行为复核跟进.md)。2026-10-15 N09 胶囊对照又确认 T24 的 Android 系统投影仍缺完整实现与验证依据，不能用现有按钮测试证明投影已复刻；详见 [1.93 快门与录制胶囊记录](iOS-1.93-增量复刻任务台账.md)。C07进一步确认T03遗漏删除队列清理、磁盘失败锁存、无图响应映射及USB统一缓存身份，见全功能复核F023–F026。C09又确认真实连拍预览入口提前展开底层列表（F035），撤回T04；C12又确认完整对象known校验漏接、STA照片仍分块、照片失败半成品被重用和USB大对象无界fallback（F056–F059），撤回T21。C13确认两路生成缺名称原子预留（F064），撤回T22。C14确认F065–F074；裁切任务仍参与自动去重，撤回T20。C16/F088/F089撤回T14/T18。C17/F096撤回T17，F091–F097补记模块/收藏缺口。C18/F102/F105确认共用LUT解析/目录缺口，撤回T12；C19/F111–F124确认地点未接、配置丢失及模板绘制缺口，撤回T15/T16。C20/F125–F135确认实际裁切准备、方向/几何/交互、原生完整性/元数据/暂存缺口，撤回T19。C23/F147确认相机工具beforeWrite后缺重新门控，撤回T06。C25/F153–F164确认曝光分析/恢复/缓存、测光生命周期/竖尺、统计与音量绘制及DISP轮询缺口，撤回T09/T10/T11。C26/F165–F170确认监看LUT入口完全未门控接入及展示提交/失败/生命周期缺口，撤回T13。C27确认隐藏LUT副作用缺失F167，撤回T05；方向生命周期/录像边框另见F171/F172。C29/F178确认资源已存在但实际文案/转义/调用未完整同步，撤回T25整体收口声明。其余5项为既有记录，仍由本轮全功能审查重新核验，不表示本次已全部重新证明。T26 是范围处置任务，其完成不代表新增 iOS 功能。不得与高级版历史 3/8 里程碑混算。
 
 ## 调查方法
 
@@ -16,35 +16,49 @@
 
 [来源索引](iOS-1.91-增量来源索引.json)记录全部净变化文件及57个提交的原始文件列表。任务路由是初始索引；大型共用文件必须按差异块细分，未归属内容由T25兜底调查，不能因此当作已覆盖。
 
+## 2026-10-12 复核收口记录
+
+本次恢复 iOS 工作前已重新阅读长期项目记忆，并在 `ios` 分支按安卓最终源码复核了 1.91 台账的关键收尾项。以下记录覆盖旧日志之后的最新证据，旧日志中的中间状态不再作为当前状态依据。
+
+- T20：`TransferQueue` 的本地原片、完整临时文件和新下载三条路径现在都把裁切失败记录为派生失败，保留原片、禁止用未裁切原片生成效果，并保留裁切任务供离线重试；已拒绝跨目标目录复用旧 `cropURL`。原生 libjpeg 错误已转换为可处理的失败返回，新增队列回归覆盖坏 JPEG 下的原片保留与重试。
+- T21：普通照片清理陈旧 `.nkpart_`，只有 `mov/mp4/nev/avi` 保留断点续传；照片/视频的策略测试与下载回放已按实际扩展名重新覆盖。iOS USB/STA 仍保留必要的有界 partial 传输平台路径，但照片不再读取旧续传偏移。
+- T11：`CameraMonitorDisp` 对齐安卓 `12pt` 横向、`10pt` 纵向边距、`100pt` STBY 预留、`16pt` 底部间距和 `400pt` 最大宽度；连接后首帧稳定前也显示 CAMERA 信息壳，轮询仍由就绪门控。新增纯布局几何回归。
+- 本轮既有定向 XCTest 日志为 `/tmp/ztransfer-ios191-t20-t21-t11-tests.log`：`CameraDownloadTests` 28/28、`TransferQueueScenarioTests` 11/11、`RemoteDispModeTests` 6/6，0 失败；当前工作树的裁切场景串行回归 `/tmp/ztransfer-ios191-transferqueue-current.log` 为 14/14，覆盖坏 JPEG 源、离线重试、仅相框失败和目录重选路径。
+- T19/T20 裁切收口：`PhotoPreviewView` 仅对 JPEG 显示裁切入口，比例组与 `setRatio` 对齐安卓，队列入队校验会话/目录；`JpegCropHeader` 严格拒绝坏 EXIF/采样参数，`LosslessCropProcessor` 在进入 libjpeg 前预检真实 JPEG 头，使用同目录 staging 文件并在尺寸/头校验后原子发布，失败时保留原片和裁切任务。相关裁切/队列定向测试均通过。
+- T24 Genie 收口：`GeniePopupMotion` 使用安卓 320/350ms 时序、Bezier 曲线、上下三角变换及 row-above 镜像，运行时弹层固定 12 个 band；`/tmp/ztransfer-t24-genie-only.log` 6/6 通过，当前 `DomainModelTests` 包含 Genie 与相框回归共 132/132 通过（`/tmp/ztransfer-ios191-domainmodel-current2.log`）。视觉像素、系统触感和真机连接行为仍交由用户验收。
+- T25 文案收口：`AndroidLocalization.byResource` 已覆盖安卓 `values*` 中全部 671 个资源键（脚本比对缺失 0），补齐远程测光及照片 LUT 等键，并移除两个原始不存在的 `photo_lut` 资源调用。新增 Film Negative 与 Parameter Poster 相框预设及编辑器/设置/队列入口，渲染尺寸 smoke 已通过。
+- 随后运行当前工作树全量 XCTest：`/tmp/ztransfer-ios191-full-final-current.log`，`ZTransferTests.xctest` 802 项、4 项跳过、0 失败，终态 `** TEST SUCCEEDED **`。模拟器警告不改变测试终态；未进行真机验收、安装、提交或推送。
+- T24/T25 的视觉材质、系统触感和真机连接行为仍按本台账定义交由用户验收；静态代码、历史日志缺失或模拟器通过均不替代该验收。
+
 ## 任务列表
 
 | 编号 | 任务 | 必须覆盖 | iOS 接入位置 | 状态 |
 |---|---|---|---|---|
 | T01 | 实时传输五档筛选 | OFF/ALL/JPG/RAW/VIDEO；旧开关迁移、目录禁用、新文件准入及不补入规则 | PhotoListView、SettingsView、PhotoListViewModel | 复刻完成，待用户验收 |
 | T02 | 三种连接断开与监看入口状态 | AP/STA/USB 断开文案、卡片表现、重连与进入监看的介绍时序 | ConnectionViewModel、ConnectionPage、RemoteViewModel | 复刻完成，待用户验收（公共控件由T24统一验收） |
-| T03 | 列表扫描、缩略图与已传身份 | 分批扫描、顺序缩略图、STA JPEG 清晰度、缓存身份及跨模式已传识别 | PhotoListViewModel、PhotoThumbnailFillQueue、PhotoThumbnailDiskCache、TransferDirectoryIndex | 复刻完成，待用户验收 |
-| T04 | 普通照片预览与会话恢复 | FHD 来源、当前页原图解码、页码会话、方向与队列返回手势 | PhotoPreviewView、PhotoListViewModel | 复刻完成，待用户验收 |
-| T05 | 监看工具配置和原位编辑 | 排序显隐、照片录像独立记忆、隐藏关闭、拖动、编辑与录制收尾 | RemoteDisplayOptions、RemoteView、RemoteViewModel | 复刻完成，待用户验收 |
-| T06 | 相机工具、诊断与能力查询 | 白平衡/对焦区域读写验证、PC 控制诊断（范围待确认）、忙时让路与设备能力边界 | RemoteProperty、CameraRepository、RemoteViewModel | 复刻完成，待用户验收 |
+| T03 | 列表扫描、缩略图与已传身份 | 分批扫描、顺序缩略图、STA JPEG 清晰度、缓存身份及跨模式已传识别 | PhotoListViewModel、PhotoThumbnailFillQueue、PhotoThumbnailDiskCache、TransferDirectoryIndex | 未完成：生产异常接线及USB缓存身份缺口，见全功能复核F023–F026 |
+| T04 | 普通照片预览与会话恢复 | FHD 来源、当前页原图解码、页码会话、方向与队列返回手势 | PhotoPreviewView、PhotoListViewModel | 未完成：连拍预览真实入口改动底层列表，见全功能复核F035及C10新增F044–F051 |
+| T05 | 监看工具配置和原位编辑 | 排序显隐、照片录像独立记忆、隐藏关闭、拖动、编辑与录制收尾 | RemoteDisplayOptions、RemoteView、RemoteViewModel | 未完成：C26/C27及F167隐藏LUT副作用/完整工具接线缺口 |
+| T06 | 相机工具、诊断与能力查询 | 白平衡/对焦区域读写验证、PC 控制诊断（范围待确认）、忙时让路与设备能力边界 | RemoteProperty、CameraRepository、RemoteViewModel | 未完成：C23/F147写前异步门控缺口 |
 | T07 | 参考线与监看手势 | 全部网格/比例框、反挤压、1–8倍缩放、平移边界、导航框及对焦逆变换 | RemoteDisplayOptions、RemoteView | 复刻完成，待用户验收（共用弹层动画由T24收尾） |
 | T08 | 双轴水平仪 | 帧头格式、滚转/俯仰、方向校正、有效期和单轴回退、绘制 | RemoteFrameParser、RemoteState、RemoteView | 复刻完成，待用户验收 |
-| T09 | 曝光辅助与统计图 | 斑马纹/伪色、亮度/RGB直方图和波形图、取样与生命周期、录制隔离 | RemoteView、RemoteViewModel | 复刻完成，待用户验收 |
-| T10 | 曝光尺 | 只读D10A、D1B1有限诊断、值域/过期/失败停查、UI | RemoteViewModel、CameraRepository、RemoteView | 复刻完成，待用户验收 |
-| T11 | 横竖监看、Dock 与 DISP | 横屏统一、空间决策、Dock、布局锁定、DISP三档、录制红框及停止入口 | RemoteView、RemoteState、RemoteDisplayOptions | 复刻完成，待用户验收 |
-| T12 | LUT 文件与数学基础 | cube解析、DOMAIN/插值、授权/超时、根目录及一级分类、缓存与快照 | 新增独立 Swift LUT 基础 | 复刻完成，待用户验收 |
-| T13 | 监看 LUT | GPU显示、原子候选提交、伪色互斥、照片录像记忆、故障回退及帧所有权 | RemoteView、RemoteViewModel及原生渲染层 | 复刻完成，待用户验收 |
-| T14 | 照片 LUT | 独立照片目录、强度/收藏、滤镜互斥、草稿/快照、预览与生成一致 | PhotoEffects、PhotoEffectsRenderer、PhotoEffectsEditorView、LocalPhotoBatchViewModel | 复刻完成，待用户验收 |
-| T15 | 边框地点与参数海报 | 城市/区域、坐标格式、元数据复用、参数海报布局与字段 | PhotoEffects、PhotoExif、PhotoEffectsRenderer | 复刻完成，待用户验收 |
-| T16 | 品牌文字与 Logo | 开关/文字/Logo、17品牌矢量与回退、模板测量和绘制、预览调试 | PhotoEffects、PhotoEffectsRenderer | 复刻完成，待用户验收 |
-| T17 | 边框宽度、背景与统一排版 | 60–200/5步长、模板独立参数、模糊/遮罩、收藏/身份、文字测量避让 | PhotoEffects、PhotoFrameTextLayout、PhotoEffectsRenderer、PhotoEffectsEditorView | 复刻完成，待用户验收 |
-| T18 | 效果模块菜单与编辑分区 | 至少一项、免费框/水印联动、Pro独立、隐藏清启用不清参数、独立持久化、主题动画 | PhotoEffects、PhotoEffectsEditorView、SettingsView、LocalPhotoEffectsView | 复刻完成，待用户验收 |
-| T19 | 无损裁切交互与坐标 | FHD复用、EXIF方向、镜像拒绝、比例组、手势、进入退出动画、队列快照 | PhotoPreviewView及裁切领域模型 | 复刻完成，待用户验收 |
-| T20 | 无损 JPEG 处理与保存 | 编码系数裁切、MCU对齐、元数据、保留原图/crop/效果图、重试及清理 | TransferQueue、PhotoEffectsRenderer及原生JPEG桥接；依赖T19 | 复刻完成，待用户验收 |
-| T21 | 下载完整性与照片/视频策略 | 单次流式照片、视频续传、大小哨兵和校验、取消与原图落盘边界 | CameraDownload、CameraRepository、PTP传输 | 复刻完成，待用户验收 |
-| T22 | 传输/生成双线与资源预算 | 独立生成队列、可靠交接、轻量快照、取消/重试/暂停、处理资源与计时 | TransferQueue、PhotoEffectsBatch、PhotoEffectsRenderer | 复刻完成，待用户验收 |
-| T23 | 队列卡片和工作台交互 | 卡片动作、滑动/拖动/顶栏时序、工作台防误退出、批次按钮、放大长按对比 | TransferQueueView、LocalPhotoEffectsView、RootView | 复刻完成，待用户验收 |
-| T24 | 公共控件、弹窗动画与触感 | 公共按钮材质/按压/阴影/涟漪、Genie/上下展开、选项准备、拨轮/角标/选中色、长按和轻点反馈 | ZTransferGlassButtonStyle、GeniePopupPanel、GeniePopupMotion、DetentWheel、ZTransferHaptics | 复刻完成，待用户验收 |
-| T25 | 跨模块入口、文案与最终差异收口 | MainActivity/Home/Settings/Remote/Transfer大型文件逐hunk归属；三语资源、版本及全部未归属变更；检查任务间连接 | 全部接入点；依赖T01–T24 | 复刻完成，待用户验收 |
+| T09 | 曝光辅助与统计图 | 斑马纹/伪色、亮度/RGB直方图和波形图、取样与生命周期、录制隔离 | RemoteView、RemoteViewModel | 未完成：C25/F153–F157/F161–F163分析算法、生产恢复/缓存与绘制缺口 |
+| T10 | 曝光尺 | 只读D10A、D1B1有限诊断、值域/过期/失败停查、UI | RemoteViewModel、CameraRepository、RemoteView | 未完成：C25/F158–F160测光协议/生命周期及竖尺UI缺口 |
+| T11 | 横竖监看、Dock 与 DISP | 横屏统一、空间决策、Dock、布局锁定、DISP三档、录制红框及停止入口 | RemoteView、RemoteState、RemoteDisplayOptions | 未完成：C25/F163/F164音量布局和DISP轮询缺口，C27继续核布局 |
+| T12 | LUT 文件与数学基础 | cube解析、DOMAIN/插值、授权/超时、根目录及一级分类、缓存与快照 | 新增独立 Swift LUT 基础 | 未完成：全功能复核F102/F105确认共用目录I/O与Cube DOMAIN/快照验证缺口，C26继续核监看消费者 |
+| T13 | 监看 LUT | GPU显示、原子候选提交、伪色互斥、照片录像记忆、故障回退及帧所有权 | RemoteView、RemoteViewModel及原生渲染层 | 未完成：C26/F165–F170真实入口、GPU展示/失败及生命周期缺口 |
+| T14 | 照片 LUT | 独立照片目录、强度/收藏、滤镜互斥、草稿/快照、预览与生成一致 | PhotoEffects、PhotoEffectsRenderer、PhotoEffectsEditorView、LocalPhotoBatchViewModel | 未完成：全功能复核F088确认相机/本地LUT当前选择共用偏好，C18继续核查 |
+| T15 | 边框地点与参数海报 | 城市/区域、坐标格式、元数据复用、参数海报布局与字段 | PhotoEffects、PhotoExif、PhotoEffectsRenderer | 未完成：全功能复核F111–F114/F120确认地点入口与调用未接、坐标/持久化及海报内容缺口 |
+| T16 | 品牌文字与 Logo | 开关/文字/Logo、17品牌矢量与回退、模板测量和绘制、预览调试 | PhotoEffects、PhotoEffectsRenderer | 未完成：全功能复核F114/F119确认Logo仅两模板消费、完整持久化和三态入口缺失 |
+| T17 | 边框宽度、背景与统一排版 | 60–200/5步长、模板独立参数、模糊/遮罩、收藏/身份、文字测量避让 | PhotoEffects、PhotoFrameTextLayout、PhotoEffectsRenderer、PhotoEffectsEditorView | 未完成：全功能复核F096确认收藏缺宽度/背景及10/12字段恢复，C19继续核查 |
+| T18 | 效果模块菜单与编辑分区 | 至少一项、免费框/水印联动、Pro独立、隐藏清启用不清参数、独立持久化、主题动画 | PhotoEffects、PhotoEffectsEditorView、SettingsView、LocalPhotoEffectsView | 未完成：全功能复核F089确认额外本地LUT入口绕过模块及滤镜互斥，C17继续核查 |
+| T19 | 无损裁切交互与坐标 | FHD复用、EXIF方向、镜像拒绝、比例组、手势、进入退出动画、队列快照 | PhotoPreviewView及裁切领域模型 | 未完成：全功能复核F125–F130确认准备/方向/几何/交互/接纳链未完整接入 |
+| T20 | 无损 JPEG 处理与保存 | 编码系数裁切、MCU对齐、元数据、保留原图/crop/效果图、重试及清理 | TransferQueue、PhotoEffectsRenderer及原生JPEG桥接；依赖T19 | 未完成：F072生成交接及F074裁切自动去重已完成开发侧修复（F074回归12/12）；完整裁切/保存运行验收仍待复核 |
+| T21 | 下载完整性与照片/视频策略 | 单次流式照片、视频续传、大小哨兵和校验、取消与原图落盘边界 | CameraDownload、CameraRepository、PTP传输 | 未完成：F056–F059已修复且56/56通过；V004真实USB未知大小EOF证据仍待闭环 |
+| T22 | 传输/生成双线与资源预算 | 独立生成队列、可靠交接、轻量快照、取消/重试/暂停、处理资源与计时 | TransferQueue、PhotoEffectsBatch、PhotoEffectsRenderer | 未完成：全功能复核F064–F073确认发布、资源、准备、计时、门控、重试及离线入口缺口 |
+| T23 | 队列卡片和工作台交互 | 卡片动作、滑动/拖动/顶栏时序、工作台防误退出、批次按钮、放大长按对比 | TransferQueueView、LocalPhotoEffectsView、RootView | 未完成：工作台阈值与返回发现暂停存在缺口，见全功能复核 F001/F002 |
+| T24 | 公共控件、弹窗动画与触感 | 公共按钮材质/按压/阴影/涟漪、Genie/上下展开、选项准备、拨轮/角标/选中色、长按和轻点反馈 | ZTransferGlassButtonStyle、GeniePopupPanel、GeniePopupMotion、DetentWheel、ZTransferHaptics | 未完成：系统投影仍缺完整实现/验证依据，见 1.93 N09 气泡记录 |
+| T25 | 跨模块入口、文案与最终差异收口 | MainActivity/Home/Settings/Remote/Transfer大型文件逐hunk归属；三语资源、版本及全部未归属变更；检查任务间连接 | 全部接入点；依赖T01–T24 | 未完成：C29/F178文案/转义/动态本地化及全链路缺口尚未核销 |
 | T26 | 回滚与平台专属范围核对 | 星级和USB损坏报告回滚；Android打包/服务器运维/许可证对应处置，不把提案当功能 | 范围核对，iOS需要的依赖许可随对应任务接入 | 复刻完成，待用户验收 |
 
 ## 最终行为覆盖历史方案
@@ -66,6 +80,8 @@
 
 ### T21：下载完整性与照片/视频策略（调查中）
 
+**2026-10-15纠正：**下文双来源校验和整体完成是历史记录。当前生产GetObject只在没有declared时校验known，已有测试还期待忽略known短读；照片失败清理/完整part捷径和STA单请求亦未闭环。全功能复核C12/F056–F059撤回完成；USB整Data回调有界限制不能扩作STA平台豁免。旧测试结果保留，本轮未运行。
+
 - 安卓规则：照片默认单次完整流式下载，只有视频或明确支持时才使用分块/续传；`SIZE_UNKNOWN` 先调用 `GetObjectSize`，声明长度与实际接收长度不一致时失败；取消保留视频部分文件，照片失败不把不完整文件发布为原片。
 - 当前 iOS `CameraRepository.downloadResultImpl` 已实现未知大小解析、照片/视频策略门控、分块续传、声明长度校验、取消保留 `.nkpart_`、完成后原子发布和失败清理。下一步需逐项补齐安卓 `DownloadIntegrity` 对 declared/known 双来源哨兵及对应测试，暂不标记完成。
 - T21 完整性规则首块：新增 `mismatchedFullObjectSize`，按安卓优先 declared、再 known、忽略 0/`SIZE_UNKNOWN` 的规则判断完整对象长度；2 项 XCTest 通过，`/tmp/ztransfer-ios191-t21-integrity.log`：`** TEST SUCCEEDED **`。尚待把该统一判定接入所有完整下载分支并核对照片/视频取消清理。
@@ -76,11 +92,15 @@
 
 ### T22：传输/生成双线与资源预算（2026-10-07）
 
+**2026-10-15纠正：**C13/F064发现真实renderer各自扫描后选名、无共享预留，atomic写入并不能防止并发覆盖。C14/F065–F073又确认当前安卓单个计算worker与4096预算、独立metadata准备/有界结果、实际计算计时、总效果开关、派生单独重试/成功下载保持及离线生产入口均未完整接入。旧两工与已有原片生成失败整卡FAILED测试明确期待过时行为，不覆盖正确发布/生命周期；T22保持未完成。历史日志只证明当时测试断言通过，不能作为当前对齐结论。
+
 - 安卓将原图传输与照片效果生成拆成两条生命周期：原片成功发布后生成任务进入有界队列；生成任务独立计时、失败不回滚原片、清理动作保护 active/waiting 任务，生成失败可离线重试。
 - iOS `TransferQueue` 已有独立传输 worker、两工 `frameWorkers`、`pendingFrames`、生成状态/计时、原片与效果图独立完成状态，以及清理保护和离线重试；本次未新增重复实现。
 - `testFramesUseTwoWorkersAndClearProtectsActiveAndWaitingRenders` 与 `testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects` 通过，结果 `/tmp/ztransfer-ios191-t22-queue.log`：`** TEST SUCCEEDED **`。T22 标记“复刻完成，待用户真机验收”，总进度 20/26。
 
 ### T23：队列卡片和工作台交互（2026-10-07）
+
+2026-10-15 纠正：下列历史测试覆盖队列状态，未覆盖 `HomeWorkspacePagerTest` 的返回阈值和全程暂停发现规则；当前 iOS 仍缺这两项，撤回 T23 整体完成结论。C15/F075–F085又确认启动/暂停显隐、侧滑移除、重试/确认资格、卡片文本/视觉、缩略图补载、订阅范围、自动飞行、押扣和Done跨批次缺口。历史测试通过记录保留，不再用于证明工作台或队列UI交互完整。
 
 - 对照安卓 `TransferScreen`，iOS 已有等待/传输/生成/完成/失败/取消状态卡片，单卡重试/移除，批量重试/清理确认，暂停当前文件、继续、生成中保护及错误状态展示；清理不会打断 active/waiting 生成任务。
 - `LocalPhotoEffectsView` 已接入工作台滚动边界与照片分页竞争手势，顶部下拉交还分页，横向拖动保留照片切换，短垂直拖动交给控件。
@@ -132,7 +152,7 @@
 | 核对项 | 当前实现与依据 | 证据 |
 |---|---|---|
 | USB/AP/STA显示及断连动作 | CameraPresentationMode与安卓CameraConnectionPresentation/DisconnectedCameraPresentationTest逐项对应；真实transport优先，USB忽略残留STA | CameraConnectionPresentationTests 5项；列表/队列/监看信号按钮实际消费已复查 |
-| 无会话恢复与重连 | RootView的SceneStorage恢复，session可空；Unavailable remote拒绝协议命令；STA重试保持离线直到真实成功 | RestoredCameraWorkspaceTests 2项及ConnectionViewModel/RootView接线复查 |
+| 无会话恢复与重连 | 更正（2026-10-17）：冷启动从连接页开始，RootView入口改用本次运行的State；当前运行断线保留工作区。Unavailable remote拒绝协议命令；STA重试保持离线直到真实成功 | RestoredCameraWorkspaceTests 2项仅验证离线模型，不证明冷启动路由；本轮真机验证见全功能跟进U001续记 |
 | V2引导次数和持久化 | 独立v2键，20次，负值钳制，800ms延迟/4秒保持，实际开始时计数，点击永久终止 | RemoteEntryIntroPolicyTests 6项、RemoteEntryIntroLifecycleTests 5项 |
 | 入口自身呈现和动作 | 原RemoteMark路径、52高/至少140宽、13字号、48×56半收起入口；展开路径及动画参数逐项对照FileListScreen；目录→传输→免费额度拦截顺序 | RemoteEntryButton/PhotoListView直接源码核对，几何与越界测试；公共材质全部遗留由T24统一负责 |
 | 滚动和取消 | 8物理像素阈值；只对真实拖动/惯性反应；返回顶部清手动展开；离开列表取消引导等待 | PhotoListScrollActivityTests 2项；本轮新增task(id:列表可见状态)接线 |
@@ -174,7 +194,7 @@
 
 #### T02 无真实会话的页面恢复接入
 
-- RootView使用SceneStorage保留已进入工作区、监看路由；列表使用SceneStorage保留队列页。首次连接交接完成才记录工作区进入状态，恢复工作区后的真实重连不再播放首次连接庆祝；新会话identity替换列表/监看模型，原传输队列仍由Root持有。
+- 历史实现曾用SceneStorage保留已进入工作区、监看路由，导致手动结束后重新启动仍进入断线照片页。2026-10-17用户反馈后纠正为State：冷启动从连接页开始，本次运行内断线保留工作区；列表队列页存储不属于入口门控。原离线模型测试不能作为冷启动恢复正确的证据。新会话identity替换列表/监看模型，原传输队列仍由Root持有。
 - PhotoListView、缩略图组件及RemoteView允许session为空并单独接受显示模式；实际会话存在时以其USB/AP/STA模式覆盖历史。Root消费ConnectionState的rememberedPresentationMode，没有为恢复页面创建CameraSession、PTP repository或虚拟传输。
 - PhotoListViewModel新增明确的无目录通道初始化，scanCatalog为nil，load/reload/remote-return均不会进入加载或标记扫描完成。可选session的列表继续复用同一份设置、筛选、空态、顶栏和队列UI；需要真实会话的预览/协议动作按能力门控。
 - RemoteView无真实session时不启动取景。`DisconnectedRemoteCamera`仅表示不可用控制能力，所有查询/命令抛出既有CameraTransportError.disconnected，能力查询false，清理幂等；没有套用默认返回OK的协议扩展。新增监看中央`camera_not_connected`原文提示，白色0.78、黑底0.22、圆角8、12/6内边距与bodySmall对照RemoteScreen最终源码。
@@ -195,7 +215,9 @@
 - **不能把上述绿灯当作T02完成**：实体投影仍通过旧iOS shadowRadius/shadowY乘以高度比例绘制，只证明高度状态公式，未证明投影和安卓Surface渲染一致；公共材质的形状/纹理/按压时序也必须追到最终安卓实现。当前这些保留为未完成依赖，不能以“原生相似效果”替代。用户再次强调先完全调查、准备充分后再实现，不接受写得很像。
 - T03只做了调查入口整理：读完FileScanBatchSize及测试、PhotoMetadataIdentity及测试、CachedThumbnailBatchPolicy及测试；未实现T03代码。下一步先完成STA缩略图、磁盘缓存、已传身份及所有调用链和测试的调查，建立完整行为清单后再编码。总进度仍1/26。
 
-### T03：任务范围复刻完成，待用户验收
+### T03：历史收尾记录（2026-10-15已撤回整体完成）
+
+2026-10-15 C07复核确认F023–F026，旧测试覆盖Store/helper但没有证明ViewModel删除清队列、PTP无图响应映射、写盘失败停止后台以及USB会话身份接线。安卓1.91已有这些要求，不能当成新版本才增加的行为。历史通过结果保留其原范围，整体状态改为未完成；本次仅审查，没有修改业务或重新运行测试。
 
 2026-10-01 收尾按任务原范围逐项核对生产接线与安卓测试，状态改为完成待用户验收；总进度3/26。
 
@@ -276,7 +298,11 @@ T03尚未完成：继续接入普通/双卡首批及缓存自适应批次、核�
 - `/tmp/ztransfer-ios191-t03-cache-audit.xcresult`：TEST SUCCEEDED、退出0，22/22、无失败/跳过。随后将legacy规则从逐字符处理统一为完整字符串正则，最终`/tmp/ztransfer-ios191-t03-cache-final.xcresult`为TEST SUCCEEDED、退出0，9/9、无失败/跳过，确认最终源码重新编译。
 
 
-### T04：调查中
+### T04：未完成（2026-10-15重新审查）
+
+当前全功能C09发现F035：实际长按合集先展开底层列表，违背安卓1.91已存在的独立预览快照契约；撤回复刻完成状态，旧日志仅保留原范围证据，C10已确认F044–F051，涉及真实FHD/方向/资源/直方图/已传/缓存及飞行，T04继续未完成。
+
+以下为历史调查记录：
 
 已读取PhotoPreviewItemsTest、PreviewGestureGeometryTest、ThumbnailPreviewPriorityTest，定位安卓PhotoPreview/LocalPhotoPreviewPager及iOS PhotoPreviewView的当前页/邻页加载、EXIF结束门控、方向和本地原片入口。下一步按最终源码核对当前页独占本地原片解码、FHD缓存来源、预览会话和返回手势；尚未修改T04代码，不声称完成。
 
@@ -749,6 +775,8 @@ T03尚未完成：继续接入普通/双卡首批及缓存自适应批次、核�
 
 ### T12 调查入口：LUT 文件与数学基础（2026-10-07）
 
+**2026-10-15纠正：**C18/F102/F105已确认当前共享目录I/O/超时/错误回滚和Cube DOMAIN/快照边界缺口，下文完成仅为历史。T12撤回完成；C26继续核监看实际消费者，不能因基础解析测试曾通过就跳过生产边界。
+
 - 已读取安卓 `CubeLut.kt`、`LutGlProgram.kt`、`LutStateInstrumentation`、`LutColorInstrumentation`：解析上限 32MiB/单行8KiB/尺寸2…65，R 轴最快，默认 DOMAIN 0…1，DOMAIN_MIN/MAX 必须有限且可安全表示，SHA-256 身份；GPU 采样前按 domain 归一化并三线性插值，失败保持旧 LUT，输入色域必须 sRGB。
 - iOS 尚无对应 LUT 基础模块；下一步先实现独立 `.cube` 流式解析、错误分类、SHA-256 身份和三线性采样测试，再接文件夹授权/缓存和 Metal 显示。
 - 新增 `CubeLUT`/`CubeLUTParser`：32MiB 文件、8KiB 行、2…65 网格、TITLE/DOMAIN 约束、R 数据顺序、默认域和 SHA-256 身份已迁移；3 项解析边界测试通过，`/tmp/ztransfer-ios191-t12-cube3.xcresult` TEST SUCCEEDED。三线性采样、文件授权/缓存和 Metal 显示仍待实现。
@@ -778,12 +806,18 @@ T03尚未完成：继续接入普通/双卡首批及缓存自适应批次、核�
 - 新增 `PhotoLUTStoreTests` 覆盖强度钳位、选择/收藏跨实例恢复和收藏切换；`/tmp/ztransfer-ios191-t14-store.xcresult` TEST SUCCEEDED，2/2。T14 仍待把照片 LUT 选择纳入现有滤镜收藏排序及完整编辑器草稿恢复。
 - `PhotoLUTStore` 新增有序收藏序列，`PhotoLUTChooser` 按安卓加入顺序将收藏 LUT 置顶，取消收藏同步移除顺序；工程构建通过（`BUILD SUCCEEDED`）。跨会话编辑器草稿自动恢复仍待最后接线。
 - `LocalPhotoEffectsView` 在进入页面时会从已保存的照片 LUT 身份和运行时快照恢复 `PhotoEffectsSettings.selectedFilter` 与强度；工程构建通过（`BUILD SUCCEEDED`）。若进程重启后需从磁盘重新加载快照的恢复路径仍待补齐，T14 不标完成。
+**2026-10-15纠正：**C16/F088确认PhotoLUTStore未区分相机/本地当前选择，工作台onAppear可覆写自身草稿；旧普通效果独立作用域测试不覆盖LUT。撤回T14完成，C18/F098–F110又确认Cube提交被清、照片/监看目录混用、路径/digest恢复不匹配、UI/错误/颜色/取消/资源缺口；旧“重启快照恢复完成”无生产证据。下列保留为历史记录。
+
 - T14 收尾：照片 LUT 目录选择、一级文件列表、收藏顺序、强度、`cube:<digest>` 与 NP3 互斥、内容寻址快照、预览/最终生成共用映射、进程重启后的快照校验恢复均已完成；工程构建通过，相关映射/Store 测试通过。T14 标记“复刻完成，待用户验收”，总进度 12/26。
 - T15 调查与基础迁移：新增 `PhotoFramePlace`，按安卓规则清洗中文行政层级，避免区县/省份误当城市；新增合法坐标校验，保留赤道/本初子午线单轴坐标并拒绝全零 EXIF 占位。`/tmp/ztransfer-ios191-t15-place2.xcresult` TEST SUCCEEDED，2/2。参数海报完整字段布局与地点解析服务接线仍待继续，T15 未完成。
 - 新增 actor `PhotoFramePlaceResolver`：使用 `CLGeocoder` 反向解析，坐标四位小数缓存，单次请求 1 秒超时，结果经 `PhotoFramePlace` 行政层级清洗后返回；工程构建通过（`BUILD SUCCEEDED`）。尚未接入生成任务的异步元数据快照，T15 未完成。
+**2026-10-15纠正：**下条收尾声明不成立。全功能复核C19发现renderWithResolvedPlace没有生产调用，城市/区域没有入口；DMS并非安卓当前度分格式，合法单轴零坐标在实际呈现/编码被拒，海报会截尾与重复字段。地点helper的1秒截止也未真正取消等待。T15已撤回完成，历史日志不删。
+
 - T15 收尾：行政层级清洗、city/region 元数据、度分秒坐标、海拔、参数海报地点行、异步地理编码缓存/超时及 `renderWithResolvedPlace` 统一生成入口均已完成；坐标测试 ` /tmp/ztransfer-ios191-t15-coord2.xcresult` TEST SUCCEEDED，工程构建通过。T15 标记“复刻完成，待用户验收”，总进度 13/26。
 
 ### T16 品牌标识与相机型号（2026-10-07）
+
+**2026-10-15纠正：**C19/F114/F119确认Logo样式只被Brand Inset/Gallery两处绘制消费，其余模板仍纯文字，新字段重启丢失且UI三态循环未复刻。17品牌资源/路径测试不证明完整接入；T16撤回完成。
 
 - 已对照安卓 `FrameBrandLogo`/`BrandLogoPaths` 完成品牌识别基础：覆盖 17 个品牌、Nikon 前缀、型号剩余文本和矢量资源命名契约；未知品牌保留完整 make/model 文字回退。
 - 参数海报的 Brand Inset/Gallery 现在使用同一品牌身份解析结果，品牌与型号后缀按统一内容参与测量和绘制；修正此前只绘制整段 EXIF 字符串导致的品牌/型号拆分差异。`/tmp/ztransfer-ios191-t16-brand2.log` 中 `** TEST SUCCEEDED **`，生产工程 `/tmp/ztransfer-ios191-t16-build.log` 为 `** BUILD SUCCEEDED **`。
@@ -822,6 +856,8 @@ T03尚未完成：继续接入普通/双卡首批及缓存自适应批次、核�
 - 新增 `PhotoFrameMetadataSettingsTests`：覆盖宽度边界/5%步长、背景百分比边界及旧 JSON 缺字段默认值，3 项通过（`/tmp/ztransfer-ios191-t17-settings-tests.log`，`** TEST SUCCEEDED **`）。
 - 照片效果元数据面板新增安卓对应的边框宽度、背景模糊、遮罩强度三个滚轮控件及三语文案，提交直接写入当前预设状态；生产构建通过（`/tmp/ztransfer-ios191-t17-controls.log`，`** BUILD SUCCEEDED **`）。完整导出/截图回归仍待完成。
 - 新增导出回归：同一源图以宽度 60/100/200 渲染 Brand Inset，验证导出画布随宽度单调变化且渲染成功；4 项 T17 状态/导出测试通过（`/tmp/ztransfer-ios191-t17-export.log`，`** TEST SUCCEEDED **`）。截图像素对照仍由后续验收补充。
+**2026-10-15纠正：**C17/F096确认收藏仅存preset/watermark，未覆盖宽度/背景快照与当前安卓10/12字段；撤回T17完成。下条旧状态/渲染测试不证明收藏闭环。
+
 - T17 收尾：宽度状态/迁移、60…200/5步长归一化、全部编辑模板边距几何、1920预览与原图导出共用布局、背景 192px proxy 模糊比例、遮罩比例、城市/地区显隐、三语控件和导出回归均已接通；状态/导出测试通过，生产构建通过。T17 标记“复刻完成，待用户验收”，总进度 15/26。截图像素对照交用户真机验收，不阻塞代码收口。
 
 ### T18 免费版/高级版模块可见性首块（2026-10-07）
@@ -832,6 +868,8 @@ T03尚未完成：继续接入普通/双卡首批及缓存自适应批次、核�
 - T18 菜单首块：iOS 编辑器新增四模块开关条，按安卓掩码显示/禁用滤镜和相框编辑卡；高级版独立开关、免费版边框/水印联动已接入。工程构建 `/tmp/ztransfer-ios191-t18-ui.log`：`** BUILD SUCCEEDED **`。LUT 专属编辑内容和保存联动仍待完成。
 - T18 持久化收尾首块：模块掩码已写入/恢复 Android transfer 与 local 两套独立偏好键，归一化时按掩码关闭滤镜、边框、水印当前生效状态；定向 4 项测试通过，结果 `/tmp/ztransfer-ios191-t18-final.log`：`** TEST SUCCEEDED **`。T18 仍未关闭，LUT 专属编辑入口与免费版水印最终回退参数需继续核对。
 - T18 LUT 入口：编辑器接入 `PhotoLUTChooser`，支持文件夹选择、Cube LUT 扫描/解析、收藏、选择、强度调节，并将 `cube:<digest>` 写入当前草稿；按模块掩码和高级版权限控制显示/编辑。工程构建 `/tmp/ztransfer-ios191-t18-lut.log`：`** BUILD SUCCEEDED **`。仍需核对安卓免费版 LUT 是否应允许查看/选择，以及与普通滤镜互斥的完整 UI 状态。
+**2026-10-15纠正：**C16/F089发现本地页面在公共编辑器外还有无条件PhotoLUTChooser，可绕过模块掩码/互斥并重复呈现；撤回T18完成，不能以公共编辑器内部条件推断所有入口一致。C17又确认F091–F095/F097的点击、独立分区、LUT门控、清启用/互斥及菜单接线缺口。下条历史构建结果不覆盖该接线。
+
 - T18 收尾：核对安卓后移除 LUT 的错误 Pro 限制；普通滤镜与 LUT 按安卓互斥显示，选中 Cube LUT 时隐藏普通滤镜，选中普通滤镜时隐藏 LUT。工程构建 `/tmp/ztransfer-ios191-t18-lut-final.log`：`** BUILD SUCCEEDED **`。T18 标记“复刻完成，待用户验收”，总进度 16/26。
 
 ### T19 无损裁切交互与坐标（2026-10-07）
@@ -866,6 +904,8 @@ T03尚未完成：继续接入普通/双卡首批及缓存自适应批次、核�
 - T19 队列消费接线：新增 `LosslessCropProcessor`，按安卓 `<basename>_crop.jpg` 规则发布裁切文件并处理重名；`TransferQueueItem`/`TransferQueueViewModel` 支持裁切任务，原片成功落盘后执行无损裁切，成功移除持久化任务，失败保留原片和任务供重试；PhotoPreview 回调已接入队列。处理器测试 `/tmp/ztransfer-ios191-t19-processor.log` 为 `** TEST SUCCEEDED **`，生产构建 `/tmp/ztransfer-ios191-t19-queue-final.log` 为 `** BUILD SUCCEEDED **`。T19 仍需补齐 EXIF 属性复制与真机验收。
 - T19 EXIF 方向解析：JPEG 头解析器已按安卓规则增加 APP1/Exif Orientation 读取，供裁切源方向使用；当前桥接仍未复制完整 EXIF 标签，T19 保持未关闭。
 - T19 无损元数据保留：桥接在读取阶段保存 APP1/APP2/COM，并在 coefficient 输出后原样回写，避免通过 ImageIO 重编码；生产构建 `/tmp/ztransfer-ios191-t19-exif-bridge.log`：`** BUILD SUCCEEDED **`。安卓会更新 EXIF 尺寸字段，iOS 尚未改写 TIFF 尺寸值，T19 继续保持未关闭。
+**2026-10-15纠正：**下条整体完成撤回。C20/F125–F135证明准备状态/规范方向/动画helper无生产接线，sheet仍允许预览尺寸回退，比例/手势不对齐；原生warning/close/资源限制、EXIF旧缩略图和marker顺序也未覆盖。旧日志只保留其真实运行范围，不能证明完整裁切。原文“orientation不可重试”不符合当前安卓失败面板；按安卓实际入口重新实现。
+
 - T19 EXIF 尺寸收尾：无损桥接现在在回写 APP1 前更新 TIFF `ImageWidth/ImageLength` 与 `PixelXDimension/PixelYDimension`（支持 SHORT/LONG、大小端），生产构建 `/tmp/ztransfer-ios191-t19-exif-size.log`：`** BUILD SUCCEEDED **`。T19 标记“复刻完成，待用户真机验收”，总进度 17/26。
 
 
@@ -874,3 +914,7 @@ T03尚未完成：继续接入普通/双卡首批及缓存自适应批次、核�
 - Android APK 打包脚本、服务器运维和许可证/激活运营不属于 iOS 功能复刻范围，未移植到 `ios/`。
 - 无损裁切使用的 libjpeg-turbo 源码已纳入 `ios/ThirdParty`，并将 IJG 与 libjpeg-turbo 许可文本加入 `ios/licenses`，由 Xcode 资源阶段打包。
 - 本项为范围与依赖审计，无新增业务代码；全量自动化回归已通过（726 项，1 项跳过，0 失败，日志 `/tmp/ztransfer-ios191-t25-full-final.log`）。T26 标记“复刻完成，待用户验收”，总进度 26/26。
+
+### 2026-10-15 T21全功能复核缺口修复节点
+
+用户现要求按复核文档逐项修复。F056–F059已补完整GetObject双尺寸校验、照片失败/取消临时清理及完整part仅限视频、STA照片单请求/短读/大小上限、USB大对象不支持partial时的安全拒绝及后续文件门控。生产协议、队列、额度集中回归`/tmp/ztransfer-20261015-f056-f059-fixed.log`为56/56、0跳过、TEST SUCCEEDED；两次新增测试编译错误及修正已如实记入[全功能复核修复进度](iOS-全功能行为复核跟进.md)。未做真机验收、提交或推送；T21不立即恢复完成，V004的实际USB未知大小EOF仍需证据，不能用脚本回放推断框架的所有行为。整体计数保持5/26。

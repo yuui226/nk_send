@@ -3,7 +3,7 @@ import XCTest
 
 final class RemoteToolSlotMotionTests: XCTestCase {
     @MainActor
-    func testFixedSlotsFollowReflowSnapOnExitAndRemoveDetachedSlots() {
+    func testFixedSlotsKeepReflowOnExitAndRemoveDetachedSlots() {
         let motion = RemoteToolEditorMotion()
         defer { motion.stop() }
         func configure(_ slots: [String: CGRect], editing: Bool) {
@@ -21,8 +21,8 @@ final class RemoteToolSlotMotionTests: XCTestCase {
         XCTAssertTrue(motion.fixedPositions["manage"]!.isRunning)
         XCTAssertTrue(motion.states.isEmpty) // Fixed controls never acquire lift or wiggle state.
         configure(["manage": moved, "rotate": first], editing: false)
-        XCTAssertEqual(motion.fixedPosition("manage"), moved.origin)
-        XCTAssertFalse(motion.fixedPositions["manage"]!.isRunning)
+        XCTAssertEqual(motion.fixedPosition("manage"), first.origin)
+        XCTAssertTrue(motion.fixedPositions["manage"]!.isRunning)
         configure(["rotate": first], editing: false)
         XCTAssertNil(motion.fixedPosition("manage"))
     }
@@ -73,7 +73,7 @@ final class RemoteToolSlotMotionTests: XCTestCase {
         XCTAssertTrue(slot.position.isRunning)
     }
 
-    func testHiddenIconFadesWithoutWigglingAndLeavingEditSnapsPosition() {
+    func testHiddenIconFadesWithoutWigglingAndLeavingEditRetainsPosition() {
         var slot = RemoteToolSlotMotion(tool: .hd, position: .zero, visible: true)
         slot.configure(position: CGPoint(x: 126, y: 40), editing: true, visible: false, dragging: false)
         slot.advance(0)
@@ -81,10 +81,31 @@ final class RemoteToolSlotMotionTests: XCTestCase {
         XCTAssertEqual(slot.angle, 0)
         slot.advance(180_000_000)
         XCTAssertEqual(slot.iconOpacity.value, 0.38)
+        let previous = slot.position.value
         slot.configure(position: CGPoint(x: 42, y: 0), editing: false, visible: false, dragging: false)
+        XCTAssertEqual(slot.position.value, previous)
+        XCTAssertTrue(slot.position.isRunning)
+        XCTAssertFalse(slot.wiggles)
+        slot.advance(2_000_000_000)
         XCTAssertEqual(slot.position.value, CGPoint(x: 42, y: 0))
         XCTAssertFalse(slot.position.isRunning)
+    }
+
+    func testRecorderExpansionAnimatesNormalSlotsWithoutAnEntryFlight() {
+        let initial = CGPoint(x: 42, y: 0)
+        var slot = RemoteToolSlotMotion(tool: .grid, position: initial, visible: true)
+        slot.configure(position: initial, editing: false, visible: true, dragging: false)
+        XCTAssertFalse(slot.needsFrames)
+        slot.configure(position: CGPoint(x: 84, y: 0), editing: false, visible: true, dragging: false)
+        slot.advance(0)
+        XCTAssertEqual(slot.position.value, initial)
+        slot.advance(100_000_000)
+        XCTAssertGreaterThan(slot.position.value.x, initial.x)
+        XCTAssertLessThan(slot.position.value.x, 84)
         XCTAssertFalse(slot.wiggles)
+        slot.advance(1_000_000_000)
+        XCTAssertEqual(slot.position.value, CGPoint(x: 84, y: 0))
+        XCTAssertFalse(slot.needsFrames)
     }
 
     func testRetargetedPositionDoesNotJumpAndBothAxesFinishTogether() {

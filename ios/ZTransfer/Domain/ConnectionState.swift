@@ -89,7 +89,7 @@ extension ConnectionState {
                 next.errorMessage = message
             } else if status == .authorized,
                       (next.usbPhase == .unavailable ||
-                       next.usbPhase == .failed(AppLocalized.resource("usb_permission_required"))) {
+                       usbAuthorization == .denied || usbAuthorization == .restricted) {
                 next.usbPhase = .waitingForCamera
                 next.errorMessage = nil
             }

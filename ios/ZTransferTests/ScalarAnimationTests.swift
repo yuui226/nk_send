@@ -2,6 +2,39 @@ import XCTest
 @testable import ZTransfer
 
 final class ScalarAnimationTests: XCTestCase {
+    func testDelayedTweenRetainsTransitionEndVelocityOnlyWhenRequested() {
+        let spec = ZTransferAndroidMotion.tween(milliseconds: 200, delayMilliseconds: 60)
+        var transition = ZTransferScalarAnimation(value: 0, retainsEndVelocity: true)
+        var animatable = ZTransferScalarAnimation(value: 0)
+        transition.retarget(1, using: spec)
+        animatable.retarget(1, using: spec)
+        for nanos in [Int64(0), 59_999_999, 60_000_000] {
+            transition.advance(frameNanos: nanos)
+            animatable.advance(frameNanos: nanos)
+            XCTAssertEqual(transition.value, 0)
+            XCTAssertTrue(transition.isRunning)
+        }
+        transition.advance(frameNanos: 110_000_000)
+        XCTAssertGreaterThan(transition.value, 0)
+        // Compose 1.7.6 subtracts delay again in velocity's finite difference.
+        XCTAssertEqual(transition.velocity, 0)
+        transition.advance(frameNanos: 260_000_000)
+        animatable.advance(frameNanos: 260_000_000)
+        XCTAssertEqual(transition.value, 1)
+        XCTAssertFalse(transition.isRunning)
+        XCTAssertGreaterThan(transition.velocity, 0)
+        XCTAssertEqual(animatable.velocity, 0)
+        let endVelocity = transition.velocity
+        transition.retarget(0, using: .criticallyDampedSpring(stiffness: 400))
+        transition.advance(frameNanos: 300_000_000)
+        XCTAssertEqual(transition.velocity, endVelocity, accuracy: 0.000001)
+        transition.reset(to: 0)
+        transition.retarget(1, using: spec)
+        transition.advance(frameNanos: 1_000_000_000)
+        transition.advance(frameNanos: 1_260_000_000)
+        XCTAssertGreaterThan(transition.velocity, 0)
+    }
+
     func testIntegerConvertedInterruptionStartsAtDisplayedPixelWithoutLosingFrameOrigin() {
         var animation = ZTransferScalarAnimation(value: 228)
         animation.retarget(348, using: .tween(milliseconds: 220))

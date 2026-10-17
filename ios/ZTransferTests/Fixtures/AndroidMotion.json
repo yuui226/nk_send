@@ -62,6 +62,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -78,6 +93,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -141,6 +161,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f770a3d",
           "velocity": "0"
@@ -157,6 +192,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f770a3d",
           "velocity": "0"
         },
@@ -220,6 +260,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -236,6 +291,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -299,6 +359,21 @@
           "velocity": "bdf5c28f"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7851ec",
           "velocity": "bdf5c28f"
@@ -315,6 +390,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f7851ec",
           "velocity": "bdf5c28f"
         },
@@ -378,6 +458,21 @@
           "velocity": "be9eb852"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "be9eb852"
@@ -394,6 +489,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "be9eb852"
         },
@@ -457,6 +557,21 @@
           "velocity": "3e6b851f"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "3e6b851f"
@@ -473,6 +588,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3e6b851f"
         },
@@ -536,6 +656,21 @@
           "velocity": "40800000"
         },
         {
+          "nanos": 59999999,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
           "nanos": 79999999,
           "value": "0",
           "velocity": "40800000"
@@ -552,6 +687,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 150000000,
           "value": "0",
           "velocity": "40800000"
         },
@@ -615,6 +755,21 @@
           "velocity": "c0000000"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "c0000000"
@@ -631,6 +786,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "c0000000"
         },
@@ -694,6 +854,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -710,6 +885,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -773,6 +953,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -789,6 +984,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -852,6 +1052,21 @@
           "velocity": "4181fa89"
         },
         {
+          "nanos": 59999999,
+          "value": "3f759922",
+          "velocity": "40983073"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f759922",
+          "velocity": "40983073"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f759922",
+          "velocity": "40983073"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "3da81740"
@@ -868,6 +1083,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3da81740"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3da81740"
         },
@@ -936,6 +1156,21 @@
           "velocity": "bf1191a0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f776770",
+          "velocity": "be2a78a0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f776770",
+          "velocity": "be2a78a0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f776770",
+          "velocity": "be2a78a0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f770a3d",
           "velocity": "bb3b8000"
@@ -952,6 +1187,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f770a3d",
+          "velocity": "bb3b8000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f770a3d",
           "velocity": "bb3b8000"
         },
@@ -1020,6 +1260,21 @@
           "velocity": "3f1191a0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fa2cd",
+          "velocity": "3e2a78a0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fa2cd",
+          "velocity": "3e2a78a0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fa2cd",
+          "velocity": "3e2a78a0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "3b3b8000"
@@ -1036,6 +1291,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3b3b8000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3b3b8000"
         },
@@ -1104,6 +1364,21 @@
           "velocity": "bef992a0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f78a1cf",
+          "velocity": "be121e40"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f78a1cf",
+          "velocity": "be121e40"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f78a1cf",
+          "velocity": "be121e40"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7851ec",
           "velocity": "bb202800"
@@ -1120,6 +1395,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f7851ec",
+          "velocity": "bb202800"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f7851ec",
           "velocity": "bb202800"
         },
@@ -1188,6 +1468,21 @@
           "velocity": "3e68e900"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fdab8",
+          "velocity": "3d885a40"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fdab8",
+          "velocity": "3d885a40"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fdab8",
+          "velocity": "3d885a40"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "3a947000"
@@ -1204,6 +1499,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3a947000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3a947000"
         },
@@ -1272,6 +1572,21 @@
           "velocity": "3e95b820"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fd012",
+          "velocity": "3daf6a40"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fd012",
+          "velocity": "3daf6a40"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fd012",
+          "velocity": "3daf6a40"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "3ac35000"
@@ -1288,6 +1603,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3ac35000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3ac35000"
         },
@@ -1356,6 +1676,21 @@
           "velocity": "c0cff742"
         },
         {
+          "nanos": 59999999,
+          "value": "3c8524b3",
+          "velocity": "bff380bb"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3c8524b3",
+          "velocity": "bff380bb"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3c8524b3",
+          "velocity": "bff380bb"
+        },
+        {
           "nanos": 79999999,
           "value": "0",
           "velocity": "bd067900"
@@ -1372,6 +1707,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "0",
+          "velocity": "bd067900"
+        },
+        {
+          "nanos": 150000000,
           "value": "0",
           "velocity": "bd067900"
         },
@@ -1440,6 +1780,21 @@
           "velocity": "bfbb2df8"
         },
         {
+          "nanos": 59999999,
+          "value": "3f8077d4",
+          "velocity": "bedb2d60"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f8077d4",
+          "velocity": "bedb2d60"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f8077d4",
+          "velocity": "bedb2d60"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "bbf23000"
@@ -1456,6 +1811,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "bbf23000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "bbf23000"
         },
@@ -1524,6 +1884,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -1540,6 +1915,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -1608,6 +1988,21 @@
           "velocity": "3c84d000"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ffd56",
+          "velocity": "3b9c4000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7ffd56",
+          "velocity": "3b9c4000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7ffd56",
+          "velocity": "3b9c4000"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "387a0000"
@@ -1624,6 +2019,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "387a0000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "387a0000"
         },
@@ -1692,6 +2092,21 @@
           "velocity": "41968534"
         },
         {
+          "nanos": 59999999,
+          "value": "3f6bb7fe",
+          "velocity": "40d00183"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f6bb7fe",
+          "velocity": "40d00183"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f6bb7fe",
+          "velocity": "40d00183"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7e32ce",
           "velocity": "3fc7bec4"
@@ -1708,6 +2123,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3d847240"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3d847240"
         },
@@ -1781,6 +2201,21 @@
           "velocity": "bf289440"
         },
         {
+          "nanos": 59999999,
+          "value": "3f77bff5",
+          "velocity": "be68f8a0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f77bff5",
+          "velocity": "be68f8a0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f77bff5",
+          "velocity": "be68f8a0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f771a61",
           "velocity": "bd5fe080"
@@ -1797,6 +2232,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f770a3d",
+          "velocity": "bb147000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f770a3d",
           "velocity": "bb147000"
         },
@@ -1870,6 +2310,21 @@
           "velocity": "3f289440"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7f4a48",
+          "velocity": "3e68f8a0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7f4a48",
+          "velocity": "3e68f8a0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7f4a48",
+          "velocity": "3e68f8a0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7fefdc",
           "velocity": "3d5fe080"
@@ -1886,6 +2341,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3b147000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3b147000"
         },
@@ -1959,6 +2419,21 @@
           "velocity": "bf108030"
         },
         {
+          "nanos": 59999999,
+          "value": "3f78edaf",
+          "velocity": "be47a560"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f78edaf",
+          "velocity": "be47a560"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f78edaf",
+          "velocity": "be47a560"
+        },
+        {
           "nanos": 79999999,
           "value": "3f785fc2",
           "velocity": "bd3fa680"
@@ -1975,6 +2450,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f7851ec",
+          "velocity": "bb00e800"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f7851ec",
           "velocity": "bb00e800"
         },
@@ -2048,6 +2528,21 @@
           "velocity": "3e86db70"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fb750",
+          "velocity": "3dba66c0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fb750",
+          "velocity": "3dba66c0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fb750",
+          "velocity": "3dba66c0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ff98b",
           "velocity": "3cb2b600"
@@ -2064,6 +2559,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3a6a6000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3a6a6000"
         },
@@ -2137,6 +2637,21 @@
           "velocity": "3ead66a0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fa28b",
+          "velocity": "3def9fc0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fa28b",
+          "velocity": "3def9fc0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fa28b",
+          "velocity": "3def9fc0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ff7b3",
           "velocity": "3ce5fb00"
@@ -2153,6 +2668,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3a9c4000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3a9c4000"
         },
@@ -2226,6 +2746,21 @@
           "velocity": "c0f0d533"
         },
         {
+          "nanos": 59999999,
+          "value": "3d01ccda",
+          "velocity": "c026679c"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3d01ccda",
+          "velocity": "c026679c"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3d01ccda",
+          "velocity": "c026679c"
+        },
+        {
           "nanos": 79999999,
           "value": "3b387a67",
           "velocity": "bf1fcbce"
@@ -2242,6 +2777,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "0",
+          "velocity": "bcd3ea00"
+        },
+        {
+          "nanos": 150000000,
           "value": "0",
           "velocity": "bcd3ea00"
         },
@@ -2315,6 +2855,21 @@
           "velocity": "bfd8c048"
         },
         {
+          "nanos": 59999999,
+          "value": "3f80e9a4",
+          "velocity": "bf15bff0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f80e9a4",
+          "velocity": "bf15bff0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f80e9a4",
+          "velocity": "bf15bff0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f8014c1",
           "velocity": "be0fcc80"
@@ -2331,6 +2886,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "bbbf6800"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "bbbf6800"
         },
@@ -2404,6 +2964,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -2420,6 +2995,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -2493,6 +3073,21 @@
           "velocity": "3c99cf00"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ffacf",
+          "velocity": "3bd4e400"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7ffacf",
+          "velocity": "3bd4e400"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7ffacf",
+          "velocity": "3bd4e400"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7fff8a",
           "velocity": "3acb2000"
@@ -2509,6 +3104,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "387a0000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "387a0000"
         },
@@ -2582,6 +3182,21 @@
           "velocity": "41994cef"
         },
         {
+          "nanos": 59999999,
+          "value": "3f2b04dd",
+          "velocity": "414ede7f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f2b04dd",
+          "velocity": "414ede7f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f2b04dd",
+          "velocity": "414ede7f"
+        },
+        {
           "nanos": 79999999,
           "value": "3f5a192c",
           "velocity": "40d0f142"
@@ -2598,6 +3213,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3cdac000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3cdac000"
         },
@@ -2671,6 +3291,21 @@
           "velocity": "bf2bb120"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7a03ab",
+          "velocity": "bee7b080"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7a03ab",
+          "velocity": "bee7b080"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7a03ab",
+          "velocity": "bee7b080"
+        },
+        {
           "nanos": 79999999,
           "value": "3f785dd6",
           "velocity": "be6a11e0"
@@ -2687,6 +3322,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f770a3d",
+          "velocity": "ba7a0000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f770a3d",
           "velocity": "ba7a0000"
         },
@@ -2760,6 +3400,21 @@
           "velocity": "3f2bb508"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7d0692",
+          "velocity": "3ee7b080"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7d0692",
+          "velocity": "3ee7b080"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7d0692",
+          "velocity": "3ee7b080"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7eac66",
           "velocity": "3e6a0240"
@@ -2776,6 +3431,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3a7a0000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "3a7a0000"
         },
@@ -2849,6 +3509,21 @@
           "velocity": "bf1327e0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ade93",
+          "velocity": "bec69bc0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7ade93",
+          "velocity": "bec69bc0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7ade93",
+          "velocity": "bec69bc0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f797502",
           "velocity": "be488fc0"
@@ -2865,6 +3540,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f7851ec",
+          "velocity": "ba4b2000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f7851ec",
           "velocity": "ba4b2000"
         },
@@ -2938,6 +3618,21 @@
           "velocity": "3e895c10"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ecf6e",
+          "velocity": "3e396cc0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7ecf6e",
+          "velocity": "3e396cc0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7ecf6e",
+          "velocity": "3e396cc0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7f7829",
           "velocity": "3dbb2240"
@@ -2954,6 +3649,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "39bb8000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "39bb8000"
         },
@@ -3027,6 +3727,21 @@
           "velocity": "3eb0a2c0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7e7868",
+          "velocity": "3e6e4800"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7e7868",
+          "velocity": "3e6e4800"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7e7868",
+          "velocity": "3e6e4800"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7f5159",
           "velocity": "3df099c0"
@@ -3043,6 +3758,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "39fa0000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "39fa0000"
         },
@@ -3116,6 +3836,21 @@
           "velocity": "c0f547c0"
         },
         {
+          "nanos": 59999999,
+          "value": "3e07f838",
+          "velocity": "c0a57ed2"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3e07f838",
+          "velocity": "c0a57ed2"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3e07f838",
+          "velocity": "c0a57ed2"
+        },
+        {
           "nanos": 79999999,
           "value": "3d72921a",
           "velocity": "c0272762"
@@ -3132,6 +3867,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "0",
+          "velocity": "bc2f0000"
+        },
+        {
+          "nanos": 150000000,
           "value": "0",
           "velocity": "bc2f0000"
         },
@@ -3205,6 +3945,21 @@
           "velocity": "bfdcbfb8"
         },
         {
+          "nanos": 59999999,
+          "value": "3f83d2fb",
+          "velocity": "bf94f0e8"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f83d2fb",
+          "velocity": "bf94f0e8"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f83d2fb",
+          "velocity": "bf94f0e8"
+        },
+        {
           "nanos": 79999999,
           "value": "3f81b4a1",
           "velocity": "bf166bd0"
@@ -3221,6 +3976,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "bb1c4000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "bb1c4000"
         },
@@ -3294,6 +4054,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -3310,6 +4085,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -3383,6 +4163,21 @@
           "velocity": "3c9db700"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fea3f",
+          "velocity": "3c53ea00"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fea3f",
+          "velocity": "3c53ea00"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fea3f",
+          "velocity": "3c53ea00"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ff64c",
           "velocity": "3bd6d800"
@@ -3399,6 +4194,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -3472,6 +4272,21 @@
           "velocity": "416b9525"
         },
         {
+          "nanos": 59999999,
+          "value": "3f0f4a72",
+          "velocity": "4166512e"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f0f4a72",
+          "velocity": "4166512e"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f0f4a72",
+          "velocity": "4166512e"
+        },
+        {
           "nanos": 79999999,
           "value": "3f468b38",
           "velocity": "410007e1"
@@ -3490,6 +4305,11 @@
           "nanos": 140000000,
           "value": "3f7db131",
           "velocity": "3f7aa410"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7f73ed",
+          "velocity": "3eeca9f0"
         },
         {
           "nanos": 180000000,
@@ -3566,6 +4386,21 @@
           "velocity": "bf03ed70"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7afc1d",
+          "velocity": "bf00fb88"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7afc1d",
+          "velocity": "bf00fb88"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7afc1d",
+          "velocity": "bf00fb88"
+        },
+        {
           "nanos": 79999999,
           "value": "3f790d0c",
           "velocity": "be8f66f0"
@@ -3584,6 +4419,11 @@
           "nanos": 140000000,
           "value": "3f771eeb",
           "velocity": "bd0c6180"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f770f24",
+          "velocity": "bc845300"
         },
         {
           "nanos": 180000000,
@@ -3660,6 +4500,21 @@
           "velocity": "3f03ed70"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7c0e20",
+          "velocity": "3f00f7a0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7c0e20",
+          "velocity": "3f00f7a0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7c0e20",
+          "velocity": "3f00f7a0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7dfd31",
           "velocity": "3e8f66f0"
@@ -3678,6 +4533,11 @@
           "nanos": 140000000,
           "value": "3f7feb52",
           "velocity": "3d0c6180"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ffb19",
+          "velocity": "3c845300"
         },
         {
           "nanos": 180000000,
@@ -3754,6 +4614,21 @@
           "velocity": "bee23240"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7bb387",
+          "velocity": "bedd1990"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7bb387",
+          "velocity": "bedd1990"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7bb387",
+          "velocity": "bedd1990"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7a0b2f",
           "velocity": "be75d980"
@@ -3772,6 +4647,11 @@
           "nanos": 140000000,
           "value": "3f7863a5",
           "velocity": "bcf0b900"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f785620",
+          "velocity": "bc629000"
         },
         {
           "nanos": 180000000,
@@ -3848,6 +4728,21 @@
           "velocity": "3e52ffa0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7e6c0d",
+          "velocity": "3e4e5c20"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7e6c0d",
+          "velocity": "3e4e5c20"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7e6c0d",
+          "velocity": "3e4e5c20"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7f3214",
           "velocity": "3de57e00"
@@ -3866,6 +4761,11 @@
           "nanos": 140000000,
           "value": "3f7ff7bb",
           "velocity": "3c609c00"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ffe0a",
+          "velocity": "3bd4e400"
         },
         {
           "nanos": 180000000,
@@ -3942,6 +4842,21 @@
           "velocity": "3e87a690"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7df8a3",
+          "velocity": "3e84a8f0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7df8a3",
+          "velocity": "3e84a8f0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7df8a3",
+          "velocity": "3e84a8f0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ef73e",
           "velocity": "3e137600"
@@ -3960,6 +4875,11 @@
           "nanos": 140000000,
           "value": "3f7ff55e",
           "velocity": "3c908800"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ffd7b",
+          "velocity": "3c08b800"
         },
         {
           "nanos": 180000000,
@@ -4036,6 +4956,21 @@
           "velocity": "c0bc7750"
         },
         {
+          "nanos": 59999999,
+          "value": "3e3455b0",
+          "velocity": "c0b840f2"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3e3455b0",
+          "velocity": "c0b840f2"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3e3455b0",
+          "velocity": "c0b840f2"
+        },
+        {
           "nanos": 79999999,
           "value": "3db7dc1a",
           "velocity": "c04cd968"
@@ -4054,6 +4989,11 @@
           "nanos": 140000000,
           "value": "3b6c52cd",
           "velocity": "bec88345"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3a601e67",
+          "velocity": "be3d54bc"
         },
         {
           "nanos": 180000000,
@@ -4130,6 +5070,21 @@
           "velocity": "bfa9a1c8"
         },
         {
+          "nanos": 59999999,
+          "value": "3f851269",
+          "velocity": "bfa5d520"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f851269",
+          "velocity": "bfa5d520"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f851269",
+          "velocity": "bfa5d520"
+        },
+        {
           "nanos": 79999999,
           "value": "3f8295e5",
           "velocity": "bf385b50"
@@ -4148,6 +5103,11 @@
           "nanos": 140000000,
           "value": "3f801a96",
           "velocity": "bdb46b80"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f80064e",
+          "velocity": "bd2a6900"
         },
         {
           "nanos": 180000000,
@@ -4224,6 +5184,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -4240,6 +5215,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -4318,6 +5298,21 @@
           "velocity": "3c713600"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fe326",
+          "velocity": "3c6c5400"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fe326",
+          "velocity": "3c6c5400"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fe326",
+          "velocity": "3c6c5400"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ff14a",
           "velocity": "3c02dc00"
@@ -4336,6 +5331,11 @@
           "nanos": 140000000,
           "value": "3f7fff69",
           "velocity": "3a84d000"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fffdc",
+          "velocity": "39fa0000"
         },
         {
           "nanos": 180000000,
@@ -4412,6 +5412,21 @@
           "velocity": "412faaf2"
         },
         {
+          "nanos": 59999999,
+          "value": "3eea1cec",
+          "velocity": "416acfd1"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3eea1cec",
+          "velocity": "416acfd1"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3eea1cec",
+          "velocity": "416acfd1"
+        },
+        {
           "nanos": 79999999,
           "value": "3f31faea",
           "velocity": "41148156"
@@ -4430,6 +5445,11 @@
           "nanos": 140000000,
           "value": "3f7802b6",
           "velocity": "3fe1ad70"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7bbd67",
+          "velocity": "3f9c2890"
         },
         {
           "nanos": 180000000,
@@ -4501,6 +5521,21 @@
           "velocity": "bec4bf30"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7be72c",
+          "velocity": "bf038010"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7be72c",
+          "velocity": "bf038010"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7be72c",
+          "velocity": "bf038010"
+        },
+        {
           "nanos": 79999999,
           "value": "3f79c54c",
           "velocity": "bea65220"
@@ -4519,6 +5554,11 @@
           "nanos": 140000000,
           "value": "3f7751d3",
           "velocity": "bd7caf80"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f773069",
+          "velocity": "bd2ece00"
         },
         {
           "nanos": 180000000,
@@ -4590,6 +5630,21 @@
           "velocity": "3ec4bf30"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7b2311",
+          "velocity": "3f038010"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7b2311",
+          "velocity": "3f038010"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7b2311",
+          "velocity": "3f038010"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7d44f1",
           "velocity": "3ea65220"
@@ -4608,6 +5663,11 @@
           "nanos": 140000000,
           "value": "3f7fb86a",
           "velocity": "3d7caf80"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fd9d4",
+          "velocity": "3d2ece00"
         },
         {
           "nanos": 180000000,
@@ -4679,6 +5739,21 @@
           "velocity": "bea8a3e0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7c7d02",
+          "velocity": "bee16720"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7c7d02",
+          "velocity": "bee16720"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7c7d02",
+          "velocity": "bee16720"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7aa91d",
           "velocity": "be8e9400"
@@ -4697,6 +5772,11 @@
           "nanos": 140000000,
           "value": "3f788f48",
           "velocity": "bd588d80"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7872a4",
+          "velocity": "bd15e700"
         },
         {
           "nanos": 180000000,
@@ -4768,6 +5848,21 @@
           "velocity": "3e1d68e0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7e0e07",
+          "velocity": "3e526360"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7e0e07",
+          "velocity": "3e526360"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7e0e07",
+          "velocity": "3e526360"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ee860",
           "velocity": "3e050e80"
@@ -4786,6 +5881,11 @@
           "nanos": 140000000,
           "value": "3f7fe35e",
           "velocity": "3cca2600"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ff0bb",
+          "velocity": "3c8ba600"
         },
         {
           "nanos": 180000000,
@@ -4857,6 +5957,21 @@
           "velocity": "3e4a6480"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7d7fc0",
+          "velocity": "3e874100"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7d7fc0",
+          "velocity": "3e874100"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7d7fc0",
+          "velocity": "3e874100"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7e987c",
           "velocity": "3e2b14e0"
@@ -4875,6 +5990,11 @@
           "nanos": 140000000,
           "value": "3f7fdb2f",
           "velocity": "3d01e200"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fec5f",
+          "velocity": "3cb42d00"
         },
         {
           "nanos": 180000000,
@@ -4946,6 +6066,21 @@
           "velocity": "c08c88ce"
         },
         {
+          "nanos": 59999999,
+          "value": "3e5e4f43",
+          "velocity": "c0bbd97a"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3e5e4f43",
+          "velocity": "c0bbd97a"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3e5e4f43",
+          "velocity": "c0bbd97a"
+        },
+        {
           "nanos": 79999999,
           "value": "3df9a9e0",
           "velocity": "c06d9be2"
@@ -4964,6 +6099,11 @@
           "nanos": 140000000,
           "value": "3c4c8767",
           "velocity": "bf348ac0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3bda1e9a",
+          "velocity": "bef9da77"
         },
         {
           "nanos": 180000000,
@@ -5035,6 +6175,21 @@
           "velocity": "bf7cee00"
         },
         {
+          "nanos": 59999999,
+          "value": "3f8640a1",
+          "velocity": "bfa91140"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f8640a1",
+          "velocity": "bfa91140"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f8640a1",
+          "velocity": "bfa91140"
+        },
+        {
           "nanos": 79999999,
           "value": "3f8382ca",
           "velocity": "bf55de00"
@@ -5053,6 +6208,11 @@
           "nanos": 140000000,
           "value": "3f805c0a",
           "velocity": "be2279c0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f803114",
+          "velocity": "bde0da80"
         },
         {
           "nanos": 180000000,
@@ -5124,6 +6284,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -5140,6 +6315,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -5213,6 +6393,21 @@
           "velocity": "3c33b000"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fdc6e",
+          "velocity": "3c703c00"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fdc6e",
+          "velocity": "3c703c00"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fdc6e",
+          "velocity": "3c703c00"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7fec07",
           "velocity": "3c185800"
@@ -5231,6 +6426,11 @@
           "nanos": 140000000,
           "value": "3f7ffdf4",
           "velocity": "3ae29000"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ffee9",
+          "velocity": "3aa41000"
         },
         {
           "nanos": 180000000,
@@ -5302,6 +6502,21 @@
           "velocity": "40cd62cc"
         },
         {
+          "nanos": 59999999,
+          "value": "3e966d33",
+          "velocity": "413d70b4"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3e966d33",
+          "velocity": "413d70b4"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3e966d33",
+          "velocity": "413d70b4"
+        },
+        {
           "nanos": 79999999,
           "value": "3f088565",
           "velocity": "412e984a"
@@ -5320,6 +6535,11 @@
           "nanos": 140000000,
           "value": "3f66f571",
           "velocity": "40421780"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f6dd84f",
+          "velocity": "401b440c"
         },
         {
           "nanos": 180000000,
@@ -5391,6 +6611,21 @@
           "velocity": "be65fb00"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7d5e16",
+          "velocity": "bed43050"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7d5e16",
+          "velocity": "bed43050"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7d5e16",
+          "velocity": "bed43050"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7b38c5",
           "velocity": "bec38e80"
@@ -5409,6 +6644,11 @@
           "nanos": 140000000,
           "value": "3f77ea9c",
           "velocity": "bdd94900"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f77ace8",
+          "velocity": "bdadf340"
         },
         {
           "nanos": 180000000,
@@ -5480,6 +6720,21 @@
           "velocity": "3e65fb00"
         },
         {
+          "nanos": 59999999,
+          "value": "3f79ac26",
+          "velocity": "3ed42880"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f79ac26",
+          "velocity": "3ed42880"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f79ac26",
+          "velocity": "3ed42880"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7bd178",
           "velocity": "3ec38e80"
@@ -5498,6 +6753,11 @@
           "nanos": 140000000,
           "value": "3f7f1fa1",
           "velocity": "3dd96840"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7f5d55",
+          "velocity": "3dadf340"
         },
         {
           "nanos": 180000000,
@@ -5569,6 +6829,21 @@
           "velocity": "be4524c0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7dbe5c",
+          "velocity": "beb5e280"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7dbe5c",
+          "velocity": "beb5e280"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7dbe5c",
+          "velocity": "beb5e280"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7be785",
           "velocity": "bea79a40"
@@ -5587,6 +6862,11 @@
           "nanos": 140000000,
           "value": "3f79123d",
           "velocity": "bdba4780"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f78dd5a",
+          "velocity": "bd950c40"
         },
         {
           "nanos": 180000000,
@@ -5658,6 +6938,21 @@
           "velocity": "3db81500"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7d780e",
+          "velocity": "3e29ad80"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7d780e",
+          "velocity": "3e29ad80"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7d780e",
+          "velocity": "3e29ad80"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7e53ca",
           "velocity": "3e1c7e80"
@@ -5676,6 +6971,11 @@
           "nanos": 140000000,
           "value": "3f7fa640",
           "velocity": "3d2dd400"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fbeef",
+          "velocity": "3d0b2900"
         },
         {
           "nanos": 180000000,
@@ -5747,6 +7047,21 @@
           "velocity": "3dec9280"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7cbeee",
+          "velocity": "3e5a23c0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7cbeee",
+          "velocity": "3e5a23c0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7cbeee",
+          "velocity": "3e5a23c0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7dd971",
           "velocity": "3e491c60"
@@ -5765,6 +7080,11 @@
           "nanos": 140000000,
           "value": "3f7f8c9c",
           "velocity": "3d5fa200"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fac57",
+          "velocity": "3d32b600"
         },
         {
           "nanos": 180000000,
@@ -5836,6 +7156,21 @@
           "velocity": "c0244efd"
         },
         {
+          "nanos": 59999999,
+          "value": "3e90a11f",
+          "velocity": "c0978d5d"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3e90a11f",
+          "velocity": "c0978d5d"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3e90a11f",
+          "velocity": "c0978d5d"
+        },
+        {
           "nanos": 79999999,
           "value": "3e3f2a92",
           "velocity": "c08bacf5"
@@ -5854,6 +7189,11 @@
           "nanos": 140000000,
           "value": "3d204393",
           "velocity": "bf9b4600"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3ce86273",
+          "velocity": "bf786cec"
         },
         {
           "nanos": 180000000,
@@ -5925,6 +7265,21 @@
           "velocity": "bf13e360"
         },
         {
+          "nanos": 59999999,
+          "value": "3f8822aa",
+          "velocity": "bf8865f8"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f8822aa",
+          "velocity": "bf8865f8"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f8822aa",
+          "velocity": "bf8865f8"
+        },
+        {
           "nanos": 79999999,
           "value": "3f856066",
           "velocity": "bf7b6760"
@@ -5943,6 +7298,11 @@
           "nanos": 140000000,
           "value": "3f81207a",
           "velocity": "be8bb5a0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f80d125",
+          "velocity": "be5fa200"
         },
         {
           "nanos": 180000000,
@@ -6014,6 +7374,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -6030,6 +7405,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -6103,6 +7483,21 @@
           "velocity": "3bd0fc00"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fd1b8",
+          "velocity": "3c425600"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fd1b8",
+          "velocity": "3c425600"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fd1b8",
+          "velocity": "3c425600"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7fe16a",
           "velocity": "3c32b600"
@@ -6121,6 +7516,11 @@
           "nanos": 140000000,
           "value": "3f7ff997",
           "velocity": "3b473800"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ffb5a",
+          "velocity": "3b1c4000"
         },
         {
           "nanos": 180000000,
@@ -6149,6 +7549,4416 @@
         },
         {
           "nanos": 220000001,
+          "value": "3f800000",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "0",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "2864af7e",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3cd3dea1",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3cd3dea1",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3d871c2b",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f1d148c",
+          "velocity": "40331650"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f344b18",
+          "velocity": "40a3e7a0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f603f6f",
+          "velocity": "415a8bc1"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f79ab25",
+          "velocity": "40cc3bb1"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "401be722"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "401be722"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f800000",
+          "velocity": "401be722"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f800000",
+          "velocity": "401be722"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f800000",
+          "velocity": "401be722"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f800000",
+      "target": "3f770a3d",
+      "velocity": "0",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7fc4ad",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7fc4ad",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7f68ae",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7a808f",
+          "velocity": "bdc8af00"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f79b092",
+          "velocity": "be378860"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7826bd",
+          "velocity": "bef4c810"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7742f8",
+          "velocity": "be64b2e0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f770a3d",
+          "velocity": "bdaeaec0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f770a3d",
+          "velocity": "bdaeaec0"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f770a3d",
+          "velocity": "bdaeaec0"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f770a3d",
+          "velocity": "bdaeaec0"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f770a3d",
+          "velocity": "bdaeaec0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f770a3d",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f774590",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f774590",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f77a190",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7c89ae",
+          "velocity": "3dc88fc0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7d59ab",
+          "velocity": "3e379800"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7ee380",
+          "velocity": "3ef4cfe0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7fc745",
+          "velocity": "3e64b2e0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3daeaec0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3daeaec0"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f800000",
+          "velocity": "3daeaec0"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f800000",
+          "velocity": "3daeaec0"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f800000",
+          "velocity": "3daeaec0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f800000",
+      "target": "3f7851ec",
+      "velocity": "bdf5c28f",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7fcd27",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7fcd27",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7f7e4c",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7b49a0",
+          "velocity": "bdabff40"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7a9759",
+          "velocity": "be1d49a0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7945c7",
+          "velocity": "bed1c720"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f78828c",
+          "velocity": "be441b20"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f7851ec",
+          "velocity": "bd95a880"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f7851ec",
+          "velocity": "bd95a880"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f7851ec",
+          "velocity": "bd95a880"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f7851ec",
+          "velocity": "bd95a880"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f7851ec",
+          "velocity": "bd95a880"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f7c6a7f",
+      "target": "3f800000",
+      "velocity": "be9eb852",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7c6a7f",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7c823a",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7c823a",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7ca706",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7e9d79",
+          "velocity": "3d20a500"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ef0ab",
+          "velocity": "3d92d9c0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7f8e33",
+          "velocity": "3e43ec40"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7fe94f",
+          "velocity": "3db6fbc0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3d0ba600"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3d0ba600"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f800000",
+          "velocity": "3d0ba600"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f800000",
+          "velocity": "3d0ba600"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f800000",
+          "velocity": "3d0ba600"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f7b645a",
+      "target": "3f800000",
+      "velocity": "3e6b851f",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7b645a",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7b82dc",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7b82dc",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7bb22d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7e382e",
+          "velocity": "3d4e4c80"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ea325",
+          "velocity": "3dbcd7c0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7f6db0",
+          "velocity": "3e7bd4c0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7fe2d3",
+          "velocity": "3deb5a00"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3d33b000"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3d33b000"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f800000",
+          "velocity": "3d33b000"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f800000",
+          "velocity": "3d33b000"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f800000",
+          "velocity": "3d33b000"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3ecccccd",
+      "target": "0",
+      "velocity": "40800000",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3ecccccd",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3ec780d6",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3ec780d6",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3ebf49fc",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3e1e4587",
+          "velocity": "bf8f44c2"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3df242e7",
+          "velocity": "c0031fdf"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3d4b36d3",
+          "velocity": "c0aed64d"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3c2215e7",
+          "velocity": "c02362e8"
+        },
+        {
+          "nanos": 500000000,
+          "value": "0",
+          "velocity": "bf7971ca"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "0",
+          "velocity": "bf7971ca"
+        },
+        {
+          "nanos": 259999999,
+          "value": "0",
+          "velocity": "bf7971ca"
+        },
+        {
+          "nanos": 260000000,
+          "value": "0",
+          "velocity": "bf7971ca"
+        },
+        {
+          "nanos": 260000001,
+          "value": "0",
+          "velocity": "bf7971ca"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f8b851f",
+      "target": "3f800000",
+      "velocity": "c0000000",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f8b851f",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f8b38da",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f8b38da",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f8ac291",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f84738e",
+          "velocity": "be80e800"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f836824",
+          "velocity": "beebf640"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f816dc9",
+          "velocity": "bf9d5940"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f8048f0",
+          "velocity": "bf131070"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "be607cc0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "be607cc0"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f800000",
+          "velocity": "be607cc0"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f800000",
+          "velocity": "be607cc0"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f800000",
+          "velocity": "be607cc0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f800000",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f800000",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-60",
+      "start": "3f7fbe77",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 260000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7fc029",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7fc029",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7fc2ca",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7fe6ae",
+          "velocity": "3b379800"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fec9e",
+          "velocity": "3ba7f800"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7ff7df",
+          "velocity": "3c5ea800"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7ffe61",
+          "velocity": "3bcf0800"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3b202800"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3b202800"
+        },
+        {
+          "nanos": 259999999,
+          "value": "3f800000",
+          "velocity": "3b202800"
+        },
+        {
+          "nanos": 260000000,
+          "value": "3f800000",
+          "velocity": "3b202800"
+        },
+        {
+          "nanos": 260000001,
+          "value": "3f800000",
+          "velocity": "3b202800"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "0",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3bbd1375",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3ebc0e27",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f000004",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f468b38",
+          "velocity": "40331650"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7030e1",
+          "velocity": "415a8bc1"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "407e41d8"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "407e41d8"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f800000",
+          "velocity": "407e41d8"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f800000",
+          "velocity": "407e41d8"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f800000",
+          "velocity": "407e41d8"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f800000",
+      "target": "3f770a3d",
+      "velocity": "0",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7ff2c4",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7cb582",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7b851e",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f790d0c",
+          "velocity": "bdc8af00"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7797e3",
+          "velocity": "bef4c810"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f770a3d",
+          "velocity": "be0e6520"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f770a3d",
+          "velocity": "be0e6520"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f770a3d",
+          "velocity": "be0e6520"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f770a3d",
+          "velocity": "be0e6520"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f770a3d",
+          "velocity": "be0e6520"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f770a3d",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f771779",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7a54ba",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7b851e",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7dfd31",
+          "velocity": "3dc88fc0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7f725a",
+          "velocity": "3ef4cfe0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3e0e6520"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3e0e6520"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f800000",
+          "velocity": "3e0e6520"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f800000",
+          "velocity": "3e0e6520"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f800000",
+          "velocity": "3e0e6520"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f800000",
+      "target": "3f7851ec",
+      "velocity": "bdf5c28f",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7ff4a8",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7d2dde",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7c28f6",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7a0b2f",
+          "velocity": "bdabff40"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f78cb56",
+          "velocity": "bed1c720"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f7851ec",
+          "velocity": "bdf42400"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f7851ec",
+          "velocity": "bdf42400"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f7851ec",
+          "velocity": "bdf42400"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f7851ec",
+          "velocity": "bdf42400"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f7851ec",
+          "velocity": "bdf42400"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f7c6a7f",
+      "target": "3f800000",
+      "velocity": "be9eb852",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7c6fca",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7dbb7e",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7e3540",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7f3214",
+          "velocity": "3d20a500"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7fc757",
+          "velocity": "3e43ec40"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3d63c880"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3d63c880"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f800000",
+          "velocity": "3d63c880"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f800000",
+          "velocity": "3d63c880"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f800000",
+          "velocity": "3d63c880"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f7b645a",
+      "target": "3f800000",
+      "velocity": "3e6b851f",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7b6b29",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7d15a2",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7db22d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7ef73e",
+          "velocity": "3d4e4c80"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7fb727",
+          "velocity": "3e7bd4c0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3d927c00"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3d927c00"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f800000",
+          "velocity": "3d927c00"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f800000",
+          "velocity": "3d927c00"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f800000",
+          "velocity": "3d927c00"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3ecccccd",
+      "target": "0",
+      "velocity": "40800000",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3ecb9e47",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3e8193f0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3e4cccc7",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3db7dc1a",
+          "velocity": "bf8f44c2"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3cca5b27",
+          "velocity": "c0aed64d"
+        },
+        {
+          "nanos": 500000000,
+          "value": "0",
+          "velocity": "bfcb67e6"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "0",
+          "velocity": "bfcb67e6"
+        },
+        {
+          "nanos": 279999999,
+          "value": "0",
+          "velocity": "bfcb67e6"
+        },
+        {
+          "nanos": 280000000,
+          "value": "0",
+          "velocity": "bfcb67e6"
+        },
+        {
+          "nanos": 280000001,
+          "value": "0",
+          "velocity": "bfcb67e6"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f8b851f",
+      "target": "3f800000",
+      "velocity": "c0000000",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f8b741a",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f8749ec",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f85c290",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f8295e5",
+          "velocity": "be80e800"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f80b61f",
+          "velocity": "bf9d5940"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "beb70b60"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "beb70b60"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f800000",
+          "velocity": "beb70b60"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f800000",
+          "velocity": "beb70b60"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f800000",
+          "velocity": "beb70b60"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f800000",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f800000",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-80",
+      "start": "3f7fbe77",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 280000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7fbed8",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7fd688",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fdf3c",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7ff14a",
+          "velocity": "3b379800"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7ffbf4",
+          "velocity": "3c5ea800"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3b82dc00"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3b82dc00"
+        },
+        {
+          "nanos": 279999999,
+          "value": "3f800000",
+          "velocity": "3b82dc00"
+        },
+        {
+          "nanos": 280000000,
+          "value": "3f800000",
+          "velocity": "3b82dc00"
+        },
+        {
+          "nanos": 280000001,
+          "value": "3f800000",
+          "velocity": "3b82dc00"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "0",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "0",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3d871c2b",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f000004",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "413d194d"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "413d194d"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f800000",
+          "velocity": "413d194d"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f800000",
+          "velocity": "413d194d"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f800000",
+          "velocity": "413d194d"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f800000",
+      "target": "3f770a3d",
+      "velocity": "0",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7f68ae",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7b851e",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f770a3d",
+          "velocity": "bed3cac0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f770a3d",
+          "velocity": "bed3cac0"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f770a3d",
+          "velocity": "bed3cac0"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f770a3d",
+          "velocity": "bed3cac0"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f770a3d",
+          "velocity": "bed3cac0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f770a3d",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f77a190",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7b851e",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3ed3cac0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3ed3cac0"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f800000",
+          "velocity": "3ed3cac0"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f800000",
+          "velocity": "3ed3cac0"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f800000",
+          "velocity": "3ed3cac0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f800000",
+      "target": "3f7851ec",
+      "velocity": "bdf5c28f",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7f7e4c",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7c28f6",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f7851ec",
+          "velocity": "beb58c90"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f7851ec",
+          "velocity": "beb58c90"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f7851ec",
+          "velocity": "beb58c90"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f7851ec",
+          "velocity": "beb58c90"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f7851ec",
+          "velocity": "beb58c90"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f7c6a7f",
+      "target": "3f800000",
+      "velocity": "be9eb852",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7c6a7f",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7ca706",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7e3540",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3e295f60"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3e295f60"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f800000",
+          "velocity": "3e295f60"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f800000",
+          "velocity": "3e295f60"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f800000",
+          "velocity": "3e295f60"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f7b645a",
+      "target": "3f800000",
+      "velocity": "3e6b851f",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7b645a",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7bb22d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7db22d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3e59c600"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3e59c600"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f800000",
+          "velocity": "3e59c600"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f800000",
+          "velocity": "3e59c600"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f800000",
+          "velocity": "3e59c600"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3ecccccd",
+      "target": "0",
+      "velocity": "40800000",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3ecccccd",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3ebf49fc",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3e4cccc7",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "0",
+          "velocity": "c097478a"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "0",
+          "velocity": "c097478a"
+        },
+        {
+          "nanos": 349999999,
+          "value": "0",
+          "velocity": "c097478a"
+        },
+        {
+          "nanos": 350000000,
+          "value": "0",
+          "velocity": "c097478a"
+        },
+        {
+          "nanos": 350000001,
+          "value": "0",
+          "velocity": "c097478a"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f8b851f",
+      "target": "3f800000",
+      "velocity": "c0000000",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f8b851f",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f8ac291",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f85c290",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "bf882778"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "bf882778"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f800000",
+          "velocity": "bf882778"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f800000",
+          "velocity": "bf882778"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f800000",
+          "velocity": "bf882778"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f800000",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f800000",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-200-delay-150",
+      "start": "3f7fbe77",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 350000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fbe77",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7fc2ca",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7fdf3c",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3c415c00"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3c415c00"
+        },
+        {
+          "nanos": 349999999,
+          "value": "3f800000",
+          "velocity": "3c415c00"
+        },
+        {
+          "nanos": 350000000,
+          "value": "3f800000",
+          "velocity": "3c415c00"
+        },
+        {
+          "nanos": 350000001,
+          "value": "3f800000",
+          "velocity": "3c415c00"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "0",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f800000",
+      "target": "3f770a3d",
+      "velocity": "0",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f770a3d",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f770a3d",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f800000",
+      "target": "3f7851ec",
+      "velocity": "bdf5c28f",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f7851ec",
+          "velocity": "bdf5c28f"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f7c6a7f",
+      "target": "3f800000",
+      "velocity": "be9eb852",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "be9eb852"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f7b645a",
+      "target": "3f800000",
+      "velocity": "3e6b851f",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "3e6b851f"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3ecccccd",
+      "target": "0",
+      "velocity": "40800000",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 999999,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 79999999,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 80000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 90000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 140000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 150000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 180000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 220000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 500000000,
+          "value": "0",
+          "velocity": "40800000"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "0",
+          "velocity": "40800000"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f8b851f",
+      "target": "3f800000",
+      "velocity": "c0000000",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "c0000000"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f800000",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
+          "value": "3f800000",
+          "velocity": "0"
+        }
+      ]
+    },
+    {
+      "spec": "tween-0-delay-60",
+      "start": "3f7fbe77",
+      "target": "3f800000",
+      "velocity": "0",
+      "durationNanos": 60000000,
+      "samples": [
+        {
+          "nanos": 0,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 16666667,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 40000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 79999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 80000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 90000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 180000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 220000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 500000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 1000000000,
           "value": "3f800000",
           "velocity": "0"
         }
@@ -6192,6 +12002,21 @@
           "velocity": "411e3313"
         },
         {
+          "nanos": 59999999,
+          "value": "3ee021c8",
+          "velocity": "412ebd0f"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3ee5b991",
+          "velocity": "412ece6d"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3ee5b991",
+          "velocity": "412ece6d"
+        },
+        {
           "nanos": 79999999,
           "value": "3f26ed5a",
           "velocity": "41244592"
@@ -6210,6 +12035,11 @@
           "nanos": 140000000,
           "value": "3f8bd3b3",
           "velocity": "406f6de1"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f8feadb",
+          "velocity": "402a8cf3"
         },
         {
           "nanos": 180000000,
@@ -6286,6 +12116,21 @@
           "velocity": "beb12f00"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7c13e3",
+          "velocity": "bec3b511"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7bfad5",
+          "velocity": "bec3c883"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7bfad5",
+          "velocity": "bec3c883"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7a2855",
           "velocity": "beb7fc09"
@@ -6304,6 +12149,11 @@
           "nanos": 140000000,
           "value": "3f76364d",
           "velocity": "be061499"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f75ed00",
+          "velocity": "bdbf044d"
         },
         {
           "nanos": 180000000,
@@ -6380,6 +12230,21 @@
           "velocity": "3eb12f00"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7af65a",
+          "velocity": "3ec3b511"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7b0f68",
+          "velocity": "3ec3c883"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7b0f68",
+          "velocity": "3ec3c883"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ce1e8",
           "velocity": "3eb7fc09"
@@ -6398,6 +12263,11 @@
           "nanos": 140000000,
           "value": "3f8069f8",
           "velocity": "3e061499"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f808e9f",
+          "velocity": "3dbf044d"
         },
         {
           "nanos": 180000000,
@@ -6474,6 +12344,21 @@
           "velocity": "bea85f9f"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7bcc9e",
+          "velocity": "bea8be41"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7bb70e",
+          "velocity": "bea81fc7"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7bb70e",
+          "velocity": "bea81fc7"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7a3425",
           "velocity": "be9389bd"
@@ -6492,6 +12377,11 @@
           "nanos": 140000000,
           "value": "3f7752b5",
           "velocity": "bda12c76"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f77290a",
+          "velocity": "bd48d7b0"
         },
         {
           "nanos": 180000000,
@@ -6568,6 +12458,21 @@
           "velocity": "3d61f15c"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7bd173",
+          "velocity": "3e176d99"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7bdb42",
+          "velocity": "3e1b0617"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7bdb42",
+          "velocity": "3e1b0617"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7cb74c",
           "velocity": "3e47b1da"
@@ -6586,6 +12491,11 @@
           "nanos": 140000000,
           "value": "3f7f96c4",
           "velocity": "3e0e5768"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7feabf",
+          "velocity": "3deff33a"
         },
         {
           "nanos": 180000000,
@@ -6662,6 +12572,21 @@
           "velocity": "3e75810d"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7f044c",
+          "velocity": "3e4d1c50"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7f1157",
+          "velocity": "3e4a90ea"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7f1157",
+          "velocity": "3e4a90ea"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7fe872",
           "velocity": "3e1648bd"
@@ -6682,6 +12607,11 @@
           "velocity": "3b48e687"
         },
         {
+          "nanos": 150000000,
+          "value": "3f807b8f",
+          "velocity": "bc38cfe7"
+        },
+        {
           "nanos": 180000000,
           "value": "3f8061d8",
           "velocity": "bd171a46"
@@ -6700,21 +12630,6 @@
           "nanos": 1000000000,
           "value": "3f7ffffd",
           "velocity": "b74ffb81"
-        },
-        {
-          "nanos": 59999999,
-          "value": "3f7f044c",
-          "velocity": "3e4d1c50"
-        },
-        {
-          "nanos": 60000000,
-          "value": "3f7f1157",
-          "velocity": "3e4a90ea"
-        },
-        {
-          "nanos": 60000001,
-          "value": "3f7f1157",
-          "velocity": "3e4a90ea"
         }
       ]
     },
@@ -6756,6 +12671,21 @@
           "velocity": "c0385c3e"
         },
         {
+          "nanos": 59999999,
+          "value": "3eab1044",
+          "velocity": "c089b81e"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3ea8d91c",
+          "velocity": "c08b32e7"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3ea8d91c",
+          "velocity": "c08b32e7"
+        },
+        {
           "nanos": 79999999,
           "value": "3e77a686",
           "velocity": "c09896f6"
@@ -6774,6 +12704,11 @@
           "nanos": 140000000,
           "value": "39ecc323",
           "velocity": "c0274fba"
+        },
+        {
+          "nanos": 150000000,
+          "value": "bcbd2e53",
+          "velocity": "c0062a49"
         },
         {
           "nanos": 180000000,
@@ -6850,6 +12785,21 @@
           "velocity": "bfb6a9a0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ef999",
+          "velocity": "bf81f47a"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7eb7c7",
+          "velocity": "bf7e4e64"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7eb7c7",
+          "velocity": "bf7e4e64"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7adff4",
           "velocity": "bf17dcbf"
@@ -6868,6 +12818,11 @@
           "nanos": 140000000,
           "value": "3f791523",
           "velocity": "3e638a2f"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f79b94e",
+          "velocity": "3e8cfbb8"
         },
         {
           "nanos": 180000000,
@@ -6944,6 +12899,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -6960,6 +12930,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "80000000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "80000000"
         },
@@ -7023,6 +12998,21 @@
           "velocity": "3c21fe85"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fdb27",
+          "velocity": "3c32ee10"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fdbdf",
+          "velocity": "3c32ffd8"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fdbdf",
+          "velocity": "3c32ffd8"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7fe933",
           "velocity": "3c28364d"
@@ -7041,6 +13031,11 @@
           "nanos": 140000000,
           "value": "3f800307",
           "velocity": "3b752c20"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f800413",
+          "velocity": "3b2ea43d"
         },
         {
           "nanos": 180000000,
@@ -7102,6 +13097,21 @@
           "velocity": "410b15f1"
         },
         {
+          "nanos": 59999999,
+          "value": "3ec5a924",
+          "velocity": "4119efab"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3eca96b6",
+          "velocity": "411a0e2a"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3eca96b6",
+          "velocity": "411a0e2a"
+        },
+        {
           "nanos": 79999999,
           "value": "3f13710c",
           "velocity": "4112c499"
@@ -7120,6 +13130,11 @@
           "nanos": 140000000,
           "value": "3f7e45fc",
           "velocity": "408468c9"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f83e06e",
+          "velocity": "4051c771"
         },
         {
           "nanos": 180000000,
@@ -7196,6 +13211,21 @@
           "velocity": "be9bc6af"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7c8a7b",
+          "velocity": "beac689e"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7c7467",
+          "velocity": "beac8ac7"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7c7467",
+          "velocity": "beac8ac7"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ad6ec",
           "velocity": "bea46158"
@@ -7214,6 +13244,11 @@
           "nanos": 140000000,
           "value": "3f7719b5",
           "velocity": "be144c6d"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f76c4c5",
+          "velocity": "bdeaf3e6"
         },
         {
           "nanos": 180000000,
@@ -7290,6 +13325,21 @@
           "velocity": "3e9bc6af"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7a7fc2",
+          "velocity": "3eac689e"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7a95d6",
+          "velocity": "3eac8ac7"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7a95d6",
+          "velocity": "3eac8ac7"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7c3351",
           "velocity": "3ea46158"
@@ -7308,6 +13358,11 @@
           "nanos": 140000000,
           "value": "3f7ff088",
           "velocity": "3e144c6d"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f8022bc",
+          "velocity": "3deaf3e6"
         },
         {
           "nanos": 180000000,
@@ -7384,6 +13439,21 @@
           "velocity": "be956f47"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7c36cf",
+          "velocity": "be955c30"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7c23b9",
+          "velocity": "be94daeb"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7c23b9",
+          "velocity": "be94daeb"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7acb43",
           "velocity": "be847eaa"
@@ -7402,6 +13472,11 @@
           "nanos": 140000000,
           "value": "3f7804ca",
           "velocity": "bdc1b660"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f77cec6",
+          "velocity": "bd90b1f7"
         },
         {
           "nanos": 180000000,
@@ -7478,6 +13553,21 @@
           "velocity": "3d299fd3"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7badc1",
+          "velocity": "3e01c177"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7bb62a",
+          "velocity": "3e050ff6"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7bb62a",
+          "velocity": "3e050ff6"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7c7542",
           "velocity": "3e2eea86"
@@ -7496,6 +13586,11 @@
           "nanos": 140000000,
           "value": "3f7f104d",
           "velocity": "3e097b78"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7f62cf",
+          "velocity": "3df06fcd"
         },
         {
           "nanos": 180000000,
@@ -7572,6 +13667,21 @@
           "velocity": "3e5d398c"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ebe99",
+          "velocity": "3e3765a1"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7eca43",
+          "velocity": "3e3528fe"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7eca43",
+          "velocity": "3e3528fe"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7f8bd7",
           "velocity": "3e08de2b"
@@ -7590,6 +13700,11 @@
           "nanos": 140000000,
           "value": "3f8052a6",
           "velocity": "3c92351f"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f80567c",
+          "velocity": "3bc2c0ea"
         },
         {
           "nanos": 180000000,
@@ -7666,6 +13781,21 @@
           "velocity": "c01c3c26"
         },
         {
+          "nanos": 59999999,
+          "value": "3eb477f6",
+          "velocity": "c06fb555"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3eb28a2c",
+          "velocity": "c0727abf"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3eb28a2c",
+          "velocity": "c0727abf"
+        },
+        {
           "nanos": 79999999,
           "value": "3e8b07e9",
           "velocity": "c086eb52"
@@ -7684,6 +13814,11 @@
           "nanos": 140000000,
           "value": "3d475dac",
           "velocity": "c028f64b"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3cc71c02",
+          "velocity": "c00ef763"
         },
         {
           "nanos": 180000000,
@@ -7760,6 +13895,21 @@
           "velocity": "bfa671a5"
         },
         {
+          "nanos": 59999999,
+          "value": "3f803b25",
+          "velocity": "bf6ad8ee"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f801d67",
+          "velocity": "bf65db9c"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f801d67",
+          "velocity": "bf65db9c"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7cb966",
           "velocity": "bf0d5399"
@@ -7778,6 +13928,11 @@
           "nanos": 140000000,
           "value": "3f7a4542",
           "velocity": "3df5e045"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7aa3f4",
+          "velocity": "3e2a5b16"
         },
         {
           "nanos": 180000000,
@@ -7854,6 +14009,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -7870,6 +14040,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "80000000"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "80000000"
         },
@@ -7933,6 +14108,21 @@
           "velocity": "3c0e6c04"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fd7c4",
+          "velocity": "3c1da0ee"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7fd865",
+          "velocity": "3c1dc029"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7fd865",
+          "velocity": "3c1dc029"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7fe436",
           "velocity": "3c1649d9"
@@ -7951,6 +14141,11 @@
           "nanos": 140000000,
           "value": "3f7fff8f",
           "velocity": "3b8795dc"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f8000fe",
+          "velocity": "3b56cf9d"
         },
         {
           "nanos": 180000000,
@@ -8012,6 +14207,21 @@
           "velocity": "414bec28"
         },
         {
+          "nanos": 59999999,
+          "value": "3f2a6a69",
+          "velocity": "41101a78"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f2cb240",
+          "velocity": "410cfa88"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f2cb240",
+          "velocity": "410cfa88"
+        },
+        {
           "nanos": 79999999,
           "value": "3f4f4113",
           "velocity": "40b1dbf2"
@@ -8030,6 +14240,11 @@
           "nanos": 140000000,
           "value": "3f78bcbd",
           "velocity": "3f6d7c65"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ac5a6",
+          "velocity": "3f2cbe1d"
         },
         {
           "nanos": 180000000,
@@ -8106,6 +14321,21 @@
           "velocity": "bee464b3"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7a0913",
+          "velocity": "bea1655c"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f79f4a4",
+          "velocity": "be9de56d"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f79f4a4",
+          "velocity": "be9de56d"
+        },
+        {
           "nanos": 79999999,
           "value": "3f78bf00",
           "velocity": "be4733d1"
@@ -8124,6 +14354,11 @@
           "nanos": 140000000,
           "value": "3f774b50",
           "velocity": "bd04fe01"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f773915",
+          "velocity": "bcc178ce"
         },
         {
           "nanos": 180000000,
@@ -8200,6 +14435,21 @@
           "velocity": "3ee464b3"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7d012a",
+          "velocity": "3ea1655c"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7d1599",
+          "velocity": "3e9de56d"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7d1599",
+          "velocity": "3e9de56d"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7e4b3d",
           "velocity": "3e4733d1"
@@ -8218,6 +14468,11 @@
           "nanos": 140000000,
           "value": "3f7fbeed",
           "velocity": "3d04fe01"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fd128",
+          "velocity": "3cc178ce"
         },
         {
           "nanos": 180000000,
@@ -8294,6 +14549,21 @@
           "velocity": "bebc990d"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ab3fd",
+          "velocity": "be824ddc"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7aa37f",
+          "velocity": "be7ec0d8"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7aa37f",
+          "velocity": "be7ec0d8"
+        },
+        {
           "nanos": 79999999,
           "value": "3f79ab26",
           "velocity": "be1edfac"
@@ -8312,6 +14582,11 @@
           "nanos": 140000000,
           "value": "3f7884d6",
           "velocity": "bcd0c853"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f787689",
+          "velocity": "bc97a75d"
         },
         {
           "nanos": 180000000,
@@ -8388,6 +14663,21 @@
           "velocity": "3e5bbf31"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7e5348",
+          "velocity": "3e2aa17b"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7e5e1a",
+          "velocity": "3e277521"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7e5e1a",
+          "velocity": "3e277521"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7f0604",
           "velocity": "3ddcb1e0"
@@ -8406,6 +14696,11 @@
           "nanos": 140000000,
           "value": "3f7fd968",
           "velocity": "3c9c00db"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7fe420",
+          "velocity": "3c64091d"
         },
         {
           "nanos": 180000000,
@@ -8482,6 +14777,21 @@
           "velocity": "3e4f7176"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7ed022",
+          "velocity": "3e0734d4"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7ed8ae",
+          "velocity": "3e03e23b"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7ed8ae",
+          "velocity": "3e03e23b"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7f573b",
           "velocity": "3d9f6380"
@@ -8500,6 +14810,11 @@
           "nanos": 140000000,
           "value": "3f7fe7db",
           "velocity": "3c47f833"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7feeb1",
+          "velocity": "3c10a58f"
         },
         {
           "nanos": 180000000,
@@ -8576,6 +14891,21 @@
           "velocity": "c0b21204"
         },
         {
+          "nanos": 59999999,
+          "value": "3e218751",
+          "velocity": "c08405b5"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3e1d58a7",
+          "velocity": "c0815f35"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3e1d58a7",
+          "velocity": "c0815f35"
+        },
+        {
           "nanos": 79999999,
           "value": "3dba5759",
           "velocity": "c02704b5"
@@ -8594,6 +14924,11 @@
           "nanos": 140000000,
           "value": "3c62750b",
           "velocity": "bee5ff1c"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3c235113",
+          "velocity": "bea7bbd5"
         },
         {
           "nanos": 180000000,
@@ -8670,6 +15005,21 @@
           "velocity": "bf69eb41"
         },
         {
+          "nanos": 59999999,
+          "value": "3f82506f",
+          "velocity": "bf0c8cf9"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f823eb2",
+          "velocity": "bf08a743"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f823eb2",
+          "velocity": "bf08a743"
+        },
+        {
           "nanos": 79999999,
           "value": "3f813eb7",
           "velocity": "be9d316b"
@@ -8688,6 +15038,11 @@
           "nanos": 140000000,
           "value": "3f802b23",
           "velocity": "bd35f2db"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f801ebf",
+          "velocity": "bd029750"
         },
         {
           "nanos": 180000000,
@@ -8764,6 +15119,21 @@
           "velocity": "0"
         },
         {
+          "nanos": 59999999,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
           "nanos": 79999999,
           "value": "3f800000",
           "velocity": "0"
@@ -8780,6 +15150,11 @@
         },
         {
           "nanos": 140000000,
+          "value": "3f800000",
+          "velocity": "0"
+        },
+        {
+          "nanos": 150000000,
           "value": "3f800000",
           "velocity": "0"
         },
@@ -8843,6 +15218,21 @@
           "velocity": "3c50d05e"
         },
         {
+          "nanos": 59999999,
+          "value": "3f7fea17",
+          "velocity": "3c138f5b"
+        },
+        {
+          "nanos": 60000000,
+          "value": "3f7feaad",
+          "velocity": "3c105c3b"
+        },
+        {
+          "nanos": 60000001,
+          "value": "3f7feaad",
+          "velocity": "3c105c3b"
+        },
+        {
           "nanos": 79999999,
           "value": "3f7ff385",
           "velocity": "3bb6201d"
@@ -8861,6 +15251,11 @@
           "nanos": 140000000,
           "value": "3f7ffe24",
           "velocity": "3a732eb4"
+        },
+        {
+          "nanos": 150000000,
+          "value": "3f7ffea9",
+          "velocity": "3a30e2dd"
         },
         {
           "nanos": 180000000,

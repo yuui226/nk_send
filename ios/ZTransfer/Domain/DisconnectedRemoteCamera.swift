@@ -25,6 +25,8 @@ struct DisconnectedRemoteCamera: RemoteCameraControlling {
     func refreshUSBRemoteSession() async throws -> String { throw CameraTransportError.disconnected }
     func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 { throw CameraTransportError.disconnected }
     func hasRemoteControlMode() async -> Bool { false }
+    func setRemoteDiagnosticControlMode(_ enabled: Bool) async throws -> UInt16 { throw CameraTransportError.disconnected }
+    func hasRemoteDiagnosticControlMode() async -> Bool { false }
     func hasMovieApplicationMode() async -> Bool { false }
     func ensureMovieApplicationMode() async throws { throw CameraTransportError.disconnected }
     func clearMovieApplicationMode(force: Bool) async {  }

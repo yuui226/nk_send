@@ -7,6 +7,280 @@ import SwiftUI
 
 @MainActor
 final class PremiumBusinessTests: XCTestCase {
+    func testTwelveMegapixelConcurrentExportEntrypointsAcrossFrameModes() async throws {
+        let (_, _, directory) = try fixture()
+        let source = directory.appendingPathComponent("large-concurrent.png")
+        let original = try autoreleasepool {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 4000, height: 3000), format: format).image { context in
+                UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4000, height: 3000))
+                UIColor.red.setFill(); context.fill(CGRect(x: 2000, y: 0, width: 2000, height: 3000))
+            }
+            return try XCTUnwrap(image.pngData())
+        }
+        try original.write(to: source)
+        for mode in 0..<4 {
+            var settings = PhotoEffectsSettings()
+            settings.photoFilterEnabled = true
+            settings.selectedFilter = .init(preset: settings.orderedFilters[0], intensityPercent: 80)
+            settings.photoFrameEnabled = mode != 0
+            settings.photoFrameBorderEnabled = mode >= 2
+            settings.photoFramePreset = mode == 2 ? .immersive : .minimal
+            settings.watermark.enabled = mode == 1
+            settings.watermark.text = "Resource test"
+            settings.watermark.position = .photoBottomRight
+            let recipe = settings
+            let baseline = try previewTestPhysicalFootprint()
+            let sampler = Task.detached(priority: .utility) { () throws -> (UInt64, Int) in
+                var peak = baseline, count = 0
+                while !Task.isCancelled {
+                    peak = max(peak, try previewTestPhysicalFootprint()); count += 1
+                    do { try await Task.sleep(for: .milliseconds(2)) } catch { break }
+                }
+                return (peak, count)
+            }
+            defer { sampler.cancel() }
+            let started = ProcessInfo.processInfo.systemUptime
+            async let local = LocalPhotoOutput.render(sourceURL: source, settings: recipe, availableMemory: { .max })
+            async let queued = TransferQueue.renderFrameFile(source: source, settings: recipe,
+                directory: directory, metadata: .empty, availableMemory: { .max })
+            let (localData, outputURL) = try await (local, queued)
+            sampler.cancel()
+            let (peak, samples) = try await sampler.value
+            try autoreleasepool {
+                let first = try XCTUnwrap(UIImage(data: localData))
+                let second = try XCTUnwrap(UIImage(contentsOfFile: outputURL.path))
+                XCTAssertEqual(first.size, second.size)
+                XCTAssertGreaterThanOrEqual(first.size.width, 4000)
+                XCTAssertGreaterThanOrEqual(first.size.height, 3000)
+                if mode < 3 { XCTAssertEqual(first.size, CGSize(width: 4000, height: 3000)) }
+            }
+            XCTAssertEqual(try Data(contentsOf: source), original)
+            XCTAssertGreaterThan(samples, 1)
+            print("F110 concurrent12MP mode=\(mode) baseline=\(baseline) peak=\(peak) delta=\(peak-baseline) samples=\(samples) seconds=\(ProcessInfo.processInfo.systemUptime-started)")
+        }
+    }
+
+    func testQueueFrameExportUsesLivePlaceGateEvenWithCachedResult() async throws {
+        let (_, _, directory) = try fixture()
+        let source = directory.appendingPathComponent("place-input.png")
+        let original = try samplePNG()
+        try original.write(to: source)
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true
+        settings.photoFrameBorderEnabled = true
+        settings.metadata.showCity = true
+        settings.metadata.showRegion = true
+        let metadata = PhotoFrameMetadata(make: "Nikon", model: "Z8", lensModel: nil,
+            focalLength: nil, aperture: nil, shutter: nil, iso: nil,
+            exposureCompensation: nil, dateTime: nil, latitude: 30, longitude: 120,
+            altitude: nil, city: "Stale city", region: "Stale region")
+        let backend = QueuePlaceQueryCounter()
+        let resolver = PhotoFramePlaceResolver { _, _, _ in await backend.query() }
+        var renderedImages: [Data] = []
+        for (allowed, expectedCalls) in [(false, 0), (true, 1), (false, 1)] {
+            let output = try await TransferQueue.renderFrameFile(source: source, settings: settings,
+                directory: directory, metadata: metadata, availableMemory: { .max },
+                placeResolver: resolver, placeAllowed: { allowed })
+            let image = try XCTUnwrap(UIImage(contentsOfFile: output.path))
+            renderedImages.append(try XCTUnwrap(image.pngData()))
+            let calls = await backend.calls
+            XCTAssertEqual(calls, expectedCalls)
+        }
+        XCTAssertEqual(renderedImages[0], renderedImages[2], "Cached place must not appear in offline exports")
+        XCTAssertNotEqual(renderedImages[0], renderedImages[1], "Online export must actually render the resolved place")
+        let calls = await backend.calls
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+    }
+
+    func testConcurrentFileExportEntrypointsRejectLowBudgetAndRecover() async throws {
+        let (_, _, directory) = try fixture()
+        let source = directory.appendingPathComponent("budget-input.png")
+        let original = try samplePNG()
+        try original.write(to: source)
+        let settings = effectivePhotoEffectsSettings(watermarkSettings(), isPro: true)
+        let failures = await withTaskGroup(of: Bool.self, returning: [Bool].self) { group in
+            group.addTask {
+                do {
+                    _ = try await LocalPhotoOutput.render(sourceURL: source, settings: settings, availableMemory: { 0 })
+                    return false
+                } catch is PhotoAllocationRejected { return true }
+                catch { return false }
+            }
+            group.addTask {
+                do {
+                    _ = try await TransferQueue.renderFrameFile(source: source, settings: settings,
+                        directory: directory, metadata: nil, availableMemory: { 0 })
+                    return false
+                } catch is PhotoAllocationRejected { return true }
+                catch { return false }
+            }
+            var values: [Bool] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+        XCTAssertEqual(failures, [true, true])
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ZTFrames").path))
+        async let local = LocalPhotoOutput.render(sourceURL: source, settings: settings, availableMemory: { .max })
+        async let queued = TransferQueue.renderFrameFile(source: source, settings: settings,
+            directory: directory, metadata: nil, availableMemory: { .max })
+        let (localData, outputURL) = try await (local, queued)
+        XCTAssertNotNil(UIImage(data: localData))
+        XCTAssertNotNil(UIImage(contentsOfFile: outputURL.path))
+        XCTAssertEqual(UIImage(data: localData)?.size, UIImage(contentsOfFile: outputURL.path)?.size)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+    }
+
+    func testExplicitModuleHideDoesNotReactivateAfterShowingOrRestoring() throws {
+        for scope: PhotoEffectsStore.Scope in [.cameraTransfer, .localPhotos] {
+            for isPro in [false, true] {
+                let suite = "module-hide-\(UUID().uuidString)"
+                let defaults = UserDefaults(suiteName: suite)!
+                defer { defaults.removePersistentDomain(forName: suite) }
+                let access = PremiumAccess(.lifetime)
+                let store = PhotoEffectsStore(defaults: defaults, scope: scope, premiumAccess: access)
+                var initial = watermarkSettings()
+                initial.watermark.enabled = true
+                initial.watermark.text = "Preserve my parameters"
+                initial.photoFrameBorderEnabled = true
+                initial.selectedFilter = .init(preset: try XCTUnwrap(PhotoFilterCatalog.presets.first), intensityPercent: 64)
+                initial.photoFilterEnabled = true
+                store.update(initial)
+                if !isPro { access.replace(with: .free) }
+                var draft = store.beginDraft()
+                draft.applyModuleVisibility(PhotoEffectModule.lut.rawValue, isPro: isPro)
+                XCTAssertFalse(draft.photoFilterEnabled)
+                XCTAssertFalse(draft.photoFrameBorderEnabled)
+                XCTAssertFalse(draft.watermark.enabled)
+                XCTAssertFalse(draft.photoFrameEnabled)
+                // Camera persists module choices before the full draft commit.
+                store.persistEditorPreferences(from: draft)
+                XCTAssertFalse(store.settings.watermark.enabled)
+                XCTAssertFalse(store.settings.photoFilterEnabled)
+                XCTAssertEqual(store.settings.watermark.text, initial.watermark.text)
+                draft.applyModuleVisibility(allPhotoEffectModules, isPro: isPro)
+                store.updateFromEditor(draft)
+                let restored = PhotoEffectsStore(defaults: defaults, scope: scope, premiumAccess: access).settings
+                XCTAssertFalse(restored.photoFilterEnabled)
+                XCTAssertFalse(restored.photoFrameBorderEnabled)
+                XCTAssertFalse(restored.watermark.enabled)
+                XCTAssertFalse(restored.photoFrameEnabled)
+                XCTAssertEqual(restored.watermark.text, initial.watermark.text)
+                XCTAssertEqual(restored.photoFramePreset, initial.photoFramePreset)
+                XCTAssertEqual(restored.selectedFilter?.preset.id, initial.selectedFilter?.preset.id)
+            }
+        }
+    }
+
+    func testWatermarkOnlyEditorSettingsRestoreAndRenderWithoutBorder() throws {
+        let source = try XCTUnwrap(UIImage(data: samplePNG()))
+        for scope: PhotoEffectsStore.Scope in [.cameraTransfer, .localPhotos] {
+            let suite = "watermark-only-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let store = PhotoEffectsStore(defaults: defaults, scope: scope,
+                                          premiumAccess: PremiumAccess(.lifetime))
+            var draft = watermarkSettings()
+            draft.photoEffectModules = PhotoEffectModule.watermark.rawValue
+            // A stale border preference must not add a frame in this module.
+            draft.photoFrameBorderEnabled = true
+            draft.watermark.enabled = true
+            draft.watermark.text = "First signature"
+            store.updateFromEditor(draft)
+            let first = effectivePhotoEffectsSettings(store.settings, isPro: true)
+            XCTAssertTrue(first.photoFrameEnabled)
+            XCTAssertTrue(first.watermark.enabled)
+            XCTAssertFalse(first.photoFrameBorderEnabled)
+            let firstImage = try PhotoEffectsRenderer.render(source, settings: first)
+            XCTAssertEqual(firstImage.size, source.size)
+            var off = first
+            off.watermark.enabled = false
+            let unmarked = try PhotoEffectsRenderer.render(source, settings: off)
+            XCTAssertNotEqual(try XCTUnwrap(firstImage.pngData()), try XCTUnwrap(unmarked.pngData()))
+            draft.watermark.text = "Changed signature"
+            store.updateFromEditor(draft)
+            let restored = PhotoEffectsStore(defaults: defaults, scope: scope,
+                                             premiumAccess: PremiumAccess(.lifetime))
+            let second = effectivePhotoEffectsSettings(restored.settings, isPro: true)
+            XCTAssertEqual(second.watermark.text, "Changed signature")
+            XCTAssertTrue(second.watermark.enabled)
+            XCTAssertFalse(second.photoFrameBorderEnabled)
+            let secondImage = try PhotoEffectsRenderer.render(source, settings: second)
+            XCTAssertEqual(secondImage.size, source.size)
+            XCTAssertNotEqual(try XCTUnwrap(firstImage.pngData()), try XCTUnwrap(secondImage.pngData()))
+        }
+    }
+
+    func testLocalBatchReleasesOnlyItsHoldAfterPreferenceAndForegroundChanges() async throws {
+        for finalPreference in [false, true] {
+            var awake = false
+            let coordinator = ScreenAwakeCoordinator { awake = $0 }
+            coordinator.setForeground(true)
+            coordinator.setPreference(!finalPreference)
+            let authorization = PremiumPhotoAuthorizationGate()
+            let model = LocalPhotoBatchViewModel(premiumAccess: PremiumAccess(.lifetime),
+                screenAwake: coordinator, requestAuthorization: { await authorization.request() },
+                generatePhoto: { _, _ in })
+            model.select([PhotosPickerItem(itemIdentifier: "held-batch")])
+            model.generate(settings: watermarkSettings())
+            XCTAssertTrue(awake)
+            for _ in 0..<300 {
+                if await authorization.isWaiting { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let waiting = await authorization.isWaiting
+            XCTAssertTrue(waiting)
+            coordinator.setPreference(finalPreference)
+            let anotherOwner = coordinator.acquire()
+            coordinator.setForeground(false)
+            XCTAssertFalse(awake)
+            await authorization.finish(.authorized)
+            for _ in 0..<300 {
+                if !model.state.generating { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(model.state.phase, .complete)
+            XCTAssertFalse(awake, "Batch completion cannot restore a foreground snapshot while backgrounded")
+            coordinator.setForeground(true)
+            XCTAssertTrue(awake, "Another owner's hold survives batch completion")
+            coordinator.release(anotherOwner)
+            XCTAssertEqual(awake, finalPreference)
+        }
+    }
+
+    func testLocalBatchPermissionDetailsSurviveReadyAndUseAndroidText() async throws {
+        let model = LocalPhotoBatchViewModel(premiumAccess: PremiumAccess(.lifetime),
+            requestAuthorization: { .denied }, generatePhoto: { _, _ in
+                XCTFail("Denied authorization must not invoke the renderer")
+            })
+        model.select((1...6).map { PhotosPickerItem(itemIdentifier: "denied-\($0)") })
+        model.generate(settings: watermarkSettings())
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while model.state.phase != .ready, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.state.phase, .ready)
+        XCTAssertEqual(model.state.progress.failed, 6)
+        XCTAssertEqual(model.state.progress.failures.count, 5)
+        let failure = try XCTUnwrap(model.state.progress.failures.first)
+        XCTAssertEqual(failure.stage, "save")
+        XCTAssertEqual(failure.kind, "permission")
+        let previous = UserDefaults.standard.object(forKey: "app_language")
+        defer { UserDefaults.standard.set(previous, forKey: "app_language") }
+        for (language, title, reason) in [
+            ("en", "Photo \(failure.number) · Saving to album", "Photo access was denied. Select the photo again and check photo permissions."),
+            ("zh", "第 \(failure.number) 张 · 保存到相册", "照片访问被拒绝，请重新选择照片并检查照片访问权限。"),
+            ("zh-Hant", "第 \(failure.number) 張 · 儲存至相簿", "照片存取遭拒，請重新選擇照片並檢查照片存取權限。")
+        ] {
+            UserDefaults.standard.set(language, forKey: "app_language")
+            XCTAssertEqual(localPhotoFailureText(failure), title + "\n" + reason + "\n" + failure.detail)
+        }
+        model.select([PhotosPickerItem(itemIdentifier: "next-selection")])
+        XCTAssertTrue(model.state.progress.failures.isEmpty)
+    }
+
     private func fixture() throws -> (UserDefaults, FreeUsageStore, URL) {
         let name = "PremiumBusinessTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
@@ -40,9 +314,11 @@ final class PremiumBusinessTests: XCTestCase {
         let queue = TransferQueue(defaults: UserDefaults(suiteName: "QueueLegacy.\(UUID())")!, premiumAccess: PremiumAccess(.free), freeUsage: usage)
         let camera = PremiumTestCamera()
         try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
-        let partial = directory.appendingPathComponent(transferPartialFileName(size: 10, captureDate: nil, fileName: file(2).fileName))
+        let video = CameraFile(id: 2, storageID: 1, format: 0x300D, size: 10,
+                               fileName: "premium-2.MP4", captureDate: nil, isProtected: false)
+        let partial = directory.appendingPathComponent(transferPartialFileName(size: 10, captureDate: nil, fileName: video.fileName))
         try Data(repeating: 1, count: 10).write(to: partial)
-        await queue.enqueue([file(1), file(2), file(3), file(4)])
+        await queue.enqueue([file(1), video, file(3), file(4)])
         await queue.start(session: camera, directory: directory)
         let done = try await settled(queue)
         XCTAssertEqual(done.items.map(\.status), [.completed, .completed, .completed, .failed])
@@ -235,6 +511,57 @@ final class PremiumBusinessTests: XCTestCase {
         attachJPEG(freeBytes, name: "queued-free-watermark-after-upgrade")
     }
 
+    func testMissingOrCorruptWatermarkKeepsOriginalAndRetriesFrozenAsset() async throws {
+        for missing in [true, false] {
+            let (defaults, usage, directory) = try fixture()
+            let access = PremiumAccess(.lifetime)
+            let queue = TransferQueue(defaults: UserDefaults(suiteName: directory.lastPathComponent)!, premiumAccess: access, freeUsage: usage)
+            let store = PhotoEffectsStore(defaults: defaults, premiumAccess: access)
+            let hash = try XCTUnwrap(store.importWatermarkImage(data: samplePNG(color: .red, unique: true)))
+            let asset = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ZTransfer/Watermarks/\(hash).png")
+            let originalAsset = try Data(contentsOf: asset)
+            addTeardownBlock {
+                PhotoEffectsStore.resetWatermarkImageCache()
+                try? FileManager.default.removeItem(at: asset)
+            }
+            var preference = watermarkSettings()
+            preference.watermark.content = .image; preference.watermark.imageHash = hash
+            store.updateFromEditor(preference)
+            let locked = effectivePhotoEffectsSettings(store.settings, isPro: true)
+            let data = try samplePNG()
+            let cameraFile = file(1, size: UInt64(data.count))
+            let source = directory.appendingPathComponent(cameraFile.fileName)
+            try data.write(to: source)
+            let enqueued = await queue.enqueue(cameraFile, effects: store.settings)
+            let id = try XCTUnwrap(enqueued)
+            if missing { try FileManager.default.removeItem(at: asset) }
+            else { try Data("corrupt watermark".utf8).write(to: asset, options: .atomic) }
+            PhotoEffectsStore.resetWatermarkImageCache()
+            await queue.start(session: nil, directory: directory)
+            let failed = try await rendered(queue)
+            XCTAssertEqual(failed.items[0].status, .completed) // Published original remains complete; frameError reports derivative failure.
+            XCTAssertNotNil(failed.items[0].frameError)
+            XCTAssertNil(failed.items[0].frameURL)
+            XCTAssertEqual(try Data(contentsOf: source), data)
+            XCTAssertEqual(failed.items[0].effects?.watermark.imageHash, hash)
+
+            preference.watermark.content = .text; preference.watermark.text = "New preference"
+            store.updateFromEditor(preference)
+            try originalAsset.write(to: asset, options: .atomic)
+            PhotoEffectsStore.resetWatermarkImageCache()
+            let retried = await queue.retry(id: id)
+            XCTAssertNotNil(retried)
+            let completed = try await rendered(queue)
+            XCTAssertEqual(completed.items[0].status, .completed)
+            XCTAssertNil(completed.items[0].frameError)
+            XCTAssertEqual(completed.items[0].effects?.watermark.imageHash, hash)
+            let output = try XCTUnwrap(completed.items[0].frameURL)
+            XCTAssertEqual(try Data(contentsOf: output), try renderedJPEG(source: source, settings: locked))
+            XCTAssertEqual(try Data(contentsOf: source), data)
+        }
+    }
+
     func testImageWatermarkRetryKeepsOriginalAssetAfterReplacementAndRefund() async throws {
         let (defaults, usage, directory) = try fixture()
         let access = PremiumAccess(.lifetime)
@@ -264,7 +591,7 @@ final class PremiumBusinessTests: XCTestCase {
         let originalID = try XCTUnwrap(enqueued)
         await queue.start(session: nil, directory: directory)
         let failed = try await rendered(queue)
-        XCTAssertEqual(failed.items[0].status, .failed)
+        XCTAssertEqual(failed.items[0].status, .completed) // Published original remains complete; frameError reports derivative failure.
         XCTAssertNotNil(failed.items[0].frameError)
         XCTAssertNil(failed.items[0].frameURL)
 
@@ -606,5 +933,13 @@ private actor PremiumRenderingCamera: TransferDownloading {
         // derivative yet. This models a refund notification during transfer.
         access.replace(with: .free)
         return output
+    }
+}
+
+private actor QueuePlaceQueryCounter {
+    private(set) var calls = 0
+    func query() -> PhotoFramePlace? {
+        calls += 1
+        return PhotoFramePlace(city: "Hangzhou", region: "Xihu")
     }
 }

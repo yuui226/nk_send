@@ -74,6 +74,44 @@ struct RemoteConfirmedFocusMarker: Equatable, Sendable {
     let confirmedAtUptime: TimeInterval
     let subjectTracking: Bool
     let nonce: UInt64
+
+    // Android RemoteScreen fallback excludes subject tracking and lasts three seconds.
+    func fallbackPoint(at uptime: TimeInterval) -> RemoteFocusPoint? {
+        !subjectTracking && uptime - confirmedAtUptime < 3 ? fallbackPoint : nil
+    }
+}
+
+/// Android FocusReticleOverlay shares one handoff latch across both drawing layers.
+struct RemoteFocusHandoff: Equatable {
+    struct Input: Equatable {
+        let nonce: UInt64
+        let phase: RemoteFocusPhase
+        let eligible: Bool
+        let hasCameraFrames: Bool
+        var candidate: Bool { phase == .locked && eligible && hasCameraFrames }
+    }
+    private var input: Input?
+    private var handedOff = false
+
+    mutating func update(_ next: Input) {
+        if input?.nonce != next.nonce || (input?.phase == .focusing) != (next.phase == .focusing) {
+            handedOff = false
+        }
+        input = next
+    }
+
+    mutating func complete(_ expected: Input) {
+        guard input == expected, expected.candidate else { return }
+        handedOff = true
+    }
+
+    func visibility(for next: Input) -> (tap: Bool, camera: Bool) {
+        var current = self
+        current.update(next)
+        let suppress = next.phase == .focusing || next.phase == .failed ||
+            (next.phase == .locked && !current.handedOff)
+        return (next.phase != .idle && !current.handedOff, !suppress && next.hasCameraFrames)
+    }
 }
 
 struct RemoteFocusResult: Equatable, Sendable {
@@ -124,7 +162,8 @@ extension RemoteState {
             next.frameSequence &+= 1
             next.fps = frameRate
             next.session = .ready
-            next.liveViewStable = true
+            // A decoded image is display-ready; USB stability belongs to the
+            // acquisition loop (eight successful packets, excluding Busy).
             next.errorMessage = nil
         case .frameLost:
             if next.session == .ready {
@@ -176,4 +215,33 @@ extension RemoteState {
         }
         return next
     }
+}
+
+/// Android RemoteOrientationSession plus its conflated request slot. Generation
+/// validation prevents an old stability timer from surviving pause/invalid input.
+struct RemoteOrientationSession<Orientation: Equatable> {
+    private(set) var candidate: Orientation?
+    private var suppressed: Orientation?
+    private var generation: UInt64 = 0
+    private var pending: Orientation?
+
+    mutating func observe(_ next: Orientation?) -> UInt64? {
+        guard candidate != next else { return nil }
+        candidate = next
+        generation &+= 1
+        guard let next, next != suppressed else { return nil }
+        suppressed = nil
+        return generation
+    }
+    func accepts(_ ticket: UInt64, target: Orientation) -> Bool {
+        generation == ticket && candidate == target
+    }
+    mutating func pause() { candidate = nil; generation &+= 1 }
+    mutating func suppressCurrent() { suppressed = candidate; generation &+= 1 }
+    mutating func enqueue(_ target: Orientation) { pending = target }
+    mutating func takePending() -> Orientation? {
+        defer { pending = nil }
+        return pending
+    }
+    mutating func discardPending() { pending = nil }
 }

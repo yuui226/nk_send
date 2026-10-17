@@ -6,11 +6,23 @@ struct RemoteToolsInteractionHarness: View {
     @StateObject private var store = Store()
     @State private var open = false
     var body: some View {
+        if ProcessInfo.processInfo.arguments.contains("--remote-recorder-ui-test") {
+            RemoteRecorderInteractionHarness()
+        } else { monitorEntry }
+    }
+    private var monitorEntry: some View {
         Button("Open monitor") { open = true }
             .accessibilityIdentifier("open-monitor")
             .fullScreenCover(isPresented: $open) {
-                RemoteView(session: nil, toolDefaults: store.defaults, remoteCamera: store.camera)
+                RemoteView(session: nil, recordingDirectory: store.recordingDirectory,
+                    toolDefaults: store.defaults, remoteCamera: store.camera,
+                    freeUsage: store.freeUsage, entitlements: store.entitlements)
                     .overlay(alignment: .bottomTrailing) {
+                        if ProcessInfo.processInfo.arguments.contains("--remote-shutter-ui-test") {
+                            Text(store.shutterEvents).font(.system(size: 9))
+                                .accessibilityIdentifier("test-shutter-events")
+                                .task { await store.observeShutterEvents() }
+                        }
                         if ProcessInfo.processInfo.arguments.contains("--remote-level-ui-test") {
                             HStack {
                                 Button("Single axis") { Task { await store.setLevelHeader(false) } }
@@ -26,7 +38,17 @@ struct RemoteToolsInteractionHarness: View {
     @MainActor
     private final class Store: ObservableObject {
         let defaults: UserDefaults
+        let freeUsage: FreeUsageStore
+        let entitlements: PremiumEntitlementStore
+        let recordingDirectory: URL?
         let camera: (any RemoteCameraControlling)?
+        @Published var shutterEvents = "focus=0 finished=0 capture=0"
+        func observeShutterEvents() async {
+            while !Task.isCancelled {
+                shutterEvents = await (camera as? RemoteToolMenuTestCamera)?.shutterEvents ?? ""
+                do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+            }
+        }
         func setLevelHeader(_ enabled: Bool) async {
             await (camera as? RemoteToolMenuTestCamera)?.setLevelHeader(enabled)
         }
@@ -34,15 +56,43 @@ struct RemoteToolsInteractionHarness: View {
             let name = "RemoteToolsInteractionHarness"
             defaults = UserDefaults(suiteName: name)!
             defaults.removePersistentDomain(forName: name)
+            freeUsage = FreeUsageStore(defaults: defaults)
+            let recording = ProcessInfo.processInfo.arguments.contains("--remote-recording-ui-test")
+            entitlements = PremiumEntitlementStore(access: PremiumAccess(recording ? .lifetime : .free))
+            recordingDirectory = recording ? FileManager.default.temporaryDirectory
+                .appendingPathComponent("RemoteRecordingUITest", isDirectory: true) : nil
+            if let recordingDirectory { try? FileManager.default.removeItem(at: recordingDirectory) }
             if ProcessInfo.processInfo.arguments.contains("--remote-camera-tools-ui-test") {
                 let format = UIGraphicsImageRendererFormat()
                 format.scale = 1
-                let bytes = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { ctx in
-                    UIColor.black.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+                let size = recording ? CGSize(width: 64, height: 48) : CGSize(width: 8, height: 8)
+                let bytes = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+                    UIColor.black.setFill(); ctx.fill(CGRect(origin: .zero, size: size))
                 }.jpegData(compressionQuality: 0.5)!
                 camera = RemoteToolMenuTestCamera(frame: bytes,
                     levelTest: ProcessInfo.processInfo.arguments.contains("--remote-level-ui-test"))
             } else { camera = nil }
+        }
+    }
+}
+
+private struct RemoteRecorderInteractionHarness: View {
+    @State private var phase: RemoteLocalRecordingPhase = .idle
+    @State private var premium = false
+    @State private var compact = false
+    @State private var starts = 0
+    @State private var stops = 0
+    var body: some View {
+        VStack(spacing: 60) {
+            RemoteRecorderBar(phase: phase, elapsedSeconds: 65, enabled: premium, compactSaved: compact,
+                onStart: { starts += 1; phase = .recording },
+                onPauseResume: { phase = phase == .paused ? .recording : .paused },
+                onStop: { stops += 1; phase = .finalizing })
+            Text("phase=\(phase) starts=\(starts) stops=\(stops)").accessibilityIdentifier("test-recorder-state")
+            Button("Premium") { premium.toggle() }.accessibilityIdentifier("test-recorder-premium")
+            Button("Saved") { phase = .saved }.accessibilityIdentifier("test-recorder-saved")
+            Button("Compact") { compact.toggle() }.accessibilityIdentifier("test-recorder-compact")
+            Button("Idle") { phase = .idle }.accessibilityIdentifier("test-recorder-idle")
         }
     }
 }
@@ -63,6 +113,19 @@ private actor RemoteToolMenuTestCamera: RemoteCameraControlling {
     init(frame: Data, levelTest: Bool) {
         self.frame = frame
         levelHeader = levelTest
+        if ProcessInfo.processInfo.arguments.contains("--remote-exposure-ui-test") {
+            properties[.iso] = .init(property: .iso, writable: true, current: 400, values: [100, 200, 400, 800, 1600, 3200])
+            properties[.nikonAutoISO] = .init(property: .nikonAutoISO, dataType: 2, writable: true, current: 0, values: [0, 1])
+            properties[.nikonISOControlSensitivity] = .init(property: .nikonISOControlSensitivity, writable: false, current: 640, values: [])
+            properties[.fNumber] = .init(property: .fNumber, writable: true, current: 400, values: [280, 400, 560, 800])
+            properties[.nikonShutter] = .init(property: .nikonShutter, writable: false, current: 1 << 16 | 125, values: [])
+            properties[.exposureCompensation] = .init(property: .exposureCompensation, writable: true, current: 0,
+                values: [UInt64(bitPattern: -1000), 0, 1000])
+            if ProcessInfo.processInfo.arguments.contains("--remote-exposure-long-list-ui-test") {
+                properties[.iso] = .init(property: .iso, writable: true, current: 2000,
+                    values: (1...64).map { UInt64($0 * 100) })
+            }
+        }
         if levelTest {
             properties[.angleLevel] = .init(property: .angleLevel, dataType: 5, writable: false,
                                             current: 45 * 65536, values: [])
@@ -80,8 +143,16 @@ private actor RemoteToolMenuTestCamera: RemoteCameraControlling {
         try await Task.sleep(for: .milliseconds(200))
         var actual = descriptor; actual.current = value; properties[descriptor.property] = actual
     }
-    func remoteFocusMode() -> RemotePropertyDescriptor? { nil }
-    func remoteEvents() -> [STAEvent] { [] }
+    func remoteFocusMode() -> RemotePropertyDescriptor? {
+        ProcessInfo.processInfo.arguments.contains("--remote-hint-ui-test")
+            ? .init(property: .focusMode, dataType: 4, writable: false, current: 1, values: []) : nil
+    }
+    private var focusCount = 0
+    private var focusFinished = 0
+    private var captureCount = 0
+    private var pendingEvents: [STAEvent] = []
+    var shutterEvents: String { "focus=\(focusCount) finished=\(focusFinished) capture=\(captureCount)" }
+    func remoteEvents() -> [STAEvent] { defer { pendingEvents = [] }; return pendingEvents }
     func startLiveView() {}
     func endLiveView() {}
     func liveViewFrame() async throws -> RemoteLiveViewPacket {
@@ -104,11 +175,19 @@ private actor RemoteToolMenuTestCamera: RemoteCameraControlling {
         return .init(bytes: frame, jpegOffset: 0, operation: PTPConstants.getLiveViewImage)
     }
     func remoteMovieMode() -> Bool? { false }
-    func capturePhoto() {}
+    func capturePhoto() {
+        captureCount += 1
+        pendingEvents.append(.init(code: 0xC101, handle: UInt32(captureCount)))
+    }
     func focusAt(trackingX: UInt32, trackingY: UInt32, focusX: UInt32, focusY: UInt32) -> RemoteFocusResult {
         .init(trackingStarted: false, polls: 0, timedOut: false)
     }
-    func halfPressFocus() -> RemoteFocusResult { .init(trackingStarted: false, polls: 0, timedOut: false) }
+    func halfPressFocus() async throws -> RemoteFocusResult {
+        focusCount += 1
+        try await Task.sleep(for: .milliseconds(600))
+        focusFinished += 1
+        return .init(trackingStarted: false, polls: 0, timedOut: false)
+    }
     func endSubjectTracking() {}
     func startMovieRecording() -> RemoteMovieStartResult { .init(responseCode: PTPConstants.operationNotSupported, prohibitCondition: nil) }
     func endMovieRecording() -> UInt16 { PTPConstants.responseOK }

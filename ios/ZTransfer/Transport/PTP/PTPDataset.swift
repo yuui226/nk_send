@@ -195,11 +195,13 @@ struct PTPObjectInfoResult: Equatable, Sendable {
 }
 
 extension PTPDatasetParser {
-    static func parseObjectInfo(handle: UInt32, _ data: Data) -> CameraFile? {
-        parseObjectInfoResult(handle: handle, data).file
+    static func parseObjectInfo(handle: UInt32, _ data: Data,
+                                protectionAvailable: Bool = true) -> CameraFile? {
+        parseObjectInfoResult(handle: handle, data, protectionAvailable: protectionAvailable).file
     }
 
-    static func parseObjectInfoResult(handle: UInt32, _ data: Data) -> PTPObjectInfoResult {
+    static func parseObjectInfoResult(handle: UInt32, _ data: Data,
+                                      protectionAvailable: Bool = true) -> PTPObjectInfoResult {
         guard data.count >= 53 else { return PTPObjectInfoResult(file: nil, successful: false) }
         var reader = PTPDataReader(data)
         guard let storage = reader.readUInt32(), let format = reader.readUInt16(),
@@ -225,7 +227,7 @@ extension PTPDatasetParser {
         let file = CameraFile(
             id: handle, storageID: storage, format: format, size: UInt64(compressedSize),
             fileName: nameIsComplete ? decodedName! : fallback,
-            captureDate: captureDate, isProtected: protection != 0
+            captureDate: captureDate, isProtected: protectionAvailable && protection != 0
         )
         return PTPObjectInfoResult(file: file, successful: complete)
     }

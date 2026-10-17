@@ -5,6 +5,8 @@ import Foundation
 actor PhotoThumbnailStore {
     private static let sharedDisk = PhotoThumbnailDiskCache()
     private struct PrefetchCacheWriteError: Error {}
+    private struct InvalidPrefetchBytes: Error {}
+    private(set) var diskWritesBlocked = false
     private let disk: PhotoThumbnailDiskCache
     private var cameraStore: PhotoThumbnailDiskCache.CameraStore?
     private var cameraIdentity: String?
@@ -32,6 +34,7 @@ actor PhotoThumbnailStore {
         }
     }
     private var inFlight: [String: Flight] = [:]
+    var activeWaiterCount: Int { inFlight.values.reduce(0) { $0 + $1.waiters } }
     private var observers: [UInt32: [UUID: AsyncStream<Void>.Continuation]] = [:]
     private let remoteGate = ThumbnailRemoteGate()
 
@@ -75,6 +78,7 @@ actor PhotoThumbnailStore {
         memoryBytes = 0
         negative.removeAll(keepingCapacity: true)
         cameraIdentity = identity
+        diskWritesBlocked = false
         cameraStore = disk.openCamera(identity: identity)
         if disk.claimCleanup() {
             let disk = self.disk
@@ -142,7 +146,7 @@ actor PhotoThumbnailStore {
                 return nil
             }
             insert(processed, key: key)
-            _ = cameraStore?.write(raw, as: key)
+            _ = writeCache(raw, key: key)
             return processed
         }
         // Flights carry raw camera bytes. Android's background lane writes
@@ -167,7 +171,7 @@ actor PhotoThumbnailStore {
                 return nil
             }
             insert(processed, key: key)
-            _ = cameraStore?.write(value, as: key)
+            _ = writeCache(value, key: key)
             return processed
         } catch { throw error }
     }
@@ -197,7 +201,7 @@ actor PhotoThumbnailStore {
         let key = keys.primary
         // Android's no-thumbnail set is a settled result, not a transient
         // failure. A disk-fill pass must not keep retrying the same handle.
-        if negative.contains(key), validate == nil { return .settled }
+        if negative.contains(key), !directSTA || validate == nil { return .settled }
         if validate != nil { negative.remove(key) }
         if let store = cameraStore,
            let url = store.find(key, legacyName: keys.legacy, alternateName: keys.alternate) {
@@ -211,21 +215,30 @@ actor PhotoThumbnailStore {
         }
         // All formats participate in the ordered fill, including direct-STA
         // RAW/video. Visibility is never a prerequisite for camera reads.
+        guard !diskWritesBlocked else { return .unsettled }
         if let flight = inFlight[key] {
             flight.waiters += 1
-            let value = try await awaitFlight(WaiterToken(key: key, flight: flight))
+            let value: Data
+            do {
+                value = try await awaitFlight(WaiterToken(key: key, flight: flight))
+            } catch is PrefetchCacheWriteError { return .unsettled }
+            catch is InvalidPrefetchBytes { return .unsettled }
             guard cameraIdentity == expectedIdentity else { throw CancellationError() }
+            if value.isEmpty && !directSTA { negative.insert(key); return .settled }
             if let validate, !validate(value) { cameraStore?.remove(key); return .unsettled }
             guard !value.isEmpty else { return .settled }
-            guard cameraStore?.write(value, as: key) == true else { return .unsettled }
+            guard writeCache(value, key: key) else { return .unsettled }
             return .settled
         }
         // Keep the completion behind the disk write. A visible request that
         // waits for this flight must observe the same cache state as Android
         // and must not start a duplicate GetThumb in the write window.
         let task = Task<Data, Error> {
-            let raw = try await self.remoteGate.withPermit { try await fetch() }
-            if let validate, !validate(raw) { throw PrefetchCacheWriteError() }
+            let raw = try await self.remoteGate.withPermit {
+                guard await !self.diskWritesBlocked else { throw PrefetchCacheWriteError() }
+                return try await fetch()
+            }
+            if !(raw.isEmpty && !directSTA), let validate, !validate(raw) { throw InvalidPrefetchBytes() }
             try self.persistPrefetch(raw, key: key, expectedIdentity: expectedIdentity)
             return raw
         }
@@ -237,9 +250,11 @@ actor PhotoThumbnailStore {
             // With a validator only usable bytes reach persistence. Ordinary
             // GetThumb also retains its authoritative empty-response handling.
             return .settled
+        } catch is InvalidPrefetchBytes {
+            return .unsettled
         } catch is PrefetchCacheWriteError {
-            // Neither invalid image bytes nor a failed write settles the item.
-            // The sequential owner can retry without relying on cell visibility.
+            // A disk failure never settles the item; the connection latch
+            // blocks subsequent remote fill while preserving cache reads.
             return .unsettled
         } catch { throw error }
     }
@@ -247,7 +262,16 @@ actor PhotoThumbnailStore {
     private func persistPrefetch(_ raw: Data, key: String, expectedIdentity: String) throws {
         guard cameraIdentity == expectedIdentity else { throw CancellationError() }
         guard !raw.isEmpty else { negative.insert(key); return }
-        guard cameraStore?.write(raw, as: key) == true else { throw PrefetchCacheWriteError() }
+        guard writeCache(raw, key: key) else { throw PrefetchCacheWriteError() }
+    }
+
+    private func writeCache(_ raw: Data, key: String) -> Bool {
+        guard !diskWritesBlocked else { return false }
+        guard cameraStore?.write(raw, as: key) == true else {
+            diskWritesBlocked = true
+            return false
+        }
+        return true
     }
 
     func clear() {
@@ -263,6 +287,7 @@ actor PhotoThumbnailStore {
         negative.removeAll()
         cameraStore = nil
         cameraIdentity = nil
+        diskWritesBlocked = false
     }
 
     func reconcile(files: [CameraFile], identity: String, directSTA: Bool) {
@@ -431,4 +456,5 @@ struct ThumbnailBatchResult: Sendable {
     var settled = Set<UInt32>()
     var cached = Set<UInt32>()
     var interrupted = false
+    var diskWritesBlocked = false
 }

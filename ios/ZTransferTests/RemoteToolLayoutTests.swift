@@ -88,4 +88,18 @@ final class RemoteToolLayoutTests: XCTestCase {
             XCTAssertEqual(layout.hiddenTools, [.record, .grid])
         }
     }
+
+    func testComputerControlIsAnIndependentPersistedToolInBothModes() {
+        withDefaults { defaults in
+            let photo = RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in })
+            let movie = RemoteToolLayout(defaults: defaults, movie: true, onHide: { _ in })
+            XCTAssertTrue(photo.visible(.computerControl))
+            XCTAssertTrue(movie.visible(.computerControl))
+            photo.setVisible(.computerControl, false)
+            XCTAssertFalse(photo.visible(.computerControl))
+            XCTAssertTrue(movie.visible(.computerControl))
+            XCTAssertFalse(RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in }).visible(.computerControl))
+            XCTAssertTrue(RemoteToolLayout(defaults: defaults, movie: true, onHide: { _ in }).visible(.computerControl))
+        }
+    }
 }

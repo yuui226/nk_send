@@ -8,6 +8,62 @@ import UniformTypeIdentifiers
 #endif
 
 final class STAProfileTests: XCTestCase {
+    func testLegacyMarkerRequiresVerificationAndVerifiedPairingSurvivesReload() {
+        let fixture = STAProfileFixture(), guid = String(repeating: "a", count: 32)
+        fixture.store.markPaired(guid)
+        XCTAssertTrue(fixture.store.requiresPairingVerification(guid))
+        XCTAssertFalse(fixture.store.hasTrustedPairing(guid))
+        fixture.store.confirmVerifiedPairing(guid.uppercased())
+        let restored = STAProfileStore(preferences: fixture.connection, pairing: fixture.pairing)
+        XCTAssertTrue(restored.isPaired(guid))
+        XCTAssertTrue(restored.hasTrustedPairing(guid))
+        XCTAssertFalse(restored.requiresPairingVerification(guid))
+        XCTAssertTrue(fixture.pairing.bool(forKey: "sta_paired_" + guid))
+        XCTAssertTrue(fixture.pairing.bool(forKey: "sta_pairing_verified_v2_" + guid))
+    }
+
+    func testTrustedOnlyMarkerIsDiscoveredWithoutLegacyMigrationPromotingOtherCameras() {
+        let fixture = STAProfileFixture()
+        let trusted = String(repeating: "1", count: 32), legacy = String(repeating: "2", count: 32)
+        fixture.pairing.set(true, forKey: "sta_pairing_verified_v2_" + trusted)
+        fixture.pairing.set(true, forKey: "sta_paired_" + legacy)
+        fixture.connection.removeObject(forKey: "sta_camera_profile_migration_v1")
+        let store = STAProfileStore(preferences: fixture.connection, pairing: fixture.pairing)
+        XCTAssertEqual(store.pairedCameraCount, 2)
+        XCTAssertTrue(store.isPaired(trusted))
+        XCTAssertFalse(store.requiresPairingVerification(trusted))
+        XCTAssertTrue(store.requiresPairingVerification(legacy))
+        XCTAssertFalse(store.hasTrustedPairing(legacy))
+    }
+
+    func testInvalidatingOneBodyClearsBothProofsButPreservesOtherBodyAndIdentity() {
+        let fixture = STAProfileFixture(), store = fixture.store
+        let first = String(repeating: "a", count: 32), second = String(repeating: "b", count: 32)
+        let identity = store.initiatorID(.pairedComputer)
+        store.confirmVerifiedPairing(first); store.confirmVerifiedPairing(second)
+        store.remember(guid: first, ip: "10.0.0.2", identity: .pairedComputer)
+        store.invalidatePairing(first)
+        let restored = STAProfileStore(preferences: fixture.connection, pairing: fixture.pairing)
+        XCTAssertFalse(restored.isPaired(first))
+        XCTAssertFalse(restored.hasTrustedPairing(first))
+        XCTAssertTrue(restored.hasTrustedPairing(second))
+        XCTAssertEqual(restored.initiatorID(.pairedComputer), identity)
+        XCTAssertEqual(restored.profiles.first { $0.responderGUID == first }?.lastIP, "10.0.0.2")
+        store.resetPairing()
+        XCTAssertFalse(store.isPaired(second))
+        XCTAssertFalse(store.hasTrustedPairing(second))
+    }
+
+    func testMissingOrInvalidGUIDCannotCreatePairingProof() {
+        let fixture = STAProfileFixture()
+        for guid in [nil, "", "not-a-guid"] as [String?] {
+            fixture.store.confirmVerifiedPairing(guid)
+            XCTAssertFalse(fixture.store.isPaired(guid))
+            XCTAssertFalse(fixture.store.requiresPairingVerification(guid))
+        }
+        XCTAssertTrue(fixture.store.profiles.isEmpty)
+    }
+
     func testIdentityPersistsAcrossInstancesAndBothIdentitiesStayIndependent() {
         let fixture = STAProfileFixture(), store = fixture.store
         let paired = store.initiatorID(.pairedComputer), album = store.initiatorID(.albumExplorer)

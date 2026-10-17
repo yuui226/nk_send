@@ -13,7 +13,10 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     let anchorWidth: CGFloat
     let anchorGap: CGFloat
     var opensAbove = false
+    var usesFunnel = true
+    var fitsContentWidth = false
     var onSettled: ((CGFloat) -> Void)? = nil
+    var onProgress: ((CGFloat) -> Void)? = nil
 
     func makeUIView(context: Context) -> GeniePopupHostView {
         // SwiftUI calls updateUIView after creation; assigning the hosted
@@ -25,8 +28,9 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
         view.host.rootView = AnyView(content.environment(\.self, context.environment))
         view.accessibilityIdentifier = "popup-panel-\(trigger.rawValue)"
         view.onSettled = onSettled
+        view.onProgress = onProgress
         view.configure(target: targetProgress, anchorX: anchorX,
-                       anchorWidth: anchorWidth, anchorGap: anchorGap, opensAbove: opensAbove)
+                       anchorWidth: anchorWidth, anchorGap: anchorGap, opensAbove: opensAbove, usesFunnel: usesFunnel)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: GeniePopupHostView,
@@ -34,7 +38,8 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
         let width = max(1, proposal.width ?? 340)
         let limit = max(1, proposal.height ?? UIScreen.main.bounds.height)
         let size = uiView.host.sizeThatFits(in: CGSize(width: width, height: limit))
-        return CGSize(width: width, height: min(limit, max(1, size.height)))
+        let fittedWidth = fitsContentWidth ? min(width, max(1, size.width)) : width
+        return CGSize(width: fittedWidth, height: min(limit, max(1, size.height)))
     }
 
     static func dismantleUIView(_ view: GeniePopupHostView, coordinator: ()) {
@@ -46,9 +51,37 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
 
 @MainActor
 final class GeniePopupHostView: UIView {
+    private final class Triangle {
+        let container = CALayer()
+        let texture = CALayer()
+        let mask = CAShapeLayer()
+
+        init() {
+            container.anchorPoint = .zero
+            container.position = .zero
+            container.masksToBounds = false
+            container.addSublayer(texture)
+            container.mask = mask
+            texture.anchorPoint = .zero
+            texture.position = .zero
+            texture.contentsGravity = .resize
+            texture.masksToBounds = true
+        }
+
+        func setMask(_ path: CGPath, size: CGSize) {
+            mask.frame = CGRect(origin: .zero, size: size)
+            mask.path = path
+        }
+    }
+
+    private final class Band {
+        let upper = Triangle()
+        let lower = Triangle()
+    }
+
     let host = UIHostingController(rootView: AnyView(EmptyView()))
     private let canvas = UIView()
-    private let bands = (0..<48).map { _ in CALayer() }
+    private let bands = (0..<GeniePopupMotion.renderBandCount).map { _ in Band() }
     private let capturePadding: CGFloat = 12
     private var capturedSize = CGSize.zero
     private var crossSections: [GeniePopupMotion.CrossSection] = []
@@ -65,7 +98,10 @@ final class GeniePopupHostView: UIView {
     private var lastDrawnProgress: CGFloat?
     private var settledTarget: CGFloat?
     private var opensAbove = false
+    private var usesFunnel = true
     var onSettled: ((CGFloat) -> Void)?
+    var onProgress: ((CGFloat) -> Void)?
+    private var lastReportedProgress: CGFloat?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -80,11 +116,8 @@ final class GeniePopupHostView: UIView {
         canvas.clipsToBounds = false
         addSubview(canvas)
         for band in bands {
-            band.anchorPoint = .zero
-            band.position = .zero
-            band.masksToBounds = true
-            band.contentsGravity = .resize
-            canvas.layer.addSublayer(band)
+            canvas.layer.addSublayer(band.upper.container)
+            canvas.layer.addSublayer(band.lower.container)
         }
         settle()
     }
@@ -112,11 +145,12 @@ final class GeniePopupHostView: UIView {
     }
 
     func configure(target next: CGFloat, anchorX: CGFloat,
-                   anchorWidth: CGFloat, anchorGap: CGFloat, opensAbove: Bool = false) {
-        if self.anchorX != anchorX || self.anchorWidth != anchorWidth || self.anchorGap != anchorGap || self.opensAbove != opensAbove {
+                   anchorWidth: CGFloat, anchorGap: CGFloat, opensAbove: Bool = false, usesFunnel: Bool = true) {
+        if self.anchorX != anchorX || self.anchorWidth != anchorWidth || self.anchorGap != anchorGap || self.opensAbove != opensAbove || self.usesFunnel != usesFunnel {
             lastDrawnProgress = nil
         }
         self.opensAbove = opensAbove
+        self.usesFunnel = usesFunnel
         self.anchorX = anchorX
         self.anchorWidth = anchorWidth
         self.anchorGap = anchorGap
@@ -178,15 +212,21 @@ final class GeniePopupHostView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, band) in bands.enumerated() {
-            // Each layer owns only its small band, never a full-panel-sized
-            // surface behind a mask. Total backing area stays about one panel.
+            // Each triangle owns only its small source band. The container
+            // mask is in destination coordinates, matching Android's two
+            // clipped drawLayer calls for every band.
             let top = index * cgImage.height / bands.count
             let bottom = (index + 1) * cgImage.height / bands.count
-            band.contents = cgImage.cropping(to: CGRect(x: 0, y: top,
-                                                       width: cgImage.width, height: bottom - top))
-            band.bounds = CGRect(x: 0, y: 0, width: rect.width,
-                                 height: CGFloat(bottom - top) / format.scale)
-            band.contentsScale = format.scale
+            let contents = cgImage.cropping(to: CGRect(x: 0, y: top,
+                                                        width: cgImage.width, height: bottom - top))
+            for triangle in [band.upper, band.lower] {
+                triangle.container.frame = canvas.bounds
+                triangle.container.bounds = canvas.bounds
+                triangle.texture.contents = contents
+                triangle.texture.bounds = CGRect(x: 0, y: 0, width: rect.width,
+                                                 height: CGFloat(bottom - top) / format.scale)
+                triangle.texture.contentsScale = format.scale
+            }
         }
         CATransaction.commit()
         hasCapture = true
@@ -211,34 +251,61 @@ final class GeniePopupHostView: UIView {
 
     private func drawFrame() {
         // Layout can run again without advancing the animation. Only rewrite
-        // the 48 transforms when progress, capture or attachment has changed.
+        // the 12-band transforms when progress, capture or attachment changed.
         guard hasCapture, lastDrawnProgress != progress else { return }
         lastDrawnProgress = progress
+        reportProgress()
         let size = capturedSize
         let paddingFraction = capturePadding / size.width
-        let source = CGRect(x: anchorX * size.width - anchorWidth * size.width / 2,
-                            y: -anchorGap, width: anchorWidth * size.width, height: 0)
-        let geometry = GeniePopupMotion.FrameGeometry(progress: progress, source: source, size: size)
+        let source = CGRect(
+            x: anchorX * size.width - anchorWidth * size.width / 2,
+            y: opensAbove ? size.height + anchorGap : -anchorGap,
+            width: anchorWidth * size.width,
+            height: 0
+        )
+        let panel = CGRect(origin: .zero, size: size)
+        // RemoteParameterPanel is beside its anchor in landscape. Android's
+        // validGenieAnchor rejects overlapping vertical spans and fades the
+        // recorded layer at p, retaining the same open/close clock.
+        let renderProgress: CGFloat = usesFunnel ? progress : 1
+        let geometry = GeniePopupMotion.FrameGeometry(progress: renderProgress, source: source, size: size)
         func row(_ index: Int) -> GeniePopupMotion.Row {
-            let section = crossSections[opensAbove ? bands.count - index : index]
-            let original = geometry.row(at: section).padded(by: paddingFraction)
-            return opensAbove ? .init(left: original.left, right: original.right, y: size.height - original.y) : original
+            let section = crossSections[index]
+            let original = opensAbove
+                ? GeniePopupMotion.rowAbove(progress: renderProgress, fraction: section.fraction,
+                                             anchor: source, panel: panel)
+                : geometry.row(at: section)
+            return original.padded(by: paddingFraction)
         }
         var top = row(0)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, band) in bands.enumerated() {
             let bottom = row(index + 1)
-            band.transform = GeniePopupMotion.bandTransform(
-                size: band.bounds.size,
-                top: top,
-                bottom: bottom
-            )
+            let sourceSize = CGSize(width: band.upper.texture.bounds.width,
+                                    height: band.upper.texture.bounds.height)
+            let upperPath = CGMutablePath()
+            upperPath.move(to: CGPoint(x: top.left, y: top.leftY))
+            upperPath.addLine(to: CGPoint(x: top.right, y: top.rightY))
+            upperPath.addLine(to: CGPoint(x: bottom.left, y: bottom.leftY))
+            upperPath.closeSubpath()
+            let lowerPath = CGMutablePath()
+            lowerPath.move(to: CGPoint(x: top.right, y: top.rightY))
+            lowerPath.addLine(to: CGPoint(x: bottom.right, y: bottom.rightY))
+            lowerPath.addLine(to: CGPoint(x: bottom.left, y: bottom.leftY))
+            lowerPath.closeSubpath()
+            band.upper.setMask(upperPath, size: size)
+            band.lower.setMask(lowerPath, size: size)
+            band.upper.texture.transform = GeniePopupMotion.bandTransform(
+                size: sourceSize, top: top, bottom: bottom, upper: true)
+            band.lower.texture.transform = GeniePopupMotion.bandTransform(
+                size: sourceSize, top: top, bottom: bottom, upper: false)
             // Adjacent bands share this exact edge. Evaluate its power curve
-            // and padding once (49 rows per frame instead of 96).
+            // and padding once, then reuse the row for the next band.
             top = bottom
         }
-        let alpha = GeniePopupMotion.opacity(progress)
+        let alpha = usesFunnel ? GeniePopupMotion.opacity(progress)
+            : (GeniePopupMotion.opacity(progress) > 0 ? progress : 0)
         if canvas.alpha != alpha { canvas.alpha = alpha }
         let hidden = progress <= 0
         if canvas.isHidden != hidden { canvas.isHidden = hidden }
@@ -263,12 +330,29 @@ final class GeniePopupHostView: UIView {
         if hasCapture {
             hasCapture = false
             lastDrawnProgress = nil
-            for band in bands { band.contents = nil }
+            for band in bands {
+                band.upper.texture.contents = nil
+                band.lower.texture.contents = nil
+            }
         }
         CATransaction.commit()
         settledTarget = target
+        reportProgress()
         let settled = target
         if let onSettled { DispatchQueue.main.async { onSettled(settled) } }
+    }
+
+    /// Scrims use the same displayed progress as the mesh. Deliver outside
+    /// layout so SwiftUI state writes cannot recursively invalidate this pass.
+    /// A queued frame superseded by a reversal must never unmount its owner.
+    private func reportProgress() {
+        guard onProgress != nil, lastReportedProgress != progress else { return }
+        lastReportedProgress = progress
+        let value = progress
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.progress == value else { return }
+            self.onProgress?(value)
+        }
     }
 
     func stop() {
@@ -282,7 +366,20 @@ final class GeniePopupHostView: UIView {
 /// synthetic fallback is involved. Bounds are outside the button's press
 /// effect, so feedback does not move the attachment edge.
 enum GeniePopupTrigger: String, Hashable {
+    case queueRetry, queueClear
     case filter, settings, gps, remoteWhiteBalance, remoteFocusArea, remoteFocusMode, remoteGrid
+    case remoteEV, remoteISO, remoteAperture, remoteShutter
+}
+
+extension RemoteExposureField {
+    var popupTrigger: GeniePopupTrigger {
+        switch self {
+        case .exposureCompensation: .remoteEV
+        case .iso: .remoteISO
+        case .aperture: .remoteAperture
+        case .shutter: .remoteShutter
+        }
+    }
 }
 
 struct GeniePopupAnchorPreferenceKey: PreferenceKey {

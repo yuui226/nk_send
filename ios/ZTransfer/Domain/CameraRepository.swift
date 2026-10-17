@@ -1,4 +1,20 @@
 import Foundation
+import CryptoKit
+
+private final class ProtectionHeaderProbeStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [UInt32: Data] = [:]
+
+    func value(for handle: UInt32) -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        return values[handle]
+    }
+
+    func save(_ data: Data, for handle: UInt32) {
+        lock.lock(); defer { lock.unlock() }
+        values[handle] = data
+    }
+}
 
 func keepsPartialOnCancellation(fileName: String) -> Bool {
     ["mov", "mp4", "nev", "avi"].contains(URL(fileURLWithPath: fileName).pathExtension.lowercased())
@@ -79,12 +95,16 @@ func transferDownloadChunkSize(
     effectiveSize: UInt64,
     isUSBConnection: Bool = false,
     preferHighThroughput: Bool = false,
+    videoTransfer: Bool = true,
 ) -> UInt64 {
     // ImageCaptureCore's PTP pass-through callback materializes the complete
     // data phase as one Data value; unlike Android's raw bulk endpoint it
     // cannot stream a 64 MiB request directly into the destination file.
     // Keep USB chunks bounded to avoid a callback-sized memory spike.
     if isUSBConnection { return transferChunkSize }
+    // Android requests a still image in one transaction, even on STA's
+    // forced-partial route. Page throughput only changes video chunking.
+    if !videoTransfer { return effectiveSize }
     if preferHighThroughput { return transferHighThroughputChunkSize }
     return effectiveSize > transferLargeFileThreshold ? transferLargeFileChunkSize : transferChunkSize
 }
@@ -97,50 +117,36 @@ func transferResumeOffset(existingSize: UInt64, totalSize: UInt64, reportedSize:
     return (existingSize / transferResumeChunkSize) * transferResumeChunkSize
 }
 
-func transferUniqueOutputURL(directory: URL, fileName: String) -> URL {
-    let safeName = URL(fileURLWithPath: fileName).lastPathComponent
-    let base = directory.appendingPathComponent(safeName, isDirectory: false)
-    guard FileManager.default.fileExists(atPath: base.path) else { return base }
-    let dot = safeName.lastIndex(of: ".")
-    let stem = dot.map { String(safeName[..<$0]) } ?? safeName
-    let ext = dot.map { String(safeName[$0...]) } ?? ""
-    for n in 1...99 {
-        let candidate = directory.appendingPathComponent("\(stem) (\(n))\(ext)", isDirectory: false)
-        if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
-    }
-    return base
-}
-
-/// Finalizes an identity-tagged temporary transfer file using the same
-/// rename-first/copy-on-provider-refusal sequence as Android's SAF path.
+/// Android reserves the first free case-insensitive name, then attempts one
+/// rename and a checked copy fallback under that same reservation.
 func finalizeTransferTemporary(temporary: URL, directory: URL, fileName: String,
                                allowCopy: Bool = true, operations: TransferFileOperations = .system) throws -> URL {
-    let name = URL(fileURLWithPath: fileName).lastPathComponent
-    let dot = name.lastIndex(of: ".").flatMap { $0 == name.startIndex ? nil : $0 }
-    let stem = dot.map { String(name[..<$0]) } ?? name
-    let ext = dot.map { String(name[$0...]) } ?? ""
-    var firstAvailable: URL?
-    for n in 0...99 {
-        let candidate = directory.appendingPathComponent(n == 0 ? name : "\(stem) (\(n))\(ext)")
-        guard !operations.exists(candidate) else { continue }
-        if firstAvailable == nil { firstAvailable = candidate }
+    let preferred = directory.appendingPathComponent(URL(fileURLWithPath: fileName).lastPathComponent)
+    return try OutputFileNameReservations.shared.withReservedName(preferred, policy: .original) { destination in
         do {
-            try operations.move(temporary, candidate)
-            return candidate
-        } catch { /* Android tries available suffixes before copy fallback. */ }
+            try operations.move(temporary, destination)
+            return destination
+        } catch {
+            guard allowCopy else { throw error }
+        }
+        // A provider or another process may create a file after reservation.
+        // Never delete its file when a no-overwrite copy refuses the collision.
+        guard !operations.exists(destination) else { throw CocoaError(.fileWriteFileExists) }
+        let expected = try operations.size(temporary)
+        do {
+            try operations.copy(temporary, destination)
+            let copied = try operations.size(destination)
+            guard copied == expected else { throw CameraDownloadError.copyIncomplete(received: copied, expected: expected) }
+        } catch {
+            let cocoa = error as NSError
+            if cocoa.domain != NSCocoaErrorDomain || cocoa.code != NSFileWriteFileExistsError {
+                try? operations.remove(destination)
+            }
+            throw error
+        }
+        try? operations.remove(temporary)
+        return destination
     }
-    guard allowCopy, let destination = firstAvailable else { throw CocoaError(.fileWriteUnknown) }
-    let expected = try operations.size(temporary)
-    do {
-        try operations.copy(temporary, destination)
-        let copied = try operations.size(destination)
-        guard copied == expected else { throw CameraDownloadError.copyIncomplete(received: copied, expected: expected) }
-    } catch {
-        try? operations.remove(destination)
-        throw error
-    }
-    try? operations.remove(temporary)
-    return destination
 }
 
 enum CameraRepositoryError: Error, Equatable, Sendable {
@@ -164,6 +170,7 @@ enum CameraRepositoryError: Error, Equatable, Sendable {
 /// foreground preview interrupts metadata reads; only handles already
 /// accepted by the list are marked processed.
 struct PhotoScanSnapshot: Sendable {
+    var catalogRevision: UInt64 = 0
     let storageIDs: [UInt32]
     let handleOrders: [(storageID: UInt32, handles: [UInt32])]
     var processedHandles: Set<UInt32>
@@ -186,6 +193,18 @@ struct PhotoScanResult: Sendable {
     /// The handle snapshot is intentionally retained when a bounded photo
     /// scan reaches an older shooting day. The next wider scope resumes it.
     var stoppedAtLoadingRange: Bool = false
+    var loadingRangeAtStop: PhotoLoadingRange? = nil
+}
+
+/// Data-only recovery state. Protocol tasks, ratings and scan cursors belong
+/// to one connection and must never cross this boundary.
+struct STACatalogRecovery: Sendable {
+    fileprivate let responderGUID: String
+    fileprivate let files: [UInt32: CameraFile]
+    fileprivate let indexedFiles: [UInt32: CameraFile]
+    fileprivate let order: [UInt32]
+    fileprivate let storageIDs: [UInt32]
+    fileprivate let knownHandles: Set<UInt32>
 }
 
 struct STADirectStorageLayout: Equatable, Sendable {
@@ -287,9 +306,13 @@ actor CameraRepository {
     /// lets an interactive preview reserve the next transaction between
     /// download chunks and suppresses idle probes for the whole download.
     private let ioGate = CameraIOGate()
+    private var retirementTask: Task<Void, Never>?
     private let isUSBConnection: Bool
     nonisolated let usbSessionIdentity: USBSessionIdentity?
     private var remoteControlModeSet = false
+    /// Android keeps diagnostic PC-control ownership separate from the USB movie
+    /// owner so a movie cleanup cannot release a mode the user still holds.
+    private var remoteDiagnosticControlModeSet = false
     private var movieApplicationPropertySet = false
     private var movieApplicationOperationSet = false
     /// Android learns this capability once and remembers an unsupported
@@ -302,10 +325,14 @@ actor CameraRepository {
     private var ratingOperationUnsupported = false
     private var ratingNikonHeaderUnsupported = false
     private var ratingStandardHeaderUnsupported = false
+    /// Bounded, connection-scoped baselines used only by the explicit STA
+    /// protection experiment. They never populate CameraFile.isProtected.
+    private nonisolated let protectionHeaderProbeBaselines = ProtectionHeaderProbeStore()
     /// Decoded ratings are scoped to this repository/connection.  A scan
     /// generation makes an old read unable to publish after invalidation or
     /// reconnect; PhotoRatingCache keeps the Android FIFO bound.
     private var photoRatingCache = PhotoRatingCache()
+    private var ratingGenerationListeners: [UUID: AsyncStream<Int>.Continuation] = [:]
     private var subjectTrackingActive = false
     private var subjectTrackingSupported: Bool?
     private let focusGate = CameraIOGate()
@@ -323,11 +350,12 @@ actor CameraRepository {
     private var activeForegroundReads = 0
     private var remoteActive = false
     private var fhdActive = false
+    private var fhdSupported: Bool?
     private var transfersBusy = false
     private var preferHighThroughputTransfers = false
     private var effectPreviewActive = false
     private var activeCatalogScans = 0
-    private var catalogLoading: Bool { activeCatalogScans > 0 }
+    var catalogLoading: Bool { activeCatalogScans > 0 }
     private var catalogFiles: [UInt32: CameraFile] = [:]
     private var indexedCatalogFiles: [UInt32: CameraFile] = [:]
     private var catalogOrder: [UInt32] = []
@@ -336,6 +364,7 @@ actor CameraRepository {
     private var catalogReady = false
     private var lastCatalogCheck = ContinuousClock.now
     private var catalogSyncRequested = false
+    private var scanCatalogRevision: UInt64 = 0
     private var scanSnapshot: PhotoScanSnapshot?
     private var pendingObjects: [UInt32: (attempts: Int, ready: ContinuousClock.Instant)] = [:]
     private var eventResolveTask: Task<Void, Never>?
@@ -381,6 +410,22 @@ actor CameraRepository {
         catalogContinuations.removeAll()
     }
 
+    /// Retire an accepted connection only after its active multi-command
+    /// transaction completes. A caller's cancellation must not abandon cleanup.
+    func retireConnection(_ close: @escaping @Sendable () async -> Void) async {
+        if let retirementTask { await retirementTask.value; return }
+        let gate = ioGate
+        let task = Task.detached {
+            await self.beginShutdown()
+            try? await gate.withCameraTransaction(.interactive, owner: "CLOSE_SESSION",
+                                                  allowDuringShutdown: true) {
+                await close()
+            }
+        }
+        retirementTask = task
+        await task.value
+    }
+
     func cameraSchedulerSnapshot() async -> CameraSchedulerSnapshot {
         await ioGate.snapshot()
     }
@@ -389,6 +434,17 @@ actor CameraRepository {
     func endRatingPhase() async { await ioGate.endRatingPhase() }
 
     func photoRatingGeneration() -> Int { photoRatingCache.generation }
+    func photoRatingGenerationUpdates() -> AsyncStream<Int> {
+        let id = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            ratingGenerationListeners[id] = continuation
+            continuation.yield(photoRatingCache.generation)
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeRatingGenerationListener(id) }
+            }
+        }
+    }
+    private func removeRatingGenerationListener(_ id: UUID) { ratingGenerationListeners.removeValue(forKey: id) }
     func cachedPhotoRating(_ handle: UInt32) -> Int? { photoRatingCache.value(for: handle)?.value }
     func cachedPhotoRatingOrigin(_ handle: UInt32) -> String? { photoRatingCache.value(for: handle)?.origin }
 
@@ -397,6 +453,7 @@ actor CameraRepository {
     @discardableResult
     func invalidatePhotoRatings() -> Int {
         photoRatingCache.invalidate()
+        for listener in ratingGenerationListeners.values { listener.yield(photoRatingCache.generation) }
         return photoRatingCache.generation
     }
 
@@ -415,6 +472,7 @@ actor CameraRepository {
     }
 
     func keepalive() async -> Bool {
+        guard !(await session.isInvalidated) else { return false }
         if activeForegroundReads > 0 { return true }
         return (try? await ioGate.withIdleCommand(skippedValue: true) {
             await session.keepaliveIfIdle()
@@ -610,7 +668,15 @@ actor CameraRepository {
             try await session.execute(operation: PTPConstants.getDevicePropValue,
                                       parameters: [descriptor.property.rawValue])
         }
-        guard let value = RemotePropertyCodec.parseValue(response.data, dataType: descriptor.dataType) else { return nil }
+        let parsed: Int64?
+        if descriptor.property == .nikonLightMeter || descriptor.property == .nikonExposureIndicate {
+            parsed = RemoteExposureMeter.decode(property: descriptor.property.rawValue,
+                dataType: descriptor.dataType, writable: descriptor.writable,
+                responseOK: true, data: response.data)
+        } else {
+            parsed = RemotePropertyCodec.parseValue(response.data, dataType: descriptor.dataType)
+        }
+        guard let value = parsed else { return nil }
         var updated = descriptor
         updated.current = UInt64(bitPattern: value)
         return updated
@@ -770,6 +836,7 @@ actor CameraRepository {
         }
         subjectTrackingActive = false
         remoteControlModeSet = false
+        remoteDiagnosticControlModeSet = false
         movieApplicationPropertySet = false
         movieApplicationOperationSet = false
         liveViewEnhancedFailures = 0
@@ -779,14 +846,28 @@ actor CameraRepository {
     }
 
     func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 {
-        if enabled == remoteControlModeSet { return PTPConstants.responseOK }
+        // RemoteLab.rcSetControlMode: the physical command also releases the
+        // manual owner on success. Movie standby decides whether release is due.
+        if enabled == remoteControlModeSet {
+            if !enabled { remoteDiagnosticControlModeSet = false }
+            return PTPConstants.responseOK
+        }
         let response = try await movieCommandWithBusyRetry(PTPConstants.setControlMode,
                                                             parameters: [enabled ? 1 : 0])
-        if response == PTPConstants.responseOK { remoteControlModeSet = enabled }
+        if response == PTPConstants.responseOK {
+            remoteControlModeSet = enabled
+            if !enabled { remoteDiagnosticControlModeSet = false }
+        }
         return response
     }
 
     func hasRemoteControlMode() -> Bool { remoteControlModeSet }
+    func setRemoteDiagnosticControlMode(_ enabled: Bool) async throws -> UInt16 {
+        let response = try await setRemoteControlMode(enabled)
+        if response == PTPConstants.responseOK { remoteDiagnosticControlModeSet = enabled }
+        return response
+    }
+    func hasRemoteDiagnosticControlMode() -> Bool { remoteDiagnosticControlModeSet }
     func hasMovieApplicationMode() -> Bool {
         movieApplicationPropertySet || movieApplicationOperationSet
     }
@@ -810,7 +891,7 @@ actor CameraRepository {
     }
 
     func clearMovieApplicationMode(force: Bool = false) async {
-        if isUSBConnection && remoteControlModeSet && !force { return }
+        if isUSBConnection && (remoteControlModeSet || remoteDiagnosticControlModeSet) && !force { return }
         if movieApplicationOperationSet {
             let response = try? await ioGate.withInteractive {
                 try await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
@@ -832,7 +913,7 @@ actor CameraRepository {
     func startPreparedUSBMovieRecording() async throws -> RemoteMovieStartResult {
         let operationWasSet = movieApplicationOperationSet
         let propertyWasSet = movieApplicationPropertySet
-        let completed = try await ioGate.withInteractive {
+        return try await ioGate.withInteractive {
             try await session.withCommandSequence { commands in
             var operationSet = operationWasSet
             var propertySet = propertyWasSet
@@ -852,7 +933,10 @@ actor CameraRepository {
                 let response = try await commands.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
                                                                  parameters: [1]).code
                 appOperation = response
-                if response == PTPConstants.responseOK { operationSet = true }
+                if response == PTPConstants.responseOK {
+                    operationSet = true
+                    await recordMovieApplicationMode(property: false)
+                }
                 if response == PTPConstants.operationNotSupported {
                     let property = try await commands.executeResponse(operation: PTPConstants.setDevicePropValue,
                                                                      parameters: [RemoteProperty.applicationMode.rawValue],
@@ -860,6 +944,7 @@ actor CameraRepository {
                     appProperty = property
                     if property == PTPConstants.responseOK {
                         propertySet = true
+                        await recordMovieApplicationMode(property: true)
                         _ = try await readProhibit()
                     }
                 }
@@ -869,17 +954,20 @@ actor CameraRepository {
                 ? try await commands.executeResponse(operation: PTPConstants.startMovieRecording).code
                 : (appProperty ?? appOperation ?? 0x200F)
             let finalProhibit = start == PTPConstants.responseOK ? nil : (try await readProhibit() ?? preflight)
-            return (RemoteMovieStartResult(responseCode: start, prohibitCondition: finalProhibit,
+            return RemoteMovieStartResult(responseCode: start, prohibitCondition: finalProhibit,
                                            prohibitExtendedResponse: extended,
                                            applicationModeResponse: appOperation,
                                            applicationModePropertyResponse: appProperty,
-                                           startCommandResponse: ready ? start : nil),
-                    operationSet, propertySet)
+                                           startCommandResponse: ready ? start : nil)
             }
         }
-        movieApplicationOperationSet = completed.1
-        movieApplicationPropertySet = completed.2
-        return completed.0
+    }
+
+    /// Commit each acknowledged side effect before the next fallible command.
+    /// The command-sequence gate remains held while recording actor ownership.
+    private func recordMovieApplicationMode(property: Bool) {
+        if property { movieApplicationPropertySet = true }
+        else { movieApplicationOperationSet = true }
     }
 
     func startMovieRecording() async throws -> RemoteMovieStartResult {
@@ -947,37 +1035,199 @@ actor CameraRepository {
 
     /// Identity verification and header read share one transaction slot, so a
     /// reused handle can never be validated after its EXIF has been consumed.
-    func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?) async throws -> Data? {
+    func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?,
+                             maxBytes: Int = cameraExifHeaderCaptureBytes) async throws -> Data? {
+        let limit = min(max(1, maxBytes), 2 * 1024 * 1024)
         let current = photoMetadataIdentity()
         if let expectedSource, expectedSource.camera != current.camera { return nil }
         let verifyFile = expectedSource.map { $0.session != current.session } ?? false
-        return try await ioGate.withTransferSlice {
+        return try await ioGate.withBackgroundThumbnail {
             if verifyFile {
                 let actual: CameraFile?
                 if let cached = await self.directReader?.cachedFile(handle: file.id) {
                     actual = cached
                 } else {
                     let response = try await self.session.executeResponse(operation: PTPConstants.getObjectInfo, parameters: [file.id])
-                    let parsed = PTPDatasetParser.parseObjectInfoResult(handle: file.id, response.data)
+                    let parsed = PTPDatasetParser.parseObjectInfoResult(
+                        handle: file.id, response.data, protectionAvailable: staAlbum == nil
+                    )
                     actual = response.code == PTPConstants.responseOK && parsed.successful ? parsed.file : nil
                 }
                 guard samePhotoMetadataSource(file, actual) else { return nil }
             }
-            if let cached = await self.directReader?.cachedMetadataHeader(handle: file.id, length: cameraExifHeaderCaptureBytes) {
+            if let cached = await self.directReader?.cachedMetadataHeader(handle: file.id, length: limit) {
                 return cached
             }
             let result = try await self.session.executeResponse(operation: PTPConstants.getPartialObjectEx,
-                parameters: [file.id, 0, 0, UInt32(cameraExifHeaderCaptureBytes), 0])
+                parameters: [file.id, 0, 0, UInt32(limit), 0])
             return result.code == PTPConstants.responseOK && !result.data.isEmpty ? result.data : nil
         }
     }
 
     func usesDirectThumbnailRead() -> Bool { directReader != nil }
+    /// True only for the paired STA album route. Debug protection probes are
+    /// deliberately unavailable to AP and USB sessions.
+    func isSTASession() -> Bool { staAlbum != nil }
+
+    private static let protectionProbeExtensions: Set<String> =
+        [".jpg", ".jpeg", ".nef", ".nrw", ".mov", ".mp4"]
+
+    /// Read a bounded file prefix for the STA protection experiment. The
+    /// normal browsing prefix cache is bypassed so a second probe observes
+    /// bytes after the user changes protection on the camera.
+    private func readProtectionProbeHeader(_ file: CameraFile, length: Int) async throws -> Data {
+        if let directReader {
+            return try await directReader.protectionHeader(handle: file.id, length: length)
+        }
+        let response = try await session.executeResponse(
+            operation: PTPConstants.getPartialObjectEx,
+            parameters: [file.id, 0, 0, UInt32(length), 0],
+            timeoutNanoseconds: 60_000_000_000
+        )
+        guard response.code == PTPConstants.responseOK else {
+            throw PTPSessionError.responseCode(response.code)
+        }
+        return response.data
+    }
+
+    /// Android's bounded read-only STA header probe. A changed byte is only a
+    /// candidate: this method never writes protection state or updates the
+    /// normal rating/protection caches.
+    func probeProtectionHeaders(files: [CameraFile]) async {
+        guard staAlbum != nil else {
+            PhotoRatingDiagnostics.note("protection header probe unavailable=non-sta")
+            return
+        }
+        PhotoRatingDiagnostics.note("protection header probe mode=STA files=\(min(files.count, 4)) cap=262144B objectProtection=not-read")
+        guard directReader != nil else {
+            PhotoRatingDiagnostics.note("protection header probe unavailable=sta-direct-not-validated")
+            return
+        }
+        var seen = Set<UInt32>()
+        let candidates = files.filter {
+            Self.protectionProbeExtensions.contains($0.fileExtension) && seen.insert($0.id).inserted
+        }.prefix(4)
+        guard !candidates.isEmpty else {
+            PhotoRatingDiagnostics.note("protection header probe no-supported-files")
+            return
+        }
+        do { try await ioGate.withRatingTransaction(owner: "RATING") { [self] in
+            for file in candidates {
+                let startedAt = DispatchTime.now().uptimeNanoseconds
+                let elapsedMS: () -> UInt64 = {
+                    (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+                }
+                let requested = Int(min(max(file.size, 1), 256 * 1024))
+                do {
+                    let bytes = try await readProtectionProbeHeader(file, length: requested)
+                    guard !bytes.isEmpty else {
+                        PhotoRatingDiagnostics.note("protection file=\(file.fileName) handle=0x\(String(format: "%08X", file.id)) bytes=0 result=read-failed elapsed=\(elapsedMS())ms")
+                        continue
+                    }
+                    let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+                    let rating = parsePhotoRating(bytes) ?? parseNikonVideoRating(bytes, fileSize: file.size)
+                    let prefix = "protection file=\(file.fileName) handle=0x\(String(format: "%08X", file.id)) bytes=\(bytes.count) sha256=\(digest) "
+                    if let previous = protectionHeaderProbeBaselines.value(for: file.id) {
+                        let common = min(previous.count, bytes.count)
+                        var changes: [String] = []
+                        var changedCount = previous.count == bytes.count ? 0 : 1
+                        if common > 0 {
+                            for index in 0..<common where previous[index] != bytes[index] {
+                                changedCount += 1
+                                if changes.count < 12 {
+                                    changes.append("@\(index):\(String(format: "%02X", previous[index]))->\(String(format: "%02X", bytes[index]))")
+                                }
+                            }
+                        }
+                        PhotoRatingDiagnostics.note(prefix + "rating=\(rating.map { String($0) } ?? "unknown") " + (changedCount == 0
+                            ? "diff=none"
+                            : "diffCount=\(changedCount) candidates=\(changes.joined(separator: ",")) candidateOnly=true") +
+                            " elapsed=\(elapsedMS())ms")
+                    } else {
+                        protectionHeaderProbeBaselines.save(bytes, for: file.id)
+                        PhotoRatingDiagnostics.note(prefix + "rating=\(rating.map { String($0) } ?? "unknown") baseline=saved elapsed=\(elapsedMS())ms")
+                    }
+                } catch {
+                    PhotoRatingDiagnostics.note("protection file=\(file.fileName) handle=0x\(String(format: "%08X", file.id)) error=\(String(describing: error)) elapsed=\(elapsedMS())ms")
+                    PhotoRatingDiagnostics.note("protection file=\(file.fileName) handle=0x\(String(format: "%08X", file.id)) bytes=0 result=read-failed elapsed=\(elapsedMS())ms")
+                }
+            }
+        } } catch { PhotoRatingDiagnostics.note("protection header probe error=\(String(describing: error))") }
+        PhotoRatingDiagnostics.note("protection header probe complete; differences are candidates only, repeat after changing the camera protection state")
+    }
+
+    /// One-shot read-only MTP ProtectionStatus probe (0xDC03). The response
+    /// code and raw payload are logged without touching FileInfo.isProtected.
+    func probeProtectionProperties(files: [CameraFile]) async {
+        guard staAlbum != nil else {
+            PhotoRatingDiagnostics.note("protection property probe unavailable=non-sta")
+            return
+        }
+        let candidateCount = min(files.count, 4)
+        var seen = Set<UInt32>()
+        let candidates = files.filter {
+            Self.protectionProbeExtensions.contains($0.fileExtension) && seen.insert($0.id).inserted
+        }.prefix(4)
+        let advertised = cachedDeviceInfo?.operations.contains(PTPConstants.getObjectPropValue) == true
+        PhotoRatingDiagnostics.note("protection property probe mode=STA prop=0xDC03 op=0x9803 advertised=\(advertised) files=\(candidateCount)")
+        guard !candidates.isEmpty else {
+            PhotoRatingDiagnostics.note("protection property probe no-supported-files")
+            return
+        }
+        do { try await ioGate.withRatingTransaction(owner: "RATING") { [self] in
+            for file in candidates {
+                do {
+                    let response = try await session.executeResponse(
+                        operation: PTPConstants.getObjectPropValue,
+                        parameters: [file.id, PTPConstants.objectPropProtectionStatus],
+                        timeoutNanoseconds: 60_000_000_000
+                    )
+                    let raw = response.data.prefix(32).map { String(format: "%02X", $0) }.joined(separator: " ")
+                    let value = response.data.count >= 2
+                        ? String(UInt16(response.data[0]) | (UInt16(response.data[1]) << 8))
+                        : "unknown"
+                    PhotoRatingDiagnostics.note("protection property file=\(file.fileName) handle=0x\(String(format: "%08X", file.id)) resp=0x\(String(format: "%04X", response.code)) bytes=\(response.data.count) value=\(value) raw=\(raw.isEmpty ? "none" : raw)")
+                } catch {
+                    PhotoRatingDiagnostics.note("protection property file=\(file.fileName) handle=0x\(String(format: "%08X", file.id)) error=\(String(describing: error))")
+                }
+            }
+        } } catch { PhotoRatingDiagnostics.note("protection property probe error=\(String(describing: error))") }
+        PhotoRatingDiagnostics.note("protection property probe complete")
+    }
     /// The Android list keeps this handle snapshot when FHD/monitoring cancels
     /// a scan before the first metadata batch is visible.  The owner must be
     /// able to pass that exact snapshot back instead of inferring resumability
     /// from the number of published rows.
     func scanSnapshotForResume() -> PhotoScanSnapshot? { scanSnapshot }
+
+    func staCatalogRecovery() -> STACatalogRecovery? {
+        guard staAlbum != nil,
+              let guid = STAProfileStore.normalizeGUID(transportCameraIdentifier),
+              !catalogOrder.isEmpty || catalogReady else { return nil }
+        return STACatalogRecovery(responderGUID: guid, files: catalogFiles,
+            indexedFiles: indexedCatalogFiles, order: catalogOrder,
+            storageIDs: catalogStorageIDs, knownHandles: knownHandles)
+    }
+
+    /// Install only before a new same-body STA session begins scanning.
+    /// The next scan must re-enumerate handles, not reuse handshake results.
+    @discardableResult
+    func restoreSTACatalog(_ recovery: STACatalogRecovery) -> Bool {
+        guard staAlbum != nil, activeCatalogScans == 0, catalogOrder.isEmpty,
+              knownHandles.isEmpty, !catalogReady,
+              STAProfileStore.normalizeGUID(transportCameraIdentifier) == recovery.responderGUID else { return false }
+        catalogFiles = recovery.files
+        indexedCatalogFiles = recovery.indexedFiles
+        catalogOrder = recovery.order
+        catalogStorageIDs = recovery.storageIDs
+        knownHandles = recovery.knownHandles
+        prefetchedStorageIDs = nil
+        prefetchedHandles = nil
+        scanSnapshot = nil
+        invalidatePhotoRatings()
+        resetRatingCapabilityState()
+        return true
+    }
     func backgroundThumbnailFillAllowed() -> Bool {
         activeForegroundReads == 0 && !remoteActive && !fhdActive && !transfersBusy && !effectPreviewActive
     }
@@ -1052,6 +1302,88 @@ actor CameraRepository {
         return ids
     }
 
+    /// Monitor-only storage discovery reuses the catalog's known physical IDs
+    /// when available, and otherwise performs one ordinary GetStorageIDs.
+    func monitorStorageIDs() async throws -> [UInt32] {
+        let ids = catalogStorageIDs.isEmpty ? try await loadStorageIDs() : catalogStorageIDs
+        // Android's usableStorageIds helper removes placeholders, excludes
+        // aggregate stores for AP/USB (low 16 bits == 0), de-duplicates, then
+        // sorts before assigning visible slots. STA keeps its wildcard mapping.
+        let usable = ids.filter { id in
+            if staAlbum != nil { return id != 0 && id != .max }
+            return (id & 0xFFFF) != 0
+        }
+        return Array(Set(usable)).sorted()
+    }
+
+    /// MonitorStorage uses an ordinary P6 ticket, unlike a skippable heartbeat.
+    /// Recheck the page's current polling condition after obtaining the channel.
+    func monitorFreeBytes(storageID: UInt32, allowed: @escaping @Sendable () async -> Bool) async throws -> Int64? {
+        try await ioGate.withCameraTransaction(.idle, owner: "MONITOR_STORAGE") {
+            guard await allowed() else { return nil }
+            let response = try await session.executeResponse(operation: PTPConstants.getStorageInfo,
+                                                              parameters: [storageID])
+            guard response.code == PTPConstants.responseOK else {
+                throw PTPSessionError.responseCode(response.code)
+            }
+            return RemoteMonitorTelemetry.parseMonitorFreeBytes(response.data)
+        }
+    }
+
+    /// Read-only developer diagnostic matching Android's fixed-layout legacy
+    /// video-time probe. It never starts/stops Live View or writes a property.
+    func probeLegacyVideoTime() async throws -> String {
+        let response = try await ioGate.withInteractive {
+            try await session.executeResponse(operation: PTPConstants.getLiveViewImage)
+        }
+        var lines = ["Legacy video-time probe op=0x9203 response=0x\(String(format: "%04X", response.code)) bytes=\(response.data.count)"]
+        let scanLimit = min(response.data.count - 3, 2048 - 3)
+        var jpegOffset: Int?
+        if scanLimit >= 0 {
+            for index in 0...scanLimit where response.data[index] == 0xFF && response.data[index + 1] == 0xD8 && response.data[index + 2] == 0xFF {
+                jpegOffset = index
+                break
+            }
+        }
+        guard response.code == PTPConstants.responseOK,
+              jpegOffset == 384,
+              response.data.count >= 69 else {
+            lines.append("unsupported layout jpegOffset=\(jpegOffset.map(String.init) ?? "none")")
+            return lines.joined(separator: "\n")
+        }
+        func bigEndianUInt16(_ offset: Int) -> UInt16 {
+            UInt16(response.data[offset]) << 8 | UInt16(response.data[offset + 1])
+        }
+        let minutes = bigEndianUInt16(64)
+        let seconds = bigEndianUInt16(66)
+        let recording = response.data[68]
+        lines.append("recording=\(recording == 1 ? "true" : "false") minutes=\(minutes) seconds=\(seconds)")
+        return lines.joined(separator: "\n")
+    }
+
+    /// Read-only D0A0/D0A7 property diagnostic. The raw response is retained
+    /// so unsupported layouts remain useful without guessing a value.
+    func probeMovieFormat() async throws -> String {
+        try await ioGate.withInteractive {
+            try await session.withCommandSequence { commands in
+                var lines = ["Movie-format probe (read-only)"]
+                for property in [UInt32(0xD0A0), UInt32(0xD0A7)] {
+                    let description = try await commands.executeResponse(operation: PTPConstants.getDevicePropDesc,
+                                                                          parameters: [property])
+                    lines.append("0x\(String(format: "%04X", property)) desc=0x\(String(format: "%04X", description.code)) hex=\(description.data.prefix(64).map { String(format: "%02X", $0) }.joined())")
+                    if let parsed = RemotePropertyCodec.parseDescription(description.data) {
+                        lines.append("  type=0x\(String(format: "%04X", parsed.dataType)) current=\(parsed.current) writable=\(parsed.writable) values=\(parsed.values.prefix(16))")
+                    }
+                    let value = try await commands.executeResponse(operation: PTPConstants.getDevicePropValue,
+                                                                     parameters: [property])
+                    lines.append("0x\(String(format: "%04X", property)) value=0x\(String(format: "%04X", value.code)) hex=\(value.data.prefix(64).map { String(format: "%02X", $0) }.joined())")
+                }
+                lines.append("mapping is informational; no property writes were issued")
+                return lines.joined(separator: "\n")
+            }
+        }
+    }
+
     func loadObjectHandles(storageID: UInt32 = 0xFFFFFFFF) async throws -> [UInt32] {
         if let prefetch = prefetchedHandles, prefetch.storageID == storageID {
             prefetchedHandles = nil; return prefetch.handles
@@ -1100,7 +1432,9 @@ actor CameraRepository {
         let result = try await ioGate.withCommand {
             try await session.execute(operation: PTPConstants.getObjectInfo, parameters: [handle])
         }
-        guard let file = PTPDatasetParser.parseObjectInfo(handle: handle, result.data) else { throw CameraRepositoryError.invalidDataset }
+        guard let file = PTPDatasetParser.parseObjectInfo(
+            handle: handle, result.data, protectionAvailable: staAlbum == nil
+        ) else { throw CameraRepositoryError.invalidDataset }
         return file
     }
 
@@ -1115,7 +1449,9 @@ actor CameraRepository {
                 return CatalogMetadataResult(groupIndex: group, handle: handle, file: file, successful: true)
             }
             let response = try await session.execute(operation: PTPConstants.getObjectInfo, parameters: [handle])
-            let parsed = PTPDatasetParser.parseObjectInfoResult(handle: handle, response.data)
+            let parsed = PTPDatasetParser.parseObjectInfoResult(
+                handle: handle, response.data, protectionAvailable: staAlbum == nil
+            )
             return CatalogMetadataResult(groupIndex: group, handle: handle,
                                          file: parsed.file, successful: parsed.successful)
         } catch let error as PTPSessionError where error == .invalidated || error == .timeout {
@@ -1204,12 +1540,17 @@ actor CameraRepository {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         return try await ioGate.withCameraTransaction(priority, owner: priority == .visibleThumbnail ? "VISIBLE_THUMBNAIL" : "BACKGROUND_THUMBNAIL") {
             if let directReader { return try await directReader.thumbnail(handle: handle) }
-            return try await session.execute(operation: PTPConstants.getThumb, parameters: [handle]).data
+            let response = try await session.executeResponse(operation: PTPConstants.getThumb, parameters: [handle])
+            switch response.code {
+            case PTPConstants.responseOK: return response.data
+            case PTPConstants.noThumbnailPresent, PTPConstants.invalidObjectHandle: return Data()
+            default: throw PTPSessionError.responseCode(response.code)
+            }
         }
     }
 
-    /// Android's preview order: FHD picture first, then Nikon large thumb, then
-    /// the standard thumbnail when the camera reports the operation unsupported.
+    /// Ordinary AP/USB only requests FHD here. The current preview page owns
+    /// the thumbnail fallback after EXIF; paired STA has its independent path.
     func preview(handle: UInt32) async throws -> Data {
         #if DEBUG
         if let debugData { return debugData.previewData }
@@ -1217,35 +1558,58 @@ actor CameraRepository {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         return try await ioGate.withPreviewTransaction(owner: "PREVIEW") {
             if let directReader { return try await directReader.preview(handle: handle) }
-            var lastError: Error?
-            for operation in [PTPConstants.getFHDPicture, PTPConstants.getLargeThumb, PTPConstants.getThumb] {
-                do {
-                    let data = try await session.execute(operation: operation, parameters: [handle]).data
-                    if !data.isEmpty { return data }
-                } catch {
-                    lastError = error
-                }
-            }
-            throw lastError ?? CameraRepositoryError.invalidDataset
+            return try await self.readFHDPreview(handle: handle)
         }
     }
 
-    func readPrefix(handle: UInt32, length: Int64) async throws -> Data {
+    private func readFHDPreview(handle: UInt32) async throws -> Data {
+        try Task.checkCancellation()
+        guard fhdSupported != false else { return Data() }
+        for attempt in 0...2 {
+            let response = try await session.executeResponse(operation: PTPConstants.getFHDPicture,
+                                                             parameters: [handle])
+            if response.code == PTPConstants.responseOK, !response.data.isEmpty {
+                fhdSupported = true
+                return response.data
+            }
+            if response.code == PTPConstants.operationNotSupported {
+                if fhdSupported != true { fhdSupported = false }
+                return Data()
+            }
+            guard response.code == PTPConstants.deviceBusy, attempt < 2 else { return Data() }
+            try await Task.sleep(for: .milliseconds(160))
+        }
+        return Data()
+    }
+
+    func readPrefix(handle: UInt32, length: Int64, retryDeviceBusy: Bool = false) async throws -> Data {
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         let generation = photoRatingCache.generation
         return try await ioGate.withPreviewTransaction(owner: "PREVIEW_EXIF") { [self] in
             let count = max(0, min(length, Int64(UInt32.max)))
-            if let directReader {
-                let data = try await directReader.exifHeader(handle: handle, length: Int(count))
-                await self.capturePhotoRating(handle, data, origin: "header", generation: generation)
-                return data
+            // Android readExifHeader keeps the PREVIEW_EXIF transaction while
+            // retrying DeviceBusy twice, with a cancellable 160 ms delay.
+            var retries = retryDeviceBusy ? 2 : 0
+            while true {
+                try Task.checkCancellation()
+                do {
+                    if let directReader {
+                        let data = try await directReader.exifHeader(handle: handle, length: Int(count))
+                        await self.capturePhotoRating(handle, data, origin: "header", generation: generation)
+                        return data
+                    }
+                    let result = try await session.execute(
+                        operation: PTPConstants.getPartialObjectEx,
+                        parameters: [handle, 0, 0, UInt32(count & 0xFFFF_FFFF), UInt32(count >> 32)]
+                    )
+                    await self.capturePhotoRating(handle, result.data, origin: "header", generation: generation)
+                    return result.data
+                } catch PTPSessionError.responseCode(let code)
+                    where code == PTPConstants.deviceBusy && retries > 0 {
+                    retries -= 1
+                    try await Task.sleep(for: .milliseconds(160))
+                }
             }
-            let result = try await session.execute(
-                operation: PTPConstants.getPartialObjectEx,
-                parameters: [handle, 0, 0, UInt32(count & 0xFFFF_FFFF), UInt32(count >> 32)]
-            )
-            await self.capturePhotoRating(handle, result.data, origin: "header", generation: generation)
-            return result.data
         }
     }
 
@@ -1311,26 +1675,43 @@ actor CameraRepository {
     /// a second time. Nikon's 0x9431 is preferred, with standard 0x101B as the
     /// connection-scoped fallback when the camera explicitly rejects it.
     func readPhotoRatingHeader(file: CameraFile) async throws -> Int? {
-        try await ioGate.withRatingTransaction(owner: "RATING") { [self] in
-            try await readPhotoRatingHeaderCommand(file: file)
+        let waiting = ContinuousClock.now
+        return try await ioGate.withRatingTransaction(owner: "RATING") { [self] in
+            try await readPhotoRatingHeaderCommand(file: file,
+                gateWaitMS: PTPTransferDiagnostics.milliseconds(since: waiting))
         }
     }
 
-    private func readPhotoRatingHeaderCommand(file: CameraFile) async throws -> Int? {
+    private func readPhotoRatingHeaderCommand(file: CameraFile, gateWaitMS: Double) async throws -> Int? {
+        let started = ContinuousClock.now
+        var commandMS = 0.0
+        var parseMS = 0.0
+        var chunks = 0
+        func parse(_ data: Data) -> Int? {
+            let start = ContinuousClock.now
+            defer { parseMS += PTPTransferDiagnostics.milliseconds(since: start) }
+            return parsePhotoRating(data)
+        }
         let firstLimit = 100 * 1024
         let extensionSize = 8 * 1024
         let maximum = 256 * 1024
         let generation = photoRatingCache.generation
-        var bytes = try await readRatingChunk(file: file, offset: 0, count: firstLimit)
+        let first = try await readTimedRatingChunk(file: file, offset: 0, count: firstLimit)
+        var bytes = first.data
+        commandMS += first.commandMS; chunks += first.chunks
         guard bytes.count <= firstLimit else { return nil }
-        var rating = parsePhotoRating(bytes)
+        var rating = parse(bytes)
         while rating == nil && bytes.count < maximum {
             let count = min(extensionSize, maximum - bytes.count)
-            let tail = try await readRatingChunk(file: file, offset: UInt64(bytes.count), count: count)
+            let next = try await readTimedRatingChunk(file: file, offset: UInt64(bytes.count), count: count)
+            commandMS += next.commandMS; chunks += next.chunks
+            let tail = next.data
             guard !tail.isEmpty, tail.count <= count else { break }
             bytes.append(tail)
-            rating = parsePhotoRating(bytes)
+            rating = parse(bytes)
         }
+        let otherMS = max(0, PTPTransferDiagnostics.milliseconds(since: started) - commandMS - parseMS)
+        PhotoRatingDiagnostics.detail("read file=\(file.fileName) bytes=\(bytes.count) chunks=\(chunks) gate=\(Int(gateWaitMS))ms command=\(Int(commandMS))ms parse=\(Int(parseMS))ms other=\(Int(otherMS))ms result=\(rating.map(String.init) ?? "unknown")")
         guard generation == photoRatingCache.generation else { return nil }
         if let rating { rememberPhotoRating(file.id, rating, generation: generation, origin: "rating-header") }
         return rating
@@ -1365,7 +1746,19 @@ actor CameraRepository {
     /// preserved so capability state distinguishes unsupported from transient
     /// busy/error responses exactly as the Android path does.
     private func readRatingChunk(file: CameraFile, offset: UInt64, count: Int) async throws -> Data {
-        guard count > 0, count <= Int(UInt32.max), offset <= UInt64.max - UInt64(count) else { return Data() }
+        try await readRatingChunkResult(file: file, offset: offset, count: count).data
+    }
+
+    private func readTimedRatingChunk(file: CameraFile, offset: UInt64, count: Int) async throws
+        -> (data: Data, commandMS: Double, chunks: Int) {
+        let start = ContinuousClock.now
+        let result = try await readRatingChunkResult(file: file, offset: offset, count: count)
+        return (result.data, result.successful ? PTPTransferDiagnostics.milliseconds(since: start) : 0,
+                result.successful ? 1 : 0)
+    }
+
+    private func readRatingChunkResult(file: CameraFile, offset: UInt64, count: Int) async throws -> (data: Data, successful: Bool) {
+        guard count > 0, count <= Int(UInt32.max), offset <= UInt64.max - UInt64(count) else { return (Data(), false) }
         if !ratingNikonHeaderUnsupported {
             let response = try await session.executeResponse(
                 operation: PTPConstants.getPartialObjectEx,
@@ -1373,17 +1766,17 @@ actor CameraRepository {
                               UInt32(truncatingIfNeeded: offset >> 32), UInt32(count), 0]
             )
             if response.code == PTPConstants.responseOK {
-                return response.data
+                return (response.data, true)
             }
             if response.code == PTPConstants.deviceBusy {
                 throw CameraRepositoryError.ratingReadDeferred
             }
             if response.code != PTPConstants.operationNotSupported {
-                return Data()
+                return (Data(), false)
             }
             ratingNikonHeaderUnsupported = true
         }
-        guard !ratingStandardHeaderUnsupported, offset <= UInt64(UInt32.max) else { return Data() }
+        guard !ratingStandardHeaderUnsupported, offset <= UInt64(UInt32.max) else { return (Data(), false) }
         let response = try await session.executeResponse(
             operation: PTPConstants.getPartialObject,
             parameters: [file.id, UInt32(offset), UInt32(count)]
@@ -1393,9 +1786,9 @@ actor CameraRepository {
         }
         if response.code == PTPConstants.operationNotSupported {
             ratingStandardHeaderUnsupported = true
-            return Data()
+            return (Data(), false)
         }
-        return response.code == PTPConstants.responseOK ? response.data : Data()
+        return response.code == PTPConstants.responseOK ? (response.data, true) : (Data(), false)
     }
 
     func download(handle: UInt32, size: UInt64, fileName: String,
@@ -1430,7 +1823,6 @@ actor CameraRepository {
         if let debugData {
             let startedAt = ContinuousClock.now
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let url = transferUniqueOutputURL(directory: directory, fileName: fileName)
             let bytes = UInt64(debugData.thumbnailData.count)
             for step in 1...20 {
                 try await Task.sleep(for: .milliseconds(200))
@@ -1439,7 +1831,11 @@ actor CameraRepository {
                                                    total: bytes,
                                                    bytesPerSecond: max(1, Int64(bytes / 4))))
             }
-            try debugData.thumbnailData.write(to: url, options: .atomic)
+            let preferred = directory.appendingPathComponent(URL(fileURLWithPath: fileName).lastPathComponent)
+            let url = try OutputFileNameReservations.shared.withReservedName(preferred, policy: .original) { output in
+                try debugData.thumbnailData.write(to: output, options: .withoutOverwriting)
+                return output
+            }
             progress?(TransferDownloadProgress(fraction: 1,
                                                downloaded: UInt64(debugData.thumbnailData.count),
                                                total: UInt64(debugData.thumbnailData.count)))
@@ -1450,16 +1846,22 @@ actor CameraRepository {
         #endif
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         let safeName = URL(fileURLWithPath: fileName).lastPathComponent
+        let videoTransfer = supportsVideoResume(fileName: safeName)
         let temporary = directory.appendingPathComponent(
             transferPartialFileName(size: size, captureDate: captureDate, fileName: safeName), isDirectory: false
         )
         defer {
-            // Android keeps resumable video parts, but a cancelled still-image
-            // transfer starts cleanly next time and must not publish its part.
-            if Task.isCancelled && !keepsPartialOnCancellation(fileName: safeName) {
+            // TransferViewModel removes still-image parts on every failure,
+            // including a complete data phase followed by an error response.
+            // This runs after the writer closes; successful publication has
+            // already moved the part. Only videos retain resumable bytes.
+            if !videoTransfer {
                 try? FileManager.default.removeItem(at: temporary)
             }
         }
+        // Android only resumes video-family objects. A stale still-image part
+        // must never turn the next photo into a resumed transfer.
+        if !videoTransfer { try? FileManager.default.removeItem(at: temporary) }
         let existingSize = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize)
             .map { UInt64(max(0, $0)) } ?? 0
         let resumeOffset = transferResumeOffset(existingSize: existingSize, totalSize: size, reportedSize: size) ?? 0
@@ -1518,7 +1920,13 @@ actor CameraRepository {
         // Snapshot after size resolution, immediately before the first file
         // data command. Page changes must not switch strategy midway through.
         let highThroughput = preferHighThroughputTransfers
-        let boundedUnknownUSB = isUSBConnection && !sizeKnown && partialObjectSupported != false
+        let requiresBoundedUSBRead = isUSBConnection && (!sizeKnown || effectiveSize > transferChunkSize)
+        // A previous unsupported response must not make the next large USB
+        // object enter ImageCaptureCore's whole-object Data callback either.
+        guard !requiresBoundedUSBRead || partialObjectSupported != false else {
+            throw CameraRepositoryError.resumeUnavailable
+        }
+        let boundedUnknownUSB = requiresBoundedUSBRead && !sizeKnown
         let usePartial = boundedUnknownUSB || shouldUsePartialObjectDownload(
             partialObjectSupported: partialObjectSupported, effectiveSize: effectiveSize,
             resumeOffset: resumeOffset, isUSBConnection: isUSBConnection,
@@ -1529,15 +1937,20 @@ actor CameraRepository {
             forcePartial: directReader != nil || (isUSBConnection && effectiveSize > transferChunkSize),
             // The transport may force bounded reads for stills (for example
             // ImageCaptureCore); the policy gate must preserve that path.
-            videoTransfer: true
+            videoTransfer: videoTransfer
         )
         if resumeOffset > 0 && !usePartial { throw CameraRepositoryError.resumeUnavailable }
+        let singleRequestPhoto = !videoTransfer && !isUSBConnection
+        if usePartial && singleRequestPhoto && effectiveSize > UInt64(Int32.max) {
+            throw CameraDownloadError.photoExceedsSingleRequestLimit
+        }
         let writer = CameraDownloadWriter(output: output, resumeOffset: resumeOffset,
                                            totalHint: sizeKnown ? effectiveSize : 0, captureHeader: captureHeader,
                                            startedAt: startedAt, onProgress: progress, diagnostics: diagnostics)
         defer { try? writer.close() }
         let chunkSize = transferDownloadChunkSize(effectiveSize: effectiveSize,
-                                                  isUSBConnection: isUSBConnection, preferHighThroughput: highThroughput)
+                                                  isUSBConnection: isUSBConnection, preferHighThroughput: highThroughput,
+                                                  videoTransfer: videoTransfer)
         var firstPartial = true
         var useFull = !usePartial
         while usePartial && (!sizeKnown || writer.bytes < effectiveSize) {
@@ -1565,10 +1978,9 @@ actor CameraRepository {
                     response.code == PTPConstants.operationNotSupported {
                     partialObjectSupported = false
                     // ImageCaptureCore cannot stream GetObject into the file;
-                    // an unknown object could be arbitrarily large. Refuse the
-                    // unbounded in-memory fallback and let a later metadata
-                    // refresh retry with a known size.
-                    if isUSBConnection && !sizeKnown {
+                    // refuse that unbounded fallback for unknown objects and
+                    // known objects larger than its callback budget alike.
+                    if requiresBoundedUSBRead {
                         throw CameraRepositoryError.resumeUnavailable
                     }
                     useFull = true
@@ -1588,6 +2000,9 @@ actor CameraRepository {
                 break
             }
             guard response.receivedByteCount > 0 else {
+                throw CameraDownloadError.incomplete(received: writer.bytes, expected: effectiveSize)
+            }
+            if singleRequestPhoto && writer.bytes != effectiveSize {
                 throw CameraDownloadError.incomplete(received: writer.bytes, expected: effectiveSize)
             }
             if !sizeKnown && response.receivedByteCount < request {
@@ -1612,13 +2027,13 @@ actor CameraRepository {
                 return response
             }
             guard response.code == PTPConstants.responseOK else { throw CameraDownloadError.response(response.code) }
-            if let expected = response.declaredByteCount,
-               let mismatch = mismatchedFullObjectSize(received: writer.bytes,
-                                                       declared: expected, known: 0) {
-                throw CameraDownloadError.incomplete(received: writer.bytes, expected: mismatch)
-            }
-            if response.declaredByteCount == nil,
-               let mismatch = mismatchedFullObjectSize(received: writer.bytes, declared: 0, known: sizeKnown ? effectiveSize : 0) {
+            // A truncated data phase can declare its own short length. Android
+            // checks both that declaration and ObjectInfo/GetObjectSize before
+            // publishing, even when the declaration is internally consistent.
+            if let mismatch = mismatchedFullObjectSize(
+                received: writer.bytes, declared: response.declaredByteCount ?? 0,
+                known: sizeKnown ? effectiveSize : 0
+            ) {
                 throw CameraDownloadError.incomplete(received: writer.bytes, expected: mismatch)
             }
         } else if sizeKnown && writer.bytes != effectiveSize {
@@ -1657,6 +2072,7 @@ actor CameraRepository {
         resumeSnapshot: PhotoScanSnapshot? = nil,
         detectNewHandles: Bool = false,
         loadingRange: PhotoLoadingRange = .all,
+        currentLoadingRange: (@Sendable () async -> PhotoLoadingRange)? = nil,
         nextBatchSize: @escaping @Sendable () async -> Int = { 12 },
         onBatch: (@Sendable ([CameraFile]) async throws -> Void)? = nil
     ) async throws -> PhotoScanResult {
@@ -1667,7 +2083,7 @@ actor CameraRepository {
         // boundary. Do this before the debug catalog early return as well, so
         // simulator fixtures cannot accidentally retain a previous session's
         // ratings.
-        let reusable = resumeSnapshot
+        var reusable = resumeSnapshot.flatMap { $0.catalogRevision == scanCatalogRevision ? $0 : nil }
         if !preserveExisting && reusable == nil {
             invalidatePhotoRatings()
             resetRatingCapabilityState()
@@ -1698,6 +2114,9 @@ actor CameraRepository {
         // that foreground owner with its first catalog command. FHD pauses
         // are held until the preview releases the same session.
         try await waitForForegroundPreview()
+        // A deletion can arrive while foreground preview holds this scan.
+        // Revalidate the caller's captured value after that suspension too.
+        reusable = resumeSnapshot.flatMap { $0.catalogRevision == scanCatalogRevision ? $0 : nil }
 
         // A resume snapshot is valid only for this repository/session.  A fresh
         // scan invalidates old rows and cache state exactly like Android.
@@ -1717,6 +2136,7 @@ actor CameraRepository {
         var addedHandles = Set<UInt32>()
         var removedHandles = Set<UInt32>()
 
+        let enumerationRevision = scanCatalogRevision
         let storageIDs: [UInt32]
         var groups: [(storage: UInt32, handles: [UInt32])]
         var filterStorageIDs: [UInt32]
@@ -1831,14 +2251,15 @@ actor CameraRepository {
                 knownHandles = currentHandles
                 catalogStorageIDs = storageIDs
             }
-            scanSnapshot = PhotoScanSnapshot(
+            scanSnapshot = enumerationRevision == scanCatalogRevision ? PhotoScanSnapshot(
+                catalogRevision: enumerationRevision,
                 storageIDs: storageIDs,
                 handleOrders: groups.map { ($0.storage, $0.handles) },
                 processedHandles: Set(existingHandles),
                 handleQueriesSucceeded: handleQueriesSucceeded,
                 filterStorageIDs: filterStorageIDs,
                 directStorageIDsByHandle: directStorageIDsByHandle
-            )
+            ) : nil
             // Preserve the Android refresh contract: metadata is requested only
             // for handles not already published in this camera session.
             if preserveExisting {
@@ -1870,6 +2291,7 @@ actor CameraRepository {
         // if the UI callback is cancelled or the session generation changes.
         var pendingProcessedHandles: [UInt32] = []
         var stoppedAtLoadingRange = false
+        var loadingRangeAtStop: PhotoLoadingRange?
         while mergeState.completed < totalCatalogHandles {
             try Task.checkCancellation()
             try await waitForForegroundPreview()
@@ -1912,8 +2334,9 @@ actor CameraRepository {
             }
             let rangeInput = files + parsedOutput
             let observedDays = Set(rangeInput.compactMap { validPhotoCaptureDay($0.captureDate) })
-            let boundaryReached = loadingRange.days > 0 && observedDays.count > loadingRange.days
-            let allowedRange = newestCaptureDaysRange(rangeInput, days: loadingRange.days)
+            let batchRange = await currentLoadingRange?() ?? loadingRange
+            let boundaryReached = batchRange.days > 0 && observedDays.count > batchRange.days
+            let allowedRange = newestCaptureDaysRange(rangeInput, days: batchRange.days)
             let acceptedOutput = boundaryReached && allowedRange != nil
                 ? parsedOutput.filter { file in
                     file.captureDate == nil || allowedRange?.contains(file.captureDate) == true
@@ -1935,6 +2358,10 @@ actor CameraRepository {
                         byIdentity[key] = merged
                         if let pendingIndex = batch.firstIndex(where: { $0.id == old.id }) {
                             batch[pendingIndex] = merged
+                        } else {
+                            // The primary row was published in an earlier
+                            // batch. Deliver its membership replacement now.
+                            batch.append(merged)
                         }
                     }
                 } else {
@@ -1956,10 +2383,11 @@ actor CameraRepository {
                 let acceptedProcessed = pendingProcessedHandles.filter { acceptedIDs.contains($0) }
                 scanSnapshot?.processedHandles.formUnion(acceptedProcessed)
                 stoppedAtLoadingRange = true
+                loadingRangeAtStop = batchRange
                 catalogFiles = Dictionary(files.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 indexedCatalogFiles = indexed
                 catalogOrder = files.map(\.id)
-                catalogReady = metadataComplete && handleQueriesSucceeded
+                catalogReady = handleQueriesSucceeded
                 lastCatalogCheck = .now
                 publishCatalog()
                 break
@@ -1984,10 +2412,14 @@ actor CameraRepository {
         // can still compute real additions/removals instead of diffing against
         // an incomplete list.
         if handleQueriesSucceeded {
-            knownHandles = Set(groups.flatMap(\.handles)).union(Set(existingHandles))
+            // The successful handle enumeration above owns this baseline.
+            // Resume groups omit already consumed backup aliases; rebuilding
+            // from them and visible rows would classify old aliases as new.
             catalogStorageIDs = storageIDs
         }
-        catalogReady = metadataComplete && handleQueriesSucceeded
+        // Incomplete ObjectInfo forbids authoritative cache pruning, but a
+        // successful handle baseline can still process new/deleted objects.
+        catalogReady = handleQueriesSucceeded
         lastCatalogCheck = .now
         if catalogReady && !stoppedAtLoadingRange { scanSnapshot = nil }
         publishCatalog()
@@ -1996,7 +2428,8 @@ actor CameraRepository {
                                handleQueriesSucceeded: handleQueriesSucceeded,
                                metadataComplete: metadataComplete,
                                filterStorageIDs: filterStorageIDs,
-                               stoppedAtLoadingRange: stoppedAtLoadingRange)
+                               stoppedAtLoadingRange: stoppedAtLoadingRange,
+                               loadingRangeAtStop: loadingRangeAtStop)
     }
 
     private func logicalIdentity(_ file: CameraFile) -> String {
@@ -2059,6 +2492,10 @@ actor CameraRepository {
         case 0x4003:
             pendingObjects.removeValue(forKey: event.handle)
             if event.handle != 0 && event.handle != .max && catalogReady && !knownHandles.contains(event.handle) { return }
+            // Android requestHandleCatalogSync invalidates the paused/range-
+            // limited cursor immediately, before idle reconciliation can run.
+            scanCatalogRevision &+= 1
+            scanSnapshot = nil
             catalogSyncRequested = true
         default: break
         }

@@ -124,6 +124,10 @@ final class RemoteCameraToolController: ObservableObject, Identifiable {
                 }
                 guard active, isCurrent(), canWrite(), currentMovie() == movie else { changed(); return }
                 guard await beforeWrite() else { failed(); return }
+                try Task.checkCancellation()
+                guard active, !closeRequested else { return }
+                guard isCurrent(), canWrite(), currentMovie() == movie else { changed(); return }
+
                 // This unstructured task is deliberately never cancelled by
                 // dismissal. Write, finite retries and readback finish together.
                 writeAttempted = true

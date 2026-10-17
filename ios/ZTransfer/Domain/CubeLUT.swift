@@ -23,6 +23,20 @@ struct CubeLUT: Equatable, Sendable {
         return result
     }
 
+    static func validDomain(_ low: SIMD3<Float>, _ high: SIMD3<Float>,
+                            requireNormalEndpoints: Bool = false) -> Bool {
+        (0..<3).allSatisfy { index in
+            let a = low[index], b = high[index]
+            let range = b - a
+            guard a.isFinite, b.isFinite, range.isFinite,
+                  range >= Float.leastNormalMagnitude,
+                  (1 / range).isFinite, 1 / range >= Float.leastNormalMagnitude else { return false }
+            return !requireNormalEndpoints ||
+                ((a == 0 || abs(a) >= Float.leastNormalMagnitude) &&
+                 (b == 0 || abs(b) >= Float.leastNormalMagnitude))
+        }
+    }
+
     func sample(_ color: SIMD3<Float>) -> SIMD3<Float> {
         let p = SIMD3(
             ((color.x - domainMin.x) / (domainMax.x - domainMin.x)).clamped(to: 0...1) * Float(size - 1),
@@ -36,12 +50,12 @@ struct CubeLUT: Equatable, Sendable {
             let index = ((b * size + g) * size + r) * 3
             return SIMD3(rgb[index], rgb[index + 1], rgb[index + 2])
         }
-        var result = SIMD3<Float>(repeating: 0)
-        for bz in 0...1 { for gy in 0...1 { for rx in 0...1 {
-            let weight = (rx == 0 ? 1 - f.x : f.x) * (gy == 0 ? 1 - f.y : f.y) * (bz == 0 ? 1 - f.z : f.z)
-            result += value(rx == 0 ? lo.x : hi.x, gy == 0 ? lo.y : hi.y, bz == 0 ? lo.z : hi.z) * weight
-        }}}
-        return result
+        // Match PhotoCubeMapper's staged interpolation to preserve byte rounding.
+        let a = value(lo.x, lo.y, lo.z) * (1 - f.x) + value(hi.x, lo.y, lo.z) * f.x
+        let b = value(lo.x, hi.y, lo.z) * (1 - f.x) + value(hi.x, hi.y, lo.z) * f.x
+        let c = value(lo.x, lo.y, hi.z) * (1 - f.x) + value(hi.x, lo.y, hi.z) * f.x
+        let d = value(lo.x, hi.y, hi.z) * (1 - f.x) + value(hi.x, hi.y, hi.z) * f.x
+        return (a * (1 - f.y) + b * f.y) * (1 - f.z) + (c * (1 - f.y) + d * f.y) * f.z
     }
 }
 
@@ -101,18 +115,7 @@ enum CubeLUTParser {
         }
         guard let size, values.count == size * size * size * 3 else { throw CubeLUTFailure.invalid }
         let low = minimum ?? SIMD3(repeating: 0), high = maximum ?? SIMD3(repeating: 1)
-        let validDomain = (0..<3).allSatisfy { index in
-            let a = low[index], b = high[index]
-            let range = b - a
-            // The Android renderer uploads the table as half floats and computes
-            // 1 / range in the shader; reject values that cannot be represented
-            // reliably by either operation.
-            return a.isFinite && b.isFinite && b > a &&
-                range >= Float.leastNormalMagnitude && (1 / range).isFinite &&
-                (a == 0 || abs(a) >= Float.leastNormalMagnitude) &&
-                (b == 0 || abs(b) >= Float.leastNormalMagnitude)
-        }
-        guard validDomain else { throw CubeLUTFailure.invalid }
+        guard CubeLUT.validDomain(low, high, requireNormalEndpoints: true) else { throw CubeLUTFailure.invalid }
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         return CubeLUT(size: size, domainMin: low, domainMax: high, rgb: values, digest: digest)
     }

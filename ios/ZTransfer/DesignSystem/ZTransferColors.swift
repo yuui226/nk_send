@@ -2,8 +2,11 @@ import SwiftUI
 import UIKit
 
 enum ZTransferColors {
+    // Android Color.kt onAccent: white in light mode, DarkBackground in dark mode.
+    static let onAccent = adaptiveHex(light: (0xFF, 0xFF, 0xFF), dark: (0x12, 0x12, 0x12))
     static let surface = adaptiveHex(light: (0xFF, 0xFF, 0xFF), dark: (0x1E, 0x1E, 0x1E))
     static let background = adaptiveHex(light: (0xF2, 0xF2, 0xF7), dark: (0x12, 0x12, 0x12))
+    static let backgroundTop = adaptiveHex(light: (0xF8, 0xF8, 0xFB), dark: (0x18, 0x18, 0x18))
     static let primaryText = adaptiveHex(light: (0x1C, 0x1C, 0x1E), dark: (0xE0, 0xE0, 0xE0))
     static let secondaryText = adaptiveHex(light: (0x6E, 0x6E, 0x73), dark: (0xB0, 0xB0, 0xB0))
     static let statusError = adaptiveHex(light: (0xD3, 0x2F, 0x2F), dark: (0xF4, 0x43, 0x36))
@@ -323,7 +326,8 @@ private struct ZTransferAnimatedGlassButton: View {
     }
 }
 
-private extension Color {
+// Shared Compose-compatible interpolation for material surfaces and queue pills.
+extension Color {
     func mix(with other: Color, by amount: CGFloat, scheme: ColorScheme) -> Color {
         let t = min(max(amount, 0), 1)
         let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)

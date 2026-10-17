@@ -13,7 +13,8 @@ struct RemoteToolPositionMotion {
     private var lastFrame: Int64?
     private var duration: Int64 = 0
     private(set) var isRunning = false
-    private let spec = ZTransferAndroidMotion.underdampedSpring(stiffness: 500, dampingRatio: 0.86)
+    // RemoteToolBar.kt / 424c8514, including Offset.VisibilityThreshold.
+    private let spec = ZTransferAndroidMotion.underdampedSpring(stiffness: 520, dampingRatio: 0.88, threshold: 0.5)
 
     init(_ point: CGPoint) { value = point; target = point; initial = point }
 
@@ -59,7 +60,7 @@ struct RemoteToolSlotMotion {
     }
 
     mutating func configure(position target: CGPoint, editing: Bool, visible: Bool, dragging: Bool) {
-        position.setTarget(target, snap: dragging || !editing)
+        position.setTarget(target, snap: dragging)
         lift.retarget(dragging ? 1.10 : 1, using: .tween(milliseconds: 120))
         if editing { iconOpacity.retarget(visible ? 1 : 0.38, using: .tween(milliseconds: 180)) }
         else { iconOpacity.reset(to: visible ? 1 : 0.38) }
@@ -139,7 +140,7 @@ final class RemoteToolEditorMotion: NSObject, ObservableObject {
         for (id, slot) in fixedSlots {
             let pixels = CGPoint(x: slot.minX * density, y: slot.minY * density)
             if fixed[id] == nil { fixed[id] = RemoteToolPositionMotion(pixels) }
-            fixed[id]?.setTarget(pixels, snap: !editing)
+            fixed[id]?.setTarget(pixels, snap: false)
         }
         fixedPositions = fixed
         schedule()

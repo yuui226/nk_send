@@ -1,0 +1,10 @@
+Android shadow lighting calculations are adapted from the Android Open Source Project,
+android-15.0.0_r1, platform/frameworks/base:
+core/java/android/view/ThreadedRenderer.java
+libs/hwui/jni/android_graphics_HardwareRenderer.cpp
+libs/hwui/pipeline/skia/ReorderBarrierDrawables.cpp
+core/res/res/values/dimens.xml
+
+Copyright The Android Open Source Project.
+Licensed under the Apache License, Version 2.0. See Apache-2.0.txt in this directory.
+Source: https://android.googlesource.com/platform/frameworks/base/+/android-15.0.0_r1/

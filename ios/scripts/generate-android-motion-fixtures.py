@@ -35,6 +35,10 @@ fun main() {
     for (duration in listOf(0, 80, 90, 140, 160, 180, 220)) {
         specs["tween-$duration"] = FloatTweenSpec(duration = duration)
     }
+    for (delay in listOf(60, 80, 150)) {
+        specs["tween-200-delay-$delay"] = FloatTweenSpec(duration = 200, delay = delay)
+    }
+    specs["tween-0-delay-60"] = FloatTweenSpec(duration = 0, delay = 60)
     specs["spring-400-0.5"] = FloatSpringSpec(dampingRatio = 0.5f, stiffness = 400f)
     specs["spring-360-0.58"] = FloatSpringSpec(dampingRatio = 0.58f, stiffness = 360f)
     specs["spring-1500-1"] = FloatSpringSpec(dampingRatio = 1f, stiffness = 1500f)
@@ -45,7 +49,8 @@ fun main() {
         Triple(1.09f, 1f, -2f), Triple(1f, 1f, 0f), Triple(0.999f, 1f, 0f)
     )
     val times = listOf(0L, 1L, 999_999L, 1_000_000L, 16_666_667L, 40_000_000L,
-        79_999_999L, 80_000_000L, 90_000_000L, 140_000_000L,
+        59_999_999L, 60_000_000L, 60_000_001L,
+        79_999_999L, 80_000_000L, 90_000_000L, 140_000_000L, 150_000_000L,
         180_000_000L, 220_000_000L, 500_000_000L, 1_000_000_000L)
     for ((name, spec) in specs) for ((start, target, velocity) in inputs) {
         val duration = spec.getDurationNanos(start, target, velocity)
@@ -100,11 +105,11 @@ fun main() {
             fixture["easing"].append(dict(fraction=fields[1], value=fields[2]))
         else:
             raise RuntimeError(f"Unexpected output: {line}")
-    if len(fixture["cases"]) != 100 or len(fixture["easing"]) != 1001:
+    if len(fixture["cases"]) != 140 or len(fixture["easing"]) != 1001:
         raise RuntimeError("Incomplete Compose reference output")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(fixture, indent=2) + "\n")
-    print(f"Generated 100 animation cases and 1001 easing samples: {args.output}")
+    print(f"Generated 140 animation cases and 1001 easing samples: {args.output}")
 
 
 if __name__ == "__main__":

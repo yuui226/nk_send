@@ -26,6 +26,19 @@ enum ProgressiveHoldHapticPattern {
         .init(startMilliseconds: 680, durationMilliseconds: 12, amplitude: 118),
         .init(startMilliseconds: 725, durationMilliseconds: 12, amplitude: 142),
     ]
+
+    /// Haptics.progressiveHoldTimings: scale cumulative boundaries, not each
+    /// segment independently (which loses milliseconds at a 300ms shutter).
+    static func pulses(durationMilliseconds requested: Int) -> [Pulse] {
+        let duration = max(1, requested)
+        func boundary(_ value: Int) -> Int { duration / 800 * value + duration % 800 * value / 800 }
+        return pulses.map {
+            let start = boundary($0.startMilliseconds)
+            return Pulse(startMilliseconds: start,
+                durationMilliseconds: boundary($0.startMilliseconds + $0.durationMilliseconds) - start,
+                amplitude: $0.amplitude)
+        }
+    }
 }
 
 enum HapticPreference {

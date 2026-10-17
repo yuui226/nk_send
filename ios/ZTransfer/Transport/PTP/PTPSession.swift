@@ -172,6 +172,7 @@ actor PTPSession {
     var isInvalidated: Bool { invalidated }
 
     func keepaliveIfIdle() async -> Bool {
+        guard !invalidated else { return false }
         guard !executing, waiters.isEmpty else { return true }
         executing = true
         defer { release() }
@@ -400,6 +401,8 @@ enum PTPConstants {
     // NikonCamera.SO_TIMEOUT_MS, shared by USB/AP/STA download reads.
     static let cameraReadTimeoutNanoseconds: UInt64 = 60_000_000_000
     static let responseOK: UInt16 = 0x2001
+    static let invalidObjectHandle: UInt16 = 0x2009
+    static let noThumbnailPresent: UInt16 = 0x2010
     static let sessionAlreadyOpen: UInt16 = 0x201E
     static let nikonCompatibilityInit: UInt16 = 0x941C
     static let nikonChangeApplicationMode: UInt16 = 0x9435
@@ -411,6 +414,7 @@ enum PTPConstants {
     static let openSession: UInt16 = 0x1002
     static let closeSession: UInt16 = 0x1003
     static let getStorageIDs: UInt16 = 0x1004
+    static let getStorageInfo: UInt16 = 0x1005
     static let getObjectHandles: UInt16 = 0x1007
     static let getObjectInfo: UInt16 = 0x1008
     static let getObject: UInt16 = 0x1009
@@ -418,6 +422,7 @@ enum PTPConstants {
     // MTP/PTP object-property operations used by Nikon's rating path.
     static let getObjectPropValue: UInt16 = 0x9803
     static let objectPropRating: UInt32 = 0xDC8A
+    static let objectPropProtectionStatus: UInt32 = 0xDC03
     static let getDevicePropDesc: UInt16 = 0x1014
     static let getDevicePropValue: UInt16 = 0x1015
     static let setDevicePropValue: UInt16 = 0x1016

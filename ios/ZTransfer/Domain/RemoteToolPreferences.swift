@@ -3,7 +3,15 @@ import Combine
 
 // Raw values are the Android preference format, shared by photo/movie modes.
 // Layout order/visibility remains separate for the two modes.
-enum RemoteHistogramMode: String, CaseIterable { case off = "OFF", rgb = "RGB", luma = "LUMA" }
+enum RemoteHistogramMode: String, CaseIterable {
+    case off = "OFF", rgb = "RGB", luma = "LUMA"
+    var next: Self {
+        switch self { case .off: .rgb; case .rgb: .luma; case .luma: .off }
+    }
+    static func restore(saved: String?, previouslyEnabled: Bool) -> Self {
+        saved.flatMap(Self.init(rawValue:)) ?? (previouslyEnabled ? .luma : .off)
+    }
+}
 enum RemoteExposureAssist: String, CaseIterable { case off = "OFF", zebra = "ZEBRA", falseColor = "FALSE_COLOR" }
 enum RemoteWaveformMode: String, CaseIterable { case off = "OFF", luma = "LUMA", rgb = "RGB" }
 enum RemoteDispMode: String, CaseIterable {
@@ -98,7 +106,7 @@ final class RemoteToolPreferences: ObservableObject {
         case .meter: meter = false
         case .waveform: waveform = .off
         case .lock: locked = false
-        case .record, .whiteBalance, .focusArea, .focusMode, .lut, .rotate: break
+        case .record, .whiteBalance, .focusArea, .focusMode, .lut, .computerControl, .rotate: break
         }
     }
 }

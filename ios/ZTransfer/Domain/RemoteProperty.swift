@@ -30,11 +30,14 @@ enum RemotePropertyCodec {
         case 1:
             guard let minimum = readScalar(&reader, type),
                   let maximum = readScalar(&reader, type),
-                  let step = readScalar(&reader, type),
-                  minimum == 0, maximum == 1, step == 1 else { break }
-            values = [0, 1]
+                  let step = readScalar(&reader, type) else { return nil }
+            if minimum == 0, maximum == 1, step == 1 {
+                values = [0, 1]
+            } else if code == 0xD100 || code == 0x500D {
+                values = shutterRange(minimum: minimum, maximum: maximum, step: step)
+            }
         case 2:
-            guard let count = reader.readUInt16(), count <= 256 else { return nil }
+            guard let count = reader.readUInt16() else { return nil }
             values = (0..<count).compactMap { _ in readScalar(&reader, type) }
             guard values.count == count else { return nil }
         default:
@@ -42,6 +45,25 @@ enum RemotePropertyCodec {
         }
         return ParsedRemoteProperty(code: code, dataType: type, writable: getSet != 0,
                               current: current, values: values)
+    }
+
+    /// Android shutterRangeValues: sample only declared step-aligned values,
+    /// with at most 256 entries. Other nonbinary ranges remain read-only lists.
+    private static func shutterRange(minimum: Int64, maximum: Int64, step: Int64) -> [Int64] {
+        guard step > 0, maximum >= minimum else { return [] }
+        let (span, overflow) = maximum.subtractingReportingOverflow(minimum)
+        guard !overflow else { return [] }
+        let (count, countOverflow) = (span / step).addingReportingOverflow(1)
+        guard !countOverflow else { return [] }
+        let stride = count <= 256 ? 1 : count / 256 + (count % 256 == 0 ? 0 : 1)
+        var values: [Int64] = []
+        var index: Int64 = 0
+        while index < count {
+            values.append(minimum + index * step)
+            guard count - index > stride else { break }
+            index += stride
+        }
+        return values
     }
 
     static func encode(_ value: Int64, dataType: UInt16) -> Data? {

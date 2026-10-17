@@ -4,6 +4,63 @@ import XCTest
 
 @MainActor
 final class RemoteViewfinderRenderingTests: XCTestCase {
+    func testFalseColorMatchesSourceGeometryWithDesqueezeAndSharedZoom() throws {
+        let width = 300, height = 200
+        let colors: [UInt32] = (0..<(width * height)).map { index in
+            let x = index % width
+            return x < 100 ? 0xffff0000 : x < 200 ? 0xffffffff : 0xff00ff00
+        }
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let source = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+            for (index, color) in [UIColor.red, .white, .green].enumerated() {
+                color.setFill(); context.fill(CGRect(x: index * 100, y: 0, width: 100, height: height))
+            }
+        }
+        func bounds<V: View>(_ view: V, size: CGSize, zoom: CGFloat, pan: CGFloat) throws -> [CGRect] {
+            let renderedView = view.frame(width: size.width, height: size.height)
+                .scaleEffect(zoom).offset(x: pan, y: 0)
+                .frame(width: size.width, height: size.height).clipped().background(.black)
+            let renderer = ImageRenderer(content: renderedView); renderer.scale = 1
+            let image = try XCTUnwrap(renderer.cgImage)
+            var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            try pixels.withUnsafeMutableBytes { buffer in
+                let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width,
+                    height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            }
+            var result = Array(repeating: CGRect.null, count: 3)
+            for y in 0..<image.height {
+                for x in 0..<image.width {
+                    let i = (y * image.width + x) * 4
+                    let r = pixels[i], g = pixels[i + 1], b = pixels[i + 2]
+                    let channel: Int? = r > 240 && g > 240 && b > 240 ? 1
+                        : r > 240 && g < 15 && b < 15 ? 0 : g > 240 && r < 15 && b < 15 ? 2 : nil
+                    if let channel { result[channel] = result[channel].union(CGRect(x: x, y: y, width: 1, height: 1)) }
+                }
+            }
+            return result
+        }
+        for multiplier: CGFloat in [1, 1.33, 2] {
+            for size in [CGSize(width: 240, height: 400), CGSize(width: 400, height: 240)] {
+                for zoom: CGFloat in [1, 1.5] {
+                    let aspect = 1.5 * multiplier, pan: CGFloat = zoom == 1 ? 0 : 13
+                    let base = try bounds(RemoteViewfinderImage(image: source, aspect: aspect,
+                        multiplier: multiplier, size: size), size: size, zoom: zoom, pan: pan)
+                    let overlay = try bounds(RemoteFalseColorOverlay(pixels: colors, width: width,
+                        height: height, aspect: aspect), size: size, zoom: zoom, pan: pan)
+                    for (a, b) in zip(base, overlay) {
+                        XCTAssertFalse(a.isNull); XCTAssertFalse(b.isNull)
+                        XCTAssertEqual(a.minX, b.minX, accuracy: 2)
+                        XCTAssertEqual(a.minY, b.minY, accuracy: 2)
+                        XCTAssertEqual(a.width, b.width, accuracy: 2)
+                        XCTAssertEqual(a.height, b.height, accuracy: 2)
+                    }
+                }
+            }
+        }
+    }
+
     func testDesqueezeFitsImageOnceAndKeepsSourceStripeAtOneThirdOfDisplayedWidth() throws {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -41,5 +98,190 @@ final class RemoteViewfinderRenderingTests: XCTestCase {
                                size.width / 2 - 0.5, accuracy: 1)
             }
         }
+    }
+}
+
+
+@MainActor
+final class RemoteFocusFeedbackRenderingTests: XCTestCase {
+    private final class Feedback: ObservableObject {
+        @Published var focused = false
+        @Published var frames = [RemoteLiveViewFocusFrame(centerX: 0.5, centerY: 0.5, width: 0.4, height: 0.4)]
+    }
+    private struct Host: View {
+        @ObservedObject var feedback: Feedback
+        var body: some View {
+            IOSLiveViewFocusFramesOverlay(frames: feedback.frames, focused: feedback.focused,
+                                          visible: true, aspect: 1.5)
+                .frame(width: 300, height: 200).background(.black)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).background(.black)
+        }
+    }
+
+    func testSameGeometryFocusChangesRenderedFeedbackAndEmptyPacketRetainsLastResult() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let feedback = Feedback()
+        let controller = UIHostingController(rootView: Host(feedback: feedback))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; previousKey?.makeKey() }
+
+        func greenPixelCount() async throws -> Int {
+            try await Task.sleep(for: .milliseconds(250))
+            controller.view.layoutIfNeeded()
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(size: controller.view.bounds.size, format: format).image { _ in
+                controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+            }
+            let cg = try XCTUnwrap(image.cgImage)
+            var pixels = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+            try pixels.withUnsafeMutableBytes { buffer in
+                let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: cg.width,
+                    height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            }
+            return stride(from: 0, to: pixels.count, by: 4).filter {
+                Int(pixels[$0 + 1]) > Int(pixels[$0]) + 35 &&
+                Int(pixels[$0 + 1]) > Int(pixels[$0 + 2]) + 25
+            }.count
+        }
+        let initial = try await greenPixelCount()
+        XCTAssertEqual(initial, 0)
+        let originalFrames = feedback.frames
+        feedback.focused = true
+        let focused = try await greenPixelCount()
+        XCTAssertGreaterThan(focused, 40)
+        XCTAssertEqual(feedback.frames, originalFrames)
+        feedback.frames = []
+        feedback.focused = false
+        let retained = try await greenPixelCount()
+        XCTAssertEqual(retained, focused)
+        feedback.frames = originalFrames
+        let unfocused = try await greenPixelCount()
+        XCTAssertEqual(unfocused, 0)
+    }
+}
+
+
+@MainActor
+final class RemoteMonitorScopesRenderingTests: XCTestCase {
+    func testProductionScopesReserveInformationRowAndKeepSingleAndDoubleSlots() throws {
+        let histogram = [Int](repeating: 1, count: 256)
+        let waveform = [[Int](repeating: 1, count: 256 * 128)]
+        for size in [CGSize(width: 240, height: 160), CGSize(width: 320, height: 213), CGSize(width: 600, height: 240)] {
+            for informationInset: CGFloat in [0, RemoteDispLayout.informationInset] {
+                for startInset: CGFloat in [8, 48] {
+                    for enabled in [(true, true), (true, false), (false, true), (false, false)] {
+                        let host = RemoteMonitorScopesOverlay(histogram: histogram, histogramRGB: nil,
+                            waveform: waveform, histogramMode: enabled.0 ? .luma : .off,
+                            waveformMode: enabled.1 ? .luma : .off, sampleHeight: 192,
+                            startInset: startInset, informationInset: informationInset)
+                            .frame(width: size.width, height: size.height)
+                            .background(Color(red: 1, green: 0, blue: 1))
+                        let renderer = ImageRenderer(content: host); renderer.scale = 1
+                        let image = try XCTUnwrap(renderer.cgImage)
+                        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+                        try pixels.withUnsafeMutableBytes { buffer in
+                            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width,
+                                height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+                            context.draw(image, in: CGRect(origin: .zero, size: size))
+                        }
+                        var bounds = CGRect.null
+                        for y in 0..<image.height {
+                            for x in 0..<image.width {
+                                let offset = (y * image.width + x) * 4
+                                guard pixels[offset] < 250 || pixels[offset + 1] > 5 || pixels[offset + 2] < 250 else { continue }
+                                bounds = bounds.union(CGRect(x: x, y: y, width: 1, height: 1))
+                            }
+                        }
+                        let count = (enabled.0 ? 1 : 0) + (enabled.1 ? 1 : 0)
+                        if count == 0 { XCTAssertTrue(bounds.isNull, "Unexpected pixels: \(bounds), size=\(size)"); continue }
+                        let width = min(138, (size.width - startInset - 8 - 6) / 2)
+                        let height = min(76, max(28, (size.height - informationInset) * 0.29))
+                        XCTAssertEqual(bounds.minX, startInset, accuracy: 1)
+                        XCTAssertEqual(bounds.width, width * CGFloat(count) + (count == 2 ? 6 : 0), accuracy: 1)
+                        XCTAssertEqual(bounds.maxY, size.height - informationInset - 8, accuracy: 1)
+                        XCTAssertEqual(bounds.height, height, accuracy: 2)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@MainActor
+final class RemoteMeterFeedbackRenderingTests: XCTestCase {
+    private func pixels<V: View>(_ view: V, height: Int) throws -> [UInt8] {
+        let renderer = ImageRenderer(content: view.frame(width: 22, height: CGFloat(height)).background(.black))
+        renderer.scale = 1
+        let image = try XCTUnwrap(renderer.cgImage)
+        XCTAssertEqual(image.width, 22); XCTAssertEqual(image.height, height)
+        var bytes = [UInt8](repeating: 0, count: 22 * height * 4)
+        try bytes.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: 22, height: height,
+                bitsPerComponent: 8, bytesPerRow: 22 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 22, height: height))
+        }
+        return bytes
+    }
+
+    func testExposureScaleSurvivesMissingReadingAndPointerShowsActualDirection() throws {
+        func litPoints(_ pixels: [UInt8], xs: Range<Int>) -> [CGPoint] {
+            (0..<120).flatMap { y in xs.compactMap { x in
+                let i = (y * 22 + x) * 4
+                return max(pixels[i], pixels[i + 1], pixels[i + 2]) > 100 ? CGPoint(x: x, y: y) : nil
+            } }
+        }
+        let missing = try pixels(RemoteExposureMeterOverlay(ev: nil), height: 120)
+        XCTAssertTrue(litPoints(missing, xs: 3..<10).isEmpty)
+        // Missing data keeps the dim scale; inspect nonblack ticks separately.
+        XCTAssertTrue((0..<120).contains { missing[($0 * 22 + 17) * 4] > 20 })
+        let zero = try pixels(RemoteExposureMeterOverlay(ev: 0), height: 120)
+        XCTAssertFalse(litPoints(zero, xs: 3..<10).isEmpty)
+        XCTAssertTrue(stride(from: 0, to: zero.count, by: 4).contains {
+            Int(zero[$0 + 1]) > Int(zero[$0]) + 40 && Int(zero[$0 + 1]) > Int(zero[$0 + 2]) + 20
+        })
+        let positive = litPoints(try pixels(RemoteExposureMeterOverlay(ev: 4), height: 120), xs: 3..<10)
+        let negative = litPoints(try pixels(RemoteExposureMeterOverlay(ev: -4), height: 120), xs: 3..<10)
+        XCTAssertFalse(positive.isEmpty); XCTAssertFalse(negative.isEmpty)
+        XCTAssertTrue(positive.allSatisfy { $0.y < 15 })
+        XCTAssertTrue(negative.allSatisfy { $0.y > 105 })
+    }
+
+    func testSoundMeterKeepsSilenceDarkAndChannelsAndPeakSeparate() throws {
+        func bright(_ bytes: [UInt8], left: Bool) -> Int {
+            let xs = left ? 3..<9 : 13..<19
+            return (4..<55).reduce(0) { count, y in
+                count + xs.filter { x in
+                    let i = (y * 22 + x) * 4
+                    return max(bytes[i], bytes[i + 1], bytes[i + 2]) > 100
+                }.count
+            }
+        }
+        func render(_ left: Int, _ right: Int, peakLeft: Int = 0, peakRight: Int = 0) throws -> [UInt8] {
+            try pixels(IOSSoundMeter(levels: .init(peakLeft: peakLeft, peakRight: peakRight,
+                currentLeft: left, currentRight: right)), height: 72)
+        }
+        let silent = try render(0, 0)
+        XCTAssertEqual(bright(silent, left: true), 0)
+        XCTAssertEqual(bright(silent, left: false), 0)
+        let left = try render(14, 0), right = try render(0, 14)
+        XCTAssertGreaterThan(bright(left, left: true), 30)
+        XCTAssertEqual(bright(left, left: false), 0)
+        XCTAssertEqual(bright(right, left: true), 0)
+        XCTAssertGreaterThan(bright(right, left: false), 30)
+        let peak = try render(0, 0, peakLeft: 12)
+        XCTAssertGreaterThan(bright(peak, left: true), 0)
+        XCTAssertLessThan(bright(peak, left: true), bright(left, left: true) / 3)
+        XCTAssertEqual(bright(peak, left: false), 0)
     }
 }

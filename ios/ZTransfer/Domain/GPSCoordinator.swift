@@ -16,7 +16,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     @Published private(set) var placeLookupState = GPSPlaceLookupState.idle
     @Published private(set) var connectionHelpViewed = false
     @Published private(set) var frequency: GPSUpdateFrequency
-    let bluetooth: NikonGPSBluetoothClient
+    let bluetooth: any GPSBluetoothTransport
     var locationAuthorizationStatus: CLAuthorizationStatus {
         locationManager.authorizationStatus
     }
@@ -30,7 +30,11 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         locationManagerStorage = manager
         return manager
     }
+    private let now: @MainActor () -> Date
+    private let writeSleep: @Sendable (UInt64) async throws -> Void
     private let defaults: UserDefaults
+    private let recoverySleep: @Sendable (UInt64) async throws -> Void
+    var hasScheduledBluetoothRecovery: Bool { reconnectTask != nil }
     private var lastWrite: Date?
     private var writeTask: Task<Void, Never>?
     private var writeTimeoutTask: Task<Void, Never>?
@@ -46,6 +50,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var readyTransitionTask: Task<Void, Never>?
     private var bluetoothObservation: AnyCancellable?
     private var awaitingPairingAction = false
+    private var bluetoothFailureOwnsRecovery = false
     private var pairingConfirmationPending = false
     private var apModeBlocked = false
     private var placeCache: [String: String] = [:]
@@ -53,17 +58,27 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     private var placeRequestID = 0
     private var placeGeocoder: CLGeocoder?
 
-    init(defaults: UserDefaults? = nil) {
+    init(defaults: UserDefaults? = nil,
+         bluetooth: (any GPSBluetoothTransport)? = nil,
+         locationManager: CLLocationManager? = nil,
+         now: @escaping @MainActor () -> Date = { Date() },
+         writeSleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+         recoverySleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }) {
+        self.now = now
+        self.writeSleep = writeSleep
+        self.locationManagerStorage = locationManager
+        self.recoverySleep = recoverySleep
         let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
         self.defaults = storage
         let raw = storage.integer(forKey: GPSPreferences.updateFrequencySeconds)
         frequency = GPSUpdateFrequency(rawValue: raw) ?? .defaultValue
-        bluetooth = NikonGPSBluetoothClient(defaults: storage)
+        self.bluetooth = bluetooth ?? NikonGPSBluetoothClient(defaults: storage)
         super.init()
+        locationManager?.delegate = self
         let enabled = storage.bool(forKey: GPSPreferences.enabled)
         state = GPSState(enabled: enabled, status: enabled ? .starting : .off)
         connectionHelpViewed = storage.bool(forKey: GPSPreferences.connectionHelpViewed)
-        bluetoothObservation = bluetooth.$state
+        bluetoothObservation = self.bluetooth.statePublisher
             .receive(on: RunLoop.main)
             .sink { [weak self] value in self?.applyBluetoothState(value) }
         if enabled {
@@ -93,6 +108,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     }
 
     func setEnabled(_ enabled: Bool) {
+        bluetoothFailureOwnsRecovery = false
         GPSDiagnostics.record("set enabled=\(enabled)")
         defaults.set(enabled, forKey: GPSPreferences.enabled)
         awaitingPairingAction = false
@@ -327,6 +343,9 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     }
 
     private func beginRunning() {
+        // Authorization callbacks must not bypass the active recovery owner or
+        // reopen pairing before the explicit retry action.
+        guard state.enabled, !awaitingPairingAction, reconnectTask == nil else { return }
         guard !apModeBlocked else {
             state.status = .apUnavailable
             state.message = AppLocalized.resource("gps_ap_unavailable")
@@ -382,30 +401,29 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
     }
 
-    private func applyBluetoothState(_ value: NikonGPSBluetoothState) {
+    func applyBluetoothState(_ value: NikonGPSBluetoothState) {
         guard state.enabled else { return }
         GPSDiagnostics.record("BLE state=\(String(describing: value))")
         switch value {
         case .unauthorized:
-            locationManager.stopUpdatingLocation()
-            state.status = .error
-            state.message = AppLocalized.resource("gps_permission_required")
+            applyBluetoothFailure("Bluetooth permission required")
         case .unavailable:
-            locationManager.stopUpdatingLocation()
+            applyBluetoothFailure("Bluetooth unavailable")
             latestLocation = nil
             latestLocationDuringWrite = nil
             latestTrustedAltitudeFix = nil
             pendingAltitudeRefresh = false
-            state.status = .error
-            state.message = AppLocalized.resource("gps_bluetooth_required")
         case .scanning:
+            bluetoothFailureOwnsRecovery = false
             if !preserveReadyDuringReconnect { state.status = .searching; state.message = nil }
         case .connecting(let name):
+            bluetoothFailureOwnsRecovery = false
             state.cameraName = name
             if !preserveReadyDuringReconnect { state.status = .connecting }
         case .pairing: state.status = .pairing
         case .cameraConfirm: state.status = .cameraConfirm
         case .ready(let name):
+            bluetoothFailureOwnsRecovery = false
             reconnectTask?.cancel(); reconnectTask = nil
             state.cameraName = name
             pairingConfirmationPending = state.status == .cameraConfirm || state.status == .pairing
@@ -418,7 +436,8 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
                 scheduleWriteIfDue(force: true)
             }
         case .disconnected:
-            guard !apModeBlocked, !awaitingPairingAction, reconnectTask == nil else { return }
+            guard !apModeBlocked, !awaitingPairingAction, !bluetoothFailureOwnsRecovery,
+                  reconnectTask == nil else { return }
             locationManager.stopUpdatingLocation()
             preserveReadyDuringReconnect = state.status == .ready
             cameraVerified = false
@@ -451,43 +470,10 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
     /// Mirrors NikonGpsService.handleBleError's ordered message mapping. The
     /// BLE client may report protocol/transport English strings, but Android
     /// converts the user-visible result into a camera-action state first.
-    private func applyBluetoothFailure(_ message: String) {
+    func applyBluetoothFailure(_ message: String) {
+        bluetoothFailureOwnsRecovery = true
         GPSDiagnostics.record("error=\(message)")
-        locationManager.stopUpdatingLocation()
-        pairingConfirmationPending = false
-        let lowercased = message.lowercased()
-        if lowercased.contains("pairing rejected") ||
-            lowercased.contains("identity expired") ||
-            lowercased.contains("not found") ||
-            lowercased.contains("pairing") ||
-            message.contains("配对") {
-            defaults.removeObject(forKey: GPSPreferences.deviceID)
-            defaults.removeObject(forKey: GPSPreferences.nonce)
-            defaults.removeObject(forKey: GPSPreferences.bleAddress)
-            awaitingPairingAction = true
-            bluetooth.stop()
-            state.status = .needsCamera
-            state.message = "请在相机上打开蓝牙配对"
-        } else if lowercased.contains("permission") ||
-                    lowercased.contains("not authorized") ||
-                    lowercased.contains("unauthorized") {
-            state.status = .error
-            state.message = AppLocalized.resource("gps_permission_required")
-        } else if lowercased.contains("scan failed") {
-            scheduleBluetoothRecovery(message: AppLocalized.resource("gps_bluetooth_required"))
-        } else if lowercased.contains("bluetooth unavailable") {
-            state.status = .error
-            state.message = AppLocalized.resource("gps_bluetooth_required")
-        } else {
-            scheduleBluetoothRecovery(message: message)
-        }
-    }
-
-    /// Android stops the failed GATT attempt and starts a clean BLE attempt
-    /// five seconds later for transport/setup errors. Pairing and permission
-    /// failures remain explicit user actions and never enter this path.
-    private func scheduleBluetoothRecovery(message: String) {
-        reconnectTask?.cancel()
+        reconnectTask?.cancel(); reconnectTask = nil
         writeTask?.cancel(); writeTask = nil
         writeTimeoutTask?.cancel(); writeTimeoutTask = nil
         readyTransitionTask?.cancel(); readyTransitionTask = nil
@@ -498,15 +484,22 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         cameraVerified = false
         pairingConfirmationPending = false
         preserveReadyDuringReconnect = false
-        locationManager.stopUpdatingLocation()
-        bluetooth.stop()
-        state.status = .error
-        state.message = message
+        locationManagerStorage?.stopUpdatingLocation()
+        let policy = GPSBluetoothFailurePolicy(message)
+        awaitingPairingAction = policy.waitsForPairing
+        if policy.invalidatesIdentity { bluetooth.clearPairing() }
+        // Match Android: permission/unavailable errors do not manufacture
+        // a disconnected callback that could enter the ordinary retry path.
+        if policy.waitsForPairing || policy.retries { bluetooth.stop() }
+        state.status = policy.status
+        state.message = policy.message
+        guard policy.retries else { return }
+        let generation = writeGeneration, sleep = recoverySleep
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            guard let self, !Task.isCancelled, self.state.enabled,
-                  !self.apModeBlocked, !self.awaitingPairingAction else { return }
+            do { try await sleep(5_000_000_000) } catch { return }
+            guard let self, !Task.isCancelled, self.writeGeneration == generation else { return }
             self.reconnectTask = nil
+            guard self.state.enabled, !self.apModeBlocked, !self.awaitingPairingAction else { return }
             self.beginRunning()
         }
     }
@@ -574,37 +567,50 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
     }
 
-    private func scheduleWriteIfDue(force: Bool = false, afterFailure: Bool = false) {
+    func scheduleWriteIfDue(force: Bool = false, afterFailure: Bool = false) {
+        guard state.enabled, !apModeBlocked, case .ready = bluetooth.state else { return }
         if geoWriteInFlight {
             if force { pendingAltitudeRefresh = true }
             return
         }
         if force { writeTask?.cancel(); writeTask = nil }
         guard writeTask == nil else { return }
-        let elapsed = lastWrite.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+        let elapsed = lastWrite.map { now().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
         let wait = force ? 0 : afterFailure
             ? Double(frequency.rawValue)
             : max(0, Double(frequency.rawValue) - elapsed)
+        let sleep = writeSleep
         writeTask = Task { [weak self] in
-            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            if wait > 0 { try? await sleep(UInt64(wait * 1_000_000_000)) }
             guard let self, !Task.isCancelled else { return }
             self.writeCurrentFix()
         }
     }
 
+    /// Android maybeSend resolves altitude for every write, including ticker
+    /// writes with no new location. Display state is not a trusted payload cache.
+    func prepareGeoPayload(for location: CLLocation, now: Date) -> Data? {
+        let (altitude, trustedFix) = resolvedGPSAltitude(
+            for: location, cached: latestTrustedAltitudeFix, now: now
+        )
+        latestTrustedAltitudeFix = trustedFix
+        return NikonGeoPayloadEncoder.encode(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            altitudeMeters: altitude ?? 0,
+            satellites: 0,
+            timestamp: now
+        )
+    }
+
     private func writeCurrentFix() {
         writeTask = nil
-        guard state.enabled, let location = latestLocation else { state.status = .waitingFix; return }
+        guard state.enabled, !apModeBlocked else { return }
+        guard let location = latestLocation else { state.status = .waitingFix; return }
         guard case .ready = bluetooth.state else { return }
         guard !geoWriteInFlight else { return }
         state.status = .writing
-        guard let payload = NikonGeoPayloadEncoder.encode(
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude,
-            altitudeMeters: state.altitudeMeters ?? 0,
-            satellites: 0,
-            timestamp: Date()
-        ) else {
+        guard let payload = prepareGeoPayload(for: location, now: now()) else {
             state.status = .error
             state.message = AppLocalized.resource("gps_retry")
             return
@@ -634,7 +640,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             latestLocationDuringWrite = nil
             pendingAltitudeRefresh = false
             if timedOut {
-                scheduleBluetoothRecovery(message: "GPS write timeout")
+                applyBluetoothFailure("GPS write timeout")
                 return
             }
             state.status = .error
@@ -648,7 +654,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         let confirmedFreshPairing = pairingConfirmationPending
         cameraVerified = true
         pairingConfirmationPending = false
-        lastWrite = Date()
+        lastWrite = now()
         state.lastSentAt = lastWrite
         state.message = nil
         if firstVerifiedWrite {
@@ -678,7 +684,8 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         if forceAltitude {
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(50))
-                self?.scheduleWriteIfDue(force: true)
+                guard let self, !Task.isCancelled, self.writeGeneration == generation else { return }
+                self.scheduleWriteIfDue(force: true)
             }
         } else {
             scheduleWriteIfDue()

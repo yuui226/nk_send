@@ -1,5 +1,13 @@
 import Foundation
 
+enum CameraSchedulerError: Error, Equatable {
+    case nestedTransaction
+}
+
+private enum CameraTransactionContext {
+    @TaskLocal static var scheduler: ObjectIdentifier?
+}
+
 /// Request classes used by the Android 1.93 camera scheduler contract.
 /// A ticket owns one complete PTP transaction and is never interrupted after admission.
 enum CameraRequestKind: Sendable, Equatable {
@@ -61,6 +69,13 @@ actor CameraIOGate {
     private var shuttingDown = false
     private var shutdownReason = "camera session closed"
 
+    #if DEBUG
+    private var admissionHandoffProbe: (owner: String, run: @Sendable () async -> Void)?
+    func setAdmissionHandoffProbe(owner: String, _ probe: @escaping @Sendable () async -> Void) {
+        admissionHandoffProbe = (owner, probe)
+    }
+    #endif
+
     #if STA_GATE_HANDOFF_TESTING
     private var transferHandoffProbe: (@Sendable () async -> Void)?
     func setTransferHandoffProbe(_ probe: @escaping @Sendable () async -> Void) {
@@ -83,6 +98,7 @@ actor CameraIOGate {
     /// Reject new business work and cancel only tickets that have not entered
     /// the protocol. The active operation remains responsible for its cleanup.
     func beginShutdown(_ reason: String = "camera session closed") {
+        guard !shuttingDown else { return }
         shuttingDown = true; shutdownReason = reason
         let queued = pending; pending.removeAll()
         queued.forEach { $0.continuation?.resume(throwing: CancellationError()) }
@@ -94,17 +110,22 @@ actor CameraIOGate {
         allowDuringShutdown: Bool = false,
         _ operation: @Sendable () async throws -> T
     ) async throws -> T {
+        // NikonCamera.TransactionMarker rejects recursion before queueing: a
+        // transaction cannot wait for the channel it already owns.
+        guard CameraTransactionContext.scheduler != ObjectIdentifier(self) else {
+            throw CameraSchedulerError.nestedTransaction
+        }
         try Task.checkCancellation()
         if shuttingDown && !allowDuringShutdown { throw CancellationError() }
         let ticket = Ticket(sequence: sequence, kind: kind, owner: owner,
                             allowDuringShutdown: allowDuringShutdown)
         sequence &+= 1
-        var admitted = false
-        defer {
-            if admitted { finish(ticket) } else { cancelWaiting(ticket) }
-        }
+        // pump selects active before resuming the waiter. Cancellation can
+        // therefore throw from acquire while this ticket already owns active.
+        // Android acquire/cancel releases either state; finish does the same
+        // by identity, without prematurely releasing an operation on the wire.
+        defer { finish(ticket) }
         try await waitForAdmission(ticket)
-        admitted = true
         try Task.checkCancellation()
         #if STA_GATE_HANDOFF_TESTING
         if kind == .transfer, let probe = transferHandoffProbe {
@@ -112,7 +133,9 @@ actor CameraIOGate {
             await probe()
         }
         #endif
-        return try await operation()
+        return try await CameraTransactionContext.$scheduler.withValue(ObjectIdentifier(self)) {
+            try await operation()
+        }
     }
 
     /// Compatibility reservation used across an FHD → EXIF foreground pair.
@@ -179,6 +202,12 @@ actor CameraIOGate {
                 ticket.continuation = continuation
                 pending.append(ticket); pump()
             }
+            #if DEBUG
+            if let probe = admissionHandoffProbe, probe.owner == ticket.owner {
+                admissionHandoffProbe = nil
+                await probe.run()
+            }
+            #endif
             try Task.checkCancellation()
         } onCancel: {
             Task { await self.cancelWaiting(ticket) }
@@ -198,11 +227,10 @@ actor CameraIOGate {
     }
 
     private func eligible(_ ticket: Ticket) -> Bool {
-        // `withIdleCommand` performs the first activity check before creating
-        // this ticket and a second check after admission. Do not screen the
-        // ticket here: if a download starts while the idle request is queued,
-        // it must be admitted and return its skipped value instead of waiting
-        // forever for the download to finish.
+        // Android screens every P6 ticket for the entire file, including
+        // gaps between slices. Heartbeats may skip before queueing; ordinary
+        // MONITOR_STORAGE requests wait here until the download finishes.
+        if activeDownloads > 0, ticket.kind == .idle { return false }
         if interactiveReservations > 0, ticket.kind.priority > CameraRequestKind.preview.priority { return false }
         if ratingPhaseCount > 0 {
             switch ticket.kind {

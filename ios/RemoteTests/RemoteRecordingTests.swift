@@ -44,13 +44,16 @@ final class RemoteRecordingTests: XCTestCase {
     func testFailureDiagnosticsAndDurationsMatchAndroid() {
         let result = RemoteMovieStartResult(responseCode: 0xA004, prohibitCondition: (1 << 14) | (1 << 18))
         let start = RemoteRecordingHint.startFailed(result)
-        XCTAssertEqual(start.message, "无法开始录像\nresult=0xA004 startOp=0xA004 prohibit=0x00044000")
+        XCTAssertEqual(start.message, "无法开始录像")
+        XCTAssertEqual(start.diagnostic, "result=0xA004 startOp=0xA004 prohibit=0x00044000")
         XCTAssertEqual(start.durationNanoseconds, 12_000_000_000)
         let stop = RemoteRecordingHint.stopFailed(responseCode: 0x2019)
-        XCTAssertEqual(stop.message, "无法停止录像，请检查相机后重试\nstop=0x2019")
+        XCTAssertEqual(stop.message, "无法停止录像，请检查相机后重试")
+        XCTAssertEqual(stop.diagnostic, "stop=0x2019")
         XCTAssertEqual(stop.durationNanoseconds, 6_000_000_000)
         XCTAssertEqual(RemoteRecordingHint.stopFailed().message,
-                       "无法停止录像，请检查相机后重试\nstop=0xFFFF")
+                       "无法停止录像，请检查相机后重试")
+        XCTAssertEqual(RemoteRecordingHint.stopFailed().diagnostic, "stop=0xFFFF")
     }
 
     func testLeavingInvalidatesLateCommandWithoutReleasingNextCommand() throws {

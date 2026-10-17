@@ -18,6 +18,42 @@ func effectivePhotoEffectModules(_ mask: Int, isPro: Bool) -> Int {
         : normalized
 }
 
+/// Android togglePhotoEffectModule: free frame/watermark form one switch,
+/// and a click may never remove the last available editor.
+func togglePhotoEffectModule(_ mask: Int, module: PhotoEffectModule, isPro: Bool) -> Int {
+    let current = effectivePhotoEffectModules(mask, isPro: isPro)
+    let paired = PhotoEffectModule.frame.rawValue | PhotoEffectModule.watermark.rawValue
+    let bits = !isPro && (module == .frame || module == .watermark) ? paired : module.rawValue
+    let next = current ^ bits
+    return next == 0 ? current : next
+}
+
+/// Shared editor command: keep the draft and its role-owned LUT persistence
+/// in the same synchronous transition. A rejected last-module click is a no-op.
+@MainActor
+@discardableResult
+func togglePhotoEffectModuleDraft(_ module: PhotoEffectModule,
+                                  draft: inout PhotoEffectsSettings,
+                                  lutStore: PhotoLUTStore, isPro: Bool) -> Bool {
+    let current = effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro)
+    let next = togglePhotoEffectModule(current, module: module, isPro: isPro)
+    guard next != current else { return false }
+    draft.applyModuleVisibility(next, isPro: isPro)
+    if !photoEffectModuleIsVisible(next, .lut) { lutStore.select(nil) }
+    return true
+}
+
+/// Android PhotoLutEditorState.off clears the active LUT and source selection.
+/// Retained NP3 preferences are unrelated to turning off the LUT editor.
+@MainActor
+func disablePhotoLUTDraft(_ draft: inout PhotoEffectsSettings, lutStore: PhotoLUTStore) {
+    if draft.colorEffectModule == .lut {
+        draft.photoFilterEnabled = false
+        draft.selectedFilter = nil
+    }
+    lutStore.select(nil)
+}
+
 func photoEffectModuleIsVisible(_ mask: Int, _ module: PhotoEffectModule) -> Bool {
     mask & module.rawValue != 0
 }
@@ -71,6 +107,17 @@ enum PhotoFramePreset: String, CaseIterable, Codable, Sendable {
     case plaque = "PLAQUE", immersive = "IMMERSIVE", brandInset = "BRAND_INSET", brandGallery = "BRAND_GALLERY"
     case classicSignature = "CLASSIC_SIGNATURE", galleryMat = "GALLERY_MAT", colorArchive = "COLOR_ARCHIVE"
     case filmGallery = "FILM_GALLERY", filmEdge = "FILM_EDGE"
+    case filmNegative = "FILM_NEGATIVE", parameterPoster = "PARAMETER_POSTER"
+}
+
+extension PhotoFramePreset {
+    var supportsWidthControl: Bool { self != .immersive }
+    var supportsBackdropControls: Bool {
+        switch self {
+        case .mist, .frosted, .cinema, .filmGallery, .parameterPoster: return true
+        default: return false
+        }
+    }
 }
 
 enum PhotoFrameWatermarkFont: String, CaseIterable, Codable, Sendable { case signature = "SIGNATURE", elegant = "ELEGANT", calligraphy = "CALLIGRAPHY", simple = "SIMPLE", bold = "BOLD" }
@@ -187,6 +234,53 @@ func restoredPhotoFrameWatermarkOpacityPercent(_ persisted: Any?) -> Int {
 struct PhotoFrameFavorite: Codable, Equatable, Sendable {
     var preset: PhotoFramePreset
     var watermark: PhotoFrameWatermark
+    var frameWidthPercent: Int
+    var backgroundBlurPercent: Int
+    var backgroundMaskPercent: Int
+
+    init(preset: PhotoFramePreset, watermark: PhotoFrameWatermark,
+         frameWidthPercent: Int = 100, backgroundBlurPercent: Int = 100,
+         backgroundMaskPercent: Int = 100) {
+        self.preset = preset
+        self.watermark = watermark
+        self.frameWidthPercent = normalizePhotoFrameWidthPercent(frameWidthPercent)
+        self.backgroundBlurPercent = normalizePhotoFrameBackdropPercent(backgroundBlurPercent)
+        self.backgroundMaskPercent = normalizePhotoFrameBackdropPercent(backgroundMaskPercent)
+    }
+
+    init(preset: PhotoFramePreset, watermark: PhotoFrameWatermark,
+         metadata: PhotoFrameMetadataSettings) {
+        self.init(preset: preset, watermark: watermark, frameWidthPercent: metadata.widthPercent,
+                  backgroundBlurPercent: metadata.backgroundBlurPercent,
+                  backgroundMaskPercent: metadata.backgroundMaskPercent)
+    }
+
+    mutating func updateFrameMetadata(_ metadata: PhotoFrameMetadataSettings) {
+        frameWidthPercent = normalizePhotoFrameWidthPercent(metadata.widthPercent)
+        backgroundBlurPercent = normalizePhotoFrameBackdropPercent(metadata.backgroundBlurPercent)
+        backgroundMaskPercent = normalizePhotoFrameBackdropPercent(metadata.backgroundMaskPercent)
+    }
+
+    func applying(to metadata: PhotoFrameMetadataSettings) -> PhotoFrameMetadataSettings {
+        var result = metadata
+        result.widthPercent = normalizePhotoFrameWidthPercent(frameWidthPercent)
+        result.backgroundBlurPercent = normalizePhotoFrameBackdropPercent(backgroundBlurPercent)
+        result.backgroundMaskPercent = normalizePhotoFrameBackdropPercent(backgroundMaskPercent)
+        return result
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case preset, watermark, frameWidthPercent, backgroundBlurPercent, backgroundMaskPercent
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(preset: try values.decode(PhotoFramePreset.self, forKey: .preset),
+                  watermark: try values.decode(PhotoFrameWatermark.self, forKey: .watermark),
+                  frameWidthPercent: try values.decodeIfPresent(Int.self, forKey: .frameWidthPercent) ?? 100,
+                  backgroundBlurPercent: try values.decodeIfPresent(Int.self, forKey: .backgroundBlurPercent) ?? 100,
+                  backgroundMaskPercent: try values.decodeIfPresent(Int.self, forKey: .backgroundMaskPercent) ?? 100)
+    }
 
     func applying(to current: PhotoFrameWatermark) -> PhotoFrameWatermark? {
         if watermark.content == .image {
@@ -204,7 +298,17 @@ struct PhotoFrameFavorite: Codable, Equatable, Sendable {
 
 enum PhotoFrameBrandStyle: String, Codable, CaseIterable, Sendable { case text, logo }
 func normalizePhotoFrameWidthPercent(_ value: Int) -> Int { min(max(value, 60), 200).rounded(toMultipleOf: 5) }
-func normalizePhotoFrameBackdropPercent(_ value: Int) -> Int { min(max(value, 0), 200) }
+func normalizePhotoFrameBackdropPercent(_ value: Int) -> Int { min(max(value, 0), 200).rounded(toMultipleOf: 10) }
+func photoFrameBackdropMaskAlpha(_ alpha: Int, percent: Int) -> Int {
+    min(255, max(0, Int((Double(alpha) * Double(min(200, max(0, percent))) / 100).rounded())))
+}
+
+func photoFrameBackdropPreviewLongEdge(_ preset: PhotoFramePreset, blurPercent: Int) -> Int {
+    guard preset.supportsBackdropControls else { return 192 }
+    let blur = normalizePhotoFrameBackdropPercent(blurPercent)
+    return blur == 0 ? 1024 : blur < 50 ? 384 : 192
+}
+
 private extension Int { func rounded(toMultipleOf step: Int) -> Int { ((self + step / 2) / step) * step } }
 
 struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
@@ -279,6 +383,9 @@ struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
             value.showDate = false; value.showTime = false; value.showModel = false
         case .galleryMat, .filmEdge:
             value.showDate = false; value.showTime = false; value.showFocalLength = false; value.showExposure = false; value.showBrand = false; value.showModel = false
+        case .filmNegative:
+            value.showDate = true; value.showTime = false; value.showFocalLength = true; value.showExposure = true
+            value.showBrand = true; value.showModel = true; value.showLensModel = false
         case .colorArchive:
             value.showDate = false; value.showTime = false; value.showModel = true
         case .filmGallery:
@@ -292,15 +399,105 @@ struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// Android chooser category order and initial scroll use the same visible list.
+struct PhotoFilterChooserState {
+    var isPresented = false
+    var category: PhotoEffectFilterCategory = .all
+
+    func items(in settings: PhotoEffectsSettings) -> [PhotoFilterPreset] {
+        settings.orderedFilters.filter { preset in
+            switch category {
+            case .all: return true
+            case .favorites: return settings.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id))
+            default: return preset.category == category
+            }
+        }
+    }
+
+    func initialItemID(in settings: PhotoEffectsSettings) -> String? {
+        let visible = items(in: settings)
+        if settings.photoFilterEnabled,
+           let selected = settings.selectedFilter?.preset.id,
+           visible.contains(where: { $0.id == selected }) { return selected }
+        return visible.first?.id
+    }
+
+    mutating func select(_ id: String?, in settings: inout PhotoEffectsSettings) {
+        settings.selectFilter(id)
+        isPresented = false
+    }
+}
+
+enum PhotoEffectFilterCategory: String, CaseIterable, Identifiable, Sendable {
+    case all, favorites, landscape, portrait, monochrome, film, cinematic, color
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: return "全部"; case .favorites: return "收藏"; case .landscape: return "风景"; case .portrait: return "人像"
+        case .monochrome: return "黑白"; case .film: return "胶片"; case .cinematic: return "电影感"; case .color: return "色彩"
+        }
+    }
+}
+
+extension PhotoFilterPreset {
+    var category: PhotoEffectFilterCategory {
+        // Android BuiltInPhotoFilters uses fallbackName as category metadata.
+        let value = Np3FilterCatalog.preset(id: id)?.fallbackName ?? name
+        if value.range(of: "黑白|单色|Mono", options: [.regularExpression, .caseInsensitive]) != nil { return .monochrome }
+        if value.range(of: "人像|Portrait|Skin|Love Glow|Warm Portrait|Soft Portrait", options: [.regularExpression, .caseInsensitive]) != nil { return .portrait }
+        if value.range(of: "风景|Landscape|Nature|Forest|Fern|Moss|Urban Green|Blue Hour|Sunset", options: [.regularExpression, .caseInsensitive]) != nil { return .landscape }
+        if value.range(of: "电影|Cine|Cinema|Teal and Orange|Dusk", options: [.regularExpression, .caseInsensitive]) != nil { return .cinematic }
+        if value.range(of: "胶片|Film|Vintage|Darkroom", options: [.regularExpression, .caseInsensitive]) != nil { return .film }
+        return .color
+    }
+}
+
+
 struct PhotoFilterPreset: Codable, Equatable, Identifiable, Sendable {
     let id: String
     let name: String
 }
 
+struct LUTAdjustments: Codable, Equatable, Sendable {
+    var contrast = 0
+    var saturation = 0
+    var highlights = 0
+    var shadows = 0
+
+    var normalized: Self {
+        Self(contrast: min(max(contrast, -100), 100), saturation: min(max(saturation, -100), 100),
+             highlights: min(max(highlights, -100), 100), shadows: min(max(shadows, -100), 100))
+    }
+    var isNeutral: Bool { contrast == 0 && saturation == 0 && highlights == 0 && shadows == 0 }
+}
+
 struct PhotoFilterSelection: Codable, Equatable, Sendable {
     let preset: PhotoFilterPreset
     var intensityPercent: Int
+    var lutAdjustments: LUTAdjustments
+    let snapshotOwner: PhotoLUTSnapshotOwner?
     var normalizedIntensityPercent: Int { Np3FilterEngine.normalizeIntensity(intensityPercent) }
+
+    init(preset: PhotoFilterPreset, intensityPercent: Int, lutAdjustments: LUTAdjustments = .init()) {
+        self.preset = preset
+        self.intensityPercent = intensityPercent
+        self.lutAdjustments = lutAdjustments.normalized
+        snapshotOwner = preset.id.hasPrefix("cube:")
+            ? PhotoLUTRuntime.snapshotOwner(digest: String(preset.id.dropFirst(5))) : nil
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.preset == rhs.preset && lhs.intensityPercent == rhs.intensityPercent
+            && lhs.lutAdjustments == rhs.lutAdjustments
+    }
+
+    private enum CodingKeys: String, CodingKey { case preset, intensityPercent, lutAdjustments }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(preset: try values.decode(PhotoFilterPreset.self, forKey: .preset),
+                  intensityPercent: try values.decode(Int.self, forKey: .intensityPercent),
+                  lutAdjustments: try values.decodeIfPresent(LUTAdjustments.self, forKey: .lutAdjustments) ?? .init())
+    }
 }
 
 /// Metadata, identity and ordering come from Android's curated NP3 catalog.
@@ -309,6 +506,20 @@ enum PhotoFilterCatalog {
 
     static func resolve(_ id: String) -> PhotoFilterPreset? {
         Np3FilterCatalog.preset(id: id).map { PhotoFilterPreset(id: $0.id, name: $0.name) }
+    }
+}
+
+extension PhotoFrameMetadataSettings {
+    /// Android nextBrandStyle: disabling always resets the remembered style to text.
+    mutating func cycleBrandStyle() {
+        if !showBrand { showBrand = true; brandStyle = .text }
+        else if brandStyle == .text { brandStyle = .logo }
+        else { showBrand = false; brandStyle = .text }
+    }
+
+    var brandControlLabelKey: String {
+        guard showBrand else { return "photo_frame_metadata_brand" }
+        return brandStyle == .logo ? "photo_frame_metadata_brand_logo" : "photo_frame_metadata_brand_text"
     }
 }
 
@@ -331,6 +542,10 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     var favoriteFilterIDs: [String] = []
     var favoriteFramePresets: Set<PhotoFramePreset> = []
     var favoriteFrameEffects: [PhotoFrameFavorite] = []
+
+    var colorEffectModule: PhotoEffectModule {
+        selectedFilter?.preset.id.hasPrefix("cube:") == true ? .lut : .filter
+    }
 
     var hasEffect: Bool {
         photoFrameEnabled || (photoFilterEnabled && selectedFilter != nil)
@@ -364,8 +579,8 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         }
         let preset: PhotoFilterPreset
         if id.hasPrefix("cube:") {
-            guard let table = PhotoLUTRuntime.table(digest: String(id.dropFirst(5))) else { photoFilterEnabled = false; return }
-            preset = PhotoFilterPreset(id: id, name: "LUT \(table.digest.prefix(8))")
+            guard PhotoLUTRuntime.contains(digest: String(id.dropFirst(5))) else { photoFilterEnabled = false; return }
+            preset = PhotoFilterPreset(id: id, name: "LUT \(id.dropFirst(5).prefix(8))")
         } else if let resolved = PhotoFilterCatalog.resolve(id) {
             preset = resolved
         } else { photoFilterEnabled = false; return }
@@ -382,6 +597,16 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         else { favoriteFilterIDs.append(key) }
     }
 
+    /// Explicit module visibility changes turn effects off without discarding
+    /// their parameters. Merely rendering with reduced access does not call this.
+    mutating func applyModuleVisibility(_ mask: Int, isPro: Bool = true) {
+        photoEffectModules = effectivePhotoEffectModules(mask, isPro: isPro)
+        if !photoEffectModuleIsVisible(photoEffectModules, colorEffectModule) { photoFilterEnabled = false }
+        if !photoEffectModuleIsVisible(photoEffectModules, .frame) { photoFrameBorderEnabled = false }
+        if !photoEffectModuleIsVisible(photoEffectModules, .watermark) { watermark.enabled = false }
+        photoFrameEnabled = photoFrameEnabled && (photoFrameBorderEnabled || (isPro && watermark.enabled))
+    }
+
     /// SettingsScreen persists these editor preferences immediately while the
     /// selected filter/frame/watermark remain a draft until returning/closing.
     func persistingEditorPreferences(from draft: Self) -> Self {
@@ -390,7 +615,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         result.favoriteFilterIDs = draft.favoriteFilterIDs
         result.favoriteFrameEffects = draft.favoriteFrameEffects
         result.favoriteFramePresets = draft.favoriteFramePresets
-        result.photoEffectModules = normalizePhotoEffectModules(draft.photoEffectModules)
+        result.applyModuleVisibility(draft.photoEffectModules)
         result.metadataByPreset = draft.metadataByPreset
         result.metadata = result.metadataByPreset[result.photoFramePreset.rawValue]
             ?? PhotoFrameMetadataSettings.defaults(for: result.photoFramePreset)
@@ -425,6 +650,20 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
 /// only the active filter/frame/watermark arguments to its renderer; editor
 /// preferences such as favorites and inactive presets must not restart the
 /// current preview or replay its frame transition.
+func nextPhotoFilterSelections(for settings: PhotoEffectsSettings) -> [PhotoFilterSelection] {
+    guard settings.photoFilterEnabled, let selected = settings.selectedFilter else { return [] }
+    let ordered = settings.orderedFilters
+    guard let index = ordered.firstIndex(where: { $0.id == selected.preset.id }),
+          index < ordered.index(before: ordered.endIndex) else { return [] }
+    return ordered.dropFirst(index + 1).prefix(2).map { preset in
+        let key = PhotoEffectsSettings.filterKey(preset.id)
+        return PhotoFilterSelection(
+            preset: preset,
+            intensityPercent: settings.filterIntensities[key] ?? 80,
+        )
+    }
+}
+
 func photoEffectsPreviewPixelSettings(_ settings: PhotoEffectsSettings) -> PhotoEffectsSettings {
     var result = settings
     result.filterIntensities = [:]
@@ -513,11 +752,27 @@ func effectivePhotoFrameWatermark(isPro: Bool, preference: PhotoFrameWatermark,
     return androidWatermarkForBorderMode(value, borderEnabled: borderEnabled)
 }
 
+/// Android PhotoColorEffectGroup: remembered but disabled selections do not
+/// hide the other editor. Module availability remains an independent gate.
+struct PhotoColorEffectEditorVisibility: Equatable {
+    let filter: Bool
+    let lut: Bool
+
+    init(settings: PhotoEffectsSettings, isPro: Bool) {
+        let modules = effectivePhotoEffectModules(settings.photoEffectModules, isPro: isPro)
+        let activeCube = settings.photoFilterEnabled && settings.colorEffectModule == .lut
+        let activeFilter = settings.photoFilterEnabled &&
+            settings.selectedFilter.flatMap { PhotoFilterCatalog.resolve($0.preset.id) } != nil
+        filter = photoEffectModuleIsVisible(modules, .filter) && !activeCube
+        lut = photoEffectModuleIsVisible(modules, .lut) && !activeFilter
+    }
+}
+
 func effectivePhotoEffectsSettings(_ preference: PhotoEffectsSettings, isPro: Bool) -> PhotoEffectsSettings {
     var value = preference
     let modules = effectivePhotoEffectModules(preference.photoEffectModules, isPro: isPro)
     value.photoEffectModules = modules
-    value.photoFilterEnabled = preference.photoFilterEnabled && photoEffectModuleIsVisible(modules, .filter)
+    value.photoFilterEnabled = preference.photoFilterEnabled && photoEffectModuleIsVisible(modules, preference.colorEffectModule)
     value.photoFrameBorderEnabled = preference.photoFrameBorderEnabled && photoEffectModuleIsVisible(modules, .frame)
     value.watermark = preference.photoFrameEnabled
         ? effectivePhotoFrameWatermark(isPro: isPro, preference: preference.watermark,
@@ -562,6 +817,8 @@ private func androidFramePresetSuffix(_ preset: PhotoFramePreset) -> String {
     case .colorArchive: return "color_archive"
     case .filmGallery: return "film_gallery"
     case .filmEdge: return "film_edge"
+    case .filmNegative: return "film_negative"
+    case .parameterPoster: return "parameter_poster"
     }
 }
 
@@ -571,7 +828,7 @@ private func androidIsBrandFrame(_ preset: PhotoFramePreset) -> Bool {
 
 private func androidIsEditorialFrame(_ preset: PhotoFramePreset) -> Bool {
     switch preset {
-    case .classicSignature, .galleryMat, .colorArchive, .filmGallery, .filmEdge: return true
+    case .classicSignature, .galleryMat, .colorArchive, .filmGallery, .filmEdge, .filmNegative, .parameterPoster: return true
     default: return false
     }
 }
@@ -582,6 +839,7 @@ private func androidResolvedWatermarkPosition(_ preset: PhotoFramePreset, _ requ
     case .plaque: return .left
     case .immersive: return .auto
     case .brandInset, .brandGallery, .classicSignature, .colorArchive, .filmEdge: return .photoBottomRight
+    case .filmNegative, .parameterPoster: return .center
     case .galleryMat, .filmGallery: return .center
     default: return .center
     }
@@ -631,12 +889,14 @@ private func androidMetadataFingerprintToken(_ preset: PhotoFramePreset, _ metad
     if !rendered.showTime { rendered.timePattern = defaults.timePattern }
     rendered.datePattern = androidNormalizedDatePattern(rendered.datePattern)
     rendered.timePattern = androidNormalizedTimePattern(rendered.timePattern)
+    rendered.showAddress = false
+    rendered.widthPercent = preset == .immersive ? 100 : normalizePhotoFrameWidthPercent(rendered.widthPercent)
+    let supportsBackdrop = preset.supportsBackdropControls
+    rendered.backgroundBlurPercent = supportsBackdrop ? normalizePhotoFrameBackdropPercent(rendered.backgroundBlurPercent) : 100
+    rendered.backgroundMaskPercent = supportsBackdrop ? normalizePhotoFrameBackdropPercent(rendered.backgroundMaskPercent) : 100
     guard rendered != defaults else { return nil }
-    return [preset.rawValue, String(rendered.showDate), String(rendered.showTime),
-            String(rendered.showFocalLength), String(rendered.showExposure),
-            String(rendered.showBrand), String(rendered.showModel),
-            String(rendered.showLensModel), String(rendered.showCoordinates),
-            String(rendered.showAltitude), rendered.datePattern, rendered.timePattern].joined(separator: "|")
+    return PhotoEffectsStore.encodeAndroidMetadata([preset.rawValue: rendered])
+
 }
 
 private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, preset: PhotoFramePreset, metadata: PhotoFrameMetadataSettings) -> String {
@@ -646,21 +906,30 @@ private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, prese
         base = ["v=2"]
         if androidIsBrandFrame(preset) { base.append("brand-v=4") }
         if androidIsEditorialFrame(preset) { base.append("editorial-v=2") }
+        if preset == .colorArchive { base.append("archive-layout-v=2") }
         if preset == .filmGallery { base.append("film-gallery-v=1") }
+        if preset == .filmNegative { base.append("film-negative-v=2") }
         base += ["on", watermark.content.rawValue, androidWatermarkSizeToken(watermark),
                  resolved.rawValue, "opacity=\(androidWatermarkOpacityToken(watermark.opacityPercent))"]
         if watermark.content == .text {
             base += [watermark.displayText, watermark.font.rawValue, watermark.color.rawValue,
                      "effect=\(watermark.effect.rawValue)"]
-        } else if let hash = watermark.imageHash,
-                  hash.range(of: "^[0-9a-fA-F]{64}$", options: .regularExpression) != nil {
-            base.append(hash)
+        } else {
+            let hash = watermark.imageHash?.lowercased()
+            let valid = hash.flatMap { value in
+                value.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+                    ? value : nil
+            }
+            // Android joinToString encodes a rejected nullable hash as "null".
+            base.append(valid ?? "null")
         }
     } else if androidIsBrandFrame(preset) {
         base = ["brand-v=4", "off"]
     } else if androidIsEditorialFrame(preset) {
         base = ["editorial-v=2"]
+        if preset == .colorArchive { base.append("archive-layout-v=2") }
         if preset == .filmGallery { base.append("film-gallery-v=1") }
+        if preset == .filmNegative { base.append("film-negative-v=2") }
         base.append("off")
     } else {
         base = ["off"]
@@ -668,12 +937,25 @@ private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, prese
     if let metadataToken = androidMetadataFingerprintToken(preset, metadata) {
         base += ["metadata=\(metadataToken)"]
     }
-    if metadata.showCoordinates || metadata.showAltitude { base.append("location-v=1") }
+    if metadata.showCity || metadata.showRegion || metadata.showCoordinates || metadata.showAltitude {
+        base.append("location-v=2")
+    }
+    if preset != .immersive {
+        base.append("measured-layout-v=6")
+        if preset == .frosted { base.append("glass-panel-v=2") }
+    }
+    if metadata.brandStyle == .logo { base.append("brand-logo-v=3") }
     return androidSHA256Hex(base.joined(separator: "\u{0}"), bytes: 6)
 }
 
 private func androidFilterFingerprint(_ filter: PhotoFilterSelection) -> String {
-    androidSHA256Hex("v=2\u{0}\(filter.preset.id)", bytes: 4)
+    // PhotoFrameExporter.photoFilterRenderFingerprint, Android render version 3.
+    let adjustments = filter.lutAdjustments
+    let identity = "v=3\u{0}\(filter.preset.id)"
+        + "\u{0}i=\(filter.normalizedIntensityPercent)"
+        + "\u{0}c=\(adjustments.contrast)\u{0}s=\(adjustments.saturation)"
+        + "\u{0}h=\(adjustments.highlights)\u{0}sh=\(adjustments.shadows)"
+    return androidSHA256Hex(identity, bytes: 4)
 }
 
 private func androidSHA256Hex(_ value: String, bytes: Int) -> String {
@@ -686,6 +968,7 @@ final class PhotoEffectsStore: ObservableObject {
     nonisolated static let maximumWatermarkImageBytes = 20 * 1024 * 1024
     nonisolated static let maximumWatermarkImagePixelDimension = 2_048
     private nonisolated static let watermarkImageCache = PhotoEffectsWatermarkImageCache(capacity: 3)
+    @Published private(set) var isEnabled: Bool
     @Published private(set) var settings: PhotoEffectsSettings
     @Published private(set) var watermarkImageImporting = false
     @Published private(set) var lastImportedWatermarkHash: String?
@@ -697,7 +980,8 @@ final class PhotoEffectsStore: ObservableObject {
     private var watermarkImportGeneration: UInt64 = 0
 
     init(defaults: UserDefaults = .standard, scope: Scope = .cameraTransfer,
-         legacyDefaults: UserDefaults? = nil, premiumAccess: PremiumAccess = .shared) {
+         legacyDefaults: UserDefaults? = nil, premiumAccess: PremiumAccess = .shared,
+         lutStore: PhotoLUTStore? = nil) {
         self.premiumAccess = premiumAccess
         // Android isolates phone-photo effects in the `local_photo_effects`
         // preference file.  UserDefaults suites provide the same isolation;
@@ -707,6 +991,7 @@ final class PhotoEffectsStore: ObservableObject {
             : defaults
         self.defaults = resolvedDefaults
         self.scope = scope
+        isEnabled = scope == .cameraTransfer ? (resolvedDefaults.object(forKey: "photo_effects_enabled") as? Bool ?? true) : true
         key = scope == .cameraTransfer ? "photoEffectsSettings.v1" : "localPhotoEffectsSettings.v1"
         if scope == .cameraTransfer, let value = Self.restoreAndroidTransferSettings(defaults: self.defaults) {
             let restored = Self.normalized(value, scope: scope)
@@ -744,6 +1029,26 @@ final class PhotoEffectsStore: ObservableObject {
                 }
             }
         }
+        // LUT identity belongs to its role store, not the NP3 preference ID.
+        // The original defaults argument intentionally keeps the shared photo-LUT
+        // directory separate from the local-effects preference suite.
+        let roleStore = lutStore ?? PhotoLUTStore(
+            role: scope == .cameraTransfer ? .camera : .local, defaults: defaults)
+        if photoEffectModuleIsVisible(settings.photoEffectModules, .lut),
+           let selection = roleStore.restoreSelection() {
+            var restored = settings
+            restored.selectedFilter = selection
+            restored.photoFilterEnabled = true
+            update(restored)
+        }
+    }
+
+    /// Transfer's master switch is not part of an editor recipe or the local
+    /// photo workspace. Toggling it never rewrites modules, drafts or watermarks.
+    func setEnabled(_ enabled: Bool) {
+        guard scope == .cameraTransfer else { return }
+        defaults.set(enabled, forKey: "photo_effects_enabled")
+        isEnabled = enabled
     }
 
     func update(_ value: PhotoEffectsSettings) {
@@ -965,12 +1270,8 @@ final class PhotoEffectsStore: ObservableObject {
 
     private static func normalized(_ value: PhotoEffectsSettings, scope: Scope) -> PhotoEffectsSettings {
         var result = value
-        result.photoEffectModules = normalizePhotoEffectModules(value.photoEffectModules)
-        let modules = result.photoEffectModules
-        result.photoFilterEnabled = result.photoFilterEnabled && photoEffectModuleIsVisible(modules, .filter)
-        result.photoFrameBorderEnabled = result.photoFrameBorderEnabled && photoEffectModuleIsVisible(modules, .frame)
-        if !photoEffectModuleIsVisible(modules, .watermark) { result.watermark.enabled = false }
-        var watermark = value.watermark
+        result.applyModuleVisibility(value.photoEffectModules)
+        var watermark = result.watermark
         let candidateHash = watermark.imageHash?.lowercased()
         let validHash: String?
         if let candidateHash,
@@ -996,7 +1297,15 @@ final class PhotoEffectsStore: ObservableObject {
         result.favoriteFilterIDs = value.favoriteFilterIDs.map(PhotoEffectsSettings.filterKey)
             .filter { validFilterKeys.contains($0) && seenFilters.insert($0).inserted }
         if let selected = value.selectedFilter {
-            if let preset = PhotoFilterCatalog.resolve(selected.preset.id) {
+            if selected.preset.id.hasPrefix("cube:"),
+               PhotoLUTRuntime.contains(digest: String(selected.preset.id.dropFirst(5))) {
+                // Cube recipes are content-addressed runtime tables, not NP3
+                // catalog entries. Keep their original display name and strength.
+                var normalized = selected
+                normalized.intensityPercent = selected.normalizedIntensityPercent
+                normalized.lutAdjustments = selected.lutAdjustments.normalized
+                result.selectedFilter = normalized
+            } else if let preset = PhotoFilterCatalog.resolve(selected.preset.id) {
                 let intensity = selected.normalizedIntensityPercent
                 result.selectedFilter = .init(preset: preset, intensityPercent: intensity)
                 let key = PhotoEffectsSettings.filterKey(preset.id)
@@ -1031,11 +1340,18 @@ final class PhotoEffectsStore: ObservableObject {
         result.metadataByPreset = value.metadataByPreset.reduce(into: [:]) { partial, entry in
             guard let preset = PhotoFramePreset(rawValue: entry.key) else { return }
             var metadata = entry.value
+            metadata.widthPercent = normalizePhotoFrameWidthPercent(metadata.widthPercent)
+            metadata.backgroundBlurPercent = normalizePhotoFrameBackdropPercent(metadata.backgroundBlurPercent)
+            metadata.backgroundMaskPercent = normalizePhotoFrameBackdropPercent(metadata.backgroundMaskPercent)
+            metadata.showAddress = false
             metadata.datePattern = androidNormalizedDatePattern(metadata.datePattern)
             metadata.timePattern = androidNormalizedTimePattern(metadata.timePattern)
             if scope == .localPhotos {
                 metadata.showCoordinates = false
                 metadata.showAltitude = false
+                metadata.showAddress = false
+                metadata.showCity = false
+                metadata.showRegion = false
             }
             if metadata != PhotoFrameMetadataSettings.defaults(for: preset) {
                 partial[preset.rawValue] = metadata
@@ -1243,13 +1559,19 @@ final class PhotoEffectsStore: ObservableObject {
         values.keys.sorted().compactMap { key in values[key].map { "\(key),\(Np3FilterEngine.normalizeIntensity($0))" } }.joined(separator: ";")
     }
     private static func decodeAndroidFrameFavorites(_ raw: String?, watermark: PhotoFrameWatermark) -> [PhotoFrameFavorite] {
-        (raw ?? "").split(separator: ";").compactMap { entry in
+        var seen = Set<PhotoFramePreset>()
+        return (raw ?? "").split(separator: ";").compactMap { entry in
             let f = entry.split(separator: ",", omittingEmptySubsequences: false)
-            guard f.count == 9, let preset = PhotoFramePreset(rawValue: String(f[0])), let enabled = Bool(String(f[1])),
+            guard [9, 10, 12].contains(f.count), let preset = PhotoFramePreset(rawValue: String(f[0])),
+                  seen.insert(preset).inserted, let enabled = Bool(String(f[1])),
                   let content = PhotoFrameWatermarkContent(rawValue: String(f[2])), let font = PhotoFrameWatermarkFont(rawValue: String(f[3])),
                   let size = Int(f[4]), let position = PhotoFrameWatermarkPosition(rawValue: String(f[5])), let color = PhotoFrameWatermarkColor(rawValue: String(f[6])),
                   let opacity = Int(f[7]), let effect = PhotoFrameWatermarkEffect(rawValue: String(f[8])) else { return nil }
-            return PhotoFrameFavorite(preset: preset, watermark: watermark.copy(enabled: enabled, content: content, font: font, sizePercent: size, position: position, color: color, opacityPercent: opacity, effect: effect))
+            guard let width = f.count >= 10 ? Int(f[9]) : 100,
+                  let blur = f.count == 12 ? Int(f[10]) : 100,
+                  let mask = f.count == 12 ? Int(f[11]) : 100 else { return nil }
+            return PhotoFrameFavorite(preset: preset, watermark: watermark.copy(enabled: enabled, content: content, font: font, sizePercent: size, position: position, color: color, opacityPercent: opacity, effect: effect),
+                                      frameWidthPercent: width, backgroundBlurPercent: blur, backgroundMaskPercent: mask)
         }
     }
     private static func encodeAndroidFrameFavorites(_ values: [PhotoFrameFavorite]) -> String {
@@ -1258,26 +1580,31 @@ final class PhotoEffectsStore: ObservableObject {
                            PhotoFrameWatermark.sizeRange.upperBound)
             let opacity = min(max(f.watermark.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound),
                               PhotoFrameWatermark.opacityRange.upperBound)
-            return [f.preset.rawValue, String(f.watermark.enabled), f.watermark.content.rawValue,
-                    f.watermark.font.rawValue, String(size), f.watermark.position.rawValue,
-                    f.watermark.color.rawValue, String(opacity), f.watermark.effect.rawValue]
-                .joined(separator: ",")
+            var fields = [f.preset.rawValue, String(f.watermark.enabled), f.watermark.content.rawValue,
+                          f.watermark.font.rawValue, String(size), f.watermark.position.rawValue,
+                          f.watermark.color.rawValue, String(opacity), f.watermark.effect.rawValue,
+                          String(normalizePhotoFrameWidthPercent(f.frameWidthPercent))]
+            if f.backgroundBlurPercent != 100 || f.backgroundMaskPercent != 100 {
+                fields += [String(normalizePhotoFrameBackdropPercent(f.backgroundBlurPercent)),
+                           String(normalizePhotoFrameBackdropPercent(f.backgroundMaskPercent))]
+            }
+            return fields.joined(separator: ",")
         }.joined(separator: ";")
     }
     private static func decodeAndroidMetadata(_ raw: String?) -> [String: PhotoFrameMetadataSettings] {
         var result: [String: PhotoFrameMetadataSettings] = [:]
         for entry in (raw ?? "").split(separator: ";") {
             let f = entry.split(separator: "|", omittingEmptySubsequences: false)
-            guard [9, 10, 12, 13].contains(f.count),
+            guard [9, 10, 12, 13, 14, 15, 16, 18].contains(f.count),
                   let preset = PhotoFramePreset(rawValue: String(f[0])),
                   result[preset.rawValue] == nil else { continue }
             let hasLensModel = f.count >= 10
-            let hasLocation = f.count == 12 || f.count == 13
+            let hasLocation = f.count >= 12
             let hasLegacyAddressSlot = f.count == 13
             let booleanEnd: Int
             switch f.count {
             case 13: booleanEnd = 11
-            case 12: booleanEnd = 10
+            case 12, 14, 15, 16, 18: booleanEnd = 10
             case 10: booleanEnd = 8
             default: booleanEnd = 7
             }
@@ -1289,23 +1616,51 @@ final class PhotoEffectsStore: ObservableObject {
                 : Array(1..<booleanEnd)
             let bools = booleanIndices.map { Bool(String(f[$0])) }
             guard bools.allSatisfy({ $0 != nil }) else { continue }
-            result[preset.rawValue] = PhotoFrameMetadataSettings(
+            var value = PhotoFrameMetadataSettings(
                 showDate: bools[0]!, showTime: bools[1]!,
                 showFocalLength: bools[2]!, showExposure: bools[3]!,
                 showBrand: bools[4]!, showModel: bools[5]!,
                 showLensModel: hasLensModel ? bools[6]! : false,
                 showCoordinates: hasLocation ? bools[7]! : false,
                 showAltitude: hasLocation ? bools[8]! : false,
-                datePattern: String(f[booleanEnd]),
-                timePattern: String(f[booleanEnd + 1])
+                datePattern: androidNormalizedDatePattern(String(f[booleanEnd])),
+                timePattern: androidNormalizedTimePattern(String(f[booleanEnd + 1]))
             )
+            if f.count >= 14 {
+                guard let city = Bool(String(f[12])), let region = Bool(String(f[13])) else { continue }
+                value.showCity = city; value.showRegion = region
+            }
+            if f.count >= 15 {
+                guard ["TEXT", "LOGO"].contains(String(f[14])),
+                      let style = PhotoFrameBrandStyle(rawValue: f[14].lowercased()) else { continue }
+                value.brandStyle = style
+            }
+            if f.count >= 16 {
+                guard let width = Int32(f[15]) else { continue }
+                value.widthPercent = normalizePhotoFrameWidthPercent(Int(width))
+            }
+            if f.count == 18 {
+                guard let blur = Int32(f[16]), let mask = Int32(f[17]) else { continue }
+                value.backgroundBlurPercent = normalizePhotoFrameBackdropPercent(Int(blur))
+                value.backgroundMaskPercent = normalizePhotoFrameBackdropPercent(Int(mask))
+            }
+            if value != .defaults(for: preset) { result[preset.rawValue] = value }
         }
         return result
     }
-    private static func encodeAndroidMetadata(_ values: [String: PhotoFrameMetadataSettings]) -> String {
+    fileprivate nonisolated static func encodeAndroidMetadata(_ values: [String: PhotoFrameMetadataSettings]) -> String {
         values.keys.sorted().compactMap { key -> String? in
             guard let p = PhotoFramePreset(rawValue: key), let v = values[key] else { return nil }
-            return [p.rawValue, String(v.showDate), String(v.showTime), String(v.showFocalLength), String(v.showExposure), String(v.showBrand), String(v.showModel), String(v.showLensModel), String(v.showCoordinates), String(v.showAltitude), v.datePattern, v.timePattern].joined(separator: "|")
+            guard v != .defaults(for: p) else { return nil }
+            var fields = [p.rawValue, String(v.showDate), String(v.showTime), String(v.showFocalLength), String(v.showExposure), String(v.showBrand), String(v.showModel), String(v.showLensModel), String(v.showCoordinates), String(v.showAltitude), v.datePattern, v.timePattern]
+            let backdrop = v.backgroundBlurPercent != 100 || v.backgroundMaskPercent != 100
+            if backdrop || v.widthPercent != 100 || v.brandStyle == .logo || v.showCity || v.showRegion {
+                fields += [String(v.showCity), String(v.showRegion)]
+            }
+            if backdrop || v.widthPercent != 100 || v.brandStyle == .logo { fields.append(v.brandStyle.rawValue.uppercased()) }
+            if backdrop || v.widthPercent != 100 { fields.append(String(normalizePhotoFrameWidthPercent(v.widthPercent))) }
+            if backdrop { fields += [String(normalizePhotoFrameBackdropPercent(v.backgroundBlurPercent)), String(normalizePhotoFrameBackdropPercent(v.backgroundMaskPercent))] }
+            return fields.joined(separator: "|")
         }.joined(separator: ";")
     }
 }
@@ -1394,9 +1749,7 @@ enum PhotoEffectsJPEGEncoder {
         var gps = copiedValues(from: gpsSource, keys: gpsKeys)
         if let latitude = cameraMetadata?.latitude,
            let longitude = cameraMetadata?.longitude,
-           latitude.isFinite, longitude.isFinite,
-           latitude != 0, longitude != 0,
-           abs(latitude) <= 90, abs(longitude) <= 180 {
+           validPhotoFrameCoordinates(latitude, longitude) {
             gps[kCGImagePropertyGPSLatitude] = abs(latitude)
             gps[kCGImagePropertyGPSLatitudeRef] = latitude < 0 ? "S" : "N"
             gps[kCGImagePropertyGPSLongitude] = abs(longitude)

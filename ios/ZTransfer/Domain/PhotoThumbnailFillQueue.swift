@@ -14,6 +14,7 @@ actor PhotoThumbnailFillQueue {
     private var failedOrder: [UInt32] = []
     private var settled = Set<UInt32>()
     private var filesByID: [UInt32: CameraFile] = [:]
+    private var ownership: [UInt32: UUID] = [:]
     private var revision = 0
     // Android seeds the post-scan queue exactly once for each scan revision.
     // Keeping this guard is important because accepted metadata batches and
@@ -62,7 +63,10 @@ actor PhotoThumbnailFillQueue {
               loadingRange: PhotoDateRange? = nil) {
         guard seededRevision != revision else { return }
         seededRevision = revision
-        for file in files { filesByID[file.id] = file }
+        for file in files {
+            filesByID[file.id] = file
+            if ownership[file.id] == nil { ownership[file.id] = UUID() }
+        }
         self.loadingRange = loadingRange
         self.priorityRange = sequential ? nil : priorityRange
         let ordered = sequential ? files : stableNewestFirst(files)
@@ -72,24 +76,33 @@ actor PhotoThumbnailFillQueue {
     }
 
     func enqueueNew(_ files: [CameraFile]) {
-        for file in files { filesByID[file.id] = file }
+        for file in files {
+            filesByID[file.id] = file
+            if ownership[file.id] == nil { ownership[file.id] = UUID() }
+        }
         for file in files where isInLoadingRange(file) && !settled.contains(file.id) {
             enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: !sequential)
         }
     }
 
-    func poll() -> (id: UInt32, revision: Int)? {
+    func poll() -> (id: UInt32, revision: Int, owner: UUID)? {
         let id: UInt32?
         if !priority.isEmpty { id = removeFirst(&priority) }
         else if !regular.isEmpty { id = removeFirst(&regular) }
         else { id = nil }
         if let id { pending.remove(id) }
-        guard let id else { return nil }
-        return (id, revision)
+        guard let id, let owner = ownership[id] else { return nil }
+        return (id, revision, owner)
     }
 
-    func returnToFront(_ id: UInt32, expectedRevision: Int) {
+    func finish(_ id: UInt32, expectedRevision: Int, owner: UUID, settled: Bool) {
+        guard revision == expectedRevision, ownership[id] == owner else { return }
+        if settled { markSettled(id) } else { markFailed(id) }
+    }
+
+    func returnToFront(_ id: UInt32, expectedRevision: Int, owner: UUID? = nil) {
         guard revision == expectedRevision else { return }
+        if let owner, ownership[id] != owner { return }
         guard !settled.contains(id), !failed.contains(id) else { return }
         priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
         pending.insert(id)
@@ -122,7 +135,10 @@ actor PhotoThumbnailFillQueue {
         regular.removeAll { ids.contains($0) }
         pending.subtract(ids); failed.subtract(ids); settled.subtract(ids)
         failedOrder.removeAll { ids.contains($0) }
-        ids.forEach { filesByID.removeValue(forKey: $0) }
+        ids.forEach {
+            filesByID.removeValue(forKey: $0)
+            ownership.removeValue(forKey: $0)
+        }
     }
 
     func retryFailed() {

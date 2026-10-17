@@ -99,10 +99,18 @@ private final class ThrowingContinuationBox<Value: Sendable>: @unchecked Sendabl
     }
 }
 
-/// ImageCaptureCore is Apple's iOS PTP camera bridge. It owns discovery and session
-/// lifecycle; PTP commands are sent only after `sessionOpened` and are serialized by
-/// the higher-level camera actor.
+/// ImageCaptureCore owns physical discovery/transport. App-side channel ownership
+/// starts after a validated PTP handshake; its separate full-content catalog is
+/// never opened. Subsequent commands are serialized by the camera actor.
 final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Sendable {
+    // Opt-in physical-device diagnostics. No PTP payloads or photo data are logged.
+    private static func trace(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["ZTRANSFER_USB_DIAGNOSTICS"] == "1" else { return }
+        print("[USB] t=\(ProcessInfo.processInfo.systemUptime) \(message())")
+        #endif
+    }
+
     private let browser = ICDeviceBrowser()
     private var cameras: [String: ICCameraDevice] = [:]
     private var cameraIDsByObject: [ObjectIdentifier: String] = [:]
@@ -111,16 +119,11 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     /// still in flight, so closing by UUID alone can close the replacement.
     private var openedCameras: [String: ICCameraDevice] = [:]
     private var openedSessionTokens: [String: UUID] = [:]
-    /// Keep a reference while requestOpenSession is in flight. A cancelled UI
-    /// owner does not actively close the camera; a late success remains the
-    /// reusable app-wide wired session.
+    /// Own the device while validating its PTP channel. A cancelled handshake
+    /// cannot publish a session when its framework callback eventually returns.
     private var openingCameras: [String: ICCameraDevice] = [:]
     private var openingGenerations: [String: UInt64] = [:]
     private var replacementTokens: [String: UUID] = [:]
-    /// requestOpenSession completion precedes ImageCaptureCore's readiness
-    /// callback. A pass-through command is legal only after the latter.
-    private var readyCameraObjects: Set<ObjectIdentifier> = []
-    private var readinessWaiters: [ObjectIdentifier: [UUID: ThrowingContinuationBox<Void>]] = [:]
     private var operationsSuspended = false
     private var resumeWaiters: [UUID: ThrowingContinuationBox<Void>] = [:]
     private var continuation: AsyncStream<USBTransportEvent>.Continuation?
@@ -160,6 +163,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     func start() {
+        Self.trace("browser start requested")
         lock.lock()
         lifecycleGeneration &+= 1
         let generation = lifecycleGeneration
@@ -171,6 +175,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         // controllable camera and sending pass-through PTP commands. ZTransfer
         // needs both, so never expose a partially-authorized state as usable.
         browser.start()
+        Self.trace("browser start returned; browsing=\(browser.isBrowsing), suspended=\(browser.isSuspended)")
         refreshAuthorization(generation: generation)
     }
 
@@ -195,10 +200,10 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     func currentAuthorization() -> USBAuthorizationState {
-        Self.combinedAuthorization(
-            contents: browser.contentsAuthorizationStatus,
-            control: browser.controlAuthorizationStatus
-        )
+        let contents = browser.contentsAuthorizationStatus
+        let control = browser.controlAuthorizationStatus
+        Self.trace("authorization contents=\(contents), control=\(control)")
+        return Self.combinedAuthorization(contents: contents, control: control)
     }
 
     private func refreshAuthorization(generation: UInt64) {
@@ -224,15 +229,11 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         openingCameras.removeAll()
         openingGenerations.removeAll()
         replacementTokens.removeAll()
-        readyCameraObjects.removeAll()
-        let readiness = readinessWaiters.values.flatMap(\.values)
-        readinessWaiters.removeAll()
         let resume = Array(resumeWaiters.values)
         resumeWaiters.removeAll()
         operationsSuspended = false
         authorizationRequestGeneration = nil
         lock.unlock()
-        readiness.forEach { _ = $0.finish(.failure(CameraTransportError.disconnected)) }
         resume.forEach { _ = $0.finish(.failure(CameraTransportError.disconnected)) }
         finishThumbnailWaiters(with: CameraTransportError.disconnected)
         // Finish outside the lock: AsyncStream invokes onTermination synchronously
@@ -246,53 +247,54 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     func openSession(for id: String) async throws {
+        Self.trace("PTP channel requested")
         try await waitUntilOperationsResume()
         guard currentAuthorization() == .authorized else {
             throw CameraTransportError.permissionDenied
         }
         guard let camera = camera(for: id) else { throw CameraTransportError.disconnected }
-        let generation = currentGeneration()
-        if openedCamera(for: id) === camera {
-            try await waitUntilReady(camera, for: id, generation: generation)
-            return
+        guard camera.capabilities.contains(ICDeviceCapability.cameraDeviceCanAcceptPTPCommands.rawValue) else {
+            throw CameraTransportError.unavailable
         }
+        let generation = currentGeneration()
+        if openedCamera(for: id) === camera { return }
         markOpening(camera, for: id, generation: generation)
-        let box = ThrowingContinuationBox<Void>()
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            box.install(continuation)
-            camera.requestOpenSession(options: nil) { [weak self] error in
-                guard let self, self.isCurrentGeneration(generation) else {
-                    _ = box.finish(.failure(CameraTransportError.disconnected))
-                    return
-                }
-                if let error {
-                    let mapped = Self.map(error)
-                    self.removeOpening(camera, for: id)
-                    if self.isKnownCamera(camera) {
-                        // The connection view maps the typed error to the
-                        // Android resource key; this event remains only a
-                        // lifecycle notification for an already-open UI.
-                        self.emit(.failed(id: id, message: error.localizedDescription))
-                    }
-                    _ = box.finish(.failure(mapped))
-                } else {
-                    if self.markOpened(camera, for: id, generation: generation) {
-                        if box.finish(.success(())) {
-                            if let token = self.ownedSessionToken(for: id, camera: camera) {
-                                self.emit(.sessionOpened(id: id, token: token))
-                            }
-                        }
-                    } else {
-                        _ = box.finish(.failure(CameraTransportError.disconnected))
-                        self.removeOpening(camera, for: id)
-                    }
+        do {
+            // Android owns its catalog scan. ImageCaptureCore discovery already
+            // supplies a public PTP channel; requestOpenSession starts a second,
+            // full-card catalog which blocks our first command (~59s on Z30).
+            // Validate actual PTP replies before admitting app-side ownership.
+            try await Self.validatePTPChannel { command in
+                try await self.requestPTP(command: command, data: nil, camera: camera) {
+                    self.isOpening(camera, for: id, generation: generation)
                 }
             }
+            try Task.checkCancellation()
+            guard markOpened(camera, for: id, generation: generation),
+                  let token = ownedSessionToken(for: id, camera: camera) else {
+                throw CameraTransportError.disconnected
+            }
+            Self.trace("PTP channel established without system catalog")
+            emit(.sessionOpened(id: id, token: token))
+        } catch {
+            removeOpening(camera, for: id)
+            throw error
         }
-        // Apple completes OpenSession before it declares the device ready to
-        // receive requests. Waiting here prevents GetDeviceInfo from racing
-        // ImageCaptureCore's own post-open preparation/content enumeration.
-        try await waitUntilReady(camera, for: id, generation: generation)
+    }
+
+    /// Match NikonCamera.connectUsb: require a successful DeviceInfo response,
+    /// but tolerate missing/malformed optional capability data. Storage access
+    /// belongs to the subsequent catalog scan, not connection admission.
+    static func validatePTPChannel(
+        send: @Sendable (Data) async throws -> (response: Data, payload: Data)
+    ) async throws {
+        try Task.checkCancellation()
+        let command = PTPCodec.encodeCommand(code: PTPConstants.getDeviceInfo, transactionID: 1)
+        let result = try await send(command)
+        try Task.checkCancellation()
+        let response = try PTPCodec.decode(result.response)
+        guard response.type == .response else { throw PTPSessionError.unexpectedResponseType(response.type) }
+        guard response.code == PTPConstants.responseOK else { throw PTPSessionError.responseCode(response.code) }
     }
 
     func sendPTP(command: Data, data: Data? = nil, to id: String,
@@ -304,20 +306,34 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         guard let camera = openedCamera(for: id, token: expectedSessionToken) else {
             throw CameraTransportError.disconnected
         }
-        guard camera.capabilities.contains(ICDeviceCapability.cameraDeviceCanAcceptPTPCommands.rawValue) else {
-            throw CameraTransportError.unavailable
+        return try await requestPTP(command: command, data: data, camera: camera) {
+            self.openedCamera(for: id, token: expectedSessionToken) === camera
         }
+    }
+
+    private func requestPTP(command: Data, data: Data?, camera: ICCameraDevice,
+                            isCurrent: @escaping @Sendable () -> Bool) async throws -> (response: Data, payload: Data) {
+        try await waitUntilOperationsResume()
+        guard isCurrent() else { throw CameraTransportError.disconnected }
         let box = ThrowingContinuationBox<(Data, Data)>()
+        Self.trace("PTP submit header=\(command.prefix(12).map { String(format: "%02x", $0) }.joined())")
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, Data), Error>) in
             box.install(continuation)
-            // Apple's delegate form defines this callback order as
-            // inData first, then the PTP response container. The block
-            // overload preserves that order even though both are `Data`.
-            // Returning them reversed makes GetDeviceInfo decode camera
-            // metadata as if it were a PTP response header.
             camera.requestSendPTPCommand(command, outData: data) { payload, response, error in
+                Self.trace("PTP completion payload=\(payload.count), responseHeader=\(response.prefix(32).map { String(format: "%02x", $0) }.joined()), error=\(String(describing: error))")
+                guard isCurrent() else {
+                    _ = box.finish(.failure(CameraTransportError.disconnected))
+                    return
+                }
                 if let error { _ = box.finish(.failure(Self.map(error))) }
-                else { _ = box.finish(.success(Self.ptpResult(inData: payload, response: response))) }
+                else {
+                    do {
+                        let result = try Self.correlatedPTPResult(command: command, inData: payload, response: response)
+                        _ = box.finish(.success(result))
+                    } catch {
+                        _ = box.finish(.failure(error))
+                    }
+                }
             }
         }
     }
@@ -407,6 +423,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     private func emit(_ event: USBTransportEvent) {
+        Self.trace("event \(event)")
         lock.lock(); let continuation = continuation; lock.unlock()
         continuation?.yield(event)
     }
@@ -420,10 +437,12 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     /// blocking lock API directly from an async function.
     private func openedCamera(for id: String) -> ICCameraDevice? {
         lock.lock(); defer { lock.unlock() }
-        return openedCameras[id] ?? openingCameras[id] ?? cameras[id]
+        // Discovery and an in-flight handshake do not establish app ownership.
+        // Never return either before the real PTP handshake has succeeded.
+        return openedCameras[id]
     }
 
-    /// Returns true only while the opened ImageCaptureCore session belongs to
+    /// Returns true only while the validated PTP channel belongs to
     /// the camera object currently published by discovery.  UUIDs can survive
     /// an unplug/replug, so comparing the identifier alone would let a stale
     /// repository leak into the replacement camera's connection attempt.
@@ -454,10 +473,15 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     private func markOpening(_ camera: ICCameraDevice, for id: String, generation: UInt64) {
         lock.lock()
-        readyCameraObjects.remove(ObjectIdentifier(camera))
         openingCameras[id] = camera
         openingGenerations[id] = generation
         lock.unlock()
+    }
+
+    private func isOpening(_ camera: ICCameraDevice, for id: String, generation: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !stopped && lifecycleGeneration == generation && cameras[id] === camera &&
+            openingCameras[id] === camera && openingGenerations[id] == generation
     }
 
     private func removeOpening(_ camera: ICCameraDevice, for id: String) {
@@ -488,7 +512,6 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     @discardableResult
     private func removeSession(_ camera: ICCameraDevice, for id: String) -> Bool {
-        let objectID = ObjectIdentifier(camera)
         lock.lock()
         let wasOpened = openedCameras[id] === camera
         if openedCameras[id] === camera {
@@ -499,10 +522,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
             openingCameras.removeValue(forKey: id)
             openingGenerations.removeValue(forKey: id)
         }
-        readyCameraObjects.remove(objectID)
-        let waiters = readinessWaiters.removeValue(forKey: objectID).map { Array($0.values) } ?? []
         lock.unlock()
-        waiters.forEach { _ = $0.finish(.failure(CameraTransportError.disconnected)) }
         return wasOpened
     }
 
@@ -541,49 +561,11 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         return !stopped && cameras[id] === camera
     }
 
-    private func waitUntilReady(_ camera: ICCameraDevice, for id: String,
-                                generation: UInt64) async throws {
-        let objectID = ObjectIdentifier(camera)
-        let requestID = UUID()
-        let box = ThrowingContinuationBox<Void>()
-        try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                box.install(continuation)
-                lock.lock()
-                let ready = !stopped && lifecycleGeneration == generation &&
-                    cameras[id] === camera && openedCameras[id] === camera &&
-                    readyCameraObjects.contains(objectID)
-                if !ready { readinessWaiters[objectID, default: [:]][requestID] = box }
-                lock.unlock()
-                if ready { _ = box.finish(.success(())) }
-            }
-        }, onCancel: { [weak self] in
-            self?.removeReadinessWaiter(objectID: objectID, requestID: requestID)
-            box.cancel()
-        })
-    }
-
-    private func markReady(_ camera: ICCameraDevice) -> Bool {
+    private func acceptsReadiness(_ camera: ICCameraDevice) -> Bool {
         let id = stableID(for: camera)
-        let objectID = ObjectIdentifier(camera)
-        lock.lock()
-        guard !stopped, cameras[id] === camera,
-              openedCameras[id] === camera || openingCameras[id] === camera else {
-            lock.unlock()
-            return false
-        }
-        readyCameraObjects.insert(objectID)
-        let waiters = readinessWaiters.removeValue(forKey: objectID).map { Array($0.values) } ?? []
-        lock.unlock()
-        waiters.forEach { _ = $0.finish(.success(())) }
-        return true
-    }
-
-    private func removeReadinessWaiter(objectID: ObjectIdentifier, requestID: UUID) {
-        lock.lock()
-        readinessWaiters[objectID]?.removeValue(forKey: requestID)
-        if readinessWaiters[objectID]?.isEmpty == true { readinessWaiters.removeValue(forKey: objectID) }
-        lock.unlock()
+        lock.lock(); defer { lock.unlock() }
+        return !stopped && cameras[id] === camera &&
+            (openedCameras[id] === camera || openingCameras[id] === camera)
     }
 
     private func waitUntilOperationsResume() async throws {
@@ -670,6 +652,18 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     private static func ptpResult(inData: Data, response: Data) -> (response: Data, payload: Data) {
         (response, inData)
+    }
+
+    /// ImageCaptureCore shares the physical PTP session with its enumerator and
+    /// assigns wire transaction IDs (Z30 U001: local 1 -> wire 1831). Its per-call
+    /// completion owns correlation; normalize only here, never on raw transports.
+    static func correlatedPTPResult(command: Data, inData: Data, response: Data) throws -> (response: Data, payload: Data) {
+        let request = try PTPCodec.decode(command)
+        let reply = try PTPCodec.decode(response)
+        guard request.type == .command else { throw CameraTransportError.protocolError("Invalid PTP command") }
+        guard reply.type == .response else { throw PTPSessionError.unexpectedResponseType(reply.type) }
+        return (PTPCodec.encode(type: .response, code: reply.code,
+                               transactionID: request.transactionID, payload: reply.payload), inData)
     }
 
     #if DEBUG
@@ -832,6 +826,7 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
     }
 
     func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
+        Self.trace("device arrived type=\(type(of: device)), moreComing=\(moreComing)")
         guard let camera = device as? ICCameraDevice else { return }
         let descriptor = descriptor(for: camera)
         var replaced: ICCameraDevice?
@@ -868,19 +863,17 @@ extension ImageCaptureUSBTransport: ICDeviceBrowserDelegate {
     }
 
     func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
+        Self.trace("browser device removal; browsing=\(browser.isBrowsing)")
         guard let camera = device as? ICCameraDevice else { return }
         let id = stableID(for: camera)
         lock.lock()
         let isCurrent = cameras[id] === camera
         if isCurrent { cameras.removeValue(forKey: id) }
         cameraIDsByObject.removeValue(forKey: ObjectIdentifier(camera))
-        readyCameraObjects.remove(ObjectIdentifier(camera))
-        let readyWaiters = readinessWaiters.removeValue(forKey: ObjectIdentifier(camera))
-            .map { Array($0.values) } ?? []
         if isCurrent { replacementTokens.removeValue(forKey: id) }
         lock.unlock()
-        readyWaiters.forEach { _ = $0.finish(.failure(CameraTransportError.disconnected)) }
         guard isCurrent else { return }
+        removeSession(camera, for: id)
         finishThumbnailWaiters(for: id, with: CameraTransportError.disconnected)
         emit(.deviceRemoved(id: id))
     }
@@ -895,9 +888,12 @@ extension ImageCaptureUSBTransport: ICDeviceDelegate {
               removeSession(camera, for: id) else { return }
         emit(.sessionClosed(id: id, token: token))
     }
-    func didRemove(_ device: ICDevice) {}
+    func didRemove(_ device: ICDevice) {
+        Self.trace("device delegate removal")
+    }
     func deviceDidBecomeReady(_ device: ICDevice) {
-        guard let camera = device as? ICCameraDevice, markReady(camera) else { return }
+        Self.trace("device ready callback")
+        guard let camera = device as? ICCameraDevice, acceptsReadiness(camera) else { return }
         emit(.ready(id: stableID(for: camera)))
     }
     func device(_ device: ICDevice, didReceiveStatusInformation status: [ICDeviceStatus : Any]) {}
@@ -937,13 +933,16 @@ extension ImageCaptureUSBTransport: ICCameraDeviceDelegate {
     }
 
     func cameraDevice(_ camera: ICCameraDevice, didReceiveMetadata metadata: [AnyHashable : Any]?, for item: ICCameraItem, error: Error?) {}
-    func cameraDevice(_ camera: ICCameraDevice, didAdd items: [ICCameraItem]) {}
+    func cameraDevice(_ camera: ICCameraDevice, didAdd items: [ICCameraItem]) {
+        Self.trace("catalog batch count=\(items.count), progress=\(camera.contentCatalogPercentCompleted)")
+    }
     func cameraDevice(_ camera: ICCameraDevice, didRemove items: [ICCameraItem]) {}
     func cameraDevice(_ camera: ICCameraDevice, didRenameItems items: [ICCameraItem]) {}
     func cameraDeviceDidChangeCapability(_ camera: ICCameraDevice) {}
     func cameraDevice(_ camera: ICCameraDevice, didReceivePTPEvent eventData: Data) {}
     func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
-        guard markReady(device) else { return }
+        Self.trace("complete catalog callback")
+        guard acceptsReadiness(device) else { return }
         emit(.ready(id: stableID(for: device)))
     }
     func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {}

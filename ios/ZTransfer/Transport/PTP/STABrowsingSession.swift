@@ -5,6 +5,7 @@ enum STAConnectionStage: Equatable, Sendable { case discovering(String?), pairin
 enum STAConnectionError: Error, Equatable, Sendable {
     case cameraRefused
     case unexpectedResponder(expected: String, actual: String?)
+    case pairingNotConfirmed
     case pairingCompleted
     case noMedia
     case albumUnavailable(UInt16)
@@ -29,6 +30,8 @@ actor STABrowsingSession {
     private let guid: String?
     private let identity: STAInitiatorIdentity
     private let profiles: STAProfileStore
+    private let verifyPairingCompletion: Bool
+    private var verifyingPairing = false
     private let onStage: @Sendable (STAConnectionStage) async -> Void
     private let waitForPairingEvent: @Sendable () async -> Void
     private(set) var storageProbeReached = false
@@ -40,13 +43,16 @@ actor STABrowsingSession {
     private var prefetchedHandles: (storageID: UInt32, handles: [UInt32])?
 
     init(session: PTPSession, guid: String?, identity: STAInitiatorIdentity, profiles: STAProfileStore,
+         verifyPairingCompletion: Bool = false,
          onStage: @escaping @Sendable (STAConnectionStage) async -> Void,
          waitForPairingEvent: @escaping @Sendable () async -> Void) {
+        self.verifyPairingCompletion = verifyPairingCompletion
         self.session = session; self.guid = guid; self.identity = identity; self.profiles = profiles
         self.onStage = onStage; self.waitForPairingEvent = waitForPairingEvent
     }
 
     func open() async throws -> STAAlbumAccess {
+        verifyingPairing = verifyPairingCompletion || profiles.requiresPairingVerification(guid)
         let opened = try await command(PTPConstants.openSession, [1])
         guard opened.code == PTPConstants.responseOK || opened.code == PTPConstants.sessionAlreadyOpen else {
             throw PTPSessionError.responseCode(opened.code)
@@ -61,16 +67,22 @@ actor STABrowsingSession {
         let ids = PTPDatasetParser.readStorageIDs(storage.data) ?? []
         let allowsPairing = identity == .pairedComputer
         // Android forceProfilePairing is true only for the computer identity.
-        if storage.code == PTPConstants.responseOK && allowsPairing && !profiles.isPaired(guid) {
+        if storage.code == PTPConstants.responseOK && allowsPairing && !profiles.isPaired(guid) && !verifyingPairing {
             try await pair()
         }
         let info = try await command(PTPConstants.getDeviceInfo)
         if info.code == PTPConstants.responseOK { deviceInfo = PTPDatasetParser.parseDeviceInfo(info.data) }
         let pairingOnly: Set<UInt16> = [0x1001, 0x1002, 0x1003, 0x952B, 0x935A]
-        if allowsPairing && deviceInfo?.operations == pairingOnly { try await pair() }
+        if verifyingPairing && (info.code != PTPConstants.responseOK || deviceInfo?.operations.isEmpty != false) {
+            try await rejectUnconfirmedPairing()
+        }
+        if deviceInfo?.operations == pairingOnly {
+            if verifyingPairing { try await rejectUnconfirmedPairing() }
+            if allowsPairing { try await pair() }
+        }
         await onStage(.connecting)
         if storage.code == PTPConstants.responseOK && !ids.isEmpty,
-           try await validateObjectAccess(storageIDs: ids) { return access(ids) }
+           try await validateObjectAccess(storageIDs: ids) { return try access(ids) }
 
         let mode = try await command(PTPConstants.nikonChangeApplicationMode, [1])
         if mode.code == PTPConstants.responseOK {
@@ -78,7 +90,7 @@ actor STABrowsingSession {
             let modeStorage = try await command(PTPConstants.getStorageIDs)
             let modeIDs = PTPDatasetParser.readStorageIDs(modeStorage.data) ?? []
             if modeStorage.code == PTPConstants.responseOK && !modeIDs.isEmpty,
-               try await validateObjectAccess(storageIDs: modeIDs) { return access(modeIDs) }
+               try await validateObjectAccess(storageIDs: modeIDs) { return try access(modeIDs) }
             _ = try? await command(PTPConstants.nikonChangeApplicationMode, [0])
         }
         if sawEmptyHandles && !sawHandles { throw STAConnectionError.noMedia }
@@ -121,10 +133,19 @@ actor STABrowsingSession {
         let id = usable[0]
         prefetchedHandles = (id & 0xFFFF == 0 ? .max : id, handles)
     }
-    private func access(_ storages: [UInt32]) -> STAAlbumAccess {
-        STAAlbumAccess(storageIDs: storages, prefetchedHandles: prefetchedHandles,
+    private func access(_ storages: [UInt32]) throws -> STAAlbumAccess {
+        try Task.checkCancellation()
+        if verifyingPairing { profiles.confirmVerifiedPairing(guid) }
+        return STAAlbumAccess(storageIDs: storages, prefetchedHandles: prefetchedHandles,
                        directObjectRead: directRead, deviceInfo: deviceInfo)
     }
+    private func rejectUnconfirmedPairing() async throws -> Never {
+        profiles.invalidatePairing(guid)
+        await onStage(.pairing)
+        try Task.checkCancellation()
+        throw STAConnectionError.pairingNotConfirmed
+    }
+
     private func pair() async throws -> Never {
         await onStage(.pairing)
         let query = try await command(PTPConstants.nikonPairingQuery)
@@ -132,7 +153,6 @@ actor STABrowsingSession {
         let result = try await command(PTPConstants.nikonPairingResult, [UInt32(PTPConstants.responseOK)])
         guard result.code == PTPConstants.responseOK else { throw STAConnectionError.pairingResultFailed(result.code) }
         try Task.checkCancellation()
-        profiles.markPaired(guid)
         await waitForPairingEvent()
         if (try? await command(PTPConstants.closeSession)) != nil { sessionOpened = false }
         try Task.checkCancellation()

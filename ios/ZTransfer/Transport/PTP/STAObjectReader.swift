@@ -198,6 +198,13 @@ actor STAObjectReader {
         return try await readPrefix(handle, target: length)
     }
 
+    /// Explicit protection diagnostics must read the camera again after the
+    /// user changes its protection state. Do not satisfy this request from
+    /// the normal prefix cache, which is intentionally retained for browsing.
+    func protectionHeader(handle: UInt32, length: Int) async throws -> Data {
+        try await partial(handle, offset: 0, length: length)
+    }
+
     func invalidate(handle: UInt32) {
         jpegThumbnailChecked.remove(handle)
         files.removeValue(forKey: handle); names.removeValue(forKey: handle); dates.removeValue(forKey: handle)

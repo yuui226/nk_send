@@ -11,6 +11,15 @@ func transferDirectoryLookupKey(_ name: String) -> String {
 }
 
 
+/// Like Android photoFrameSessionName, identify this process's in-flight
+/// derivatives while preserving cleanup of older .nkframe_ names.
+enum PhotoFrameTemporaryFiles {
+    private static let sessionID = UUID()
+    static var currentPrefix: String { ".nkframe_frame-\(sessionID.uuidString)_" }
+    static func makeName() -> String { currentPrefix + UUID().uuidString + ".jpg" }
+    static func isCurrent(_ name: String) -> Bool { name.hasPrefix(currentPrefix) }
+}
+
 struct TransferDirectoryIndex: Sendable {
     let directory: URL
     private(set) var files: [String: [(size: UInt64, url: URL)]] = [:]
@@ -29,6 +38,7 @@ struct TransferDirectoryIndex: Sendable {
                   values.isDirectory != true,
                   values.isRegularFile == true else { continue }
             let name = url.lastPathComponent
+            if LosslessCropTemporaryFiles.recognizes(name) { continue }
             if name.hasPrefix(".nkpart_") {
                 index.partials[name] = url
                 continue
@@ -54,8 +64,10 @@ struct TransferDirectoryIndex: Sendable {
             $0.lastPathComponent.caseInsensitiveCompare(transferFrameOutputDirectoryName) != .orderedSame &&
             (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
         }
+        let originals = [directory] + storageDirectories
+        let targets = originals + originals.map { $0.appendingPathComponent(transferFrameOutputDirectoryName, isDirectory: true) }
         var removed = 0
-        for target in [directory] + storageDirectories {
+        for target in targets {
             guard let entries = try? fileManager.contentsOfDirectory(
                 at: target,
                 includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
@@ -63,7 +75,13 @@ struct TransferDirectoryIndex: Sendable {
             ) else { continue }
             for url in entries {
                 let name = url.lastPathComponent
+                if LosslessCropTemporaryFiles.recognizes(name) {
+                    guard !LosslessCropTemporaryFiles.isCurrent(name) else { continue }
+                    if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
+                    continue
+                }
                 guard name.hasPrefix(".nkpart_") || name.hasPrefix(".nkframe_") else { continue }
+                guard !PhotoFrameTemporaryFiles.isCurrent(name) else { continue }
                 guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]),
                       values.isDirectory != true, values.isRegularFile == true else { continue }
                 if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
@@ -81,7 +99,11 @@ struct TransferDirectoryIndex: Sendable {
     }
 
     func completePartial(for file: CameraFile) -> URL? {
-        guard file.size > 0, file.size != UInt64(UInt32.max) else { return nil }
+        // Android discards still-image parts before its complete-part shortcut.
+        // Matching byte counts do not prove that a failed photo was received
+        // successfully, including parts left by an earlier app version.
+        guard supportsVideoResume(fileName: file.fileName),
+              file.size > 0, file.size != UInt64(UInt32.max) else { return nil }
         let name = transferPartialFileName(size: file.size, captureDate: file.captureDate, fileName: file.fileName)
         guard let url = partials[name],
               let values = try? url.resourceValues(forKeys: [.fileSizeKey]),

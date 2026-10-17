@@ -548,3 +548,45 @@
 "胶片边框" = "Film Edge";
 "艺术装裱" = "Gallery Mat";
 "按档位自动加入新增文件：全部、JPG、RAW（NEF 照片）或视频（MOV/MP4）。不影响已有任务和手动传输。" = "New files are queued automatically by mode: All, JPG, RAW (NEF photos), or Video (MOV/MP4). Existing tasks and manual transfers are unaffected.";
+
+"crop_title" = "Crop";
+
+"crop_task" = "Cropped photo";
+
+"crop_confirm" = "Crop and add to queue";
+
+"crop_reset" = "Reset crop";
+
+"crop_cancel" = "Cancel crop";
+
+"crop_free" = "Free";
+
+"crop_original" = "Original";
+
+"crop_swap" = "Switch crop orientation";
+
+"crop_loading" = "Preparing crop…";
+
+"crop_unavailable" = "Cannot prepare crop. Please retry.";
+
+"crop_retry" = "Retry";
+
+"crop_added" = "Added to queue";
+
+"crop_effects_skipped" = "Effects skipped";
+
+"crop_preview_read_failed" = "Cannot read the high-resolution preview. Please retry.";
+
+"crop_orientation_failed" = "Cannot read photo orientation. Please retry.";
+
+"camera_not_connected" = "Camera not connected";
+
+"photo_effect_modules" = "Manage modules";
+
+"photo_effect_module_filter" = "Filter";
+
+"photo_effect_module_lut" = "LUT";
+
+"photo_effect_module_frame" = "Frame";
+
+"photo_effect_module_watermark" = "Watermark";

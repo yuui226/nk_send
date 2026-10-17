@@ -9,8 +9,8 @@ final class CropPreparationStateTests: XCTestCase {
         state.beginRetry(); XCTAssertEqual(state.attempt, 1)
         state.succeed(); XCTAssertEqual(state, .ready)
     }
-    func testOrientationFailureIsNotRetryable() {
+    func testOrientationFailureIsRetryable() {
         var state = CropPreparationState.idle
-        state.fail(.orientation(detail: "invalid")); XCTAssertFalse(state.isRetryable)
+        state.fail(.orientation(detail: "invalid")); XCTAssertTrue(state.isRetryable)
     }
 }

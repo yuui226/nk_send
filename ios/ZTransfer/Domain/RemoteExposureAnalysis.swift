@@ -1,13 +1,13 @@
 import Foundation
 
 /// Display-referred monitor exposure math copied from Android's
-/// RemoteExposureAnalysis. This intentionally uses integer Rec.709 math so
+/// RemoteExposureAnalysis. This intentionally uses Android's 77/150/29 integer weights so
 /// threshold membership is identical at every 8-bit boundary.
 enum RemoteExposureAnalysis {
     static let waveformWidth = 256
     static let waveformHeight = 128
     static func luma(red: UInt8, green: UInt8, blue: UInt8) -> Int {
-        (54 * Int(red) + 183 * Int(green) + 19 * Int(blue)) >> 8
+        (77 * Int(red) + 150 * Int(green) + 29 * Int(blue)) >> 8
     }
 
     static func falseColor(forLuma value: Int) -> UInt32 {
@@ -53,6 +53,23 @@ enum RemoteExposureAnalysis {
             }
         }
         return result
+    }
+
+    static func waveformPixels(channels: [[Int]], sampleHeight: Int) -> [UInt32] {
+        let count = waveformWidth * waveformHeight
+        guard sampleHeight > 0, channels.count == 1 || channels.count == 3,
+              channels.allSatisfy({ $0.count == count }) else { return [] }
+        let intensities = (0...sampleHeight).map { waveformAlpha(count: $0, sampleHeight: sampleHeight) }
+        func intensity(_ value: Int) -> Int { intensities[min(sampleHeight, max(0, value))] }
+        return (0..<count).map { index in
+            let red = intensity(channels[0][index])
+            if channels.count == 1 { return red == 0 ? 0 : UInt32(red) << 24 | 0x00DCEBE3 }
+            let green = intensity(channels[1][index]), blue = intensity(channels[2][index])
+            let alpha = max(red, green, blue)
+            guard alpha > 0 else { return 0 }
+            return UInt32(alpha) << 24 | UInt32(red * 255 / alpha) << 16 |
+                UInt32(green * 255 / alpha) << 8 | UInt32(blue * 255 / alpha)
+        }
     }
 
     static func waveformAlpha(count: Int, sampleHeight: Int) -> Int {

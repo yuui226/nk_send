@@ -34,7 +34,7 @@ struct PhotoEffectsControls: View {
     var imageImporting = false
     @State private var metadataExpanded = false
     @State private var watermarkExpanded = false
-    @StateObject private var photoLUTStore = PhotoLUTStore()
+    @ObservedObject var photoLUTStore: PhotoLUTStore
     @State private var lutExpanded = false
     @Binding var filterChooser: PhotoFilterChooserState
     var onWatermarkTextCommitted: (String) -> Void = { _ in }
@@ -46,12 +46,18 @@ struct PhotoEffectsControls: View {
     }
     private func isFavoriteID(_ id: String) -> Bool { draft.favoriteFilterIDs.contains(filterKey(id)) }
     private var selectedFilterID: String? { draft.photoFilterEnabled ? draft.selectedFilter?.preset.id : nil }
-    private var frameEnabled: Bool { draft.photoFrameEnabled && draft.photoFrameBorderEnabled }
+    private var visibleModules: Int { effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro) }
+    private var showFrame: Bool { photoEffectModuleIsVisible(visibleModules, .frame) }
+    private var showWatermark: Bool { photoEffectModuleIsVisible(visibleModules, .watermark) }
+    private var frameEnabled: Bool { showFrame && draft.photoFrameEnabled && draft.photoFrameBorderEnabled }
     private var isPro: Bool { entitlements.access.isPro }
+    private var colorEditorVisibility: PhotoColorEffectEditorVisibility {
+        .init(settings: draft, isPro: isPro)
+    }
     private var shownWatermark: PhotoFrameWatermark {
         effectivePhotoEffectsSettings(draft, isPro: isPro).watermark
     }
-    private var watermarkEnabled: Bool { draft.photoFrameEnabled && shownWatermark.enabled }
+    private var watermarkEnabled: Bool { showWatermark && draft.photoFrameEnabled && shownWatermark.enabled }
     private var activeMetadata: PhotoFrameMetadataSettings {
         draft.metadataByPreset[draft.photoFramePreset.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: draft.photoFramePreset)
     }
@@ -71,6 +77,9 @@ struct PhotoEffectsControls: View {
         update(&metadata)
         value.metadata = metadata
         value.metadataByPreset[value.photoFramePreset.rawValue] = metadata
+        if let index = value.favoriteFrameEffects.firstIndex(where: { $0.preset == value.photoFramePreset }) {
+            value.favoriteFrameEffects[index].updateFrameMetadata(metadata)
+        }
         draft = value
     }
     private func updateWatermark(_ update: (inout PhotoFrameWatermark) -> Void) {
@@ -83,66 +92,40 @@ struct PhotoEffectsControls: View {
         draft = value
     }
 
-    private func toggleModule(_ module: PhotoEffectModule) {
-        var value = draft
-        let current = effectivePhotoEffectModules(value.photoEffectModules, isPro: isPro)
-        let next = current ^ module.rawValue
-        value.photoEffectModules = normalizePhotoEffectModules(next)
-        draft = value
-    }
-
-    private var moduleMenu: some View {
-        HStack(spacing: 6) {
-            ForEach(PhotoEffectModule.allCases, id: \.self) { module in
-                Button {
-                    toggleModule(module)
-                } label: {
-                    Text(moduleTitle(module))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), module) ? .white : ZTransferColors.secondaryText)
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(Capsule().fill(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), module) ? ZTransferColors.accentBlue.opacity(0.75) : Color.white.opacity(0.08)))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func moduleTitle(_ module: PhotoEffectModule) -> String {
-        switch module {
-        case .filter: return AppLocalized.resource("photo_filter")
-        case .lut: return AppLocalized.resource("photo_lut")
-        case .frame: return AppLocalized.resource("photo_frame_style_short")
-        case .watermark: return AppLocalized.resource("photo_frame_watermark_short")
-        }
-    }
-
     var body: some View {
         VStack(spacing: 10) {
-            moduleMenu
-            if photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter), draft.selectedFilter?.preset.id.hasPrefix("cube:") != true {
+            if colorEditorVisibility.filter {
                 filterCard
             }
-            if photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .lut),
-               (draft.selectedFilter == nil || draft.selectedFilter?.preset.id.hasPrefix("cube:") == true) {
+            if colorEditorVisibility.lut {
                 PhotoEffectsCard(accent: ZTransferColors.accentPurple) {
                     Button {
                         withAnimation(ZTransferMotion.inlineExpansion) { lutExpanded.toggle() }
                     } label: {
-                        HStack { Text(AppLocalized.resource("photo_lut")); Spacer(); Text(draft.selectedFilter?.preset.id.hasPrefix("cube:") == true ? "LUT" : AppLocalized.resource("photo_filter_off_option")) }
+                        HStack { Text(AppLocalized.resource("photo_effect_module_lut")); Spacer(); Text(draft.photoFilterEnabled && draft.colorEffectModule == .lut ? "LUT" : AppLocalized.resource("lut_off")) }
                     }.buttonStyle(.plain)
                     if lutExpanded {
                         PhotoLUTChooser(store: photoLUTStore,
-                                        onSelect: { id, _, intensity in
+                                        onDisable: {
                                             var value = draft
-                                            value.selectFilter(id)
-                                            if var selected = value.selectedFilter { selected.intensityPercent = intensity; value.selectedFilter = selected }
+                                            disablePhotoLUTDraft(&value, lutStore: photoLUTStore)
+                                            draft = value
+                                        },
+                                        onSelect: { selection in
+                                            var value = draft
+                                            value.selectedFilter = selection
                                             value.photoFilterEnabled = true
                                             draft = value
                                         },
                                         onIntensity: { intensity in
                                             guard var selected = draft.selectedFilter else { return }
                                             selected.intensityPercent = intensity
+                                            var value = draft; value.selectedFilter = selected; draft = value
+                                        },
+                                        onAdjustments: { adjustments in
+                                            guard var selected = draft.selectedFilter,
+                                                  selected.preset.id.hasPrefix("cube:") else { return }
+                                            selected.lutAdjustments = adjustments
                                             var value = draft; value.selectedFilter = selected; draft = value
                                         })
                     }
@@ -151,6 +134,13 @@ struct PhotoEffectsControls: View {
             frameCard
         }
         .photoEffectsHint($premiumHint, duration: 2)
+        .onChange(of: draft.selectedFilter) { selection in
+            // Covers both the wheel and the category chooser. A newly selected
+            // NP3 must not leave a role recipe that restores the previous Cube.
+            if let selection, !selection.preset.id.hasPrefix("cube:") {
+                photoLUTStore.select(nil)
+            }
+        }
         .onChange(of: entitlements.entitlement) { _ in
             if !isPro { textFieldFocused = false; showingWatermarkPicker = false }
         }
@@ -211,238 +201,253 @@ struct PhotoEffectsControls: View {
             .disabled(!photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter))
     }
 
-    private var frameCard: some View {
+    @ViewBuilder private var frameCard: some View {
+        if showFrame || showWatermark {
             PhotoEffectsCard(accent: ZTransferColors.accentOrange) {
-                PhotoEffectControlRow {
-                    DetentWheel(label: AppLocalized.resource("photo_frame_style_short"), options: orderedFrameOptions,
-                                selected: frameEnabled ? draft.photoFramePreset : nil,
-                                optionLabel: { $0.map(frameName) ?? AppLocalized.resource("photo_frame_off") }, onCommit: { value in
-                                    textFieldFocused = false
-                                    var updated = draft
-                                    guard let value else {
-                                        updated.photoFrameBorderEnabled = false
-                                        updated.photoFrameEnabled = isPro && updated.watermark.enabled
-                                        draft = updated
-                                        return
-                                    }
-                                    if isPro, let favorite = updated.favoriteFrameEffects.first(where: { $0.preset == value }) {
-                                        guard let watermark = favorite.applying(to: updated.watermark) else {
-                                            onFavoriteImageMissing()
-                                            return
-                                        }
-                                        updated.watermark = watermark
-                                    }
-                                    updated.photoFramePreset = value
-                                    updated.photoFrameEnabled = true
-                                    updated.photoFrameBorderEnabled = true
-                                    updated.metadata = updated.metadataByPreset[value.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: value)
-                                    draft = updated
-                                }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange,
-                                favoriteOption: { preset in preset.map { p in draft.favoriteFrameEffects.contains { $0.preset == p } } ?? false },
-                                favoriteIconColor: ZTransferColors.accentOrange)
-                    .frame(maxWidth: .infinity)
-                    DetentWheel(label: "", options: [false], selected: false,
-                                optionLabel: { _ in AppLocalized.resource("photo_frame_metadata_button") }, onCommit: { _ in },
-                                rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: frameEnabled,
-                                accentColor: ZTransferColors.accentOrange,
-                                emphasized: metadataExpanded, showDragHint: false,
-                                onActivated: {
-                                    ZTransferHaptics.shared.tick()
-                                    withAnimation(ZTransferMotion.inlineExpansion) { metadataExpanded.toggle() }
-                                })
-                    .frame(maxWidth: .infinity)
-                    PhotoEffectFavoriteButton(
-                        favorite: frameEnabled && draft.favoriteFrameEffects.contains { $0.preset == draft.photoFramePreset },
-                        enabled: frameEnabled,
-                        action: toggleFrameFavorite
-                    )
-                }
-                if frameEnabled && metadataExpanded {
-                    VStack(spacing: 8) {
-                        HStack(spacing: 8) {
-                            metadataButton(AppLocalized.resource("photo_frame_metadata_focal_length"), activeMetadata.showFocalLength) { updateMetadata { $0.showFocalLength.toggle() } }
-                            metadataButton(AppLocalized.resource("photo_frame_metadata_exposure"), activeMetadata.showExposure) { updateMetadata { $0.showExposure.toggle() } }
-                            metadataButton(AppLocalized.resource("photo_frame_metadata_lens_model"), activeMetadata.showLensModel) { updateMetadata { $0.showLensModel.toggle() } }
-                        }
-                        HStack(spacing: 8) {
-                            metadataButton(AppLocalized.resource("photo_frame_metadata_brand"), activeMetadata.showBrand) { updateMetadata { $0.showBrand.toggle() } }
-                            metadataButton(AppLocalized.resource("photo_frame_metadata_model"), activeMetadata.showModel) { updateMetadata { $0.showModel.toggle() } }
-                            DetentWheel(label: AppLocalized.resource("photo_frame_metadata_brand_logo"), options: PhotoFrameBrandStyle.allCases,
-                                        selected: activeMetadata.brandStyle,
-                                        optionLabel: { $0 == .logo ? AppLocalized.resource("photo_frame_metadata_brand_logo") : AppLocalized.resource("photo_frame_metadata_brand_text") },
-                                        onCommit: { value in updateMetadata { $0.brandStyle = value } }, rowHeight: 18,
-                                        wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
-                            if showLocationFields {
-                                metadataButton(AppLocalized.resource("photo_frame_metadata_coordinates"), activeMetadata.showCoordinates) { updateMetadata { $0.showCoordinates.toggle() } }
+                if showFrame { frameControls }
+                if showWatermark { watermarkControls }
+            }
+        }
+    }
+
+    @ViewBuilder private var frameControls: some View {
+        PhotoEffectControlRow {
+            DetentWheel(label: AppLocalized.resource("photo_frame_style_short"), options: orderedFrameOptions,
+                        selected: frameEnabled ? draft.photoFramePreset : nil,
+                        optionLabel: { $0.map(frameName) ?? AppLocalized.resource("photo_frame_off") }, onCommit: { value in
+                            textFieldFocused = false
+                            var updated = draft
+                            guard let value else {
+                                updated.photoFrameBorderEnabled = false
+                                updated.photoFrameEnabled = isPro && updated.watermark.enabled
+                                draft = updated
+                                return
                             }
-                        }
-                        if showLocationFields {
-                            metadataButton(AppLocalized.resource("photo_frame_metadata_altitude"), activeMetadata.showAltitude) { updateMetadata { $0.showAltitude.toggle() } }
-                        }
-                        HStack(spacing: 8) {
-                            DetentWheel(label: AppLocalized.resource("photo_frame_width"), options: Array(stride(from: 60, through: 200, by: 5)), selected: activeMetadata.widthPercent,
-                                        optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.widthPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
-                            DetentWheel(label: AppLocalized.resource("photo_frame_background_blur"), options: Array(stride(from: 0, through: 200, by: 5)), selected: activeMetadata.backgroundBlurPercent,
-                                        optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.backgroundBlurPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
-                            DetentWheel(label: AppLocalized.resource("photo_frame_background_mask"), options: Array(stride(from: 0, through: 200, by: 5)), selected: activeMetadata.backgroundMaskPercent,
-                                        optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.backgroundMaskPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
-                        }
-                        HStack(spacing: 8) {
-                            let datePatterns: [String?] = [nil, "yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy"]
-                            let timePatterns: [String?] = [nil, "HH:mm", "HH:mm:ss", "HH.mm", "HH.mm.ss"]
-                            DetentWheel(label: AppLocalized.resource("photo_frame_metadata_date_format"), options: datePatterns, selected: activeMetadata.showDate ? activeMetadata.datePattern : nil,
-                                        optionLabel: { value in
-                                            guard let value else { return AppLocalized.resource("photo_frame_off") }
-                                            switch value { case "yyyy-MM-dd": return "2026-08-17"; case "yyyy/MM/dd": return "2026/08/17"; case "yyyy.MM.dd": return "2026.08.17"; default: return "08-17-2026" }
-                                        }, onCommit: { value in updateMetadata { $0.showDate = value != nil; if let value { $0.datePattern = value } } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
-                            DetentWheel(label: AppLocalized.resource("photo_frame_metadata_time_format"), options: timePatterns, selected: activeMetadata.showTime ? activeMetadata.timePattern : nil,
-                                        optionLabel: { value in
-                                            guard let value else { return AppLocalized.resource("photo_frame_off") }
-                                            switch value { case "HH:mm": return "14:32"; case "HH:mm:ss": return "14:32:08"; case "HH.mm": return "14.32"; default: return "14.32.08" }
-                                        }, onCommit: { value in updateMetadata { $0.showTime = value != nil; if let value { $0.timePattern = value } } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
-                        }
-                    }
-                    .padding(8)
-                    .background(.thinMaterial.opacity(0.58), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.secondaryText.opacity(0.18)))
-                    .padding(.top, 4)
-                    .transition(.opacity)
-                }
-                VStack(spacing: 0) {
+                            if isPro, showWatermark, let favorite = updated.favoriteFrameEffects.first(where: { $0.preset == value }) {
+                                guard let watermark = favorite.applying(to: updated.watermark) else {
+                                    onFavoriteImageMissing()
+                                    return
+                                }
+                                updated.watermark = watermark
+                            }
+                            updated.photoFramePreset = value
+                            updated.photoFrameEnabled = true
+                            updated.photoFrameBorderEnabled = true
+                            let metadata = updated.metadataByPreset[value.rawValue] ?? PhotoFrameMetadataSettings.defaults(for: value)
+                            updated.metadata = updated.favoriteFrameEffects.first(where: { $0.preset == value })?.applying(to: metadata) ?? metadata
+                            updated.metadataByPreset[value.rawValue] = updated.metadata
+                            draft = updated
+                        }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange,
+                        favoriteOption: { preset in preset.map { p in draft.favoriteFrameEffects.contains { $0.preset == p } } ?? false },
+                        favoriteIconColor: ZTransferColors.accentOrange)
+            .frame(maxWidth: .infinity)
+            DetentWheel(label: "", options: [false], selected: false,
+                        optionLabel: { _ in AppLocalized.resource("photo_frame_metadata_button") }, onCommit: { _ in },
+                        rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: frameEnabled,
+                        accentColor: ZTransferColors.accentOrange,
+                        emphasized: metadataExpanded, showDragHint: false,
+                        onActivated: {
+                            ZTransferHaptics.shared.tick()
+                            withAnimation(ZTransferMotion.inlineExpansion) { metadataExpanded.toggle() }
+                        })
+            .frame(maxWidth: .infinity)
+            PhotoEffectFavoriteButton(
+                favorite: frameEnabled && draft.favoriteFrameEffects.contains { $0.preset == draft.photoFramePreset },
+                enabled: frameEnabled,
+                action: toggleFrameFavorite
+            )
+        }
+        if frameEnabled && metadataExpanded {
+            VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    DetentWheel(label: AppLocalized.resource("photo_frame_watermark_short"), options: [false, true], selected: watermarkEnabled,
-                                optionLabel: { $0 ? AppLocalized.resource("photo_frame_on") : AppLocalized.resource("photo_frame_off") }, onCommit: { value in
-                                    guard isPro else { return }
-                                    textFieldFocused = false
-                                    let borderWasEnabled = frameEnabled
-                                    var updated = draft
-                                    if !updated.photoFrameEnabled {
-                                        let preferredPosition = updated.watermark.position
-                                        updated.watermark = PhotoFrameWatermark(enabled: false)
-                                        updated.watermark.position = preferredPosition
-                                    }
-                                    updated.watermark.enabled = value
-                                    updated.photoFrameEnabled = borderWasEnabled || value
-                                    if borderWasEnabled, let index = updated.favoriteFrameEffects.firstIndex(where: { $0.preset == updated.photoFramePreset }) {
-                                        updated.favoriteFrameEffects[index].watermark = updated.watermark
-                                    }
-                                    draft = updated
-                                }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: isPro, accentColor: ZTransferColors.accentPurple)
-                    .overlay {
-                        if !isPro {
-                            Color.clear.contentShape(Rectangle()).onTapGesture { showPremiumHint() }
-                        }
-                    }
-                    DetentWheel(label: "", options: [false], selected: false,
-                                optionLabel: { _ in AppLocalized.resource("photo_frame_watermark_settings_button") }, onCommit: { _ in }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
-                                enabled: watermarkEnabled, accentColor: ZTransferColors.accentPurple,
-                                emphasized: watermarkExpanded, showDragHint: false,
-                                onActivated: {
-                                    ZTransferHaptics.shared.tick()
-                                    withAnimation(ZTransferMotion.inlineExpansion) { watermarkExpanded.toggle() }
-                                })
+                    metadataButton(AppLocalized.resource("photo_frame_metadata_focal_length"), activeMetadata.showFocalLength) { updateMetadata { $0.showFocalLength.toggle() } }
+                    metadataButton(AppLocalized.resource("photo_frame_metadata_exposure"), activeMetadata.showExposure) { updateMetadata { $0.showExposure.toggle() } }
+                    metadataButton(AppLocalized.resource("photo_frame_metadata_lens_model"), activeMetadata.showLensModel) { updateMetadata { $0.showLensModel.toggle() } }
                 }
-                if watermarkExpanded && watermarkEnabled {
-                    VStack(spacing: 8) {
-                        // Android keeps the content wheel and its editor on
-                        // one row: one third for the type and two thirds for
-                        // the text field / logo button. Keeping that geometry
-                        // here prevents the editor from becoming a separate,
-                        // oversized row on iOS.
-                        GeometryReader { proxy in
-                            let typeWidth = (proxy.size.width - 8) / 3
-                            HStack(spacing: 8) {
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_content"), options: PhotoFrameWatermarkContent.allCases,
-                                            selected: shownWatermark.content,
-                                            optionLabel: { $0 == .text ? AppLocalized.resource("photo_frame_content_text") : AppLocalized.resource("photo_frame_content_image") },
-                                            onCommit: { value in
-                                                if value == .image && shownWatermark.imageHash == nil {
-                                                    showingWatermarkPicker = true
-                                                } else {
-                                                    updateWatermark { $0.content = value }
-                                                }
-                                            }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
-                                            enabled: !imageImporting,
-                                            accentColor: ZTransferColors.accentPurple)
-                                .frame(width: typeWidth)
-                                if shownWatermark.content == .text {
-                                    TextField("", text: Binding(
-                                        get: { shownWatermark.text },
-                                        set: { value in
-                                            updateWatermark {
-                                                $0.text = PhotoFrameWatermark.limitText(value)
+                HStack(spacing: 8) {
+                    metadataButton(AppLocalized.resource(activeMetadata.brandControlLabelKey), activeMetadata.showBrand) { updateMetadata { $0.cycleBrandStyle() } }
+                    metadataButton(AppLocalized.resource("photo_frame_metadata_model"), activeMetadata.showModel) { updateMetadata { $0.showModel.toggle() } }
+                    if showLocationFields {
+                        metadataButton(AppLocalized.resource("photo_frame_metadata_coordinates"), activeMetadata.showCoordinates) { updateMetadata { $0.showCoordinates.toggle() } }
+                    }
+                }
+                if showLocationFields {
+                    HStack(spacing: 8) {
+                        metadataButton(AppLocalized.resource("photo_frame_metadata_altitude"), activeMetadata.showAltitude) { updateMetadata { $0.showAltitude.toggle() } }
+                        metadataButton(AppLocalized.resource("photo_frame_metadata_city"), activeMetadata.showCity) { updateMetadata { $0.showCity.toggle() } }
+                        metadataButton(AppLocalized.resource("photo_frame_metadata_region"), activeMetadata.showRegion) { updateMetadata { $0.showRegion.toggle() } }
+                    }
+                }
+                if draft.photoFramePreset.supportsWidthControl {
+                    DetentWheel(label: AppLocalized.resource("photo_frame_width"), options: Array(stride(from: 60, through: 200, by: 5)), selected: activeMetadata.widthPercent,
+                                optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.widthPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
+                        .id(draft.photoFramePreset)
+                }
+                if draft.photoFramePreset.supportsBackdropControls {
+                    HStack(spacing: 8) {
+                        DetentWheel(label: AppLocalized.resource("photo_frame_background_blur"), options: Array(stride(from: 0, through: 200, by: 10)), selected: activeMetadata.backgroundBlurPercent,
+                                    optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.backgroundBlurPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
+                        DetentWheel(label: AppLocalized.resource("photo_frame_background_mask"), options: Array(stride(from: 0, through: 200, by: 10)), selected: activeMetadata.backgroundMaskPercent,
+                                    optionLabel: { "\($0)%" }, onCommit: { value in updateMetadata { $0.backgroundMaskPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
+                    }
+                    .id(draft.photoFramePreset)
+                }
+                HStack(spacing: 8) {
+                    let datePatterns: [String?] = [nil, "yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy"]
+                    let timePatterns: [String?] = [nil, "HH:mm", "HH:mm:ss", "HH.mm", "HH.mm.ss"]
+                    DetentWheel(label: AppLocalized.resource("photo_frame_metadata_date_format"), options: datePatterns, selected: activeMetadata.showDate ? activeMetadata.datePattern : nil,
+                                optionLabel: { value in
+                                    guard let value else { return AppLocalized.resource("photo_frame_off") }
+                                    switch value { case "yyyy-MM-dd": return "2026-08-17"; case "yyyy/MM/dd": return "2026/08/17"; case "yyyy.MM.dd": return "2026.08.17"; default: return "08-17-2026" }
+                                }, onCommit: { value in updateMetadata { $0.showDate = value != nil; if let value { $0.datePattern = value } } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
+                    DetentWheel(label: AppLocalized.resource("photo_frame_metadata_time_format"), options: timePatterns, selected: activeMetadata.showTime ? activeMetadata.timePattern : nil,
+                                optionLabel: { value in
+                                    guard let value else { return AppLocalized.resource("photo_frame_off") }
+                                    switch value { case "HH:mm": return "14:32"; case "HH:mm:ss": return "14:32:08"; case "HH.mm": return "14.32"; default: return "14.32.08" }
+                                }, onCommit: { value in updateMetadata { $0.showTime = value != nil; if let value { $0.timePattern = value } } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentOrange)
+                }
+            }
+            .padding(8)
+            .background(.thinMaterial.opacity(0.58), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.secondaryText.opacity(0.18)))
+            .padding(.top, 4)
+            .transition(.opacity)
+        }
+    }
+
+    private var watermarkControls: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_short"), options: [false, true], selected: watermarkEnabled,
+                            optionLabel: { $0 ? AppLocalized.resource("photo_frame_on") : AppLocalized.resource("photo_frame_off") }, onCommit: { value in
+                                guard isPro else { return }
+                                textFieldFocused = false
+                                let borderWasEnabled = frameEnabled
+                                var updated = draft
+                                if !updated.photoFrameEnabled {
+                                    let preferredPosition = updated.watermark.position
+                                    updated.watermark = PhotoFrameWatermark(enabled: false)
+                                    updated.watermark.position = preferredPosition
+                                }
+                                updated.watermark.enabled = value
+                                updated.photoFrameEnabled = borderWasEnabled || value
+                                if borderWasEnabled, let index = updated.favoriteFrameEffects.firstIndex(where: { $0.preset == updated.photoFramePreset }) {
+                                    updated.favoriteFrameEffects[index].watermark = updated.watermark
+                                }
+                                draft = updated
+                            }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: isPro, accentColor: ZTransferColors.accentPurple)
+                .overlay {
+                    if !isPro {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { showPremiumHint() }
+                    }
+                }
+                DetentWheel(label: "", options: [false], selected: false,
+                            optionLabel: { _ in AppLocalized.resource("photo_frame_watermark_settings_button") }, onCommit: { _ in }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
+                            enabled: watermarkEnabled, accentColor: ZTransferColors.accentPurple,
+                            emphasized: watermarkExpanded, showDragHint: false,
+                            onActivated: {
+                                ZTransferHaptics.shared.tick()
+                                withAnimation(ZTransferMotion.inlineExpansion) { watermarkExpanded.toggle() }
+                            })
+            }
+            if watermarkExpanded && watermarkEnabled {
+                VStack(spacing: 8) {
+                    // Android keeps the content wheel and its editor on
+                    // one row: one third for the type and two thirds for
+                    // the text field / logo button. Keeping that geometry
+                    // here prevents the editor from becoming a separate,
+                    // oversized row on iOS.
+                    GeometryReader { proxy in
+                        let typeWidth = (proxy.size.width - 8) / 3
+                        HStack(spacing: 8) {
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_content"), options: PhotoFrameWatermarkContent.allCases,
+                                        selected: shownWatermark.content,
+                                        optionLabel: { $0 == .text ? AppLocalized.resource("photo_frame_content_text") : AppLocalized.resource("photo_frame_content_image") },
+                                        onCommit: { value in
+                                            if value == .image && shownWatermark.imageHash == nil {
+                                                showingWatermarkPicker = true
+                                            } else {
+                                                updateWatermark { $0.content = value }
                                             }
+                                        }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
+                                        enabled: !imageImporting,
+                                        accentColor: ZTransferColors.accentPurple)
+                            .frame(width: typeWidth)
+                            if shownWatermark.content == .text {
+                                TextField("", text: Binding(
+                                    get: { shownWatermark.text },
+                                    set: { value in
+                                        updateWatermark {
+                                            $0.text = PhotoFrameWatermark.limitText(value)
                                         }
-                                    ))
-                                    .textFieldStyle(.plain)
-                                    .multilineTextAlignment(.center)
-                                    .focused($textFieldFocused)
-                                    .submitLabel(.done)
-                                    .onSubmit { textFieldFocused = false }
-                                    .padding(.horizontal, 14)
+                                    }
+                                ))
+                                .textFieldStyle(.plain)
+                                .multilineTextAlignment(.center)
+                                .focused($textFieldFocused)
+                                .submitLabel(.done)
+                                .onSubmit { textFieldFocused = false }
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: PhotoEffectControlMetrics.height)
+                                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 13))
+                                .overlay(RoundedRectangle(cornerRadius: 13).stroke(ZTransferColors.secondaryText.opacity(0.15)))
+                            } else {
+                                Button { showingWatermarkPicker = true } label: {
+                                    HStack(spacing: 6) {
+                                        if imageImporting {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                                .tint(ZTransferColors.accentPurple)
+                                        } else {
+                                            Image(systemName: "photo").font(.system(size: 16, weight: .medium))
+                                            Text(AppLocalized.resource("photo_frame_replace_image")).font(.system(size: 14, weight: .medium))
+                                        }
+                                    }
+                                    .foregroundStyle(ZTransferColors.primaryText)
                                     .frame(maxWidth: .infinity)
                                     .frame(height: PhotoEffectControlMetrics.height)
-                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 13))
-                                    .overlay(RoundedRectangle(cornerRadius: 13).stroke(ZTransferColors.secondaryText.opacity(0.15)))
-                                } else {
-                                    Button { showingWatermarkPicker = true } label: {
-                                        HStack(spacing: 6) {
-                                            if imageImporting {
-                                                ProgressView()
-                                                    .controlSize(.small)
-                                                    .tint(ZTransferColors.accentPurple)
-                                            } else {
-                                                Image(systemName: "photo").font(.system(size: 16, weight: .medium))
-                                                Text(AppLocalized.resource("photo_frame_replace_image")).font(.system(size: 14, weight: .medium))
-                                            }
-                                        }
-                                        .foregroundStyle(ZTransferColors.primaryText)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: PhotoEffectControlMetrics.height)
-                                    }
-                                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 13))
-                                    .disabled(imageImporting)
                                 }
-                            }
-                        }
-                        .frame(height: PhotoEffectControlMetrics.height)
-                        if shownWatermark.content == .text {
-                            HStack(spacing: 8) {
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_font"), options: PhotoFrameWatermarkFont.allCases, selected: shownWatermark.font, optionLabel: fontName, onCommit: { value in updateWatermark { $0.font = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: shownWatermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: shownWatermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                            }
-                            HStack(spacing: 8) {
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: textWatermarkPositions, selected: textWatermarkPositions.contains(shownWatermark.position) ? shownWatermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_color"), options: PhotoFrameWatermarkColor.allCases, selected: shownWatermark.color, optionLabel: colorName, onCommit: { value in updateWatermark { $0.color = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_effect"), options: PhotoFrameWatermarkEffect.allCases, selected: shownWatermark.effect, optionLabel: effectName, onCommit: { value in updateWatermark { $0.effect = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                            }
-                        } else {
-                            HStack(spacing: 8) {
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: shownWatermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: shownWatermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
-                                DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: photoWatermarkPositions, selected: photoWatermarkPositions.contains(shownWatermark.position) ? shownWatermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 13))
+                                .disabled(imageImporting)
                             }
                         }
                     }
-                    .disabled(!isPro)
-                    .opacity(isPro ? 1 : 0.45)
-                    .overlay {
-                        if !isPro {
-                            Color.clear.contentShape(Rectangle()).onTapGesture { showPremiumHint() }
+                    .frame(height: PhotoEffectControlMetrics.height)
+                    if shownWatermark.content == .text {
+                        HStack(spacing: 8) {
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_font"), options: PhotoFrameWatermarkFont.allCases, selected: shownWatermark.font, optionLabel: fontName, onCommit: { value in updateWatermark { $0.font = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: shownWatermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: shownWatermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                        }
+                        HStack(spacing: 8) {
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: textWatermarkPositions, selected: textWatermarkPositions.contains(shownWatermark.position) ? shownWatermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_color"), options: PhotoFrameWatermarkColor.allCases, selected: shownWatermark.color, optionLabel: colorName, onCommit: { value in updateWatermark { $0.color = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_effect"), options: PhotoFrameWatermarkEffect.allCases, selected: shownWatermark.effect, optionLabel: effectName, onCommit: { value in updateWatermark { $0.effect = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_size"), options: Array(PhotoFrameWatermark.sizeRange.reversed()), selected: shownWatermark.sizePercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.sizePercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_opacity"), options: Array(PhotoFrameWatermark.opacityRange.reversed()), selected: shownWatermark.opacityPercent, optionLabel: { "\($0)%" }, onCommit: { value in updateWatermark { $0.opacityPercent = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
+                            DetentWheel(label: AppLocalized.resource("photo_frame_watermark_position"), options: photoWatermarkPositions, selected: photoWatermarkPositions.contains(shownWatermark.position) ? shownWatermark.position : .photoBottomCenter, optionLabel: positionName, onCommit: { value in updateWatermark { $0.position = value } }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: ZTransferColors.accentPurple)
                         }
                     }
-                    .padding(.top, 10)
-                    .transition(.opacity)
                 }
+                .disabled(!isPro)
+                .opacity(isPro ? 1 : 0.45)
+                .overlay {
+                    if !isPro {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { showPremiumHint() }
+                    }
                 }
-                .padding(8)
-                .background(ZTransferColors.accentPurple.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.accentPurple.opacity(0.18)))
-                .padding(.top, 8)
+                .padding(.top, 10)
+                .transition(.opacity)
             }
-            .opacity(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .frame) ? 1 : 0.45)
-            .disabled(!photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .frame))
+        }
+        .padding(8)
+        .background(ZTransferColors.accentPurple.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.accentPurple.opacity(0.18)))
+        .padding(.top, 8)
     }
 
     private func showPremiumHint() {
@@ -465,14 +470,14 @@ struct PhotoEffectsControls: View {
             value.favoriteFrameEffects.remove(at: index)
             value.favoriteFramePresets.remove(preset)
         } else {
-            value.favoriteFrameEffects.append(.init(preset: preset, watermark: value.watermark))
+            value.favoriteFrameEffects.append(.init(preset: preset, watermark: value.watermark, metadata: activeMetadata))
             value.favoriteFramePresets.insert(preset)
         }
         draft = value
     }
     private func frameName(_ value: PhotoFramePreset) -> String {
         switch value {
-        case .mist: return AppLocalized.resource("photo_frame_mist"); case .cinema: return AppLocalized.resource("photo_frame_cinema"); case .minimal: return AppLocalized.resource("photo_frame_minimal"); case .frosted: return AppLocalized.resource("photo_frame_frosted"); case .plaque: return AppLocalized.resource("photo_frame_plaque"); case .immersive: return AppLocalized.resource("photo_frame_immersive"); case .brandInset: return AppLocalized.resource("photo_frame_brand_inset"); case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery"); case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature"); case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat"); case .colorArchive: return AppLocalized.resource("photo_frame_color_archive"); case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery"); case .filmEdge: return AppLocalized.resource("photo_frame_film_edge")
+        case .mist: return AppLocalized.resource("photo_frame_mist"); case .cinema: return AppLocalized.resource("photo_frame_cinema"); case .minimal: return AppLocalized.resource("photo_frame_minimal"); case .frosted: return AppLocalized.resource("photo_frame_frosted"); case .plaque: return AppLocalized.resource("photo_frame_plaque"); case .immersive: return AppLocalized.resource("photo_frame_immersive"); case .brandInset: return AppLocalized.resource("photo_frame_brand_inset"); case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery"); case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature"); case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat"); case .colorArchive: return AppLocalized.resource("photo_frame_color_archive"); case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery"); case .filmEdge: return AppLocalized.resource("photo_frame_film_edge"); case .filmNegative: return AppLocalized.resource("photo_frame_film_negative"); case .parameterPoster: return AppLocalized.resource("photo_frame_parameter_poster")
         }
     }
     private func fontName(_ value: PhotoFrameWatermarkFont) -> String {
@@ -631,6 +636,9 @@ func photoEffectsPreviewCanvasKey(_ settings: PhotoEffectsSettings, rotationQuar
 /// prepared. Rendering is detached from SwiftUI so wheel interaction remains
 /// responsive and a cancelled generation cannot replace a newer one.
 struct PhotoEffectsSettingsPreview: View {
+    @ObservedObject private var placeAvailability = PhotoFramePlaceAvailability.shared
+    @AppStorage("app_language") private var appLanguage = "system"
+    @State private var cachedPlaceContextKey = ""
     let source: UIImage?
     let metadata: PhotoFrameMetadata?
     let settings: PhotoEffectsSettings
@@ -686,12 +694,32 @@ struct PhotoEffectsSettingsPreview: View {
             metadata.latitude.map { String($0) } ?? "",
             metadata.longitude.map { String($0) } ?? "",
             metadata.altitude.map { String($0) } ?? "",
+            metadata.city ?? "", metadata.region ?? "",
         ]
         return "meta:" + fields.joined(separator: "|")
     }
 
+    private var placeContextKey: String {
+        // Android SettingsScreen includes availability in completed-frame cache
+        // identity only when place fields are requested; filter pixels are independent.
+        let enabled = settings.metadata.showCity || settings.metadata.showRegion
+        return "place:\(enabled ? String(placeAvailability.allowed) : "unused")|language:\(appLanguage)"
+    }
+
     private var renderKeyWithRotation: String {
-        "\(renderKey)|rotation:\(rotationQuarterTurns)"
+        "\(renderKey)|rotation:\(rotationQuarterTurns)|\(placeContextKey)"
+    }
+
+    private static func resolvedPreviewMetadata(
+        _ metadata: PhotoFrameMetadata?, settings: PhotoEffectsSettings
+    ) async -> PhotoFrameMetadata? {
+        guard settings.photoFrameEnabled, settings.photoFrameBorderEnabled, let metadata else {
+            return metadata
+        }
+        return await PhotoFramePlaceResolver.shared.enriching(
+            metadata, settings: settings.metadata,
+            allowed: { await PhotoFramePlaceAvailability.shared.allowed }
+        )
     }
 
     private var requestedCanvasKey: String {
@@ -748,9 +776,10 @@ struct PhotoEffectsSettingsPreview: View {
 
     private static func prefetchedPreviews(
         image: UIImage, sourceIdentity: UIImage, settings: PhotoEffectsSettings,
-        metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int
+        metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int, placeContextKey: String
     ) async -> [(String, UIImage)] {
         var results: [(String, UIImage)] = []
+        let resolvedMetadata = await resolvedPreviewMetadata(metadata, settings: settings)
         do {
             for selection in nextPhotoFilterSelections(for: settings) {
                 try Task.checkCancellation()
@@ -761,11 +790,11 @@ struct PhotoEffectsSettingsPreview: View {
                     image: image, selection: selection
                 )
                 let preview = try await LocalPhotoOutput.preview(
-                    image: image, settings: next, metadata: metadata,
+                    image: image, settings: next, metadata: resolvedMetadata,
                     filteredSource: nextFiltered
                 )
                 let base = makeRenderKey(settings: next, source: sourceIdentity, metadata: metadata)
-                results.append(("\(base)|rotation:\(rotationQuarterTurns)", preview.filtered))
+                results.append(("\(base)|rotation:\(rotationQuarterTurns)|\(placeContextKey)", preview.filtered))
             }
         } catch {}
         return results
@@ -890,6 +919,12 @@ struct PhotoEffectsSettingsPreview: View {
                 guard !Task.isCancelled else { return }
             }
             lastPreviewSettings = pixelSettings
+            if cachedPlaceContextKey != placeContextKey {
+                cachedPlaceContextKey = placeContextKey
+                prefetched.removeAll(keepingCapacity: true)
+                unfiltered = nil
+                showUnfiltered = false
+            }
             previewFailed = false
             if cachedContextKey != sourceContextKey {
                 // Rotation/source/EXIF changes invalidate every pixel cache;
@@ -908,17 +943,12 @@ struct PhotoEffectsSettingsPreview: View {
                 let fallback = PhotoEffectsFallbackSource.make()
                 let rotatedFallback = Self.rotate(fallback, quarterTurns: rotationQuarterTurns)
                 let fallbackSettings = settings
-                let fallbackResult = try? await Task.detached(priority: .utility) {
-                    try Task.checkCancellation()
-                    return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
-                        try autoreleasepool {
-                            try PhotoEffectsRenderer.render(
-                                rotatedFallback, settings: fallbackSettings, metadata: nil,
-                                previewPlaceholders: true, previewLongEdge: 1_920
-                            )
-                        }
-                    }
-                }.value
+                let fallbackResult = try? await PhotoEffectsPreviewRenderGate.render {
+                    try PhotoEffectsRenderer.render(
+                        rotatedFallback, settings: fallbackSettings, metadata: nil,
+                        previewPlaceholders: true, previewLongEdge: 1_920, filterExecution: .preview
+                    )
+                }
                 guard !Task.isCancelled else { return }
                 guard let fallbackResult else {
                     previewFailed = true
@@ -933,7 +963,8 @@ struct PhotoEffectsSettingsPreview: View {
             }
             showUnfiltered = false
             unfiltered = nil
-            let metadata = metadata
+            let metadata = await Self.resolvedPreviewMetadata(metadata, settings: settings)
+            guard !Task.isCancelled else { return }
             let settings = settings
             let rotationQuarterTurns = rotationQuarterTurns
             let rotatedSource = Self.rotate(source, quarterTurns: rotationQuarterTurns)
@@ -993,7 +1024,7 @@ struct PhotoEffectsSettingsPreview: View {
             let rotatedSource = Self.rotate(source, quarterTurns: rotation)
             let warmedResults = await Self.prefetchedPreviews(
                 image: rotatedSource, sourceIdentity: source, settings: settings,
-                metadata: metadata, rotationQuarterTurns: rotation
+                metadata: metadata, rotationQuarterTurns: rotation, placeContextKey: placeContextKey
             )
             guard !Task.isCancelled else { return }
             for (key, image) in warmedResults where prefetched[key] == nil {
@@ -1025,49 +1056,38 @@ private struct ConnectedPhotoEffectsPrefetchRequest: Equatable {
 /// Android's expanded effects preview uses the same fitted image surface as
 /// the photo viewer: a tap dismisses at 1x, a double tap toggles 2.5x, and a
 /// pinch/drag pair keeps the image inside the viewport while zoomed.
-private struct PhotoEffectsExpandedPreview: View {
+struct PhotoEffectsExpandedPreview: View {
     let image: UIImage
+    var comparison: UIImage? = nil
+    @GestureState private var comparing = false
     let initialAnchor: CGRect
     let onDismiss: () -> Void
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
-    @State private var gestureStartScale: CGFloat = 1
+    @State private var magnifying = false
     @State private var gestureStartOffset: CGSize = .zero
     @State private var rotationDegrees: Double = 0
     @State private var presentationProgress: CGFloat = 0
     @State private var closing = false
 
-    private let maximumScale: CGFloat = 4
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
                 ZStack {
-                    Image(uiImage: image)
+                    Image(uiImage: comparing ? (comparison ?? image) : image)
                         .resizable()
                         .scaledToFit()
-                        .scaleEffect(scale)
-                        .offset(offset)
                         .rotationEffect(.degrees(rotationDegrees))
+                        .scaleEffect(scale * photoPreviewPlacement(imageSize: image.size,
+                            viewportSize: proxy.size, rotationDegrees: rotationDegrees).scale)
+                        .offset(offset)
                         .contentShape(Rectangle())
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    let next = min(max(gestureStartScale * value, 1), maximumScale)
-                                    scale = next
-                                    offset = clamped(offset, scale: next, viewport: proxy.size)
-                                }
-                                .onEnded { _ in
-                                    gestureStartScale = scale
-                                    gestureStartOffset = offset
-                                    if scale <= 1.01 { resetZoom() }
-                                }
-                        )
                         .simultaneousGesture(
-                            DragGesture(minimumDistance: 0)
+                            DragGesture(minimumDistance: 0, coordinateSpace: .global)
                                 .onChanged { value in
-                                    guard scale > 1.01 else { return }
+                                    guard !magnifying, !closing, scale > 1.01 else { return }
                                     offset = clamped(
                                         CGSize(width: gestureStartOffset.width + value.translation.width,
                                                height: gestureStartOffset.height + value.translation.height),
@@ -1078,18 +1098,34 @@ private struct PhotoEffectsExpandedPreview: View {
                                 .onEnded { _ in gestureStartOffset = offset }
                         )
                         .simultaneousGesture(
-                            TapGesture(count: 2)
-                                .exclusively(before: TapGesture(count: 1))
+                            LongPressGesture(minimumDuration: 0.5)
+                                .sequenced(before: DragGesture(minimumDistance: 12))
+                                .updating($comparing) { value, state, _ in
+                                    guard comparison != nil, !closing, !magnifying else { return }
+                                    switch value {
+                                    case .first(true), .second(true, _): state = true
+                                    default: break
+                                    }
+                                }
+                        )
+                        .simultaneousGesture(
+                            SpatialTapGesture(count: 2, coordinateSpace: .global)
+                                .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: .global))
                                 .onEnded { gesture in
+                                    guard !magnifying, !closing else { return }
                                     switch gesture {
-                                    case .first:
+                                    case .first(let tap):
                                         let target: CGFloat = scale > 1.01 ? 1 : 2.5
+                                        let frame = proxy.frame(in: .global)
+                                        let nextOffset = target == 1 ? CGSize.zero : photoPreviewDoubleTapOffset(
+                                            location: CGPoint(x: tap.location.x - frame.minX, y: tap.location.y - frame.minY),
+                                            scale: target, imageSize: image.size,
+                                            viewportSize: proxy.size, rotationDegrees: rotationDegrees)
                                         withAnimation(.easeInOut(duration: 0.24)) {
                                             scale = target
-                                            offset = .zero
+                                            offset = nextOffset
                                         }
-                                        gestureStartScale = target
-                                        gestureStartOffset = .zero
+                                        gestureStartOffset = nextOffset
                                     case .second:
                                         if scale <= 1.01 { startClose() }
                                     }
@@ -1097,6 +1133,25 @@ private struct PhotoEffectsExpandedPreview: View {
                         )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    PreviewPinchObserver(enabled: !closing, onActive: { active in
+                        magnifying = active
+                        if !active {
+                            if scale <= 1.01 { resetZoom() }
+                            gestureStartOffset = offset
+                        }
+                    }, onChange: { factor, centroid, pan in
+                        let next = min(max(scale * factor, 1), photoPreviewMaximumZoom(
+                            imageSize: image.size, viewportSize: proxy.size, rotationDegrees: rotationDegrees))
+                        let placement = photoPreviewPlacement(imageSize: image.size,
+                            viewportSize: proxy.size, rotationDegrees: rotationDegrees)
+                        let proposed = previewPinchOffset(offset: offset,
+                            centroidFromCenter: CGPoint(x: centroid.x - placement.center.x, y: centroid.y - placement.center.y),
+                            factor: next / max(scale, 0.01), pan: pan)
+                        scale = next
+                        offset = clamped(proposed, scale: next, viewport: proxy.size)
+                    })
+                }
                 .modifier(PhotoPreviewAnchorTransform(
                     progress: presentationProgress,
                     anchor: initialAnchor == .zero ? nil : initialAnchor,
@@ -1146,7 +1201,6 @@ private struct PhotoEffectsExpandedPreview: View {
     private func resetZoom() {
         scale = 1
         offset = .zero
-        gestureStartScale = 1
         gestureStartOffset = .zero
     }
 
@@ -1163,25 +1217,8 @@ private struct PhotoEffectsExpandedPreview: View {
     }
 
     private func clamped(_ proposed: CGSize, scale: CGFloat, viewport: CGSize) -> CGSize {
-        // Match Android's fitted-image bounds: only the part that grows past
-        // the viewport can be panned, so a portrait image does not acquire a
-        // loose horizontal drift when it is enlarged.
-        let turns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
-        let size = turns.isMultiple(of: 2)
-            ? image.size
-            : CGSize(width: image.size.height, height: image.size.width)
-        let imageAspect = max(size.width, 1) / max(size.height, 1)
-        let viewportAspect = max(viewport.width, 1) / max(viewport.height, 1)
-        let fittedWidth = imageAspect > viewportAspect
-            ? viewport.width
-            : viewport.height * imageAspect
-        let fittedHeight = imageAspect > viewportAspect
-            ? viewport.width / imageAspect
-            : viewport.height
-        let maxX = max(0, (fittedWidth * scale - viewport.width) / 2)
-        let maxY = max(0, (fittedHeight * scale - viewport.height) / 2)
-        return CGSize(width: min(max(proposed.width, -maxX), maxX),
-                      height: min(max(proposed.height, -maxY), maxY))
+        photoPreviewClampedOffset(proposed, scale: scale, imageSize: image.size,
+            viewportSize: viewport, rotationDegrees: rotationDegrees)
     }
 }
 
@@ -1192,20 +1229,6 @@ private struct PhotoEffectsPreviewAnchorPreferenceKey: PreferenceKey {
 
 /// Android's `nextPhotoFilterSelections`: preserve the catalog's favorite-first
 /// order and warm only the two entries after the current selection.
-func nextPhotoFilterSelections(for settings: PhotoEffectsSettings) -> [PhotoFilterSelection] {
-    guard settings.photoFilterEnabled, let selected = settings.selectedFilter else { return [] }
-    let ordered = settings.orderedFilters
-    guard let index = ordered.firstIndex(where: { $0.id == selected.preset.id }),
-          index < ordered.index(before: ordered.endIndex) else { return [] }
-    return ordered.dropFirst(index + 1).prefix(2).map { preset in
-        let key = PhotoEffectsSettings.filterKey(preset.id)
-        return PhotoFilterSelection(
-            preset: preset,
-            intensityPercent: settings.filterIntensities[key] ?? 80,
-        )
-    }
-}
-
 /// Exact shape of Android's settings-page fallback source. It is only visible
 /// after the grace period and disappears automatically when a real source key
 /// arrives; it is never used for export or camera transfers.
@@ -1255,101 +1278,80 @@ private struct PhotoEffectsCard<Content: View>: View {
     }
 }
 
-enum PhotoEffectFilterCategory: String, CaseIterable, Identifiable {
-    case all, favorites, landscape, portrait, monochrome, film, cinematic, color
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .all: return "全部"; case .favorites: return "收藏"; case .landscape: return "风景"; case .portrait: return "人像"
-        case .monochrome: return "黑白"; case .film: return "胶片"; case .cinematic: return "电影感"; case .color: return "色彩"
-        }
-    }
-}
-
-private extension PhotoFilterPreset {
-    var category: PhotoEffectFilterCategory {
-        let value = name
-        if value.range(of: "黑白|单色|Mono", options: [.regularExpression, .caseInsensitive]) != nil { return .monochrome }
-        if value.range(of: "人像|Portrait|Skin|Love Glow|Warm Portrait|Soft Portrait", options: [.regularExpression, .caseInsensitive]) != nil { return .portrait }
-        if value.range(of: "风景|Landscape|Nature|Forest|Fern|Moss|Urban Green|Blue Hour|Sunset", options: [.regularExpression, .caseInsensitive]) != nil { return .landscape }
-        if value.range(of: "电影|Cine|Cinema|Teal and Orange|Dusk", options: [.regularExpression, .caseInsensitive]) != nil { return .cinematic }
-        if value.range(of: "胶片|Film|Vintage|Darkroom", options: [.regularExpression, .caseInsensitive]) != nil { return .film }
-        return .color
-    }
-}
-
-
-struct PhotoFilterChooserState {
-    var isPresented = false
-    var category: PhotoEffectFilterCategory = .all
-}
-
 /// Hosted above the page/popup, outside its ScrollView and clipping bounds.
 struct PhotoFilterChooserOverlay: View {
     @Binding var draft: PhotoEffectsSettings
     @Binding var state: PhotoFilterChooserState
 
-    private var items: [PhotoFilterPreset] {
-        draft.orderedFilters.filter { preset in
-            switch state.category {
-            case .all: return true
-            case .favorites: return draft.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id))
-            default: return preset.category == state.category
-            }
-        }
-    }
+    private var items: [PhotoFilterPreset] { state.items(in: draft) }
 
     var body: some View {
         GeometryReader { proxy in
-            let maximumHeight = min(max(proxy.size.height - 160, 360), 440)
+            let maximumHeight = min(max(proxy.size.height - 120, 120), 440)
             let contentHeight = min(max(334, CGFloat(items.count * 44 - 4)), maximumHeight)
             ZStack {
                 Color.black.opacity(0.32).ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { state.isPresented = false }
-                HStack(spacing: 8) {
-                    ScrollView {
-                        VStack(spacing: 2) {
-                            ForEach(PhotoEffectFilterCategory.allCases) { category in
-                                Button { state.category = category } label: {
-                                    Text(category.title)
-                                        .font(.system(size: 14, weight: state.category == category ? .semibold : .regular))
-                                        .foregroundStyle(state.category == category ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
-                                        .padding(.horizontal, 10).padding(.vertical, 5)
-                                        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                                        .background(state.category == category ? ZTransferColors.accentBlue.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                                }.buttonStyle(.plain)
-                            }
+                VStack(spacing: 8) {
+                    Button {
+                        ZTransferHaptics.shared.tick()
+                        state.select(nil, in: &draft)
+                    } label: {
+                        HStack {
+                            Text(AppLocalized.resource("photo_filter_turn_off"))
+                            Spacer()
+                            if !draft.photoFilterEnabled { Image(systemName: "checkmark") }
                         }
-                    }.frame(width: 84)
-                    ScrollView {
-                        VStack(spacing: 4) {
-                            ForEach(items) { preset in
-                                Button {
-                                    var updated = draft
-                                    updated.selectFilter(preset.id)
-                                    draft = updated
-                                    state.isPresented = false
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        if draft.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id)) {
-                                            Image(systemName: "star.fill").font(.system(size: 18))
-                                                .foregroundStyle(ZTransferColors.accentYellow)
-                                        }
-                                        Text(AppLocalized.resource("photo_filter_builtin_\(Np3FilterCatalog.preset(id: preset.id)?.legacyID ?? preset.id)"))
-                                            .font(.system(size: 14)).foregroundStyle(ZTransferColors.primaryText)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                    }.buttonStyle(.plain)
+                    HStack(spacing: 8) {
+                        ScrollView {
+                            VStack(spacing: 2) {
+                                ForEach(PhotoEffectFilterCategory.allCases) { category in
+                                    Button { state.category = category } label: {
+                                        Text(category.title)
+                                            .font(.system(size: 14, weight: state.category == category ? .semibold : .regular))
+                                            .foregroundStyle(state.category == category ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
+                                            .padding(.horizontal, 10).padding(.vertical, 5)
+                                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                                            .background(state.category == category ? ZTransferColors.accentBlue.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        }.frame(width: 84)
+                        ScrollViewReader { scroll in
+                            ScrollView {
+                                VStack(spacing: 4) {
+                                    ForEach(items) { preset in
+                                        Button {
+                                            ZTransferHaptics.shared.tick()
+                                            state.select(preset.id, in: &draft)
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                if draft.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id)) {
+                                                    Image(systemName: "star.fill").font(.system(size: 18))
+                                                        .foregroundStyle(ZTransferColors.accentYellow)
+                                                }
+                                                Text(AppLocalized.resource("photo_filter_builtin_\(Np3FilterCatalog.preset(id: preset.id)?.legacyID ?? preset.id)"))
+                                                    .font(.system(size: 14)).foregroundStyle(ZTransferColors.primaryText)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                            }
+                                            .padding(.horizontal, 10).padding(.vertical, 5)
+                                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                                            .background(draft.photoFilterEnabled && draft.selectedFilter?.preset.id == preset.id ? ZTransferColors.accentBlue.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                                        }.buttonStyle(.plain).id(preset.id)
                                     }
-                                    .padding(.horizontal, 10).padding(.vertical, 5)
-                                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                                    .background(draft.photoFilterEnabled && draft.selectedFilter?.preset.id == preset.id ? ZTransferColors.accentBlue.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                                }.buttonStyle(.plain)
+                                }
                             }
-                        }
+                            .onAppear {
+                                if let target = state.initialItemID(in: draft) { scroll.scrollTo(target, anchor: .top) }
+                            }
+                        }.id(state.category)
                     }
                 }
                 .padding(10)
-                .frame(width: min(280, proxy.size.width - 48), height: contentHeight + 20)
+                .frame(width: min(320, max(0, proxy.size.width - 48)), height: contentHeight + 20)
                 .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
                 .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1479,6 +1481,89 @@ private struct PhotoEffectsHintModifier: ViewModifier {
             guard hint != nil else { return }
             do { try await Task.sleep(for: .seconds(duration)) } catch { return }
             hint = nil
+        }
+    }
+}
+
+
+private struct PhotoEffectModuleAnchorKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+struct PhotoEffectModuleMenuButton: View {
+    @Binding var isPresented: Bool
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            Image(systemName: "slider.horizontal.3")
+                .frame(width: 38, height: 38)
+        }
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+        .accessibilityLabel(AppLocalized.resource("photo_effect_modules"))
+        .anchorPreference(key: PhotoEffectModuleAnchorKey.self, value: .bounds) { $0 }
+        .onDisappear { isPresented = false }
+    }
+}
+
+struct PhotoEffectModuleMenuOverlay: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Binding var isPresented: Bool
+    @Binding var draft: PhotoEffectsSettings
+    let lutStore: PhotoLUTStore
+    let isPro: Bool
+
+    func body(content: Content) -> some View {
+        content.overlayPreferenceValue(PhotoEffectModuleAnchorKey.self) { anchor in
+            if isPresented, let anchor {
+                GeometryReader { proxy in
+                    let rect = proxy[anchor]
+                    ZStack(alignment: .topLeading) {
+                        Color.clear.contentShape(Rectangle())
+                            .onTapGesture { isPresented = false }
+                        VStack(spacing: 8) {
+                            ForEach(PhotoEffectModule.allCases, id: \.self) { module in
+                                Button {
+                                    var value = draft
+                                    if togglePhotoEffectModuleDraft(module, draft: &value,
+                                        lutStore: lutStore, isPro: isPro) {
+                                        ZTransferHaptics.shared.tick()
+                                        draft = value
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(AppLocalized.resource(module.menuLabelKey))
+                                        Spacer()
+                                        if photoEffectModuleIsVisible(effectivePhotoEffectModules(
+                                            draft.photoEffectModules, isPro: isPro), module) {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }.frame(minHeight: 28).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                        .padding(12).frame(width: 156)
+                        .background(ZTransferColors.surface, in: RoundedRectangle(cornerRadius: 18))
+                        .onTapGesture { }
+                        .offset(x: max(0, min(rect.maxX - 156, proxy.size.width - 156)),
+                                y: rect.maxY + 8)
+                    }
+                }
+            }
+        }
+        .onChange(of: colorScheme) { _ in isPresented = false }
+        .onDisappear { isPresented = false }
+    }
+}
+
+extension PhotoEffectModule {
+    var menuLabelKey: String {
+        switch self {
+        case .filter: "photo_effect_module_filter"
+        case .lut: "photo_effect_module_lut"
+        case .frame: "photo_effect_module_frame"
+        case .watermark: "photo_effect_module_watermark"
         }
     }
 }

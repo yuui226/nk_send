@@ -2,10 +2,57 @@ import XCTest
 @testable import ZTransfer
 
 final class RemoteExposureAnalysisTests: XCTestCase {
-    func testLumaUsesAndroidRec709IntegerWeights() {
-        XCTAssertEqual(RemoteExposureAnalysis.luma(red: 255, green: 0, blue: 0), 53)
-        XCTAssertEqual(RemoteExposureAnalysis.luma(red: 0, green: 255, blue: 0), 182)
-        XCTAssertEqual(RemoteExposureAnalysis.luma(red: 0, green: 0, blue: 255), 18)
+    func testSoundMeterSeparatesCurrentBarFromSinglePeak() {
+        let silent = RemoteSoundMeterChannel(current: 0, peak: 0)
+        XCTAssertEqual(silent.activeCount, 0)
+        XCTAssertNil(silent.peakIndex)
+        let low = RemoteSoundMeterChannel(current: 7, peak: 12)
+        XCTAssertEqual(low.activeCount, 8)
+        XCTAssertEqual(low.peakIndex, 12)
+        let high = RemoteSoundMeterChannel(current: 14, peak: 3)
+        XCTAssertEqual(high.activeCount, 15)
+        XCTAssertEqual(high.peakIndex, 3)
+        XCTAssertEqual(RemoteSoundMeterChannel(current: -1, peak: -1), silent)
+        XCTAssertEqual(RemoteSoundMeterChannel(current: 99, peak: 99).activeCount, 15)
+        XCTAssertEqual(RemoteSoundMeterChannel(current: 99, peak: 99).peakIndex, 14)
+    }
+
+    func testWaveformDensityIsIndependentOfOtherPeaksAndCombinesRGB() {
+        var red = [Int](repeating: 0, count: 256 * 128)
+        red[0] = 1
+        red[1] = 15
+        let first = RemoteExposureAnalysis.waveformPixels(channels: [red], sampleHeight: 15)
+        red[1] = 3
+        let second = RemoteExposureAnalysis.waveformPixels(channels: [red], sampleHeight: 15)
+        XCTAssertEqual(first[0], 0x40DCEBE3)
+        XCTAssertEqual(first[0], second[0])
+        XCTAssertEqual(first[1], 0xFFDCEBE3)
+        XCTAssertEqual(second[1], 0x80DCEBE3)
+        var green = [Int](repeating: 0, count: red.count)
+        green[0] = 3
+        let blue = [Int](repeating: 0, count: red.count)
+        let rgb = RemoteExposureAnalysis.waveformPixels(channels: [red, green, blue], sampleHeight: 15)
+        XCTAssertEqual(rgb[0], 0x807FFF00)
+        XCTAssertEqual(rgb[2], 0)
+    }
+
+    func testLumaUsesAndroidMonitorIntegerWeights() {
+        XCTAssertEqual(RemoteExposureAnalysis.luma(red: 255, green: 0, blue: 0), 76)
+        XCTAssertEqual(RemoteExposureAnalysis.luma(red: 0, green: 255, blue: 0), 149)
+        XCTAssertEqual(RemoteExposureAnalysis.luma(red: 0, green: 0, blue: 255), 28)
+    }
+
+    func testColoredPixelsOnBothSidesOfEveryFalseColorThreshold() {
+        let cases: [(UInt8, UInt32)] = [
+            (12, 0xFF6B39B8), (13, 0xFF2874D7), (37, 0xFF2874D7), (38, 0xFF50555B),
+            (101, 0xFF50555B), (102, 0xFF5ABE87), (114, 0xFF5ABE87), (115, 0xFFE792AE),
+            (139, 0xFFE792AE), (140, 0xFFB9BDC2), (203, 0xFFB9BDC2), (204, 0xFFF0D55D),
+            (241, 0xFFF0D55D), (242, 0xFFF14D4D)
+        ]
+        for (value, color) in cases {
+            // Unequal channels straddle the same boundaries after Android integer truncation.
+            XCTAssertEqual(RemoteExposureAnalysis.falseColor(red: value + 1, green: value, blue: value - 1), color)
+        }
     }
 
     func testFalseColorThresholdsMatchAndroid() {
@@ -28,9 +75,9 @@ final class RemoteExposureAnalysisTests: XCTestCase {
             width: 4, height: 1, rgb: false
         )
         XCTAssertEqual(bins.count, 1)
-        XCTAssertEqual(bins[0][101 * 256 + 0], 1) // red luma 53
-        XCTAssertEqual(bins[0][37 * 256 + 64], 1) // green luma 182
-        XCTAssertEqual(bins[0][119 * 256 + 128], 1) // blue luma 18
+        XCTAssertEqual(bins[0][90 * 256 + 0], 1) // red luma 76
+        XCTAssertEqual(bins[0][53 * 256 + 64], 1) // green luma 149
+        XCTAssertEqual(bins[0][114 * 256 + 128], 1) // blue luma 28
         XCTAssertEqual(bins[0][0 * 256 + 192], 1) // white luma 255
     }
 

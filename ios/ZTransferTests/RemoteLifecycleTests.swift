@@ -5,9 +5,542 @@ import UIKit
 
 @MainActor
 final class RemoteLifecycleTests: XCTestCase {
+    /// Each test owns its natural-day ledger. Sharing .standard makes unrelated
+    /// camera tests exhaust the 180s trial and fail later in the same simulator.
+    private func makeModel(camera: any RemoteCameraControlling, recordingDirectory: URL? = nil,
+                           onTransportLost: (() -> Void)? = nil,
+                           haptics: ZTransferHaptics = .shared,
+                           entitlements: PremiumEntitlementStore = .shared,
+                           freeUsage: FreeUsageStore? = nil,
+                           permission: (@MainActor () async -> Bool)? = nil,
+                           saveFailure: @escaping @MainActor (String) -> Void = { _ in },
+                           recorderFactory: @escaping @MainActor (RemoteViewfinderRecorder.Configuration) -> RemoteViewfinderRecorder = { RemoteViewfinderRecorder(configuration: $0) }) -> RemoteViewModel {
+        let name = "RemoteLifecycleTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: name)!
+        let model = RemoteViewModel(camera: camera, recordingDirectory: recordingDirectory,
+            onTransportLost: onTransportLost, haptics: haptics, entitlements: entitlements,
+            freeUsage: freeUsage ?? FreeUsageStore(defaults: defaults), requestMicrophonePermission: permission, onRecordingSaveFailure: saveFailure, makeLocalRecorder: recorderFactory)
+        addTeardownBlock {
+            await model.stopAndWait()
+            UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+        }
+        return model
+    }
+
+    func testFocusHandoffSharesVisibilityAndRejectsObsoleteCompletion() {
+        var handoff = RemoteFocusHandoff()
+        let locked = RemoteFocusHandoff.Input(nonce: 1, phase: .locked, eligible: true, hasCameraFrames: true)
+        handoff.update(locked)
+        XCTAssertTrue(handoff.visibility(for: locked).tap)
+        XCTAssertFalse(handoff.visibility(for: locked).camera)
+        handoff.complete(locked)
+        XCTAssertFalse(handoff.visibility(for: locked).tap)
+        XCTAssertTrue(handoff.visibility(for: locked).camera)
+        let gap = RemoteFocusHandoff.Input(nonce: 1, phase: .locked, eligible: true, hasCameraFrames: false)
+        handoff.update(gap)
+        XCTAssertFalse(handoff.visibility(for: gap).tap, "Packet gaps must not revive the old tap")
+        XCTAssertFalse(handoff.visibility(for: gap).camera)
+        let next = RemoteFocusHandoff.Input(nonce: 2, phase: .focusing, eligible: true, hasCameraFrames: true)
+        XCTAssertTrue(handoff.visibility(for: next).tap, "New requests reset synchronously before task execution")
+        handoff.update(next)
+        handoff.complete(locked)
+        XCTAssertTrue(handoff.visibility(for: next).tap)
+        XCTAssertFalse(handoff.visibility(for: next).camera)
+        let early = RemoteFocusHandoff.Input(nonce: 2, phase: .locked, eligible: false, hasCameraFrames: true)
+        handoff.update(early)
+        handoff.complete(early)
+        XCTAssertTrue(handoff.visibility(for: early).tap)
+        XCTAssertFalse(handoff.visibility(for: early).camera)
+        let idle = RemoteFocusHandoff.Input(nonce: 2, phase: .idle, eligible: false, hasCameraFrames: false)
+        handoff.update(idle)
+        XCTAssertFalse(handoff.visibility(for: idle).tap)
+        XCTAssertFalse(handoff.visibility(for: idle).camera)
+    }
+
+    func testConfirmedFocusFallbackExcludesTrackingAndExpires() {
+        let point = RemoteFocusPoint(x: 0.2, y: 0.8)
+        let ordinary = RemoteConfirmedFocusMarker(fallbackPoint: point, confirmedAtUptime: 100,
+                                                  subjectTracking: false, nonce: 1)
+        let tracking = RemoteConfirmedFocusMarker(fallbackPoint: point, confirmedAtUptime: 100,
+                                                  subjectTracking: true, nonce: 2)
+        for age in [0.0, 0.12, 0.5, 2.999] {
+            XCTAssertEqual(ordinary.fallbackPoint(at: 100 + age), point)
+            XCTAssertNil(tracking.fallbackPoint(at: 100 + age))
+        }
+        XCTAssertNil(ordinary.fallbackPoint(at: 103))
+        XCTAssertNil(ordinary.fallbackPoint(at: 104))
+    }
+
+    func testUSBFirstImageDoesNotReleasePollingBeforeEightSuccessfulFrames() async throws {
+        let camera = RemoteLifecycleCamera(isUSB: true)
+        await camera.limitSuccessfulFrames(to: 1)
+        await camera.setProperty(.init(property: .nikonAutoISO, writable: true, current: 1, values: [0, 1]))
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        XCTAssertEqual(model.state.session, .ready)
+        XCTAssertFalse(model.state.liveViewStable)
+        // Keep returning Busy across a complete polling interval. A decoded
+        // first image must not release events or periodic battery refresh.
+        try await Task.sleep(for: .milliseconds(750))
+        let first = await camera.log
+        XCTAssertTrue(model.autoISOEnabled)
+        XCTAssertFalse(first.contains("refresh:nikonISOControlSensitivity"))
+        XCTAssertFalse(first.contains("events"))
+        XCTAssertFalse(first.contains("refresh:batteryLevel"))
+        await camera.limitSuccessfulFrames(to: 7)
+        try await waitFor { await camera.successfulFrameCount == 7 }
+        try await Task.sleep(for: .milliseconds(750))
+        XCTAssertFalse(model.state.liveViewStable)
+        let seventh = await camera.log
+        XCTAssertFalse(seventh.contains("refresh:nikonISOControlSensitivity"))
+        XCTAssertFalse(seventh.contains("events"))
+        await camera.limitSuccessfulFrames(to: 8)
+        try await waitFor { model.state.liveViewStable }
+        try await waitFor { await camera.log.contains("refresh:nikonISOControlSensitivity") }
+        try await waitFor { await camera.log.contains("events") }
+        await model.stopAndWait()
+        XCTAssertFalse(model.state.liveViewStable)
+    }
+
+    func testFocusFrameExpiresWithoutNewFramesAndRecoversOnArrival() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        XCTAssertFalse(model.focusFrameExpired)
+        try await waitFor(timeout: 1) { model.focusFrameExpired }
+        XCTAssertNotNil(model.frameImage)
+        await camera.limitSuccessfulFrames(to: 2)
+        try await waitFor { !model.focusFrameExpired }
+        await model.stopAndWait()
+    }
+
+    func testFocusPropertyEventsInvalidateRetainedImageBeforeNextFrame() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        for property: UInt32 in [0x501C, 0xD05D, 0xD1F8] {
+            let previous = model.focusValidAfterUptime
+            await camera.queueEvents([.init(code: 0x4006, handle: property)])
+            try await waitFor { model.focusValidAfterUptime > previous }
+            XCTAssertLessThanOrEqual(model.frameReceivedAtUptime, model.focusValidAfterUptime)
+        }
+        await camera.limitSuccessfulFrames(to: 2)
+        try await waitFor { model.frameReceivedAtUptime > model.focusValidAfterUptime }
+        XCTAssertFalse(model.focusFrameExpired)
+    }
+
+    func testEquivalentFocusLabelAcrossPropertiesPreservesCutoff() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .stillFocusMode, dataType: 2, writable: true,
+                                       current: 0, values: [0, 1]))
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil && model.focusModeDescriptor?.property == .stillFocusMode }
+        let cutoff = model.focusValidAfterUptime
+        await camera.setProperty(.init(property: .focusMode, dataType: 4, writable: true,
+                                       current: 0x8010, values: [0x8010, 0x8011]))
+        await camera.queueEvents([.init(code: 0x4006, handle: UInt32(RemoteProperty.focusMode.rawValue))])
+        try await waitFor { model.focusModeDescriptor?.property == .focusMode }
+        XCTAssertEqual(model.focusValidAfterUptime, cutoff, "Both encodings mean AF-S")
+    }
+
+    func testSameRawFocusPropertyTransitionInvalidatesRetainedFrame() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .stillFocusMode, dataType: 2, writable: true,
+                                       current: 1, values: [0, 1]))
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil && model.focusModeDescriptor?.property == .stillFocusMode }
+        let image = model.frameImage
+        let cutoff = model.focusValidAfterUptime
+        XCTAssertFalse(model.state.focus.manual)
+        // Raw 1 means AF-C for D061, but MF for standard 500A. This event
+        // is not one of the three area properties that invalidate directly.
+        await camera.setProperty(.init(property: .focusMode, dataType: 4, writable: true,
+                                       current: 1, values: [1, 2]))
+        await camera.queueEvents([.init(code: 0x4006, handle: UInt32(RemoteProperty.focusMode.rawValue))])
+        try await waitFor { model.focusModeDescriptor?.property == .focusMode }
+        XCTAssertEqual(model.focusModeDescriptor?.current, 1)
+        XCTAssertTrue(model.state.focus.manual)
+        XCTAssertGreaterThan(model.focusValidAfterUptime, cutoff)
+        XCTAssertLessThanOrEqual(model.frameReceivedAtUptime, model.focusValidAfterUptime)
+        XCTAssertTrue(model.frameImage === image)
+        await camera.limitSuccessfulFrames(to: 2)
+        try await waitFor { model.frameReceivedAtUptime > model.focusValidAfterUptime }
+        XCTAssertFalse(model.focusFrameExpired)
+    }
+
+    func testSuccessfulToolWriteInvalidatesFocusExceptWhiteBalance() async throws {
+        for tool: RemoteCameraTool in [.whiteBalance, .focusArea] {
+            let camera = RemoteLifecycleCamera()
+            let property: RemoteProperty = tool == .whiteBalance ? .whiteBalance : .focusArea
+            let values: [UInt64] = tool == .whiteBalance ? [2, 4] : [0x8010, 0x8011]
+            await camera.setProperty(.init(property: property, dataType: 4, writable: true,
+                                           current: values[0], values: values))
+            await camera.acceptWrites(property)
+            await camera.limitSuccessfulFrames(to: 1)
+            let model = makeModel(camera: camera)
+            model.start()
+            try await waitFor { model.frameImage != nil }
+            let image = model.frameImage
+            let cutoff = model.focusValidAfterUptime
+            model.openCameraTool(tool)
+            let panel = try XCTUnwrap(model.cameraToolPanel)
+            try await waitFor { !panel.loading }
+            panel.select(values[1])
+            try await waitFor { !panel.busy }
+            XCTAssertEqual(panel.descriptor?.current, values[1])
+            XCTAssertTrue(panel.closeRequested)
+            XCTAssertTrue(model.frameImage === image)
+            if tool == .whiteBalance {
+                XCTAssertEqual(model.focusValidAfterUptime, cutoff)
+            } else {
+                XCTAssertGreaterThan(model.focusValidAfterUptime, cutoff)
+                XCTAssertLessThanOrEqual(model.frameReceivedAtUptime, model.focusValidAfterUptime)
+            }
+            await model.stopAndWait()
+        }
+    }
+
+    func testMeterRejectsLateReadAcrossReopenSlowResponseAndNewBusyState() async throws {
+        for scenario in 0..<3 {
+            let camera = RemoteLifecycleCamera()
+            await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1, writable: false, current: 12, values: []))
+            let barrier = FramePublicationBarrier()
+            await camera.holdNextMeterRefresh { await barrier.waitOnce() }
+            let model = makeModel(camera: camera)
+            model.setExposureMeterVisible(true)
+            model.start()
+            try await waitFor { await barrier.reached }
+            XCTAssertNil(model.exposureMeterEV)
+            if scenario == 0 {
+                model.setExposureMeterVisible(false)
+                await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1, writable: false, current: 24, values: []))
+                model.setExposureMeterVisible(true)
+                try await waitFor { model.exposureMeterEV == 2 }
+            } else if scenario == 1 {
+                try await Task.sleep(for: .milliseconds(1600))
+            } else {
+                model.beginHalfPress()
+                XCTAssertTrue(model.halfPressVisualActive)
+            }
+            await barrier.release()
+            try await Task.sleep(for: .milliseconds(100))
+            if scenario == 0 {
+                XCTAssertEqual(model.exposureMeterEV, 2, "Old result and cleanup must not overwrite the new generation")
+            } else {
+                XCTAssertNil(model.exposureMeterEV, "Late or newly busy result must not publish")
+            }
+            if scenario == 2 { model.endHalfPress(fire: false) }
+            if scenario != 0 { try await waitFor { model.exposureMeterEV == 1 } }
+            await model.stopAndWait()
+        }
+    }
+
+    func testMeterPreservesReadingDuringHeldFocusBeyondExpiryWindow() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1, writable: false, current: 12, values: []))
+        let model = makeModel(camera: camera)
+        model.setExposureMeterVisible(true)
+        model.start()
+        try await waitFor { model.exposureMeterEV == 1 }
+        model.beginHalfPress()
+        try await waitFor { model.state.focus.phase == .locked }
+        let baseline = await camera.log.filter { $0 == "refresh:nikonLightMeter" }.count
+        try await Task.sleep(for: .milliseconds(3200))
+        XCTAssertEqual(model.exposureMeterEV, 1)
+        let after = await camera.log.filter { $0 == "refresh:nikonLightMeter" }.count
+        XCTAssertEqual(after, baseline)
+        model.endHalfPress(fire: false)
+    }
+
+    func testMeterExpiresWhileReadIsSuspendedAndCloseRejectsLateResult() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1, writable: false, current: 12, values: []))
+        let model = makeModel(camera: camera)
+        model.setExposureMeterVisible(true)
+        model.start()
+        try await waitFor { model.exposureMeterEV == 1 }
+        let barrier = FramePublicationBarrier()
+        await camera.holdNextMeterRefresh { await barrier.waitOnce() }
+        try await waitFor { await barrier.reached }
+        try await waitFor(timeout: 4) { model.exposureMeterEV == nil }
+        model.setExposureMeterVisible(false)
+        await barrier.release()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(model.exposureMeterEV)
+    }
+
+    func testMeterClearsAfterThreeFailedReads() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1, writable: false, current: 12, values: []))
+        let model = makeModel(camera: camera)
+        model.setExposureMeterVisible(true)
+        model.start()
+        try await waitFor { model.exposureMeterEV == 1 }
+        let baseline = await camera.log.filter { $0 == "refresh:nikonLightMeter" }.count
+        await camera.failRefresh(.nikonLightMeter)
+        try await waitFor { model.exposureMeterEV == nil }
+        let completed = await camera.log.filter { $0 == "refresh:nikonLightMeter" }.count
+        XCTAssertEqual(completed - baseline, 3)
+    }
+
+    func testMeterReprobesAfterModeChangeAndHDSession() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1, writable: false, current: 12, values: []))
+        let model = makeModel(camera: camera)
+        model.setExposureMeterVisible(true)
+        model.start()
+        try await waitFor { model.exposureMeterEV == 1 }
+        await camera.changeMovieMode(true)
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
+        try await waitFor { model.movieMode && model.exposureMeterEV == 1 }
+        try await waitFor { await camera.log.filter { $0 == "property:nikonLightMeter" }.count == 2 }
+        model.setHDLiveView(true)
+        try await waitFor { await camera.log.filter { $0 == "start" }.count == 2 }
+        try await waitFor { model.exposureMeterEV == 1 }
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "property:nikonLightMeter" }.count, 3)
+    }
+
+    func testMeterDefersProbeDuringExposureAndAutoISOWrites() async throws {
+        for autoISO in [false, true] {
+            let camera = RemoteLifecycleCamera()
+            let property: RemoteProperty = autoISO ? .nikonAutoISO : .iso
+            await camera.setProperty(.init(property: property, writable: true,
+                current: autoISO ? 0 : 100, values: autoISO ? [0, 1] : [100, 200]))
+            await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1,
+                writable: false, current: 12, values: []))
+            await camera.acceptWrites(property)
+            await camera.delayWrites(milliseconds: 650)
+            let model = makeModel(camera: camera)
+            model.start()
+            try await waitFor { model.state.liveViewStable }
+            if autoISO { model.setAutoISO(true) } else { model.setExposure(.iso, value: 200) }
+            try await waitFor { await camera.log.contains { $0.hasPrefix("write:\(property):") } }
+            model.setExposureMeterVisible(true)
+            try await Task.sleep(for: .milliseconds(300))
+            let blocked = await camera.log
+            XCTAssertFalse(blocked.contains("property:nikonLightMeter"))
+            try await waitFor { model.exposureMeterEV == 1 }
+            await model.stopAndWait()
+        }
+    }
+
+    func testMeterWaitsForUSBStabilityAndReprobesAfterForeground() async throws {
+        let camera = RemoteLifecycleCamera(isUSB: true)
+        await camera.limitSuccessfulFrames(to: 1)
+        await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1,
+            writable: false, current: 12, values: []))
+        let model = makeModel(camera: camera)
+        model.setExposureMeterVisible(true)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        try await Task.sleep(for: .milliseconds(300))
+        let before = await camera.log
+        XCTAssertFalse(before.contains("property:nikonLightMeter"))
+        await camera.limitSuccessfulFrames(to: 8)
+        try await waitFor { model.exposureMeterEV == 1 }
+        model.setExposureMeterForeground(false)
+        XCTAssertNil(model.exposureMeterEV)
+        model.setExposureMeterForeground(true)
+        try await waitFor { model.exposureMeterEV == 1 }
+        let after = await camera.log
+        XCTAssertEqual(after.filter { $0 == "property:nikonLightMeter" }.count, 2)
+    }
+
+    func testMeterProbeWaitsForHeldHalfPressAndPollsDuringStableRecording() async throws {
+        for movie in [false, true] {
+            let camera = RemoteLifecycleCamera(movie: movie)
+            await camera.setProperty(.init(property: .nikonLightMeter, dataType: 1,
+                writable: false, current: 12, values: []))
+            let model = makeModel(camera: camera)
+            model.start()
+            try await waitFor { model.state.liveViewStable }
+            if movie {
+                model.toggleRecording()
+                try await waitFor { model.state.capture == .recording && !model.recordingBusy }
+            } else {
+                model.beginHalfPress()
+                try await waitFor { model.state.focus.phase == .locked }
+            }
+            model.setExposureMeterVisible(true)
+            if !movie {
+                try await Task.sleep(for: .milliseconds(550))
+                let blocked = await camera.log
+                XCTAssertFalse(blocked.contains("property:nikonLightMeter"))
+                model.endHalfPress(fire: false)
+            }
+            try await waitFor { model.exposureMeterEV == 1 }
+            if movie { XCTAssertEqual(model.state.capture, .recording) }
+            model.setExposureMeterVisible(false)
+            await model.stopAndWait()
+        }
+    }
+
+    func testMeterRetriesMissingPrimaryButFallsBackImmediatelyForInvalidDescriptor() async throws {
+        for missing in [true, false] {
+            let camera = RemoteLifecycleCamera()
+            if missing { await camera.markUnsupported(.nikonLightMeter) }
+            // Default stub descriptor is writable UINT32: invalid for read-only metering.
+            await camera.setProperty(.init(property: .nikonExposureIndicate, dataType: 1,
+                writable: false, current: UInt64(bitPattern: -3), values: []))
+            let model = makeModel(camera: camera)
+            model.start()
+            try await waitFor { model.state.liveViewStable }
+            let start = ContinuousClock.now
+            model.setExposureMeterVisible(true)
+            try await waitFor(timeout: 4) { model.exposureMeterEV == -1 }
+            let elapsed = start.duration(to: .now)
+            let calls = await camera.log
+            XCTAssertEqual(calls.filter { $0 == "property:nikonLightMeter" }.count, missing ? 3 : 1)
+            XCTAssertEqual(calls.filter { $0 == "property:nikonExposureIndicate" }.count, 1)
+            if missing { XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(2100)) }
+            model.setExposureMeterVisible(false)
+            await model.stopAndWait()
+        }
+    }
+
+    func testPersistedAnalysisSelectionSurvivesErrorAndMovieCompatibilityRecovery() async throws {
+        let name = "analysis-recovery-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let saved = RemoteToolPreferences(defaults: defaults)
+        saved.histogram = .rgb
+        saved.waveform = .rgb
+        saved.exposure = .falseColor
+        for compatibility in [false, true] {
+            let restored = RemoteToolPreferences(defaults: defaults)
+            let camera = RemoteLifecycleCamera(movie: compatibility)
+            await camera.limitSuccessfulFrames(to: 1)
+            let model = makeModel(camera: camera)
+            model.setFrameAnalysis(histogram: restored.histogram != .off, zebra: restored.exposure == .zebra,
+                waveform: restored.waveform, falseColor: restored.exposure == .falseColor,
+                histogramRGB: restored.histogram == .rgb)
+            model.start()
+            try await waitFor { model.frameFalseColorPixels != nil && model.frameWaveform?.count == 3 }
+            let oldImage = model.frameImage
+            if compatibility {
+                await camera.queueMovieStarts([
+                    .init(responseCode: 0xA004, prohibitCondition: 1 << 14),
+                    .init(responseCode: PTPConstants.responseOK, prohibitCondition: nil)
+                ])
+                model.toggleRecording()
+                try await waitFor(timeout: 5) { model.state.capture == .recording && !model.recordingBusy }
+            } else {
+                await camera.failNextFrames(3)
+            }
+            try await waitFor(timeout: 5) { await camera.log.filter { $0 == "start" }.count == 2 }
+            await camera.limitSuccessfulFrames(to: 2)
+            try await waitFor { model.frameImage !== oldImage }
+            XCTAssertEqual(model.frameHistogramRGB?.count, 3)
+            XCTAssertEqual(model.frameWaveform?.count, 3)
+            XCTAssertNotNil(model.frameFalseColorPixels)
+            XCTAssertNil(model.frameZebraMask)
+            await model.stopAndWait()
+        }
+    }
+
+    func testAnalysisSelectionSurvivesInitialStartAndHDRestart() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = makeModel(camera: camera)
+        model.setFrameAnalysis(histogram: true, zebra: true, waveform: .rgb, falseColor: true, histogramRGB: true)
+        model.start()
+        try await waitFor {
+            model.frameHistogramRGB?.count == 3 && model.frameWaveform?.count == 3 &&
+                model.frameFalseColorPixels != nil && model.frameZebraMask != nil
+        }
+        model.setHDLiveView(true)
+        try await waitFor { await camera.log.filter { $0 == "start" }.count == 2 }
+        try await waitFor {
+            model.frameHistogramRGB?.count == 3 && model.frameWaveform?.count == 3 &&
+                model.frameFalseColorPixels != nil && model.frameZebraMask != nil
+        }
+        XCTAssertNotNil(model.frameHistogram)
+    }
+
+    func testHDSessionClearsOldImageWhileReplacementFramesAreBusy() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        model.setHDLiveView(true)
+        try await waitFor { await camera.log.filter { $0 == "start" }.count == 2 }
+        XCTAssertNil(model.frameImage)
+        XCTAssertNil(model.frameData)
+        XCTAssertNil(model.frameMetadata)
+        XCTAssertEqual(model.frameReceivedAtUptime, 0)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertNil(model.frameImage, "An obsolete decode cannot republish the cleared image")
+        await camera.limitSuccessfulFrames(to: 2)
+        try await waitFor { model.frameImage != nil }
+        XCTAssertNotNil(model.frameData)
+    }
+
+    func testMovieCompatibilityRestartRetainsImageUntilReplacementArrives() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        await camera.limitSuccessfulFrames(to: 1)
+        await camera.queueMovieStarts([
+            .init(responseCode: 0xA004, prohibitCondition: 1 << 14),
+            .init(responseCode: PTPConstants.responseOK, prohibitCondition: nil)
+        ])
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        let image = model.frameImage
+        let focusCutoff = model.focusValidAfterUptime
+        model.toggleRecording()
+        try await waitFor(timeout: 5) { model.state.capture == .recording && !model.recordingBusy }
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "start" }.count, 2)
+        XCTAssertGreaterThan(model.focusValidAfterUptime, focusCutoff)
+        XCTAssertLessThanOrEqual(model.frameReceivedAtUptime, model.focusValidAfterUptime)
+        XCTAssertTrue(model.frameImage === image)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(model.frameImage === image)
+        await camera.limitSuccessfulFrames(to: 2)
+        try await waitFor { model.frameImage !== image }
+        XCTAssertNotNil(model.frameImage)
+        XCTAssertGreaterThan(model.frameReceivedAtUptime, model.focusValidAfterUptime)
+    }
+
+    func testAcquisitionErrorRetryRetainsImageLikeAndroidInnerLoop() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        let image = model.frameImage
+        let focusCutoff = model.focusValidAfterUptime
+        await camera.failNextFrames(3)
+        try await waitFor(timeout: 5) { await camera.log.filter { $0 == "start" }.count == 2 }
+        XCTAssertTrue(model.frameImage === image)
+        XCTAssertNotNil(model.frameData)
+        XCTAssertEqual(model.focusValidAfterUptime, focusCutoff,
+                       "Android inner acquisition retries retain the focus cutoff")
+    }
+
+    func testWiFiFirstImageRetainsImmediateStability() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        XCTAssertTrue(model.state.liveViewStable)
+        try await waitFor { await camera.log.contains("events") }
+    }
+
     func testZoomedTapCoordinatesReachCameraAndConfirmedMarker() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -28,7 +561,7 @@ final class RemoteLifecycleTests: XCTestCase {
                                        current: 0x8010, values: [0x8010, 0x8011]))
         await camera.acceptWrites(.focusArea)
         await camera.queueFocusResults([.init(trackingStarted: true, polls: 0, timedOut: false)])
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -105,7 +638,7 @@ final class RemoteLifecycleTests: XCTestCase {
     func testCameraToolPanelRechecksChangedOptionsWithoutWriting() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { model.state.session == .ready }
         model.openCameraTool(.whiteBalance)
@@ -126,7 +659,7 @@ final class RemoteLifecycleTests: XCTestCase {
     func testCameraToolPanelRejectsPhysicalModeChangeBeforeWriting() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { model.state.session == .ready }
         model.openCameraTool(.whiteBalance)
@@ -141,12 +674,48 @@ final class RemoteLifecycleTests: XCTestCase {
         await model.stopAndWait()
     }
 
+    func testCameraToolRechecksOwnershipAfterSuspendedBeforeWrite() async throws {
+        for change in 0..<5 {
+            let camera = RemoteLifecycleCamera()
+            await camera.acceptWrites(.whiteBalance)
+            var current = true
+            var writable = true
+            var movie = false
+            var release: CheckedContinuation<Bool, Never>?
+            var applied = 0
+            let panel = RemoteCameraToolController(camera: camera, tool: .whiteBalance, movie: false,
+                isCurrent: { current }, currentMovie: { movie }, canWrite: { writable },
+                beforeWrite: { await withCheckedContinuation { release = $0 } },
+                onApplied: { applied += 1 }, onUnavailable: {}, onDismiss: {})
+            panel.start()
+            try await waitFor { !panel.loading }
+            panel.select(1)
+            try await waitFor { release != nil }
+            switch change {
+            case 0: panel.dismiss()
+            case 1: panel.requestClose()
+            case 2: current = false
+            case 3: movie = true
+            default: writable = false
+            }
+            release?.resume(returning: true)
+            release = nil
+            try await waitFor { !panel.busy }
+            panel.dismiss()
+            await panel.drain()
+            let calls = await camera.log
+            XCTAssertFalse(calls.contains { $0.hasPrefix("write:whiteBalance:") }, "Change \(change)")
+            XCTAssertEqual(applied, 0)
+            XCTAssertNil(panel.pendingValue)
+        }
+    }
+
     func testCameraToolWriteDrainsAfterMonitorExitWithoutLatePopup() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
         await camera.acceptWrites(.whiteBalance)
         await camera.delayWrites(milliseconds: 180)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { model.state.session == .ready }
         model.openCameraTool(.whiteBalance)
@@ -170,7 +739,7 @@ final class RemoteLifecycleTests: XCTestCase {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
         await camera.acceptWrites(.whiteBalance)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { model.state.session == .ready }
         model.openCameraTool(.whiteBalance)
@@ -266,7 +835,7 @@ final class RemoteLifecycleTests: XCTestCase {
         await camera.setProperty(.init(property: .focusMode, dataType: 4, writable: true,
                                        current: 2, values: [1, 2]))
         await camera.acceptWrites(.focusMode)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -293,7 +862,7 @@ final class RemoteLifecycleTests: XCTestCase {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .stillFocusMode, dataType: 2, writable: true,
                                        current: 0, values: [0, 1, 3, 4]))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -312,7 +881,7 @@ final class RemoteLifecycleTests: XCTestCase {
         await camera.setProperty(.init(property: .focusMode, dataType: 4, writable: true,
                                        current: 2, values: [1, 2]))
         await camera.setWriteResponses(.focusMode, [0x2019, 0x2019, 0x2019])
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -332,7 +901,7 @@ final class RemoteLifecycleTests: XCTestCase {
         await camera.setProperty(.init(property: .whiteBalance, writable: true, current: 2, values: [2, 4]))
         await camera.acceptWrites(.whiteBalance)
         await camera.delayWrites(milliseconds: 300)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -397,7 +966,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testConcurrentTrialAndPageExitShareOneCleanup() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { await camera.log.contains("frame") }
         async let trial: Void = model.stopAndWait()
@@ -411,7 +980,7 @@ final class RemoteLifecycleTests: XCTestCase {
     func testFreeLocalRecordingIsBlockedBeforeMicrophoneOrRecorder() {
         let camera = RemoteLifecycleCamera()
         let entitlements = PremiumEntitlementStore(access: PremiumAccess(.free))
-        let model = RemoteViewModel(camera: camera, entitlements: entitlements)
+        let model = makeModel(camera: camera, entitlements: entitlements)
         model.startLocalRecording()
         XCTAssertEqual(model.localRecordingPhase, .idle)
         XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("remote_rec_pro_only"))
@@ -421,8 +990,133 @@ final class RemoteLifecycleTests: XCTestCase {
         try await verifyRecordingLoss(expiry: true)
     }
 
+    func testRecordingSaveFailureUsesActiveOrDepartedHostExactlyOnce() async throws {
+        for (leaving, fail) in [(false, true), (true, true), (true, false)] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            var notices: [String] = []
+            let model = makeModel(camera: RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48)),
+                recordingDirectory: directory,
+                entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)),
+                permission: { false }, saveFailure: { notices.append($0) })
+            model.start()
+            try await waitFor { model.frameImage != nil }
+            model.startLocalRecording()
+            try await waitFor { model.localRecordingPhase == .recording }
+            try await Task.sleep(for: .milliseconds(150))
+            if fail {
+                let staging = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory,
+                    includingPropertiesForKeys: nil).first { $0.lastPathComponent.hasPrefix(".recording_") })
+                try FileManager.default.removeItem(at: staging)
+            }
+            model.stopLocalRecording()
+            if leaving {
+                model.markMonitorHintHostInactive()
+                async let first: Void = model.stopAndWait()
+                async let second: Void = model.stopAndWait()
+                _ = await (first, second)
+            } else {
+                try await waitFor { model.localRecordingPhase == .idle }
+                XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("cd_remote_rec_toast_failed"))
+            }
+            XCTAssertEqual(notices, leaving && fail ? [AppLocalized.resource("cd_remote_rec_toast_failed")] : [])
+            await model.stopAndWait()
+            XCTAssertEqual(notices.count, leaving && fail ? 1 : 0)
+        }
+    }
+
+    func testEncoderFailureAutomaticallyStopsModelAndOldCallbackCannotStopReplacement() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writerOwner = RecorderWriterOwner()
+        var callbacks: [@Sendable () -> Void] = []
+        let model = makeModel(camera: RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48)),
+            recordingDirectory: directory,
+            entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)), permission: { false },
+            recorderFactory: { configuration in
+                callbacks.append(configuration.onEncodingFailure)
+                return RemoteViewfinderRecorder(outputURL: configuration.outputURL,
+                    sourceSize: configuration.sourceSize, withAudio: false,
+                    desqueeze: configuration.desqueeze, makeWriter: { url in
+                        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+                        writerOwner.store(writer)
+                        return writer
+                    }, onEncodingFailure: configuration.onEncodingFailure)
+            })
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        model.startLocalRecording()
+        try await waitFor { model.localRecordingPhase == .recording }
+        writerOwner.cancel()
+        try await waitFor { model.localRecordingPhase == .idle }
+        XCTAssertEqual(model.localRecordingSeconds, 0)
+        XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("cd_remote_rec_toast_failed"))
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        let oldCallback = try XCTUnwrap(callbacks.first)
+        model.startLocalRecording()
+        try await waitFor { model.localRecordingPhase == .recording }
+        XCTAssertEqual(callbacks.count, 2)
+        oldCallback()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(model.localRecordingPhase, .recording)
+        model.stopLocalRecording()
+        try await waitFor { model.localRecordingPhase == .saved }
+        await model.stopAndWait()
+    }
+
+    func testRecordingSaveNoticeSurvivesWithoutHostAndIsConsumedOnce() {
+        let notice = RemoteRecordingSaveNotice()
+        notice.post("failure")
+        XCTAssertEqual(notice.take(), "failure")
+        XCTAssertNil(notice.take())
+    }
+
+    func testPermissionReturnUsesCurrentFrameOrRejectsMissingFrame() async throws {
+        for missing in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            var permission: CheckedContinuation<Bool, Never>?
+            let camera = RemoteLifecycleCamera()
+            let model = makeModel(camera: camera, recordingDirectory: directory,
+                entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)),
+                permission: { await withCheckedContinuation { permission = $0 } })
+            model.start()
+            try await waitFor { model.frameImage != nil }
+            model.startLocalRecording()
+            try await waitFor { permission != nil }
+            if missing {
+                let count = await camera.successfulFrameCount
+                await camera.limitSuccessfulFrames(to: count)
+                model.setHDLiveView(true)
+                try await waitFor { model.frameImage == nil }
+            } else {
+                await camera.replaceFrame(size: CGSize(width: 96, height: 64))
+                model.recordingDesqueeze = 2
+                try await waitFor { model.frameImage?.size.width == 96 }
+            }
+            permission?.resume(returning: false)
+            permission = nil
+            if missing {
+                try await waitFor { model.localRecordingHint == AppLocalized.resource("remote_rec_start_failed") }
+                XCTAssertEqual(model.localRecordingPhase, .idle)
+                XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+            } else {
+                try await waitFor { model.localRecordingPhase == .recording }
+                try await Task.sleep(for: .milliseconds(150))
+                model.stopLocalRecording()
+                try await waitFor { model.localRecordingPhase == .saved }
+                let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                let asset = AVURLAsset(url: try XCTUnwrap(files.first { $0.pathExtension == "mp4" }))
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                let size = try await XCTUnwrap(tracks.first).load(.naturalSize)
+                XCTAssertEqual(size, CGSize(width: 192, height: 64))
+            }
+            await model.stopAndWait()
+        }
+    }
+
     func testHiddenRecordingToolBlocksAdmissionBeforeFrameOrPermission() {
-        let model = RemoteViewModel(camera: RemoteLifecycleCamera(),
+        let model = makeModel(camera: RemoteLifecycleCamera(),
                                     entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)))
         model.setLocalRecordingToolVisible(false, fixedRecorder: true)
         model.startLocalRecording()
@@ -433,6 +1127,39 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("remote_rec_start_failed"))
     }
 
+    func testUnwritableRecordingDirectoryFallsBackThroughProductionEntry() async throws {
+        guard AVAudioSession.sharedInstance().recordPermission == .denied else {
+            throw XCTSkip("Test simulator microphone permission must be denied")
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let blocked = root.appendingPathComponent("not-a-directory")
+        let original = Data("user file must survive failed directory creation".utf8)
+        try original.write(to: blocked)
+        let fallback = RemoteViewfinderRecorder.outputURL(preferredDirectory: nil).deletingLastPathComponent()
+        let before = Set((try? FileManager.default.contentsOfDirectory(at: fallback, includingPropertiesForKeys: nil)) ?? [])
+        let model = makeModel(camera: RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48)),
+                              recordingDirectory: blocked,
+                              entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)))
+        addTeardownBlock {
+            await model.stopAndWait()
+            try? FileManager.default.removeItem(at: root)
+        }
+        model.start()
+        try await waitFor { model.state.session == .ready && model.frameImage != nil }
+        model.startLocalRecording()
+        try await waitFor { model.localRecordingPhase == .recording }
+        try await Task.sleep(for: .milliseconds(400))
+        model.stopLocalRecording()
+        try await waitFor { model.localRecordingPhase == .saved }
+        let after = Set(try FileManager.default.contentsOfDirectory(at: fallback, includingPropertiesForKeys: nil))
+        let created = after.subtracting(before)
+        defer { for file in created { try? FileManager.default.removeItem(at: file) } }
+        XCTAssertEqual(created.count, 1)
+        try await assertDecodableSilentRecording(XCTUnwrap(created.first))
+        XCTAssertEqual(try Data(contentsOf: blocked), original)
+    }
+
     func testHiddenPortraitRecorderFinalizesButLandscapeFixedRecorderKeepsRecording() async throws {
         guard AVAudioSession.sharedInstance().recordPermission == .denied else {
             throw XCTSkip("Test simulator microphone permission must be denied")
@@ -440,7 +1167,7 @@ final class RemoteLifecycleTests: XCTestCase {
         let name = "RemoteHiddenRecording.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        let model = RemoteViewModel(camera: RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48)),
+        let model = makeModel(camera: RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48)),
                                     recordingDirectory: directory,
                                     entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)),
                                     freeUsage: FreeUsageStore(defaults: defaults))
@@ -487,7 +1214,7 @@ final class RemoteLifecycleTests: XCTestCase {
         if expiry { usage.consumeMonitoring(FreeUsageStore.monitoringLimit, isPro: false) }
         let entitlements = PremiumEntitlementStore(access: PremiumAccess(.lifetime))
         let camera = RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48))
-        let model = RemoteViewModel(camera: camera, recordingDirectory: directory,
+        let model = makeModel(camera: camera, recordingDirectory: directory,
                                    entitlements: entitlements, freeUsage: usage)
         addTeardownBlock {
             await model.stopAndWait()
@@ -533,14 +1260,17 @@ final class RemoteLifecycleTests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         model.startLocalRecording()
-        XCTAssertEqual(model.localRecordingHint, AppLocalized.resource("remote_rec_pro_only"))
+        // The monitor has already left. Admission still fails, but its disposed
+        // page must not create a new inline hint (RemoteScreen hintHostActive).
+        XCTAssertNil(model.localRecordingHint)
+        XCTAssertFalse(model.monitorHint.visible)
         XCTAssertNotEqual(model.localRecordingPhase, .recording)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
     }
 
     func testEntryGatesBeforeParametersAndSelectsMovieExposureBeforeLiveView() async throws {
         let camera = RemoteLifecycleCamera(movie: true)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { await camera.log.contains("frame") }
         let calls = await camera.log
@@ -557,9 +1287,135 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertLessThan(try XCTUnwrap(stopped.lastIndex(of: "end")), stopped.count - 1)
     }
 
+    func testStopInterruptsMovieFormatIdleTimerAndReleasesGateOnce() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { await camera.log.filter { $0 == "property:movieFormat" }.count >= 2 }
+        // The second read is the poller's first read; it now waits ten seconds.
+        try await Task.sleep(for: .milliseconds(80))
+        let started = ContinuousClock.now
+        async let first: Void = model.stopAndWait()
+        async let second: Void = model.stopAndWait()
+        _ = await (first, second)
+        XCTAssertLessThan(started.duration(to: .now), .seconds(2))
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "gate:false" }.count, 1)
+        XCTAssertEqual(calls.last, "gate:false")
+    }
+
+    func testStopDrainsMovieFormatReadWithoutCancellingWireRequest() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        await camera.delayProperty(.movieFormat, milliseconds: 350)
+        let before = await camera.log.filter { $0 == "property:movieFormat" }.count
+        model.setMovieFormatMonitoring(true)
+        try await waitFor { await camera.log.filter { $0 == "property:movieFormat" }.count > before }
+        let started = ContinuousClock.now
+        await model.stopAndWait()
+        let elapsed = started.duration(to: .now)
+        XCTAssertGreaterThan(elapsed, .milliseconds(250))
+        XCTAssertLessThan(elapsed, .seconds(2))
+        let calls = await camera.log
+        XCTAssertFalse(calls.contains("cancelled-property:movieFormat"))
+        XCTAssertEqual(calls.last, "gate:false")
+    }
+
+    func testMovieFormatRetainsDescriptorAcrossMissingScalar() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        await camera.setProperty(.init(property: .movieFormat, dataType: 8, writable: false,
+                                       current: (1920 << 48) | (1080 << 32) | (60 << 16), values: []))
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.movieFormatLabel == "1080 60p" }
+        // Let the entry monitor resolve its own descriptor before event refreshes.
+        try await Task.sleep(for: .milliseconds(100))
+        let reads = await camera.log.filter { $0 == "property:movieFormat" }.count
+        await camera.failRefresh(.movieFormat)
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.movieFormat.rawValue)])
+        try await waitFor { model.movieFormatLabel == nil }
+        await camera.restoreRefresh(.movieFormat)
+        await camera.setProperty(.init(property: .movieFormat, dataType: 8, writable: false,
+                                       current: (1920 << 48) | (1080 << 32) | (30 << 16), values: []))
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.movieFormat.rawValue)])
+        try await waitFor { model.movieFormatLabel == "1080 30p" }
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "property:movieFormat" }.count, reads)
+        XCTAssertGreaterThanOrEqual(calls.filter { $0 == "refresh:movieFormat" }.count, 2)
+        await model.stopAndWait()
+    }
+
+    func testMovieFormatRejectsHeldReadAcrossModeRoundTrip() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        await camera.setProperty(.init(property: .movieFormat, dataType: 8, writable: false,
+                                       current: (1920 << 48) | (1080 << 32) | (60 << 16), values: []))
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.movieFormatLabel == "1080 60p" }
+        let barrier = FramePublicationBarrier()
+        await camera.holdNextProperty(.movieFormat) { await barrier.waitOnce() }
+        model.setMovieFormatMonitoring(true)
+        try await waitFor { await barrier.reached }
+        await camera.changeMovieMode(false)
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
+        try await waitFor { !model.movieMode }
+        XCTAssertNil(model.movieFormatLabel)
+        await camera.setProperty(.init(property: .movieFormat, dataType: 8, writable: false,
+                                       current: (1920 << 48) | (1080 << 32) | (30 << 16), values: []))
+        await camera.changeMovieMode(true)
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
+        try await waitFor { model.movieMode && model.movieFormatLabel == "1080 30p" }
+        await barrier.release()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(model.movieFormatLabel, "1080 30p")
+        await model.stopAndWait()
+    }
+
+    func testMovieFormatRejectsOldReadAfterHideAndReopen() async throws {
+        for reopen in [false, true] {
+            let camera = RemoteLifecycleCamera(movie: true)
+            await camera.setProperty(.init(property: .movieFormat, dataType: 0x0008, writable: false,
+                                           current: (1920 << 48) | (1080 << 32) | (60 << 16), values: []))
+            let model = makeModel(camera: camera)
+            model.start()
+            try await waitFor { model.movieFormatLabel == "1080 60p" }
+            let barrier = FramePublicationBarrier()
+            await camera.holdNextProperty(.movieFormat) { await barrier.waitOnce() }
+            model.setMovieFormatMonitoring(true)
+            try await waitFor { await barrier.reached }
+            model.setMovieFormatMonitoring(false)
+            if reopen {
+                await camera.setProperty(.init(property: .movieFormat, dataType: 0x0008, writable: false,
+                                               current: (1920 << 48) | (1080 << 32) | (30 << 16), values: []))
+                model.setMovieFormatMonitoring(true)
+                try await waitFor { model.movieFormatLabel == "1080 30p" }
+            }
+            await barrier.release()
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertEqual(model.movieFormatLabel, reopen ? "1080 30p" : nil)
+            await model.stopAndWait()
+        }
+    }
+
+    func testMovieFormatIsReadOnEntryAndInvalidValueIsHidden() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        await camera.setProperty(.init(property: .movieFormat, dataType: 0x0008, writable: false,
+                                       current: (1920 << 48) | (1080 << 32) | (60 << 16), values: []))
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.movieFormatLabel == "1080 60p" }
+        await camera.setProperty(.init(property: .movieFormat, dataType: 0x0008, writable: false,
+                                       current: (2560 << 48) | (1440 << 32) | (60 << 16), values: []))
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.movieFormat.rawValue)])
+        try await waitFor { model.movieFormatLabel == nil }
+        await model.stopAndWait()
+    }
+
     func testBatteryUsesEventsInsteadOfSixHundredMillisecondPolling() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { await camera.log.contains("events") }
         try await Task.sleep(for: .milliseconds(1300))
@@ -577,7 +1433,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testHDChangeEndsOldLiveViewWithoutReleasingPageGate() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { await camera.log.contains("frame") }
         model.setHDLiveView(true)
@@ -592,7 +1448,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testRepeatedNonBusyFrameErrorsRestartLiveView() async throws {
         let camera = RemoteLifecycleCamera(failingFrames: 3)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor(timeout: 5) { await camera.log.filter { $0 == "start" }.count == 2 }
         let calls = await camera.log
@@ -604,7 +1460,7 @@ final class RemoteLifecycleTests: XCTestCase {
     func testTransportFailureUsesGlobalRecoveryOnceInsteadOfRestartingDeadLiveView() async throws {
         let camera = RemoteLifecycleCamera(transportFailure: true)
         var losses = 0
-        let model = RemoteViewModel(camera: camera, onTransportLost: { losses += 1 })
+        let model = makeModel(camera: camera, onTransportLost: { losses += 1 })
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { losses == 1 }
@@ -618,7 +1474,7 @@ final class RemoteLifecycleTests: XCTestCase {
     func testBatteryBecomesUnknownInsteadOfKeepingOldPercent() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .batteryLevel, dataType: 2, writable: false, current: 67, values: []))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.batteryPercent == 67 }
@@ -631,7 +1487,7 @@ final class RemoteLifecycleTests: XCTestCase {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .iso, writable: false, current: 100, values: [100]))
         await camera.setProperty(.init(property: .nikonISOEx, writable: true, current: 200, values: [100, 200]))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -648,7 +1504,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testInactiveMovieExposureEventRefreshesItsOwnCacheWithoutReplacingPhotoUI() async throws {
         let camera = RemoteLifecycleCamera(movie: false)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -661,12 +1517,57 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(model.exposureDescriptors[.iso]?.property, .iso)
     }
 
+    func testPhysicalSelectorRefreshesIndependentExposureAndClearsPhotoApplicationWithoutRestarting() async throws {
+        let camera = RemoteLifecycleCamera(movie: false)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        let starts = await camera.log.filter { $0 == "start" }.count
+        await camera.setProperty(.init(property: .liveViewSelector, writable: false, current: 1, values: [0, 1]))
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
+        try await waitFor { model.movieMode && model.exposureDescriptors[.iso]?.property == .movieISO }
+        // The selector is intentionally not polled while recording. This is
+        // stale application state after a completed/failed attempt in standby.
+        await camera.ensureMovieApplicationMode()
+        await camera.setProperty(.init(property: .liveViewSelector, writable: false, current: 0, values: [0, 1]))
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
+        try await waitFor { !model.movieMode && model.state.capture == .idle && model.exposureDescriptors[.iso]?.property == .iso }
+        let application = await camera.hasMovieApplicationMode()
+        let log = await camera.log
+        XCTAssertFalse(application)
+        XCTAssertEqual(log.filter { $0 == "start" }.count, starts)
+        XCTAssertFalse(log.contains("end"))
+        XCTAssertTrue(log.contains("app:off:false"))
+    }
+
+    func testPhotoSelectorDoesNotSplitUSBManualControlOwnership() async throws {
+        let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
+        _ = try await camera.setRemoteDiagnosticControlMode(true)
+        await camera.ensureMovieApplicationMode()
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready && model.computerControlEnabled }
+        let starts = await camera.log.filter { $0 == "start" }.count
+        await camera.setProperty(.init(property: .liveViewSelector, writable: false, current: 0, values: [0, 1]))
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
+        try await waitFor { !model.movieMode && model.exposureDescriptors[.iso]?.property == .iso }
+        let application = await camera.hasMovieApplicationMode()
+        let control = await camera.hasRemoteDiagnosticControlMode()
+        let actualStarts = await camera.log.filter { $0 == "start" }.count
+        XCTAssertTrue(application)
+        XCTAssertTrue(control)
+        XCTAssertTrue(model.computerControlEnabled)
+        XCTAssertEqual(actualStarts, starts)
+    }
+
     func testFreshDualAxisHeaderSuspendsPropertyPollingAndStaleHeaderFallsBack() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.setAttitudeFrame(roll: 12.5, pitch: -3.2)
         await camera.setProperty(.init(property: .angleLevel, dataType: 5, writable: false,
                                        current: 23_514_322, values: []))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.frameMetadata?.attitude != nil }
@@ -686,7 +1587,7 @@ final class RemoteLifecycleTests: XCTestCase {
     func testDualAxisHeaderRecoversAfterPropertyDeclaredUnavailable() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.markUnsupported(.angleLevel)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         model.setLevelVisible(true)
@@ -706,7 +1607,7 @@ final class RemoteLifecycleTests: XCTestCase {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .angleLevel, dataType: 5, writable: false,
                                        current: 23_514_322, values: []))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -733,7 +1634,7 @@ final class RemoteLifecycleTests: XCTestCase {
     func testUnsupportedLevelKeepsPreferenceAndStopsOnlyPropertyPolling() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.markUnsupported(.angleLevel)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         model.setLevelVisible(true)
@@ -752,7 +1653,7 @@ final class RemoteLifecycleTests: XCTestCase {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .focusMode, dataType: 0x0002,
                                        writable: false, current: 1, values: []))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -770,7 +1671,7 @@ final class RemoteLifecycleTests: XCTestCase {
             .init(trackingStarted: false, polls: 0, timedOut: false,
                   responseCode: 0xA004, trackingResponseCode: 0xA004)
         ])
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -789,7 +1690,7 @@ final class RemoteLifecycleTests: XCTestCase {
             .init(trackingStarted: false, polls: 0, timedOut: false,
                   responseCode: 0x2019, moveResponseCode: 0x2019)
         ])
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -810,7 +1711,7 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(area?.property, .focusArea)
         XCTAssertEqual(area?.current, 0x801C)
         XCTAssertEqual(rcTapFocusPath(area, model: modelName), .unsupported)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -825,7 +1726,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testTapFocusSeparatesTransientFeedbackFromThreeSecondConfirmedMarker() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -841,9 +1742,51 @@ final class RemoteLifecycleTests: XCTestCase {
         try await waitFor(timeout: 1.6) { model.confirmedFocusMarker == nil }
     }
 
+    func testHalfPressHandoffAndQuietFallbackExpiry() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.limitSuccessfulFrames(to: 1)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        await camera.delayFocus(milliseconds: 80)
+        model.beginHalfPress()
+        let firstNonce = model.state.focus.nonce
+        XCTAssertTrue(model.halfPressVisualActive)
+        XCTAssertEqual(model.state.focus.phase, .focusing)
+        try await waitFor { model.state.focus.phase == .locked }
+        let marker = try XCTUnwrap(model.confirmedFocusMarker)
+        XCTAssertNotNil(marker.fallbackPoint(at: ProcessInfo.processInfo.systemUptime))
+        var handoff = RemoteFocusHandoff()
+        let stale = RemoteFocusHandoff.Input(nonce: firstNonce, phase: model.state.focus.phase,
+            eligible: model.frameReceivedAtUptime >= marker.confirmedAtUptime, hasCameraFrames: true)
+        handoff.update(stale)
+        XCTAssertFalse(stale.eligible, "Held old image cannot accept half-press handoff")
+        XCTAssertTrue(handoff.visibility(for: stale).tap)
+        XCTAssertFalse(handoff.visibility(for: stale).camera)
+        model.endHalfPress(fire: false)
+        XCTAssertEqual(model.state.focus.phase, .idle)
+        XCTAssertFalse(model.halfPressVisualActive)
+        XCTAssertEqual(model.confirmedFocusMarker, marker)
+        try await waitFor(timeout: 4) {
+            marker.fallbackPoint(at: ProcessInfo.processInfo.systemUptime) == nil
+        }
+        model.beginHalfPress()
+        XCTAssertGreaterThan(model.state.focus.nonce, firstNonce)
+        XCTAssertNil(model.confirmedFocusMarker)
+        let next = RemoteFocusHandoff.Input(nonce: model.state.focus.nonce, phase: model.state.focus.phase,
+                                           eligible: false, hasCameraFrames: true)
+        handoff.update(next)
+        handoff.complete(stale)
+        XCTAssertTrue(handoff.visibility(for: next).tap)
+        XCTAssertFalse(handoff.visibility(for: next).camera)
+        await model.stopAndWait()
+        XCTAssertNil(model.confirmedFocusMarker)
+        XCTAssertFalse(model.halfPressVisualActive)
+    }
+
     func testHalfPressUsesLastFocusAreaAndKeepsLateConfirmedMarkerAfterRelease() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -863,7 +1806,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testShutterWaitsForObjectAddedAndCommandFailureDoesNotFailLiveView() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -881,7 +1824,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testMovieEventsSynchronizeCameraStateAndIgnoreLateStartAfterLocalStop() async throws {
         let camera = RemoteLifecycleCamera(movie: true)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -898,13 +1841,238 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(model.state.capture, .idle)
     }
 
+    func testMonitorStoragePollsSortedUsableCardsAndPublishesDecimalFreeBytes() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setMonitorStorage(
+            ids: [.max, 0, 7, 7, 3],
+            free: [3: 2_000_000_000, 7: 1_000_000_000])
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.setStorageMonitoring(true)
+        model.start()
+        try await waitFor(timeout: 5) { model.monitorStorageFreeBytes.count == 2 }
+        XCTAssertEqual(model.monitorStorageFreeBytes[3], 2_000_000_000)
+        XCTAssertEqual(model.monitorStorageFreeBytes[7], 1_000_000_000)
+        XCTAssertEqual(model.monitorStorageSlotCount, 2)
+        XCTAssertEqual(model.monitorStorageSlotByID, [3: 1, 7: 2])
+        let firstLog = await camera.log
+        XCTAssertEqual(firstLog.filter { $0 == "storage:ids" }.count, 1)
+    }
+
+    func testMonitorStorageStopsAfterUnsupportedAndKeepsEarlierCardsInCycle() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setMonitorStorage(
+            ids: [3, 7],
+            free: [3: 2_000_000_000],
+            errors: [7: .responseCode(0x2005)])
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.setStorageMonitoring(true)
+        model.start()
+        try await waitFor(timeout: 5) { await camera.log.contains("storage:free:7") }
+        XCTAssertEqual(model.monitorStorageFreeBytes, [3: 2_000_000_000])
+        XCTAssertEqual(model.monitorStorageSlotCount, 2)
+        let firstPollCount = await camera.log.filter { $0.hasPrefix("storage:free:") }.count
+        try await Task.sleep(for: .milliseconds(350))
+        let secondPollCount = await camera.log.filter { $0.hasPrefix("storage:free:") }.count
+        XCTAssertEqual(secondPollCount, firstPollCount)
+    }
+
+    func testMonitorStorageKeepsPublishedValuesWhileQueuedAndOnCancellation() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setMonitorStorage(ids: [3], free: [3: 111])
+        let model = makeModel(camera: camera)
+        model.setStorageMonitoring(true); model.start()
+        try await waitFor { model.monitorStorageFreeBytes == [3: 111] }
+        let queued = GateTestLatch(), release = GateTestLatch()
+        await camera.setMonitorAdmissionProbe { await queued.signal(); await release.wait() }
+        let poll = Task { await model.refreshMonitorStorage() }
+        await queued.wait()
+        XCTAssertEqual(model.monitorStorageFreeBytes, [3: 111], "Waiting for the download must not publish an empty cycle")
+        poll.cancel()
+        await release.signal(); await poll.value
+        XCTAssertEqual(model.monitorStorageFreeBytes, [3: 111])
+        let reads = await camera.log.filter { $0 == "storage:free:3" }.count
+        XCTAssertEqual(reads, 1)
+    }
+
+    func testMonitorStorageRechecksRecordingStateAtAdmission() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        await camera.setMonitorStorage(ids: [3], free: [3: 111])
+        let model = makeModel(camera: camera)
+        model.setStorageMonitoring(true); model.start()
+        try await waitFor { model.monitorStorageFreeBytes == [3: 111] }
+        let queued = GateTestLatch(), release = GateTestLatch()
+        await camera.setMonitorAdmissionProbe { await queued.signal(); await release.wait() }
+        let poll = Task { await model.refreshMonitorStorage() }
+        await queued.wait()
+        model.toggleRecording()
+        try await waitFor { model.state.capture == .recording && !model.recordingBusy }
+        await release.signal(); await poll.value
+        let reads = await camera.log.filter { $0 == "storage:free:3" }.count
+        XCTAssertEqual(reads, 1, "No storage PTP command is sent after recording began while waiting")
+    }
+
+    func testOldStorageFailureCannotDisableNewCameraDispGeneration() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setMonitorStorage(ids: [3], free: [3: 111])
+        let model = makeModel(camera: camera)
+        model.setStorageMonitoring(true); model.start()
+        try await waitFor { model.monitorStorageFreeBytes == [3: 111] }
+        let responseReady = GateTestLatch(), release = GateTestLatch()
+        await camera.setMonitorStorage(ids: [3], free: [:], errors: [3: .responseCode(0x2005)])
+        await camera.setMonitorResponseProbe { await responseReady.signal(); await release.wait() }
+        let old = Task { await model.refreshMonitorStorage() }
+        await responseReady.wait()
+        model.setStorageMonitoring(false)
+        await camera.setMonitorStorage(ids: [7], free: [7: 222])
+        model.setStorageMonitoring(true)
+        try await waitFor { model.monitorStorageFreeBytes == [7: 222] }
+        await release.signal(); await old.value
+        XCTAssertEqual(model.monitorStorageFreeBytes, [7: 222])
+        await camera.setMonitorStorage(ids: [7], free: [7: 333])
+        await model.refreshMonitorStorage()
+        XCTAssertEqual(model.monitorStorageFreeBytes, [7: 333], "Late 0x2005 must not latch unsupported on the new generation")
+    }
+
+    func testCameraDispRestartsOnModeChangeWithoutViewCallback() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, dataType: 2, writable: true, current: 2, values: [2, 4]))
+        let model = makeModel(camera: camera)
+        model.setDisplayDetailsMonitoring(true)
+        model.start()
+        try await waitFor { model.displayWhiteBalanceLabel != nil }
+        let first = model.displayWhiteBalanceLabel
+        let barrier = FramePublicationBarrier()
+        await camera.holdNextRefresh(.whiteBalance) { await barrier.waitOnce() }
+        try await waitFor { await barrier.reached }
+        await camera.setProperty(.init(property: .movieWhiteBalance, dataType: 2, writable: true, current: 4, values: [2, 4]))
+        await camera.changeMovieMode(true)
+        await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
+        try await waitFor { model.movieMode && model.displayWhiteBalanceLabel != nil && model.displayWhiteBalanceLabel != first }
+        let replacement = model.displayWhiteBalanceLabel
+        await barrier.release()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(model.displayWhiteBalanceLabel, replacement)
+        await model.stopAndWait()
+    }
+
+    func testCameraDispRejectsSuspendedScalarAndDeviceModelAfterReopen() async throws {
+        for deviceModelRead in [false, true] {
+            let camera = RemoteLifecycleCamera()
+            await camera.setProperty(.init(property: .whiteBalance, dataType: 2, writable: true, current: 2, values: [2, 4]))
+            let model = makeModel(camera: camera)
+            model.start()
+            try await waitFor { model.state.session == .ready }
+            model.setDisplayDetailsMonitoring(true)
+            try await waitFor { model.displayWhiteBalanceLabel != nil }
+            let first = model.displayWhiteBalanceLabel
+            let barrier = FramePublicationBarrier()
+            if deviceModelRead {
+                await camera.holdNextDeviceModel { await barrier.waitOnce() }
+            } else {
+                await camera.holdNextRefresh(.whiteBalance) { await barrier.waitOnce() }
+            }
+            try await waitFor { await barrier.reached }
+            model.setDisplayDetailsMonitoring(false)
+            XCTAssertNil(model.displayWhiteBalanceLabel)
+            await camera.setProperty(.init(property: .whiteBalance, dataType: 2, writable: true, current: 4, values: [2, 4]))
+            model.setDisplayDetailsMonitoring(true)
+            try await waitFor { model.displayWhiteBalanceLabel != nil && model.displayWhiteBalanceLabel != first }
+            let replacement = model.displayWhiteBalanceLabel
+            await barrier.release()
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertEqual(model.displayWhiteBalanceLabel, replacement)
+            await model.stopAndWait()
+        }
+    }
+
+    func testCameraDispRecoversAfterNilScalarWithoutLosingDescriptor() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, dataType: 2, writable: true, current: 2, values: [2, 4]))
+        let model = makeModel(camera: camera)
+        model.setDisplayDetailsMonitoring(true)
+        model.start()
+        try await waitFor { model.displayWhiteBalanceLabel != nil }
+        let first = model.displayWhiteBalanceLabel
+        await camera.failRefresh(.whiteBalance)
+        try await waitFor { model.displayWhiteBalanceLabel == nil }
+        await camera.setProperty(.init(property: .whiteBalance, dataType: 2, writable: true, current: 4, values: [2, 4]))
+        await camera.restoreRefresh(.whiteBalance)
+        try await waitFor { model.displayWhiteBalanceLabel != nil && model.displayWhiteBalanceLabel != first }
+        let calls = await camera.log
+        XCTAssertGreaterThanOrEqual(calls.filter { $0 == "refresh:whiteBalance" }.count, 2)
+    }
+
+    func testCameraDispRefreshesWhiteBalanceDetailsAndClearsWhenDisabled() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .whiteBalance, dataType: 2, writable: true,
+                                       current: 2, values: [1, 2, 4]))
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.setDisplayDetailsMonitoring(true)
+        model.start()
+        try await waitFor(timeout: 5) { model.displayWhiteBalanceLabel != nil }
+        XCTAssertNotNil(model.displayWhiteBalanceLabel)
+        model.setDisplayDetailsMonitoring(false)
+        XCTAssertNil(model.displayWhiteBalanceLabel)
+    }
+
+    func testUSBMovieStopFailureRetainsModesAndCanRetry() async throws {
+        for throwsError in [false, true] {
+            let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
+            let model = makeModel(camera: camera)
+            model.start()
+            try await waitFor { model.state.session == .ready }
+            model.toggleRecording()
+            try await waitFor { model.state.capture == .recording && !model.recordingBusy }
+            let baseline = await camera.log.count
+            await camera.configureMovieStop(error: throwsError ? .responseCode(0x2002) : nil,
+                                            response: 0x2002)
+            model.toggleRecording()
+            try await waitFor { !model.recordingBusy && model.state.recordingHint != nil }
+            XCTAssertEqual(model.state.capture, .recording)
+            let application = await camera.hasMovieApplicationMode()
+            let control = await camera.hasRemoteControlMode()
+            XCTAssertTrue(application)
+            XCTAssertTrue(control)
+            let failed = await camera.log
+            XCTAssertFalse(failed.dropFirst(baseline).contains { $0.hasPrefix("app:off") || $0 == "control:off" })
+            await camera.configureMovieStop()
+            model.toggleRecording()
+            try await waitFor { await camera.log.filter { $0 == "movie:end" }.count == 2 }
+            await camera.queueEvents([.init(code: 0xC108, handle: 0)])
+            try await waitFor { !model.recordingBusy && model.state.capture == .idle }
+            let released = await camera.hasMovieApplicationMode()
+            XCTAssertFalse(released)
+            await model.stopAndWait()
+        }
+    }
+
+    func testMovieStopTransportFailureUsesGlobalDisconnectWithoutStopHint() async throws {
+        let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
+        var losses = 0
+        let model = makeModel(camera: camera, onTransportLost: { losses += 1 })
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleRecording()
+        try await waitFor { model.state.capture == .recording && !model.recordingBusy }
+        await camera.configureMovieStop(error: .timeout)
+        model.toggleRecording()
+        try await waitFor { losses == 1 && !model.recordingBusy }
+        XCTAssertNil(model.state.recordingHint)
+        XCTAssertNil(model.frameImage)
+        await model.stopAndWait()
+        XCTAssertEqual(losses, 1)
+    }
+
     func testWiFiMovieRecoveryRestartsLiveViewOnceAndWaitsForCompletionBeforeCleanup() async throws {
         let camera = RemoteLifecycleCamera(movie: true)
         await camera.queueMovieStarts([
             .init(responseCode: 0xA004, prohibitCondition: 1 << 14),
             .init(responseCode: PTPConstants.responseOK, prohibitCondition: nil)
         ])
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -926,17 +2094,17 @@ final class RemoteLifecycleTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertTrue(model.recordingBusy, "application-mode stop waits for the completion event")
         let beforeEvent = await camera.log
-        XCTAssertFalse(beforeEvent.contains("app:off:true"))
+        XCTAssertFalse(beforeEvent.contains("app:off:false"))
         await camera.queueEvents([.init(code: 0xC108, handle: 0)])
         try await waitFor(timeout: 3) { !model.recordingBusy }
         let stopped = await camera.log
         XCTAssertLessThan(try XCTUnwrap(stopped.firstIndex(of: "movie:end")),
-                          try XCTUnwrap(stopped.firstIndex(of: "app:off:true")))
+                          try XCTUnwrap(stopped.firstIndex(of: "app:off:false")))
     }
 
     func testUSBMoviePreparesExistingSessionAndReturnsToOrdinaryLiveViewAfterStop() async throws {
         let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor(timeout: 5) { model.state.session == .ready }
@@ -962,10 +2130,59 @@ final class RemoteLifecycleTests: XCTestCase {
                           try XCTUnwrap(stopped.lastIndex(of: "start")))
     }
 
+    func testUSBStandbyRetriesFailedReleaseBeforeRestartingLiveView() async throws {
+        let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleRecording()
+        try await waitFor { model.state.capture == .recording && !model.recordingBusy && model.state.session == .ready }
+        await camera.configureControlResponses([0x2019, 0x2019, 0x2019, PTPConstants.responseOK])
+        model.toggleRecording()
+        try await waitFor { await camera.log.contains("movie:end") }
+        await camera.queueEvents([.init(code: 0xC105, handle: 0)])
+        try await waitFor(timeout: 6) {
+            let released = await camera.log.filter { $0 == "control:off" }.count >= 4
+            return released && model.state.session == .ready && !model.recordingBusy
+        }
+        let log = await camera.log
+        let releases = log.indices.filter { log[$0] == "control:off" }
+        XCTAssertEqual(releases.count, 4)
+        let first = try XCTUnwrap(releases.first), last = try XCTUnwrap(releases.last)
+        XCTAssertFalse(log[first..<last].contains("start"), "Do not restart LV while ControlMode release is still failing")
+        XCTAssertTrue(log[(last + 1)...].contains("start"))
+    }
+
+    func testWiFiCompletionClearsApplicationWithoutRestartingOrReleasingManualControl() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        _ = try await camera.setRemoteDiagnosticControlMode(true)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready && model.computerControlEnabled }
+        await camera.ensureMovieApplicationMode()
+        await camera.queueEvents([.init(code: 0xC10A, handle: 0)])
+        try await waitFor { model.state.capture == .recording }
+        await camera.queueEvents([.init(code: 0xC105, handle: 0)])
+        try await waitFor {
+            let application = await camera.hasMovieApplicationMode()
+            return model.state.capture == .idle && !application
+        }
+        let control = await camera.hasRemoteDiagnosticControlMode()
+        let log = await camera.log
+        XCTAssertTrue(control)
+        XCTAssertTrue(model.computerControlEnabled)
+        XCTAssertFalse(log.contains("end"))
+        XCTAssertFalse(log.contains("control:off"))
+        XCTAssertEqual(log.filter { $0 == "start" }.count, 1)
+        XCTAssertTrue(log.contains("app:off:false"))
+    }
+
     func testLeavingDuringUSBMovieStartStopsLateCameraRecordingWithoutDisconnecting() async throws {
         let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
         await camera.delayPreparedMovieStart(milliseconds: 250)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor(timeout: 5) { model.state.session == .ready }
 
@@ -979,10 +2196,44 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(calls.last, "gate:false")
     }
 
+    func testExposureStepsUseNearestAnchorAndLatestOptimisticValue() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .iso, writable: true, current: 300, values: [100, 200, 400, 800]))
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        await camera.acceptWrites(.iso)
+        model.stepExposure(.iso, delta: 1)
+        XCTAssertEqual(model.exposureDescriptors[.iso]?.current, 400)
+        model.stepExposure(.iso, delta: 1)
+        XCTAssertEqual(model.exposureDescriptors[.iso]?.current, 800)
+        try await waitFor { await camera.log.contains("write:iso:800") }
+        let writes = await camera.log.filter { $0.hasPrefix("write:iso:") }
+        XCTAssertEqual(writes, ["write:iso:800"])
+    }
+
+    func testExposureFallbackStepsUseAndroidLogicalPropertyAnchor() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.markUnsupported(.nikonShutter)
+        await camera.setProperty(.init(property: .exposureTimeStandard, writable: true, current: 300, values: [100, 200, 400]))
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        await camera.acceptWrites(.exposureTimeStandard)
+        XCTAssertEqual(model.exposureDescriptors[.shutter]?.property, .exposureTimeStandard)
+        // Android stepParam uses logical D100 for the off-enum anchor even
+        // when the readable/writable fallback is 500D; do not invent a change.
+        model.stepExposure(.shutter, delta: 1)
+        XCTAssertEqual(model.exposureDescriptors[.shutter]?.current, 200)
+        try await waitFor { await camera.log.contains("write:exposureTimeStandard:200") }
+    }
+
     func testExposureWritesCoalesceAndOldInFlightResultCannotReplaceNewValue() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .iso, writable: true, current: 100, values: [100, 200, 400, 800]))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -1053,7 +2304,7 @@ final class RemoteLifecycleTests: XCTestCase {
             await camera.setProperty(.init(property: property, dataType: 2, writable: true, current: 0, values: [0, 2]))
         }
         await camera.acceptWrites(.nikonAutoISOAlternate)
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -1073,7 +2324,7 @@ final class RemoteLifecycleTests: XCTestCase {
         let camera = RemoteLifecycleCamera()
         await camera.setProperty(.init(property: .nikonAutoISO, dataType: 2, writable: true, current: 1, values: [0, 1]))
         await camera.setProperty(.init(property: .nikonISOControlSensitivity, writable: false, current: 640, values: []))
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.effectiveISO?.current == 640 }
@@ -1089,9 +2340,64 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(count, later)
     }
 
+
+    func testHalfPressAndCaptureWorkBeforeFirstLiveViewFrame() async throws {
+        let camera = RemoteLifecycleCamera(failingFrames: 100)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { await camera.log.contains("frame") }
+        XCTAssertNotEqual(model.state.session, .ready)
+        model.beginHalfPress()
+        XCTAssertTrue(model.halfPressVisualActive)
+        model.endHalfPress(fire: true)
+        try await waitFor { await camera.log.contains("capture") }
+        let calls = await camera.log
+        XCTAssertLessThan(try XCTUnwrap(calls.firstIndex(of: "halfpress:end")),
+                          try XCTUnwrap(calls.firstIndex(of: "capture")))
+    }
+
+    func testRecordingHalfPressCanFocusAndReleaseToStop() async throws {
+        let camera = RemoteLifecycleCamera(movie: true)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleRecording()
+        try await waitFor { model.state.capture == .recording && !model.recordingBusy }
+        await camera.delayFocus(milliseconds: 120)
+        model.beginHalfPress()
+        XCTAssertTrue(model.halfPressVisualActive)
+        XCTAssertEqual(model.state.capture, .recording)
+        model.endHalfPress(fire: true)
+        try await waitFor { await camera.log.contains("movie:end") }
+        let calls = await camera.log
+        XCTAssertLessThan(try XCTUnwrap(calls.firstIndex(of: "halfpress:end")),
+                          try XCTUnwrap(calls.firstIndex(of: "movie:end")))
+    }
+
+    func testReleaseWaitsForAlreadyRunningTapFocusWhenHalfPressWasRejected() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        await camera.delayFocus(milliseconds: 300)
+        model.focus(at: .init(x: 0.5, y: 0.5))
+        try await waitFor { await camera.log.contains("tapfocus:start") }
+        model.beginHalfPress()
+        XCTAssertFalse(model.halfPressVisualActive)
+        model.endHalfPress(fire: true)
+        try await waitFor { await camera.log.contains("capture") }
+        let calls = await camera.log
+        XCTAssertFalse(calls.contains("halfpress:start"))
+        XCTAssertLessThan(try XCTUnwrap(calls.firstIndex(of: "tapfocus:end")),
+                          try XCTUnwrap(calls.firstIndex(of: "capture")))
+    }
+
     func testLeavingDuringHalfPressDrainsAFWithoutCancellingOrLateCapture() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { model.state.session == .ready }
         await camera.delayFocus(milliseconds: 300)
@@ -1110,7 +2416,7 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testLeavingDuringTapFocusWaitsForTransactionAndDiscardsLateUIResult() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = RemoteViewModel(camera: camera)
+        let model = makeModel(camera: camera)
         model.start()
         try await waitFor { model.state.session == .ready }
         await camera.delayFocus(milliseconds: 300)
@@ -1126,10 +2432,155 @@ final class RemoteLifecycleTests: XCTestCase {
                           try XCTUnwrap(calls.firstIndex(of: "gate:false")))
     }
 
-    private func waitFor(timeout: Double = 3, _ condition: () async -> Bool) async throws {
+    func testDiagnosticControlModeOwnsControlAndIsReleasedOnModelStop() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleComputerControl()
+        try await waitFor { model.computerControlEnabled }
+        let enabledDiagnostic = await camera.hasRemoteDiagnosticControlMode()
+        let enabledControl = await camera.hasRemoteControlMode()
+        XCTAssertTrue(enabledDiagnostic)
+        XCTAssertTrue(enabledControl)
+        let enabledLog = await camera.log
+        XCTAssertTrue(enabledLog.contains("diagnostic:on"))
+
+        await model.stopAndWait()
+        let stoppedDiagnostic = await camera.hasRemoteDiagnosticControlMode()
+        let stoppedControl = await camera.hasRemoteControlMode()
+        XCTAssertFalse(stoppedDiagnostic)
+        XCTAssertFalse(stoppedControl)
+        let stoppedLog = await camera.log
+        XCTAssertTrue(stoppedLog.contains("control:off"))
+    }
+
+    func testComputerControlStopsFramesRetainsImageAndRejectsDuplicateClicks() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.configureDiagnostic(delay: 150)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleComputerControl()
+        model.toggleComputerControl()
+        try await waitFor { await camera.log.contains("diagnostic:on") }
+        let image = model.frameImage
+        XCTAssertNotNil(image)
+        XCTAssertTrue(model.computerControlBusy)
+        XCTAssertFalse(model.computerControlToggleAllowed)
+        let during = await camera.log
+        let command = try XCTUnwrap(during.firstIndex(of: "diagnostic:on"))
+        XCTAssertLessThan(try XCTUnwrap(during[..<command].lastIndex(of: "end")), command)
+        XCTAssertEqual(during.filter { $0 == "diagnostic:on" }.count, 1)
+        try await waitFor { model.computerControlEnabled && !model.computerControlBusy }
+        XCTAssertNotNil(model.frameImage)
+        try await waitFor { model.state.session == .ready }
+        let after = await camera.log
+        let accepted = try XCTUnwrap(after.firstIndex(of: "diagnostic:accepted:on"))
+        XCTAssertFalse(after[command..<accepted].contains("frame"))
+        XCTAssertLessThan(accepted, try XCTUnwrap(after.lastIndex(of: "start")))
+    }
+
+    func testComputerControlRefusalKeepsOwnerAndRestartsLiveView() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        await camera.configureDiagnostic(responses: [0xA004])
+        model.toggleComputerControl()
+        try await waitFor { !model.computerControlBusy && model.state.session == .ready }
+        XCTAssertFalse(model.computerControlEnabled)
+        model.toggleComputerControl()
+        try await waitFor { model.computerControlEnabled && model.state.session == .ready }
+        await camera.configureDiagnostic(responses: [0xA004])
+        model.toggleComputerControl()
+        try await waitFor { !model.computerControlBusy && model.state.session == .ready }
+        XCTAssertTrue(model.computerControlEnabled)
+        let physical = await camera.hasRemoteControlMode()
+        let diagnostic = await camera.hasRemoteDiagnosticControlMode()
+        XCTAssertTrue(physical)
+        XCTAssertTrue(diagnostic)
+    }
+
+    func testLeavingDuringComputerControlWaitsForAcceptedCommandBeforeReleasing() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.configureDiagnostic(delay: 200)
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleComputerControl()
+        try await waitFor { await camera.log.contains("diagnostic:on") }
+        await model.stopAndWait()
+        let calls = await camera.log
+        let accepted = try XCTUnwrap(calls.firstIndex(of: "diagnostic:accepted:on"))
+        let release = try XCTUnwrap(calls.firstIndex(of: "control:off"))
+        XCTAssertLessThan(accepted, release)
+        XCTAssertFalse(calls[accepted...].contains("start"))
+        XCTAssertEqual(calls.last, "gate:false")
+        XCTAssertFalse(model.computerControlEnabled)
+        XCTAssertFalse(model.computerControlBusy)
+        let diagnostic = await camera.hasRemoteDiagnosticControlMode()
+        XCTAssertFalse(diagnostic)
+    }
+
+    func testUSBMovieReusesManualControlAndKeepsItUntilPageExit() async throws {
+        let camera = RemoteLifecycleCamera(movie: true, isUSB: true)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleComputerControl()
+        try await waitFor { model.computerControlEnabled && model.state.session == .ready }
+        model.toggleRecording()
+        try await waitFor { model.state.capture == .recording && !model.recordingBusy }
+        XCTAssertFalse(model.computerControlToggleAllowed)
+        let started = await camera.log
+        XCTAssertTrue(started.contains("movie:prepared"))
+        XCTAssertFalse(started.contains("usb:refresh"))
+        model.toggleRecording()
+        try await waitFor { await camera.log.contains("movie:end") }
+        await camera.queueEvents([.init(code: 0xC105, handle: 0)])
+        try await waitFor { !model.recordingBusy && model.state.capture == .idle }
+        XCTAssertTrue(model.computerControlEnabled)
+        let retained = await camera.hasRemoteDiagnosticControlMode()
+        XCTAssertTrue(retained)
+        let beforeExit = await camera.log
+        XCTAssertFalse(beforeExit.contains("control:off"))
+        // The Android page-exit fallback retries the release three times.
+        await camera.configureControlResponses([0xA004, 0xA004, PTPConstants.responseOK])
+        await model.stopAndWait()
+        let ended = await camera.log
+        XCTAssertEqual(ended.filter { $0 == "control:off" }.count, 3)
+        XCTAssertLessThan(try XCTUnwrap(ended.firstIndex(of: "app:off:true")),
+                          try XCTUnwrap(ended.firstIndex(of: "control:off")))
+        let physical = await camera.hasRemoteControlMode()
+        let diagnostic = await camera.hasRemoteDiagnosticControlMode()
+        XCTAssertFalse(physical)
+        XCTAssertFalse(diagnostic)
+    }
+
+    func testEntryRestoresManualControlAndHiddenToolCanReleaseBeforeFirstFrame() async throws {
+        let camera = RemoteLifecycleCamera(isUSB: true)
+        _ = try await camera.setRemoteDiagnosticControlMode(true)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        try await waitFor { model.computerControlEnabled }
+        model.setComputerControl(false)
+        try await waitFor { !model.computerControlEnabled && !model.computerControlBusy }
+        try await waitFor { model.state.session == .ready }
+        let calls = await camera.log
+        XCTAssertTrue(calls.contains("diagnostic:off"))
+        XCTAssertFalse(calls.contains("usb:refresh"))
+    }
+
+    private func waitFor(timeout: Double = 3, file: StaticString = #filePath, line: UInt = #line,
+                         _ condition: () async -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
         while !(await condition()) {
-            guard ContinuousClock.now < deadline else { XCTFail("Timed out waiting for camera operation"); return }
+            guard ContinuousClock.now < deadline else { XCTFail("Timed out waiting for camera operation", file: file, line: line); return }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -1163,7 +2614,366 @@ private final class RemoteDecodedFrameCollector {
     var frames: [RemoteDecodedFrame] = []
 }
 
+private actor FramePublicationBarrier {
+    private(set) var reached = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func waitOnce() async {
+        guard !reached else { return }
+        reached = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() { continuation?.resume(); continuation = nil }
+}
+
+private final class FrameAnalysisTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let origin = ContinuousClock.now
+    private var milliseconds = 0
+    func set(_ value: Int) { lock.lock(); defer { lock.unlock() }; milliseconds = value }
+    func now() -> ContinuousClock.Instant {
+        lock.lock(); defer { lock.unlock() }
+        return origin.advanced(by: .milliseconds(milliseconds))
+    }
+}
+
 final class RemoteFrameDecodePipelineTests: XCTestCase {
+    @MainActor
+    func testPipelinePublicationRejectsMultipleModeChangesAndSessionReset() async throws {
+        for resetSession in [false, true] {
+            let barrier = FramePublicationBarrier()
+            let collector = RemoteDecodedFrameCollector()
+            let pipeline = RemoteFrameDecodePipeline(beforePublication: { await barrier.waitOnce() }) {
+                collector.frames.append($0)
+            }
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+                UIColor.red.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+            }
+            let data = try XCTUnwrap(image.pngData())
+            func request(_ generation: UInt64) -> RemoteFrameDecodePipeline.Request {
+                .init(packet: .init(bytes: data, jpegOffset: 0, operation: PTPConstants.getLiveViewImage),
+                      fps: 1, generation: generation)
+            }
+            await pipeline.reset(generation: 1)
+            await pipeline.setAnalysis(histogram: true, zebra: true, waveform: true)
+            await pipeline.submit(request(1))
+            let deadline = ContinuousClock.now + .seconds(2)
+            while !(await barrier.reached), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            let reached = await barrier.reached
+            XCTAssertTrue(reached)
+            XCTAssertTrue(collector.frames.isEmpty)
+            await pipeline.setAnalysis(histogram: false, zebra: false)
+            await pipeline.setAnalysis(histogram: true, zebra: false, waveform: true, waveformRGB: true, histogramRGB: true)
+            await pipeline.setAnalysis(histogram: true, zebra: false, waveform: true)
+            await pipeline.setAnalysis(histogram: true, zebra: false, waveform: true, waveformRGB: true, histogramRGB: true)
+            if resetSession {
+                await pipeline.reset(generation: 2)
+                await pipeline.submit(request(2))
+            }
+            await barrier.release()
+            await pipeline.waitUntilIdle()
+            XCTAssertEqual(collector.frames.count, 1)
+            let frame = try XCTUnwrap(collector.frames.first)
+            XCTAssertEqual(frame.generation, resetSession ? 2 : 1)
+            XCTAssertEqual(frame.waveform?.count, 3)
+            XCTAssertEqual(frame.histogramRGB?.count, 3)
+            XCTAssertNil(frame.zebraMask)
+        }
+    }
+
+    @MainActor
+    func testQueuedPublicationCannotOutliveInvalidation() async {
+        let obsolete = RemoteFramePublicationPermit()
+        var values: [Int] = []
+        let queued = Task { @MainActor in obsolete.deliver { values.append(1) } }
+        // The child cannot run on this actor until this method suspends.
+        obsolete.invalidate()
+        let delivered = await queued.value
+        XCTAssertFalse(delivered)
+        XCTAssertTrue(values.isEmpty)
+        let current = RemoteFramePublicationPermit()
+        XCTAssertTrue(current.deliver { values.append(2) })
+        current.invalidate()
+        XCTAssertFalse(current.deliver { values.append(3) })
+        XCTAssertEqual(values, [2])
+    }
+
+    @MainActor
+    func testAnalysisCacheInvalidatesForDimensionsAndSessionAtSameTime() async throws {
+        let clock = FrameAnalysisTestClock()
+        let collector = RemoteDecodedFrameCollector()
+        let pipeline = RemoteFrameDecodePipeline(clock: { clock.now() }) { collector.frames.append($0) }
+        await pipeline.reset(generation: 1)
+        await pipeline.setAnalysis(histogram: true, zebra: true, waveform: true, histogramRGB: true)
+        func feed(_ side: Int, white: Bool, generation: UInt64) async throws -> RemoteDecodedFrame {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+                (white ? UIColor.white : UIColor.black).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            }
+            await pipeline.submit(.init(packet: .init(bytes: try XCTUnwrap(image.pngData()), jpegOffset: 0,
+                operation: PTPConstants.getLiveViewImage), fps: 1, generation: generation))
+            await pipeline.waitUntilIdle()
+            return try XCTUnwrap(collector.frames.last)
+        }
+        _ = try await feed(8, white: false, generation: 1)
+        let resized = try await feed(12, white: true, generation: 1)
+        XCTAssertEqual(resized.histogram?[255], 144)
+        XCTAssertEqual(resized.histogramRGB?.map { $0[255] }, [144, 144, 144])
+        XCTAssertEqual(resized.waveform?.first?.prefix(256).reduce(0, +), 144)
+        XCTAssertTrue(try XCTUnwrap(resized.zebraMask).cells.allSatisfy { $0 })
+        await pipeline.reset(generation: 2)
+        let reset = try await feed(12, white: false, generation: 2)
+        XCTAssertEqual(reset.histogram?[0], 144)
+        XCTAssertEqual(reset.histogramRGB?.map { $0[0] }, [144, 144, 144])
+        XCTAssertEqual(reset.waveform?.first?.suffix(256).reduce(0, +), 144)
+        XCTAssertTrue(try XCTUnwrap(reset.zebraMask).cells.allSatisfy { !$0 })
+    }
+
+    @MainActor
+    func testInFlightWaveformModeChangeRejectsOldAnalysisAndReprocessesLatestFrame() async throws {
+        let collector = RemoteDecodedFrameCollector()
+        let pipeline = RemoteFrameDecodePipeline(decodeDelayNanoseconds: 100_000_000) { collector.frames.append($0) }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        await pipeline.reset(generation: 1)
+        await pipeline.setAnalysis(histogram: false, zebra: false, waveform: true)
+        await pipeline.submit(.init(packet: .init(bytes: try XCTUnwrap(image.pngData()), jpegOffset: 0,
+            operation: PTPConstants.getLiveViewImage), fps: 1, generation: 1))
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !(await pipeline.isDecoding), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let decoding = await pipeline.isDecoding
+        XCTAssertTrue(decoding)
+        await pipeline.setAnalysis(histogram: false, zebra: false, waveform: true, waveformRGB: true)
+        await pipeline.waitUntilIdle()
+        XCTAssertEqual(collector.frames.count, 1)
+        XCTAssertEqual(collector.frames.first?.waveform?.count, 3)
+    }
+
+    @MainActor
+    func testExactAnalysisCadenceAndHistogramModeSwitches() async throws {
+        let clock = FrameAnalysisTestClock()
+        let collector = RemoteDecodedFrameCollector()
+        let pipeline = RemoteFrameDecodePipeline(clock: { clock.now() }) { collector.frames.append($0) }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        func encoded(_ white: Bool) throws -> Data {
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+                (white ? UIColor.white : UIColor.black).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+            }
+            return try XCTUnwrap(image.pngData())
+        }
+        let black = try encoded(false), white = try encoded(true)
+        func feed(_ time: Int, _ data: Data) async throws -> RemoteDecodedFrame {
+            clock.set(time)
+            await pipeline.submit(.init(packet: .init(bytes: data, jpegOffset: 0,
+                operation: PTPConstants.getLiveViewImage), fps: 1, generation: 1))
+            await pipeline.waitUntilIdle()
+            return try XCTUnwrap(collector.frames.last)
+        }
+        await pipeline.reset(generation: 1)
+        await pipeline.setAnalysis(histogram: true, zebra: true, histogramRGB: true)
+        _ = try await feed(0, black)
+        let beforeZebra = try await feed(49, white)
+        XCTAssertTrue(try XCTUnwrap(beforeZebra.zebraMask).cells.allSatisfy { !$0 })
+        let zebra = try await feed(50, white)
+        XCTAssertTrue(try XCTUnwrap(zebra.zebraMask).cells.allSatisfy { $0 })
+        let beforeHistogram = try await feed(249, white)
+        XCTAssertEqual(beforeHistogram.histogram?[0], 64)
+        XCTAssertEqual(beforeHistogram.histogramRGB?.map { $0[0] }, [64, 64, 64])
+        let histogram = try await feed(250, white)
+        XCTAssertEqual(histogram.histogram?[255], 64)
+        XCTAssertEqual(histogram.histogramRGB?.map { $0[255] }, [64, 64, 64])
+        await pipeline.setAnalysis(histogram: true, zebra: true, histogramRGB: false)
+        let luma = try await feed(251, black)
+        XCTAssertEqual(luma.histogram?[255], 64)
+        XCTAssertNil(luma.histogramRGB)
+        await pipeline.setAnalysis(histogram: false, zebra: true)
+        _ = try await feed(252, black)
+        await pipeline.setAnalysis(histogram: true, zebra: true)
+        _ = try await feed(253, black)
+        await pipeline.setAnalysis(histogram: true, zebra: true, histogramRGB: true)
+        let rgb = try await feed(254, white)
+        XCTAssertEqual(rgb.histogram?[255], 64, "Missing RGB forces both channels to refresh immediately")
+        XCTAssertEqual(rgb.histogramRGB?.map { $0[255] }, [64, 64, 64])
+    }
+
+    @MainActor
+    func testZebraRefreshesBeforeSharedRGBHistogram() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let black = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+            UIColor.black.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let white = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let collector = RemoteDecodedFrameCollector()
+        let pipeline = RemoteFrameDecodePipeline { collector.frames.append($0) }
+        await pipeline.reset(generation: 1)
+        await pipeline.setAnalysis(histogram: true, zebra: true, histogramRGB: true)
+        func submit(_ image: UIImage) async throws {
+            await pipeline.submit(.init(packet: .init(bytes: try XCTUnwrap(image.pngData()), jpegOffset: 0,
+                operation: PTPConstants.getLiveViewImage), fps: 1, generation: 1))
+            await pipeline.waitUntilIdle()
+        }
+        try await submit(black)
+        try await Task.sleep(for: .milliseconds(70))
+        try await submit(white)
+        let early = try XCTUnwrap(collector.frames.last)
+        XCTAssertTrue(try XCTUnwrap(early.zebraMask).cells.allSatisfy { $0 })
+        XCTAssertEqual(early.histogram?[0], 64)
+        XCTAssertEqual(early.histogramRGB?.map { $0[0] }, [64, 64, 64])
+        try await Task.sleep(for: .milliseconds(260))
+        try await submit(white)
+        let late = try XCTUnwrap(collector.frames.last)
+        XCTAssertEqual(late.histogram?[255], 64)
+        XCTAssertEqual(late.histogramRGB?.map { $0[255] }, [64, 64, 64])
+    }
+
+    @MainActor
+    func testNonuniformAnalysisUsesScaledPixelCenters() async throws {
+        let width = 319, height = 241
+        func bright(_ x: Int, _ y: Int) -> Bool { (x / 7 + y / 11) % 2 == 0 }
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let value: UInt8 = bright(x, y) ? 255 : 0
+                for channel in 0..<3 { bytes[(y * width + x) * 4 + channel] = value }
+            }
+        }
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
+        let cg = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        let collector = RemoteDecodedFrameCollector()
+        let pipeline = RemoteFrameDecodePipeline { collector.frames.append($0) }
+        await pipeline.reset(generation: 1)
+        await pipeline.setAnalysis(histogram: true, zebra: true, waveform: true, falseColor: true)
+        await pipeline.submit(.init(packet: .init(bytes: try XCTUnwrap(UIImage(cgImage: cg).pngData()), jpegOffset: 0,
+            operation: PTPConstants.getLiveViewImage), fps: 1, generation: 1))
+        await pipeline.waitUntilIdle()
+        let frame = try XCTUnwrap(collector.frames.last)
+        let zebra = try XCTUnwrap(frame.zebraMask)
+        func expected(_ cols: Int, _ rows: Int) -> [Bool] {
+            (0..<rows).flatMap { y in
+                (0..<cols).map { x in
+                    bright((2 * x + 1) * width / (2 * cols), (2 * y + 1) * height / (2 * rows))
+                }
+            }
+        }
+        XCTAssertEqual(zebra.cells, expected(zebra.cols, zebra.rows))
+        let monitor = expected(256, 192)
+        XCTAssertEqual(frame.falseColorPixels, monitor.map { $0 ? UInt32(0xFFF14D4D) : UInt32(0xFF6B39B8) })
+        let waveform = try XCTUnwrap(frame.waveform?.first)
+        for x in 0..<256 {
+            let whites = (0..<192).filter { monitor[$0 * 256 + x] }.count
+            XCTAssertEqual(waveform[x], whites)
+            XCTAssertEqual(waveform[127 * 256 + x], 192 - whites)
+        }
+        let whites = stride(from: 0, to: height, by: 2).reduce(0) { total, y in
+            total + stride(from: 0, to: width, by: 2).filter { bright($0, y) }.count
+        }
+        XCTAssertEqual(frame.histogram?[255], whites)
+        XCTAssertEqual(frame.histogram?[0], 19360 - whites)
+    }
+
+    @MainActor
+    func testMonitorAnalysisSharesBoundedDimensionsForLargeAndNarrowFrames() async throws {
+        for (width, height, sampledWidth, sampledHeight) in [(1920, 1080, 256, 192), (319, 241, 256, 192), (17, 300, 17, 192)] {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.preferredRange = .standard
+            let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+                UIColor.red.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            }
+            let collector = RemoteDecodedFrameCollector()
+            let pipeline = RemoteFrameDecodePipeline { collector.frames.append($0) }
+            await pipeline.reset(generation: 1)
+            await pipeline.setAnalysis(histogram: false, zebra: false, waveform: true, falseColor: true)
+            await pipeline.submit(.init(packet: .init(bytes: try XCTUnwrap(image.pngData()), jpegOffset: 0,
+                operation: PTPConstants.getLiveViewImage), fps: 1, generation: 1))
+            await pipeline.waitUntilIdle()
+            let frame = try XCTUnwrap(collector.frames.last)
+            XCTAssertEqual(frame.falseColorWidth, sampledWidth)
+            XCTAssertEqual(frame.falseColorHeight, sampledHeight)
+            XCTAssertEqual(frame.falseColorPixels, Array(repeating: 0xFF50555B, count: sampledWidth * sampledHeight))
+            XCTAssertEqual(frame.waveform?.first?.reduce(0, +), sampledWidth * sampledHeight)
+            XCTAssertEqual(frame.image.cgImage?.width, width)
+            XCTAssertEqual(frame.image.cgImage?.height, height)
+        }
+    }
+
+    @MainActor
+    func testHistogramSamplesBothAxesAtFullHDAndNondivisibleDimensions() async throws {
+        for (width, height, expected) in [(1920, 1080, 20736), (319, 241, 19360)] {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.preferredRange = .standard
+            let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+                UIColor.red.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            }
+            let collector = RemoteDecodedFrameCollector()
+            let pipeline = RemoteFrameDecodePipeline { collector.frames.append($0) }
+            await pipeline.reset(generation: 1)
+            await pipeline.setAnalysis(histogram: true, zebra: false, histogramRGB: true)
+            await pipeline.submit(.init(packet: .init(bytes: try XCTUnwrap(image.pngData()), jpegOffset: 0,
+                operation: PTPConstants.getLiveViewImage), fps: 1, generation: 1))
+            await pipeline.waitUntilIdle()
+            let frame = try XCTUnwrap(collector.frames.last)
+            XCTAssertEqual(frame.histogram?.reduce(0, +), expected)
+            XCTAssertEqual(frame.histogram?[53], expected)
+            XCTAssertEqual(frame.histogramRGB?.map { $0.reduce(0, +) }, [expected, expected, expected])
+            XCTAssertEqual(frame.histogramRGB?[0][255], expected)
+            XCTAssertEqual(frame.histogramRGB?[1][0], expected)
+            XCTAssertEqual(frame.histogramRGB?[2][0], expected)
+        }
+    }
+
+    @MainActor
+    func testDecodedPrimaryColorsUseMonitorWeightsWithoutChangingHistogram() async throws {
+        for (color, row, histogramBin, falseColor): (UIColor, Int, Int, UInt32) in [
+            (.red, 90, 53, 0xFF50555B), (.green, 53, 182, 0xFFB9BDC2), (.blue, 114, 18, 0xFF2874D7)
+        ] {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.preferredRange = .standard
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+                color.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+            }
+            // Lossless encoded input isolates analysis from JPEG quantization.
+            let encoded = try XCTUnwrap(image.pngData())
+            let collector = RemoteDecodedFrameCollector()
+            let pipeline = RemoteFrameDecodePipeline { collector.frames.append($0) }
+            await pipeline.reset(generation: 1)
+            await pipeline.setAnalysis(histogram: true, zebra: true, waveform: true, falseColor: true)
+            await pipeline.submit(.init(packet: .init(bytes: encoded, jpegOffset: 0,
+                operation: PTPConstants.getLiveViewImage), fps: 1, generation: 1))
+            await pipeline.waitUntilIdle()
+            let frame = try XCTUnwrap(collector.frames.last)
+            XCTAssertEqual(frame.falseColorPixels, Array(repeating: falseColor, count: 64))
+            let waveform = try XCTUnwrap(frame.waveform?.first)
+            XCTAssertEqual(waveform.reduce(0, +), 64)
+            for column in stride(from: 0, to: 256, by: 32) {
+                XCTAssertEqual(waveform[row * 256 + column], 8)
+            }
+            XCTAssertEqual(frame.histogram?[histogramBin], 64)
+            XCTAssertEqual(frame.histogram?.reduce(0, +), 64)
+        }
+    }
+
     func testPipelineConflatesPendingFramesRunsAnalysisOffMainAndRejectsOldGeneration() async throws {
         let collector = await MainActor.run { RemoteDecodedFrameCollector() }
         let pipeline = RemoteFrameDecodePipeline(decodeDelayNanoseconds: 80_000_000) { frame in
@@ -1216,24 +3026,518 @@ final class RemoteFrameDecodePipelineTests: XCTestCase {
 }
 
 final class RemoteViewfinderRecorderTests: XCTestCase {
+    func testAudioBeforeFirstVideoSurvivesPauseOnSharedEpoch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let clock = RecorderClockSequence([100, 100.25, 101.25])
+        let recorder = RemoteViewfinderRecorder(outputURL: directory.appendingPathComponent("audio-epoch.mp4"),
+            sourceSize: CGSize(width: 64, height: 48), withAudio: true, clock: { clock.next() },
+            makeAudioCapture: { AVCaptureSession() })
+        XCTAssertTrue(recorder.start())
+        for index in 0..<5 {
+            recorder.appendAudioSample(try silence(at: 100.05 + Double(index) * 1024 / 44100))
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        recorder.pause(); recorder.resume()
+        await recorder.waitForSubmittedWork()
+        for index in 0..<5 {
+            recorder.appendAudioSample(try silence(at: 101.5 + Double(index) * 1024 / 44100))
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        recorder.append(image: image, receivedAtUptime: 101.5)
+        await recorder.waitForSubmittedWork()
+        recorder.append(image: image, receivedAtUptime: 101.75)
+        await recorder.waitForSubmittedWork()
+        let result = await recorder.stop()
+        let asset = AVURLAsset(url: try XCTUnwrap(result))
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        let track = try XCTUnwrap(tracks.first)
+        let segments = try await track.load(.segments)
+        XCTAssertFalse(segments.filter { !$0.isEmpty }.isEmpty)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        var times: [Double] = []
+        while let sample = output.copyNextSampleBuffer() {
+            if CMSampleBufferGetTotalSampleSize(sample) > 0 {
+                for index in 0..<CMSampleBufferGetNumSamples(sample) {
+                    var timing = CMSampleTimingInfo()
+                    XCTAssertEqual(CMSampleBufferGetSampleTimingInfo(sample, at: index, timingInfoOut: &timing), noErr)
+                    let sourceTime = timing.presentationTimeStamp
+                    if let segment = segments.first(where: { !$0.isEmpty && CMTimeRangeContainsTime($0.timeMapping.source, time: sourceTime) }) {
+                        let mapping = segment.timeMapping
+                        times.append(sourceTime.seconds - mapping.source.start.seconds + mapping.target.start.seconds)
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(reader.status, .completed)
+        XCTAssertGreaterThan(times.count, 5)
+        XCTAssertLessThan(try XCTUnwrap(times.first), 0.15, "Audio preceding first video must be retained")
+        XCTAssertGreaterThan(try XCTUnwrap(times.last), 0.55)
+        XCTAssertLessThan(try XCTUnwrap(times.last), 0.75, "Pause must be deducted exactly once")
+    }
+
+    private func silence(at time: Double) throws -> CMSampleBuffer {
+        let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 44100,
+                                                channels: 1, interleaved: true))
+        let pcm = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024))
+        pcm.frameLength = 1024
+        memset(pcm.mutableAudioBufferList.pointee.mBuffers.mData, 0, 2048)
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 44100),
+            presentationTimeStamp: CMTime(seconds: time, preferredTimescale: 44100), decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        XCTAssertEqual(CMSampleBufferCreate(allocator: kCFAllocatorDefault, dataBuffer: nil, dataReady: false,
+            makeDataReadyCallback: nil, refcon: nil, formatDescription: format.formatDescription,
+            sampleCount: 1024, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+            sampleSizeEntryCount: 0, sampleSizeArray: nil, sampleBufferOut: &sample), noErr)
+        let result = try XCTUnwrap(sample)
+        XCTAssertEqual(CMSampleBufferSetDataBufferFromAudioBufferList(result, blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault, flags: 0, bufferList: pcm.audioBufferList), noErr)
+        return result
+    }
+
+    func testPauseBeforeFirstFrameUsesRecordingStartEpoch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let clock = RecorderClockSequence([100, 100.25, 101.25])
+        let recorder = RemoteViewfinderRecorder(outputURL: directory.appendingPathComponent("epoch.mp4"),
+            sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { clock.next() })
+        XCTAssertTrue(recorder.start())
+        recorder.pause()
+        recorder.resume()
+        await recorder.waitForSubmittedWork()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        recorder.append(image: image, receivedAtUptime: 101.5)
+        await recorder.waitForSubmittedWork()
+        recorder.append(image: image, receivedAtUptime: 101.75)
+        await recorder.waitForSubmittedWork()
+        let result = await recorder.stop()
+        let asset = AVURLAsset(url: try XCTUnwrap(result))
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let segments = try await XCTUnwrap(tracks.first).load(.segments)
+        let mapping = try XCTUnwrap(segments.first { !$0.isEmpty }).timeMapping
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: try XCTUnwrap(tracks.first), outputSettings: nil)
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        var pts: [Double] = []
+        while let sample = output.copyNextSampleBuffer() {
+            if CMSampleBufferGetTotalSampleSize(sample) > 0 {
+                pts.append(CMSampleBufferGetPresentationTimeStamp(sample).seconds
+                    - mapping.source.start.seconds + mapping.target.start.seconds)
+            }
+        }
+        XCTAssertEqual(pts.count, 2, "Encoded sample timestamps: \(pts)")
+        if pts.count == 2 {
+            XCTAssertEqual(pts[0], 0.5, accuracy: 0.001)
+            XCTAssertEqual(pts[1], 0.75, accuracy: 0.001)
+        }
+        XCTAssertEqual(reader.status, .completed)
+    }
+
+    func testRecordingFrameFitsFixedCanvasAfterDesqueezeOrSourceChanges() {
+        let canvas = CGSize(width: 128, height: 48)
+        XCTAssertEqual(RemoteViewfinderRecorder.fittedFrame(source: CGSize(width: 64, height: 48),
+                         canvas: canvas, desqueeze: 2), CGRect(x: 0, y: 0, width: 128, height: 48))
+        XCTAssertEqual(RemoteViewfinderRecorder.fittedFrame(source: CGSize(width: 64, height: 48),
+                         canvas: canvas, desqueeze: 1), CGRect(x: 32, y: 0, width: 64, height: 48))
+        let portrait = RemoteViewfinderRecorder.fittedFrame(source: CGSize(width: 48, height: 64),
+                                                            canvas: canvas, desqueeze: 1.33)
+        XCTAssertEqual(portrait.height, 48)
+        XCTAssertEqual(portrait.width, 48 * 1.33 / 64 * 48, accuracy: 0.0001)
+        XCTAssertEqual(portrait.midX, 64)
+        for invalid in [Double.nan, .infinity, 0.5, 3] {
+            XCTAssertEqual(RemoteViewfinderRecorder.validDesqueeze(invalid), 1)
+        }
+    }
+
+    func testSameNameRecordersPublishDistinctPlayableFilesWithoutDeletingPrevious() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let output = directory.appendingPathComponent("rec_same_second.mp4")
+        // Generate a real previous recording rather than a non-video placeholder.
+        let previous = RemoteViewfinderRecorder(outputURL: output, sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 })
+        XCTAssertTrue(previous.start())
+        await appendFrames(to: previous)
+        let previousResult = await previous.stop()
+        XCTAssertEqual(previousResult, output)
+        let original = try Data(contentsOf: output)
+        let first = RemoteViewfinderRecorder(outputURL: output, sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 })
+        let second = RemoteViewfinderRecorder(outputURL: output, sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 })
+        XCTAssertTrue(first.start())
+        XCTAssertTrue(second.start())
+        XCTAssertEqual(try Data(contentsOf: output), original)
+        await appendFrames(to: first)
+        await appendFrames(to: second)
+        async let firstResult = first.stop()
+        async let secondResult = second.stop()
+        let finished = await (firstResult, secondResult)
+        let results = try [XCTUnwrap(finished.0), XCTUnwrap(finished.1)]
+        XCTAssertNotEqual(results[0], results[1])
+        for result in results {
+            XCTAssertNotEqual(result, output)
+            try await assertDecodableSilentRecording(result)
+        }
+        XCTAssertEqual(try Data(contentsOf: output), original)
+        try await assertDecodableSilentRecording(output)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 3)
+    }
+
+    func testPublishFailureCleansOnlyOwnedStagingDirectory() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let output = directory.appendingPathComponent("rec_existing.mp4")
+        let original = Data("existing recording".utf8)
+        try original.write(to: output)
+        let recorder = RemoteViewfinderRecorder(outputURL: output, sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 })
+        XCTAssertTrue(recorder.start())
+        await appendFrames(to: recorder)
+        // Revoke the temporary pathname while the writer is open: completion
+        // must not remove the unrelated existing destination on publish failure.
+        let staging = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .first { $0.lastPathComponent.hasPrefix(".recording_") })
+        try FileManager.default.removeItem(at: staging)
+        let result = await recorder.stop()
+        XCTAssertNil(result)
+        XCTAssertEqual(try Data(contentsOf: output), original)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [output.lastPathComponent])
+    }
+
+    func testEncodedDesqueezeCanvasAndChangingFrameAspectPreserveBlackBars() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cases: [(Double, CGSize, Double, Int, Bool, Bool)] = [
+            (1.33, CGSize(width: 64, height: 48), 1.33, 84, false, false),
+            (2, CGSize(width: 64, height: 48), 2, 128, false, false),
+            (2, CGSize(width: 64, height: 48), 1, 128, true, false),
+            (2, CGSize(width: 32, height: 64), 1.33, 128, true, false),
+            (2, CGSize(width: 192, height: 48), 1, 128, false, true)
+        ]
+        for (index, item) in cases.enumerated() {
+            let (initial, source, multiplier, width, sideBlack, topBlack) = item
+            let url = directory.appendingPathComponent("geometry-\(index).mp4")
+            let recorder = RemoteViewfinderRecorder(outputURL: url, sourceSize: CGSize(width: 64, height: 48),
+                                                    withAudio: false, clock: { 100 }, desqueeze: initial)
+            XCTAssertTrue(recorder.start())
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let image = UIGraphicsImageRenderer(size: source, format: format).image { context in
+                UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: source))
+            }
+            let firstImage = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48), format: format).image { context in
+                UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+            }
+            recorder.append(image: firstImage, receivedAtUptime: 100, desqueeze: initial)
+            await recorder.waitForSubmittedWork()
+            await recorder.waitForSubmittedWork()
+            for frame in 1...3 {
+                recorder.append(image: image, receivedAtUptime: 100 + Double(frame) / 30, desqueeze: multiplier)
+                await recorder.waitForSubmittedWork()
+                // Flush the serial append queue without depending on wall time.
+                await recorder.waitForSubmittedWork()
+            }
+            let result = await recorder.stop()
+            let asset = AVURLAsset(url: try XCTUnwrap(result))
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            let track = try XCTUnwrap(tracks.first)
+            let reader = try AVAssetReader(asset: asset)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ])
+            reader.add(output)
+            XCTAssertTrue(reader.startReading())
+            var count = 0
+            while let sample = output.copyNextSampleBuffer() {
+                let buffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+                XCTAssertEqual(CVPixelBufferGetWidth(buffer), width)
+                XCTAssertEqual(CVPixelBufferGetHeight(buffer), 48)
+                CVPixelBufferLockBaseAddress(buffer, .readOnly)
+                let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer)).assumingMemoryBound(to: UInt8.self)
+                let stride = CVPixelBufferGetBytesPerRow(buffer)
+                func brightness(_ x: Int, _ y: Int) -> Int { Int(base[y * stride + x * 4 + 1]) }
+                XCTAssertGreaterThan(brightness(width / 2, 24), 220)
+                XCTAssertEqual(brightness(4, 24) < 30, count == 0 ? false : sideBlack)
+                XCTAssertEqual(brightness(width / 2, 3) < 30, count == 0 ? false : topBlack)
+                CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+                count += 1
+            }
+            XCTAssertEqual(reader.status, .completed)
+            XCTAssertEqual(count, 4)
+        }
+    }
+
+    func testContinuousProducersCannotStarvePauseOrStop() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = RemoteViewfinderRecorder(outputURL: directory.appendingPathComponent("fairness.mp4"),
+            sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 })
+        XCTAssertTrue(recorder.start())
+        await appendFrames(to: recorder)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        let audio = try silence(at: 100.2)
+        let producer = Task.detached {
+            while !Task.isCancelled {
+                recorder.append(image: image, receivedAtUptime: 100.2)
+                recorder.appendAudioSample(audio)
+            }
+        }
+        defer { producer.cancel() }
+        try await Task.sleep(for: .milliseconds(50))
+        let started = ContinuousClock.now
+        recorder.pause()
+        await recorder.waitForSubmittedWork()
+        recorder.resume()
+        await recorder.waitForSubmittedWork()
+        let result = await recorder.stop()
+        producer.cancel()
+        await producer.value
+        XCTAssertLessThan(started.duration(to: .now), .seconds(2))
+        try await assertDecodableSilentRecording(XCTUnwrap(result))
+    }
+
+    func testBlockedRecorderRetainsOnlyLatestOfferedImage() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let entered = expectation(description: "Recorder worker blocked")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let times = RecorderClockSequence([100, 100.25])
+        let recorder = RemoteViewfinderRecorder(outputURL: directory.appendingPathComponent("bounded.mp4"),
+            sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: {
+                let time = times.next()
+                if time == 100.25 { entered.fulfill(); release.wait() }
+                return time
+            })
+        XCTAssertTrue(recorder.start())
+        await appendFrames(to: recorder)
+        recorder.pause()
+        await fulfillment(of: [entered], timeout: 3)
+        var images: [WeakRecorderImage] = []
+        var audio: [WeakRecorderAudio] = []
+        for index in 0..<1000 {
+            try autoreleasepool {
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+                    UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+                }
+                images.append(WeakRecorderImage(image))
+                recorder.append(image: image, receivedAtUptime: 101 + Double(index) / 30)
+                let sample = try silence(at: 101 + Double(index) * 1024 / 44100)
+                audio.append(WeakRecorderAudio(sample))
+                recorder.appendAudioSample(sample)
+            }
+        }
+        XCTAssertEqual(images.filter { $0.value != nil }.count, 1,
+                       "Queue closures must not retain every obsolete frame")
+        XCTAssertEqual(audio.filter { $0.value != nil }.count, 1)
+        release.signal()
+        let result = await recorder.stop()
+        try await assertDecodableSilentRecording(XCTUnwrap(result))
+        XCTAssertTrue(images.allSatisfy { $0.value == nil })
+        XCTAssertTrue(audio.allSatisfy { $0.value == nil })
+    }
+
+    func testRecorderInputReplacesBacklogWithoutSchedulingMoreConsumers() {
+        let input = RemoteRecordingLatestInput<Int>()
+        XCTAssertTrue(input.offer(0))
+        for value in 1...10_000 { XCTAssertFalse(input.offer(value)) }
+        XCTAssertEqual(input.take(), 10_000)
+        // A producer arriving during slow encoding must not enqueue a second
+        // consumer, and its newest value wins over retrying the failed old one.
+        for value in 10_001...20_000 { XCTAssertFalse(input.offer(value)) }
+        XCTAssertTrue(input.finish(retry: 10_000))
+        XCTAssertEqual(input.take(), 20_000)
+        XCTAssertFalse(input.finish())
+        XCTAssertTrue(input.offer(20_001))
+        XCTAssertEqual(input.take(), 20_001)
+        XCTAssertTrue(input.finish(retry: 20_001))
+        input.discardPending()
+        XCTAssertNil(input.take())
+        XCTAssertFalse(input.finish())
+    }
+
+    func testRecorderInputConcurrentProducersStillReserveOneConsumer() {
+        let input = RemoteRecordingLatestInput<Int>()
+        XCTAssertTrue(input.offer(-1))
+        DispatchQueue.concurrentPerform(iterations: 1000) { value in
+            XCTAssertFalse(input.offer(value))
+        }
+        // Explicit final producer makes the expected last value deterministic.
+        XCTAssertFalse(input.offer(1000))
+        XCTAssertEqual(input.take(), 1000)
+        XCTAssertFalse(input.finish())
+        XCTAssertTrue(input.offer(1001))
+    }
+
+    func testEncodingFailureStreakResetsOnSuccessAndStopsExactlyOnceAtThirty() {
+        var streak = RemoteRecordingFailureStreak()
+        for _ in 0..<3 {
+            for _ in 0..<29 { XCTAssertFalse(streak.record(success: false)) }
+            XCTAssertFalse(streak.record(success: true))
+            XCTAssertEqual(streak.count, 0)
+        }
+        for _ in 0..<29 { XCTAssertFalse(streak.record(success: false)) }
+        XCTAssertTrue(streak.record(success: false))
+        XCTAssertTrue(streak.stopped)
+        XCTAssertEqual(streak.count, 30)
+        XCTAssertFalse(streak.record(success: false))
+        XCTAssertFalse(streak.record(success: true))
+        XCTAssertTrue(streak.stopped)
+    }
+
+    func testValidFrameReplacesFailingRetryAndRecordingContinues() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let failed = expectation(description: "Recovered encoder must not request stop")
+        failed.isInverted = true
+        let recorder = RemoteViewfinderRecorder(outputURL: directory.appendingPathComponent("recovery.mp4"),
+            sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 },
+            onEncodingFailure: { failed.fulfill() })
+        XCTAssertTrue(recorder.start())
+        await appendFrames(to: recorder)
+        await recorder.waitForSubmittedWork()
+        recorder.append(image: UIImage(), receivedAtUptime: 100.2)
+        await recorder.waitForSubmittedWork()
+        try await Task.sleep(for: .milliseconds(40))
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        recorder.append(image: image, receivedAtUptime: 100.3)
+        await recorder.waitForSubmittedWork()
+        await fulfillment(of: [failed], timeout: 0.3)
+        recorder.append(image: image, receivedAtUptime: 100.4)
+        await recorder.waitForSubmittedWork()
+        let result = await recorder.stop()
+        try await assertDecodableSilentRecording(XCTUnwrap(result))
+    }
+
+    func testRepeatedUnencodableFrameAutomaticallyRequestsFinalization() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let failed = expectation(description: "Thirty consecutive encoding failures")
+        failed.assertForOverFulfill = true
+        let recorder = RemoteViewfinderRecorder(outputURL: directory.appendingPathComponent("failure.mp4"),
+            sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 },
+            onEncodingFailure: { failed.fulfill() })
+        XCTAssertTrue(recorder.start())
+        await appendFrames(to: recorder)
+        await recorder.waitForSubmittedWork()
+        // No CGImage: exercise the actual pixel-buffer failure path, with no
+        // later camera frames to drive the 30-attempt failure streak.
+        recorder.append(image: UIImage(), receivedAtUptime: 100.2)
+        await recorder.waitForSubmittedWork()
+        await fulfillment(of: [failed], timeout: 3)
+        let result = await recorder.stop()
+        try await assertDecodableSilentRecording(XCTUnwrap(result))
+    }
+
+    func testBusyVideoInputSkipsButAppendRefusalRetriesThirtyTimes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let operations = RecorderVideoFaults()
+        let stopped = expectation(description: "Only append refusals reach failure threshold")
+        stopped.assertForOverFulfill = true
+        let recorder = RemoteViewfinderRecorder(outputURL: directory.appendingPathComponent("busy.mp4"),
+            sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 },
+            videoOperations: .init(isReady: { operations.isReady($0) },
+                                   append: { operations.append($0, $1, $2) }),
+            onEncodingFailure: { stopped.fulfill() })
+        XCTAssertTrue(recorder.start())
+        await appendFrames(to: recorder)
+        operations.setBusy()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        for index in 0..<60 {
+            recorder.append(image: image, receivedAtUptime: 100.2 + Double(index) / 100)
+            await recorder.waitForSubmittedWork()
+        }
+        XCTAssertEqual(operations.busySkips, 60)
+        XCTAssertEqual(operations.refusals, 0)
+        operations.setRefusing()
+        recorder.append(image: image, receivedAtUptime: 101)
+        await fulfillment(of: [stopped], timeout: 3)
+        XCTAssertEqual(operations.refusals, 30)
+        recorder.append(image: image, receivedAtUptime: 102)
+        await recorder.waitForSubmittedWork()
+        XCTAssertEqual(operations.refusals, 30)
+        let result = await recorder.stop()
+        try await assertDecodableSilentRecording(XCTUnwrap(result))
+    }
+
+    func testTerminalWriterRequestsStopAndDiscardsUnpublishableRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writerOwner = RecorderWriterOwner()
+        let failed = expectation(description: "Terminal writer requests finalization once")
+        failed.assertForOverFulfill = true
+        let output = directory.appendingPathComponent("terminal.mp4")
+        let recorder = RemoteViewfinderRecorder(outputURL: output,
+            sourceSize: CGSize(width: 64, height: 48), withAudio: false, clock: { 100 },
+            makeWriter: { url in
+                let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+                writerOwner.store(writer)
+                return writer
+            }, onEncodingFailure: { failed.fulfill() })
+        XCTAssertTrue(recorder.start())
+        await appendFrames(to: recorder)
+        writerOwner.cancel()
+        XCTAssertEqual(writerOwner.status, .cancelled)
+        await appendFrames(to: recorder)
+        await fulfillment(of: [failed], timeout: 3)
+        let result = await recorder.stop()
+        XCTAssertNil(result)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        let repeated = await recorder.stop()
+        XCTAssertNil(repeated)
+    }
+
+    private func appendFrames(to recorder: RemoteViewfinderRecorder) async {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        recorder.append(image: image, receivedAtUptime: 100)
+        await recorder.waitForSubmittedWork()
+        recorder.append(image: image, receivedAtUptime: 100.05)
+        await recorder.waitForSubmittedWork()
+        recorder.append(image: image, receivedAtUptime: 100.10)
+        await recorder.waitForSubmittedWork()
+    }
+
     func testRecorderWritesLiveViewFramesAndFinalizesPlayableContainer() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ztransfer-recorder-\(UUID().uuidString)", isDirectory: true)
         let output = directory.appendingPathComponent("rec_test.mp4")
         let recorder = RemoteViewfinderRecorder(outputURL: output,
                                                 sourceSize: CGSize(width: 64, height: 48),
-                                                withAudio: false)
+                                                withAudio: false, clock: { 100 })
         XCTAssertTrue(recorder.start())
         let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
             UIColor.systemBlue.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
         }
         recorder.append(image: image, receivedAtUptime: 100)
+        await recorder.waitForSubmittedWork()
         recorder.append(image: image, receivedAtUptime: 100.05)
+        await recorder.waitForSubmittedWork()
         recorder.pause()
         recorder.append(image: image, receivedAtUptime: 100.10)
+        await recorder.waitForSubmittedWork()
         recorder.resume()
         recorder.append(image: image, receivedAtUptime: 100.15)
+        await recorder.waitForSubmittedWork()
         let result = await recorder.stop()
         XCTAssertEqual(result, output)
         let values = try output.resourceValues(forKeys: [.fileSizeKey])
@@ -1242,6 +3546,7 @@ final class RemoteViewfinderRecorderTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 }
+
 
 /// Decode every frame: a nonempty MP4 alone does not prove its muxer was closed.
 private func assertDecodableSilentRecording(_ url: URL,
@@ -1281,9 +3586,13 @@ private func assertDecodableSilentRecording(_ url: URL,
 private actor RemoteLifecycleCamera: RemoteCameraControlling {
     nonisolated let isUSB: Bool
     private(set) var log: [String] = []
-    private let movie: Bool
+    private var movie: Bool
     private let model: String?
     private var failingFrames: Int
+    func failNextFrames(_ count: Int) { failingFrames = count }
+    private var successfulFrameLimit: Int?
+    private(set) var successfulFrameCount = 0
+    func limitSuccessfulFrames(to count: Int) { successfulFrameLimit = count }
     private var transportFailure: Bool
     private var batteryEvent = false
     private var overrides: [RemoteProperty: RemotePropertyDescriptor] = [:]
@@ -1291,6 +3600,10 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var propertyErrors: [RemoteProperty: PTPSessionError] = [:]
     private var propertyDelays: [RemoteProperty: Int] = [:]
     private var refreshFailures = Set<RemoteProperty>()
+    private var deviceModelProbe: (@Sendable () async -> Void)?
+    private var refreshResponseProbes: [RemoteProperty: @Sendable () async -> Void] = [:]
+    private var propertyResponseProbes: [RemoteProperty: @Sendable () async -> Void] = [:]
+    private var meterRefreshProbe: (@Sendable () async -> Void)?
     private var queuedEvents: [STAEvent] = []
     private var captureFails = false
     private var acceptedWrites = Set<RemoteProperty>()
@@ -1302,8 +3615,27 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     private var movieStarts: [RemoteMovieStartResult] = []
     private var preparedMovieStartDelay = 0
     private var remoteControlMode = false
+    private var remoteDiagnosticControlMode = false
+    private var diagnosticDelay = 0
+    private var diagnosticResponses: [UInt16] = []
+    private var controlResponses: [UInt16] = []
     private var applicationMode = false
-    private let frame: Data
+    private var monitorIDs: [UInt32] = []
+    private var monitorFreeBytes: [UInt32: Int64] = [:]
+    private var monitorErrors: [UInt32: PTPSessionError] = [:]
+    private var monitorIDsError: PTPSessionError?
+    private var monitorAdmissionProbe: (@Sendable () async -> Void)?
+    private var monitorResponseProbe: (@Sendable () async -> Void)?
+    func setMonitorAdmissionProbe(_ probe: @escaping @Sendable () async -> Void) { monitorAdmissionProbe = probe }
+    func setMonitorResponseProbe(_ probe: @escaping @Sendable () async -> Void) { monitorResponseProbe = probe }
+    private var frame: Data
+    func replaceFrame(size: CGSize) {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        frame = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
+        }.jpegData(compressionQuality: 0.5)!
+    }
     init(movie: Bool = false, failingFrames: Int = 0, isUSB: Bool = false,
          model: String? = nil,
          transportFailure: Bool = false, frameSize: CGSize = CGSize(width: 8, height: 8)) {
@@ -1327,6 +3659,10 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         catch { log.append("cancelled-frame"); throw error }
         if transportFailure { transportFailure = false; throw PTPSessionError.timeout }
         if failingFrames > 0 { failingFrames -= 1; throw PTPSessionError.responseCode(0xA004) }
+        if let successfulFrameLimit, successfulFrameCount >= successfulFrameLimit {
+            throw PTPSessionError.responseCode(PTPConstants.deviceBusy)
+        }
+        successfulFrameCount += 1
         if let enhancedFrame {
             return .init(bytes: enhancedFrame, jpegOffset: 512, operation: PTPConstants.getLiveViewImageEx,
                          receivedAtUptime: ProcessInfo.processInfo.systemUptime - frameAge)
@@ -1351,13 +3687,39 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         enhancedFrame = Data(bytes) + frame
         frameAge = age
     }
-    func remoteDeviceModel() async -> String? { model }
+    func remoteDeviceModel() async -> String? {
+        if let probe = deviceModelProbe { deviceModelProbe = nil; await probe() }
+        return model
+    }
+    func holdNextDeviceModel(_ probe: @escaping @Sendable () async -> Void) { deviceModelProbe = probe }
+    func holdNextRefresh(_ property: RemoteProperty, _ probe: @escaping @Sendable () async -> Void) {
+        refreshResponseProbes[property] = probe
+    }
     func remoteMovieMode() -> Bool? {
         log.append("selector")
         return overrides[.liveViewSelector].map { $0.current != 0 } ?? movie
     }
+    func monitorStorageIDs() throws -> [UInt32] {
+        log.append("storage:ids")
+        if let monitorIDsError { throw monitorIDsError }
+        return monitorIDs
+    }
+    func monitorFreeBytes(storageID: UInt32, allowed: @escaping @Sendable () async -> Bool) async throws -> Int64? {
+        if let probe = monitorAdmissionProbe { monitorAdmissionProbe = nil; await probe() }
+        guard await allowed() else { return nil }
+        log.append("storage:free:\(storageID)")
+        let error = monitorErrors[storageID], value = monitorFreeBytes[storageID]
+        if let probe = monitorResponseProbe { monitorResponseProbe = nil; await probe() }
+        if let error { throw error }
+        return value
+    }
     func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor? {
         log.append("property:\(property)")
+        if let probe = propertyResponseProbes.removeValue(forKey: property) {
+            let captured = overrides[property]
+            await probe()
+            return captured
+        }
         if let delay = propertyDelays[property] {
             do { try await Task.sleep(for: .milliseconds(delay)) }
             catch { log.append("cancelled-property:\(property)"); throw error }
@@ -1368,7 +3730,18 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         return .init(property: property, dataType: property == .batteryLevel ? 0x0002 : 0x0006, writable: true,
                      current: property == .liveViewSelector ? (movie ? 1 : 0) : 0, values: [0, 1])
     }
-    func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) -> RemotePropertyDescriptor? {
+    func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async -> RemotePropertyDescriptor? {
+        if let probe = refreshResponseProbes.removeValue(forKey: descriptor.property) {
+            let captured = overrides[descriptor.property] ?? descriptor
+            await probe()
+            return captured
+        }
+        if descriptor.property == .nikonLightMeter, let probe = meterRefreshProbe {
+            meterRefreshProbe = nil
+            let captured = overrides[descriptor.property] ?? descriptor
+            await probe()
+            return captured
+        }
         log.append("refresh:\(descriptor.property)")
         if refreshFailures.contains(descriptor.property) { return nil }
         return overrides[descriptor.property] ?? descriptor
@@ -1391,11 +3764,23 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     }
     func emitBatteryEvent() { batteryEvent = true }
     func setProperty(_ descriptor: RemotePropertyDescriptor) { overrides[descriptor.property] = descriptor }
+    func setMonitorStorage(ids: [UInt32], free: [UInt32: Int64], errors: [UInt32: PTPSessionError] = [:], idsError: PTPSessionError? = nil) {
+        monitorIDs = ids
+        monitorFreeBytes = free
+        monitorErrors = errors
+        monitorIDsError = idsError
+    }
+    func holdNextProperty(_ property: RemoteProperty, _ probe: @escaping @Sendable () async -> Void) {
+        propertyResponseProbes[property] = probe
+    }
     func delayProperty(_ property: RemoteProperty, milliseconds: Int) { propertyDelays[property] = milliseconds }
     func failProperty(_ property: RemoteProperty, error: PTPSessionError) { propertyErrors[property] = error }
     func markUnsupported(_ property: RemoteProperty) { unsupported.insert(property) }
+    func holdNextMeterRefresh(_ probe: @escaping @Sendable () async -> Void) { meterRefreshProbe = probe }
+    func restoreRefresh(_ property: RemoteProperty) { refreshFailures.remove(property) }
     func failRefresh(_ property: RemoteProperty) { refreshFailures.insert(property) }
     func queueEvents(_ events: [STAEvent]) { queuedEvents += events }
+    func changeMovieMode(_ value: Bool) { movie = value }
     func queueMovieStarts(_ results: [RemoteMovieStartResult]) { movieStarts += results }
     func failCapture() { captureFails = true }
     func acceptWrites(_ property: RemoteProperty) { acceptedWrites.insert(property) }
@@ -1455,21 +3840,59 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         }
         return movieStarts.removeFirst()
     }
-    func endMovieRecording() -> UInt16 { log.append("movie:end"); return PTPConstants.responseOK }
-    func refreshUSBRemoteSession() -> String { log.append("usb:refresh"); return "refreshed" }
-    func setRemoteControlMode(_ enabled: Bool) -> UInt16 {
-        log.append("control:\(enabled ? "on" : "off")")
-        remoteControlMode = enabled
-        return PTPConstants.responseOK
+    private var movieStopError: PTPSessionError?
+    private var movieStopResponse = PTPConstants.responseOK
+    func configureMovieStop(error: PTPSessionError? = nil, response: UInt16 = PTPConstants.responseOK) {
+        movieStopError = error
+        movieStopResponse = response
     }
-    func hasRemoteControlMode() -> Bool { remoteControlMode }
-    func hasMovieApplicationMode() -> Bool { applicationMode }
-    func ensureMovieApplicationMode() {
+    func endMovieRecording() throws -> UInt16 {
+        log.append("movie:end")
+        if let movieStopError { throw movieStopError }
+        return movieStopResponse
+    }
+    func refreshUSBRemoteSession() async throws -> String {
+        log.append("usb:refresh")
+        remoteControlMode = false
+        remoteDiagnosticControlMode = false
+        applicationMode = false
+        return "refreshed"
+    }
+    func configureDiagnostic(delay: Int = 0, responses: [UInt16] = []) {
+        diagnosticDelay = delay
+        diagnosticResponses = responses
+    }
+    func configureControlResponses(_ responses: [UInt16]) { controlResponses = responses }
+    func setRemoteControlMode(_ enabled: Bool) async throws -> UInt16 {
+        log.append("control:\(enabled ? "on" : "off")")
+        let response = controlResponses.isEmpty ? PTPConstants.responseOK : controlResponses.removeFirst()
+        if response == PTPConstants.responseOK {
+            remoteControlMode = enabled
+            if !enabled { remoteDiagnosticControlMode = false }
+        }
+        return response
+    }
+    func hasRemoteControlMode() async -> Bool { remoteControlMode }
+    func setRemoteDiagnosticControlMode(_ enabled: Bool) async throws -> UInt16 {
+        log.append("diagnostic:\(enabled ? "on" : "off")")
+        if diagnosticDelay > 0 { try await Task.sleep(for: .milliseconds(diagnosticDelay)) }
+        let response = diagnosticResponses.isEmpty ? PTPConstants.responseOK : diagnosticResponses.removeFirst()
+        if response == PTPConstants.responseOK {
+            remoteDiagnosticControlMode = enabled
+            remoteControlMode = enabled
+            log.append("diagnostic:accepted:\(enabled ? "on" : "off")")
+        }
+        return response
+    }
+    func hasRemoteDiagnosticControlMode() async -> Bool { remoteDiagnosticControlMode }
+    func hasMovieApplicationMode() async -> Bool { applicationMode }
+    func ensureMovieApplicationMode() async {
         log.append("app:on")
         applicationMode = true
     }
     func clearMovieApplicationMode(force: Bool) {
         log.append("app:off:\(force)")
+        if isUSB && remoteControlMode && !force { return }
         applicationMode = false
     }
     func startPreparedUSBMovieRecording() async -> RemoteMovieStartResult {
@@ -1485,6 +3908,26 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
 /// Replay the wire responses, including capability fallback and malformed frames.
 /// These exercise CameraRepository, not a mock of its frame selection policy.
 final class RemoteFrameProtocolTests: XCTestCase {
+    func testMeterRefreshRequiresExactSignedByteThroughProductionRepository() async throws {
+        for property: RemoteProperty in [.nikonLightMeter, .nikonExposureIndicate] {
+            for payload in [Data([0xFD]), Data(), Data([0xFD, 0]), Data([1, 2, 3, 4])] {
+                let wire = RemoteWireReplay([.init(PTPConstants.getDevicePropValue,
+                    parameters: [property.rawValue], payload: payload)])
+                let camera = repository(wire)
+                let descriptor = RemotePropertyDescriptor(property: property, dataType: 1,
+                    writable: false, current: 0, values: [])
+                let result = try await camera.refreshRemoteProperty(descriptor)
+                if payload.count == 1 {
+                    XCTAssertEqual(result.map { Int64(bitPattern: $0.current) }, -3)
+                } else {
+                    XCTAssertNil(result)
+                }
+                let remaining = await wire.remaining
+                XCTAssertEqual(remaining, 0)
+            }
+        }
+    }
+
     private let standard = PTPConstants.getLiveViewImage
     private let enhanced = PTPConstants.getLiveViewImageEx
     private let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
@@ -1721,6 +4164,90 @@ final class RemoteFrameProtocolTests: XCTestCase {
         XCTAssertEqual(operations, [0x9424, 0x90C1, standard, 0x90C8])
     }
 
+    func testPreparedUSBSideEffectsSurviveLaterFailureAndRespectInvalidation() async throws {
+        for propertyFallback in [false, true] {
+            for failureKind in 0..<3 {
+                let failure: any Error
+                switch failureKind {
+                case 0: failure = PTPSessionError.responseCode(0x2002)
+                case 1: failure = CancellationError()
+                default: failure = PTPSessionError.timeout
+                }
+                var steps: [RemoteWireReplay.Step] = [
+                    .init(PTPConstants.getDevicePropValueEx, parameters: [0xD0A4]),
+                    .init(PTPConstants.getDevicePropValue, parameters: [0xD0A4], payload: littleEndian(1 << 14)),
+                    .init(PTPConstants.nikonChangeApplicationMode, parameters: [1],
+                          code: propertyFallback ? PTPConstants.operationNotSupported : PTPConstants.responseOK)
+                ]
+                if propertyFallback {
+                    steps.append(.init(PTPConstants.setDevicePropValue,
+                                       parameters: [RemoteProperty.applicationMode.rawValue], sentData: Data([1])))
+                    steps.append(.init(PTPConstants.getDevicePropValue, parameters: [0xD0A4], failure: failure))
+                    steps.append(.init(PTPConstants.setDevicePropValue,
+                                       parameters: [RemoteProperty.applicationMode.rawValue], sentData: Data([0])))
+                } else {
+                    steps.append(.init(PTPConstants.startMovieRecording, failure: failure))
+                    steps.append(.init(PTPConstants.nikonChangeApplicationMode, parameters: [0]))
+                }
+                let wire = RemoteWireReplay(steps, managesTimeouts: true)
+                let camera = repository(wire, usb: true)
+                do { _ = try await camera.startPreparedUSBMovieRecording(); XCTFail("Expected injected failure") }
+                catch { }
+                let active = await camera.hasMovieApplicationMode()
+                XCTAssertTrue(active, "Acknowledged side effect must survive subsequent failure")
+                await camera.clearMovieApplicationMode(force: true)
+                let retained = await camera.hasMovieApplicationMode()
+                let remaining = await wire.remaining
+                // A timeout poisons the PTP session: no cleanup command is sent
+                // on that channel and ownership is not falsely marked cleared.
+                XCTAssertEqual(retained, failureKind == 2)
+                XCTAssertEqual(remaining, failureKind == 2 ? 1 : 0)
+            }
+        }
+    }
+
+    func testWireShutterRangesAndLongEnumerationReachRepository() async throws {
+        func description(_ property: RemoteProperty, form: UInt8, values: [Int64]) -> Data {
+            var data = Data([UInt8(truncatingIfNeeded: property.rawValue), UInt8(truncatingIfNeeded: property.rawValue >> 8), 6, 0, 1])
+            data += RemotePropertyCodec.encode(0, dataType: 6)!
+            data += RemotePropertyCodec.encode(10, dataType: 6)!
+            data.append(form)
+            if form == 2 {
+                data.append(UInt8(truncatingIfNeeded: values.count))
+                data.append(UInt8(truncatingIfNeeded: values.count >> 8))
+            }
+            for value in values { data += RemotePropertyCodec.encode(value, dataType: 6)! }
+            return data
+        }
+        let shutter = try XCTUnwrap(RemoteProperty(rawValue: 0xD100))
+        let standard = try XCTUnwrap(RemoteProperty(rawValue: 0x500D))
+        for property in [shutter, standard] {
+            let payload = description(property, form: 1, values: [10, 3010, 3])
+            let wire = RemoteWireReplay([.init(PTPConstants.getDevicePropDesc, parameters: [property.rawValue], payload: payload)])
+            let parsed = try await repository(wire).remoteProperty(property)
+            // 1001 declared values -> stride4 -> 251 entries, all step-aligned.
+            XCTAssertEqual(parsed?.values, (0...250).map { UInt64(10 + $0 * 12) })
+            XCTAssertTrue(parsed?.writable == true)
+        }
+        XCTAssertEqual(RemotePropertyCodec.parseDescription(description(shutter, form: 1, values: [10, 19, 3]))?.values,
+                       [10, 13, 16, 19])
+        XCTAssertEqual(RemotePropertyCodec.parseDescription(description(shutter, form: 1, values: [0, 255, 1]))?.values.count, 256)
+        XCTAssertEqual(RemotePropertyCodec.parseDescription(description(shutter, form: 1, values: [0, 256, 1]))?.values,
+                       stride(from: Int64(0), through: 256, by: 2).map { $0 })
+        XCTAssertEqual(RemotePropertyCodec.parseDescription(description(.iso, form: 1, values: [0, 1, 1]))?.values, [0, 1])
+        let ordinary = description(.iso, form: 1, values: [100, 6400, 100])
+        XCTAssertEqual(RemotePropertyCodec.parseDescription(ordinary)?.values, [])
+        let longValues = (0..<600).map(Int64.init)
+        let payload = description(shutter, form: 2, values: longValues)
+        let wire = RemoteWireReplay([.init(PTPConstants.getDevicePropDesc, parameters: [shutter.rawValue], payload: payload)])
+        let parsed = try await repository(wire).remoteProperty(shutter)
+        XCTAssertEqual(parsed?.values, longValues.map(UInt64.init))
+        XCTAssertNil(RemotePropertyCodec.parseDescription(payload.dropLast()))
+        for values: [Int64] in [[10, 0, 1], [0, 100, 0]] {
+            XCTAssertEqual(RemotePropertyCodec.parseDescription(description(shutter, form: 1, values: values))?.values, [])
+        }
+    }
+
     func testPreparedUSBMovieStartsDirectlyWhenApplicationModeIsNotRequired() async throws {
         let wire = RemoteWireReplay([
             .init(PTPConstants.getDevicePropValueEx, parameters: [0xD0A4]),
@@ -1797,6 +4324,83 @@ final class RemoteFrameProtocolTests: XCTestCase {
         XCTAssertEqual(remaining, 0)
     }
 
+    func testLegacyVideoDiagnosticOnlyInterpretsFixedJPEGLayout() async throws {
+        var payload = Data(repeating: 0, count: 512)
+        payload[64] = 0x00; payload[65] = 0x01
+        payload[66] = 0x00; payload[67] = 0x2A
+        payload[68] = 1
+        payload[384] = 0xFF; payload[385] = 0xD8; payload[386] = 0xFF
+        let wire = RemoteWireReplay([.init(PTPConstants.getLiveViewImage, payload: payload)])
+        let result = try await repository(wire).probeLegacyVideoTime()
+        XCTAssertFalse(result.contains("unsupported layout"))
+        XCTAssertTrue(result.contains("recording=true minutes=1 seconds=42"))
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testMovieFormatDiagnosticReadsD0A0AndD0A7WithoutWrites() async throws {
+        let wire = RemoteWireReplay([
+            .init(PTPConstants.getDevicePropDesc, parameters: [0xD0A0], payload: Data([0xA0, 0xD0, 0x08, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+            .init(PTPConstants.getDevicePropValue, parameters: [0xD0A0], payload: Data([0, 0, 0, 0, 0, 0, 0, 0])),
+            .init(PTPConstants.getDevicePropDesc, parameters: [0xD0A7], payload: Data()),
+            .init(PTPConstants.getDevicePropValue, parameters: [0xD0A7], payload: Data([0]))
+        ])
+        let result = try await repository(wire).probeMovieFormat()
+        XCTAssertTrue(result.contains("0xD0A0 desc=0x2001"))
+        XCTAssertTrue(result.contains("0xD0A7 value=0x2001"))
+        XCTAssertTrue(result.contains("no property writes"))
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testManualControlReusesPhysicalModeAndReleaseClearsBothOwners() async throws {
+        let wire = RemoteWireReplay([
+            .init(PTPConstants.setControlMode, parameters: [1]),
+            .init(PTPConstants.setControlMode, parameters: [0])
+        ])
+        let camera = repository(wire, usb: true)
+        let ordinary = try await camera.setRemoteControlMode(true)
+        let manual = try await camera.setRemoteDiagnosticControlMode(true)
+        XCTAssertEqual(ordinary, PTPConstants.responseOK)
+        XCTAssertEqual(manual, PTPConstants.responseOK)
+        let held = await camera.hasRemoteDiagnosticControlMode()
+        XCTAssertTrue(held)
+        let released = try await camera.setRemoteControlMode(false)
+        XCTAssertEqual(released, PTPConstants.responseOK)
+        let diagnostic = await camera.hasRemoteDiagnosticControlMode()
+        let physical = await camera.hasRemoteControlMode()
+        let remaining = await wire.remaining
+        XCTAssertFalse(diagnostic)
+        XCTAssertFalse(physical)
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testManualControlFailureDoesNotPublishAnUnconfirmedMode() async throws {
+        let wire = RemoteWireReplay([
+            .init(PTPConstants.setControlMode, parameters: [1], code: 0x200F),
+            .init(PTPConstants.setControlMode, parameters: [1]),
+            .init(PTPConstants.setControlMode, parameters: [0], code: 0x200F),
+            .init(PTPConstants.setControlMode, parameters: [0])
+        ])
+        let camera = repository(wire)
+        let refused = try await camera.setRemoteDiagnosticControlMode(true)
+        XCTAssertEqual(refused, 0x200F)
+        let inactive = await camera.hasRemoteDiagnosticControlMode()
+        XCTAssertFalse(inactive)
+        _ = try await camera.setRemoteDiagnosticControlMode(true)
+        let refusedRelease = try await camera.setRemoteDiagnosticControlMode(false)
+        XCTAssertEqual(refusedRelease, 0x200F)
+        let diagnostic = await camera.hasRemoteDiagnosticControlMode()
+        let physical = await camera.hasRemoteControlMode()
+        XCTAssertTrue(diagnostic)
+        XCTAssertTrue(physical)
+        _ = try await camera.setRemoteDiagnosticControlMode(false)
+        let released = await camera.hasRemoteDiagnosticControlMode()
+        let remaining = await wire.remaining
+        XCTAssertFalse(released)
+        XCTAssertEqual(remaining, 0)
+    }
+
     private func repository(_ wire: RemoteWireReplay, enhanced: Bool = true,
                             usb: Bool = false) -> CameraRepository {
         let info = PTPDeviceInfo(standardVersion: 100, vendorExtensionID: 10, vendorExtensionVersion: 100,
@@ -1818,22 +4422,27 @@ final class RemoteFrameProtocolTests: XCTestCase {
 }
 
 private actor RemoteWireReplay: PTPCommandTransport {
+    nonisolated let managesCommandTimeouts: Bool
     struct Step: Sendable {
         let operation: UInt16
         let parameters: [UInt32]
         let code: UInt16
         let payload: Data
         let sentData: Data?
+        let failure: (any Error)?
         init(_ operation: UInt16, parameters: [UInt32] = [], code: UInt16 = 0x2001,
-             payload: Data = Data(), sentData: Data? = nil) {
+             payload: Data = Data(), sentData: Data? = nil, failure: (any Error)? = nil) {
             self.operation = operation; self.parameters = parameters; self.code = code
-            self.payload = payload; self.sentData = sentData
+            self.payload = payload; self.sentData = sentData; self.failure = failure
         }
     }
     private var steps: [Step]
     private(set) var operations: [UInt16] = []
     var remaining: Int { steps.count }
-    init(_ steps: [Step]) { self.steps = steps }
+    init(_ steps: [Step], managesTimeouts: Bool = false) {
+        self.steps = steps
+        managesCommandTimeouts = managesTimeouts
+    }
     func sendPTP(command: Data, data: Data?) throws -> (response: Data, payload: Data) {
         let packet = try PTPCodec.decode(command)
         operations.append(packet.code)
@@ -1846,6 +4455,58 @@ private actor RemoteWireReplay: PTPCommandTransport {
               expected.sentData == nil || data == expected.sentData else {
             throw CocoaError(.coderInvalidValue)
         }
+        if let failure = expected.failure { throw failure }
         return (PTPCodec.encode(type: .response, code: expected.code, transactionID: packet.transactionID), expected.payload)
+    }
+}
+
+private final class RecorderClockSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var times: [TimeInterval]
+    init(_ times: [TimeInterval]) { self.times = times }
+    func next() -> TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return times.removeFirst()
+    }
+}
+
+private final class WeakRecorderImage {
+    weak var value: UIImage?
+    init(_ value: UIImage) { self.value = value }
+}
+
+private final class WeakRecorderAudio {
+    weak var value: CMSampleBuffer?
+    init(_ value: CMSampleBuffer) { self.value = value }
+}
+
+private final class RecorderWriterOwner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var writer: AVAssetWriter?
+    func store(_ writer: AVAssetWriter) { lock.lock(); defer { lock.unlock() }; self.writer = writer }
+    func cancel() { lock.lock(); defer { lock.unlock() }; writer?.cancelWriting() }
+    var status: AVAssetWriter.Status? { lock.lock(); defer { lock.unlock() }; return writer?.status }
+}
+
+private final class RecorderVideoFaults: @unchecked Sendable {
+    private let lock = NSLock()
+    private var busy = false
+    private var refusing = false
+    private var skipCount = 0
+    private var refusalCount = 0
+    var busySkips: Int { lock.lock(); defer { lock.unlock() }; return skipCount }
+    var refusals: Int { lock.lock(); defer { lock.unlock() }; return refusalCount }
+    func setBusy() { lock.lock(); defer { lock.unlock() }; busy = true }
+    func setRefusing() { lock.lock(); defer { lock.unlock() }; busy = false; refusing = true }
+    func isReady(_ input: AVAssetWriterInput) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if busy { skipCount += 1; return false }
+        return input.isReadyForMoreMediaData
+    }
+    func append(_ adaptor: AVAssetWriterInputPixelBufferAdaptor, _ buffer: CVPixelBuffer, _ time: CMTime) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if refusing { refusalCount += 1; return false }
+        return adaptor.append(buffer, withPresentationTime: time)
     }
 }

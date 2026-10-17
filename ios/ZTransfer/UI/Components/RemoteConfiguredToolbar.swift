@@ -45,6 +45,10 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
                             .rotationEffect(.degrees(Double(motion.states[tool]?.angle ?? 0)))
                             .offset(offset(for: tool))
                     }
+                    // Android keeps normal and editor slots at 36 dp; only
+                    // the active recorder may expand across adjacent tracks.
+                    .frame(width: tool == .record && !editing ? nil : 36,
+                           height: tool == .record && !editing ? nil : 36)
                     .background {
                         GeometryReader { proxy in
                             Color.clear.preference(key: RemoteToolSlotPreference.self,
@@ -125,12 +129,12 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
     }
 
     private func offset(for tool: RemoteTool) -> CGSize {
-        guard editing, let slot = drag.slots[tool], let point = motion.position(tool) else { return .zero }
+        guard let slot = drag.slots[tool], let point = motion.position(tool) else { return .zero }
         return CGSize(width: point.x - slot.minX, height: point.y - slot.minY)
     }
 
     private func fixedOffset(for id: String) -> CGSize {
-        guard editing, let slot = fixedSlots[id], let point = motion.fixedPosition(id) else { return .zero }
+        guard let slot = fixedSlots[id], let point = motion.fixedPosition(id) else { return .zero }
         return CGSize(width: point.x - slot.minX, height: point.y - slot.minY)
     }
 

@@ -9,7 +9,31 @@ import XCTest
 final class STABrowsingSessionTests: XCTestCase {
     private let guid = String(repeating: "1", count: 32)
 
-    func testFirstPairingMustFinishBeforeAlbumAndMarkerPrecedesOptionalEvent() async throws {
+    func testCancellationAfterDeviceInfoDoesNotPromoteLegacyProof() async throws {
+        let prefs = STAProfileFixture(), guid = guid
+        prefs.store.markPaired(guid)
+        let wire = STAScriptTransport([
+            .init(0x1002, [1]), .init(0x941C), .init(0x1004, payload: staU32Array([0x10001])),
+            .init(0x1001, payload: staDeviceInfo())
+        ])
+        let store = prefs.store
+        let task = Task {
+            let browsing = STABrowsingSession(session: PTPSession(transport: wire), guid: guid,
+                identity: .pairedComputer, profiles: store, onStage: { stage in
+                    if stage == .connecting { withUnsafeCurrentTask { $0?.cancel() } }
+                }, waitForPairingEvent: { XCTFail() })
+            return try await browsing.open()
+        }
+        do { _ = try await task.value; XCTFail("Cancellation accepted album") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(store.hasTrustedPairing(guid))
+        XCTAssertTrue(store.requiresPairingVerification(guid))
+        let remaining = await wire.remaining, commands = await wire.commands
+        XCTAssertEqual(remaining, 0)
+        XCTAssertEqual(commands.map(\.code), [0x1002, 0x941C, 0x1004, 0x1001])
+    }
+
+    func testPairingAcknowledgmentDoesNotPersistProofBeforeVerification() async throws {
         let prefs = STAProfileFixture()
         // A route/legacy paired field is deliberately not pairing confirmation.
         prefs.store.remember(guid: guid, ip: "192.168.5.2", identity: .pairedComputer)
@@ -22,7 +46,7 @@ final class STABrowsingSessionTests: XCTestCase {
         let store = prefs.store, cameraGUID = guid
         let browsing = STABrowsingSession(session: PTPSession(transport: wire, firstTransactionID: 0),
             guid: guid, identity: .pairedComputer, profiles: store,
-            onStage: { await stages.append($0) }, waitForPairingEvent: { XCTAssertTrue(store.isPaired(cameraGUID)) })
+            onStage: { await stages.append($0) }, waitForPairingEvent: { XCTAssertFalse(store.isPaired(cameraGUID)) })
         do { _ = try await browsing.open(); XCTFail("Pre-pairing album must not activate") }
         catch { XCTAssertEqual(error as? STAConnectionError, .pairingCompleted) }
         let recorded = await stages.values
@@ -32,7 +56,47 @@ final class STABrowsingSessionTests: XCTestCase {
         let timeouts = await wire.readTimeouts
         XCTAssertEqual(timeouts, Array(repeating: 5_000_000_000, count: 6))
         let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
-        XCTAssertTrue(prefs.store.isPaired(guid))
+        XCTAssertFalse(prefs.store.isPaired(guid))
+    }
+
+    func testPairingReconnectConfirmsOnlyAfterDeviceInfoAndAlbumAccess() async throws {
+        let prefs = STAProfileFixture()
+        let wire = STAScriptTransport([
+            .init(0x1002, [1]), .init(0x941C), .init(0x1004, payload: staU32Array([0x10001])),
+            .init(0x1001, payload: staDeviceInfo()), .init(0x1007, [.max, .max, 0], payload: staU32Array([7])),
+            .init(0x1008, [7], payload: Data(repeating: 0, count: 53)),
+        ])
+        let store = prefs.store, cameraGUID = guid
+        let browsing = STABrowsingSession(session: PTPSession(transport: wire), guid: guid,
+            identity: .pairedComputer, profiles: store, verifyPairingCompletion: true,
+            onStage: { _ in XCTAssertFalse(store.isPaired(cameraGUID)) }, waitForPairingEvent: { XCTFail() })
+        _ = try await browsing.open()
+        XCTAssertTrue(store.hasTrustedPairing(guid))
+        let restored = STAProfileStore(preferences: prefs.connection, pairing: prefs.pairing)
+        XCTAssertTrue(restored.hasTrustedPairing(guid))
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testLegacyVerificationRejectsMissingEmptyAndPairingOnlyDeviceInfo() async throws {
+        let replies: [(UInt16, Data)] = [
+            (0x2005, Data()), (0x2001, Data()), (0x2001, staDeviceInfo(operations: [])),
+            (0x2001, staDeviceInfo(operations: [0x1001, 0x1002, 0x1003, 0x952B, 0x935A]))
+        ]
+        for (code, data) in replies {
+            let prefs = STAProfileFixture()
+            prefs.store.markPaired(guid)
+            let wire = STAScriptTransport([
+                .init(0x1002, [1]), .init(0x941C), .init(0x1004, payload: staU32Array([0x10001])),
+                .init(0x1001, response: code, payload: data)
+            ])
+            do { _ = try await make(wire, prefs).open(); XCTFail("Unverified camera accepted") }
+            catch { XCTAssertEqual(error as? STAConnectionError, .pairingNotConfirmed) }
+            XCTAssertFalse(prefs.store.isPaired(guid))
+            XCTAssertFalse(prefs.store.hasTrustedPairing(guid))
+            let remaining = await wire.remaining
+            XCTAssertEqual(remaining, 0)
+        }
     }
 
     func testConfirmedPairingValidatesFirstMiddleLastAndReusesHandles() async throws {
@@ -47,6 +111,7 @@ final class STABrowsingSessionTests: XCTestCase {
             .init(0x1008, [15], payload: Data(repeating: 0, count: 53)),
         ])
         let album = try await make(wire, prefs).open()
+        XCTAssertTrue(prefs.store.hasTrustedPairing(guid))
         XCTAssertFalse(album.directObjectRead)
         XCTAssertEqual(album.prefetchedHandles?.storageID, .max)
         XCTAssertEqual(album.prefetchedHandles?.handles, handles)
@@ -124,7 +189,7 @@ final class STABrowsingSessionTests: XCTestCase {
             let wire = STAScriptTransport(exchanges)
             do { _ = try await make(wire, prefs).open(); XCTFail("Unexpected album") }
             catch { XCTAssertEqual(error as? STAConnectionError, pairs ? .pairingCompleted : .albumUnavailable(0x200F)) }
-            XCTAssertEqual(prefs.store.isPaired(guid), pairs)
+            XCTAssertFalse(prefs.store.isPaired(guid)) // Pairing still requires a verified reconnect.
             let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
         }
     }
@@ -167,6 +232,10 @@ struct STAExchange: Sendable {
 }
 actor STAScriptTransport: PTPCommandTransport {
     private var script: [STAExchange]
+    private var nextReplyHook: (operation: UInt16, action: @Sendable () async throws -> Void)?
+    func beforeNextReply(_ operation: UInt16, action: @escaping @Sendable () async throws -> Void) {
+        nextReplyHook = (operation, action)
+    }
     private(set) var commands: [PTPContainer] = []
     private(set) var readTimeouts: [UInt64] = []
     var remaining: Int { script.count }
@@ -183,6 +252,10 @@ actor STAScriptTransport: PTPCommandTransport {
         XCTAssertEqual(command.code, expected.operation)
         XCTAssertEqual(command.payload, expected.parameters.reduce(into: Data()) { $0.append(staInteger($1)) })
         guard command.code == expected.operation else { throw STAFixtureError.unexpectedCommand(command.code) }
+        if let hook = nextReplyHook, hook.operation == command.code {
+            nextReplyHook = nil
+            try await hook.action()
+        }
         return (PTPCodec.encode(type: .response, code: expected.response, transactionID: command.transactionID), expected.payload)
     }
 }

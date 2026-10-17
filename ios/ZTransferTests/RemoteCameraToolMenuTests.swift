@@ -2,6 +2,18 @@ import XCTest
 @testable import ZTransfer
 
 final class RemoteCameraToolMenuTests: XCTestCase {
+    func testLandscapeParameterListUsesFullHeightAndPrefersLeftOfAnchor() {
+        let side = RemoteCameraToolMenuPlacement(host: CGSize(width: 800, height: 360),
+            anchor: CGRect(x: 660, y: 130, width: 120, height: 46), landscape: true,
+            width: 80, contentHeight: 400, besideAnchor: true)
+        XCTAssertEqual(side.availableHeight, 344)
+        XCTAssertEqual(side.frame, CGRect(x: 574, y: 0, width: 80, height: 344))
+        let right = RemoteCameraToolMenuPlacement(host: CGSize(width: 800, height: 360),
+            anchor: CGRect(x: 20, y: 130, width: 100, height: 46), landscape: true,
+            width: 80, contentHeight: 100, besideAnchor: true)
+        XCTAssertEqual(right.frame, CGRect(x: 126, y: 103, width: 80, height: 100))
+    }
+
     func testPortraitMenuStaysBelowAndClampsToHost() {
         let placement = RemoteCameraToolMenuPlacement(host: CGSize(width: 320, height: 600),
             anchor: CGRect(x: 270, y: 180, width: 36, height: 36), landscape: false,

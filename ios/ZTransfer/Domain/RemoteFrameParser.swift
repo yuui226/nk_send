@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import ImageIO
 
 /// Keep the wire operation alongside its payload: standard frames must never
 /// be interpreted as enhanced AF metadata (RemoteLab.labGrabFrame).
@@ -280,6 +281,18 @@ struct RemoteLiveViewSoundLevels: Equatable, Sendable {
     let currentRight: Int
 }
 
+struct RemoteSoundMeterChannel: Equatable {
+    static let segmentCount = 15
+    let activeCount: Int
+    let peakIndex: Int?
+
+    init(current: Int, peak: Int) {
+        let maximum = Int(RemoteLiveViewSoundLevels.maxSegment)
+        activeCount = Int((Double(min(max(current, 0), maximum)) / Double(maximum) * 15).rounded())
+        peakIndex = peak > 0 ? min(peak, maximum) : nil
+    }
+}
+
 struct RemoteLiveViewAttitude: Equatable, Sendable {
     let roll: Float
     let pitch: Float
@@ -473,6 +486,26 @@ struct RemoteDecodedFrame: @unchecked Sendable {
 /// while decoding runs on a worker; if decoding falls behind, only the newest
 /// waiting packet is retained. Histogram and zebra work share the same 250 ms
 /// worker-side throttle and cost nothing while their overlays are disabled.
+final class RemoteFramePublicationPermit: @unchecked Sendable {
+    private let lock = NSLock()
+    private var valid = true
+
+    func invalidate() {
+        lock.lock(); defer { lock.unlock() }
+        valid = false
+    }
+
+    @MainActor
+    func deliver(_ body: @MainActor () -> Void) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard valid else { return false }
+        // No suspension between admission and publication. Invalidation and
+        // delivery are ordered even when the main actor has queued the result.
+        body()
+        return true
+    }
+}
+
 actor RemoteFrameDecodePipeline {
     struct Request: Sendable {
         let packet: RemoteLiveViewPacket
@@ -481,10 +514,15 @@ actor RemoteFrameDecodePipeline {
     }
 
     private let publish: @MainActor @Sendable (RemoteDecodedFrame) -> Void
+    private let beforePublication: (@Sendable () async -> Void)?
+    private let clock: @Sendable () -> ContinuousClock.Instant
     private let decodeDelayNanoseconds: UInt64
     private var pending: Request?
     private var worker: Task<Void, Never>?
     private var generation: UInt64 = 0
+    private var publicationPermit = RemoteFramePublicationPermit()
+    private var analysisGeneration: UInt64 = 0
+    private var analysisSize: CGSize?
     private var histogramEnabled = false
     private var zebraEnabled = false
     private var waveformEnabled = false
@@ -494,23 +532,48 @@ actor RemoteFrameDecodePipeline {
     private var falseColorEnabled = false
     private var histogramRGB = false
     private var cachedHistogram: [Int]?
+    private var cachedHistogramRGB: [[Int]]?
     private var cachedZebra: RemoteZebraMask?
     private var histogramCalculatedAt: ContinuousClock.Instant?
     private var zebraCalculatedAt: ContinuousClock.Instant?
     private(set) var isDecoding = false
 
     init(decodeDelayNanoseconds: UInt64 = 0,
+         clock: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
+         beforePublication: (@Sendable () async -> Void)? = nil,
          publish: @escaping @MainActor @Sendable (RemoteDecodedFrame) -> Void) {
+        self.beforePublication = beforePublication
+        self.clock = clock
         self.decodeDelayNanoseconds = decodeDelayNanoseconds
         self.publish = publish
     }
 
     func reset(generation: UInt64) {
         self.generation = generation
+        publicationPermit.invalidate()
+        publicationPermit = RemoteFramePublicationPermit()
         pending = nil
+        analysisSize = nil
+        clearAnalysisCache()
+    }
+
+    private func clearAnalysisCache() {
+        cachedHistogram = nil
+        cachedHistogramRGB = nil
+        cachedZebra = nil
+        cachedWaveform = nil
+        histogramCalculatedAt = nil
+        zebraCalculatedAt = nil
+        waveformCalculatedAt = nil
     }
 
     func setAnalysis(histogram: Bool, zebra: Bool, waveform: Bool = false, waveformRGB: Bool = false, falseColor: Bool = false, histogramRGB: Bool = false) {
+        if histogramEnabled != histogram || zebraEnabled != zebra || waveformEnabled != waveform ||
+            self.waveformRGB != waveformRGB || falseColorEnabled != falseColor || self.histogramRGB != histogramRGB {
+            analysisGeneration &+= 1
+            publicationPermit.invalidate()
+            publicationPermit = RemoteFramePublicationPermit()
+        }
         let waveformModeChanged = self.waveformRGB != waveformRGB
         histogramEnabled = histogram
         zebraEnabled = zebra
@@ -519,7 +582,7 @@ actor RemoteFrameDecodePipeline {
         falseColorEnabled = falseColor
         self.histogramRGB = histogramRGB
         if !waveform || waveformModeChanged { cachedWaveform = nil; waveformCalculatedAt = nil }
-        if !histogram { cachedHistogram = nil; histogramCalculatedAt = nil }
+        if !histogram { cachedHistogram = nil; cachedHistogramRGB = nil; histogramCalculatedAt = nil }
         if !zebra { cachedZebra = nil; zebraCalculatedAt = nil }
     }
 
@@ -537,16 +600,22 @@ actor RemoteFrameDecodePipeline {
     private func drain() async {
         while let request = pending {
             pending = nil
-            let now = ContinuousClock.now
+            if let size = Self.imageSize(request), size != analysisSize {
+                analysisSize = size
+                clearAnalysisCache()
+            }
+            let now = clock()
             let calculateHistogram = histogramEnabled && (
-                cachedHistogram == nil || histogramCalculatedAt.map { $0.duration(to: now) >= .milliseconds(250) } == true
+                cachedHistogram == nil || (histogramRGB && cachedHistogramRGB == nil) || histogramCalculatedAt.map { $0.duration(to: now) >= .milliseconds(250) } == true
             )
             let calculateZebra = zebraEnabled && (
-                cachedZebra == nil || zebraCalculatedAt.map { $0.duration(to: now) >= .milliseconds(250) } == true
+                cachedZebra == nil || zebraCalculatedAt.map { $0.duration(to: now) >= .milliseconds(50) } == true
             )
             let calculateWaveform = waveformEnabled && (
                 cachedWaveform == nil || waveformCalculatedAt.map { $0.duration(to: now) >= .milliseconds(125) } == true
             )
+            let permit = publicationPermit
+            let currentAnalysisGeneration = analysisGeneration
             let currentWaveformRGB = waveformRGB
             let currentFalseColor = falseColorEnabled
             let currentHistogramRGB = histogramRGB
@@ -554,12 +623,19 @@ actor RemoteFrameDecodePipeline {
             let delay = decodeDelayNanoseconds
             let decoded = await Task.detached(priority: .userInitiated) {
                 if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
-                return Self.decode(request, histogram: calculateHistogram, histogramRGB: currentHistogramRGB, zebra: calculateZebra, waveform: calculateWaveform, waveformRGB: currentWaveformRGB, falseColor: currentFalseColor)
+                return Self.decode(request, histogram: calculateHistogram, histogramRGB: calculateHistogram && currentHistogramRGB, zebra: calculateZebra, waveform: calculateWaveform, waveformRGB: currentWaveformRGB, falseColor: currentFalseColor)
             }.value
             isDecoding = false
             guard request.generation == generation, let decoded else { continue }
+            guard currentAnalysisGeneration == analysisGeneration else {
+                // Re-evaluate the newest frame with current options; never publish or
+                // cache the obsolete analysis, even if no new packet arrives.
+                if pending == nil { pending = request }
+                continue
+            }
             if calculateHistogram {
                 cachedHistogram = decoded.histogram
+                cachedHistogramRGB = decoded.histogramRGB
                 histogramCalculatedAt = now
             }
             if calculateZebra {
@@ -578,7 +654,7 @@ actor RemoteFrameDecodePipeline {
                 operation: request.packet.operation,
                 metadata: decoded.metadata,
                 histogram: histogramEnabled ? (calculateHistogram ? decoded.histogram : cachedHistogram) : nil,
-                histogramRGB: histogramEnabled ? decoded.histogramRGB : nil,
+                histogramRGB: histogramEnabled && histogramRGB ? cachedHistogramRGB : nil,
                 waveform: waveformEnabled ? (calculateWaveform ? decoded.waveform : cachedWaveform) : nil,
                 falseColorPixels: falseColorEnabled ? decoded.falseColorPixels : nil,
                 falseColorWidth: decoded.falseColorWidth,
@@ -588,7 +664,9 @@ actor RemoteFrameDecodePipeline {
                 generation: request.generation,
                 receivedAtUptime: request.packet.receivedAtUptime
             )
-            await publish(result)
+            await beforePublication?()
+            let delivered = await permit.deliver { publish(result) }
+            if !delivered, request.generation == generation, pending == nil { pending = request }
         }
         worker = nil
         // An enqueue can run after the loop observed nil but before worker is
@@ -596,6 +674,17 @@ actor RemoteFrameDecodePipeline {
         if pending != nil {
             worker = Task { [weak self] in await self?.drain() }
         }
+    }
+
+    private nonisolated static func imageSize(_ request: Request) -> CGSize? {
+        let offset = request.packet.jpegOffset
+        let bytes = request.packet.bytes
+        guard offset >= 0, offset < bytes.count,
+              let source = CGImageSourceCreateWithData(Data(bytes[offset...]) as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        return CGSize(width: width, height: height)
     }
 
     private nonisolated static func decode(
@@ -608,6 +697,8 @@ actor RemoteFrameDecodePipeline {
         let jpeg = Data(payload[request.packet.jpegOffset...])
         guard let image = UIImage(data: jpeg) else { return nil }
         let cg = image.cgImage
+        let histograms = (histogram || histogramRGB) ? cg.flatMap { histogramBins($0, includeRGB: histogramRGB) } : nil
+        let monitor = (waveform || falseColor) ? cg.flatMap { monitorPixels($0) } : nil
         return RemoteDecodedFrame(
             image: image,
             jpeg: jpeg,
@@ -617,12 +708,12 @@ actor RemoteFrameDecodePipeline {
             metadata: RemoteFrameParser.metadata(from: payload,
                                                  jpegOffset: request.packet.jpegOffset,
                                                  operation: request.packet.operation),
-            histogram: histogram ? cg.flatMap(histogramBins) : nil,
-            histogramRGB: histogramRGB ? cg.flatMap(rgbHistogramBins) : nil,
-            waveform: waveform ? cg.flatMap { waveformBins($0, rgb: waveformRGB) } : nil,
-            falseColorPixels: falseColor ? cg.flatMap { falseColorPixels($0) } : nil,
-            falseColorWidth: cg?.width ?? 0,
-            falseColorHeight: cg?.height ?? 0,
+            histogram: histogram ? histograms?.luma : nil,
+            histogramRGB: histograms?.rgb,
+            waveform: waveform ? monitor.map { RemoteExposureAnalysis.waveformBins(pixels: $0.packed, width: $0.width, height: $0.height, rgb: waveformRGB) } : nil,
+            falseColorPixels: falseColor ? monitor.flatMap { RemoteExposureAnalysis.falseColorPixels(pixels: $0.packed, width: $0.width, height: $0.height) } : nil,
+            falseColorWidth: monitor?.width ?? 0,
+            falseColorHeight: monitor?.height ?? 0,
             zebraMask: zebra ? cg.flatMap(zebraMask) : nil,
             fps: request.fps,
             generation: request.generation,
@@ -630,73 +721,56 @@ actor RemoteFrameDecodePipeline {
         )
     }
 
-    private nonisolated static func waveformBins(_ cg: CGImage, rgb: Bool) -> [[Int]]? {
-        guard let pixels = rgbaPixels(cg) else { return nil }
+    /// Both monitor tools share one bounded nearest-neighbor conversion,
+    /// matching Android analyzeMonitorFrame rather than copying the full frame twice.
+    private nonisolated static func monitorPixels(_ cg: CGImage) -> (packed: [UInt32], width: Int, height: Int)? {
+        guard let pixels = rgbaPixels(cg, width: min(cg.width, 256), height: min(cg.height, 192)) else { return nil }
         var packed = [UInt32](repeating: 0, count: pixels.width * pixels.height)
         for i in packed.indices {
             let o = i * 4
             packed[i] = UInt32(pixels.bytes[o]) << 16 | UInt32(pixels.bytes[o + 1]) << 8 | UInt32(pixels.bytes[o + 2])
         }
-        return RemoteExposureAnalysis.waveformBins(pixels: packed, width: pixels.width, height: pixels.height, rgb: rgb)
+        return (packed, pixels.width, pixels.height)
     }
 
-    private nonisolated static func falseColorPixels(_ cg: CGImage) -> [UInt32]? {
+    private nonisolated static func histogramBins(
+        _ cg: CGImage, includeRGB: Bool
+    ) -> (luma: [Int], rgb: [[Int]]?)? {
         guard let pixels = rgbaPixels(cg) else { return nil }
-        var packed = [UInt32](repeating: 0, count: pixels.width * pixels.height)
-        for i in packed.indices {
-            let o = i * 4
-            packed[i] = UInt32(pixels.bytes[o]) << 16 | UInt32(pixels.bytes[o + 1]) << 8 | UInt32(pixels.bytes[o + 2]
-            )
+        var luma = Array(repeating: 0, count: 256)
+        var rgb = includeRGB ? Array(repeating: Array(repeating: 0, count: 256), count: 3) : nil
+        // Android calculateLuminanceHistogram applies the step independently
+        // to both axes, sharing the sampled pixels between luma and RGB.
+        let step = max(1, Int(ceil(sqrt(Double(pixels.width * pixels.height) / 24_000))))
+        for y in stride(from: 0, to: pixels.height, by: step) {
+            for x in stride(from: 0, to: pixels.width, by: step) {
+                let offset = y * pixels.rowBytes + x * 4
+                let red = Int(pixels.bytes[offset])
+                let green = Int(pixels.bytes[offset + 1])
+                let blue = Int(pixels.bytes[offset + 2])
+                luma[(54 * red + 183 * green + 19 * blue) >> 8] += 1
+                if includeRGB {
+                    rgb?[0][red] += 1
+                    rgb?[1][green] += 1
+                    rgb?[2][blue] += 1
+                }
+            }
         }
-        return RemoteExposureAnalysis.falseColorPixels(pixels: packed, width: pixels.width, height: pixels.height)
-    }
-
-    private nonisolated static func histogramBins(_ cg: CGImage) -> [Int]? {
-        guard let pixels = rgbaPixels(cg) else { return nil }
-        let bytes = pixels.bytes
-        let channels = 4
-        // Android keeps the full 256-bin Rec.709 histogram and samples at most
-        // roughly 24,000 pixels. Keep the bin identity; the drawing layer owns
-        // any visual reduction to chart columns.
-        var bins = Array(repeating: 0, count: 256)
-        let pixelCount = max(1, pixels.width * pixels.height)
-        let stepPixels = max(1, Int(ceil(sqrt(Double(pixelCount) / 24_000.0))))
-        let step = max(channels, stepPixels * channels)
-        var index = 0
-        while index + 2 < bytes.count {
-            let luminance = (54 * Int(bytes[index]) + 183 * Int(bytes[index + 1]) + 19 * Int(bytes[index + 2])) >> 8
-            bins[luminance] += 1
-            index += step
-        }
-        return bins
-    }
-
-    private nonisolated static func rgbHistogramBins(_ cg: CGImage) -> [[Int]]? {
-        guard let pixels = rgbaPixels(cg) else { return nil }
-        var channels = Array(repeating: Array(repeating: 0, count: 256), count: 3)
-        let step = max(4, Int(ceil(sqrt(Double(pixels.width * pixels.height) / 24_000.0))) * 4)
-        for index in stride(from: 0, to: pixels.bytes.count - 2, by: step) {
-            channels[0][Int(pixels.bytes[index])] += 1
-            channels[1][Int(pixels.bytes[index + 1])] += 1
-            channels[2][Int(pixels.bytes[index + 2])] += 1
-        }
-        return channels
+        return (luma, rgb)
     }
 
     private nonisolated static func zebraMask(_ cg: CGImage) -> RemoteZebraMask? {
-        guard let pixels = rgbaPixels(cg) else { return nil }
-        let width = pixels.width
-        let height = pixels.height
+        let width = cg.width
+        let height = cg.height
         let cellWidth = max(1, (width + 119) / 120)
         let cellHeight = max(1, (height + 79) / 80)
         let cols = (width + cellWidth - 1) / cellWidth
         let rows = (height + cellHeight - 1) / cellHeight
+        guard let pixels = rgbaPixels(cg, width: cols, height: rows) else { return nil }
         var cells = Array(repeating: false, count: cols * rows)
         for row in 0..<rows {
-            let y = min(height - 1, row * cellHeight + cellHeight / 2)
             for column in 0..<cols {
-                let x = min(width - 1, column * cellWidth + cellWidth / 2)
-                let offset = y * pixels.rowBytes + x * 4
+                let offset = row * pixels.rowBytes + column * 4
                 let red = Int(pixels.bytes[offset])
                 let green = Int(pixels.bytes[offset + 1])
                 let blue = Int(pixels.bytes[offset + 2])
@@ -707,10 +781,10 @@ actor RemoteFrameDecodePipeline {
     }
 
     private nonisolated static func rgbaPixels(
-        _ cg: CGImage
+        _ cg: CGImage, width requestedWidth: Int? = nil, height requestedHeight: Int? = nil
     ) -> (bytes: [UInt8], width: Int, height: Int, rowBytes: Int)? {
-        let width = max(1, cg.width)
-        let height = max(1, cg.height)
+        let width = max(1, requestedWidth ?? cg.width)
+        let height = max(1, requestedHeight ?? cg.height)
         let rowBytes = width * 4
         var bytes = Array(repeating: UInt8(0), count: rowBytes * height)
         let rendered = bytes.withUnsafeMutableBytes { raw -> Bool in
@@ -720,6 +794,7 @@ actor RemoteFrameDecodePipeline {
                                           space: CGColorSpaceCreateDeviceRGB(),
                                           bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return false }
+            context.interpolationQuality = .none
             context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }

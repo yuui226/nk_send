@@ -101,6 +101,54 @@ final class AutoTransferModeTests: XCTestCase {
         XCTAssertNotNil(fresh)
     }
 
+    // F074: Android TransferViewModel.addNewMediaToQueue filters cropRecipe
+    // before building identities, independently of the selected media mode.
+    func testCropOnlyTasksDoNotSuppressAutomaticOriginalAcrossModes() async throws {
+        let expected: [AutoTransferMode: [UInt32]] = [
+            .off: [], .all: [9, 2, 3], .jpg: [9], .raw: [2], .video: [3]
+        ]
+        for mode in AutoTransferMode.allCases {
+            let queue = makeQueue()
+            let original = file(1, "a.JPG")
+            let crop = LosslessCropTask(fileID: original.id, recipe: .init(
+                source: .init(width: 32, height: 32, mcuWidth: 16, mcuHeight: 16, orientation: 1),
+                rect: .init(left: 0, top: 0, right: 16, bottom: 16)))
+            let cropID = await queue.enqueueCrop(original, task: crop)
+            let before = await queue.snapshot()
+            let alias = file(9, "a.JPG", storage: 2)
+            let events = [alias, original, file(2, "b.NEF"), file(3, "c.MOV"), alias]
+            let accepted = await queue.enqueueAutomatic(events, mode: mode)
+            let snapshot = await queue.snapshot()
+            XCTAssertEqual(snapshot.items.first, before.items.first, "Existing crop must remain unchanged")
+            XCTAssertEqual(snapshot.items.first?.id, cropID)
+            XCTAssertEqual(snapshot.items.dropFirst().map(\.file.id), expected[mode])
+            XCTAssertEqual(snapshot.items.dropFirst().map(\.id), accepted)
+            XCTAssertTrue(snapshot.items.dropFirst().allSatisfy { $0.cropTask == nil })
+            // The newly admitted ordinary task now blocks replay, including a
+            // different handle/storage alias and duplicates within one event.
+            let replay = await queue.enqueueAutomatic(events, mode: mode)
+            XCTAssertTrue(replay.isEmpty)
+        }
+    }
+
+    func testCropAndOrdinaryTasksStillDeduplicateRegardlessOfEnqueueOrder() async {
+        for cropFirst in [true, false] {
+            let queue = makeQueue()
+            let original = file(1, "a.JPG")
+            let crop = LosslessCropTask(fileID: original.id, recipe: .init(
+                source: .init(width: 32, height: 32, mcuWidth: 16, mcuHeight: 16, orientation: 1),
+                rect: .init(left: 0, top: 0, right: 16, bottom: 16)))
+            if !cropFirst { _ = await queue.enqueue(original) }
+            _ = await queue.enqueueCrop(original, task: crop)
+            if cropFirst { _ = await queue.enqueue(original) }
+            let before = await queue.snapshot()
+            let accepted = await queue.enqueueAutomatic(file(9, "a.JPG", storage: 2))
+            XCTAssertNil(accepted)
+            let after = await queue.snapshot()
+            XCTAssertEqual(after.items, before.items)
+        }
+    }
+
     @MainActor
     func testAutomaticEntryRequiresCameraAndDirectory() async {
         let queue = makeQueue()

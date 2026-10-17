@@ -5,13 +5,31 @@ private final class PhotoRatingDiagnosticsStore: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [String] = []
     private var enabled = false
+    private var verbose = false
     private let maxEntries = 48
     private let maxCharacters = 8_000
 
     func setEnabled(_ value: Bool) {
         lock.lock(); defer { lock.unlock() }
         enabled = value
+        verbose = false
         if !value { entries.removeAll(keepingCapacity: true) }
+    }
+
+    func beginProbe(keepExisting: Bool) -> PhotoRatingDiagnostics.CaptureState {
+        lock.lock(); defer { lock.unlock() }
+        let previous = PhotoRatingDiagnostics.CaptureState(enabled: enabled, verbose: verbose)
+        enabled = true
+        verbose = true
+        if !keepExisting { entries.removeAll(keepingCapacity: true) }
+        return previous
+    }
+
+    func restore(_ state: PhotoRatingDiagnostics.CaptureState, preserveEntries: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        enabled = state.enabled
+        verbose = state.verbose
+        if !enabled && !preserveEntries { entries.removeAll(keepingCapacity: true) }
     }
 
     func note(_ message: String) {
@@ -26,18 +44,51 @@ private final class PhotoRatingDiagnosticsStore: @unchecked Sendable {
         }
     }
 
+    func detail(_ message: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard enabled, verbose else { return }
+        appendLocked(message)
+    }
+
+    private func appendLocked(_ message: String) {
+        let normalized = message.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .prefix(260)
+        entries.append(String(normalized))
+        while entries.count > maxEntries || entries.reduce(0, { $0 + $1.count + 1 }) > maxCharacters {
+            guard !entries.isEmpty else { break }
+            entries.removeFirst()
+        }
+    }
+
     func snapshot() -> String {
         lock.lock(); defer { lock.unlock() }
         guard !entries.isEmpty else { return "评级筛选：暂无诊断记录" }
         return "ZTransfer 评级筛选诊断\n" + entries.joined(separator: "\n")
     }
+
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        entries.removeAll(keepingCapacity: true)
+    }
 }
 
 enum PhotoRatingDiagnostics {
     private static let store = PhotoRatingDiagnosticsStore()
+    struct CaptureState: Sendable {
+        fileprivate let enabled: Bool
+        fileprivate let verbose: Bool
+    }
     static func setEnabled(_ enabled: Bool) { store.setEnabled(enabled) }
     static func note(_ message: String) { store.note(message) }
+    static func detail(_ message: String) { store.detail(message) }
     static func snapshot() -> String { store.snapshot() }
+    static func clear() { store.clear() }
+    static func beginProbe(keepExisting: Bool = false) -> CaptureState {
+        store.beginProbe(keepExisting: keepExisting)
+    }
+    static func restore(_ state: CaptureState, preserveEntries: Bool = false) {
+        store.restore(state, preserveEntries: preserveEntries)
+    }
 }
 
 /// A completed rating keeps the distinction between a confirmed value and an
@@ -97,6 +148,7 @@ struct PhotoRatingCache: Sendable {
 /// can replay Android's scan lifecycle without a live PTP transport.
 struct PhotoRatingScanIO: Sendable {
     let generation: @Sendable () async -> Int
+    let generationUpdates: @Sendable () async -> AsyncStream<Int>
     let invalidate: @Sendable () async -> Int
     let cached: @Sendable (UInt32) async -> PhotoRatingCacheEntry?
     let beginPhase: @Sendable () async -> Void
@@ -105,6 +157,7 @@ struct PhotoRatingScanIO: Sendable {
 
     init(
         generation: @escaping @Sendable () async -> Int,
+        generationUpdates: @escaping @Sendable () async -> AsyncStream<Int> = { AsyncStream { $0.finish() } },
         invalidate: @escaping @Sendable () async -> Int,
         cached: @escaping @Sendable (UInt32) async -> PhotoRatingCacheEntry?,
         beginPhase: @escaping @Sendable () async -> Void,
@@ -112,6 +165,7 @@ struct PhotoRatingScanIO: Sendable {
         read: @escaping @Sendable (CameraFile, Bool) async throws -> Int?
     ) {
         self.generation = generation
+        self.generationUpdates = generationUpdates
         self.invalidate = invalidate
         self.cached = cached
         self.beginPhase = beginPhase
@@ -133,6 +187,7 @@ extension PhotoRatingScanIO {
     init(session: CameraSession) {
         self.init(
             generation: { await session.photoRatingGeneration() },
+            generationUpdates: { await session.photoRatingGenerationUpdates() },
             invalidate: { await session.invalidatePhotoRatings() },
             cached: { handle in
                 guard let value = await session.cachedPhotoRating(handle) else { return nil }
@@ -260,10 +315,25 @@ final class PhotoRatingScanController: ObservableObject {
     private var scanTask: Task<Void, Never>?
     private var phaseStarted = false
     private var revision = 0
+    private var observedGeneration = -1
+    private var generationTask: Task<Void, Never>?
+    private(set) var activeEvaluationCount = 0
 
-    init(io: PhotoRatingScanIO) { self.io = io }
+    init(io: PhotoRatingScanIO) {
+        self.io = io
+        generationTask = Task { [weak self, io] in
+            for await value in await io.generationUpdates() {
+                guard !Task.isCancelled, let self else { return }
+                self.observedGeneration = value
+                if self.enabled, self.generationReady, value > self.generation {
+                    self.beginFreshGeneration(invalidateCache: false)
+                }
+            }
+        }
+    }
 
     deinit {
+        generationTask?.cancel()
         evaluationTask?.cancel()
         scanTask?.cancel()
     }
@@ -272,16 +342,26 @@ final class PhotoRatingScanController: ObservableObject {
     /// range state changes. Once the date snapshot is locked and reads begin,
     /// later thumbnail/catalog emissions are intentionally ignored.
     func update(_ input: PhotoRatingScanInput, enabled: Bool) {
+        let configurationChanged = latestInput.map {
+            $0.ratingDays != input.ratingDays || $0.photoLoadingDays != input.photoLoadingDays ||
+            $0.useObjectRating != input.useObjectRating || $0.staConnection != input.staConnection
+        } ?? false
+        if latestInput == nil || self.enabled != enabled || configurationChanged {
+            PhotoRatingDiagnostics.setEnabled(enabled)
+        }
         latestInput = input
         if !enabled {
             disable()
             return
         }
-        PhotoRatingDiagnostics.setEnabled(true)
         self.enabled = true
         if !previousEnabled {
             previousEnabled = true
             beginFreshGeneration()
+        } else if configurationChanged {
+            // Android restarts the effect for range/mode keys, but only
+            // entering enabled invalidates the camera's passive rating cache.
+            beginFreshGeneration(invalidateCache: false)
         }
         guard !scanStarted else { return }
         scheduleEvaluation()
@@ -315,14 +395,14 @@ final class PhotoRatingScanController: ObservableObject {
         scanStarted = false
         localRatings.removeAll()
         state = PhotoRatingScan()
-        PhotoRatingDiagnostics.setEnabled(false)
         let expected = generation
         guard clearedGeneration != expected else { return }
         clearedGeneration = expected
         Task { [io] in _ = await io.invalidate() }
     }
 
-    private func beginFreshGeneration() {
+    private func beginFreshGeneration(invalidateCache: Bool = true) {
+        PhotoRatingDiagnostics.setEnabled(true)
         revision &+= 1
         evaluationTask?.cancel(); evaluationTask = nil
         scanTask?.cancel(); scanTask = nil
@@ -336,12 +416,16 @@ final class PhotoRatingScanController: ObservableObject {
         PhotoRatingDiagnostics.note("scan generation pending source=\(latestInput?.useObjectRating == true ? "object" : "header")")
         let token = revision
         evaluationTask = Task { [weak self, io] in
-            let generation = await io.invalidate()
+            let generation = invalidateCache ? await io.invalidate() : await io.generation()
             guard let self, self.revision == token, self.enabled else { return }
             self.generation = generation
             self.generationReady = true
             self.clearedGeneration = nil
             self.evaluationTask = nil
+            if self.observedGeneration > generation {
+                self.beginFreshGeneration(invalidateCache: false)
+                return
+            }
             self.scheduleEvaluation()
         }
     }
@@ -356,7 +440,11 @@ final class PhotoRatingScanController: ObservableObject {
     }
 
     private func evaluate(token: Int) async {
-        defer { evaluationTask = nil }
+        activeEvaluationCount += 1
+        defer {
+            activeEvaluationCount -= 1
+            if token == revision { evaluationTask = nil }
+        }
         guard token == revision, enabled, generationReady, !scanStarted, let input = latestInput else { return }
         let effectiveDays = PhotoRatingScanPolicy.effectiveDays(
             ratingDays: input.ratingDays, photoLoadingDays: input.photoLoadingDays
@@ -388,14 +476,18 @@ final class PhotoRatingScanController: ObservableObject {
         }
         let sources = photoRatingSources(eligible)
         var seenSources = Set<UInt32>()
-        let uniqueSources = sources.values.filter { file in
+        // Android's associate retains the input row order before distinctBy.
+        // Dictionary.values does not preserve that order in Swift.
+        let uniqueSources = eligible.compactMap { sources[$0.id] }.filter { file in
             seenSources.insert(file.id).inserted
         }
         localRatings = localRatings.filter { entry in
             sources.values.contains(where: { $0.id == entry.key })
         }
         for file in uniqueSources where localRatings[file.id] == nil {
-            if let cached = await io.cached(file.id) {
+            let cached = await io.cached(file.id)
+            guard !Task.isCancelled, token == revision, enabled else { return }
+            if let cached {
                 localRatings[file.id] = .known(cached.value)
             }
         }
@@ -441,7 +533,9 @@ final class PhotoRatingScanController: ObservableObject {
             do {
                 await io.beginPhase()
                 didBeginPhase = true
-                await MainActor.run { self.phaseStarted = true }
+                await MainActor.run {
+                    if self.revision == token, self.enabled { self.phaseStarted = true }
+                }
                 for file in pending {
                     try Task.checkCancellation()
                     let value = try await io.read(file, input.useObjectRating)
@@ -461,10 +555,13 @@ final class PhotoRatingScanController: ObservableObject {
             }
             if didBeginPhase { await io.endPhase() }
             await MainActor.run {
+                guard self.revision == token else { return }
                 self.phaseStarted = false
                 self.scanTask = nil
                 guard !cancelled, self.revision == token, self.enabled else { return }
-                let complete = self.localRatings.count >= sources.values.count && !sources.isEmpty
+                // Paired JPG/RAW rows share a source. Completion requires a
+                // result for each source, while visible progress counts rows.
+                let complete = !sources.isEmpty && sources.values.allSatisfy { self.localRatings[$0.id] != nil }
                 self.publish(sources: sources, eligible: eligible, loading: false, complete: complete)
                 PhotoRatingDiagnostics.note("complete=\(self.state.completed)/\(self.state.total)")
             }

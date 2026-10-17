@@ -41,6 +41,28 @@ final class Np3BitmapFilterTests: XCTestCase {
         catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
     }
 
+    func testOriginalIsSerialAndPreviewHasAtMostTwoWorkers() {
+        for processors in [1, 2, 3, 8, 64] {
+            XCTAssertEqual(PhotoFilterExecution.original.workers(width: 6000, height: 4000, processors: processors), 1)
+            XCTAssertEqual(PhotoFilterExecution.preview.workers(width: 511, height: 512, processors: processors), 1)
+            XCTAssertEqual(PhotoFilterExecution.preview.workers(width: 512, height: 512, processors: processors), min(max(processors - 1, 1), 2))
+        }
+    }
+
+    func testSerialAndParallelPathsProduceIdenticalPixelsIncludingOddFinalRow() throws {
+        // Above the Android parallel threshold; 513 rows exercises uneven partitioning.
+        let palette: [UInt32] = [0xffff0000, 0xff00ff00, 0xff0000ff, 0x80804020, 0x00000000]
+        let pixels = (0..<(512 * 513)).map { palette[$0 % palette.count] }
+        let source = try image(pixels, width: 512)
+        let parameters = Np3FilterCatalog.presets[1].parameters
+        let original = try Np3BitmapFilter.apply(source, parameters: parameters, intensityPercent: 80, execution: .original)
+        let preview = try Np3BitmapFilter.apply(source, parameters: parameters, intensityPercent: 80, execution: .preview)
+        XCTAssertEqual(try rgbaBytes(original), try rgbaBytes(preview))
+        XCTAssertEqual(original.width, 512)
+        XCTAssertEqual(original.height, 513)
+        XCTAssertEqual(try rgbaBytes(source), pixels.flatMap(rgba))
+    }
+
     private func image(_ argb: [UInt32], width: Int) throws -> CGImage {
         let bytes = argb.flatMap(rgba)
         let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))

@@ -1,7 +1,198 @@
 import XCTest
+import Combine
 @testable import ZTransfer
 
 final class ConnectionStateTests: XCTestCase {
+    @MainActor
+    func testUSBPermissionRecoveryUsesAuthorizationAcrossLanguageChanges() {
+        let saved = UserDefaults.standard.object(forKey: "app_language")
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: "app_language") }
+            else { UserDefaults.standard.removeObject(forKey: "app_language") }
+        }
+        for (before, after) in [("zh-Hans", "en"), ("en", "zh-Hans"), ("zh-Hant", "en"), ("en", "zh-Hant")] {
+            for denied in [USBAuthorizationState.denied, .restricted] {
+                UserDefaults.standard.set(before, forKey: "app_language")
+                let model = ConnectionViewModel()
+                model.apply(.authorization(denied))
+                model.apply(.deviceAdded(USBDeviceDescriptor(id: "camera", name: "Nikon", productKind: nil, transportType: "USB")))
+                let original = model.state.errorMessage
+                UserDefaults.standard.set(after, forKey: "app_language")
+                XCTAssertNotEqual(original, AppLocalized.resource("usb_permission_required"))
+                model.apply(.authorization(.authorized))
+                XCTAssertEqual(model.state.usbPhase, .waitingForCamera)
+                XCTAssertNil(model.state.errorMessage)
+                XCTAssertEqual(model.state.selectedDeviceID, "camera")
+                // This synchronous replay ends before the queued physical USB
+                // open; model teardown cancels it. No camera is contacted.
+            }
+        }
+        var unrelated = ConnectionState()
+        unrelated.usbAuthorization = .authorized
+        unrelated.usbPhase = .failed("protocol failed")
+        unrelated.errorMessage = "protocol failed"
+        unrelated = unrelated.applying(.authorization(.authorized))
+        XCTAssertEqual(unrelated.usbPhase, .failed("protocol failed"))
+    }
+
+    @MainActor
+    func testUSBViewModelPreservesReducerFallbackAndPermissionError() {
+        let device = USBDeviceDescriptor(id: "camera", name: "Nikon", productKind: nil, transportType: "USB")
+        for status in [USBAuthorizationState.notDetermined, .denied, .restricted] {
+            let model = ConnectionViewModel()
+            model.apply(.authorization(status))
+            model.apply(.deviceAdded(device))
+            for message in ["", "framework failure"] {
+                model.apply(.failed(id: device.id, message: message))
+                let expected = status == .notDetermined
+                    ? (message.isEmpty ? AppLocalized.resource("usb_unknown_error") : message)
+                    : AppLocalized.resource("usb_permission_required")
+                XCTAssertEqual(model.state.usbPhase, .failed(expected))
+                XCTAssertEqual(model.state.errorMessage, expected)
+                model.apply(.failed(id: "another camera", message: "unrelated"))
+                XCTAssertEqual(model.state.usbPhase, .failed(expected))
+            }
+        }
+    }
+    @MainActor
+    func testAPRetriesKeepFailureVisibleUntilSuccess() async {
+        let preferences = UserDefaults(suiteName: "sta_connection")!
+        let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
+        let previous = keys.map { preferences.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { preferences.set(value, forKey: key) }
+                else { preferences.removeObject(forKey: key) }
+            }
+        }
+        let service = APReplayService()
+        let model = ConnectionViewModel(wifiService: service)
+        model.setGPSConnectionPaused(false)
+        model.select(wirelessMode: .ap)
+        var observed: [ConnectionState] = []
+        let observation = model.$state.sink { observed.append($0) }
+        defer { observation.cancel() }
+        let failures: [WiFiFailureKind] = [.notFound, .refused, .failed]
+        for index in failures.indices {
+            observed.removeAll()
+            await model.connectSelectedWiFi()
+            XCTAssertEqual(model.state.wifiFailureKind, failures[index])
+            guard case .failed = model.state.wifiPhase else { return XCTFail("Expected AP failure") }
+            XCTAssertEqual(observed.contains { $0.wifiPhase == .connecting }, index == 0)
+            if index > 0 {
+                XCTAssertFalse(observed.contains { $0.wifiFailureKind == nil })
+            }
+        }
+        observed.removeAll()
+        await model.connectSelectedWiFi()
+        XCTAssertEqual(model.state.wifiPhase, .connected)
+        XCTAssertNil(model.state.wifiFailureKind)
+        XCTAssertNotNil(model.cameraSession)
+        XCTAssertFalse(observed.contains { $0.wifiPhase == .connecting })
+        let attempts = await service.attempts
+        XCTAssertEqual(attempts, 4)
+    }
+
+    @MainActor
+    func testAPCancellationRestartsBackoffAndReconnectingStaysVisible() async {
+        let preferences = UserDefaults(suiteName: "sta_connection")!
+        let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
+        let previous = keys.map { preferences.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { preferences.set(value, forKey: key) }
+                else { preferences.removeObject(forKey: key) }
+            }
+        }
+        let service = APReplayService(succeedsOnAttempt: 100)
+        let model = ConnectionViewModel(wifiService: service)
+        model.setGPSConnectionPaused(false)
+        model.select(wirelessMode: .ap)
+        await model.connectSelectedWiFi()
+        XCTAssertEqual(model.apRetryDelayNanoseconds, 1_000_000_000)
+        await model.connectSelectedWiFi()
+        XCTAssertEqual(model.apRetryDelayNanoseconds, 3_000_000_000)
+        model.cancelWiFiConnection()
+        XCTAssertEqual(model.state.wifiPhase, .idle)
+        XCTAssertNil(model.state.wifiFailureKind)
+        var phases: [WiFiConnectionPhase] = []
+        let observation = model.$state.sink { phases.append($0.wifiPhase) }
+        defer { observation.cancel() }
+        await model.connectSelectedWiFi()
+        XCTAssertTrue(phases.contains(.connecting))
+        XCTAssertEqual(model.apRetryDelayNanoseconds, 1_000_000_000)
+        model.cancelWiFiConnection()
+        for _ in 0..<3 {
+            phases.removeAll()
+            await model.connectSelectedWiFi(reconnect: true)
+            XCTAssertEqual(model.state.wifiPhase, .reconnecting)
+            XCTAssertNil(model.state.wifiFailureKind)
+            XCTAssertEqual(model.apRetryDelayNanoseconds, 1_000_000_000)
+            XCTAssertFalse(phases.contains(.connecting))
+            XCTAssertFalse(phases.contains { if case .failed = $0 { return true }; return false })
+        }
+        model.cancelWiFiConnection()
+        XCTAssertEqual(model.state.wifiPhase, .idle)
+    }
+
+    @MainActor
+    func testWorkspaceReturnDefersDiscoverySnapshotAndTransportEventsUntilSettled() {
+        let device = USBDeviceDescriptor(id: "workspace-replay", name: "Nikon", productKind: nil, transportType: "USB")
+        let source = WorkspaceDiscoverySource(devices: [device])
+        let model = ConnectionViewModel(discoverySource: source)
+        var workspace = WorkspaceDiscoveryState()
+        workspace.request(1)
+        model.setConnectionDiscoveryPaused(workspace.shouldPause)
+        workspace.begin(1)
+        workspace.settle(1)
+        workspace.request(0)
+        workspace.begin(0)
+        model.setConnectionDiscoveryPaused(workspace.shouldPause)
+        // Framework events can already be queued when the workbench pauses.
+        model.apply(.authorization(.authorized))
+        model.apply(.deviceAdded(device))
+        model.apply(.ready(id: device.id))
+        model.apply(.sessionOpened(id: device.id, token: UUID()))
+        XCTAssertNil(model.state.selectedDeviceID)
+        XCTAssertTrue(model.state.discoveredDevices.isEmpty)
+        XCTAssertEqual(model.state.usbPhase, .waitingForCamera)
+        XCTAssertNil(model.cameraSession)
+        XCTAssertEqual(source.calls, [])
+        // Cancel return and retry it: neither path may resume early.
+        workspace.request(1)
+        workspace.settle(1)
+        model.setConnectionDiscoveryPaused(workspace.shouldPause)
+        workspace.request(0)
+        workspace.begin(0)
+        model.setConnectionDiscoveryPaused(workspace.shouldPause)
+        XCTAssertEqual(source.calls, [])
+        workspace.settle(0)
+        model.setConnectionDiscoveryPaused(workspace.shouldPause)
+        XCTAssertEqual(source.calls, ["authorization", "refresh", "devices"])
+        XCTAssertEqual(model.state.usbAuthorization, .denied)
+        XCTAssertEqual(model.state.discoveredDevices, [device])
+        XCTAssertEqual(model.state.selectedDeviceID, device.id)
+        // A repeated settled callback must not request permission/enumerate again.
+        model.setConnectionDiscoveryPaused(workspace.shouldPause)
+        XCTAssertEqual(source.calls, ["authorization", "refresh", "devices"])
+    }
+
+    #if DEBUG
+    @MainActor
+    func testWorkspacePauseAndResumePreserveAcceptedCameraSession() {
+        let source = WorkspaceDiscoverySource(devices: [])
+        let model = ConnectionViewModel(discoverySource: source)
+        model.connectDebugSimulator()
+        let accepted = model.cameraSession
+        XCTAssertNotNil(accepted)
+        model.setConnectionDiscoveryPaused(true)
+        XCTAssertTrue(model.cameraSession === accepted)
+        model.setConnectionDiscoveryPaused(false)
+        XCTAssertTrue(model.cameraSession === accepted)
+        XCTAssertTrue(source.calls.isEmpty)
+    }
+    #endif
+
     #if DEBUG
     @MainActor
     func testDebugPremiumPreviewIsSessionScopedAndDoesNotGrantAccess() {
@@ -164,4 +355,47 @@ final class ConnectionStateTests: XCTestCase {
         }
         XCTAssertEqual(protocolFailure, .failed)
     }
+}
+
+
+@MainActor
+private final class WorkspaceDiscoverySource: ConnectionUSBDiscoverySource {
+    let devices: [USBDeviceDescriptor]
+    private(set) var calls: [String] = []
+    init(devices: [USBDeviceDescriptor]) { self.devices = devices }
+    func currentAuthorization() -> USBAuthorizationState {
+        calls.append("authorization")
+        // Keep this replay at the permission gate; no physical camera is opened.
+        return .denied
+    }
+    func refreshAuthorization() { calls.append("refresh") }
+    func attachedDevices() -> [USBDeviceDescriptor] { calls.append("devices"); return devices }
+}
+
+
+private actor APReplayService: WiFiConnectionServicing {
+    nonisolated let profiles: STAProfileStore
+    private(set) var attempts = 0
+    private let succeedsOnAttempt: Int
+    init(succeedsOnAttempt: Int = 4) {
+        self.succeedsOnAttempt = succeedsOnAttempt
+        let name = "APReplay-\(UUID())"
+        profiles = STAProfileStore(preferences: UserDefaults(suiteName: name)!,
+                                   pairing: UserDefaults(suiteName: name + ".pairing")!)
+    }
+    func connectAP(host: String) async throws -> CameraRepository {
+        attempts += 1
+        if attempts >= succeedsOnAttempt { return CameraRepository(debugData: .shared) }
+        switch attempts % 3 {
+        case 1: throw PTPSessionError.timeout
+        case 2: throw STAConnectionError.cameraRefused
+        default: throw PTPSessionError.invalidated
+        }
+    }
+    func connectSTA(discovery: PTPIPDiscoveryService,
+                    onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> CameraRepository {
+        throw STAConnectionError.notFound
+    }
+    func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) {}
+    func disconnect() {}
 }

@@ -24,6 +24,7 @@ final class STAProfileStore: @unchecked Sendable {
     private let lock = NSRecursiveLock()
     private let now: @Sendable () -> Double
     private static let marker = "sta_paired_"
+    private static let verifiedMarker = "sta_pairing_verified_v2_"
     private static let prefix = "sta_camera_profile_v1."
     private static let registry = "sta_camera_profile_guids_v1"
     private static let migration = "sta_camera_profile_migration_v1"
@@ -54,14 +55,46 @@ final class STAProfileStore: @unchecked Sendable {
     }
 
     func isPaired(_ guid: String?) -> Bool {
-        locked { Self.normalizeGUID(guid).map { pairing.bool(forKey: Self.marker + $0) } ?? false }
+        locked {
+            Self.normalizeGUID(guid).map {
+                pairing.bool(forKey: Self.marker + $0) || pairing.bool(forKey: Self.verifiedMarker + $0)
+            } ?? false
+        }
+    }
+
+    func hasTrustedPairing(_ guid: String?) -> Bool {
+        locked { Self.normalizeGUID(guid).map { pairing.bool(forKey: Self.verifiedMarker + $0) } ?? false }
+    }
+
+    func requiresPairingVerification(_ guid: String?) -> Bool {
+        locked { isPaired(guid) && !hasTrustedPairing(guid) }
+    }
+
+    /// Only the successful post-reconnect DeviceInfo/album validation may call this.
+    func confirmVerifiedPairing(_ guid: String?) {
+        locked {
+            guard let guid = Self.normalizeGUID(guid) else { return }
+            pairing.set(true, forKey: Self.marker + guid)
+            pairing.set(true, forKey: Self.verifiedMarker + guid)
+            pairing.synchronize()
+        }
+    }
+
+    /// Forget proof for one body without losing its route or rotating initiator IDs.
+    func invalidatePairing(_ guid: String?) {
+        locked {
+            guard let guid = Self.normalizeGUID(guid) else { return }
+            pairing.removeObject(forKey: Self.marker + guid)
+            pairing.removeObject(forKey: Self.verifiedMarker + guid)
+            pairing.synchronize()
+        }
     }
 
     func markPaired(_ guid: String?) {
         locked {
             guard let guid = Self.normalizeGUID(guid) else { return }
             pairing.set(true, forKey: Self.marker + guid)
-            pairing.synchronize() // Before the optional event wait/service restart.
+            pairing.synchronize() // Legacy marker; never promoted to v2 without verification.
         }
     }
 
@@ -146,8 +179,11 @@ final class STAProfileStore: @unchecked Sendable {
     }
     private var markerGUIDs: Set<String> {
         Set(pairing.dictionaryRepresentation().keys.compactMap { key in
-            guard key.hasPrefix(Self.marker), pairing.bool(forKey: key) else { return nil }
-            return Self.normalizeGUID(String(key.dropFirst(Self.marker.count)))
+            guard pairing.bool(forKey: key) else { return nil }
+            for prefix in [Self.marker, Self.verifiedMarker] where key.hasPrefix(prefix) {
+                return Self.normalizeGUID(String(key.dropFirst(prefix.count)))
+            }
+            return nil
         })
     }
     private func migrate() {

@@ -1,8 +1,17 @@
 import Foundation
 
+protocol WiFiConnectionServicing: Sendable {
+    var profiles: STAProfileStore { get }
+    func connectAP(host: String) async throws -> CameraRepository
+    func connectSTA(discovery: PTPIPDiscoveryService,
+                    onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> CameraRepository
+    func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) async
+    func disconnect() async
+}
+
 /// One owner for accepted Wi-Fi sessions. Discovery attempts own their sockets
 /// until accepted, so cancellation cannot close a later replacement session.
-actor WiFiConnectionService {
+actor WiFiConnectionService: WiFiConnectionServicing {
     let profiles = STAProfileStore()
     private var closeConnection: (@Sendable () async -> Void)?
     private var closeSocket: (@Sendable () -> Void)?
@@ -38,9 +47,9 @@ actor WiFiConnectionService {
             try Task.checkCancellation()
             guard request == generation else { throw CancellationError() }
             socket.startEvents()
-            closeConnection = { await PTPIPSocketTransport.retireOpenedSession(session, socket: socket, opened: true) }
-            closeSocket = { socket.close() }
-            repository = repo
+            acceptConnection(repo) {
+                await PTPIPSocketTransport.retireOpenedSession(session, socket: socket, opened: true)
+            }
             return repo
         } catch {
             await PTPIPSocketTransport.retireOpenedSession(session, socket: socket, opened: opened)
@@ -53,9 +62,9 @@ actor WiFiConnectionService {
         generation &+= 1
         let request = generation
         let profiles = self.profiles
-        let coordinator = STAConnectionCoordinator(profiles: profiles, connect: { candidate, identity, expected, stage in
+        let coordinator = STAConnectionCoordinator(profiles: profiles, connect: { candidate, identity, expected, verify, stage in
             try await STAConnectionCoordinator.open(candidate: candidate, identity: identity,
-                expectedGUID: expected, profiles: profiles, onStage: stage)
+                expectedGUID: expected, profiles: profiles, verifyPairingCompletion: verify, onStage: stage)
         }, onStage: onStage)
         let selection = STACandidateSelection(coordinator: coordinator, expectedGUID: profiles.mostRecentGUID)
         let found = try await discovery.discover(lastIP: profiles.lastUsedIP,
@@ -70,10 +79,18 @@ actor WiFiConnectionService {
         let repo = CameraRepository(session: camera.session, staAlbum: camera.album,
                                     transportCameraIdentifier: camera.guid)
         camera.startEvents { await repo.receiveEvent($0) }
-        closeConnection = camera.close
-        closeSocket = { Task { await camera.close() } }
-        repository = repo
+        acceptConnection(repo, close: camera.close)
         return repo
+    }
+
+    /// Both transports publish ownership only after their handshake succeeds.
+    /// Pre-publication cleanup stays with the attempt that opened the socket.
+    func acceptConnection(_ repository: CameraRepository,
+                          close: @escaping @Sendable () async -> Void) {
+        let retire: @Sendable () async -> Void = { await repository.retireConnection(close) }
+        closeConnection = retire
+        closeSocket = { Task { await retire() } }
+        self.repository = repository
     }
 
     func startKeepalive(for expectedRepository: CameraRepository, onLost: @escaping @Sendable () async -> Void) {
@@ -87,15 +104,7 @@ actor WiFiConnectionService {
             }
         }
         keepaliveTask = Task {
-            while !Task.isCancelled {
-                do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
-                guard !Task.isCancelled else { return }
-                if !(await repository.keepalive()) {
-                    guard !Task.isCancelled else { return }
-                    await onLost()
-                    return
-                }
-            }
+            await WiFiKeepaliveLoop.run(probe: { await repository.keepalive() }, onLost: onLost)
         }
     }
 

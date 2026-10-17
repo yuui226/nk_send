@@ -8,15 +8,21 @@ struct RemoteCameraToolMenuPlacement {
     let opensAbove: Bool
     let frame: CGRect
 
-    init(host: CGSize, anchor: CGRect?, landscape: Bool, width: CGFloat, contentHeight: CGFloat) {
+    init(host: CGSize, anchor: CGRect?, landscape: Bool, width: CGFloat, contentHeight: CGFloat, besideAnchor: Bool = false) {
         let above = max(0, min(host.height, max(0, anchor?.minY ?? 0)) - 14)
         let below = max(0, host.height - min(host.height, max(0, anchor?.maxY ?? 0)) - 14)
         opensAbove = landscape && anchor != nil && above > below
-        availableHeight = max(1, opensAbove ? above : below)
+        availableHeight = max(1, besideAnchor ? host.height - 16 : (opensAbove ? above : below))
         self.width = min(width, max(1, host.width - 16))
         let height = min(max(1, contentHeight), availableHeight)
-        let x = min(max(8, anchor?.minX ?? 8), max(8, host.width - self.width - 8))
-        let wantedY = opensAbove ? (anchor?.minY ?? host.height) - 6 - height : (anchor?.maxY ?? 8) + 6
+        let preferredX: CGFloat
+        if besideAnchor, let anchor {
+            let before = anchor.minX - 6 - self.width
+            preferredX = before >= 8 ? before : anchor.maxX + 6
+        } else { preferredX = anchor?.minX ?? 8 }
+        let x = min(max(8, preferredX), max(8, host.width - self.width - 8))
+        let wantedY = besideAnchor ? (anchor?.midY ?? host.height / 2) - height / 2
+            : (opensAbove ? (anchor?.minY ?? host.height) - 6 - height : (anchor?.maxY ?? 8) + 6)
         frame = CGRect(x: x, y: min(max(0, wantedY), max(0, host.height - height)), width: self.width, height: height)
     }
 }

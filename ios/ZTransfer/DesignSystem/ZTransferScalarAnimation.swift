@@ -14,15 +14,18 @@ struct ZTransferScalarAnimation {
     private var durationNanos: Int64 = 0
     private var startNanos: Int64?
     private var lastFrameNanos: Int64?
+    private let retainsEndVelocity: Bool
 
-    init(value: Float) {
+    init(value: Float, retainsEndVelocity: Bool = false) {
+        self.retainsEndVelocity = retainsEndVelocity
         self.value = value
         target = value
         initialValue = value
     }
 
     mutating func retarget(_ target: Float, using spec: ZTransferAndroidMotion,
-                          fromDisplayedValue: Float? = nil, force: Bool = false) {
+                          fromDisplayedValue: Float? = nil, force: Bool = false,
+                          atFrameNanos: Int64? = nil) {
         // animateValueAsState does not restart on a spec-only recomposition.
         // A vector animation retargets every component, even unchanged ones;
         // force preserves that common timeline and its rounded displayed start.
@@ -35,7 +38,9 @@ struct ZTransferScalarAnimation {
         self.target = target
         self.spec = spec
         durationNanos = spec.durationNanos(from: value, to: target, velocity: velocity)
-        startNanos = lastFrameNanos
+        // Transition groups can retain a common frame origin after one
+        // channel has settled while another is still running.
+        startNanos = atFrameNanos ?? lastFrameNanos
         isRunning = true
         if let startNanos {
             // Animatable executes a zero-play-time frame immediately when
@@ -53,9 +58,9 @@ struct ZTransferScalarAnimation {
         velocity = result.velocity
         lastFrameNanos = frameNanos
         if elapsed >= durationNanos {
-            // Animatable.endAnimation clears the velocity even for tweens
-            // (TargetBasedAnimation itself reports its finite difference).
-            velocity = 0
+            // Transition keeps TargetBasedAnimation's end velocity; Animatable
+            // explicitly clears it. Springs already return zero in either mode.
+            if !retainsEndVelocity { velocity = 0 }
             lastFrameNanos = nil
             startNanos = nil
             isRunning = false
@@ -63,6 +68,6 @@ struct ZTransferScalarAnimation {
     }
 
     mutating func reset(to value: Float) {
-        self = Self(value: value)
+        self = Self(value: value, retainsEndVelocity: retainsEndVelocity)
     }
 }

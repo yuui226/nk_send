@@ -4,29 +4,34 @@ import MetalKit
 import CoreGraphics
 
 final class RemoteLUTMetalRenderer {
-    enum Failure: Error { case unavailable, pipeline, texture }
+    enum Failure: Error { case unavailable, pipeline, texture, inputColor }
     private let device: MTLDevice
-    private let queue: MTLCommandQueue
+    struct Resources {
+        var makePipeline: (MTLDevice, MTLRenderPipelineDescriptor) throws -> MTLRenderPipelineState = {
+            try $0.makeRenderPipelineState(descriptor: $1)
+        }
+        var makeTexture: (MTLDevice, MTLTextureDescriptor) -> MTLTexture? = { $0.makeTexture(descriptor: $1) }
+    }
+    private let resources: Resources
     private let pipeline: MTLRenderPipelineState
     private var lutTexture: MTLTexture?
     private var current: CubeLUT?
 
-    init(device: MTLDevice? = MTLCreateSystemDefaultDevice()) throws {
+    init(device: MTLDevice? = MTLCreateSystemDefaultDevice(), resources: Resources = Resources()) throws {
         guard let device else { throw Failure.unavailable }
         self.device = device
-        guard let queue = device.makeCommandQueue() else { throw Failure.unavailable }
-        self.queue = queue
+        self.resources = resources
         guard let library = try? device.makeLibrary(source: Self.shader, options: nil), let vertex = library.makeFunction(name: "remoteLUTVertex"), let fragment = library.makeFunction(name: "remoteLUTFragment") else { throw Failure.pipeline }
         let descriptor = MTLRenderPipelineDescriptor(); descriptor.vertexFunction = vertex; descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        do { pipeline = try device.makeRenderPipelineState(descriptor: descriptor) } catch { throw Failure.pipeline }
+        do { pipeline = try resources.makePipeline(device, descriptor) } catch { throw Failure.pipeline }
     }
 
     func setLUT(_ candidate: CubeLUT) throws {
         if current?.digest == candidate.digest, lutTexture != nil { return }
         let descriptor = MTLTextureDescriptor(); descriptor.textureType = .type3D; descriptor.pixelFormat = .rgba16Float; descriptor.width = candidate.size; descriptor.height = candidate.size; descriptor.depth = candidate.size; descriptor.mipmapLevelCount = 1
         descriptor.usage = MTLTextureUsage.shaderRead
-        guard let texture = device.makeTexture(descriptor: descriptor) else { throw Failure.texture }
+        guard let texture = resources.makeTexture(device, descriptor) else { throw Failure.texture }
         let values = candidate.rgba16FloatUploadValues
         values.withUnsafeBytes { bytes in
             texture.replace(region: MTLRegionMake3D(0, 0, 0, candidate.size, candidate.size, candidate.size), mipmapLevel: 0, slice: 0, withBytes: bytes.baseAddress!, bytesPerRow: candidate.size * 8, bytesPerImage: candidate.size * candidate.size * 8)
@@ -51,7 +56,7 @@ final class RemoteLUTMetalRenderer {
     /// by the LUT pass. The loader is recreated per frame only for the small
     /// monitor preview; callers can retain it when they have a persistent stream.
     func encode(image: CGImage, into destination: MTLTexture, commandBuffer: MTLCommandBuffer, fit: SIMD2<Float> = SIMD2(repeating: 1)) throws {
-        guard image.colorSpace?.name == CGColorSpace.sRGB else { throw Failure.texture }
+        guard image.colorSpace?.name == CGColorSpace.sRGB else { throw Failure.inputColor }
         let loader = MTKTextureLoader(device: device)
         guard let source = try? loader.newTexture(cgImage: image, options: [MTKTextureLoader.Option.SRGB: false]) else { throw Failure.texture }
         try encode(source: source, destination: destination, commandBuffer: commandBuffer, fit: fit)

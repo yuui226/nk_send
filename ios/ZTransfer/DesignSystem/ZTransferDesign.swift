@@ -7,6 +7,7 @@ struct ZTransferTypography {
     let size: CGFloat
     let lineHeight: CGFloat
     static let titleMedium = Self(size: 16, lineHeight: 24)
+    static let titleSmall = Self(size: 14, lineHeight: 20)
     static let bodyMedium = Self(size: 14, lineHeight: 20)
     static let labelMedium = Self(size: 12, lineHeight: 16)
     static let bodySmall = Self(size: 12, lineHeight: 16)

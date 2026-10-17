@@ -548,3 +548,45 @@
 "胶片边框" = "Film Edge";
 "艺术装裱" = "Gallery Mat";
 "按档位自动加入新增文件：全部、JPG、RAW（NEF 照片）或视频（MOV/MP4）。不影响已有任务和手动传输。" = "依檔位自動加入新增檔案：全部、JPG、RAW（NEF 照片）或影片（MOV/MP4）。不影響既有任務與手動傳輸。";
+
+"crop_title" = "裁切";
+
+"crop_task" = "裁切照片";
+
+"crop_confirm" = "裁切並加入佇列";
+
+"crop_reset" = "重設裁切";
+
+"crop_cancel" = "取消裁切";
+
+"crop_free" = "自由";
+
+"crop_original" = "原比例";
+
+"crop_swap" = "切換橫直比例";
+
+"crop_loading" = "正在準備裁切…";
+
+"crop_unavailable" = "暫時無法準備裁切，請重試";
+
+"crop_retry" = "重試";
+
+"crop_added" = "已加入佇列";
+
+"crop_effects_skipped" = "照片效果已略過";
+
+"crop_preview_read_failed" = "無法讀取高清預覽，請重試";
+
+"crop_orientation_failed" = "無法讀取照片方向，請重試";
+
+"camera_not_connected" = "相機未連線";
+
+"photo_effect_modules" = "管理模組";
+
+"photo_effect_module_filter" = "濾鏡";
+
+"photo_effect_module_lut" = "LUT";
+
+"photo_effect_module_frame" = "邊框";
+
+"photo_effect_module_watermark" = "浮水印";

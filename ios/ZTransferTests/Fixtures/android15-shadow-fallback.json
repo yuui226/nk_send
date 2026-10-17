@@ -1,0 +1,389 @@
+{
+  "cases": [
+    {
+      "height": -1,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 0.0
+    },
+    {
+      "height": -1,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": -1,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": -1,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": -1,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 0,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 0,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 0,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 0,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 0,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 0.0,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 1,
+      "spotRadius": 0,
+      "stroke": 0.124023438,
+      "ambientSigma": 0.645465136,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 1,
+      "spotRadius": 0.125,
+      "stroke": 0.124023438,
+      "ambientSigma": 0.645465136,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 1,
+      "spotRadius": 1,
+      "stroke": 0.124023438,
+      "ambientSigma": 0.645465136,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 1,
+      "spotRadius": 10,
+      "stroke": 0.124023438,
+      "ambientSigma": 0.645465136,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 1,
+      "spotRadius": 100,
+      "stroke": 0.124023438,
+      "ambientSigma": 0.645465136,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 6,
+      "spotRadius": 0,
+      "stroke": 0.71484375,
+      "ambientSigma": 1.40662003,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 6,
+      "spotRadius": 0.125,
+      "stroke": 0.71484375,
+      "ambientSigma": 1.40662003,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 6,
+      "spotRadius": 1,
+      "stroke": 0.71484375,
+      "ambientSigma": 1.40662003,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 6,
+      "spotRadius": 10,
+      "stroke": 0.71484375,
+      "ambientSigma": 1.40662003,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 6,
+      "spotRadius": 100,
+      "stroke": 0.71484375,
+      "ambientSigma": 1.40662003,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 64,
+      "spotRadius": 0,
+      "stroke": 4.0,
+      "ambientSigma": 14.3564005,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 64,
+      "spotRadius": 0.125,
+      "stroke": 4.0,
+      "ambientSigma": 14.3564005,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 64,
+      "spotRadius": 1,
+      "stroke": 4.0,
+      "ambientSigma": 14.3564005,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 64,
+      "spotRadius": 10,
+      "stroke": 4.0,
+      "ambientSigma": 14.3564005,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 64,
+      "spotRadius": 100,
+      "stroke": 4.0,
+      "ambientSigma": 14.3564005,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 128,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 37.4504013,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 128,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 37.4504013,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 128,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 37.4504013,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 128,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 37.4504013,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 128,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 37.4504013,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 129,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 37.8845406,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 129,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 37.8845406,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 129,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 37.8845406,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 129,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 37.8845406,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 129,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 37.8845406,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 256,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 111.351204,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 256,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 111.351204,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 256,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 111.351204,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 256,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 111.351204,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 256,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 111.351204,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 300,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 145.288559,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 300,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 145.288559,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 300,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 145.288559,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 300,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 145.288559,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 300,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 145.288559,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 500,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 212.946762,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 500,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 212.946762,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 500,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 212.946762,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 500,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 212.946762,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 500,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 212.946762,
+      "spotSigma": 58.2350006
+    },
+    {
+      "height": 1000,
+      "spotRadius": 0,
+      "stroke": 0.0,
+      "ambientSigma": 382.092285,
+      "spotSigma": 0.0
+    },
+    {
+      "height": 1000,
+      "spotRadius": 0.125,
+      "stroke": 0.0,
+      "ambientSigma": 382.092285,
+      "spotSigma": 0.572168767
+    },
+    {
+      "height": 1000,
+      "spotRadius": 1,
+      "stroke": 0.0,
+      "ambientSigma": 382.092285,
+      "spotSigma": 1.07735002
+    },
+    {
+      "height": 1000,
+      "spotRadius": 10,
+      "stroke": 0.0,
+      "ambientSigma": 382.092285,
+      "spotSigma": 6.27350044
+    },
+    {
+      "height": 1000,
+      "spotRadius": 100,
+      "stroke": 0.0,
+      "ambientSigma": 382.092285,
+      "spotSigma": 58.2350006
+    }
+  ]
+}
