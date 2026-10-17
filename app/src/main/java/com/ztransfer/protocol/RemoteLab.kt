@@ -405,6 +405,9 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
         4L -> "S"
         // Nikon 在全自动档使用厂商扩展枚举；不是操作失败或错误码。
         0x8010L -> "AUTO"
+        0x8050L -> "U1"
+        0x8051L -> "U2"
+        0x8052L -> "U3"
         else -> "0x${raw.toString(16)}"
     }
     Lab.PROP_FOCUS_MODE, Lab.PROP_NK_STILL_FOCUS_MODE, Lab.PROP_NK_AF_MODE ->

@@ -2,6 +2,7 @@
     <string name="remote_tool_picture_control">Picture Control</string>
     <string name="picture_control_loading">Loading…</string>
     <string name="picture_control_write_failed">Operation failed</string>
+    <string name="picture_control_exposure_mode_required">Switch to P/S/A/M</string>
     <string name="picture_control_failed_restored">Failed. Previous settings restored.</string>
     <string name="picture_control_check_slot">Operation failed. Check C%1$d.</string>
     <string name="picture_control_files_failed">Presets unavailable</string>
@@ -17,6 +18,7 @@
     <string name="picture_control_file_read_failed">Could not read file</string>
     <string name="picture_control_file_invalid">Invalid NP3 file</string>
     <string name="picture_control_file_unsupported">Unsupported preset</string>
+    <string name="picture_control_flexible_color_unsupported">Flexible Color presets are not supported yet</string>
     <string name="picture_control_read_timeout">Read timed out</string>
     <string name="picture_control_slots_title">Camera presets</string>
     <string name="picture_control_edit_slot">Replace C%1$d</string>

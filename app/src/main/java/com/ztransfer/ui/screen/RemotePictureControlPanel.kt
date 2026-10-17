@@ -172,11 +172,13 @@ internal fun RemotePictureControlPanel(
             } catch (error: Exception) {
                 operationFailed = true
                 val resource = when (error) {
+                    is PictureControlExposureModeException -> R.string.picture_control_exposure_mode_required
                     is PictureControlReplacementException -> if (error.originalRestored)
                         R.string.picture_control_failed_restored else R.string.picture_control_check_slot
                     is PictureControlImportException -> when (error.reason) {
                         PictureControlImportFailure.READ -> R.string.picture_control_file_read_failed
                         PictureControlImportFailure.INVALID -> R.string.picture_control_file_invalid
+                        PictureControlImportFailure.FLEXIBLE_COLOR -> R.string.picture_control_flexible_color_unsupported
                         PictureControlImportFailure.UNSUPPORTED -> R.string.picture_control_file_unsupported
                         PictureControlImportFailure.TIMEOUT -> R.string.picture_control_read_timeout
                     }

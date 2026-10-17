@@ -2,6 +2,7 @@
     <string name="remote_tool_picture_control">優化校準</string>
     <string name="picture_control_loading">讀取中…</string>
     <string name="picture_control_write_failed">操作失敗</string>
+    <string name="picture_control_exposure_mode_required">請切換至 P/S/A/M</string>
     <string name="picture_control_failed_restored">操作失敗，已還原</string>
     <string name="picture_control_check_slot">操作失敗，請檢查 C%1$d</string>
     <string name="picture_control_files_failed">預設載入失敗</string>
@@ -17,6 +18,7 @@
     <string name="picture_control_file_read_failed">檔案讀取失敗</string>
     <string name="picture_control_file_invalid">NP3 檔案無效</string>
     <string name="picture_control_file_unsupported">暫不支援此預設</string>
+    <string name="picture_control_flexible_color_unsupported">暫不支援靈活顏色預設</string>
     <string name="picture_control_read_timeout">讀取逾時</string>
     <string name="picture_control_slots_title">機內預設</string>
     <string name="picture_control_edit_slot">更換 C%1$d</string>

@@ -6,6 +6,9 @@ import java.security.MessageDigest
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
+internal class NikonFlexibleColorUnsupportedException :
+    IllegalArgumentException("Flexible Color Picture Controls are not supported")
+
 /** File container only. The camera's Get/SetPicCtrlData dataset is a separate format. */
 internal class NikonPictureControlFile private constructor(
     val name: String,
@@ -64,6 +67,14 @@ internal class NikonPictureControlFile private constructor(
             }
             val version = versionBytes.toString(Charsets.US_ASCII)
             require(version.startsWith("03")) { "Not an NP3 Picture Control file" }
+            // Identify the known Flexible Color layout only after validating the complete
+            // container, but before applying classic name/parameter restrictions. A newer
+            // version alone is not enough to label an unknown preset as Flexible Color.
+            // Layout: ssssota/nikon-flexible-color-picture-control, src/base.ts / offset.ts.
+            val flexibleColor = version == "0310" &&
+                fields[0x0300]?.contentEquals(byteArrayOf(0x00, 0x20)) == true &&
+                fields[0x1F00]?.size == 28 && fields[0x2000]?.size == 20
+            if (flexibleColor) throw NikonFlexibleColorUnsupportedException()
             val nameBytes = requireNotNull(fields[0x200]) { "Missing Picture Control name" }
             require(nameBytes.size == 20) { "Invalid Picture Control name field" }
             val nameEnd = nameBytes.indexOf(0).let { if (it < 0) nameBytes.size else it }

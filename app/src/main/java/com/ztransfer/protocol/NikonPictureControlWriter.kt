@@ -45,6 +45,9 @@ internal fun interface PictureControlTransport {
 }
 
 internal enum class PictureControlSlotAvailability { OCCUPIED, EMPTY, UNREADABLE, UNSUPPORTED }
+internal class PictureControlExposureModeException(program: Int, userMode: Int?) :
+    IllegalStateException("Picture Control requires P/S/A/M: exposure=0x%04X userMode=%s".format(program, userMode))
+
 internal data class PictureControlSlotInfo(
     val slot: Int,
     val availability: PictureControlSlotAvailability,
@@ -109,9 +112,24 @@ internal class NikonPictureControlAccess(
         }
         val descriptor = selectionDescriptor()
         check(descriptor.writable && descriptor.supportsSlot(slot)) { "Camera does not expose writable C${slot - 200}" }
-        check(readU16(0x500E) in 1..4) { "Set the camera exposure mode to P, S, A or M" }
+        requireAdjustableExposureMode()
         selection = descriptor
         selectionPrepared = true
+    }
+
+    private suspend fun requireAdjustableExposureMode() {
+        val program = readU16(0x500E)
+        // Z5 MTP §§6.5, 6.5.1.11, 6.5.7.1 (also Z30/Z6): PSAM restrictions
+        // apply to the effective mode stored in U1/U2/U3. D0FC is UINT8, and its
+        // value is only defined in a user mode; do not read it for ordinary PSAM.
+        val userMode = if (program in 0x8050..0x8052) {
+            val bytes = requireNotNull(command(0x1015, intArrayOf(0xD0FC)))
+            require(bytes.size == 1) { "Unexpected UserMode property format" }
+            bytes[0].toInt() and 255
+        } else null
+        if (program !in 1..4 && userMode !in 19..22) {
+            throw PictureControlExposureModeException(program, userMode)
+        }
     }
 
     suspend fun prepare(dataset: ByteArray? = null) {

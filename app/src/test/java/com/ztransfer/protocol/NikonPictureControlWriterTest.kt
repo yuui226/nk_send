@@ -38,6 +38,8 @@ class NikonPictureControlWriterTest {
         var current = initial.copyOf()
         var selection = 5
         var exposure = 1
+        var userMode: ByteArray? = byteArrayOf(19)
+        var userModeResponse = 0x2001
         var rejectActivation = false
         var malformedCapabilities = false
         var omitDefaultCurve = false
@@ -53,6 +55,7 @@ class NikonPictureControlWriterTest {
                     captured(code, "$property")
                 }
                 0x1015 -> {
+                    if (params.toList() == listOf(0xD0FC)) return userModeResponse to userMode?.copyOf()
                     assertTrue(params.single() in listOf(0x500E, property))
                     val value = if (params[0] == 0x500E) exposure else selection
                     byteArrayOf(value.toByte(), (value shr 8).toByte())
@@ -190,6 +193,76 @@ class NikonPictureControlWriterTest {
         assertEquals(5, wire.selection)
         assertEquals(listOf(listOf(209, 0, 0), listOf(209, 0, 0), listOf(209, 1, 0)),
             wire.calls.filter { it.code == 0x90CD }.map { it.params })
+    }
+
+    @Test fun userProgramsWithStoredPsamCanActivateAndReplaceInBothBanks() = runBlocking {
+        for (movie in listOf(false, true)) for (program in 0x8050..0x8052) for (storedMode in 19..22) {
+            val wire = Wire(movie).apply { exposure = program; userMode = byteArrayOf(storedMode.toByte()) }
+            val access = wire.access()
+            val replacement = PictureControlReplacement(PictureControlBackupStore(temporary.newFolder()))
+            val original = wire.current.copyOf()
+            access.prepareSelection()
+            replacement.activate(access)
+            assertEquals(209, wire.selection)
+            assertArrayEquals(original, wire.current)
+            assertTrue(wire.mutations().all { it.code == 0x1016 })
+
+            val dataset = preset()
+            access.prepare(dataset)
+            replacement.apply(access, NikonPictureControlSlotState.fromDataset(209, dataset).bytes())
+            assertArrayEquals(dataset, wire.current)
+            assertEquals(listOf(209, 0, if (movie) 1 else 0), wire.calls.single { it.code == 0x90CD }.params)
+            assertEquals(2, wire.calls.count { it.code == 0x1015 && it.params == listOf(0xD0FC) })
+        }
+    }
+
+    @Test fun standardPsamDoesNotDependOnUserModeProperty() = runBlocking {
+        for (movie in listOf(false, true)) for (program in 1..4) {
+            val wire = Wire(movie).apply { exposure = program; userModeResponse = 0x200A; userMode = null }
+            val access = wire.access()
+            val replacement = PictureControlReplacement(PictureControlBackupStore(temporary.newFolder()))
+            access.prepareSelection()
+            replacement.activate(access)
+            val dataset = preset()
+            access.prepare(dataset)
+            replacement.apply(access, NikonPictureControlSlotState.fromDataset(209, dataset).bytes())
+            assertEquals(209, wire.selection)
+            assertArrayEquals(dataset, wire.current)
+            assertFalse(wire.calls.any { it.params == listOf(0xD0FC) })
+        }
+    }
+
+    @Test fun autoAndUnknownProgramsRejectSelectionAndReplacementBeforeMutation() {
+        for (program in listOf(0x8010, 0x8053, 0xFFFF)) for (write in listOf(false, true)) {
+            val wire = Wire().apply { exposure = program }
+            assertThrows(PictureControlExposureModeException::class.java) {
+                runBlocking { if (write) wire.access().prepare(preset()) else wire.access().prepareSelection() }
+            }
+            assertTrue(wire.mutations().isEmpty())
+            assertFalse(wire.calls.any { it.params == listOf(0xD0FC) })
+        }
+    }
+
+    @Test fun userProgramsWithAutoOrUnknownStoredModeRejectBeforeMutation() {
+        for (program in 0x8050..0x8052) for (storedMode in listOf(23, 0, 18, 255)) for (write in listOf(false, true)) {
+            val wire = Wire().apply { exposure = program; userMode = byteArrayOf(storedMode.toByte()) }
+            assertThrows(PictureControlExposureModeException::class.java) {
+                runBlocking { if (write) wire.access().prepare(preset()) else wire.access().prepareSelection() }
+            }
+            assertTrue(wire.mutations().isEmpty())
+        }
+    }
+
+    @Test fun unavailableOrMalformedUserModeNeverStartsMutation() {
+        val responses = listOf(0x200A to byteArrayOf(19), 0x2001 to null,
+            0x2001 to byteArrayOf(), 0x2001 to byteArrayOf(19, 0))
+        for ((response, bytes) in responses) for (write in listOf(false, true)) {
+            val wire = Wire().apply { exposure = 0x8052; userMode = bytes; userModeResponse = response }
+            assertThrows(Exception::class.java) {
+                runBlocking { if (write) wire.access().prepare(preset()) else wire.access().prepareSelection() }
+            }
+            assertTrue(wire.mutations().isEmpty())
+        }
     }
 
     @Test fun manualRestoreSurvivesNewStoreAndWriterInstancesIncludingOriginallyEmptyC9() = runBlocking {

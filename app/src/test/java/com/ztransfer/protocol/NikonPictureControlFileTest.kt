@@ -9,6 +9,49 @@ import org.junit.Test
 
 class NikonPictureControlFileTest {
     private fun sample(): ByteArray = File("src/main/assets/picture_controls/Kodak Ektar Green.NP3").readBytes()
+    private fun flexibleColor(name: String = "vanilla"): ByteArray =
+        javaClass.getResourceAsStream("/picture_control/flexible-color/$name.NP3")!!.use { it.readBytes() }
+
+    @Test fun realFlexibleColorFilesHaveTheirOwnUnsupportedReason() {
+        for (name in listOf("vanilla", "tonecurve-noop", "comment-a")) {
+            val bytes = flexibleColor(name)
+            assertThrows(NikonFlexibleColorUnsupportedException::class.java) {
+                NikonPictureControlFile.parse(bytes)
+            }
+            assertThrows(NikonFlexibleColorUnsupportedException::class.java) {
+                NikonPictureControlFile.read(ByteArrayInputStream(bytes))
+            }
+        }
+    }
+
+    @Test fun damagedFlexibleColorContainersAreStillInvalidFiles() {
+        val bytes = flexibleColor()
+        fun assertInvalid(data: ByteArray) {
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                NikonPictureControlFile.parse(data)
+            }
+            assertFalse(error is NikonFlexibleColorUnsupportedException)
+        }
+        for (length in 0 until bytes.size) assertInvalid(bytes.copyOf(length))
+        assertInvalid(bytes + 0)
+        assertInvalid(bytes.copyOf().apply { this[0] = 0 })
+        assertInvalid(bytes.copyOf().apply { this[8] = 0x7f })
+        // Repeat the version field before the terminator: duplicate TLVs are corrupt.
+        assertInvalid(bytes.dropLast(4).toByteArray() + bytes.copyOfRange(4, 16) + ByteArray(4))
+    }
+
+    @Test fun aNewVersionAloneDoesNotIdentifyFlexibleColor() {
+        for (version in listOf("0301", "0310", "0399")) {
+            // The classic fixture starts with a four-byte version TLV at offset 12.
+            val bytes = sample().apply { version.toByteArray(Charsets.US_ASCII).copyInto(this, 12) }
+            val parsed = NikonPictureControlFile.parse(bytes)
+            assertEquals(version, parsed.version)
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                parsed.encodeClassicPictureControl()
+            }
+            assertFalse(error is NikonFlexibleColorUnsupportedException)
+        }
+    }
 
     @Test fun bundledFilesPreserveEveryByte() {
         val directory = File("src/main/assets/picture_controls")

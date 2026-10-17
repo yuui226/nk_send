@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.ztransfer.R
+import com.ztransfer.protocol.NikonFlexibleColorUnsupportedException
 import com.ztransfer.protocol.NikonPictureControlFile
 import com.ztransfer.protocol.encodeClassicPictureControl
 import kotlinx.coroutines.CoroutineScope
@@ -16,7 +17,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
-internal enum class PictureControlImportFailure { READ, INVALID, UNSUPPORTED, TIMEOUT }
+internal enum class PictureControlImportFailure { READ, INVALID, FLEXIBLE_COLOR, UNSUPPORTED, TIMEOUT }
 internal class PictureControlImportException(val reason: PictureControlImportFailure, cause: Throwable? = null) :
     Exception(reason.name, cause)
 
@@ -97,6 +98,8 @@ internal class PictureControlFolderState(
                                 NikonPictureControlFile.read(stream) { signal.throwIfCanceled() }
                             }
                         } ?: throw PictureControlImportException(PictureControlImportFailure.READ)
+                    } catch (error: NikonFlexibleColorUnsupportedException) {
+                        throw PictureControlImportException(PictureControlImportFailure.FLEXIBLE_COLOR, error)
                     } catch (error: IllegalArgumentException) {
                         throw PictureControlImportException(PictureControlImportFailure.INVALID, error)
                     } catch (error: PictureControlImportException) {
