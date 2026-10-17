@@ -65,6 +65,7 @@ actor CameraIOGate {
     private var active: Ticket?
     private var interactiveReservations = 0
     private var activeDownloads = 0
+    private var uninterruptedPhotoDownloads = 0
     private var ratingPhaseCount = 0
     private var shuttingDown = false
     private var shutdownReason = "camera session closed"
@@ -179,9 +180,16 @@ actor CameraIOGate {
         try await withCameraTransaction(.transfer, owner: "TRANSFER", operation)
     }
 
-    func withDownloadActivity<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
-        activeDownloads += 1; pump()
-        defer { activeDownloads = max(0, activeDownloads - 1); pump() }
+    func withDownloadActivity<T: Sendable>(prioritizePhoto: Bool = false,
+                                           _ operation: @Sendable () async throws -> T) async throws -> T {
+        activeDownloads += 1
+        if prioritizePhoto { uninterruptedPhotoDownloads += 1 }
+        pump()
+        defer {
+            activeDownloads = max(0, activeDownloads - 1)
+            if prioritizePhoto { uninterruptedPhotoDownloads = max(0, uninterruptedPhotoDownloads - 1) }
+            pump()
+        }
         return try await operation()
     }
 
@@ -227,6 +235,16 @@ actor CameraIOGate {
     }
 
     private func eligible(_ ticket: Ticket) -> Bool {
+        // Android USB stills occupy one GetObject transaction. ICC needs
+        // bounded callbacks, but those implementation chunks must not reopen
+        // the background scan lane between every 4 MiB. Retain foreground
+        // preview/interactive admission and release all lanes on every exit.
+        if uninterruptedPhotoDownloads > 0 {
+            switch ticket.kind {
+            case .rating, .visibleThumbnail, .backgroundThumbnail, .idle, .eventPoll(background: true): return false
+            default: break
+            }
+        }
         // Android screens every P6 ticket for the entire file, including
         // gaps between slices. Heartbeats may skip before queueing; ordinary
         // MONITOR_STORAGE requests wait here until the download finishes.

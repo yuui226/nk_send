@@ -317,7 +317,6 @@ private struct PhotoListSessionTaskID: Equatable {
     @SceneStorage("camera_workspace_intro_handled") private var remoteIntroHandled = false
     @State private var showingSettings = false
     @State private var transferDirectoryAttention = false
-    @State private var signalExpanded = false
     @StateObject private var signalAttention = PhotoListSignalAttentionClock()
     @StateObject private var admissionHint = PhotoListHintState()
     @State private var effectPreviewSource: UIImage?
@@ -1047,43 +1046,11 @@ private struct PhotoListSessionTaskID: Equatable {
             .geniePopupAnchor(.settings)
             .accessibilityIdentifier("popup-trigger-settings")
 
-            Button {
-                if (presentationMode == .usb) {
-                    guard isSessionConnected else { return }
-                    withAnimation(signalExpanded
-                                  ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
-                                  : .spring(response: 0.42, dampingFraction: 0.72)) {
-                        signalExpanded.toggle()
-                    }
-                } else if (presentationMode == .sta ? WirelessMode.sta : .ap) == .sta {
-                    if !isSessionConnected { onRetrySTA() }
-                } else if !isSessionConnected {
-                    CameraWirelessSettings.open(.ap)
-                }
-            } label: {
-                HStack(spacing: signalExpanded ? 5 : 0) {
-                    PhotoListSignalIcon(isUSB: (presentationMode == .usb),
-                                        wirelessMode: (presentationMode == .sta ? WirelessMode.sta : .ap),
-                                        connected: isSessionConnected)
-                    if signalExpanded && (presentationMode == .usb) && isSessionConnected {
-                        Text(AppLocalized.resource("connection_usb"))
-                            .zTransferTypography(.labelSmall, weight: .medium)
-                            .foregroundStyle(ZTransferColors.accentBlue)
-                    }
-                }
-                // All compact top controls except the Z mark are exactly
-                // 40pt wide, matching Android's compact-button baseline.
-                // Horizontal padding is introduced only for the intentional
-                // expanded USB label state.
-                .padding(.horizontal, signalExpanded ? 10 : 0)
-                .frame(
-                    width: signalExpanded ? nil : photoListCompactButtonWidth,
-                    height: photoListTopControlsHeight
-                )
-            }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-            .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
-            .scaleEffect(CGFloat(signalAttention.motion.scale.value))
+            CameraSignalControl(isUSB: presentationMode == .usb,
+                                wirelessMode: presentationMode == .sta ? .sta : .ap,
+                                connected: isSessionConnected,
+                                height: photoListTopControlsHeight)
+                .scaleEffect(CGFloat(signalAttention.motion.scale.value))
 
             let filterPalette = zTransferButtonAccentPalette(
                 skin: .init(storedValue: skinPreset),
@@ -1177,39 +1144,11 @@ private struct PhotoListSessionTaskID: Equatable {
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
 
-            Button {
-                if (presentationMode == .usb) {
-                    guard isSessionConnected else { return }
-                    withAnimation(signalExpanded
-                                  ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
-                                  : .spring(response: 0.42, dampingFraction: 0.72)) {
-                        signalExpanded.toggle()
-                    }
-                } else if (presentationMode == .sta ? WirelessMode.sta : .ap) == .sta && !isSessionConnected {
-                    onRetrySTA()
-                } else if !isSessionConnected {
-                    CameraWirelessSettings.open(.ap)
-                }
-            } label: {
-                HStack(spacing: signalExpanded ? 5 : 0) {
-                    PhotoListSignalIcon(isUSB: (presentationMode == .usb),
-                                        wirelessMode: (presentationMode == .sta ? WirelessMode.sta : .ap),
-                                        connected: isSessionConnected)
-                    if signalExpanded && (presentationMode == .usb) && isSessionConnected {
-                        Text(AppLocalized.resource("connection_usb"))
-                            .zTransferTypography(.labelSmall, weight: .medium)
-                            .foregroundStyle(ZTransferColors.accentBlue)
-                    }
-                }
-                .padding(.horizontal, signalExpanded ? 10 : 0)
-                .frame(
-                    width: signalExpanded ? nil : photoListCompactButtonWidth,
-                    height: photoListTopControlsHeight
-                )
-            }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-            .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
-            .scaleEffect(CGFloat(signalAttention.motion.scale.value))
+            CameraSignalControl(isUSB: presentationMode == .usb,
+                                wirelessMode: presentationMode == .sta ? .sta : .ap,
+                                connected: isSessionConnected,
+                                height: photoListTopControlsHeight)
+                .scaleEffect(CGFloat(signalAttention.motion.scale.value))
         }
         .transition(.opacity)
     }
@@ -2138,6 +2077,38 @@ private struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
     }
 }
 
+/// 2026-10-17 user override: USB/STA indicate status only, including offline.
+/// Keep the selected skin without pressed feedback, haptics or a button action.
+struct CameraSignalControl: View {
+    let isUSB: Bool
+    let wirelessMode: WirelessMode?
+    let connected: Bool
+    var height: CGFloat = 36
+
+    private var acceptsTap: Bool { !isUSB && wirelessMode != .sta }
+    private var labelKey: String {
+        if !connected { return "camera_not_connected" }
+        return isUSB ? "connection_usb" : "camera_session_notification_title"
+    }
+
+    var body: some View {
+        Button {
+            guard acceptsTap, !connected else { return }
+            CameraWirelessSettings.open(.ap)
+        } label: {
+            PhotoListSignalIcon(isUSB: isUSB, wirelessMode: wirelessMode, connected: connected)
+                .frame(width: 40, height: height)
+        }
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22, disabledAlpha: 1))
+        .disabled(!acceptsTap)
+        .allowsHitTesting(acceptsTap)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AppLocalized.resource(labelKey))
+        .accessibilityRemoveTraits(acceptsTap ? [] : .isButton)
+        .modifier(DisconnectedSignalBreath(connected: connected))
+    }
+}
+
 /// SignalPill family: USB keeps its dedicated mark, STA shows topology state,
 /// and AP uses a static four-bar connected mark. iOS intentionally does not
 /// request the restricted Access Wi-Fi Information capability.
@@ -2481,6 +2452,9 @@ struct QueuePill: View {
     @State private var doneTask: Task<Void, Never>?
     @State private var widthMeasurement = QueuePillWidthMeasurement()
     @StateObject private var widthClock = QueuePillWidthClock()
+    // Retain ownership without subscribing the whole capsule to display frames.
+    // Only TransferProgressContent observes this animator.
+    @State private var progressAnimator = SmoothTransferProgressAnimator()
     @Environment(\.displayScale) private var displayScale
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -2500,7 +2474,7 @@ struct QueuePill: View {
     }
 
     private var activeSpeedText: String? {
-        activeSpeed > 0 ? speedText(activeSpeed) : nil
+        activeSpeed > 0 ? transferSpeedText(activeSpeed) : nil
     }
 
     private var displayRemainingCount: Int { taskSummary.displayRemaining(heldCount: heldCount) }
@@ -2557,7 +2531,15 @@ struct QueuePill: View {
     private var presentation: QueuePillPresentation {
         .init(mode: visualMode,
               count: visualMode == .generating ? generationCount : displayRemainingCount,
-              speed: activeSpeedText)
+              speed: activeSpeed > 0 ? activeSpeed : nil)
+    }
+    private struct ProgressInput: Equatable {
+        let fraction: Double
+        let key: String
+    }
+    private var progressInput: ProgressInput {
+        .init(fraction: progressFraction,
+              key: progressOwner?.id.uuidString ?? retainedProgressSeed)
     }
     private var widthKey: QueuePillWidthKey {
         .init(mode: visualMode, speedText: activeSpeedText,
@@ -2573,51 +2555,49 @@ struct QueuePill: View {
 
     var body: some View {
         QueuePillSizingLayout(displayedWidth: widthClock.motion.width, height: photoListTopControlsHeight) {
-            // This host and the outer width clock survive both button branches.
-            SmoothTransferProgress(target: progressFraction,
-                                   resetKey: progressOwner?.id.uuidString ?? retainedProgressSeed) { value in
-                ZStack {
-                    if visualMode == .icon {
-                        Button(action: onClick) {
-                            pillContent(for: presentation)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                        }
-                        .buttonStyle(ZTransferGlassButtonStyle(
-                            cornerRadius: 22, textureSeed: 0x2A71E001))
-                    } else {
-                        Button(action: onClick) {
-                            ZStack(alignment: .trailing) {
-                                if usesNativeLiquidGlass {
-                                    ZTransferButtonMaterialSurface(
-                                        skin: .liquidGlass, cornerRadius: 22,
-                                        textureSeed: 0x2A71E001)
-                                } else {
-                                    ZTransferGlassSurface(cornerRadius: 22, kind: .button)
-                                }
-                                if !allDone || completionFillVisible {
+            ZStack {
+                if visualMode == .icon {
+                    Button(action: onClick) {
+                        pillContent(for: presentation)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    }
+                    .buttonStyle(ZTransferGlassButtonStyle(
+                        cornerRadius: 22, textureSeed: 0x2A71E001))
+                } else {
+                    Button(action: onClick) {
+                        ZStack(alignment: .trailing) {
+                            if usesNativeLiquidGlass {
+                                ZTransferButtonMaterialSurface(
+                                    skin: .liquidGlass, cornerRadius: 22,
+                                    textureSeed: 0x2A71E001)
+                            } else {
+                                ZTransferGlassSurface(cornerRadius: 22, kind: .button)
+                            }
+                            if !allDone || completionFillVisible {
+                                TransferProgressContent(animator: progressAnimator) { value in
                                     LiquidTransferProgressSurface(
                                         progress: value,
-                                        seed: progressOwner?.id.uuidString ?? retainedProgressSeed,
+                                        seed: progressInput.key,
                                         isCapsule: true,
                                         waveEligible: activeItem != nil || completionFillVisible)
                                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 }
-                                QueuePillContentTransition(presentation: presentation) { displayed in
-                                    pillContent(for: displayed)
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
-                            .frame(height: photoListTopControlsHeight, alignment: .trailing)
-                            .compositingGroup()
-                            .clipShape(Capsule())
-                            .overlay {
-                                if !usesNativeLiquidGlass {
-                                    Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
-                                }
+                            QueuePillContentTransition(presentation: presentation) { displayed in
+                                pillContent(for: displayed)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .frame(height: photoListTopControlsHeight, alignment: .trailing)
+                        .compositingGroup()
+                        .clipShape(Capsule())
+                        .overlay {
+                            if !usesNativeLiquidGlass {
+                                Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
                             }
                         }
-                        .buttonStyle(QueuePillButtonStyle())
                     }
+                    .buttonStyle(QueuePillButtonStyle())
                 }
             }
             .frame(height: photoListTopControlsHeight)
@@ -2664,6 +2644,9 @@ struct QueuePill: View {
         .onChange(of: progressOwner?.id) { id in
             if let id { retainedProgressSeed = id.uuidString }
         }
+        .onChange(of: progressInput) { input in
+            progressAnimator.update(target: input.fraction, key: input.key)
+        }
         .onChange(of: hasWorkingTask) { active in
             guard active else { return }
             sawActiveBatch = true
@@ -2706,10 +2689,12 @@ struct QueuePill: View {
             sawActiveBatch = hasWorkingTask
             widthClock.update(width: targetWidth, scale: displayScale)
             if let id = progressOwner?.id { retainedProgressSeed = id.uuidString }
+            progressAnimator.update(target: progressInput.fraction, key: progressInput.key)
         }
         .onDisappear {
             doneTask?.cancel()
             widthClock.reset()
+            progressAnimator.stop()
         }
         .background {
 #if DEBUG
@@ -2750,7 +2735,7 @@ struct QueuePill: View {
         case .counting:
             HStack(alignment: .center, spacing: 8) {
                 if let speed = displayed.speed {
-                    Text(speed)
+                    TransferNumericText(text: transferSpeedText(speed), value: Double(speed))
                         .zTransferTypography(.labelMedium, weight: .bold)
                         .foregroundStyle(ZTransferColors.accentBlue)
                         .monospacedDigit()
@@ -2804,13 +2789,6 @@ struct QueuePill: View {
             .lineLimit(1)
     }
 
-    private func speedText(_ bytesPerSecond: Int64) -> String {
-        switch bytesPerSecond {
-        case ..<1024: return "\(bytesPerSecond) B/s"
-        case ..<(1024 * 1024): return String(format: "%.1f KB/s", Double(bytesPerSecond) / 1024)
-        default: return String(format: "%.1f MB/s", Double(bytesPerSecond) / (1024 * 1024))
-        }
-    }
 }
 
 /// The first child draws the capsule; the hidden second child supplies its

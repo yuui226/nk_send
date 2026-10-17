@@ -146,7 +146,18 @@ struct QueuePillCountMotion {
 struct QueuePillPresentation: Equatable {
     let mode: QueuePillVisualMode
     let count: Int
-    let speed: String?
+    /// Keep the real sample so numeric transitions know the direction without
+    /// parsing localized/formatted text. Outgoing modes retain this snapshot.
+    let speed: Int64?
+}
+
+func transferSpeedText(_ bytesPerSecond: Int64) -> String {
+    let speed = max(0, bytesPerSecond)
+    switch speed {
+    case ..<1024: return "\(speed) B/s"
+    case ..<(1024 * 1024): return String(format: "%.1f KB/s", Double(speed) / 1024)
+    default: return String(format: "%.1f MB/s", Double(speed) / (1024 * 1024))
+    }
 }
 
 struct QueuePillContentMotion {
@@ -175,6 +186,10 @@ struct QueuePillContentMotion {
         } else {
             layers.append(.init(presentation: next, fade: .init(initiallyVisible: false)))
         }
+        // A settled mode only changes its readout. Do not start a new display
+        // link/alpha segment for each 200ms speed sample. Interrupted mode fades
+        // still follow the original retained-layer rules below.
+        if next.mode == current, !isRunning { return }
         // contentKey preserves layer identity, while a changed Triple still
         // resets child animation segments. Never reset opacity to zero here.
         current = next.mode

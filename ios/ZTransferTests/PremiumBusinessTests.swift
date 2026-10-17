@@ -308,6 +308,45 @@ final class PremiumBusinessTests: XCTestCase {
         throw CocoaError(.validationMissingMandatoryProperty)
     }
 
+    #if DEBUG
+    func testSimulatedPurchaseUnblocksExhaustedQueueWithoutResettingUsage() async throws {
+        let (defaults, usage, directory) = try fixture()
+        for _ in 0..<25 { usage.recordTransfer(id: UUID(), isPro: false) }
+        let access = PremiumAccess(.free)
+        let entitlement = PremiumEntitlementStore(access: access)
+        entitlement.enableDevelopmentPurchases(defaults: defaults)
+        let queueSuite = "SimulatedPurchaseQueue.\(UUID())"
+        defer { UserDefaults.standard.removePersistentDomain(forName: queueSuite) }
+        let queue = TransferQueue(defaults: UserDefaults(suiteName: queueSuite)!,
+                                  premiumAccess: access, freeUsage: usage)
+        let camera = PremiumTestCamera()
+        await queue.enqueue([file(1)])
+        await queue.start(session: camera, directory: directory)
+        let blocked = try await settled(queue)
+        XCTAssertEqual(blocked.items.first?.status, .failed)
+        XCTAssertEqual(blocked.items.first?.error, AppLocalized.resource("transfer_limit_reached"))
+
+        entitlement.simulatePurchase(.lifetime)
+        entitlement.publish(.free) // A concurrent real StoreKit refresh must not relock it.
+        _ = await queue.retry(id: try XCTUnwrap(blocked.items.first?.id))
+        await queue.start(session: camera, directory: directory)
+        let completed = try await settled(queue)
+        XCTAssertEqual(completed.items.first?.status, .completed)
+        XCTAssertEqual(usage.snapshot().transfers, 25)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(file(1).fileName).path))
+
+        entitlement.endSimulatedPurchase()
+        await queue.enqueue([file(2)])
+        await queue.start(session: camera, directory: directory)
+        let relocked = try await settled(queue)
+        XCTAssertEqual(relocked.items.last?.status, .failed)
+        XCTAssertEqual(relocked.items.last?.error, AppLocalized.resource("transfer_limit_reached"))
+        XCTAssertEqual(usage.snapshot().transfers, 25)
+        let requests = await camera.requests
+        XCTAssertEqual(requests, [1])
+    }
+    #endif
+
     func testQuotaCountsOnlyRealSuccessAndDoesNotBlockLocalShortcuts() async throws {
         let (defaults, usage, directory) = try fixture()
         for _ in 0..<24 { usage.recordTransfer(id: UUID(), isPro: false) }

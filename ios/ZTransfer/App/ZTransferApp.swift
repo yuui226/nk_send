@@ -9,6 +9,17 @@ struct ZTransferApp: App {
             UserDefaults.standard.object(forKey: "keep_screen_on") as? Bool ?? true)
         ScreenAwakeCoordinator.shared.setForeground(UIApplication.shared.applicationState == .active)
         // Application-scoped, not owned by a settings/purchase popup.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--simulate-premium-lifetime") {
+            PremiumEntitlementStore.shared.simulatePurchase(.lifetime)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--report-development-premium") {
+            let premium = PremiumEntitlementStore.shared
+            let product = premium.developmentPurchase?.product?.rawValue ?? "none"
+            let usage = FreeUsageStore.shared.snapshot()
+            print("[DevelopmentPremium] simulated_product=\(product) is_pro=\(premium.access.isPro) transfers=\(usage.transfers)")
+        }
+        #endif
         StoreKitPurchaseStore.shared.start()
         PhotoFramePlaceAvailability.shared.start()
         Task { await PhotoLUTStore().pruneSnapshots() }
@@ -45,7 +56,12 @@ struct ZTransferApp: App {
             #endif
         }
         .onChange(of: keepScreenOn) { ScreenAwakeCoordinator.shared.setPreference($0) }
-        .onChange(of: scenePhase) { ScreenAwakeCoordinator.shared.setForeground($0 == .active) }
+        .onChange(of: scenePhase) { phase in
+            ScreenAwakeCoordinator.shared.setForeground(phase == .active)
+            #if DEBUG
+            if phase == .active { PremiumEntitlementStore.shared.refreshDevelopmentPurchase() }
+            #endif
+        }
     }
 }
 

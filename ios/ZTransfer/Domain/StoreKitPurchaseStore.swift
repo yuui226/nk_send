@@ -4,20 +4,101 @@ import UIKit
 
 @MainActor
 final class PremiumEntitlementStore: ObservableObject {
-    static let shared = PremiumEntitlementStore()
+    static let shared: PremiumEntitlementStore = {
+        let store = PremiumEntitlementStore()
+        #if DEBUG
+        store.enableDevelopmentPurchases(defaults: .standard)
+        #endif
+        return store
+    }()
     @Published private(set) var entitlement: PremiumEntitlement = .unresolved
     let access: PremiumAccess
+    private var verifiedEntitlement: PremiumEntitlement
+
+    #if DEBUG
+    @Published private(set) var developmentPurchase: DevelopmentPremiumPurchase?
+    private var developmentDefaults: UserDefaults?
+    private static let developmentKey = "debug.simulatedPremiumPurchase.v1"
+
+    /// Explicit opt-in, isolated from signed StoreKit grants and quota storage.
+    /// Ordinary test instances never read the application's development state.
+    func enableDevelopmentPurchases(defaults: UserDefaults, at now: Date = Date()) {
+        developmentDefaults = defaults
+        developmentPurchase = defaults.data(forKey: Self.developmentKey)
+            .flatMap { try? JSONDecoder().decode(DevelopmentPremiumPurchase.self, from: $0) }
+        refreshDevelopmentPurchase(at: now)
+    }
+
+    func simulatePurchase(_ product: PremiumProduct, at now: Date = Date()) {
+        guard let developmentDefaults else { return }
+        let purchase = DevelopmentPremiumPurchase(product: product,
+            expiration: product == .annual ? now.addingTimeInterval(365 * 86_400) : nil)
+        guard let data = try? JSONEncoder().encode(purchase) else { return }
+        developmentDefaults.set(data, forKey: Self.developmentKey)
+        developmentPurchase = purchase
+        refreshDevelopmentPurchase(at: now)
+    }
+
+    func endSimulatedPurchase() {
+        developmentDefaults?.removeObject(forKey: Self.developmentKey)
+        developmentPurchase = nil
+        apply(verifiedEntitlement)
+    }
+
+    func refreshDevelopmentPurchase(at now: Date = Date()) {
+        if let purchase = developmentPurchase, let value = purchase.entitlement(at: now) {
+            apply(value)
+        } else {
+            endSimulatedPurchase()
+        }
+    }
+    #endif
 
     init(access: PremiumAccess = .shared) {
         self.access = access
+        verifiedEntitlement = access.entitlement
         entitlement = access.entitlement
     }
 
     func publish(_ value: PremiumEntitlement) {
+        verifiedEntitlement = value
+        #if DEBUG
+        refreshDevelopmentPurchase()
+        #else
+        apply(value)
+        #endif
+    }
+
+    private func apply(_ value: PremiumEntitlement) {
         access.replace(with: value)
         if value != entitlement { entitlement = value }
     }
 }
+
+#if DEBUG
+/// Local development convenience, NOT an Apple sandbox transaction. This type,
+/// persistence reader and UI are absent from Release builds.
+struct DevelopmentPremiumPurchase: Codable, Equatable {
+    private let productID: String
+    let expiration: Date?
+    var product: PremiumProduct? { PremiumProduct(rawValue: productID) }
+
+    init(product: PremiumProduct, expiration: Date?) {
+        productID = product.rawValue
+        self.expiration = expiration
+    }
+
+    func entitlement(at now: Date) -> PremiumEntitlement? {
+        switch product {
+        case .lifetime: return .lifetime
+        case .annual:
+            guard let expiration, expiration > now else { return nil }
+            return .annual(until: expiration, gracePeriod: false)
+        case nil: return nil
+        }
+    }
+}
+#endif
 
 /// UI-only renewal details. They never block lifetime entitlement delivery.
 struct PremiumRenewal: Equatable {

@@ -3342,7 +3342,7 @@
         "C32"
       ],
       "role": "production",
-      "sha256": "f581af1f7d6dbe17a4309b597ae2f52fc35d159d3ecf65197839740ab5edca3e",
+      "sha256": "f95f5282000342cb673c4aea8d95cb0b92f008f6214a64452ba8f71cd0d61b28",
       "audit_sha256": "668aea5ee1bd3e7b6efc6be220e241ad055c125072d98a93ef5eb47f82e9279e",
       "repair_evidence": [
         "; 2026-10-16 F069 settings/persistence/180ms switch; f069-settings-fixed.log25/25 and f069-settings-ui.log1/1 TEST SUCCEEDED; actual SettingsView DEBUG host screenshot inspected, real camera/device unverified; F034 real-list UI3/3; burst and elevation pending；2026-10-16 F076生产卡片UI双向侧滑/回弹/按钮和显式竖滚1/1通过，收合FastOutSlowIn280ms/恢复200ms；变忙UI和VoiceOver仍待验收。；2026-10-16 F077生产按钮真实索引/旧session断线/混合批次/无session本地重试UI2/2通过；清空中新终态瞬态验证未完。",
@@ -3352,7 +3352,8 @@
         "2026-10-16 F080生产宽限期：每100ms数量增加，首次显现300–850ms且在最终11前；/tmp/ztransfer-f080-grace.log UI3/3（含完成/取消回归）。跨任务归属仍待专项；未核销。",
         "F106 后台prune双角色/活跃owner保留，启动及成功选择接线；f106-prune-20261016.log 33/33 TEST SUCCEEDED；F106仍未完成。",
         "2026-10-16 F111网络生产接线：PhotoFramePlaceAvailability应用级默认NWPathMonitor、初始禁止、路径/模式去重发布及stop代次隔离；ConnectionViewModel的state/cameraSession变化同步门控，按安卓CameraViewModel实际USB覆盖记忆AP规则，非USB AP禁止。ZTransferApp启动监听。TransferQueue.renderFrameFile在有边框及metadata时先共享resolver.enriching并读实时allowed，再渲染，JPEG仍使用原相机EXIF快照。f111-network-20261016.log 7/7 TEST SUCCEEDED、退出0，含默认阻止/AP/STA/USB/断网/stop模型及门控生命周期回归。真实NWPath回调/地理服务和队列成片未专项验收，预览接线/网络变化刷新/旧成片复用仍待处理；F111/F112不核销，累计95项。",
-        "2026-10-17 F173 idle-timer app ownership and batch holds; ownership2/2,batch2/2; no UI/device auto-lock evidence; see ledger."
+        "2026-10-17 F173 idle-timer app ownership and batch holds; ownership2/2,batch2/2; no UI/device auto-lock evidence; see ledger.",
+        "U005 用户授权DEBUG模拟购买/持久化/退出恢复；settings-payment-isolated 23/23中17权益+2队列通过，未替代Apple沙盒验收。"
       ]
     },
     {
@@ -3784,11 +3785,12 @@
         "C11"
       ],
       "role": "production",
-      "sha256": "7acfb4579b57eca4edd6622ac68e82f0cb95a9f790c216a928cf2df3a9ae3e3b",
+      "sha256": "a201c4b76a2e1a306acdb6c2a23c1129b7a47072d0f5e4c2e9224c76899698ce",
       "audit_sha256": "04acb0bf7d5646aa480facdaa73079bc81de2fffede6743e8ba9a4b324681114",
       "repair_evidence": [
         "F053既有修复核验，f053-storage 24/24：整文件屏障/真实两段下载/存储准入回检/保留旧值与代次隔离；未真机。",
-        "F054进行中：运行期共享P0关闭，f054-close 20/20；service.disconnect直接回放未补。"
+        "F054进行中：运行期共享P0关闭，f054-close 20/20；service.disconnect直接回放未补。",
+        "2026-10-17 U002 USB照片整文件后台屏障/逐命令目录让路与框架进度通知顺序；usb-photo-priority-tests.log 61/61通过，真机同图扫描争用1042ms/9.61MiB/s修复后322–343ms/29–31MiB/s。详细证据及范围见项目记忆文末。"
       ]
     },
     {
@@ -3806,7 +3808,7 @@
         "C32"
       ],
       "role": "production",
-      "sha256": "71f9586fc6bb098055cb1b0134524d3da9aedbf2c011592c31095e27aebaa3b7",
+      "sha256": "6eccf8d7fab8be70b7b8ac1ecf78d3fc94f61f5fe48a8be7367e3b7af81dd425",
       "audit_sha256": "e7b5425ec2b5be9d2e6db84a5ae3cd47feab36c72e69519e50f575766f0305d6",
       "repair_evidence": [
         "2026-10-15 F056–F059; /tmp/ztransfer-20261015-f056-f059-fixed.log, 56/56 TEST SUCCEEDED; only affected download/queue/quota behavior revalidated；F063原片共享预留/无限序号与同名copy，20261016-f063.log 56/56、f063-publication.log 1/1通过，真机Provider待验。；F065生产准备旁路/容量/关闭，F066身份与补读异步及后台通道：20261016-f065-f066-handoff.log 97/97、f066-identity.log 32/32。F066捕获头parser交接仍未完。; 2026-10-16 F067 structure/expansion/LRU; f067-expansion.log 102/102, f067-expansion-cap.log 1/1 TEST SUCCEEDED; independent parser/spool/pending coalescing incomplete",
@@ -3828,7 +3830,8 @@
         "F044真实会话FHD→EXIF与后续thumbnail命令顺序、transport失效和STA回归，43/43通过，/tmp/ztransfer-f044-order-20261016.log；UI触发/真机待验收。",
         "F053既有修复核验，f053-storage 24/24：整文件屏障/真实两段下载/存储准入回检/保留旧值与代次隔离；未真机。",
         "F054进行中：运行期共享P0关闭，f054-close 20/20；service.disconnect直接回放未补。",
-        "2026-10-17 F125方向头DeviceBusy：对照Android NikonCamera.readExifHeader3153–3198及常量2221–2222，CameraRepository.readPrefix新增默认关闭的retryDeviceBusy，经CameraSession传递，仅裁切方向读取启用；在同一PREVIEW_EXIF事务内对PTPSessionError.responseCode(0x2019)最多重试2次、每次可取消160ms等待，其他错误不重试。兼容既有directReader前缀缓存路径；默认EXIF调用行为不变。f125-busy-header-20261017.log 8/8 TEST SUCCEEDED、退出0，协议回放覆盖busy/busy/成功、3次busy耗尽、默认不开重试、非busy错误、等待中取消及后续读取通道可用，含旧FHD回归；未单独覆盖STA directReader缓存重试及真机响应。git diff --check通过。F125/F126继续进行中，页面交错及选区到原图像素验收未闭环，累计103项不变。"
+        "2026-10-17 F125方向头DeviceBusy：对照Android NikonCamera.readExifHeader3153–3198及常量2221–2222，CameraRepository.readPrefix新增默认关闭的retryDeviceBusy，经CameraSession传递，仅裁切方向读取启用；在同一PREVIEW_EXIF事务内对PTPSessionError.responseCode(0x2019)最多重试2次、每次可取消160ms等待，其他错误不重试。兼容既有directReader前缀缓存路径；默认EXIF调用行为不变。f125-busy-header-20261017.log 8/8 TEST SUCCEEDED、退出0，协议回放覆盖busy/busy/成功、3次busy耗尽、默认不开重试、非busy错误、等待中取消及后续读取通道可用，含旧FHD回归；未单独覆盖STA directReader缓存重试及真机响应。git diff --check通过。F125/F126继续进行中，页面交错及选区到原图像素验收未闭环，累计103项不变。",
+        "2026-10-17 U002 USB照片整文件后台屏障/逐命令目录让路与框架进度通知顺序；usb-photo-priority-tests.log 61/61通过，真机同图扫描争用1042ms/9.61MiB/s修复后322–343ms/29–31MiB/s。详细证据及范围见项目记忆文末。"
       ]
     },
     {
@@ -4991,7 +4994,11 @@
         "C31"
       ],
       "role": "production",
-      "sha256": "09e6aafe3d7984b603d4233a2d3e25f782743ee59f4c5af5afedf34890cddb18"
+      "sha256": "398a7797afaa4c8f26410d1877ecfb586b6270dca31da32bcd2e24e8b86cae9d",
+      "audit_sha256": "09e6aafe3d7984b603d4233a2d3e25f782743ee59f4c5af5afedf34890cddb18",
+      "repair_evidence": [
+        "U005 用户授权DEBUG模拟购买/持久化/退出恢复；settings-payment-isolated 23/23中17权益+2队列通过，未替代Apple沙盒验收。"
+      ]
     },
     {
       "path": "ios/ZTransfer/Domain/TransferDirectoryIndex.swift",
@@ -5209,11 +5216,12 @@
         "C12"
       ],
       "role": "production",
-      "sha256": "9d178c9aba37e0ab16f762ec51cc805e784d690385f8282288cbd7282f9e8d28",
+      "sha256": "41b0a39d3fae169425908cf5363e611c56114f90cba4d0ca16054f6b35ee42ce",
       "audit_sha256": "68d5e422e74b0e4ee26e4d6295fd8d0b47721502268e4d20c251f91b040be41b",
       "repair_evidence": [
         "2026-10-16 F005两次连续心跳失败容错，失效协议拒绝重发；f005-keepalive7/7通过，开发侧核销待真机，无UI测试。",
-        "F025: /tmp/ztransfer-f025-reconnect.log 45/45 TEST SUCCEEDED；真实协议无图/忙/IO恢复会话回放；未真机。"
+        "F025: /tmp/ztransfer-f025-reconnect.log 45/45 TEST SUCCEEDED；真实协议无图/忙/IO恢复会话回放；未真机。",
+        "2026-10-17 U002 USB照片整文件后台屏障/逐命令目录让路与框架进度通知顺序；usb-photo-priority-tests.log 61/61通过，真机同图扫描争用1042ms/9.61MiB/s修复后322–343ms/29–31MiB/s。详细证据及范围见项目记忆文末。"
       ]
     },
     {
@@ -5222,7 +5230,11 @@
         "C32"
       ],
       "role": "production",
-      "sha256": "0a9fb7e594d431b561efa7f9020fd8c5a5ce5929dae2df2c41a87f7b337da332"
+      "sha256": "09af8a2714bca85399f9f848e2c01e1eefc19edac99343a7dccc3152a53a8112",
+      "audit_sha256": "0a9fb7e594d431b561efa7f9020fd8c5a5ce5929dae2df2c41a87f7b337da332",
+      "repair_evidence": [
+        "2026-10-17 U002 USB照片整文件后台屏障/逐命令目录让路与框架进度通知顺序；usb-photo-priority-tests.log 61/61通过，真机同图扫描争用1042ms/9.61MiB/s修复后322–343ms/29–31MiB/s。详细证据及范围见项目记忆文末。"
+      ]
     },
     {
       "path": "ios/ZTransfer/Transport/PTP/PhotoMetadataIdentity.swift",
@@ -5624,14 +5636,15 @@
         "C15"
       ],
       "role": "production",
-      "sha256": "177aa539fac042f2344abc4051b40a8fc6674bdc285758d82509a30ad79cce6b",
+      "sha256": "1a0b6d94dd24556c6ef9c8d519f978d07dc51d066fcdede9180d9563037fd063",
       "repair_evidence": [
         "2026-10-16 F080: nine pure top-pill models moved verbatim from PhotoListView, no algorithm change; syntax only, tests/build pending.",
         "2026-10-16 F080 unchanged outgoing targets rebuilt on parent mode/count segment change; syntax only, analytic test unrun.",
         "2026-10-16 F080 same-mode Triple changes retain layer identity but rebuild alpha; syntax only, analytic/native/UI verification pending.",
         "2026-10-16 F080授权专项：models-r2 12/12；UI首轮5项回归通过、顶栏取消误显Done修复后top-final 2/2（共7个不同UI通过）。日志 /tmp/ztransfer-f080-authorized-*.log；首次失败保留，详见台账。F080未核销，逐帧/完整布局/真机仍待验。",
         "2026-10-16 F080摘要排除transferring生成任务、下载优先进度归属：f080-summary域1/1、f080-crop-summary-ui UI2/2通过。动态跨ID进度仍待验证，未核销。",
-        "F084计数按真实下载-held、生成不扣、allDone独立，f084-counts 1/1；未UI。"
+        "F084计数按真实下载-held、生成不扣、allDone独立，f084-counts 1/1；未UI。",
+        "2026-10-17 user-requested readout/progress smoothing: numeric glyph transition240ms, raw speed snapshot, settled-mode samples no longer restart opacity; top progress observes only drawing leaf while ownership survives branches. queue-readout-smoothing-tests.log8/8 TEST SUCCEEDED exit0 (7 existing boundary regressions +1 settled-readout test). No UI automation or measured device FPS; detailed scope in speed-pill document."
       ],
       "audit_sha256": "f87aba212169f3bcc9896716ce5b146e9439968785a8515ce6c45e53893c6da5"
     },
@@ -5912,11 +5925,14 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "59b299e8b1be43ec1249d86b19466bef91b5e5ca9e09e10191d91fe3a7812937",
+      "sha256": "1d94a1664f54981693a2ab49ae6199858341bd52be73ad71cf8eac0eb9264d0d",
       "audit_sha256": "f53d21ce47b73385dbedd2d768a2f66c4033118bb3ee16c887cac9a326a9ede5",
       "repair_evidence": [
         "F078行内独立Genie/真实进度/退出挂载；f078-genie-progress 2/2、inline UI4/4、最终anchors UI1/1；其余验收未完。",
-        "F078自然宽度/最终宽度重测多行及普通关闭帧：natural-layout-final UI2/2；早期fixedSize截断已撤掉，详见台账。"
+        "F078自然宽度/最终宽度重测多行及普通关闭帧：natural-layout-final UI2/2；早期fixedSize截断已撤掉，详见台账。",
+        "U004 完整布局后下一帧取图、尺寸重捕获及内描边；settings-payment-isolated 23/23中4项宿主渲染/反转通过，非真机视觉验收。",
+        "2026-10-17 U004按安卓标题/卡片/页脚整列滚动、当次内容测量后展开、明确视口尺寸；完整SettingsPopupOverlay首帧至展开高度/两入口/小屏/换高重开及原宿主回归6/6通过，settings-whole-column-isolated-tests.log TEST SUCCEEDED；已真机构建安装，用户观感待确认。",
+        "2026-10-17 U004用户再次否决后修正：实际网格保留上下12pt越界空间/物理像素裁片边界/Retina遮罩；设置列禁回弹和系统滚动边缘材质、单Surface单描边/安卓间距/卡片4%底/随显示进度遮罩。settings-render-final.log7/7 TEST SUCCEEDED，精确终点全图平均差0.2497/255；旧固定尺寸/源图测试证据缺口与中间失败均保留，真机观感另验。"
       ]
     },
     {
@@ -6058,7 +6074,7 @@
         "C21"
       ],
       "role": "production",
-      "sha256": "1e98209e8ebf3e1e601b319deb2d646c7dd2024fbc7ad2525de9d9343fb5d162",
+      "sha256": "20adca1d2a2e6e30bf0708d9a836fe2648e88339c9c3917403af7dad641aa25c",
       "audit_sha256": "8240ba7c2ec5debcd489143ddf18f2340277e06fba2cf26d5571127225f229fe",
       "repair_evidence": [
         "; F073 f073.log 45/45 TEST SUCCEEDED; page wiring statically inspected; F034 partial admission and signal pulse; f034-admission-fixed 6/6; preview hint/UI still pending; F034 bottom hint 8/8 and preview host UI1/1; shadow and full list UI pending; F034 real-list UI3/3; burst and elevation pending; F034 burst UI four combinations1/1 and cell ID regression3/3; elevation pending；2026-10-16 F075顶栏直读运行态executionControl，移除飞行/延后偏好显隐门控；状态边界与生产单/多文件暂停3/3 TEST SUCCEEDED；未跑UI点击或真机。；2026-10-16 F077共享canRetry/真实连接/当前原片索引与清空抑制接线，12/12定向测试通过；真实按钮UI验收未完。",
@@ -6100,7 +6116,9 @@
         "F042飞行有效来源/同源准入及UUID完成取消一次释放、离页清理接线，12/12通过，/tmp/ztransfer-f042-admission-20261016.log；页面手工待验收。",
         "F084计数按真实下载-held、生成不扣、allDone独立，f084-counts 1/1；未UI。",
         "2026-10-17 F125/F126页面与延后解析接线：PhotoPreview裁切sheet等待现有FHD，400ms后展示准备状态；仅显式重试补FHD，复用缓存方向或128KiB独立方向头，后台preparePhotoCrop；结构化task随照片/FHD/失败/连接/重试切换取消，关闭及切页阻止旧结果回写，准备成功才确认并规范方向。删除预览尺寸/8MCU猜测及提前LosslessCropTaskStore写入。发现PhotoList旧回调依赖该store，已一并新增队列cropSelection入口，保持hasCrop分支/重试选择，原片就绪后读取真实头并resolve；旧recipe入口继续兼容。f125-page-queue-20261017.log 9/9 TEST SUCCEEDED、退出0：6项模型与真实图像准备、旧离线裁切、旧失败重试、新selection立即/延后启动，原片不变及输出存在。随后队列裁切标签改用hasCrop、新文案统一AppLocalized，三语取Android crop.xml与camera_not_connected；这两项小型显示修改尚未重编。git diff --check通过。待补页面任务取消/重试交错、非对称旋转像素、新selection方向变化及失败恢复验证；F125/F126仍不核销，累计103项。未UI/真机验证。",
-        "U001: framework transaction correlation verified by physical Z30 photo grid and 6/6 ImageCaptureErrorMappingTests. Bottom diagnostic button verified by screenshot. DEBUG metadata-veto experiment still unproven; full initial-enumeration issue remains open."
+        "U001: framework transaction correlation verified by physical Z30 photo grid and 6/6 ImageCaptureErrorMappingTests. Bottom diagnostic button verified by screenshot. DEBUG metadata-veto experiment still unproven; full initial-enumeration issue remains open.",
+        "2026-10-17 user-requested readout/progress smoothing: numeric glyph transition240ms, raw speed snapshot, settled-mode samples no longer restart opacity; top progress observes only drawing leaf while ownership survives branches. queue-readout-smoothing-tests.log8/8 TEST SUCCEEDED exit0 (7 existing boundary regressions +1 settled-readout test). No UI automation or measured device FPS; detailed scope in speed-pill document.",
+        "U003 用户覆盖旧安卓行为：USB/STA信号禁止点击，四处共用CameraSignalControl；源码复核，无UI手势测试。"
       ]
     },
     {
@@ -6154,7 +6172,11 @@
         "C31"
       ],
       "role": "production",
-      "sha256": "1806a86f7ce78083922b32ec4860d619d4f198ba746072e54bdce470d0fd46c1"
+      "sha256": "64bce92b61ca475b847270b34412a145a87710fa536fd52e77b27589cdabe3e4",
+      "audit_sha256": "1806a86f7ce78083922b32ec4860d619d4f198ba746072e54bdce470d0fd46c1",
+      "repair_evidence": [
+        "U005 用户授权DEBUG模拟购买/持久化/退出恢复；settings-payment-isolated 23/23中17权益+2队列通过，未替代Apple沙盒验收。"
+      ]
     },
     {
       "path": "ios/ZTransfer/UI/RemoteLUTMetalView.swift",
@@ -6182,7 +6204,7 @@
         "C32"
       ],
       "role": "production",
-      "sha256": "0a51debb1049a7fe233386e7d39c82d328fb47cf4cc9e854f34e425d962cc012",
+      "sha256": "d731b52ec7cf5acb951bc57cc2c9f6159577bfc2e2e269764a204f0ae6c5b966",
       "audit_sha256": "5e3e3e2306f33a712fe231a6e3a6b10fb439bba8ae7d15267d10fb8a8ea1d6fe",
       "repair_evidence": [
         "2026-10-17 F164 lifecycle and descriptor/scalar repair; details/mode/polling logs documented in ledger; final movie-format5/5 passed, no UI/device tests.",
@@ -6203,7 +6225,8 @@
         "2026-10-17 F160/F161/F163 combined readout audit found a remaining F161 functional overlap: Android RemoteScreen landscape ViewfinderCard passes MonitorDispInformationInset=32 only when CAMERA DISP and connected; ViewfinderImage applies it outside MonitorAnalysisOverlays, reducing chart height and lifting scopes above MODE/WB/AF. iOS omitted this reservation. Added shared RemoteDispLayout.informationInset=32 and matching outer bottom padding on the production scope GeometryReader, gated by landscape/CAMERA/connected. Exposure/audio stack and portrait behavior unchanged. Compared equal-slot sizing, portrait audio lane48/landscape8, mode/data gates, shared RGB normalization, waveform density, single-peak/current audio and missing/overflow EV feedback. /tmp/ztransfer-monitor-readouts-inset-20261017.log actual12/12 TEST SUCCEEDED exit0 (3 EV reading,8 analysis,1 meter geometry test across16 configurations). Earlier readouts-final run also12/12 before inset fix; final evidence is inset log. No combined screen render or UI gesture validation claimed; functional coexistence audit continues, F160/F161/F163 remain open.165/182 closed,17 unclosed (9 functional/platform/validation,8 deferred visual). No device/install/commit/push.",
         "2026-10-17 F161 functional completion: extracted existing production scope GeometryReader/card/data gates into RemoteMonitorScopesOverlay, directly used by RemoteView with original model inputs and CAMERA informationInset condition. No alternate test-only layout. Added actual ImageRenderer test across48 combinations (3 sizes x2 information insets x2 audio lanes x4 histogram/waveform enabled states); verifies rendered bounds, equal single/double slots, waveform relocation, bottom information reservation and all-off absence. Initial transparent render and diagnostic runs failed12 all-off assertions with previous single-chart bounds; fixed-background rendering removes ambiguous empty transparent surface reuse. Assertions remain: no pixels differing from background when both modes off, and same slot/bottom/height bounds when enabled. /tmp/ztransfer-monitor-scope-render-background-20261017.log actual1/1 TEST SUCCEEDED exit0, all48 combinations; earlier failed logs retained. Combined prior12/12 readout math and meter-layout tests plus actual source/data gates closes F161 functional/basic usable scope. This tests actual scope component, not complete camera screen, hardware, gesture or animation fidelity. Histogram fill styling, transition/fade timing and fine typography remain deferred; not claimed reproduced.166/182 closed,16 unclosed:8 functional/platform/validation (F013,F051,F078,F142,F160,F163,F171,F177),8 deferred visual tasks. No device/install/commit/push.",
         "2026-10-17 F160/F163 functional completion: exposed existing production RemoteExposureMeterOverlay and IOSSoundMeter internally for actual rendering tests (no alternate UI). EV rendering proves missing sample leaves dim scale/no pointer, zero renders balanced feedback, positive/negative overflow pointers appear at correct ends. Audio rendering proves silence has no bright segments, left/right full-current inputs affect only their channel, a peak-only input illuminates a small isolated region rather than the full bar. /tmp/ztransfer-meter-feedback-render-20261017.log actual7/7 TEST SUCCEEDED exit0 (2 actual-render tests,3 EV boundary tests,1 current/peak test,1 adaptive meter layout test across16 configurations). Root source retains connected/movie/audio gate, optional levels gate, independent EV enabled gate and metadata-driven readings; landscape right stack/portrait left lane use tested RemoteMonitorMeterLayout. Combined F161 actual48 scope bounds cases establishes reserved lanes/information row; no complete camera-screen screenshot or hardware/VoiceOver/gesture claim. Current basic usable functional feedback is closed; exact 160ms pointer/80-90ms audio animation and fine styling remain deferred by user.168/182 closed,14 unclosed:6 functional/platform/validation (F013,F051,F078,F142,F171,F177),8 deferred visual tasks. No device/install/commit/push.",
-        "2026-10-17 F171 orientation resume admission: Android re-enables OrientationEventListener on resume and unfreezing. iOS paused/cleared candidates on background/lock/editing, but never resampled on return; UIDevice may emit no new event while stationary. Added refreshOrientationCandidate gated by active notification ownership and !stopCleanupStarted; invoked when scene becomes active, lock is released, and tool editing ends. It routes through existing valid-direction/foreground/unlocked gate and260ms generation check, preserving manual suppression and conflated pending semantics. applyDeviceOrientation now also rejects teardown. /tmp/ztransfer-orientation-resume-20261017.log actual3/3 TEST SUCCEEDED exit0 for invalid/pause tickets, manual suppression across pause and latest pending request/discard; compile verifies production wiring. No physical sensor/background replay claimed. Asked platform choice via async question: CoreMotion gravity mapped to Android angle bands vs retaining UIDevice classification; NO answer yet, source unchanged. Android bands read from RemoteScreen and RemoteOrientationPolicyTest:0...30/330...359 portrait,60...120 rotation2,240...300 rotation1; invalid/gaps/upside-down ignored. F171 remains open.168/182 closed,14 unclosed (6 functional/platform/validation,8 deferred visual). No UI/device/install/commit/push."
+        "2026-10-17 F171 orientation resume admission: Android re-enables OrientationEventListener on resume and unfreezing. iOS paused/cleared candidates on background/lock/editing, but never resampled on return; UIDevice may emit no new event while stationary. Added refreshOrientationCandidate gated by active notification ownership and !stopCleanupStarted; invoked when scene becomes active, lock is released, and tool editing ends. It routes through existing valid-direction/foreground/unlocked gate and260ms generation check, preserving manual suppression and conflated pending semantics. applyDeviceOrientation now also rejects teardown. /tmp/ztransfer-orientation-resume-20261017.log actual3/3 TEST SUCCEEDED exit0 for invalid/pause tickets, manual suppression across pause and latest pending request/discard; compile verifies production wiring. No physical sensor/background replay claimed. Asked platform choice via async question: CoreMotion gravity mapped to Android angle bands vs retaining UIDevice classification; NO answer yet, source unchanged. Android bands read from RemoteScreen and RemoteOrientationPolicyTest:0...30/330...359 portrait,60...120 rotation2,240...300 rotation1; invalid/gaps/upside-down ignored. F171 remains open.168/182 closed,14 unclosed (6 functional/platform/validation,8 deferred visual). No UI/device/install/commit/push.",
+        "U003 用户覆盖旧安卓行为：USB/STA信号禁止点击，四处共用CameraSignalControl；源码复核，无UI手势测试。"
       ]
     },
     {
@@ -6213,7 +6236,12 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "d1d10eadca197f029436471537971d8570a715289c13ed5672d58e399317d91e"
+      "sha256": "095ad3834a528821963a3bbba8975ce1db56d5c16a3edccfbbddfdab07c1acc1",
+      "audit_sha256": "d1d10eadca197f029436471537971d8570a715289c13ed5672d58e399317d91e",
+      "repair_evidence": [
+        "2026-10-17 U004按安卓标题/卡片/页脚整列滚动、当次内容测量后展开、明确视口尺寸；完整SettingsPopupOverlay首帧至展开高度/两入口/小屏/换高重开及原宿主回归6/6通过，settings-whole-column-isolated-tests.log TEST SUCCEEDED；已真机构建安装，用户观感待确认。",
+        "2026-10-17 U004用户再次否决后修正：实际网格保留上下12pt越界空间/物理像素裁片边界/Retina遮罩；设置列禁回弹和系统滚动边缘材质、单Surface单描边/安卓间距/卡片4%底/随显示进度遮罩。settings-render-final.log7/7 TEST SUCCEEDED，精确终点全图平均差0.2497/255；旧固定尺寸/源图测试证据缺口与中间失败均保留，真机观感另验。"
+      ]
     },
     {
       "path": "ios/ZTransfer/UI/SettingsView.swift",
@@ -6224,12 +6252,15 @@
         "C31"
       ],
       "role": "production",
-      "sha256": "713b23e50634b27a0e444776b7833eb0bdb56d11a2666cc32fb4ad3e0a0705f2",
+      "sha256": "e30be3c63faf4463708f395380388872a1aae37cb4ce69f5b029e1eac65f1749",
       "audit_sha256": "aab78153e37abd7b765c041a9e4b01a77226e870ca46df8f8b7f6cf8884671f2",
       "repair_evidence": [
         "; 2026-10-16 F069 settings/persistence/180ms switch; f069-settings-fixed.log25/25 and f069-settings-ui.log1/1 TEST SUCCEEDED; actual SettingsView DEBUG host screenshot inspected, real camera/device unverified",
         "F088第一阶段角色键隔离及宿主Store注入；f088-roles-20261016专项3/3通过，完整配方恢复尚未核销。",
-        "2026-10-17 F097 shared anchored toolbar menu+accepted-change feedback+15 exact localized strings; module-menu TEST SUCCEEDED; input integration pending."
+        "2026-10-17 F097 shared anchored toolbar menu+accepted-change feedback+15 exact localized strings; module-menu TEST SUCCEEDED; input integration pending.",
+        "U004 完整布局后下一帧取图、尺寸重捕获及内描边；settings-payment-isolated 23/23中4项宿主渲染/反转通过，非真机视觉验收。",
+        "2026-10-17 U004按安卓标题/卡片/页脚整列滚动、当次内容测量后展开、明确视口尺寸；完整SettingsPopupOverlay首帧至展开高度/两入口/小屏/换高重开及原宿主回归6/6通过，settings-whole-column-isolated-tests.log TEST SUCCEEDED；已真机构建安装，用户观感待确认。",
+        "2026-10-17 U004用户再次否决后修正：实际网格保留上下12pt越界空间/物理像素裁片边界/Retina遮罩；设置列禁回弹和系统滚动边缘材质、单Surface单描边/安卓间距/卡片4%底/随显示进度遮罩。settings-render-final.log7/7 TEST SUCCEEDED，精确终点全图平均差0.2497/255；旧固定尺寸/源图测试证据缺口与中间失败均保留，真机观感另验。"
       ]
     },
     {
@@ -6238,7 +6269,7 @@
         "C15"
       ],
       "role": "production",
-      "sha256": "510db5d16a6154d3639994cb26fa4160a2aa1946cf1e79b069008c1475ee3835",
+      "sha256": "0eb709442b0a50674a9e6f12ef091f59186802ad2b3f2ce86d35d80c34e51965",
       "audit_sha256": "7327729dc90e5e53d9797083bc9a1eaeae97b6d779d57c2f1ede3978c5d76945",
       "repair_evidence": [
         "; 2026-10-16 F068 ordinary generation monotonic timing; f068-clock.log 85/85 TEST SUCCEEDED; crop timing production integration with F072 incomplete; 2026-10-16 F068 complete dev/F069 runtime only; f069-runtime-isolated.log52/52 and f069-download-regression.log42/42 TEST SUCCEEDED; master UI/store wiring pending；2026-10-16 F076生产侧滑接线及输入/宿主释放9/9验证，尚未跑实际UI侧滑/滚动竞争/VoiceOver；未核销。；2026-10-16 F076生产卡片UI双向侧滑/回弹/按钮和显式竖滚1/1通过，收合FastOutSlowIn280ms/恢复200ms；变忙UI和VoiceOver仍待验收。；2026-10-16 F077共享canRetry/真实连接/当前原片索引与清空抑制接线，12/12定向测试通过；真实按钮UI验收未完。；2026-10-16 F077生产按钮真实索引/旧session断线/混合批次/无session本地重试UI2/2通过；清空中新终态瞬态验证未完。；2026-10-16 F077真实320ms清空中新失败卡按钮onAppear探针1/1通过；撤掉门控负向对照捕获leaked=true，逐字恢复后1/1通过；开发侧核销待真机。",
@@ -6293,7 +6324,9 @@
         "2026-10-17 F125/F126页面与延后解析接线：PhotoPreview裁切sheet等待现有FHD，400ms后展示准备状态；仅显式重试补FHD，复用缓存方向或128KiB独立方向头，后台preparePhotoCrop；结构化task随照片/FHD/失败/连接/重试切换取消，关闭及切页阻止旧结果回写，准备成功才确认并规范方向。删除预览尺寸/8MCU猜测及提前LosslessCropTaskStore写入。发现PhotoList旧回调依赖该store，已一并新增队列cropSelection入口，保持hasCrop分支/重试选择，原片就绪后读取真实头并resolve；旧recipe入口继续兼容。f125-page-queue-20261017.log 9/9 TEST SUCCEEDED、退出0：6项模型与真实图像准备、旧离线裁切、旧失败重试、新selection立即/延后启动，原片不变及输出存在。随后队列裁切标签改用hasCrop、新文案统一AppLocalized，三语取Android crop.xml与camera_not_connected；这两项小型显示修改尚未重编。git diff --check通过。待补页面任务取消/重试交错、非对称旋转像素、新selection方向变化及失败恢复验证；F125/F126仍不核销，累计103项。未UI/真机验证。",
         "2026-10-17 F082 developer-side completion: QueueProgressScope is now module-visible so tests host the exact production subscription component (no behavior change). QueueProgressInvalidationTests hosts40 scopes and sends five actual ObservableObject invalidations per phase: only active row0 updates, subscription moves to17, and with no active row no rows update; parent page does not reevaluate on progress. This measures SwiftUI content evaluation, not GPU drawing or device RSS. Production TransferQueueView uses this component for each item and only structural queue snapshots drive the page; QueueItemView checks task identity before consuming progress. Existing two-subscriber slow-consumer test pauses consumption across100 enqueues, receives100 then101 without replaying old arrays; both streams are bufferingNewest(1), structurally bounding retained queued samples. Android TransferScreen active-only collection and TransferStateTest matching-task merge inspected. /tmp/ztransfer-queue-progress-scope-20261017.log TEST SUCCEEDED exit0,2/2 targeted tests. No UI touch automation or device memory benchmark. F082 closed in developer functional/resource scope;152/182,30 unclosed.",
         "2026-10-17 F078 confirmation dispatch admission: production TransferQueueView now rechecks pendingConfirmation identity and current hasClearable/hasRetryable before dispatch, rejecting callbacks after dismissal/switch or lost task eligibility. FAB and opening share confirmationIsEnabled. Android TransferScreen 253-267,616-663 and ConfirmFab/ConfirmCard distinguish connectivity (open FAB only) from task eligibility; existing open confirmation remains usable on disconnect, preserved in final code. Final /tmp/ztransfer-confirmation-final-20261017.log actual 2/2 tests, TEST SUCCEEDED, exit0 (activity/generation/departing eligibility and withdraw/retry exclusions). This verifies compilation and business regression, not actual stale UI callback replay. F078 remains open;162/182 closed,20 unclosed. No UI automation/device/commit/push.",
-        "2026-10-17 F051/F078 functional completion audit: found/fixed two final source boundaries. PhotoPreviewView flight Task checks cancellation before its first actor-turn image writes (a cancelled task can still begin); existing await-boundary checks prevent old completion. Shared page/disappearance cleanup cancels task and clears active/count/images before releasing parent hold once; normal completion clears count/task first; real enqueue admission precedes hold. TransferQueueView panel-specific dismiss now clears pending only if it still matches that action, matching Android separate showRetryConfirm/showClearConfirm flags; old cancel no longer dismisses the other panel. Confirm already rechecks identity and task eligibility, and onClosed preserves a reopened owner. Eligibility/nonce observers, shared top controls and retained scrim source checked. /tmp/ztransfer-queue-lifecycle-final-20261017.log actual6/6 TEST SUCCEEDED exit0: actual view-model offline single/batch/deferred admission, queue qualification/excluded retiring items, hold accounting and actual UIKit popup close/reversal/input lifecycle. Tests do not invoke the entire preview flight entry or every queued SwiftUI callback; those command wiring/ordering requirements are supported by source audit, not mislabeled as UI replay. Earlier retained physical gesture/full-page disappearance gates are excluded under user's later no-UI-test/functional-only scope, not reported passed. Functional scope F051 and F078 closed; image flight geometry, springs, anchors' visual fidelity and detailed transitions deferred.170/182 closed,12 unclosed:4 functional/platform/validation (F013,F142,F171,F177),8 deferred visual tasks. No device/install/commit/push."
+        "2026-10-17 F051/F078 functional completion audit: found/fixed two final source boundaries. PhotoPreviewView flight Task checks cancellation before its first actor-turn image writes (a cancelled task can still begin); existing await-boundary checks prevent old completion. Shared page/disappearance cleanup cancels task and clears active/count/images before releasing parent hold once; normal completion clears count/task first; real enqueue admission precedes hold. TransferQueueView panel-specific dismiss now clears pending only if it still matches that action, matching Android separate showRetryConfirm/showClearConfirm flags; old cancel no longer dismisses the other panel. Confirm already rechecks identity and task eligibility, and onClosed preserves a reopened owner. Eligibility/nonce observers, shared top controls and retained scrim source checked. /tmp/ztransfer-queue-lifecycle-final-20261017.log actual6/6 TEST SUCCEEDED exit0: actual view-model offline single/batch/deferred admission, queue qualification/excluded retiring items, hold accounting and actual UIKit popup close/reversal/input lifecycle. Tests do not invoke the entire preview flight entry or every queued SwiftUI callback; those command wiring/ordering requirements are supported by source audit, not mislabeled as UI replay. Earlier retained physical gesture/full-page disappearance gates are excluded under user's later no-UI-test/functional-only scope, not reported passed. Functional scope F051 and F078 closed; image flight geometry, springs, anchors' visual fidelity and detailed transitions deferred.170/182 closed,12 unclosed:4 functional/platform/validation (F013,F142,F171,F177),8 deferred visual tasks. No device/install/commit/push.",
+        "2026-10-17 user-requested readout/progress smoothing: numeric glyph transition240ms, raw speed snapshot, settled-mode samples no longer restart opacity; top progress observes only drawing leaf while ownership survives branches. queue-readout-smoothing-tests.log8/8 TEST SUCCEEDED exit0 (7 existing boundary regressions +1 settled-readout test). No UI automation or measured device FPS; detailed scope in speed-pill document.",
+        "U003 用户覆盖旧安卓行为：USB/STA信号禁止点击，四处共用CameraSignalControl；源码复核，无UI手势测试。"
       ]
     },
     {
@@ -6414,12 +6447,13 @@
         "C12"
       ],
       "role": "test",
-      "sha256": "730d49bdb4cca8c781eadf79ed388692e50f7b7f3bc0280a9d89d98d1da9575e",
+      "sha256": "d2c0d792f20608cf40c5afac3974b605aca18670771acde2276a4c070fc95a26",
       "audit_sha256": "551dab9321591a9ce6cc584b09fb9878c749f1bbc20be8a0aa5acb09b5cc3fc7",
       "repair_evidence": [
         "2026-10-15 F056–F059; /tmp/ztransfer-20261015-f056-f059-fixed.log, 56/56 TEST SUCCEEDED; only affected download/queue/quota behavior revalidated；F063原片共享预留/无限序号与同名copy，20261016-f063.log 56/56、f063-publication.log 1/1通过，真机Provider待验。; 2026-10-16 F067 text bounds only; f067-bounds.log 72/72, f067-bounds-production.log 1/1 TEST SUCCEEDED; F066/F067 remain incomplete; 2026-10-16 F067 structure/expansion/LRU; f067-expansion.log 102/102, f067-expansion-cap.log 1/1 TEST SUCCEEDED; independent parser/spool/pending coalescing incomplete；2026-10-16 F071：仅派生失败，保留原片成功，f071.log 90/90 TEST SUCCEEDED; F070 f070-fixed.log 91/91 TEST SUCCEEDED",
         "2026-10-17 F110 export/download overlap: extended DownloadReplay test fixture with optional per-chunk async delay and first/last chunk timestamps (default zero preserves existing replay behavior). New test concurrently runs actual local export of first.png and queued export of second.png (independent4000x3000 source files, bundled filter80%,minimal frame) plus actual CameraRepository/PTPSession streaming64MiB AP whole-object download.64x1MiB delayed chunks are verified byte-for-byte after publication, EOF checked, both original PNGs unchanged and two derived outputs decode at equal source-preserving dimensions. Chunk interval intersects export interval by asserted timestamps. /tmp/ztransfer-export-download-overlap-final-20261017.log TEST SUCCEEDED exit0,2/2 incl existing USB/workspace whole-object regression. Sampled baseline75,139,448 bytes, peak321,391,256 (~306.5MiB), growth246,251,808,4748 samples at requested2ms; exports16.037s. Initial run failed with replay command mismatch because test selected USB, which correctly uses bounded partial reads for64MiB; switched test to intended AP whole-object mode, no production changes. Hardware wire is replayed; sink/gate/landing/export are production. Remaining F110 requirement: cancellation/resource behavior during overlapping work; no device/hard-memory-bound claim.154/182 closed,28 unclosed.",
-        "2026-10-17 F110 developer functional/resource completion: refactored high-pixel overlap test into shared normal/cancel scenarios. Cancellation fixture pauses actual queued export at its second available-memory query (after source loading, before canvas allocation), waits for actual download first chunk, cancels export and releases checkpoint. Cancelled export throws CancellationError and creates noZTFrames directory; concurrent local export and64MiB AP streaming download complete with dimensions/content intact; both4000x3000 originals remain byte-identical. /tmp/ztransfer-export-cancel-overlap-final-20261017.log TEST SUCCEEDED exit0,2/2. Observed cancel baseline87,968,096/peak228,985,328 bytes; normal baseline71,764,320/peak320,031,360;4378/5553 samples at requested2ms. First combined run had a test-only unwaited XCTest expectation in normal scenario; fixed awaited fulfillment, no production change.\n\nF110 requirement audit: PhotoFilterExecution returns1 worker for original and caps preview at2; original composed paths use bounded stripe/filter work (existing tile-budget and actual NP3/Cube seam tests). Existing all-eight-orientation/alpha and source-pixel tests remain evidence of fidelity. New1200万像素 dual production-entry tests cover filter-only,watermark-only,immersive,and framed modes with source bytes/dimensions preserved and sampled peaks; two independent source files plus real streaming sink/download publication establish overlapping export/download progress. Deterministic active-export cancellation verifies isolation/cleanup at the stated checkpoint; generation/cancellation regressions and per-stripe cancellation checks retained. F124 already owns early-budget/retry behavior; injected unlimited budget in resource tests deliberately measures successful work and is not a production memory policy.\nF110 closed in developer functional/resource scope. Observed simulator process peaks are workload measurements, not device guarantees or a proof against all OOMs; no exact pixel-loop interruption timing or exhaustive filter calibration is claimed. Physical-device profiling remains unperformed. Count155/182 closed,27 unclosed; overall goal active. No UI automation/install/commit/push."
+        "2026-10-17 F110 developer functional/resource completion: refactored high-pixel overlap test into shared normal/cancel scenarios. Cancellation fixture pauses actual queued export at its second available-memory query (after source loading, before canvas allocation), waits for actual download first chunk, cancels export and releases checkpoint. Cancelled export throws CancellationError and creates noZTFrames directory; concurrent local export and64MiB AP streaming download complete with dimensions/content intact; both4000x3000 originals remain byte-identical. /tmp/ztransfer-export-cancel-overlap-final-20261017.log TEST SUCCEEDED exit0,2/2. Observed cancel baseline87,968,096/peak228,985,328 bytes; normal baseline71,764,320/peak320,031,360;4378/5553 samples at requested2ms. First combined run had a test-only unwaited XCTest expectation in normal scenario; fixed awaited fulfillment, no production change.\n\nF110 requirement audit: PhotoFilterExecution returns1 worker for original and caps preview at2; original composed paths use bounded stripe/filter work (existing tile-budget and actual NP3/Cube seam tests). Existing all-eight-orientation/alpha and source-pixel tests remain evidence of fidelity. New1200万像素 dual production-entry tests cover filter-only,watermark-only,immersive,and framed modes with source bytes/dimensions preserved and sampled peaks; two independent source files plus real streaming sink/download publication establish overlapping export/download progress. Deterministic active-export cancellation verifies isolation/cleanup at the stated checkpoint; generation/cancellation regressions and per-stripe cancellation checks retained. F124 already owns early-budget/retry behavior; injected unlimited budget in resource tests deliberately measures successful work and is not a production memory policy.\nF110 closed in developer functional/resource scope. Observed simulator process peaks are workload measurements, not device guarantees or a proof against all OOMs; no exact pixel-loop interruption timing or exhaustive filter calibration is claimed. Physical-device profiling remains unperformed. Count155/182 closed,27 unclosed; overall goal active. No UI automation/install/commit/push.",
+        "2026-10-17 U002 USB照片整文件后台屏障/逐命令目录让路与框架进度通知顺序；usb-photo-priority-tests.log 61/61通过，真机同图扫描争用1042ms/9.61MiB/s修复后322–343ms/29–31MiB/s。详细证据及范围见项目记忆文末。"
       ]
     },
     {
@@ -6428,14 +6462,15 @@
         "C11"
       ],
       "role": "test",
-      "sha256": "1fb15e5bc25f662db811435dc9ebfda972b694556947ab6c516b95a55d3d92ac",
+      "sha256": "33b3af405c7be21bfa7e58c5440da2a45e745bb32ab8ff793093623f37b315c0",
       "audit_sha256": "d086616ab7c0d48943a8b0eaf3d9100150206ca9f3a6997f9bff0f5d9c517f9f",
       "repair_evidence": [
         "；F065生产准备旁路/容量/关闭，F066身份与补读异步及后台通道：20261016-f065-f066-handoff.log 97/97、f066-identity.log 32/32。F066捕获头parser交接仍未完。",
         "F053既有修复核验，f053-storage 24/24：整文件屏障/真实两段下载/存储准入回检/保留旧值与代次隔离；未真机。",
         "2026-10-17 F046 session/decode integration: PreviewTimingTransport test fixture now optionally supplies real JPEG bytes while retaining existing default. New test runs4096x3072 JPEG through actual PTPSession/CameraRepository/CameraSession.previewAndExif and production loadCameraPhotoPreviewContent in onPreviewLoaded. Verifies1920x1440+histogram, wire/event order fhd->decoded->exif, and cancellation while callback is suspended after decoding prevents EXIF. A subsequent actual camera.preview request succeeds in both branches, proving interactive reservation release. /tmp/ztransfer-preview-session-decode-20261017.log TEST SUCCEEDED exit0,2/2 including cached-read skip/order regression. Fake transport replaces camera hardware only; JPEG codec/session/gate are production. Does not invoke private PhotoPreviewView publication methods or full page lifecycle concurrently; remaining F046 gap is that final integration, not decoder resource measurements already recorded.153/182 closed,29 unclosed. No production change/UI automation.",
         "2026-10-17 F046 full production page integration: added testFullPhotoPreviewPageLoadsNeighborsAndReusesCachedPage using actual PhotoPreviewView in UIWindow/UIHostingController, actual TransferQueueViewModel, CameraSession/CameraRepository/PTPSession,4096x3072 JPEG and replay wire. Drives the actual paging UIScrollView programmatically. Verifies initial current+neighbor FHD requests, selection binding advances to2 and requests3, return to1 performs no second FHD read, then2->3->4->3->2->1 crosses +/-2 window and requires file1 to be fetched again. /tmp/ztransfer-full-preview-page-paging-20261017.log TEST SUCCEEDED exit0,1/1 in5.158s. Earlier basic full-page run also passed; first two compile attempts failed due test UserDefaults MainActor-to-actor isolation, fixed by constructing isolated queue config inside detached task (no production changes). Test has bounded waits, dedicated defaults suite and restored prior window. This is actual page loading/decoder/cache/pager integration, not just a helper host; fake camera replaces hardware only. Existing decoder resource/probe evidence remains separate: full hosted-page peak memory sampling has not yet been combined with this test. F046 remains open for that resource-validation completion check.153/182 closed,29 unclosed. No UI gesture automation/install/commit/push.",
-        "2026-10-17 F046 developer functional completion: shared test-only previewTestPhysicalFootprint helper now supports both codec and complete production-page sampling. Full hosted PhotoPreviewView/real4096x3072 JPEG/session/repository/codec/pager test samples process phys_footprint during setup and continuous paging: baseline88,820,112 bytes, observed peak196,184,560 (about187.1MiB), growth107,364,448 (about102.4MiB),506 samples at requested2ms interval. Requests[1,2,2,3,3,4,1] include cancelled-prefetch/retry transitions; cached first-page return makes no new read, crossing retention window later reloads1. This does not claim every wire handle is fetched only once. Combined /tmp/ztransfer-preview-final-resource-20261017.log TEST SUCCEEDED exit0,4/4: full-page integration/resource sampling;24x24MP five-retained-page codec test; synchronous-decode cancellation/discard; actual SwiftUI retention observer lifecycle.\n\nF046 requirement audit:\n- Larger-than1920 inputs: actual JPEG dimensions640/1920/2560/4096 landscape+portrait tests and24MP repeated production decode establish1920 cap/no upscale/manual orientation policy. ImageIO thumbnail decoding avoids an explicit source-sized UIImage; histogram uses its own bounded analysis decode.\n- Continuous paging/cache: complete production page uses real session and codec with hardware replaced by replay transport; proves neighbor loading, accepted page changes, cache reuse and eviction/reload. Live publication guards reject out-of-window results; independent retained-ID lifecycle handles page/list/invalid-page transitions.\n- Resource/response evidence: full-page observed memory above; retained5x1920x1280 CGImage buffers <=49,152,000 bytes. Combined codec run sampled147,606,024-byte peak, max decode221.549ms, main-thread probe321 ticks/max observed50.746ms (scheduler observation, not a frame-time guarantee). Earlier isolated run20.4ms is not presented as universal. Polling cannot establish absolute transient maximum and simulator footprint includes runtime/renderer/fixture effects.\n- Cancellation: deterministic entered-codec cancellation discards old output and replacement succeeds; real session callback cancellation skips EXIF and releases interactive gate for subsequent read. Load identity matches Android page/list/connection/deferred keys; closing suppresses not-yet-enabled deferred loads.\nF046 closed in developer functional/resource scope; physical camera/RAW source retrieval and device profiling remain platform validation limits, not claims of this simulator test. No UI gesture automation. Count154/182 closed,28 unclosed; overall goal remains active."
+        "2026-10-17 F046 developer functional completion: shared test-only previewTestPhysicalFootprint helper now supports both codec and complete production-page sampling. Full hosted PhotoPreviewView/real4096x3072 JPEG/session/repository/codec/pager test samples process phys_footprint during setup and continuous paging: baseline88,820,112 bytes, observed peak196,184,560 (about187.1MiB), growth107,364,448 (about102.4MiB),506 samples at requested2ms interval. Requests[1,2,2,3,3,4,1] include cancelled-prefetch/retry transitions; cached first-page return makes no new read, crossing retention window later reloads1. This does not claim every wire handle is fetched only once. Combined /tmp/ztransfer-preview-final-resource-20261017.log TEST SUCCEEDED exit0,4/4: full-page integration/resource sampling;24x24MP five-retained-page codec test; synchronous-decode cancellation/discard; actual SwiftUI retention observer lifecycle.\n\nF046 requirement audit:\n- Larger-than1920 inputs: actual JPEG dimensions640/1920/2560/4096 landscape+portrait tests and24MP repeated production decode establish1920 cap/no upscale/manual orientation policy. ImageIO thumbnail decoding avoids an explicit source-sized UIImage; histogram uses its own bounded analysis decode.\n- Continuous paging/cache: complete production page uses real session and codec with hardware replaced by replay transport; proves neighbor loading, accepted page changes, cache reuse and eviction/reload. Live publication guards reject out-of-window results; independent retained-ID lifecycle handles page/list/invalid-page transitions.\n- Resource/response evidence: full-page observed memory above; retained5x1920x1280 CGImage buffers <=49,152,000 bytes. Combined codec run sampled147,606,024-byte peak, max decode221.549ms, main-thread probe321 ticks/max observed50.746ms (scheduler observation, not a frame-time guarantee). Earlier isolated run20.4ms is not presented as universal. Polling cannot establish absolute transient maximum and simulator footprint includes runtime/renderer/fixture effects.\n- Cancellation: deterministic entered-codec cancellation discards old output and replacement succeeds; real session callback cancellation skips EXIF and releases interactive gate for subsequent read. Load identity matches Android page/list/connection/deferred keys; closing suppresses not-yet-enabled deferred loads.\nF046 closed in developer functional/resource scope; physical camera/RAW source retrieval and device profiling remain platform validation limits, not claims of this simulator test. No UI gesture automation. Count154/182 closed,28 unclosed; overall goal remains active.",
+        "2026-10-17 U002 USB照片整文件后台屏障/逐命令目录让路与框架进度通知顺序；usb-photo-priority-tests.log 61/61通过，真机同图扫描争用1042ms/9.61MiB/s修复后322–343ms/29–31MiB/s。详细证据及范围见项目记忆文末。"
       ]
     },
     {
@@ -6552,7 +6587,7 @@
         "C29"
       ],
       "role": "test",
-      "sha256": "92d4355b7cd7dadb205f0a5c1bc18295832ea41931c1a188b438e8382e64b70b",
+      "sha256": "29d28a063bf9f6754bf19327077e0796634e452fc85bf6082e538e894a60c836",
       "audit_sha256": "f7902b5ce66f7822f53ac04ce9965a58c8bb3046b016c687288dcd49aa630359",
       "repair_evidence": [
         "2026-10-15 F056–F059; /tmp/ztransfer-20261015-f056-f059-fixed.log, 56/56 TEST SUCCEEDED; only affected download/queue/quota behavior revalidated；F064共享名称预留/隐藏暂存发布；PhotoFramePublicationTests及TransferQueueScenarioTests共17/17通过，/tmp/ztransfer-20261015-f064.log。；F145最终录制器/生产目录失败回退/JPEG发布6/6通过、0跳过，/tmp/ztransfer-20261015-f145-final.log，已修复待真机。；F117画廊照片完整性24配置+相关回归最终5/5通过，/tmp/ztransfer-20261015-f117-final.log；此前两轮失败保留，F116不核销。；F132有效头截断/非零起点重试iOS2/2通过，原生fflush/fclose故障与ASan/UBSan PASS；/tmp/ztransfer-20261015-f132-offset.log及f132-native-fixed.log。；F134会话/任务暂存、取消和发布记账及旧会话清理，最终21/21通过，/tmp/ztransfer-20261015-f134-fixed.log；旧会话为夹具，未实际杀进程重启。；F133 ICC-only/35字段EXIF重建，32元数据组合与压缩流/越界及回归7/7通过，/tmp/ztransfer-20261015-f133-rectangular.log；原生ASan/UBSan PASS。；F135资源边界与独立串行准入：f135-native.log ASan/UBSan PASS；f135-serial.log 25/25、20261016-f135-admission.log 3/3通过，真机内存压力未测。；F063原片共享预留/无限序号与同名copy，20261016-f063.log 56/56、f063-publication.log 1/1通过，真机Provider待验。；F060创建前目录名校验/重试/长度边界，20261016-f060.log 18/18通过。；F061目录授权lease生产持有，20261016-f061.log 25/25、f061-active.log 1/1通过；真实Provider权限待验。；F062共享启动清理屏障/取消/当前frame保护，20261016-f062-fixed.log 32/32通过；实际杀进程/Provider重启待验。；F065部分：单计算/4096准入生产接线，20261016-f065-admission.log 36/36；真实异步准备与旁路待F066，不核销。；F065生产准备旁路/容量/关闭，F066身份与补读异步及后台通道：20261016-f065-f066-handoff.log 97/97、f066-identity.log 32/32。F066捕获头parser交接仍未完。; 2026-10-16 F072 crop handoff/shared compute/publication; f072-handoff.log85/85, f072-routes.log42/42, f072-lifecycle.log12/12 TEST SUCCEEDED; F068 dynamic pause awaits F069；2026-10-16 F071：仅派生失败，保留原片成功，f071.log 90/90 TEST SUCCEEDED; F070 f070-fixed.log 91/91 TEST SUCCEEDED; F073 f073.log 45/45 TEST SUCCEEDED; page wiring statically inspected；2026-10-16 F075顶栏直读运行态executionControl，移除飞行/延后偏好显隐门控；状态边界与生产单/多文件暂停3/3 TEST SUCCEEDED；未跑UI点击或真机。",
@@ -6662,7 +6697,11 @@
         "2026-10-17 F046 developer functional completion: shared test-only previewTestPhysicalFootprint helper now supports both codec and complete production-page sampling. Full hosted PhotoPreviewView/real4096x3072 JPEG/session/repository/codec/pager test samples process phys_footprint during setup and continuous paging: baseline88,820,112 bytes, observed peak196,184,560 (about187.1MiB), growth107,364,448 (about102.4MiB),506 samples at requested2ms interval. Requests[1,2,2,3,3,4,1] include cancelled-prefetch/retry transitions; cached first-page return makes no new read, crossing retention window later reloads1. This does not claim every wire handle is fetched only once. Combined /tmp/ztransfer-preview-final-resource-20261017.log TEST SUCCEEDED exit0,4/4: full-page integration/resource sampling;24x24MP five-retained-page codec test; synchronous-decode cancellation/discard; actual SwiftUI retention observer lifecycle.\n\nF046 requirement audit:\n- Larger-than1920 inputs: actual JPEG dimensions640/1920/2560/4096 landscape+portrait tests and24MP repeated production decode establish1920 cap/no upscale/manual orientation policy. ImageIO thumbnail decoding avoids an explicit source-sized UIImage; histogram uses its own bounded analysis decode.\n- Continuous paging/cache: complete production page uses real session and codec with hardware replaced by replay transport; proves neighbor loading, accepted page changes, cache reuse and eviction/reload. Live publication guards reject out-of-window results; independent retained-ID lifecycle handles page/list/invalid-page transitions.\n- Resource/response evidence: full-page observed memory above; retained5x1920x1280 CGImage buffers <=49,152,000 bytes. Combined codec run sampled147,606,024-byte peak, max decode221.549ms, main-thread probe321 ticks/max observed50.746ms (scheduler observation, not a frame-time guarantee). Earlier isolated run20.4ms is not presented as universal. Polling cannot establish absolute transient maximum and simulator footprint includes runtime/renderer/fixture effects.\n- Cancellation: deterministic entered-codec cancellation discards old output and replacement succeeds; real session callback cancellation skips EXIF and releases interactive gate for subsequent read. Load identity matches Android page/list/connection/deferred keys; closing suppresses not-yet-enabled deferred loads.\nF046 closed in developer functional/resource scope; physical camera/RAW source retrieval and device profiling remain platform validation limits, not claims of this simulator test. No UI gesture automation. Count154/182 closed,28 unclosed; overall goal remains active.",
         "2026-10-17 F176 actual hosted wheel accepted selection/reorder rendering;final3/3 TEST SUCCEEDED; functional closed161/182.",
         "2026-10-17 F076 actual late card command admission + swipe/generation10/10; functional scope closed162/182; no VoiceOver device claim.",
-        "2026-10-17 F078 input lifecycle evidence: strengthened existing production GeniePopupHostView reversal test with synchronous assertions that closing and immediate reopen keep touch disabled and accessibility elements hidden; only fully open restores both, fully closed stays hidden. /tmp/ztransfer-confirmation-input-20261017.log actual 2/2 TEST SUCCEEDED exit0 (reversal and close-before-first-frame). This is UIKit controller lifecycle validation, not UI gesture automation. Source audit: PhotoListView queueTopRightControls increments queueControlActionNonce before both valid start/pause commands; TransferQueueView receives it and clears pendingConfirmation. Scrim remains while mountedConfirmations is nonempty and consumes tap/drag; each onClosed removes only a noncurrent action, preserving a reopened owner. Task eligibility changes independently close matching pending confirmation. Actual transient gesture interception and queue-level event integration are not newly replayed; F078 remains open,162/182 closed,20 unclosed. Fine animation/style remains outside current scope. No device/commit/push."
+        "2026-10-17 F078 input lifecycle evidence: strengthened existing production GeniePopupHostView reversal test with synchronous assertions that closing and immediate reopen keep touch disabled and accessibility elements hidden; only fully open restores both, fully closed stays hidden. /tmp/ztransfer-confirmation-input-20261017.log actual 2/2 TEST SUCCEEDED exit0 (reversal and close-before-first-frame). This is UIKit controller lifecycle validation, not UI gesture automation. Source audit: PhotoListView queueTopRightControls increments queueControlActionNonce before both valid start/pause commands; TransferQueueView receives it and clears pendingConfirmation. Scrim remains while mountedConfirmations is nonempty and consumes tap/drag; each onClosed removes only a noncurrent action, preserving a reopened owner. Task eligibility changes independently close matching pending confirmation. Actual transient gesture interception and queue-level event integration are not newly replayed; F078 remains open,162/182 closed,20 unclosed. Fine animation/style remains outside current scope. No device/commit/push.",
+        "2026-10-17 user-requested readout/progress smoothing: numeric glyph transition240ms, raw speed snapshot, settled-mode samples no longer restart opacity; top progress observes only drawing leaf while ownership survives branches. queue-readout-smoothing-tests.log8/8 TEST SUCCEEDED exit0 (7 existing boundary regressions +1 settled-readout test). No UI automation or measured device FPS; detailed scope in speed-pill document.",
+        "U004 完整布局后下一帧取图、尺寸重捕获及内描边；settings-payment-isolated 23/23中4项宿主渲染/反转通过，非真机视觉验收。",
+        "2026-10-17 U004按安卓标题/卡片/页脚整列滚动、当次内容测量后展开、明确视口尺寸；完整SettingsPopupOverlay首帧至展开高度/两入口/小屏/换高重开及原宿主回归6/6通过，settings-whole-column-isolated-tests.log TEST SUCCEEDED；已真机构建安装，用户观感待确认。",
+        "2026-10-17 U004用户再次否决后修正：实际网格保留上下12pt越界空间/物理像素裁片边界/Retina遮罩；设置列禁回弹和系统滚动边缘材质、单Surface单描边/安卓间距/卡片4%底/随显示进度遮罩。settings-render-final.log7/7 TEST SUCCEEDED，精确终点全图平均差0.2497/255；旧固定尺寸/源图测试证据缺口与中间失败均保留，真机观感另验。"
       ]
     },
     {
@@ -7171,7 +7210,7 @@
         "C31"
       ],
       "role": "test",
-      "sha256": "6e3a01d08ae00b2dee4a1064f5df65cbd1453aba34e223aa90f69d9b5beec14c",
+      "sha256": "1da2b601295d8d46a1475f833e31140edc2028ed7f8050e55a0db17eef5c9047",
       "audit_sha256": "2523e4fbc1c9a4251b7b8d33959922c159dbc41d1e46709a1812c409e4c11ae9",
       "repair_evidence": [
         "2026-10-15 F056–F059; /tmp/ztransfer-20261015-f056-f059-fixed.log, 56/56 TEST SUCCEEDED; only affected download/queue/quota behavior revalidated",
@@ -7182,7 +7221,8 @@
         "2026-10-17 F124开发侧核销：TransferQueue.renderFrameFile与LocalPhotoOutput.render可注入Sendable内存快照，默认系统接口不变，解码前与画布前分别查询。f124-concurrent-entry-20261017.log 2/2 TEST SUCCEEDED、退出0：task group并发调用两生产入口低预算均PhotoAllocationRejected，原片字节保留且无ZTFrames半成品；恢复预算并发两路均输出可解码同尺寸图片；队列冻结配方重试回归通过。结合predecode4/4、invalid-header5/5、large-retry2/2，已覆盖文件头/算术溢出/64MiB余量、测量扩框预算、1200万像素拒绝恢复与内部像素、原片与重试。F124分配前预算功能开发侧已修复，累计103项；与Android一样仅快照早拒绝，不是内存预留或所有OOM保证，未测真机RSS/极端并发压力，这些性能验收归F110且仍未完成。未UI/真机验证，git diff --check通过。",
         "2026-10-17 F173 idle-timer app ownership and batch holds; ownership2/2,batch2/2; no UI/device auto-lock evidence; see ledger.",
         "F111 actual export offline/online/offline image comparison1/1 f111-pixels pass; overall consumer verification ongoing.",
-        "2026-10-17 F110 high-pixel dual-entry resource evidence: added testTwelveMegapixelConcurrentExportEntrypointsAcrossFrameModes. Real4000x3000 two-color PNG, enabled first bundled filter at80%, concurrently invokes actual LocalPhotoOutput.render and TransferQueue.renderFrameFile for filter-only/watermark-only-border-off/immersive/minimal-frame modes. Two outputs decode with equal dimensions, first3 remain4000x3000, framed dimensions >=source; original file bytes unchanged after each mode. Memory snapshot injection .max isolates render resource sampling from early-budget rejection already covered byF124. Detached2ms process sampler observed peaks237,750,840 /291,244,624 /262,916,664 /313,854,592 bytes (about227/278/251/299MiB), respective increases163,184,856 /221,757,680 /192,790,744 /243,237,152; each pair about9.5–9.8sec. /tmp/ztransfer-highpixel-concurrent-final-20261017.log TEST SUCCEEDED exit0. Initial compile failed for capturing mutable settings in two async lets; fixed test by freezing recipe before dispatch. Android PhotoFilterRenderer.scratchPixelCount/renderInPlace fixed4M-pixel stripe source inspected. This proves sampled dual production-entry workload, not a hard memory bound, physical-device result, active download coexistence, or exhaustive image/preset content fidelity. F110 remains open for two-image batch plus concurrent transfer/cancellation resource integration; earlier tile/seam/alpha/orientation proofs retained.154/182 closed,28 unclosed. No production change/UI automation."
+        "2026-10-17 F110 high-pixel dual-entry resource evidence: added testTwelveMegapixelConcurrentExportEntrypointsAcrossFrameModes. Real4000x3000 two-color PNG, enabled first bundled filter at80%, concurrently invokes actual LocalPhotoOutput.render and TransferQueue.renderFrameFile for filter-only/watermark-only-border-off/immersive/minimal-frame modes. Two outputs decode with equal dimensions, first3 remain4000x3000, framed dimensions >=source; original file bytes unchanged after each mode. Memory snapshot injection .max isolates render resource sampling from early-budget rejection already covered byF124. Detached2ms process sampler observed peaks237,750,840 /291,244,624 /262,916,664 /313,854,592 bytes (about227/278/251/299MiB), respective increases163,184,856 /221,757,680 /192,790,744 /243,237,152; each pair about9.5–9.8sec. /tmp/ztransfer-highpixel-concurrent-final-20261017.log TEST SUCCEEDED exit0. Initial compile failed for capturing mutable settings in two async lets; fixed test by freezing recipe before dispatch. Android PhotoFilterRenderer.scratchPixelCount/renderInPlace fixed4M-pixel stripe source inspected. This proves sampled dual production-entry workload, not a hard memory bound, physical-device result, active download coexistence, or exhaustive image/preset content fidelity. F110 remains open for two-image batch plus concurrent transfer/cancellation resource integration; earlier tile/seam/alpha/orientation proofs retained.154/182 closed,28 unclosed. No production change/UI automation.",
+        "U005 用户授权DEBUG模拟购买/持久化/退出恢复；settings-payment-isolated 23/23中17权益+2队列通过，未替代Apple沙盒验收。"
       ]
     },
     {
@@ -7192,7 +7232,11 @@
         "C31"
       ],
       "role": "test",
-      "sha256": "cc613398a8470317016a573132308b5663d109cb04ae01381e9d4d959fcf2658"
+      "sha256": "6d46f761aa38fc86c444ee1b3bebf6d59b314cd45f89f489c77791c7524b8f6e",
+      "audit_sha256": "cc613398a8470317016a573132308b5663d109cb04ae01381e9d4d959fcf2658",
+      "repair_evidence": [
+        "U005 用户授权DEBUG模拟购买/持久化/退出恢复；settings-payment-isolated 23/23中17权益+2队列通过，未替代Apple沙盒验收。"
+      ]
     },
     {
       "path": "ios/ZTransferTests/PremiumFireworksTests.swift",
@@ -7598,7 +7642,7 @@
         "C06"
       ],
       "role": "test",
-      "sha256": "c63d912d885a145562b4ef5b0f13d19fc487084b80744bcebf026273ee380357",
+      "sha256": "f989b53e9a06aa16f55a7df196dcce99db4101adff518a892e3ef94a0171948a",
       "audit_sha256": "46692943bb674098857633f47e8aad220405910d48938d06c6d2005fc273b316",
       "repair_evidence": [
         "F022 full handle baseline retained across resume: /tmp/ztransfer-f022-baseline.log 9/9 TEST SUCCEEDED. F007 cross-session integration remains open.",
@@ -7625,7 +7669,8 @@
         "F024 real read-only cache failure->worker stop and cached reads: /tmp/ztransfer-f024-real-disk-fixed.log 1/1 TEST SUCCEEDED; first root-removal fixture failed and retained. Shared-flight/cursor verification pending.",
         "F024 shared-flight outcomes and retained pending cursor: /tmp/ztransfer-f024-waiters.log 44/44 TEST SUCCEEDED. Developer-side complete; hardware untested.",
         "F025: /tmp/ztransfer-f025-reconnect.log 45/45 TEST SUCCEEDED；真实协议无图/忙/IO恢复会话回放；未真机。",
-        "F036类型筛选空/全失效归一化、扫描中与部分匹配保留及持久化；真实扫描六组合，30/30回归通过，/tmp/ztransfer-f036-types-20261016.log。"
+        "F036类型筛选空/全失效归一化、扫描中与部分匹配保留及持久化；真实扫描六组合，30/30回归通过，/tmp/ztransfer-f036-types-20261016.log。",
+        "2026-10-17 U002 USB照片整文件后台屏障/逐命令目录让路与框架进度通知顺序；usb-photo-priority-tests.log 61/61通过，真机同图扫描争用1042ms/9.61MiB/s修复后322–343ms/29–31MiB/s。详细证据及范围见项目记忆文末。"
       ]
     },
     {

@@ -4,6 +4,73 @@ import XCTest
 final class PremiumEntitlementTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    #if DEBUG
+    @MainActor
+    func testSimulatedPurchaseSurvivesRelaunchAndRealStoreRefresh() {
+        withLedger { ledger, defaults in
+            for _ in 0..<25 { ledger.recordTransfer(id: UUID(), isPro: false) }
+            let access = PremiumAccess(.free)
+            let store = PremiumEntitlementStore(access: access)
+            store.enableDevelopmentPurchases(defaults: defaults)
+            store.simulatePurchase(.lifetime)
+            XCTAssertTrue(access.isPro)
+            store.publish(.free)
+            XCTAssertEqual(store.entitlement, .lifetime)
+            XCTAssertEqual(ledger.snapshot().transfersLeft, 0)
+            ledger.recordTransfer(id: UUID(), isPro: access.isPro)
+            XCTAssertEqual(ledger.snapshot().transfers, 25)
+
+            let restoredAccess = PremiumAccess()
+            let restored = PremiumEntitlementStore(access: restoredAccess)
+            restored.enableDevelopmentPurchases(defaults: defaults)
+            restored.publish(.free)
+            XCTAssertTrue(restoredAccess.isPro)
+            XCTAssertEqual(restored.developmentPurchase?.product, .lifetime)
+            restored.endSimulatedPurchase()
+            XCTAssertEqual(restoredAccess.entitlement, .free)
+            XCTAssertEqual(ledger.snapshot().transfersLeft, 0)
+
+            let afterClear = PremiumEntitlementStore(access: PremiumAccess(.free))
+            afterClear.enableDevelopmentPurchases(defaults: defaults)
+            XCTAssertNil(afterClear.developmentPurchase)
+            XCTAssertEqual(afterClear.entitlement, .free)
+        }
+    }
+
+    @MainActor
+    func testSimulationRetainsLatestVerifiedEntitlementAndRequiresExplicitOptIn() {
+        withLedger { _, defaults in
+            let store = PremiumEntitlementStore(access: PremiumAccess(.free))
+            store.simulatePurchase(.lifetime)
+            XCTAssertEqual(store.entitlement, .free)
+            store.enableDevelopmentPurchases(defaults: defaults)
+            store.simulatePurchase(.annual)
+            store.publish(.lifetime)
+            XCTAssertEqual(store.developmentPurchase?.product, .annual)
+            XCTAssertNotEqual(store.entitlement, .lifetime)
+            store.endSimulatedPurchase()
+            XCTAssertEqual(store.entitlement, .lifetime)
+            store.publish(.free)
+            XCTAssertEqual(store.entitlement, .free)
+        }
+    }
+
+    @MainActor
+    func testExpiredSimulatedAnnualCannotUnlockAfterRecreation() {
+        withLedger { _, defaults in
+            let store = PremiumEntitlementStore(access: PremiumAccess(.free))
+            store.enableDevelopmentPurchases(defaults: defaults, at: now)
+            store.simulatePurchase(.annual, at: now)
+            let deadline = now.addingTimeInterval(365 * 86_400)
+            XCTAssertEqual(store.entitlement, .annual(until: deadline, gracePeriod: false))
+            let restored = PremiumEntitlementStore(access: PremiumAccess(.free))
+            restored.enableDevelopmentPurchases(defaults: defaults, at: deadline)
+            XCTAssertNil(restored.developmentPurchase)
+            XCTAssertEqual(restored.entitlement, .free)
+        }
+    }
+    #endif
+
     func testRefundedLifetimeFallsBackToValidAnnual() {
         let annual = PremiumGrant(product: .annual, transactionID: 10, expiration: now.addingTimeInterval(60))
         var lifetime = PremiumGrant(product: .lifetime, transactionID: 11)

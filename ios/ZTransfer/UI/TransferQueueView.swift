@@ -28,7 +28,6 @@ struct TransferQueueView: View {
     @State private var pendingConfirmation: QueueConfirmation?
     @State private var removingItemIDs: Set<UUID> = []
     @State private var clearAllInProgress = false
-    @State private var signalExpanded = false
     @State private var listAtTop = true
     @Environment(\.displayScale) private var displayScale
 
@@ -161,34 +160,8 @@ struct TransferQueueView: View {
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
             if let session {
-                Button {
-                    if session.isUSB {
-                        guard isSessionConnected else { return }
-                        withAnimation(signalExpanded
-                                      ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
-                                      : .spring(response: 0.42, dampingFraction: 0.72)) {
-                            signalExpanded.toggle()
-                        }
-                    } else if session.wirelessMode == .sta && !isSessionConnected {
-                        onRetrySTA()
-                    } else if !isSessionConnected {
-                        CameraWirelessSettings.open(.ap)
-                    }
-                } label: {
-                    HStack(spacing: signalExpanded ? 5 : 0) {
-                        PhotoListSignalIcon(isUSB: session.isUSB, wirelessMode: session.wirelessMode,
-                                            connected: isSessionConnected)
-                        if signalExpanded && session.isUSB && isSessionConnected {
-                            Text(AppLocalized.resource("connection_usb"))
-                                .zTransferTypography(.labelSmall, weight: .medium)
-                                .foregroundStyle(ZTransferColors.accentBlue)
-                        }
-                    }
-                        .padding(.horizontal, 10)
-                        .frame(minWidth: 40, minHeight: 40, maxHeight: 40)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
+                CameraSignalControl(isUSB: session.isUSB, wirelessMode: session.wirelessMode,
+                                    connected: isSessionConnected, height: 40)
             }
             Spacer()
 
@@ -807,6 +780,9 @@ private struct QueueItemView: View {
                     QueuePillVisibility(visible: speedText != nil, delay: 60) {
                         if let speedText {
                             TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected,
+                                             numericValue: item.status == .completed
+                                                ? item.downloadMBps * 1024 * 1024
+                                                : Double(displayedBytesPerSecond),
                                              respond: item.elapsedMs != nil)
                         }
                     }
@@ -922,11 +898,7 @@ private struct QueueItemView: View {
             return String(format: "%.1f MB/s", item.downloadMBps)
         }
         guard item.status == .transferring, displayedBytesPerSecond > 0 else { return nil }
-        switch displayedBytesPerSecond {
-        case ..<1024: return "\(displayedBytesPerSecond) B/s"
-        case ..<(1024 * 1024): return String(format: "%.1f KB/s", Double(displayedBytesPerSecond) / 1024)
-        default: return String(format: "%.1f MB/s", Double(displayedBytesPerSecond) / (1024 * 1024))
-        }
+        return transferSpeedText(displayedBytesPerSecond)
     }
 
     private var displayedProgress: Double {
@@ -1205,7 +1177,7 @@ struct SmoothTransferProgressMotion {
 }
 
 @MainActor
-private final class SmoothTransferProgressAnimator: ObservableObject {
+final class SmoothTransferProgressAnimator: ObservableObject {
     @Published private(set) var motion = SmoothTransferProgressMotion()
     private var link: CADisplayLink?
     @MainActor
@@ -1261,12 +1233,27 @@ struct SmoothTransferProgress<Content: View>: View {
     }
     private var input: Input { .init(target: target, key: resetKey) }
     var body: some View {
-        content(Double(animator.motion.animation.value))
+        TransferProgressContent(animator: animator, content: content)
             .onAppear { animator.update(target: target, key: resetKey) }
             .onChange(of: input) { next in
                 animator.update(target: next.target, key: next.key)
             }
             .onDisappear { animator.stop() }
+    }
+}
+
+/// Observe display frames only at the drawing leaf. A parent can retain the
+/// animator in State across icon/content branches without redrawing its text,
+/// glass material and layout on every progress frame.
+struct TransferProgressContent<Content: View>: View {
+    @ObservedObject var animator: SmoothTransferProgressAnimator
+    @ViewBuilder let content: (Double) -> Content
+
+    var body: some View {
+        content(Double(animator.motion.animation.value))
+            // Values already come from the explicit momentum-preserving spring.
+            // A surrounding button/fade transaction must not animate them again.
+            .transaction { $0.animation = nil }
             .background {
 #if DEBUG
                 Color.clear.preference(key: SmoothTransferProgressObservationKey.self,
@@ -1599,15 +1586,41 @@ private final class TransferPillResponseAnimator: NSObject, ObservableObject {
     func stop() { link?.invalidate(); link = nil }
 }
 
+/// The user requested smoother speed readouts on iOS (2026-10-17). Keep the
+/// sampled value and formatting exact; animate only the glyph replacement.
+/// Shared by the top capsule and the active queue card, with stable digit widths.
+struct TransferNumericText: View {
+    let text: String
+    let value: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                Text(text)
+            } else if #available(iOS 17.0, *) {
+                Text(text).contentTransition(.numericText(value: value))
+            } else {
+                Text(text).contentTransition(.opacity)
+            }
+        }
+        .monospacedDigit()
+        .animation(reduceMotion ? nil : .timingCurve(0.2, 0, 0, 1, duration: 0.24), value: text)
+    }
+}
+
 private struct TransferInfoPill: View {
     let text: String
     let color: Color
+    let numericValue: Double?
     let waiting: Bool
     let respond: Bool
     @StateObject private var response: TransferPillResponseAnimator
 
-    init(text: String, color: Color, waiting: Bool = false, respond: Bool = false) {
+    init(text: String, color: Color, numericValue: Double? = nil,
+         waiting: Bool = false, respond: Bool = false) {
         self.text = text; self.color = color; self.waiting = waiting; self.respond = respond
+        self.numericValue = numericValue
         _response = StateObject(wrappedValue: TransferPillResponseAnimator(responding: respond))
     }
     @Environment(\.colorScheme) private var scheme
@@ -1635,6 +1648,9 @@ private struct TransferInfoPill: View {
                     QueueWaitingClock().fill(color, style: FillStyle(eoFill: true))
                         .frame(width: 16, height: 16)
                         .accessibilityLabel(AppLocalized.resource("status_waiting"))
+                } else if let numericValue {
+                    TransferNumericText(text: text, value: numericValue)
+                        .zTransferTypography(.labelSmall).foregroundStyle(color)
                 } else {
                     Text(text).zTransferTypography(.labelSmall).foregroundStyle(color)
                 }

@@ -50,9 +50,20 @@ extension PTPCommandTransport {
     /// override this adapter to deliver packets directly without buffering the
     /// whole object; the session still owns the transaction in both cases.
     func receivePTP(command: Data, sink: PTPDataSink) async throws -> PTPDataTransfer {
-        let result = try await sendPTP(command: command, data: nil)
         try Task.checkCancellation()
+        // ICC only returns after receiving the entire phase. Announce the
+        // read before awaiting it, like Android's onDataStart before pumping
+        // bytes. Announcing it after the callback resets the writer's 200 ms
+        // progress clock and suppresses the just-received bytes, reporting
+        // the previous chunk against the new elapsed time instead.
         sink.started(nil)
+        let started = sink.diagnostics.map { _ in ContinuousClock.now }
+        sink.diagnostics?.commandSent()
+        let result = try await sendPTP(command: command, data: nil)
+        if let started {
+            sink.diagnostics?.frameworkCallback(payloadBytes: result.payload.count,
+                                                waitedMS: PTPTransferDiagnostics.milliseconds(since: started))
+        }
         try Task.checkCancellation()
         try sink.received(result.payload)
         return PTPDataTransfer(response: result.response,

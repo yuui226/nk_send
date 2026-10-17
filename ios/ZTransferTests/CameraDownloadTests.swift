@@ -591,6 +591,32 @@ final class CameraDownloadTests: XCTestCase {
         try writer.close()
     }
 
+    func testFrameworkCallbackPublishesReceivedBytesInsteadOfStaleChunkProgress() async throws {
+        let target = try directory().appendingPathComponent("framework.part")
+        FileManager.default.createFile(atPath: target.path, contents: Data())
+        let values = DownloadValueBox<[TransferDownloadProgress]>([])
+        let writer = CameraDownloadWriter(output: try FileHandle(forWritingTo: target), resumeOffset: 0,
+            totalHint: 2 * 1024 * 1024, captureHeader: false, startedAt: .now,
+            onProgress: { value in values.mutate { $0.append(value) } })
+        defer { try? writer.close() }
+        // Exercise the real default adapter used by ImageCaptureCore, unlike
+        // DownloadReplay's packet-streaming override. Each whole-phase callback
+        // takes longer than the writer's refresh interval.
+        let transport = CallbackDownloadReplay(onSend: {
+            XCTAssertEqual(values.value.last?.downloaded, writer.bytes,
+                           "The read must start before awaiting its callback")
+        })
+        let session = PTPSession(transport: transport)
+        for index in 1...2 {
+            _ = try await session.executeReceiving(operation: PTPConstants.getPartialObjectEx,
+                                                     parameters: [7], sink: writer.sink)
+            XCTAssertEqual(values.value.last?.downloaded, UInt64(index * 1024 * 1024))
+            XCTAssertGreaterThan(values.value.last?.bytesPerSecond ?? 0, 0)
+        }
+        try writer.close()
+        XCTAssertEqual(try Data(contentsOf: target).count, 2 * 1024 * 1024)
+    }
+
     func testWriterBatchesSmallPacketsAndFlushesEveryByteOnClose() throws {
         let target = try directory().appendingPathComponent("buffered.part")
         FileManager.default.createFile(atPath: target.path, contents: Data())
@@ -917,6 +943,19 @@ private actor DownloadReplay: PTPCommandTransport {
             lastChunkTime = now
         }
         return PTPDataTransfer(response: response, receivedByteCount: UInt64(step.chunks.reduce(0) { $0 + $1.count }), declaredByteCount: step.declared)
+    }
+}
+
+private struct CallbackDownloadReplay: PTPCommandTransport {
+    let onSend: @Sendable () -> Void
+    var managesCommandTimeouts: Bool { true }
+    func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) {
+        onSend()
+        try await Task.sleep(for: .milliseconds(240))
+        let container = try PTPCodec.decode(command)
+        let response = PTPCodec.encode(type: .response, code: PTPConstants.responseOK,
+                                       transactionID: container.transactionID)
+        return (response, Data(repeating: 7, count: 1024 * 1024))
     }
 }
 

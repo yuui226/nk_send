@@ -18,6 +18,50 @@ private extension View {
             }
         }
     }
+
+    @ViewBuilder func settingsScrollEdges() -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectHidden()
+        } else {
+            self
+        }
+    }
+}
+
+/// Only the settings column: keep native scrolling/focus handling, but do not
+/// rubber-band a second sheet of content inside the Android popup surface.
+private struct SettingsScrollBounds: UIViewRepresentable {
+    final class Probe: UIView {
+        override func didMoveToWindow() { super.didMoveToWindow(); configure() }
+        override func layoutSubviews() { super.layoutSubviews(); configure() }
+        func configure() {
+            var ancestor = superview
+            while let view = ancestor {
+                if let scroll = view as? UIScrollView {
+                    scroll.bounces = false
+                    scroll.alwaysBounceVertical = false
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+    }
+    func makeUIView(context: Context) -> Probe { Probe() }
+    func updateUIView(_ view: Probe, context: Context) { view.configure() }
+}
+
+/// AnchorPopup's single Surface + full-height sheen, with one inset rim.
+/// No independent header fill or system scroll-edge material is involved.
+private struct SettingsPanelSurface: View {
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let dark = scheme == .dark
+        let shape = RoundedRectangle(cornerRadius: 20)
+        shape.fill(dark ? Color(white: 30 / 255).opacity(0.92) : .white.opacity(0.95))
+            .overlay(shape.fill(LinearGradient(colors: [.white.opacity(dark ? 0.08 : 0.55), .clear],
+                                               startPoint: .top, endPoint: .bottom)))
+            .overlay(shape.strokeBorder(dark ? .white.opacity(0.15) : .black.opacity(0.10), lineWidth: 1))
+    }
 }
 
 struct SettingsView: View {
@@ -125,11 +169,18 @@ struct SettingsView: View {
         ZStack(alignment: .topLeading) {
             Group {
                 if settingsPage == .main {
-                    VStack(spacing: 0) {
-                        header
-                            .settingsHeight("mainHeader")
-                        ScrollView { mainSettingsContent.settingsHeight("mainContent") }
+                    // Android SettingsOverlay scrolls one whole Column: title,
+                    // cards and footer. The header is not a separate fixed bar.
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            header
+                            mainSettingsContent.padding(.top, 14)
+                        }
+                        .padding(16)
+                        .settingsHeight("main")
+                        .background(SettingsScrollBounds())
                     }
+                    .settingsScrollEdges()
                     .transition(.asymmetric(
                         insertion: .offset(x: settingsTransitionDirection * 24)
                             .combined(with: .opacity),
@@ -137,35 +188,34 @@ struct SettingsView: View {
                             .combined(with: .opacity)
                     ))
                 } else {
-                    VStack(spacing: 0) {
-                        effectsHeader
-                            .settingsHeight("effectsHeader")
-                        ScrollView {
-                            VStack(spacing: 0) {
-                                PhotoEffectsSettingsPreview(source: effectPreviewSource,
-                                    metadata: effectPreviewExif.map(PhotoFrameMetadata.init),
-                                    settings: effectivePhotoEffectsSettings(effectsDraft, isPro: entitlements.access.isPro),
-                                    onRequest: onEffectPreviewRequested)
-                                    .padding(.horizontal, 16).padding(.top, 10)
-                                PhotoEffectsControls(draft: $effectsDraft,
-                                    showingWatermarkPicker: $showingWatermarkPicker,
-                                    textFieldFocused: $watermarkTextFocused,
-                                    showLocationFields: true,
-                                    imageImporting: effectsStore.watermarkImageImporting,
-                                    photoLUTStore: photoLUTStore,
-                                    filterChooser: $filterChooser,
-                                    onWatermarkTextCommitted: { _ in commitFrameDraft() },
-                                    onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
-                                    .padding(.horizontal, 16)
-                                    .padding(.bottom, 14)
-                            }
-                            .settingsHeight("effectsContent")
-                            .frame(maxWidth: .infinity)
-                            .photoEffectsBackgroundFocusDismiss {
-                                if watermarkTextFocused { watermarkTextFocused = false }
-                            }
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            effectsHeader
+                            PhotoEffectsSettingsPreview(source: effectPreviewSource,
+                                metadata: effectPreviewExif.map(PhotoFrameMetadata.init),
+                                settings: effectivePhotoEffectsSettings(effectsDraft, isPro: entitlements.access.isPro),
+                                onRequest: onEffectPreviewRequested)
+                                .padding(.horizontal, 16).padding(.top, 10)
+                            PhotoEffectsControls(draft: $effectsDraft,
+                                showingWatermarkPicker: $showingWatermarkPicker,
+                                textFieldFocused: $watermarkTextFocused,
+                                showLocationFields: true,
+                                imageImporting: effectsStore.watermarkImageImporting,
+                                photoLUTStore: photoLUTStore,
+                                filterChooser: $filterChooser,
+                                onWatermarkTextCommitted: { _ in commitFrameDraft() },
+                                onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 14)
+                        }
+                        .settingsHeight("effects")
+                        .background(SettingsScrollBounds())
+                        .frame(maxWidth: .infinity)
+                        .photoEffectsBackgroundFocusDismiss {
+                            if watermarkTextFocused { watermarkTextFocused = false }
                         }
                     }
+                    .settingsScrollEdges()
                     .transition(.asymmetric(
                         insertion: .offset(x: settingsTransitionDirection * 24)
                             .combined(with: .opacity),
@@ -195,17 +245,13 @@ struct SettingsView: View {
             }
         }
         .onPreferenceChange(SettingsContentHeightKey.self) { heights in
-            let prefix = settingsPage == .main ? "main" : "effects"
-            if let header = heights[prefix + "Header"], let content = heights[prefix + "Content"] {
-                onContentHeightChange(header + content)
+            let page = settingsPage == .main ? "main" : "effects"
+            if let height = heights[page], height.isFinite, height > 0 {
+                onContentHeightChange(height)
             }
         }
-        // Android AnchorPopup uses glassSurfaceHeavy (0.92/0.95 alpha). A
-        // connection-card wash is intentionally translucent and lets the
-        // underlying USB/Wi‑Fi labels bleed through the settings panel.
-        .background(ZTransferGlassSurface(cornerRadius: 26, kind: .panel))
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(ZTransferColors.primaryText.opacity(0.16), lineWidth: 1))
+        .background(SettingsPanelSurface())
+        .clipShape(RoundedRectangle(cornerRadius: 20))
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
                       maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current)
@@ -278,15 +324,19 @@ struct SettingsView: View {
     }
 
     private var mainSettingsContent: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 0) {
             directoryCard
+            Spacer().frame(height: 16)
             listCard
-            if showPhotoEffectsEntry { photoEffectsCard }
+            Spacer().frame(height: 8)
+            if showPhotoEffectsEntry {
+                photoEffectsCard
+                Spacer().frame(height: 8)
+            }
             appearanceCard
+            Spacer().frame(height: 14)
             footer
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 14)
     }
 
     private var effectsHeader: some View {
@@ -384,7 +434,7 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
+        .frame(minHeight: 32)
     }
 
     private var directoryCard: some View {
@@ -609,7 +659,7 @@ struct SettingsView: View {
              .accessibilityIdentifier("photo-effects-summary")
         }
         .padding(12)
-        .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
+        .background(RoundedRectangle(cornerRadius: 14).fill(ZTransferColors.primaryText.opacity(0.04)))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .stroke(ZTransferColors.accentOrange.opacity(effectsStore.isEnabled && settings.hasEffect ? 0.56 : 0.30), lineWidth: 1.2))
         .background { Button(action: showEffectsSettings) { Color.clear }.buttonStyle(.plain) }
@@ -722,7 +772,8 @@ extension PhotoFramePreset {
 }
 
 private struct SettingsCard<Content: View>: View {
-    var borderColor = ZTransferColors.primaryText.opacity(0.10)
+    @Environment(\.colorScheme) private var scheme
+    var borderColor: Color?
     var attentionColor: Color?
     var attentionProgress: CGFloat = 0
     @ViewBuilder let content: Content
@@ -733,9 +784,9 @@ private struct SettingsCard<Content: View>: View {
         // empty rounded card in the popup.
         VStack(spacing: 0) { content }
             .padding(12)
-            .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(borderColor, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 14).fill(ZTransferColors.primaryText.opacity(0.04)))
+            .overlay(RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(borderColor ?? (scheme == .dark ? .white.opacity(0.15) : .black.opacity(0.10)), lineWidth: 1))
             .overlay {
                 if let attentionColor {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)

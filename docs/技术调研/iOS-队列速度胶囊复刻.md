@@ -14,14 +14,13 @@
 - 移除外层 `ZTransferGlassButtonStyle` 与内部胶囊的双重背景，入口和展开态改为一个持续存在的胶囊表面。
 - 取消 `fixedSize` 和顶栏整组隐式布局动画，按当前文字度量得到唯一目标宽度，并用右缘锚定弹簧插值。
 - 计数实现独立的双层里程表动画；相同位数的速度使用等宽数字，不因实时采样产生宽度抖动。
-- 完成瞬间直接从当前内容过渡到 Done，不经过一帧入口图标；进入 Done 后立即移除进度层，只保留完成文字与胶囊材质，避免满格进度在 Done 下方再次播放。
+- 完成瞬间直接从当前内容过渡到 Done，不经过一帧入口图标；当前实现按安卓保留成功补满阶段，1.8秒后收回。此前“Done立即移除进度层”为旧实现记录，不再代表当前代码。
 - 列表和预览入队抵达都触发同一套右上控件接住回弹。
 - 接住回弹使用安卓 `Motion.bouncy()` 的等效物理参数：stiffness 400、damping ratio 0.5；
   先用 110 ms 放大至 1.18 倍再回落。
 - 开始/暂停图案分别按安卓的 21 pt / 18 pt 占比；队列自绘图标使用 20 pt 画布，
   其可见轮廓与安卓 22 dp Material Checklist 图标一致。
-- 任务身份切换时，进度填充先用 220 ms 平滑回落到 0，再继续追踪下一任务进度，
-  避免继承上一任务满格，也避免瞬间清空。
+- 当前实现按安卓在任务身份变化时从0重新追踪新任务，保留同一任务目标的连续速度；此前220ms排空延迟已撤销，不能沿用旧时序描述。
 - iOS 26+ 选择“液态玻璃”主题时，入口、速度/数量、生成中、Done 与开始/暂停整组统一改用系统 `glassEffect(.regular.interactive())`。原有右缘锚定、内容裁切和进度填充保持不变；原生按压反馈启用时关闭队列自定义按压缩放，避免双重形变。
 
 ## 验证记录
@@ -39,3 +38,17 @@
 ### 2026-10-16 弹簧常量更正
 
 此前本文把 Motion.bouncy() 的 StiffnessMediumLow 误记为200，生产接住回弹也误用了该值。Compose 1.7.6 VectorizedAnimationSpec.kt 明确 MediumLow=400、Low=200；本次修正为400，并与队列徽标/来源胶囊共用 ZTransferAndroidMotion 常量。历史构建或静态截图不证明此前弹簧参数正确；本次未对接住回弹做逐帧运行验收，其余时序/中断和当前安卓基准的完整对齐仍以全功能复核台账为准。
+
+
+## 2026-10-17 速度读数与进度刷新优化
+
+用户明确要求优化这两处动画，本次是局部体验调整，不宣称与安卓直接替换速度Text的视觉完全相同。仍对照FileListScreen.QueuePill、TransferProgressMotion.kt、LiquidProgressFill.kt及TransferProgressMotionTest/TransferSpeedTest保留业务语义。
+
+- 顶栏和队列卡片共用TransferNumericText：iOS17+使用numericText(value:)滚动数字，240ms、曲线(0.2,0,0,1)；iOS16以同一时长淡化替换，开启“减弱动态效果”时直接更新。触发键为最终格式化文本，不为不可见的小数采样变化重复启动动画。等宽数字和真实速度格式保留，不修改测速或创建预测读数。
+- QueuePillPresentation保存原始Int64速度，退场内容保留原始快照；无字符串反向解析。格式化共用transferSpeedText，完成卡片仍保留安卓的固定MB/s口径。
+- 顶栏进度动画对象由State持有跨分支生命周期，只让TransferProgressContent观察逐帧变化。材质、文字、计数及整个胶囊布局不再挂在每帧progress闭包下面；绘制节点禁用外层隐式动画，避免显式弹簧与按钮事务叠加。
+- 保留现有spring(stiffness180,dampingRatio1,threshold0.0005)和新任务从0起步、同任务只向前的规则；完成补满、失败/取消不补满的业务边界不变。模式已稳定时速度/计数变化不再重启整层透明度时钟；进行中的模式切换仍遵循原有中断和退场快照规则。
+- 新增稳定模式连续速度变化不唤醒整层动画、随后Done仍能正常退场的模型回归。最小8项专项/tmp/ztransfer-queue-readout-smoothing-tests.log已8/8、0失败、TEST SUCCEEDED、exit0（7项既有回归+1项新增稳定模式读数回归）。未运行UI自动化；沿用同一会话已有真机安装授权，正在构建优化版，安装前检查当前传输状态。未提交。最终主观流畅度/实际帧率尚未真机验证。
+
+
+2026-10-17 速度/进度优化交付：/tmp/ztransfer-queue-readout-smoothing-build.log BUILD SUCCEEDED、exit0；已覆盖安装到同一iPhone（应用目录663AF847-710C-42C3-B3AA-FA8207257ACB），devicectl普通启动成功，未附加诊断/实验启动参数。8/8专项通过证据保持。未自动发起相机下载、未运行UI自动化；真实传输主观手感及FPS未测，不宣称已完成视觉验收。git diff --check通过。当前修改尚未提交/推送。

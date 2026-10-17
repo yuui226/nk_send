@@ -2,6 +2,52 @@ import XCTest
 @testable import ZTransfer
 
 final class ScanBatchPolicyTests: XCTestCase {
+    func testUSBScanYieldsWithinBatchToPhotoAndResumesWithoutSkippingHandles() async throws {
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: target) }
+        let entered = GateTestLatch(), release = GateTestLatch()
+        let size = transferChunkSize + 1
+        var script: [STAExchange] = [
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array(Array(1...8))),
+            .init(PTPConstants.getObjectInfo, [8], payload: objectInfo(8)),
+            .init(PTPConstants.getObjectInfo, [7], payload: objectInfo(7)),
+            .init(PTPConstants.getPartialObjectEx, [8, 0, 0, UInt32(transferChunkSize), 0],
+                  payload: Data(repeating: 9, count: Int(transferChunkSize))),
+            .init(PTPConstants.getPartialObjectEx, [8, UInt32(transferChunkSize), 0, 1, 0], payload: Data([9])),
+        ]
+        script += (1...6).reversed().map { .init(PTPConstants.getObjectInfo, [UInt32($0)], payload: objectInfo(UInt32($0))) }
+        let wire = STAScriptTransport(script)
+        let repository = CameraRepository(session: PTPSession(transport: wire), isUSBConnection: true)
+        let scan = Task {
+            try await repository.scanCatalog(nextBatchSize: { 48 }) { batch in
+                if batch.map(\.id) == [8] {
+                    await wire.beforeNextReply(PTPConstants.getObjectInfo) {
+                        await entered.signal()
+                        await release.wait()
+                    }
+                }
+            }
+        }
+        await entered.wait()
+        let photo = Task {
+            try await repository.downloadResult(handle: 8, size: size, fileName: "8.JPG", to: target)
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while await repository.cameraSchedulerSnapshot().queued == 0, ContinuousClock.now < deadline { await Task.yield() }
+        let queued = await repository.cameraSchedulerSnapshot().queued
+        XCTAssertEqual(queued, 1)
+        await release.signal()
+        let result = try await photo.value
+        let catalog = try await scan.value
+        XCTAssertEqual(result.bytes, size)
+        XCTAssertEqual(catalog.files.map(\.id), Array(UInt32(1)...8).reversed())
+        XCTAssertTrue(catalog.metadataComplete)
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
     @MainActor
     func testTypeSelectionNormalizesOnlyAfterScanAndPersistsWholeSelection() async throws {
         let original = PhotoFilterPersistence.load()

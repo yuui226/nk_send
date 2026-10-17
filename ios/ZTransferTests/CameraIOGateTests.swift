@@ -432,6 +432,40 @@ final class CameraIOGateTests: XCTestCase {
         XCTAssertEqual(after, "ran")
     }
 
+    func testUSBPhotoKeepsBackgroundOutBetweenChunksAndReleasesOnCancellation() async throws {
+        for cancel in [false, true] {
+            let gate = CameraIOGate(), order = GateTestOrder()
+            let gap = GateTestLatch(), resume = GateTestLatch()
+            let photo = Task {
+                try await gate.withDownloadActivity(prioritizePhoto: true) {
+                    try await gate.withTransferSlice { await order.append("first") }
+                    await gap.signal()
+                    await resume.wait()
+                    try Task.checkCancellation()
+                    try await gate.withTransferSlice { await order.append("second") }
+                }
+            }
+            await gap.wait()
+            let background = Task {
+                try await gate.withCommand { await order.append("background") }
+            }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+            while await gate.snapshot().queued == 0, ContinuousClock.now < deadline { await Task.yield() }
+            let queued = await gate.snapshot().queued
+            XCTAssertEqual(queued, 1)
+            try await gate.withPreviewTransaction { await order.append("preview") }
+            let before = await order.snapshot()
+            XCTAssertEqual(before, ["first", "preview"])
+            if cancel { photo.cancel() }
+            await resume.signal()
+            do { try await photo.value; XCTAssertFalse(cancel) }
+            catch is CancellationError { XCTAssertTrue(cancel) }
+            try await background.value
+            let final = await order.snapshot()
+            XCTAssertEqual(final, cancel ? ["first", "preview", "background"] : ["first", "preview", "second", "background"])
+        }
+    }
+
     func testQueuedIdleWaitsUntilDownloadEndsEvenWhenQueuedBeforeDownloadStarts() async throws {
         let gate = CameraIOGate()
         let sliceEntered = GateTestLatch()

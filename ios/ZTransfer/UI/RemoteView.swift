@@ -87,7 +87,6 @@ struct RemoteView: View {
     @StateObject private var monitorHintAnimator = RemoteMonitorHintAnimator()
     @State private var developerLogLines: [String] = []
     @State private var persistedFocusDiagnosticReport = ""
-    @State private var signalExpanded = false
     @State private var exposureMode: RemoteExposureAssist = .off
     @State private var batteryExpanded = false
     @State private var layoutOrientation: RemoteLayoutOrientation = .portrait
@@ -552,39 +551,8 @@ struct RemoteView: View {
     }
 
     private var remoteSignalButton: some View {
-        Button {
-            if isUSBSession {
-                guard isSessionConnected else { return }
-                withAnimation(signalExpanded
-                              ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.22)
-                              : .spring(response: 0.42, dampingFraction: 0.72)) {
-                    signalExpanded.toggle()
-                }
-            } else if wirelessMode == .sta && !isSessionConnected {
-                onRetrySTA()
-            } else if !isSessionConnected {
-                CameraWirelessSettings.open(.ap)
-            }
-        } label: {
-            HStack(spacing: signalExpanded ? 5 : 0) {
-                PhotoListSignalIcon(isUSB: isUSBSession, wirelessMode: wirelessMode,
-                                    connected: isSessionConnected)
-                if signalExpanded && isUSBSession && isSessionConnected {
-                    Text(AppLocalized.resource("connection_usb"))
-                        .zTransferTypography(.labelSmall, weight: .medium)
-                        .foregroundStyle(ZTransferColors.accentBlue)
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(minWidth: 40, minHeight: 36, maxHeight: 36)
-        }
-        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-        .modifier(DisconnectedSignalBreath(connected: isSessionConnected))
-        .accessibilityLabel(AppLocalized.resource(
-            isUSBSession ? "connection_usb" :
-                (wirelessMode == .sta && !isSessionConnected
-                    ? "sta_signal_disconnected_reconnect" : "sta_signal_connected")
-        ))
+        CameraSignalControl(isUSB: isUSBSession, wirelessMode: wirelessMode,
+                            connected: isSessionConnected)
     }
 
     private var remoteBatteryButton: some View {

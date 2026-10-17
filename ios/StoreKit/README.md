@@ -6,12 +6,16 @@
 
 最新状态（2026-09-19）：两个首次权益查询／重建恢复失败仍保留。按商品查询的临时替换未通过整组回归，已撤回；不能将试验实现的 14/16 当作当前生产代码结果。后续修正测试补款步骤：保留模拟扣款问题，直接调用 `resolveIssueForTransaction`，不先关闭重试模拟。年转永久退款／到期、宽限期补款及无宽限期补款的定向组合 3/3 通过（`/tmp/ztransfer-billing-issue-resolution-order.log`／`.xcresult`）；没有修改生产支付代码，没有重跑完整套件，不能由此判定真实苹果沙盒通过。此前 1/2 失败与诊断仍保留，详见迁移台账第 10 节及 [原生查询对照](NativeRecoveryProbe/README.md)。
 
-## 两种测试环境
+## 测试环境
 
 - **`ZTransfer-StoreKit` Scheme**：Xcode 本地 StoreKit Testing，使用本目录的 `ZTransfer.storekit`。测试价格为人民币 39.99／年和 99.99 永久，不扣真实款，不证明苹果后台已创建商品或允许该价格档位。
 - **`ZTransfer` Scheme**：不指定本地 StoreKit 配置。开发签名真机安装后使用苹果 Sandbox Apple Account 测试；TestFlight 也使用沙盒交易。不能仅凭 Debug／Release 判断交易环境。
 
-本地配置不属于 App 的资源，不打包进正式 App；只有独立交易／界面测试 bundle 会复制配置文件。客户端没有修改 `isPro` 的隐藏解锁入口。两种环境共用生产的 StoreKit 2 交易交付与验证逻辑。
+本地配置不属于 App 的资源，不打包进正式 App；只有独立交易／界面测试 bundle 会复制配置文件。这两种环境共用生产的 StoreKit 2 交易交付与验证逻辑。
+
+2026-10-17 用户明确要求日常真机测试可用的假支付，新增第三种 **仅 Debug 的本地模拟权益**：设置 → 解锁高级版（已模拟时为“测试权益”）→“开发测试 · 模拟支付”，可模拟年度／永久版，明确不扣款、不使用 Apple 账号。普通安装、重开应用后仍保留；“结束模拟，恢复真实权益”恢复最新真实 StoreKit 状态，不重置免费额度。该入口、持久化读取与模拟类型均在 `#if DEBUG` 内，Release 不包含它们。
+
+交付时可用 Debug 参数 `--simulate-premium-lifetime` 一次启用用户要求的测试永久版，之后普通启动不需要参数。此功能只供业务测试，**不是 Apple Sandbox 交易，也不能证明购买、退款、续订和签名验证通过**。StoreKit 专项实例默认不启用模拟状态；正式内购仍只接受已验证交易。普通 devicectl 安装并启动 `ZTransfer` 不会自动启用 Xcode 的 `.storekit` 会话，不能再据工程内存在测试配置声称手机已可假支付。
 
 ## 本地运行
 
@@ -179,3 +183,7 @@ xcrun simctl privacy SIMULATOR_ID revoke microphone com.ztransfer.ios
 对照安卓 DebugSimulatorButton，模拟照片入口普通点击按真实权益选择连接效果，长按 500 ms 请求本次模拟连接的高级金色效果。预览只绑定模拟 CameraSession，不修改 PremiumAccess、StoreKit 或免费额度；Release 不组合入口。保持已经确认的 iOS 620 ms 主段＋760 ms 成功效果和原交接时序。
 
 新增 `testDebugPremiumAnimationPreviewKeepsFreeWatermarkLocked` 验证实际长按进入后，设置仍显示免费入口、水印全部控制项仍锁定，重启后普通点击仍为免费。新增模型检查预览归属、松手重复连接无效、另一个工作区不继承及真实权限／额度未变。结果：`/tmp/ztransfer-premium-debug-preview.log`／`.xcresult` 定向 2/2；`ztransfer-storekit-ui.k3pkFI/` 的 UI 1/1，准备／清理均通过。录屏 `/tmp/ztransfer-debug-preview.mp4` 的 81.25 秒金色光环与 213.1 秒绿色双环帧已查看，确认长按预览与重启后的普通点击正确选择效果；UI 截图也已检查。Debug 构建、安装、启动通过，完整证据见迁移台账第 10 节。这不是实际帧率或真机连接验收。
+
+2026-10-17 本地模拟权益专项：`/tmp/ztransfer-settings-payment-isolated-tests.log` 23/23、TEST SUCCEEDED（其中17权益模型、2正式队列、4弹窗）。覆盖重建恢复、StoreKit免费刷新不覆盖模拟、退出回到最新真实权益、模拟年度到期、免费次数不重置、实际失败队列购买后重试成功及退出后再次受限。不是苹果 Sandbox/真实支付验收。
+
+同日真机交付：模拟永久版已启用；结束进程后不带购买参数重开，定向日志仍显示模拟lifetime/isPro=true，免费次数保持25。随后无参数普通启动成功。只读取模拟商品、权限和用量三个状态，未导出整份偏好文件。

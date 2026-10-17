@@ -1,9 +1,16 @@
 import Foundation
 
-/// Opt-in per-file STA diagnostics. No photo bytes, names, paths or addresses.
+/// Opt-in per-file STA/USB diagnostics. No photo bytes, names, paths or addresses.
 /// Clock reads and counters stay on the hot path; file I/O is offloaded.
 /// Network wait includes framework scheduling, and is NOT a wire RTT measurement.
 final class PTPTransferDiagnostics: @unchecked Sendable {
+    static var isEnabledForUSBLaunch: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["ZTRANSFER_USB_DIAGNOSTICS"] == "1"
+        #else
+        false
+        #endif
+    }
     static var isEnabledForDevelopmentLaunch: Bool {
         #if DEBUG
         ProcessInfo.processInfo.environment["ZTRANSFER_STA_DIAGNOSTICS"] == "1"
@@ -66,6 +73,15 @@ final class PTPTransferDiagnostics: @unchecked Sendable {
     }
     func sessionAcquired() { mark("session_acquired_ms") }
     func commandSent() { mark("command_sent_ms") }
+    /// ICC's completed Data callback includes framework and camera wait. Its
+    /// payload length is not a raw USB packet/wire-byte measurement.
+    func frameworkCallback(payloadBytes: Int, waitedMS: Double) {
+        lock.withLock {
+            values["framework_payload_bytes", default: 0] += Double(payloadBytes)
+            values["framework_wait_ms", default: 0] += waitedMS
+            values["framework_callback_ms"] = Self.milliseconds(since: chunkStarted)
+        }
+    }
     // In this mode posixRead measures recv only; there is no per-read queue /
     // continuation. Worker dispatch and packet assembly remain in file time.
     func continuousReadWorkerStarted() {
@@ -175,6 +191,7 @@ final class PTPTransferDiagnostics: @unchecked Sendable {
     private static let outputQueue = DispatchQueue(label: "com.ztransfer.sta-diagnostics", qos: .utility)
     static func persist(_ line: String) {
         #if DEBUG
+        if isEnabledForUSBLaunch { print("[USB-TRANSFER] \(line)") }
         outputQueue.async {
             do {
                 let manager = FileManager.default

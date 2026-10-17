@@ -10,6 +10,9 @@ struct PremiumSettingsActions: View {
     let onShowPremium: () -> Void
     let onPlayFireworks: () -> Void
     private var showManagement: Bool {
+        #if DEBUG
+        if access.entitlement.isPro() { return true }
+        #endif
         if case .annual = access.entitlement { return true }
         guard access.entitlement == .lifetime else { return false }
         switch purchases.renewal.state {
@@ -22,20 +25,34 @@ struct PremiumSettingsActions: View {
             if showManagement {
                 // Lifetime owners retain the management route as well: their
                 // former annual renewal may still be active or unconfirmed.
-                Button(AppLocalized.resource("iap_manage"), action: onShowPremium)
+                Button(managementLabel, action: onShowPremium)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(ZTransferColors.accentBlue)
                     .padding(.horizontal, 8).frame(height: 28)
                     .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
                     .buttonStyle(.plain)
             }
-            ProBadgeButton(label: AppLocalized.resource(access.entitlement == .unresolved
-                           ? "iap_confirming" : (access.entitlement.isPro() ? "pro_label" : "unlock_pro")),
+            ProBadgeButton(label: badgeLabel,
                            motionPaused: motionPaused) {
                 if access.entitlement.isPro() { onPlayFireworks() }
                 else { onShowPremium() }
             }
         }
+    }
+
+    private var managementLabel: String {
+        #if DEBUG
+        if access.developmentPurchase != nil { return "测试权益" }
+        #endif
+        return AppLocalized.resource("iap_manage")
+    }
+
+    private var badgeLabel: String {
+        #if DEBUG
+        if access.developmentPurchase != nil { return "测试 Pro" }
+        #endif
+        return AppLocalized.resource(access.entitlement == .unresolved
+            ? "iap_confirming" : (access.entitlement.isPro() ? "pro_label" : "unlock_pro"))
     }
 }
 
@@ -53,6 +70,13 @@ struct PremiumPurchaseView: View {
     let onCelebrate: () -> Void
 
     private var busy: Bool { store.operation != .idle }
+    private var isDevelopmentSimulation: Bool {
+        #if DEBUG
+        return access.developmentPurchase != nil
+        #else
+        return false
+        #endif
+    }
     private var isLifetime: Bool { access.entitlement == .lifetime }
     private var hasAnnual: Bool {
         switch store.renewal.state {
@@ -82,66 +106,71 @@ struct PremiumPurchaseView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         header
-                        // Billing retry without grace removes Pro access, but
-                        // the verified payment problem still needs to be shown.
-                        if access.entitlement != .free || hasAnnual { entitlementStatus }
-                        if !isLifetime {
-                            comparison(width: min(420, proxy.size.width - 48) - 40)
-                            VStack(spacing: 10) {
-                                plan(.annual)
-                                plan(.lifetime)
-                            }
-                            Text(AppLocalized.resource("iap_account_hint"))
-                                .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if selected == .lifetime, needsCancellationReminder {
-                                notice("iap_lifetime_notice")
-                            }
-                            if selected == .annual {
-                                Text(AppLocalized.resource("iap_renewal_terms"))
+                        #if DEBUG
+                        developmentPurchases
+                        #endif
+                        if !isDevelopmentSimulation {
+                            // Billing retry without grace removes Pro access, but
+                            // the verified payment problem still needs to be shown.
+                            if access.entitlement != .free || hasAnnual { entitlementStatus }
+                            if !isLifetime {
+                                comparison(width: min(420, proxy.size.width - 48) - 40)
+                                VStack(spacing: 10) {
+                                    plan(.annual)
+                                    plan(.lifetime)
+                                }
+                                Text(AppLocalized.resource("iap_account_hint"))
                                     .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if selected == .lifetime, needsCancellationReminder {
+                                    notice("iap_lifetime_notice")
+                                }
+                                if selected == .annual {
+                                    Text(AppLocalized.resource("iap_renewal_terms"))
+                                        .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
+                                }
+                                ProBadgeButton(label: purchaseLabel, big: true,
+                                               enabled: canPurchase, motionPaused: busy) {
+                                    if selected == .lifetime, needsCancellationReminder { confirmLifetime = true }
+                                    else { Task { await store.purchase(selected) } }
+                                }
                             }
-                            ProBadgeButton(label: purchaseLabel, big: true,
-                                           enabled: canPurchase, motionPaused: busy) {
-                                if selected == .lifetime, needsCancellationReminder { confirmLifetime = true }
-                                else { Task { await store.purchase(selected) } }
+                            if store.loadingProducts { ProgressView().accessibilityLabel(AppLocalized.resource("iap_loading")) }
+                            if store.productError, !isLifetime {
+                                Text(AppLocalized.resource("iap_prices_failed"))
+                                    .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
+                                action("iap_retry") { Task { await store.loadProducts() } }
                             }
-                        }
-                        if store.loadingProducts { ProgressView().accessibilityLabel(AppLocalized.resource("iap_loading")) }
-                        if store.productError, !isLifetime {
-                            Text(AppLocalized.resource("iap_prices_failed"))
-                                .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-                            action("iap_retry") { Task { await store.loadProducts() } }
-                        }
-                        if let message = store.messageKey {
-                            Text(AppLocalized.resource(message)).font(.system(size: 13))
-                                .foregroundStyle(ZTransferColors.secondaryText)
-                        }
-                        if busy { ProgressView() }
-                        if needsRenewalManagement {
-                            if isLifetime, store.renewal.willAutoRenew != false {
-                                notice("iap_lifetime_followup")
+                            if let message = store.messageKey {
+                                Text(AppLocalized.resource(message)).font(.system(size: 13))
+                                    .foregroundStyle(ZTransferColors.secondaryText)
                             }
-                            action("iap_manage") {
-                                guard let scene else { return }
-                                Task { await store.manage(in: scene) }
-                            }.disabled(scene == nil)
+                            if busy { ProgressView() }
+                            if needsRenewalManagement {
+                                if isLifetime, store.renewal.willAutoRenew != false {
+                                    notice("iap_lifetime_followup")
+                                }
+                                action("iap_manage") {
+                                    guard let scene else { return }
+                                    Task { await store.manage(in: scene) }
+                                }.disabled(scene == nil)
+                            }
+                            HStack(spacing: 10) {
+                                action("iap_restore") { Task { await store.restore() } }
+                                action("iap_redeem") {
+                                    guard let scene else { return }
+                                    Task { await store.redeem(in: scene) }
+                                }.disabled(scene == nil)
+                            }
+                            if #unavailable(iOS 16.3) {
+                                Text(AppLocalized.resource("iap_redeem_version")).font(.system(size: 11))
+                            }
+                            action("feedback") {
+                                UIPasteboard.general.string = "953000922"
+                                copiedSupport = true
+                            }
+                            legalLinks
                         }
-                        HStack(spacing: 10) {
-                            action("iap_restore") { Task { await store.restore() } }
-                            action("iap_redeem") {
-                                guard let scene else { return }
-                                Task { await store.redeem(in: scene) }
-                            }.disabled(scene == nil)
-                        }
-                        if #unavailable(iOS 16.3) {
-                            Text(AppLocalized.resource("iap_redeem_version")).font(.system(size: 11))
-                        }
-                        action("feedback") {
-                            UIPasteboard.general.string = "953000922"
-                            copiedSupport = true
-                        }
-                        legalLinks
                     }
                     .padding(20)
                 }
@@ -178,6 +207,33 @@ struct PremiumPurchaseView: View {
             Button(AppLocalized.resource("cd_close"), role: .cancel) {}
         }
     }
+
+    #if DEBUG
+    private var developmentPurchases: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("开发测试 · 模拟支付").font(.system(size: 15, weight: .bold))
+            Text("不会扣款，无需 Apple 账号。测试权益在重开应用后保留，仅此开发版可用。")
+                .font(.system(size: 12))
+            if let purchase = access.developmentPurchase {
+                Text("当前：模拟" + AppLocalized.resource(purchase.product == .annual ? "plan_annual" : "plan_lifetime"))
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            HStack(spacing: 12) {
+                Button("模拟购买年度版") { access.simulatePurchase(.annual); onCelebrate() }
+                Button("模拟购买永久版") { access.simulatePurchase(.lifetime); onCelebrate() }
+            }.font(.system(size: 13, weight: .semibold))
+            if isDevelopmentSimulation {
+                Button("结束模拟，恢复真实权益") { access.endSimulatedPurchase() }
+                    .font(.system(size: 12))
+            }
+        }
+        .foregroundStyle(ZTransferColors.accentBlue)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(ZTransferColors.accentBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .disabled(busy)
+    }
+    #endif
 
     private var header: some View {
         HStack(spacing: 12) {

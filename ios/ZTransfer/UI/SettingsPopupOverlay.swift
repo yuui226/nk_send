@@ -53,10 +53,13 @@ struct SettingsPopupOverlay: View {
     @State private var contentHeight: CGFloat?
     @State private var presentationID = 0
     @State private var showingPremium = false
+    @State private var backdropProgress = SettingsBackdropProgress()
+    @State private var panelVisible = false
     @StateObject private var fireworks = PremiumFireworks()
 
     var body: some View {
         GeometryReader { proxy in
+            let measuringPresentation = presentationID
             let localAnchor = proxy[anchor]
             let panelLeft: CGFloat = 12
             let panelWidth = max(1, proxy.size.width - panelLeft * 2)
@@ -70,13 +73,9 @@ struct SettingsPopupOverlay: View {
                 for: localAnchor, cornerRadius: 22
             ).offsetBy(dx: -panelLeft, dy: -panelTop)
             ZStack(alignment: .topLeading) {
-                // A transparent hit area still closes the popup on outside
-                // taps without altering the photo list or system bars.
-                Color.clear
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { close() }
+                // AnchorPopup dims the page with the same rendered progress
+                // as the complete panel and consumes drags outside it.
+                SettingsBackdrop(progress: backdropProgress, onDismiss: close)
 
                 GeniePopupPanel(
                     content: SettingsView(
@@ -94,7 +93,10 @@ struct SettingsPopupOverlay: View {
                         onEffectPreviewRequested: onEffectPreviewRequested,
                         onPhotoLoadingRangeChanged: onPhotoLoadingRangeChanged,
                         onContentHeightChange: { height in
-                            contentHeight = height
+                            // A retired page can deliver a late preference when
+                            // reopening. Only the current presentation may size it.
+                            guard measuringPresentation == presentationID else { return }
+                            if contentHeight != height { contentHeight = height }
                         },
                         onShowPremium: { showingPremium = true },
                         onPlayFireworks: { fireworks.launch() },
@@ -102,16 +104,21 @@ struct SettingsPopupOverlay: View {
                     )
                     .id(presentationID),
                     trigger: .settings,
-                    targetProgress: isPresented ? 1 : 0,
+                    // Lay out the complete scroll column while hidden. Its
+                    // measured height must exist before the first visible frame.
+                    targetProgress: isPresented && contentHeight != nil ? 1 : 0,
                     anchorX: sourceAnchor.midX / max(1, panelWidth),
                     anchorWidth: sourceAnchor.width / max(1, panelWidth),
-                    anchorGap: max(0, -sourceAnchor.maxY)
+                    anchorGap: max(0, -sourceAnchor.maxY),
+                    fillsProposedSize: true,
+                    onProgress: {
+                        backdropProgress.value = $0
+                        if panelVisible != ($0 > 0) { panelVisible = $0 > 0 }
+                    }
                 )
                 .frame(width: panelWidth)
-                // The panel grows to its content height, then clamps to the
-                // space below the Z row. SettingsView's ScrollView takes the
-                // remaining height on compact phones instead of covering the
-                // fixed top controls.
+                // Natural whole-page height, capped by the available viewport.
+                // The provisional full height is never used by the animation.
                 .frame(height: min(contentHeight ?? availableHeight, availableHeight), alignment: .top)
                 .padding(.horizontal, panelLeft)
                 .padding(.top, panelTop)
@@ -126,12 +133,13 @@ struct SettingsPopupOverlay: View {
                 PremiumFireworksOverlay(state: fireworks)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .allowsHitTesting(isPresented)
+            .allowsHitTesting(isPresented || panelVisible)
             .onChange(of: isPresented) { presented in
                 if presented {
                     effectsDraft = effectsStore.beginDraft()
                     filterChooser = PhotoFilterChooserState()
                     effectsHint = nil
+                    contentHeight = nil
                     presentationID &+= 1
                 } else {
                     showingPremium = false
@@ -154,5 +162,26 @@ struct SettingsPopupOverlay: View {
     private func close() {
         guard isPresented else { return }
         isPresented = false
+    }
+}
+
+/// Only the backdrop subscribes to display frames; the settings hierarchy is
+/// not rebuilt each tick while its recorded layer is expanding/collapsing.
+@MainActor
+private final class SettingsBackdropProgress: ObservableObject {
+    @Published var value: CGFloat = 0
+}
+
+private struct SettingsBackdrop: View {
+    @ObservedObject var progress: SettingsBackdropProgress
+    @Environment(\.colorScheme) private var scheme
+    let onDismiss: () -> Void
+    var body: some View {
+        Color.black.opacity((scheme == .dark ? 0.40 : 0.32) * progress.value)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onDismiss)
+            .gesture(DragGesture(minimumDistance: 1).onChanged { _ in })
     }
 }

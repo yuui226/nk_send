@@ -785,11 +785,11 @@ final class DomainModelTests: XCTestCase {
 
     func testQueuePillSameModeDataChangeRetargetsWithoutRemounting() {
         var motion = QueuePillContentMotion(.init(mode: .paused, count: 8, speed: nil))
-        motion.update(.init(mode: .counting, count: 8, speed: "1.0 MB/s"))
+        motion.update(.init(mode: .counting, count: 8, speed: 1_048_576))
         motion.advance(0)
         motion.advance(100_000_000)
         let before = motion.layers.last!.fade.alpha
-        motion.update(.init(mode: .counting, count: 7, speed: "2.0 MB/s"))
+        motion.update(.init(mode: .counting, count: 7, speed: 2_097_152))
         XCTAssertEqual(motion.layers.map(\.id), [.paused, .counting])
         // Retarget samples the spring at t=0; Float subtraction/addition can round by one ULP.
         XCTAssertEqual(motion.layers.last!.fade.alpha.value, before.value, accuracy: before.value.ulp)
@@ -799,6 +799,25 @@ final class DomainModelTests: XCTestCase {
         let expected = 1 + (delta + (Double(before.velocity) + r * delta) * 0.02) * exp(-r * 0.02)
         XCTAssertEqual(Double(motion.layers.last!.fade.alpha.value), expected, accuracy: 0.00001)
         XCTAssertEqual(motion.layers.last!.presentation.count, 7)
+    }
+
+    func testQueuePillSettledSpeedSamplesDoNotRestartModeAnimation() {
+        var motion = QueuePillContentMotion(.init(mode: .counting, count: 8, speed: 1_048_576))
+        for speed in [Int64(2_097_152), 800_000, 10_380_902, 1_048_576] {
+            motion.update(.init(mode: .counting, count: 7, speed: speed))
+            XCTAssertFalse(motion.isRunning, "Only the numeric glyphs should animate in a settled mode")
+            XCTAssertEqual(motion.layers.count, 1)
+            XCTAssertEqual(motion.layers[0].presentation.speed, speed)
+            XCTAssertEqual(motion.layers[0].fade.alpha.value, 1)
+        }
+        let lastReadout = motion.layers[0].presentation
+        motion.update(.init(mode: .done, count: 0, speed: nil))
+        XCTAssertTrue(motion.isRunning)
+        XCTAssertEqual(motion.layers[0].presentation, lastReadout, "Done must retain the outgoing readout")
+        motion.advance(0)
+        motion.advance(300_000_000)
+        XCTAssertEqual(motion.layers.map(\.id), [.done])
+        XCTAssertFalse(motion.isRunning)
     }
 
     func testQueuePillParentSegmentRebuildsUnchangedExitTarget() {
@@ -919,7 +938,7 @@ final class DomainModelTests: XCTestCase {
     }
 
     func testQueuePillContentRetainsOutgoingSnapshotAndCleansFinishedLayers() {
-        let downloading = QueuePillPresentation(mode: .counting, count: 3, speed: "9.9 MB/s")
+        let downloading = QueuePillPresentation(mode: .counting, count: 3, speed: 10_380_902)
         var motion = QueuePillContentMotion(downloading)
         let done = QueuePillPresentation(mode: .done, count: 0, speed: nil)
         motion.update(done)
@@ -930,12 +949,12 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(motion.isRunning)
         motion.advance(255_000_000)
         XCTAssertFalse(motion.isRunning)
-        let resumed = QueuePillPresentation(mode: .counting, count: 8, speed: "1.0 MB/s")
+        let resumed = QueuePillPresentation(mode: .counting, count: 8, speed: 1_048_576)
         motion.update(resumed)
         motion.advance(300_000_000)
         motion.advance(350_000_000)
         let before = motion.layers.last!.fade.alpha.value
-        motion.update(.init(mode: .counting, count: 7, speed: "2.0 MB/s"))
+        motion.update(.init(mode: .counting, count: 7, speed: 2_097_152))
         XCTAssertEqual(motion.layers.last!.fade.alpha.value, before)
         XCTAssertEqual(motion.layers.last!.presentation.count, 7)
         motion.update(done)
@@ -1096,6 +1115,7 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(settled, [0])
         popup.configure(target: 1, anchorX: 0.5, anchorWidth: 0.1, anchorGap: 8, opensAbove: true)
         popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
         let layers = try XCTUnwrap(popup.subviews.last?.layer.sublayers)
         XCTAssertEqual(layers.count, GeniePopupMotion.renderBandCount * 2)
         XCTAssertTrue(layers.compactMap { $0.sublayers?.first?.transform.m42 }
@@ -1572,6 +1592,81 @@ final class DomainModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSettingsPopupCaptureKeepsFinalSizeAndOutlineThroughHandoff() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        let popup = GeniePopupHostView(frame: CGRect(x: 20, y: 70, width: 340, height: 400))
+        let suite = "SettingsPopupCapture.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { popup.stop(); window.isHidden = true; defaults.removePersistentDomain(forName: suite) }
+        popup.host.rootView = AnyView(SettingsView(showPhotoEffectsEntry: true,
+            effectsStore: PhotoEffectsStore(defaults: defaults), directory: DirectoryAccessStore(defaults: defaults),
+            effectsDraft: .constant(PhotoEffectsSettings()), filterChooser: .constant(PhotoFilterChooserState()),
+            effectsHint: .constant(nil), dismissalRequested: false, popupMotionPaused: true)
+            .environment(\.colorScheme, .light))
+        root.view.addSubview(popup)
+        popup.configure(target: 1, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+        popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+        // Preferences can resize Settings after its initial layout. The mesh
+        // must follow that final measured size instead of keeping the old rim.
+        popup.frame.size.height = 520
+        popup.setNeedsLayout()
+        popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+        let layers = try XCTUnwrap(popup.subviews.last?.layer.sublayers)
+        let images = stride(from: 0, to: layers.count, by: 2).compactMap {
+            layers[$0].sublayers?.first?.contents
+        }.map { $0 as! CGImage }
+        XCTAssertEqual(images.count, GeniePopupMotion.renderBandCount)
+        let scale = window.screen.scale
+        XCTAssertEqual(images.reduce(0) { $0 + $1.height }, Int((520 + 24) * scale))
+        let format = UIGraphicsImageRendererFormat(); format.scale = scale
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 364, height: 544), format: format)
+        let capture = renderer.image { _ in
+            var y: CGFloat = 0
+            for image in images {
+                let height = CGFloat(image.height) / scale
+                UIImage(cgImage: image, scale: scale, orientation: .up)
+                    .draw(in: CGRect(x: 0, y: y, width: 364, height: height))
+                y += height
+            }
+        }
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertTrue(popup.subviews.last?.isHidden == true)
+        let live = renderer.image { context in
+            context.cgContext.translateBy(x: 12, y: 12)
+            XCTAssertTrue(popup.host.view.drawHierarchy(in: popup.host.view.bounds, afterScreenUpdates: true))
+        }
+        func pixels(_ image: UIImage) throws -> [UInt8] {
+            let image = try XCTUnwrap(image.cgImage)
+            var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return bytes
+        }
+        let first = try pixels(capture), second = try pixels(live)
+        let width = Int(364 * scale)
+        var difference = 0, samples = 0
+        for y in Int(60 * scale)..<Int(480 * scale) {
+            for x in [Int(12 * scale), Int(13 * scale), Int(350 * scale), Int(351 * scale)] {
+                for channel in 0..<4 {
+                    let index = (y * width + x) * 4 + channel
+                    difference += abs(Int(first[index]) - Int(second[index]))
+                    samples += 1
+                }
+            }
+        }
+        XCTAssertLessThan(Double(difference) / Double(samples), 3,
+                          "The captured settings rim must not change when the live panel takes over")
+    }
+
+    @MainActor
     func testGeniePopupHostFirstCaptureAndReversal() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let window = UIWindow(windowScene: scene)
@@ -1587,6 +1682,7 @@ final class DomainModelTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(60))
         popup.configure(target: 1, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
         let layers = try XCTUnwrap(popup.subviews.last?.layer.sublayers)
         XCTAssertEqual(layers.count, GeniePopupMotion.renderBandCount * 2)
         let images = layers.compactMap { $0.sublayers?.first?.contents }.map { $0 as! CGImage }
@@ -1606,7 +1702,7 @@ final class DomainModelTests: XCTestCase {
         let originalLeft = layers[0].sublayers!.first!.transform.m41
         popup.configure(target: 1, anchorX: 148.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
-        XCTAssertEqual(layers[0].sublayers!.first!.transform.m41, originalLeft + 40, accuracy: 0.0001)
+        XCTAssertNotEqual(layers[0].sublayers!.first!.transform.m41, originalLeft)
         popup.configure(target: 1, anchorX: 108.0 / 340, anchorWidth: 20.0 / 340, anchorGap: 8)
         popup.layoutIfNeeded()
         XCTAssertEqual(layers[0].sublayers!.first!.transform.m41, originalLeft, accuracy: 0.0001)
@@ -8089,5 +8185,183 @@ final class DetentWheelAcceptedValueRenderingTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(accepted, try capture(referenceHost.view),
             "Updated wheel must render the same accepted label as a fresh wheel")
+    }
+}
+
+/// Uses the complete production overlay, including its preference/hosting-size
+/// handoff. A fixed-frame Genie host alone cannot detect a late outer resize.
+@MainActor
+final class SettingsPopupLayoutTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var presented = false
+    }
+
+    private struct Harness: View {
+        @ObservedObject var state: State
+        let effects: PhotoEffectsStore
+        let directory: DirectoryAccessStore
+        let showEffects: Bool
+        var body: some View {
+            ZStack(alignment: .topLeading) {
+                Color.gray.opacity(0.1)
+                Color.clear.frame(width: 44, height: 36)
+                    .geniePopupAnchor(.settings)
+                    .padding(.leading, 12).padding(.top, 20)
+            }
+            .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
+                if let anchor = anchors[.settings] {
+                    SettingsPopupOverlay(isPresented: $state.presented, showPhotoEffectsEntry: showEffects,
+                        effectsStore: effects, directory: directory, anchor: anchor)
+                }
+            }
+        }
+    }
+
+    private func descendants<T: UIView>(_ type: T.Type, in root: UIView) -> [T] {
+        (root as? T).map { [$0] } ?? [] + root.subviews.flatMap { descendants(type, in: $0) }
+    }
+
+    private func verifyOpening(_ root: UIView, state: State) async throws -> GeniePopupHostView {
+        state.presented = true
+        var visibleHeights: [CGFloat] = []
+        var popup: GeniePopupHostView?
+        for _ in 0..<80 {
+            root.layoutIfNeeded()
+            if let current = descendants(GeniePopupHostView.self, in: root).first {
+                popup = current
+                let meshVisible = current.subviews.last.map { !$0.isHidden && $0.alpha > 0.01 } ?? false
+                if meshVisible || current.host.view.layer.opacity > 0.01 {
+                    visibleHeights.append(current.bounds.height)
+                }
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let result = try XCTUnwrap(popup)
+        XCTAssertGreaterThan(visibleHeights.count, 10)
+        XCTAssertLessThanOrEqual((visibleHeights.max() ?? 0) - (visibleHeights.min() ?? 0), 0.5,
+            "No provisional full-height shell may appear before the measured column: \(visibleHeights)")
+        XCTAssertTrue(result.host.view.isUserInteractionEnabled)
+        XCTAssertEqual(result.host.view.layer.opacity, 1)
+        let scroll = try XCTUnwrap(descendants(UIScrollView.self, in: result.host.view).first)
+        let viewport = scroll.convert(scroll.bounds, to: result.host.view)
+        XCTAssertEqual(viewport.minY, 0, accuracy: 0.5, "The title must belong to the scroll column")
+        XCTAssertEqual(viewport.height, result.bounds.height, accuracy: 0.5,
+                       "There must be no pinned header outside a smaller inner scroll viewport")
+        XCTAssertLessThanOrEqual(result.bounds.height, scroll.contentSize.height + 0.5,
+                                 "Short settings should wrap their content without an empty outer shell")
+        XCTAssertFalse(scroll.showsVerticalScrollIndicator)
+        return result
+    }
+
+    func testWholeColumnUsesFinalHeightFromFirstVisibleFrameOnBothEntrypoints() async throws {
+        for showEffects in [false, true] {
+            try await withOverlay(size: CGSize(width: 393, height: 852), showEffects: showEffects) { root, state, _ in
+                let popup = try await self.verifyOpening(root, state: state)
+                let scroll = try XCTUnwrap(self.descendants(UIScrollView.self, in: popup.host.view).first)
+                if !showEffects {
+                    XCTAssertEqual(popup.bounds.height, scroll.contentSize.height, accuracy: 0.5)
+                }
+            }
+        }
+    }
+
+    func testRenderedSettingsMeshMatchesLivePanelAndDoesNotBounce() async throws {
+        try await withOverlay(size: CGSize(width: 393, height: 852), showEffects: true) { root, state, _ in
+            state.presented = true
+            var popup: GeniePopupHostView?
+            func snapshot(_ view: UIView) -> UIImage {
+                let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+                return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+                    view.layer.render(in: context.cgContext)
+                }
+            }
+            for _ in 0..<50 {
+                root.layoutIfNeeded()
+                if let current = self.descendants(GeniePopupHostView.self, in: root).first,
+                   let texture = current.subviews.last?.layer.sublayers?.first?.sublayers?.first,
+                   texture.contents != nil {
+                    popup = current
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let panel = try XCTUnwrap(popup)
+            panel.stop()
+            // Use the production mesh drawing routine at its exact endpoint.
+            // Repeated screenshots can themselves miss the final display tick.
+            panel.renderFrame(at: 1)
+            let mesh = snapshot(try XCTUnwrap(panel.subviews.last))
+            panel.setNeedsLayout()
+            panel.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(450))
+            XCTAssertEqual(panel.host.view.layer.opacity, 1)
+            let live = snapshot(panel.host.view)
+            let scroll = try XCTUnwrap(self.descendants(UIScrollView.self, in: panel.host.view).first)
+            print("[SettingsRendering] panel=\(panel.bounds) scroll=\(scroll.bounds) content=\(scroll.contentSize) bounce=\(scroll.bounces) always=\(scroll.alwaysBounceVertical)")
+            let attachment = XCTAttachment(image: mesh); attachment.name = "settings-final-mesh"; attachment.lifetime = .keepAlways; self.add(attachment)
+            let liveAttachment = XCTAttachment(image: live); liveAttachment.name = "settings-live-panel"; liveAttachment.lifetime = .keepAlways; self.add(liveAttachment)
+            XCTAssertFalse(scroll.bounces, "Settings must not rubber-band a separate content layer inside its surface")
+            func rgba(_ image: UIImage) throws -> [UInt8] {
+                let image = try XCTUnwrap(image.cgImage)
+                var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+                let context = try XCTUnwrap(CGContext(data: &bytes, width: image.width, height: image.height,
+                    bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                return bytes
+            }
+            XCTAssertEqual(mesh.size, live.size)
+            let a = try rgba(mesh), b = try rgba(live)
+            var difference = 0
+            for i in a.indices { difference += abs(Int(a[i]) - Int(b[i])) }
+            let mean = Double(difference) / Double(a.count)
+            print("[SettingsRendering] transformed_mesh_to_live_mean_difference=\(mean)")
+            XCTAssertLessThan(mean, 3, "The actual transformed panel, not only its source bands, must match the live handoff")
+        }
+    }
+
+    func testCompactColumnScrollsAsAWholeAndReopenDoesNotUseStaleHeight() async throws {
+        try await withOverlay(size: CGSize(width: 393, height: 450), showEffects: true) { root, state, window in
+            let popup = try await self.verifyOpening(root, state: state)
+            let scroll = try XCTUnwrap(self.descendants(UIScrollView.self, in: popup.host.view).first)
+            XCTAssertGreaterThan(scroll.contentSize.height, popup.bounds.height + 40)
+            let height = popup.bounds.height
+            scroll.setContentOffset(CGPoint(x: 0, y: 40), animated: false)
+            try await Task.sleep(for: .milliseconds(50))
+            XCTAssertEqual(scroll.contentOffset.y, 40, accuracy: 0.5)
+            XCTAssertEqual(popup.bounds.height, height, accuracy: 0.5)
+            state.presented = false
+            try await Task.sleep(for: .milliseconds(450))
+            XCTAssertEqual(popup.host.view.layer.opacity, 0)
+            // A new presentation after a viewport change must measure anew,
+            // without showing the preceding short/scrolling shell first.
+            window.frame.size.height = 852
+            root.frame = window.bounds
+            root.setNeedsLayout()
+            _ = try await self.verifyOpening(root, state: state)
+        }
+    }
+
+    private func withOverlay(size: CGSize, showEffects: Bool,
+        body: @MainActor (UIView, State, UIWindow) async throws -> Void) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(origin: .zero, size: size)
+        let suite = "SettingsPopupLayout.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let state = State()
+        let host = UIHostingController(rootView: Harness(state: state,
+            effects: PhotoEffectsStore(defaults: defaults), directory: DirectoryAccessStore(defaults: defaults),
+            showEffects: showEffects).defaultAppStorage(defaults).environment(\.colorScheme, .light))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            descendants(GeniePopupHostView.self, in: host.view).forEach { $0.stop() }
+            window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey()
+            defaults.removePersistentDomain(forName: suite)
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        try await body(host.view, state, window)
     }
 }

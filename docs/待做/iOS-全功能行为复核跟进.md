@@ -4546,3 +4546,57 @@ Reproduction for Apple investigation: iPhone15 iOS27.0.1 + Nikon Z30 direct USB-
 
 2026-10-17 U001本次修复收尾：最终/tmp/ztransfer-usb-direct-final-tests.log为30/30、0失败、TEST SUCCEEDED、exit0（20项ConnectionStateTests、10项ImageCaptureErrorMappingTests，含4项最终握手测试：可选DeviceInfo容错、失败响应、坏响应容器、取消后拒绝成功）。与/tmp/ztransfer-usb-direct-final-build.log BUILD SUCCEEDED、默认版安装/启动真实PTP响应及用户重新插线“几秒内出现”共同确认：当前iPhone 15 / iOS27.0.1 / Z30的连接后约一分钟首屏等待问题已修复，U001此次连接与初始加载范围核销。系统全卡目录不再由应用打开；公开PTP渠道握手后由现有Repository按新到旧扫描并增量显示。不是只取消等待状态或用缓存假装成功。
 证据范围：0.679/0.830秒为默认版启动后真实句柄/首条信息返回；重插速度由用户确认，本次控制台未捕获第二组remove/add，不能将启动计时写成独立冷插拔计时。截图缩略图可能来自原缓存，未据此宣称全部缩略图/全尺寸传输或其他机型已重测。专项是模型/协议测试，不含UI自动化。历史F001–F182计数仍174项核销、8项延期视觉，不为U001改分母。git diff --check通过；未提交/推送，未使用子代理。
+
+
+2026-10-17 用户请求速度胶囊和进度动画优化：新增局部视觉授权，未扩成全面样式复刻。已对照Android FileListScreen QueuePill、TransferProgressMotion/LiquidProgressFill及对应测试。顶栏与卡片共享240ms数字滚动过渡（iOS16淡化，减弱动态效果直接更新），原始速度/单位格式不改；顶栏的progress对象由State持有跨分支生命周期，只在TransferProgressContent绘制叶节点观察帧更新，避免每帧重建整组文字/玻璃/布局。模式稳定时数字采样不再重启模式透明度时钟，进行中转场保留原中断规则。现有180临界阻尼弹簧、同任务只前进、新任务从0起步、完成/失败/取消进度语义保留。/tmp/ztransfer-queue-readout-smoothing-tests.log实际8/8、TEST SUCCEEDED、exit0（7既有边界回归+1稳定模式更新回归）；无UI自动化或实测FPS证据。真机优化版正在按既有同机验证安装授权构建，/tmp/ztransfer-queue-readout-smoothing-build.log；安装前截图为桌面，旧诊断进程已exit0。未提交/推送；不据此核销整项F080/F083或其他延期视觉任务。完整说明见docs/技术调研/iOS-队列速度胶囊复刻.md。
+
+
+2026-10-17 速度/进度优化交付：/tmp/ztransfer-queue-readout-smoothing-build.log BUILD SUCCEEDED、exit0；已覆盖安装到同一iPhone（应用目录663AF847-710C-42C3-B3AA-FA8207257ACB），devicectl普通启动成功，未附加诊断/实验启动参数。8/8专项通过证据保持。未自动发起相机下载、未运行UI自动化；真实传输主观手感及FPS未测，不宣称已完成视觉验收。git diff --check通过。当前修改尚未提交/推送。
+
+
+2026-10-17 U002 有线首批传输偶发低速：用户补充首次队列见1.x/3 MB/s，后一批恢复；免费25次已用完。采用仅开发启动启用的同机自动读图测试，不改FreeUsageStore/会员、不进入用户保存队列、不扣额度；在独有临时子目录写入后删除。全部使用同一iPhone 15/iOS27.0.1/Z30和同一张10,504,207字节JPEG。临时测速实现已从生产源码移除，备份/tmp/ztransfer-usb-read-benchmark-source.swift，仅保留显式环境启用的有界协议/写盘诊断。
+- 实测/tmp/ztransfer-usb-throughput-benchmark-console.txt：4MiB分块两轮30.63/29.16 MiB/s，GetObject两轮37.51/37.69 MiB/s，单范围partial 37.68 MiB/s，五次SHA256一致。说明分块有固定开销，但不是个位数的充分原因；最终保持4MiB内存上限，没有以无界整文件回调换速度。
+- /tmp/ztransfer-usb-throughput-repository-console.txt：正式Repository下载到临时目录/用户选择目录分别373.84/375.19ms（26.80/26.70 MiB/s），写盘约8ms、发布约4ms。旧适配器在整块回调后才sink.started，重置200ms节流，紧接着received不再发布；实测4MiB旧字节被除以第二块完成后的时间，读数仅约14.6MiB/s，低于真实端到端速度。
+- /tmp/ztransfer-usb-first-transfer-console.txt在修正读数后捕获真实扫描争用：同样10,504,207字节，第二次探测1042.26ms、9.61MiB/s；三块gate_acquired分别456.554/127.232/138.767ms，合计722.553ms，而框架等待118.441/121.760/74.190ms、总写盘1.942ms。说明后台ObjectInfo批次既拖住首块，又在4MiB分块间取得通道。用户所说1.x/3的原始那轮未捕获，不将9.61谎报为同一轮；这是同类首次扫描期间争用的直接证据。
+- 修复依据：Android NikonCamera.downloadToFile的USB照片用单GetObject，后台不会在同一照片数据中插入。iOS仍采用有界分块，但CameraIOGate新增仅USB照片启用的整文件后台准入屏障，覆盖正常、失败、取消释放；预览/交互保留优先，视频/AP/STA策略不变。USB目录在每条完整ObjectInfo后归还通道，合并游标、跨卡排序、发布批次、错误及续扫规则保留。PTP默认回调适配器在发起读取前sink.started，已收字节用真实时间正常发布，不修改端到端速度公式。没有重新打开系统目录或引入预热要求。
+- /tmp/ztransfer-usb-photo-priority-console.txt修复后在列表扫描运行时，不预读照片数据：用户选择目录322.32ms/31.08MiB/s，临时目录343.46ms/29.17MiB/s；首轮首块等当前命令7.388ms，后两块0.077/0.051ms，第二轮三块0.049/0.084/0.300ms。测量是同相机保持连接、应用重启后的首次下载/后续扫描争用，不是每轮物理冷拔插，也非所有机型保证。原诊断字段receive_wait/wire_bytes对USB只代表框架回调等待/有效载荷，最终改为framework_wait_ms/framework_payload_bytes以免误称USB线速。
+- 验证：/tmp/ztransfer-usb-progress-callback-tests.log 10/10 TEST SUCCEEDED；/tmp/ztransfer-usb-photo-priority-tests.log 61/61 TEST SUCCEEDED、exit0（22调度、31扫描、2下载、6完整性）。新增默认框架适配器延迟回调真实进度、分块间后台阻挡/前台预览放行/取消释放、真实Repository半批扫描让下载且续扫不丢句柄三项回归。临时测速入口移除后/tmp/ztransfer-usb-throughput-final-build.log BUILD SUCCEEDED、exit0。无UI测试、子代理、提交或推送；台账仍174/182、8项延期视觉，不改变分母。
+
+2026-10-17 U002最终交付：移除自动测速入口后的日常版已安装到同一iPhone，应用目录2C439E41-DDA7-4D31-B58F-470AD7D8A54D；最终构建exit0。git diff --check通过，保留上一轮未提交的速度/进度动画优化，无提交/推送。
+
+
+2026-10-17 U003–U005 用户本轮三项修正（开发中，验证结果待补）：
+- U003：用户明确 USB/STA 信号按钮不响应点击，优先于 Android FileListScreen.SignalPill 旧有“USB 展开/STA 离线重连”行为。列表顶栏、列表内队列顶栏、独立队列和监看共用 CameraSignalControl；禁用点击/按压反馈且保持材质颜色，移除 USB 展开状态和 STA 点击重连。AP 原有离线设置入口保留，无新增 RSSI 能力。
+- U004：Android AnchorPopup 先完成最终尺寸测量、下一帧开始动画，Surface 边框随整层变形。iOS 旧实现 layoutSubviews 立即 CALayer.render，首轮高度 preference 后到时不更新快照；Settings 额外居中描边还有半线宽溢出截图范围。改为下一显示帧在布局完成后整体取图，尺寸改变整张重捕获，描边改为内描边，原 320/350ms 曲线/反转语义保持。取图耗时不扣减可见动画时长。新增真实 SettingsView 截图边缘/高度交接测试，不是端到端 UI 自动化或真机肉眼验收。
+- U005：之前普通真机 devicectl 安装未激活 Xcode .storekit 会话，因此不能用假支付。用户明确授权仅开发版模拟购买；新增 DEBUG 年度/永久模拟权益和可见说明，不扣款、不用 Apple 账户、重启持久化，真实 StoreKit 刷新不会覆盖活动模拟，退出恢复最新真实权益。独立存储键 debug.simulatedPremiumPurchase.v1，不清 FreeUsageStore。Release 不编译模拟类型、入口、读取或启动参数；不是 Apple 沙盒支付验收，不改变真实购买/恢复/退款流程。日常测试可从设置“解锁高级版/测试权益”管理。
+- 首轮 /tmp/ztransfer-settings-payment-tests.log 编译失败：新增测试用 CGImage 条件转换，Swift 6 不允许；已修正，不记测试通过。当前 /tmp/ztransfer-settings-payment-fixed-tests.log 运行中。主代理独立处理，不运行 UI 自动化、未提交/推送；历史 F001–F182 仍 174/182，8 项延期视觉，不借本轮改分母。
+
+2026-10-17 U004/U005 中间验证：/tmp/ztransfer-settings-payment-fixed-tests.log 执行22项，支付/额度18项通过，弹窗4项中2项失败、3处断言失败。依据 [Apple 完整视图截图说明](https://developer.apple.com/library/archive/qa/qa1817/index.html) 试用 drawHierarchy(afterScreenUpdates:true)，但实测当前隐藏宿主返回透明图，即使接口报告完整；已撤回该截图方式，继续使用已有 snapshot-stable 面板图层，只修布局时机、尺寸重捕获和内描边。此失败保留，不据文档推断本工程可用。新加正式 TransferQueue 免费25次耗尽→模拟购买→失败任务重试成功→退出模拟恢复限制的业务测试，最终 /tmp/ztransfer-settings-payment-final-tests.log 运行中。此前 device-build 构建成功但包含已撤回试验，未安装；最终构建为 /tmp/ztransfer-settings-payment-final-build.log。
+
+2026-10-17 U003–U005 最终专项：/tmp/ztransfer-settings-payment-isolated-tests.log 为23/23、0失败、TEST SUCCEEDED、exit0（17权益模型、2正式队列、4弹窗宿主渲染/反转）。真实 SettingsView 动画快照在高度400→520后按最终尺寸重取，边缘像素与展开后的真实面板一致性通过；含首帧非透明、关开反转、交互禁用/恢复。免费25次耗尽的真实 TransferQueue 在模拟购买后重试成功、实际测试文件发布，结束模拟恢复限制，次数始终25。未运行端到端 UI 自动化或宣称真机肉眼闪烁验收完成。前两份 final-tests/verified-tests 日志分别因新增队列夹具共享 UserDefaults、XCTUnwrap 主 actor 捕获编译失败，均已修正并保留。
+真机构建 /tmp/ztransfer-settings-payment-final-build.log BUILD SUCCEEDED。完整手机偏好 plist 导出被自动审批拒绝（可能夹带其他敏感状态），未执行/未导出；改为 DEBUG 显式 --report-development-premium 参数只打印模拟商品 ID、isPro 和传输次数三个状态，不读取/输出其他偏好。追加这个定向日志入口后交付构建 /tmp/ztransfer-settings-payment-delivery-build.log 运行中；业务与渲染代码未变，23项证据对应最终行为，手机安装和重开验证待补。
+
+2026-10-17 U003–U005 交付完成：/tmp/ztransfer-settings-payment-delivery-build.log BUILD SUCCEEDED、exit0；安装到同一 iPhone 15，应用目录50A589D4-C845-4EB0-B72E-A9F11307D227。手机定向诊断工具输出：启用前 simulated_product=none/is_pro=false/transfers=25；用户授权的 --simulate-premium-lifetime 启用后 lifetime/true/25；结束进程后仅带 --report-development-premium（不带购买参数）重开，/tmp/ztransfer-premium-restored-console.txt 再次 lifetime/true/25，证明模拟权益已持久化，未清免费次数。最终结束诊断进程并无参数普通启动成功，无残留控制台会话。整份偏好导出未执行，定向状态读取获准完成，无剩余审批阻塞。
+23/23 专项证据保持；最终多出的仅是显式 DEBUG 定向日志，无业务/渲染变更，未为日志入口重复跑测试。USB/STA 点击逻辑完成源码收口；设置窗真实宿主边缘/高度交接回归通过，尚未由用户确认真机主观闪烁观感，无 UI 手势自动化或 FPS 测量。U003–U005 完成开发侧修复及当前手机交付，旧延期视觉分母不变。覆盖索引相关11份源码哈希一致，git diff --check通过。未提交/推送、未使用子代理；既有U002和速度动画未提交修改全部保留。
+
+
+2026-10-17 U004用户复测撤回收尾：用户报告“设置窗弹出后有高度跳变”，并指出“外皮框+内部可滚动内容”和安卓不同。之前23项仅验证固定尺寸宿主的快照/描边交接，没有覆盖SettingsPopupOverlay的真实高度偏好回传；不能据此前通过宣称整个设置窗结构/高度已验收。已重新完整对照Android SettingsScreen.SettingsOverlay 511–633：标题/卡片/页脚在同一个verticalScroll Column，Surface自然包裹、超高整体滚动，初次布局确定后再展开。iOS原先header在ScrollView外，且使用availableHeight临时高度直接展开、随后contentHeight回传改框，再由Genie.sizeThatFits二次推算高度。
+本轮修正：主设置与效果页各自整列ScrollView（含标题），单次测量整列高度；弹出先等待当次presentation内容测量、拒绝上一代迟到回调；明确外层指定最终frame，Genie不再二次计算已确定的设置视口。新加完整生产SettingsPopupOverlay宿主测试，采样首个可见帧到完全展开的高度、短内容包裹/小屏整列滚动/两处入口/换视口重开，而非只有固定frame测试。/tmp/ztransfer-settings-whole-column-tests.log运行中，未完成前不记通过。保留此前内描边/整图捕获和DEBUG模拟会员，未安装本轮代码，未提交/推送、无子代理及端到端UI自动化。
+
+
+2026-10-17 U004整列结构与高度修复交付：最终 /tmp/ztransfer-settings-whole-column-isolated-tests.log 为6/6、0失败、TEST SUCCEEDED、exit0（4项原宿主快照/反转回归，2项完整生产SettingsPopupOverlay布局生命周期测试）。覆盖两个入口393×852、393×450超高内容整列滚动、关闭后换高重开；在每轮首次可见帧到完全展开连续采样，高度极差≤0.5pt，滚动视口从面板顶部开始且覆盖整个面板，短内容按自身高度包裹。关闭/重开、快照到实时视图交接后的交互恢复亦通过。首轮 /tmp/ztransfer-settings-whole-column-tests.log 因测试辅助闭包缺少MainActor标注编译失败，已修复，保留失败日志，不记为通过。
+真机构建 /tmp/ztransfer-settings-whole-column-build.log BUILD SUCCEEDED、exit0；安装到同一iPhone 15，应用目录475079BE-11C5-48EB-9BBB-B2BB3DAE5920，并无参数普通启动成功。安装前截图 /tmp/ztransfer-settings-height-before-install.png 已确认无进行中传输。此前USB/STA信号禁点、DEBUG模拟永久权益和有线速度修复保持；未重置免费次数。本次是生产宿主布局/渲染专项，不是端到端UI手势自动化，也不宣称用户真机观感已确认。四份本轮源码覆盖索引更新，未使用子代理、未提交/推送；F001–F182仍174/182、8项延期视觉，不改变历史分母。
+
+
+2026-10-17 U004再次用户复测失败：用户确认外框内内容回弹分层与展开结束跳高/闪边同时存在，提供安卓1.97-debug截图，追加“顶部标题栏更白，安卓一体，希望和安卓看起来一样”。本次局部视觉对齐已明确获授权，不扩大全应用视觉范围。上一轮6项布局检查不代表实际变形画面交接正确，撤回整体问题已解决的含义。新生产宿主测试 /tmp/ztransfer-settings-render-before.log 为1项2断言失败、TEST FAILED：视口/contentSize均369×682.333但bounces/alwaysBounceVertical均true；实际CALayer网格画面与实时视图平均每通道差14.0569（之前测试只重拼源截图，未绘制变形三角形）。xcresult两张截图已导出并查看，标题/底边在源截图留白被压缩后变形。真机截图 /tmp/ztransfer-settings-still-broken.png 确认设置打开且背景未压暗；devicectl录屏明确返回此设备不支持，未伪称已录到动画。
+依据：Android AnchorPopup Surface圆角20、唯一glassPanelBorder边框和整层glassSheen；SettingsOverlay整列16dp内边距、标题后14dp、目录后16dp、其余8dp、页脚前14dp，SettingsCard仅onBackground 4%内嵌底。Color.kt浅色scrim .32/深色 .40。iOS本次移除额外叠加描边/按钮材质卡片，整层背景与标题共用；恢复按实际进度绘制的遮罩，只让遮罩订阅帧；当前设置列关闭独立橡皮筋回弹及iOS26自动滚动边缘材质（Apple https://developer.apple.com/documentation/swiftui/view/scrolledgeeffecthidden(_:for:)）。网格按实际裁片像素边界构造，并保留上下12pt越界纹理空间，正文几何曲线/时长不变。正在运行 /tmp/ztransfer-settings-render-fixed.log，未通过前不记完成；未提交/推送。
+
+U004实际画面验证补充（仍在收敛）：settings-render-fixed为7项中6通过，实际画面比较1项失败，连续同步截图在主线程占用时间造成最后采样仍停在展开途中；导出图显示宽度尚未到终点，不把此误差全部归于生产缺陷。将绘制与显示时钟拆开，测试调用同一个生产renderFrame(at:1)而非推算最后一帧。settings-render-endpoint仍1项失败（平均差4.3254），端点截图已显示上下位置一致，细看分片边界有采样/透明度误差。发现纹理为屏幕scale而CAShapeLayer遮罩仍默认scale1，已统一遮罩scale；测试截图也从scale1改为屏幕原生scale，阈值保持3不放宽。settings-render-retina验证中，尚未安装中间构建。
+
+U004最终专项结果：/tmp/ztransfer-settings-render-retina.log 1/1 TEST SUCCEEDED，精确p=1的原生像素网格→实时视图平均差0.30265/255；导出两张1107×2107图片检查，标题/页脚位置一致，独立图像统计标题区域平均差1.268、页脚0.210。最终集中回归 /tmp/ztransfer-settings-render-final.log 为7/7、0失败、TEST SUCCEEDED、exit0（4宿主开合/反转/描边，3完整设置布局/小屏/重开/实际渲染）；当轮终点全图差0.24969/255，bounces=false且alwaysBounceVertical=false，视口/内容均369×702.333。保留3次失败：before复现、fixed连续截帧漏终点、endpoint低分辨率遮罩/采样；不改写为首次全绿，也不放宽像素门限。最终真机构建 /tmp/ztransfer-settings-render-final-device-build.log BUILD SUCCEEDED、exit0，安装前真机截图仍在旧设置窗、队列闲置。正在安装最终版，用户实际动画观感仍待确认；没有录屏成功、没有全应用视觉验收或UI手势自动化。
+
+U004本轮交付：最终版已安装到同一iPhone 15，应用目录1B7FB203-1716-488D-8AEF-6975CD473D86，devicectl无参数启动成功。保留模拟永久会员与原有设置，没有再模拟购买、清次数或自动下载。7/7专项通过和git diff --check通过；四份源码索引哈希已同步。已请求用户打开/拖动/关开设置窗确认实际观感，尚未收到确认，不标真机视觉验收完成。未提交/推送、无子代理；174/182功能台账与8项延期视觉分母保持。
+
+U004交付后截图限制：/tmp/ztransfer-settings-render-device-after.png 与 /tmp/ztransfer-settings-render-device-review.png 均为新版本正常照片列表，尚未采到用户打开后的新设置窗；它们仅证明普通启动/相机列表正常，不能用作新设置窗真机外观验收。当前无运行中构建或诊断会话，等待用户实际反馈。
+
+2026-10-17 U004用户真机验收：在安装目录1B7FB203-1716-488D-8AEF-6975CD473D86的最终版上，用户回复打开一次设置窗、拖动空白处、关开后是否仍有标题独立白块/跳高/闪边的询问：“这次正常了”。据此本轮设置窗问题收尾，证据为用户明确真机反馈与此前7/7专项，非新截图或录屏；不扩展为其他页面、全部样式/动画均验收。本次仅更新记录，未新增构建、测试、安装、提交或推送，既有未提交修改保留。

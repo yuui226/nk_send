@@ -15,6 +15,7 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     var opensAbove = false
     var usesFunnel = true
     var fitsContentWidth = false
+    var fillsProposedSize = false
     var onSettled: ((CGFloat) -> Void)? = nil
     var onProgress: ((CGFloat) -> Void)? = nil
 
@@ -37,6 +38,10 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
                       context: Context) -> CGSize? {
         let width = max(1, proposal.width ?? 340)
         let limit = max(1, proposal.height ?? UIScreen.main.bounds.height)
+        // Settings has already measured its entire scroll column. Asking a
+        // second hosting layout for an intrinsic size can shrink the viewport
+        // again after the animation has started.
+        if fillsProposedSize { return CGSize(width: width, height: limit) }
         let size = uiView.host.sizeThatFits(in: CGSize(width: width, height: limit))
         let fittedWidth = fitsContentWidth ? min(width, max(1, size.width)) : width
         return CGSize(width: fittedWidth, height: min(limit, max(1, size.height)))
@@ -86,6 +91,7 @@ final class GeniePopupHostView: UIView {
     private var capturedSize = CGSize.zero
     private var crossSections: [GeniePopupMotion.CrossSection] = []
     private var hasCapture = false
+    private var capturing = false
     private var displayLink: CADisplayLink?
     private var progress: CGFloat = 0
     private var target: CGFloat = 0
@@ -164,6 +170,10 @@ final class GeniePopupHostView: UIView {
             startedAt = CACurrentMediaTime()
             duration = GeniePopupMotion.duration(expanding: next > progress) * Double(abs(next - progress))
         }
+        if progress != target {
+            host.view.isUserInteractionEnabled = false
+            host.view.accessibilityElementsHidden = true
+        }
         setNeedsLayout()
     }
 
@@ -171,13 +181,10 @@ final class GeniePopupHostView: UIView {
         super.layoutSubviews()
         host.view.frame = bounds
         canvas.frame = bounds
-        guard window != nil, bounds.width > 0, bounds.height > 0 else { return }
+        guard !capturing, window != nil, bounds.width > 0, bounds.height > 0 else { return }
         if progress != target {
-            if !hasCapture {
-                captureContent()
-                // Layout/capture time is not part of the visible animation.
-                startedAt = CACurrentMediaTime()
-            }
+            // Capture on the next display frame, after the layout transaction,
+            // rather than freezing the first, potentially incomplete hierarchy.
             if displayLink == nil {
                 let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
                 link.add(to: .main, forMode: .common)
@@ -189,7 +196,12 @@ final class GeniePopupHostView: UIView {
         }
     }
 
-    private func captureContent() {
+    private func captureContent() -> Bool {
+        capturing = true
+        defer { capturing = false }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         host.view.layer.opacity = 1
         host.view.alpha = 1
         host.view.setNeedsLayout()
@@ -199,18 +211,23 @@ final class GeniePopupHostView: UIView {
         format.scale = window?.screen.scale ?? UIScreen.main.scale
         let image = UIGraphicsImageRenderer(size: rect.size, format: format).image { context in
             context.cgContext.translateBy(x: capturePadding, y: capturePadding)
+            // Popup controls use snapshot-stable panel materials. Render the
+            // laid-out layer, including its inset rim, while the live view is
+            // hidden; drawHierarchy can return transparent data in this state.
             host.view.layer.render(in: context.cgContext)
         }
-        guard let cgImage = image.cgImage else { return }
+        host.view.layer.opacity = 0
+        host.view.isUserInteractionEnabled = false
+        host.view.accessibilityElementsHidden = true
+        guard let cgImage = image.cgImage else { return false }
         if capturedSize != bounds.size {
             capturedSize = bounds.size
             crossSections = (0...bands.count).map { index in
-                let fraction = (CGFloat(index) / CGFloat(bands.count) * rect.height - capturePadding) / bounds.height
+                // Use the same physical-pixel boundary as the cropped texture.
+                let fraction = (CGFloat(index * cgImage.height / bands.count) / format.scale - capturePadding) / bounds.height
                 return GeniePopupMotion.CrossSection(fraction: fraction)
             }
         }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
         for (index, band) in bands.enumerated() {
             // Each triangle owns only its small source band. The container
             // mask is in destination coordinates, matching Android's two
@@ -226,17 +243,23 @@ final class GeniePopupHostView: UIView {
                 triangle.texture.bounds = CGRect(x: 0, y: 0, width: rect.width,
                                                  height: CGFloat(bottom - top) / format.scale)
                 triangle.texture.contentsScale = format.scale
+                triangle.mask.contentsScale = format.scale
             }
         }
-        CATransaction.commit()
         hasCapture = true
         lastDrawnProgress = nil
-        host.view.layer.opacity = 0
-        host.view.isUserInteractionEnabled = false
-        host.view.accessibilityElementsHidden = true
+        return true
     }
 
     @objc private func tick(_ link: CADisplayLink) {
+        guard window != nil, bounds.width > 0, bounds.height > 0 else { return }
+        if !hasCapture || capturedSize != bounds.size {
+            let firstCapture = !hasCapture
+            guard captureContent() else { return }
+            // Height changes during a transition refresh the full surface and
+            // content together without restarting/reversing the animation clock.
+            if firstCapture { startedAt = CACurrentMediaTime() }
+        }
         let elapsed = link.timestamp - startedAt
         let fraction = min(1, max(0, elapsed / max(duration, 0.001)))
         if fraction >= 1 {
@@ -255,6 +278,13 @@ final class GeniePopupHostView: UIView {
         guard hasCapture, lastDrawnProgress != progress else { return }
         lastDrawnProgress = progress
         reportProgress()
+        renderFrame(at: progress)
+    }
+
+    /// Drawing is independent of the display clock so endpoint rendering can
+    /// be checked exactly, without a screenshot racing the final display tick.
+    func renderFrame(at progress: CGFloat) {
+        guard hasCapture else { return }
         let size = capturedSize
         let paddingFraction = capturePadding / size.width
         let source = CGRect(
@@ -275,7 +305,15 @@ final class GeniePopupHostView: UIView {
                 ? GeniePopupMotion.rowAbove(progress: renderProgress, fraction: section.fraction,
                                              anchor: source, panel: panel)
                 : geometry.row(at: section)
-            return original.padded(by: paddingFraction)
+            // The Android geometry clamps body fractions to 0...1. Our texture
+            // additionally includes overflow outside that body. Preserve that
+            // padding instead of squeezing it into the first/last content band;
+            // otherwise the title and footer jump at the live-view handoff.
+            let overflow = section.fraction - min(1, max(0, section.fraction))
+            let length = renderProgress * (2 - renderProgress)
+            return GeniePopupMotion.Row(left: original.left, right: original.right,
+                y: original.y + overflow * size.height * length, tilt: original.tilt)
+                .padded(by: paddingFraction)
         }
         var top = row(0)
         CATransaction.begin()

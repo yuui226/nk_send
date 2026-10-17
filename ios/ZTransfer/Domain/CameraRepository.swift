@@ -1478,8 +1478,10 @@ actor CameraRepository {
 
     /// Android streamMergedFileInfo/streamStaDirectMergedFileInfo: retain one
     /// head per card and only request the card whose head has been consumed.
-    /// Ordinary scans hold the gate for the whole batch; the approved STA
-    /// foreground-pause behavior retains this local cursor between commands.
+    /// AP scans hold the gate for the whole batch. STA and ICC USB yield at
+    /// complete command boundaries while retaining the same merge cursor and
+    /// publication batch. An ICC batch must not hold up a newly queued photo
+    /// through dozens of separate framework callbacks.
     private func readMergedCatalogBatch(
         groups: [(storage: UInt32, handles: [UInt32])], state: CatalogMergeState,
         limit: Int, budget: Int, total: Int, pauseBetweenCommands: Bool
@@ -1808,7 +1810,7 @@ actor CameraRepository {
     func downloadResult(handle: UInt32, size: UInt64, fileName: String,
                         captureDate: String? = nil, to directory: URL, captureHeader: Bool = false,
                         progress: (@Sendable (TransferDownloadProgress) -> Void)? = nil) async throws -> CameraDownloadResult {
-        try await ioGate.withDownloadActivity {
+        try await ioGate.withDownloadActivity(prioritizePhoto: isUSBConnection && !supportsVideoResume(fileName: fileName)) {
             try await self.downloadResultImpl(handle: handle, size: size, fileName: fileName,
                                               captureDate: captureDate, to: directory,
                                               captureHeader: captureHeader, progress: progress)
@@ -1894,7 +1896,8 @@ actor CameraRepository {
         #if DEBUG
         // Android's normal download loop has no per-recv diagnostic counters.
         // Enable explicitly from a development launch, never merely by Debug.
-        let diagnostics = staAlbum != nil && PTPTransferDiagnostics.isEnabledForDevelopmentLaunch
+        let diagnostics = ((staAlbum != nil && PTPTransferDiagnostics.isEnabledForDevelopmentLaunch) ||
+                           (isUSBConnection && PTPTransferDiagnostics.isEnabledForUSBLaunch))
             ? PTPTransferDiagnostics() : nil
         #else
         let diagnostics: PTPTransferDiagnostics? = nil
@@ -2304,7 +2307,7 @@ actor CameraRepository {
 
             let merged: CatalogMergeBatch
             do {
-                if staAlbum != nil {
+                if staAlbum != nil || isUSBConnection {
                     merged = try await readMergedCatalogBatch(groups: groups, state: mergeState,
                         limit: batchLimit, budget: requestBudget, total: totalCatalogHandles, pauseBetweenCommands: true)
                 } else {
