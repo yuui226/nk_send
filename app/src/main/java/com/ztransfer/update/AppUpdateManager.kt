@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.ztransfer.BuildConfig
+import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +72,16 @@ object AppUpdateManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val checkMutex = Mutex()
     private var downloadJob: Job? = null
+    private var fixedDownloadJob: Job? = null
+
+    /** 相机热点没有外网。由界面同步，避免检查失败后把下载打到相机上。 */
+    @Volatile
+    var cameraApConnected: Boolean = false
+        private set
+
+    fun setCameraApConnected(connected: Boolean) {
+        cameraApConnected = connected
+    }
     private val _state = MutableStateFlow<UiState>(UiState.Idle)
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -82,6 +93,9 @@ object AppUpdateManager {
         scope.launch {
             discardLegacySystemDownload()
             restoreDownloadOrCachedPrompt()
+            val ready = _state.value as? UiState.Ready
+            // 固定地址的包已经下好并准备安装。接着再检查会在服务器仍不可达时把这个文件删掉重下。
+            if (ready != null && ready.info.sha256.isEmpty() && ready.info.fallbackUrl.isNotEmpty()) return@launch
             val cached = decode(prefs.getString(KEY_CACHED_INFO, null))
             val cachedHardUpdate = cached?.isRequired(BuildConfig.VERSION_CODE) == true
             // 强制更新每次启动复查一次，及时取得最新版本和软硬策略。
@@ -91,31 +105,42 @@ object AppUpdateManager {
         }
     }
 
-    /** 手动检查会无视“忽略此版本”和每日提示间隔；自动检查不会打扰已忽略版本。 */
-    suspend fun check(force: Boolean): LicenseManager.UpdateResult = checkMutex.withLock {
-        if (force) _state.value = UiState.Checking
-        val result = LicenseManager.checkAppUpdate(BuildConfig.VERSION_CODE)
-        when (result) {
-            is LicenseManager.UpdateResult.Available -> {
-                prefs.edit()
-                    .putLong(KEY_LAST_CHECK, System.currentTimeMillis())
-                    .putString(KEY_CACHED_INFO, encode(result.info))
-                    .apply()
-                maybePresent(result.info, force)
+    /**
+     * 手动检查会无视“忽略此版本”和每日提示间隔；自动检查不会打扰已忽略版本。
+     * 服务器或域名不可达时，从固定地址下载安装包。能读到版本且不比当前新，就不当作更新。
+     */
+    suspend fun check(force: Boolean, allowFixedFallback: Boolean = true): LicenseManager.UpdateResult =
+        checkMutex.withLock {
+            if (force) _state.value = UiState.Checking
+            when (val result = LicenseManager.checkAppUpdate(BuildConfig.VERSION_CODE)) {
+                is LicenseManager.UpdateResult.Available -> {
+                    prefs.edit()
+                        .putLong(KEY_LAST_CHECK, System.currentTimeMillis())
+                        .putString(KEY_CACHED_INFO, encode(result.info))
+                        .apply()
+                    maybePresent(result.info, force)
+                    result
+                }
+                LicenseManager.UpdateResult.UpToDate -> {
+                    deleteVerifiedApk()
+                    prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis())
+                        .remove(KEY_CACHED_INFO).apply()
+                    _state.value = UiState.Idle
+                    result
+                }
+                LicenseManager.UpdateResult.Unreachable -> {
+                    if (allowFixedFallback) downloadFixedRelease(force)
+                    else {
+                        if (force) _state.value = UiState.Idle
+                        result
+                    }
+                }
             }
-            LicenseManager.UpdateResult.UpToDate -> {
-                deleteVerifiedApk()
-                prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis())
-                    .remove(KEY_CACHED_INFO).apply()
-                _state.value = UiState.Idle
-            }
-            LicenseManager.UpdateResult.Unreachable -> if (force) _state.value = UiState.Idle
         }
-        result
-    }
 
     fun postpone(info: LicenseManager.UpdateInfo) {
         if (info.isRequired(BuildConfig.VERSION_CODE)) return
+        fixedDownloadJob?.cancel()
         prefs.edit().putLong(KEY_LAST_PROMPT, System.currentTimeMillis()).apply()
         _state.value = UiState.Idle
     }
@@ -126,6 +151,109 @@ object AppUpdateManager {
         _state.value = UiState.Idle
     }
 
+    /**
+     * 授权服务器不可达时直接取固定地址，展示进度并提供复制链接/浏览器下载入口。
+     * 只有安装包确实更新或系统读不出版本时才进入安装。两条路都失败时，手动检查
+     * 保留失败弹窗，自动检查恢复空闲。
+     */
+    private suspend fun downloadFixedRelease(force: Boolean): LicenseManager.UpdateResult =
+        withContext(Dispatchers.IO) {
+            fixedDownloadJob = coroutineContext[Job]
+            val url = context.getString(R.string.update_fixed_download_url)
+            val placeholder = fixedReleaseInfo(versionCode = 0, versionName = "", required = false, url = url)
+            if (cameraApConnected) {
+                if (force) _state.value = UiState.Idle
+                return@withContext LicenseManager.UpdateResult.Unreachable
+            }
+            val root = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            val updateDir = root?.let { File(it, "updates").apply { mkdirs() } }
+            val apk = updateDir?.let { File(it, "ZTransfer-fixed.apk") }
+            val partial = apk?.let { File(it.parentFile, "${it.name}.part") }
+            try {
+                if (root == null || apk == null || partial == null) {
+                    return@withContext failFixedRelease(force, placeholder, Failure.DOWNLOAD)
+                }
+                _state.value = UiState.Downloading(placeholder, null)
+                partial.delete()
+                apk.delete()
+                prefs.edit().remove(KEY_VERIFIED_PATH)
+                    .putString(KEY_DOWNLOAD_PATH, partial.absolutePath).apply()
+                downloadDirect(url, partial, 0L) { progress ->
+                    _state.value = UiState.Downloading(placeholder, progress)
+                }
+                if (!partial.renameTo(apk)) throw IllegalStateException("无法保存下载文件")
+                prefs.edit().putString(KEY_DOWNLOAD_PATH, apk.absolutePath).apply()
+                currentCoroutineContext().ensureActive()
+                _state.value = UiState.Verifying(placeholder)
+                if (!hasZipMagic(apk)) {
+                    return@withContext failFixedRelease(force, placeholder, Failure.INVALID_APK, apk)
+                }
+                val archive = archiveInfo(apk)
+                currentCoroutineContext().ensureActive()
+                val actualVersion = archive?.let(::versionCode)
+                if (archive != null && archive.packageName != context.packageName) {
+                    return@withContext failFixedRelease(force, placeholder, Failure.INVALID_APK, apk)
+                }
+                if (!isFixedReleaseInstallable(actualVersion, BuildConfig.VERSION_CODE.toLong())) {
+                    apk.delete()
+                    clearDownloadRecord(deleteFile = false)
+                    _state.value = UiState.Idle
+                    return@withContext LicenseManager.UpdateResult.UpToDate
+                }
+                val info = fixedReleaseInfo(
+                    versionCode = actualVersion?.toInt() ?: BuildConfig.VERSION_CODE + 1,
+                    versionName = archive?.versionName.orEmpty(),
+                    required = actualVersion != null,
+                    url = url
+                )
+                prefs.edit().remove(KEY_DOWNLOAD_ID).remove(KEY_DOWNLOAD_PATH)
+                    .putString(KEY_VERIFIED_PATH, apk.absolutePath)
+                    .putString(KEY_CACHED_INFO, encode(info)).apply()
+                _state.value = UiState.Ready(info, apk)
+                LicenseManager.UpdateResult.Available(info)
+            } catch (_: CancellationException) {
+                partial?.delete()
+                if (_state.value is UiState.Downloading || _state.value is UiState.Verifying) {
+                    _state.value = UiState.Idle
+                }
+                LicenseManager.UpdateResult.Unreachable
+            } catch (e: Exception) {
+                Log.w(TAG, "固定地址下载失败", e)
+                partial?.delete()
+                failFixedRelease(force, placeholder, Failure.DOWNLOAD, apk)
+            } finally {
+                if (fixedDownloadJob == coroutineContext[Job]) fixedDownloadJob = null
+            }
+        }
+
+    private fun failFixedRelease(
+        force: Boolean,
+        info: LicenseManager.UpdateInfo,
+        failure: Failure,
+        apk: File? = null
+    ): LicenseManager.UpdateResult {
+        apk?.delete()
+        clearDownloadRecord(deleteFile = false)
+        _state.value = if (force) UiState.Failed(info, failure) else UiState.Idle
+        return LicenseManager.UpdateResult.Unreachable
+    }
+
+    private fun fixedReleaseInfo(
+        versionCode: Int,
+        versionName: String,
+        required: Boolean,
+        url: String
+    ) = LicenseManager.UpdateInfo(
+        versionCode = versionCode,
+        versionName = versionName,
+        minSupportedVersionCode = if (required && versionCode > 0) versionCode else 1,
+        notes = "",
+        sha256 = "",
+        sizeBytes = 0L,
+        fallbackUrl = url,
+        fallbackPassword = ""
+    )
+
     fun download(info: LicenseManager.UpdateInfo) {
         if (_state.value is UiState.Resolving || _state.value is UiState.Downloading) return
         _state.value = UiState.Resolving(info)
@@ -133,7 +261,7 @@ object AppUpdateManager {
             val direct = LicenseManager.resolveAppDownload(info.versionCode)
             if (direct == null) {
                 // 发布版本可能已变化；刷新一次元数据。版本没变才按真正的地址领取失败处理。
-                when (val refreshed = check(force = false)) {
+                when (val refreshed = check(force = false, allowFixedFallback = false)) {
                     LicenseManager.UpdateResult.UpToDate -> return@launch
                     is LicenseManager.UpdateResult.Available -> {
                         if (refreshed.info.versionCode != info.versionCode) {
@@ -188,6 +316,7 @@ object AppUpdateManager {
         if (info.isRequired(BuildConfig.VERSION_CODE)) return
         downloadJob?.cancel()
         downloadJob = null
+        fixedDownloadJob?.cancel()
         clearDownloadRecord(deleteFile = true)
         context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             ?.resolve("updates/ZTransfer-${info.versionCode}.apk.part")
@@ -445,3 +574,22 @@ object AppUpdateManager {
  */
 internal fun isDownloadedVersionAcceptable(actualVersion: Long?, expectedVersion: Int): Boolean =
     actualVersion == null || actualVersion == expectedVersion.toLong()
+
+/** 固定地址没有服务端声明的版本号。读不到归档版本时交给系统安装器，读到了就必须更高。 */
+internal fun isFixedReleaseInstallable(actualVersion: Long?, installedVersion: Long): Boolean =
+    actualVersion == null || actualVersion > installedVersion
+
+/** 固定地址在读不到版本时会交给安装器，因此必须先确认这是一个 ZIP/APK，而不是错误页。 */
+internal fun hasZipMagic(header: ByteArray): Boolean =
+    header.size >= 4 &&
+        header[0] == 0x50.toByte() &&
+        header[1] == 0x4B.toByte() &&
+        header[2] == 0x03.toByte() &&
+        header[3] == 0x04.toByte()
+
+internal fun hasZipMagic(file: File): Boolean = runCatching {
+    file.inputStream().use { input ->
+        val header = ByteArray(4)
+        input.read(header) == 4 && hasZipMagic(header)
+    }
+}.getOrDefault(false)

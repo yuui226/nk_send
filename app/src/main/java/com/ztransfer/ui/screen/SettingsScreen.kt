@@ -33,19 +33,16 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -57,7 +54,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -69,8 +65,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -86,14 +82,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
@@ -188,7 +188,6 @@ import com.ztransfer.util.formatDegreesMinutesCoordinates
 import com.ztransfer.util.formatDegreesMinutesLatitude
 import com.ztransfer.util.formatDegreesMinutesLongitude
 import com.ztransfer.viewmodel.TransferViewModel
-import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
 import com.ztransfer.gps.GpsDiagnostics
 import com.ztransfer.gps.GpsPlaceLookupState
@@ -201,19 +200,15 @@ import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
 import com.ztransfer.viewmodel.photoFrameWatermark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -257,6 +252,9 @@ fun SettingsOverlay(
     cameraConnectionType: CameraConnectionType? = null,
     cameraConnected: Boolean = false,
     cameraIsStaMode: Boolean = false,
+    // FHD 入口直接编辑全局效果；关闭后由承载的大图接续，不经过设置首页。
+    effectsOnly: Boolean = false,
+    effectPreviewInitialRotationQuarterTurns: Int = 0,
 ) {
     val state by viewModel.state.collectAsState()
     // 弹窗一出现就开始准备效果演示图；ViewModel 会按照片身份去重，重复打开不重复读取。
@@ -335,7 +333,9 @@ fun SettingsOverlay(
     }
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
-    var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
+    var settingsPage by remember {
+        mutableStateOf(if (effectsOnly) SettingsPage.EFFECTS else SettingsPage.MAIN)
+    }
     var showMainSettingsInfo by remember { mutableStateOf(false) }
     var mainSettingsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
@@ -348,10 +348,19 @@ fun SettingsOverlay(
     }
     var watermarkImageImporting by remember { mutableStateOf(false) }
     var frameDraftDecorationEnabled by remember { mutableStateOf(state.photoFrameEnabled) }
-    var frameDraftBorderEnabled by remember { mutableStateOf(state.photoFrameBorderEnabled) }
+    var frameDraftBorderEnabled by remember {
+        mutableStateOf(state.photoFrameEnabled && state.photoFrameBorderEnabled)
+    }
     var frameDraftPreset by remember { mutableStateOf(state.photoFramePreset) }
-    var watermarkDraft by remember { mutableStateOf(state.photoFrameWatermark) }
-    var filterDraftId by remember { mutableStateOf(state.selectedPhotoFilterId) }
+    var watermarkDraft by remember {
+        mutableStateOf(state.photoFrameWatermark.copy(
+            enabled = state.photoFrameEnabled && state.photoFrameWatermark.enabled,
+            text = state.photoFrameWatermark.displayText,
+        ))
+    }
+    var filterDraftId by remember {
+        mutableStateOf(state.selectedPhotoFilterId ?: state.photoFilters.firstOrNull()?.id)
+    }
     var filterDraftEnabled by remember { mutableStateOf(state.photoFilterEnabled) }
     var filterDraftIntensity by remember {
         mutableIntStateOf(state.photoFilterIntensityPercent)
@@ -375,9 +384,9 @@ fun SettingsOverlay(
     // 兜底图延迟生成：给内存缩略图和按需 FHD 足够时间，绝大多数已连接场景不会看见假图。
     var generatedEffectPreviewFallback by remember { mutableStateOf<Bitmap?>(null) }
     var effectPreviewFallbackVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(settingsPage, effectPreviewSource) {
+    LaunchedEffect(settingsPage, effectPreviewSource, effectsOnly) {
         effectPreviewFallbackVisible = false
-        if (settingsPage != SettingsPage.EFFECTS || effectPreviewSource != null) return@LaunchedEffect
+        if (effectsOnly || settingsPage != SettingsPage.EFFECTS || effectPreviewSource != null) return@LaunchedEffect
         delay(PHOTO_EFFECTS_FALLBACK_GRACE_MS)
         if (generatedEffectPreviewFallback == null) {
             generatedEffectPreviewFallback = withContext(Dispatchers.Default) {
@@ -389,11 +398,14 @@ fun SettingsOverlay(
     val effectPreviewBase = effectPreviewSource
         ?: generatedEffectPreviewFallback.takeIf { effectPreviewFallbackVisible }
     // 缩略图升级为 FHD 或兜底切换为真实图时保留用户刚做的旋转，不让源升级重置界面。
-    var effectPreviewRotationQuarterTurns by remember { mutableIntStateOf(0) }
+    var effectPreviewRotationQuarterTurns by remember {
+        mutableIntStateOf(Math.floorMod(effectPreviewInitialRotationQuarterTurns, 4))
+    }
     // 保留当前可见帧，等新照片或旋转结果在后台准备好后再一次性交给 AnimatedContent。
     // 不使用 keyed produceState 的 initialValue，避免每次旋转都先短暂跳回 0°。
     var rotatedEffectPreviewSource by remember {
-        mutableStateOf(effectPreviewBase?.let { RotatedPreviewSource(it, 0) })
+        mutableStateOf(effectPreviewBase?.takeIf { effectPreviewRotationQuarterTurns == 0 }
+            ?.let { RotatedPreviewSource(it, 0) })
     }
     LaunchedEffect(effectPreviewBase, effectPreviewRotationQuarterTurns) {
         val source = effectPreviewBase ?: run {
@@ -462,7 +474,7 @@ fun SettingsOverlay(
     }
     LaunchedEffect(footerHintNonce) {
         if (footerHintVisible) {
-            delay(1800)
+            delay(if (footerHintText.contains('\n')) 3600 else 1800)
             footerHintVisible = false
         }
     }
@@ -514,7 +526,14 @@ fun SettingsOverlay(
             if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
             onDismiss()
         },
-        panelModifier = Modifier
+        gentleMotion = effectsOnly,
+        panelAlignment = if (effectsOnly) Alignment.Center else Alignment.TopStart,
+        panelModifier = if (effectsOnly) Modifier
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .fillMaxSize()
+        else Modifier
             .padding(start = 12.dp, end = 12.dp, top = panelTop)
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
             .fillMaxWidth(),
@@ -575,8 +594,11 @@ fun SettingsOverlay(
         BackHandler(
             enabled = settingsPage != SettingsPage.MAIN && expandedEffectsPreview == null
         ) {
-            if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
-            settingsPage = SettingsPage.MAIN
+            if (effectsOnly) close()
+            else {
+                if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
+                settingsPage = SettingsPage.MAIN
+            }
         }
         // Detail navigation is a short directional push, not another popup opening.
         val pageTravel = with(density) { 24.dp.roundToPx() }
@@ -603,7 +625,7 @@ fun SettingsOverlay(
             },
             contentAlignment = Alignment.TopCenter,
             label = "settingsDetailPage",
-            modifier = Modifier.fillMaxWidth(),
+            modifier = if (effectsOnly) Modifier.fillMaxSize() else Modifier.fillMaxWidth(),
         ) { page ->
             Column(
                 modifier = Modifier
@@ -634,8 +656,11 @@ fun SettingsOverlay(
                     GlassBackButton(
                         onClick = {
                             focusManager.clearFocus()
-                            if (page == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
-                            settingsPage = SettingsPage.MAIN
+                            if (effectsOnly) close()
+                            else {
+                                if (page == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
+                                settingsPage = SettingsPage.MAIN
+                            }
                         },
                     )
                     Spacer(Modifier.width(10.dp))
@@ -801,6 +826,7 @@ fun SettingsOverlay(
                         if (previewSource != null) {
                             PhotoEffectsRenderedPreview(
                                 source = previewSource.bitmap,
+                                showSourceWhileRendering = effectsOnly,
                                 metadata = effectPreviewMetadata,
                                 sourceRotationQuarterTurns = previewSource.quarterTurns,
                                 requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
@@ -1389,7 +1415,7 @@ fun SettingsOverlay(
             var checkingUpdate by remember { mutableStateOf(false) }
             val updateScope = rememberCoroutineScope()
             val latestHint = stringResource(R.string.update_latest)
-            val checkFailedHint = stringResource(R.string.update_check_failed)
+            val disconnectCameraHint = stringResource(R.string.update_disconnect_camera_wifi)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 VersionPlaque(
                     text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
@@ -1410,12 +1436,19 @@ fun SettingsOverlay(
                         if (!checkingUpdate) {
                             checkingUpdate = true
                             updateScope.launch {
-                                when (AppUpdateManager.check(force = true)) {
-                                    is LicenseManager.UpdateResult.Available -> Unit
-                                    LicenseManager.UpdateResult.UpToDate -> showFooterHint(latestHint)
-                                    LicenseManager.UpdateResult.Unreachable -> showFooterHint(checkFailedHint)
+                                try {
+                                    when (AppUpdateManager.check(force = true)) {
+                                        is LicenseManager.UpdateResult.Available -> Unit
+                                        LicenseManager.UpdateResult.UpToDate -> showFooterHint(latestHint)
+                                        LicenseManager.UpdateResult.Unreachable -> {
+                                            if (AppUpdateManager.cameraApConnected) {
+                                                showFooterHint(disconnectCameraHint)
+                                            }
+                                        }
+                                    }
+                                } finally {
+                                    checkingUpdate = false
                                 }
-                                checkingUpdate = false
                             }
                         }
                     },
@@ -2949,6 +2982,7 @@ private fun PhotoEffectsPreviewLoadingPlaceholder() {
 internal fun PhotoEffectsRenderedPreview(
     source: Bitmap,
     resetOnSourceChange: Boolean = false,
+    showSourceWhileRendering: Boolean = false,
     metadata: PhotoFrameMetadata = EMPTY_PHOTO_EFFECTS_PREVIEW_METADATA,
     sourceRotationQuarterTurns: Int,
     requestedRotationQuarterTurns: Int,
@@ -2971,7 +3005,7 @@ internal fun PhotoEffectsRenderedPreview(
     }.collectAsState(initial = false)
 
     // 相机缩略图升级为 FHD 时保留旧效果帧；本地工作台换照片则按源重置，避免串图。
-    // 两种入口在首张效果帧完成前都不直接绘制原图。
+    // 原有入口等待首张成片；从 FHD 大图直接进入时可沿用原图，避免空白。
     val sourceRenderIdentity: Any = if (resetOnSourceChange) source else Unit
     val rendered = remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
@@ -2996,10 +3030,12 @@ internal fun PhotoEffectsRenderedPreview(
         previewPlaceholders,
         watermark,
     ) {
-        BoundedAccessCache<PhotoEffectsPreviewCacheKey, PhotoEffectsPreviewCache>(
+        BoundedAccessCache<PhotoEffectsPreviewCacheKey, PhotoEffectsPreviewCache<Bitmap>>(
             maxEntries = PHOTO_EFFECTS_RECENT_PREVIEW_CACHE_SIZE,
-            createValue = { _: PhotoEffectsPreviewCacheKey -> PhotoEffectsPreviewCache() },
-            closeValue = PhotoEffectsPreviewCache::close,
+            createValue = { _: PhotoEffectsPreviewCacheKey ->
+                PhotoEffectsPreviewCache<Bitmap>(photoEffectsPreviewRenderMutex)
+            },
+            closeValue = { it.close() },
         )
     }
     DisposableEffect(previewCaches) {
@@ -3022,7 +3058,7 @@ internal fun PhotoEffectsRenderedPreview(
         placeLookupAllowed.takeIf { metadataSettings.showCity || metadataSettings.showRegion },
         previewPlaceholders,
         watermark,
-    ) { PhotoEffectsPreviewCache() }
+    ) { PhotoEffectsPreviewCache<Bitmap>(photoEffectsPreviewRenderMutex) }
     DisposableEffect(comparisonCache) {
         onDispose { comparisonCache?.close() }
     }
@@ -3030,7 +3066,7 @@ internal fun PhotoEffectsRenderedPreview(
     val filteredSourceCache = if (filter == null) {
         null
     } else remember(source, sourceRotationQuarterTurns, currentFilterKey) {
-        PhotoEffectsPreviewCache()
+        PhotoEffectsPreviewCache<Bitmap>(photoEffectsPreviewRenderMutex)
     }
     DisposableEffect(filteredSourceCache) {
         onDispose { filteredSourceCache?.close() }
@@ -3173,7 +3209,6 @@ internal fun PhotoEffectsRenderedPreview(
             recordPhotoFramePreviewFailure(context, error)
         }
     }
-    val preview = rendered.value
     val sourceImage = remember(source) { source.asImageBitmap() }
     val targetViewportAspectRatio = if (requestedPortrait) {
         PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO
@@ -3185,7 +3220,7 @@ internal fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
-    // 首张效果帧就绪前保持图片区为空；不绘制原图、遮罩或加载层。
+    // 默认首张效果帧就绪前保持图片区为空；FHD 直接进入时可沿用原图。
     // 本地工作台按新照片重置，相机的高清源升级不重置。
     val replacementVisibility = remember(sourceRenderIdentity) { Animatable(1f) }
     var visibleFrame by remember(sourceRenderIdentity) {
@@ -3194,90 +3229,91 @@ internal fun PhotoEffectsRenderedPreview(
     var outgoingFrame by remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
     }
-    val frameTransition = remember(sourceRenderIdentity) { Animatable(1f) }
-    val previewForGesture = preview
+    var initialSourceVisible by remember(sourceRenderIdentity) {
+        mutableStateOf(showSourceWhileRendering)
+    }
+    val frameTransition = remember(sourceRenderIdentity) {
+        Animatable(if (showSourceWhileRendering) 0f else 1f)
+    }
+    val previewForGesture = visibleFrame
     val boundsForGesture = previewBounds
     val latestOnRotate by rememberUpdatedState(onRotate)
     val latestOnOpen by rememberUpdatedState(onOpen)
-    LaunchedEffect(
-        requestedRotationQuarterTurns,
-        requestedFrameLayout,
-        visibleFrame?.rotationQuarterTurns,
-        visibleFrame?.frameLayout,
-    ) {
-        val current = visibleFrame ?: return@LaunchedEffect
-        val awaitingReplacement =
-            current.rotationQuarterTurns != requestedRotationQuarterTurns ||
-                current.frameLayout != requestedFrameLayout
-        if (awaitingReplacement) {
-            replacementVisibility.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(durationMillis = 110, easing = LinearEasing),
+    val requestedCanvas by rememberUpdatedState(
+        PhotoEffectsPreviewCanvas(requestedRotationQuarterTurns, requestedFrameLayout),
+    )
+    LaunchedEffect(sourceRenderIdentity) {
+        // 一帧的过渡必须完整结束；EXIF 补齐、FHD 升级及连续调参只替换待显示帧。
+        // 同时拥有图片渐入和画布淡出，避免多个 animateTo 互相取消后终止收帧任务。
+        snapshotFlow {
+            PhotoEffectsPreviewTransitionTarget(rendered.value, requestedCanvas, previewFailed)
+        }.collectPhotoEffectsPreviewTransitions { target ->
+            val current = visibleFrame
+            val transition = planPhotoEffectsPreviewTransition(
+                current = current,
+                next = target.frame,
+                requestedCanvas = requestedCanvas,
+                canvasOf = { it.canvas },
+                sameImage = { previous, next -> previous.bitmap === next.bitmap },
             )
-        } else {
-            // 新方向或新边框成片先进入组合树一帧，纹理就绪后再柔和出现。
-            withFrameNanos { }
-            replacementVisibility.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing),
-            )
-        }
-    }
-    LaunchedEffect(preview?.bitmap) {
-        val next = preview ?: return@LaunchedEffect
-        val current = visibleFrame
-        if (current == null) {
-            visibleFrame = next
-            outgoingFrame = null
-            frameTransition.snapTo(1f)
-        } else if (current.bitmap === next.bitmap) {
-            // 无滤镜对比图稍后补齐时只更新数据，不触发第二次画面过渡。
-            visibleFrame = next
-        } else {
-            val renderedRotationDelta = Math.floorMod(
-                next.rotationQuarterTurns - current.rotationQuarterTurns,
-                4,
-            )
-            val replacesCanvas = renderedRotationDelta != 0 ||
-                current.frameLayout != next.frameLayout
-            if (replacesCanvas) {
-                // 旋转和边框画布变化都先让旧成片完全淡出，再换入已经按新布局渲染的
-                // 成片；避免无边框、铭牌等不同比例画布直接叠加造成僵硬跳变。
-                replacementVisibility.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(durationMillis = 110, easing = LinearEasing),
-                )
-                outgoingFrame = null
-                visibleFrame = next
-                frameTransition.snapTo(1f)
-            } else {
-                outgoingFrame = current
-                visibleFrame = next
-                frameTransition.snapTo(0f)
-                // 先让新位图以透明层进入一帧，确保纹理准备好后再开始交叉过渡。
-                withFrameNanos { }
-                frameTransition.animateTo(
-                    1f,
-                    tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                )
-                outgoingFrame = null
+            val next = transition.frame
+            when (transition.change) {
+                PhotoEffectsPreviewChange.INITIAL -> {
+                    visibleFrame = next
+                    outgoingFrame = null
+                    if (initialSourceVisible) {
+                        frameTransition.snapTo(0f)
+                        withFrameNanos { }
+                        frameTransition.animateTo(
+                            1f,
+                            tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                        )
+                        initialSourceVisible = false
+                    } else {
+                        frameTransition.snapTo(1f)
+                    }
+                }
+                PhotoEffectsPreviewChange.UPDATE -> {
+                    // 对比图只补齐数据，不打断渐入或再播放一次动画。
+                    visibleFrame = next
+                }
+                PhotoEffectsPreviewChange.REPLACE_CANVAS -> {
+                    // 方向或边框变化先完整淡出，再换入新画布，避免不同比例直接叠加。
+                    replacementVisibility.animateTo(
+                        0f,
+                        tween(durationMillis = 110, easing = LinearEasing),
+                    )
+                    outgoingFrame = null
+                    visibleFrame = next
+                    frameTransition.snapTo(1f)
+                }
+                PhotoEffectsPreviewChange.CROSSFADE -> {
+                    outgoingFrame = current
+                    visibleFrame = next
+                    frameTransition.snapTo(0f)
+                    withFrameNanos { }
+                    frameTransition.animateTo(
+                        1f,
+                        tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                    )
+                    outgoingFrame = null
+                }
+                PhotoEffectsPreviewChange.KEEP -> Unit
             }
-        }
-    }
-    LaunchedEffect(preview?.bitmap, preview?.unfilteredBitmap) {
-        val latest = preview ?: return@LaunchedEffect
-        // 对比图完成只补充当前帧的数据，绝不取消仍在进行的滤镜渐入动画。
-        if (visibleFrame?.bitmap === latest.bitmap) {
-            visibleFrame = latest
-        }
-    }
-    LaunchedEffect(previewFailed) {
-        if (previewFailed) {
-            // 新方向或新边框渲染失败时恢复旧成片，避免预览永久停在透明状态。
-            replacementVisibility.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing),
+            // 过渡期间请求方向可能又发生变化：按最新请求决定显隐，不把过时画布淡入。
+            val displayed = visibleFrame ?: return@collectPhotoEffectsPreviewTransitions
+            val shouldBeVisible = photoEffectsPreviewCanvasVisible(
+                displayed.canvas, requestedCanvas, previewFailed,
             )
+            val visibility = if (shouldBeVisible) 1f else 0f
+            if (replacementVisibility.value != visibility) {
+                if (shouldBeVisible) withFrameNanos { }
+                replacementVisibility.animateTo(
+                    visibility,
+                    if (shouldBeVisible) tween(190, easing = FastOutSlowInEasing)
+                    else tween(110, easing = LinearEasing),
+                )
+            }
         }
     }
     Column {
@@ -3302,7 +3338,7 @@ internal fun PhotoEffectsRenderedPreview(
                         },
                         onTap = {
                             latestOnOpen?.invoke(previewForGesture.bitmap, boundsForGesture) {
-                                rendered.value?.takeIf { it.bitmap === previewForGesture.bitmap }
+                                visibleFrame?.takeIf { it.bitmap === previewForGesture.bitmap }
                                     ?.unfilteredBitmap ?: previewForGesture.unfilteredBitmap
                             }
                         },
@@ -3315,10 +3351,18 @@ internal fun PhotoEffectsRenderedPreview(
                     )
                 },
         ) {
-            if (preview != null) {
-                outgoingFrame?.let { frame ->
+            if (initialSourceVisible || (visibleFrame == null && (showSourceWhileRendering || previewFailed))) {
+                FittedRotatingBitmap(
+                    image = sourceImage,
+                    rotationDegrees = 0f,
+                    description = if (visibleFrame == null) stringResource(R.string.photo_frame_preview) else null,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            visibleFrame?.let { frame ->
+                outgoingFrame?.let { outgoing ->
                     PhotoEffectsPreviewLayer(
-                        frame = frame,
+                        frame = outgoing,
                         showUnfiltered = showUnfiltered,
                         // 旧帧保持不透明作为底层，新帧只负责渐入；总画面始终不透底，
                         // 避免普通双向淡化在中点产生一次明显的亮度闪烁。
@@ -3326,36 +3370,15 @@ internal fun PhotoEffectsRenderedPreview(
                         description = null,
                     )
                 }
-                (visibleFrame ?: preview).let { frame ->
-                    PhotoEffectsPreviewLayer(
-                        frame = frame,
-                        showUnfiltered = showUnfiltered,
-                        alpha = replacementVisibility.value *
-                            if (outgoingFrame == null) 1f else frameTransition.value,
-                        description = stringResource(R.string.photo_frame_preview),
-                    )
-                }
-            } else if (previewFailed) {
-                Image(
-                    bitmap = sourceImage,
-                    contentDescription = stringResource(R.string.photo_frame_preview),
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+                PhotoEffectsPreviewLayer(
+                    frame = frame,
+                    showUnfiltered = showUnfiltered,
+                    alpha = replacementVisibility.value *
+                        if (outgoingFrame == null && !initialSourceVisible) 1f else frameTransition.value,
+                    description = stringResource(R.string.photo_frame_preview),
                 )
-                Surface(
-                    color = colors.glassSurfaceHeavy,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                ) {
-                    Text(
-                        text = stringResource(R.string.photo_frame_preview_unavailable),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
-                }
             }
-            if (previewFailed && preview != null) {
+            if (previewFailed) {
                 Surface(
                     color = colors.glassSurfaceHeavy,
                     shape = RoundedCornerShape(10.dp),
@@ -3426,7 +3449,58 @@ private data class RenderedPhotoEffectsPreview(
     val unfilteredBitmap: Bitmap? = null,
     val rotationQuarterTurns: Int,
     val frameLayout: PhotoEffectsPreviewFrameLayout,
+) {
+    val canvas: PhotoEffectsPreviewCanvas
+        get() = PhotoEffectsPreviewCanvas(rotationQuarterTurns, frameLayout)
+}
+
+private data class PhotoEffectsPreviewCanvas(
+    val rotationQuarterTurns: Int,
+    val frameLayout: PhotoEffectsPreviewFrameLayout,
 )
+
+private data class PhotoEffectsPreviewTransitionTarget(
+    val frame: RenderedPhotoEffectsPreview?,
+    val canvas: PhotoEffectsPreviewCanvas,
+    val failed: Boolean,
+)
+
+internal enum class PhotoEffectsPreviewChange { KEEP, INITIAL, UPDATE, CROSSFADE, REPLACE_CANVAS }
+
+internal data class PhotoEffectsPreviewTransition<F>(
+    val frame: F?,
+    val change: PhotoEffectsPreviewChange,
+)
+
+/** An outdated rotation/frame result must not replace the canvas requested most recently. */
+internal fun <F : Any, C> planPhotoEffectsPreviewTransition(
+    current: F?,
+    next: F?,
+    requestedCanvas: C,
+    canvasOf: (F) -> C,
+    sameImage: (F, F) -> Boolean,
+): PhotoEffectsPreviewTransition<F> {
+    val accepted = next?.takeIf { canvasOf(it) == requestedCanvas }
+    val change = when {
+        accepted == null -> PhotoEffectsPreviewChange.KEEP
+        current == null -> PhotoEffectsPreviewChange.INITIAL
+        sameImage(current, accepted) -> PhotoEffectsPreviewChange.UPDATE
+        canvasOf(current) != canvasOf(accepted) -> PhotoEffectsPreviewChange.REPLACE_CANVAS
+        else -> PhotoEffectsPreviewChange.CROSSFADE
+    }
+    return PhotoEffectsPreviewTransition(accepted ?: current, change)
+}
+
+internal fun <C> photoEffectsPreviewCanvasVisible(
+    displayedCanvas: C,
+    requestedCanvas: C,
+    failed: Boolean,
+): Boolean = failed || displayedCanvas == requestedCanvas
+
+/** Finish the visible transition and retain only the newest pending result, never collectLatest. */
+internal suspend fun <T> Flow<T>.collectPhotoEffectsPreviewTransitions(transition: suspend (T) -> Unit) {
+    conflate().collect { transition(it) }
+}
 
 /** 只有真正改变输出画布的边框样式才走完整淡出淡入；无边框时忽略保留的预设草稿。 */
 private data class PhotoEffectsPreviewFrameLayout(
@@ -3473,74 +3547,6 @@ internal fun shouldRecyclePrefetchInput(
     inputIsSource: Boolean,
     outputIsInput: Boolean,
 ): Boolean = !useCurrentFilteredSource && !inputIsSource && !outputIsInput
-
-/**
- * 单个明确渲染目标的一帧缓存。
- *
- * 同一目标的请求共享一个 [Deferred]；不同实例通过全局渲染锁串行，取消的等待任务不会
- * 继续抢 CPU。最近完成的三个完整预览由外层有界缓存持有；位图只解除引用而不主动
- * recycle，避免 Compose 仍在使用旧帧纹理。
- */
-private class PhotoEffectsPreviewCache {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val mutex = Mutex()
-    private var completed: Bitmap? = null
-    private var running: Deferred<Bitmap>? = null
-
-    suspend fun getOrRender(
-        isObsolete: () -> Boolean = { false },
-        serializeWithOtherPreviews: Boolean = true,
-        render: suspend (isCancelled: () -> Boolean) -> Bitmap,
-    ): Bitmap {
-        while (true) {
-            val task = mutex.withLock {
-                completed?.let { return it }
-                running?.takeUnless { it.isCancelled } ?: scope.async {
-                    val renderNow: suspend () -> Bitmap = {
-                        ensureActive()
-                        render { !isActive || isObsolete() }
-                    }
-                    if (serializeWithOtherPreviews) {
-                        photoEffectsPreviewRenderMutex.withLock { renderNow() }
-                    } else {
-                        renderNow()
-                    }
-                }.also { running = it }
-            }
-            val bitmap = try {
-                task.await()
-            } catch (error: Throwable) {
-                // Awaiter cancellation does not cancel the cache-owned shared task. Keep it
-                // published so a prefetched filter promoted to current can join the same work.
-                if (task.isCancelled) {
-                    mutex.withLock {
-                        if (running === task) running = null
-                    }
-                    // A task can become obsolete, cancel, and then be requested as the new current
-                    // filter. Retry transparently instead of exposing that harmless race as failure.
-                    if (
-                        error is CancellationException &&
-                        currentCoroutineContext().isActive &&
-                        !isObsolete()
-                    ) {
-                        continue
-                    }
-                }
-                throw error
-            }
-            return mutex.withLock {
-                completed ?: bitmap.also {
-                    if (running === task) running = null
-                    completed = it
-                }
-            }
-        }
-    }
-
-    fun close() {
-        scope.cancel()
-    }
-}
 
 private data class RotatedPreviewSource(
     val bitmap: Bitmap,
@@ -3637,6 +3643,7 @@ private fun BooleanSettingsWheel(
         onDetent = wheelHaptics::tick,
         label = label,
         accentColor = if (checked) colors.accentBlue else colors.statusWaiting,
+        labelTextColor = if (checked) null else colors.onBackground,
         emphasized = checked,
         wheelHeight = if (compact) {
             COMPACT_SETTINGS_WHEEL_HEIGHT
@@ -3670,6 +3677,7 @@ private fun StorageModeWheel(
         optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
         onDetent = haptics::tick, label = stringResource(R.string.storage_mode),
         accentColor = if (mode == TransferStorageMode.UNIFIED) colors.statusWaiting else colors.accentBlue,
+        labelTextColor = if (mode == TransferStorageMode.UNIFIED) colors.onBackground else null,
         emphasized = mode != TransferStorageMode.UNIFIED,
         wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT, optionRowHeight = 18.dp,
         optionFontSize = 14.sp, modifier = modifier, enabled = enabled,
@@ -3694,6 +3702,7 @@ private fun AutoTransferSettingsWheel(
         optionLabel = { labels.getValue(it) }, onValueCommitted = onModeChanged,
         onDetent = haptics::tick, label = stringResource(R.string.auto_transfer_new_media),
         accentColor = if (mode == AutoTransferMode.OFF) colors.statusWaiting else colors.accentBlue,
+        labelTextColor = if (mode == AutoTransferMode.OFF) colors.onBackground else null,
         emphasized = mode != AutoTransferMode.OFF, wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT,
         optionRowHeight = 18.dp, optionFontSize = 14.sp, modifier = modifier, enabled = enabled)
 }
@@ -5406,7 +5415,7 @@ internal fun ProBadgeButton(
     }
 }
 
-/** Compact title-row switch; its hit area is wider than the drawn track. */
+/** Compact switch: a quiet track and sliding thumb, with the effects section's orange accent. */
 @Composable
 private fun PhotoEffectsMasterSwitch(
     checked: Boolean,
@@ -5414,50 +5423,74 @@ private fun PhotoEffectsMasterSwitch(
 ) {
     val colors = AppTheme.colors
     val label = stringResource(R.string.photo_effects)
-    val position by animateFloatAsState(
+    val dark = colors.background.luminance() < 0.5f
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val focused by interactionSource.collectIsFocusedAsState()
+    val position = animateFloatAsState(
         targetValue = if (checked) 1f else 0f,
-        animationSpec = tween(180),
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
         label = "photoEffectsSwitchPosition",
     )
-    val trackColor by animateColorAsState(
-        targetValue = if (checked) colors.accentOrange else colors.onBackground.copy(alpha = 0.16f),
-        animationSpec = tween(180),
-        label = "photoEffectsSwitchTrack",
+    val press = animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = tween(100),
+        label = "photoEffectsSwitchPress",
     )
-    val thumbColor by animateColorAsState(
-        targetValue = if (checked) Color.White else colors.onSurfaceVariant,
-        animationSpec = tween(180),
-        label = "photoEffectsSwitchThumb",
-    )
-    Box(
+    val offTrack = lerp(colors.surfaceVariant, colors.onSurfaceVariant, if (dark) 0.22f else 0.12f)
+    val onTrack = lerp(colors.accentOrange, colors.surface, if (dark) 0.16f else 0f)
+    val thumbColor = if (dark) Color(0xFFF4F5F7) else Color.White
+
+    androidx.compose.foundation.Canvas(
         modifier = Modifier
-            .size(width = 48.dp, height = 32.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .size(width = 56.dp, height = 32.dp)
+            .semantics { contentDescription = label }
+            // Standard toggle semantics retain keyboard/TalkBack support and cancel when
+            // the settings page takes over a scroll gesture. Only the parent owns persistence.
             .toggleable(
                 value = checked,
+                interactionSource = interactionSource,
+                indication = null,
                 role = Role.Switch,
                 onValueChange = onCheckedChange,
-            )
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
+            ),
     ) {
-        androidx.compose.foundation.Canvas(Modifier.size(width = 36.dp, height = 20.dp)) {
+        val progress = position.value
+        val trackSize = Size(48.dp.toPx(), 28.dp.toPx())
+        val trackOrigin = Offset((size.width - trackSize.width) / 2f, (size.height - trackSize.height) / 2f)
+        val trackRadius = CornerRadius(trackSize.height / 2f)
+        if (focused) {
+            val gap = 1.5.dp.toPx()
             drawRoundRect(
-                color = trackColor,
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
-            )
-            val progress = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) {
-                1f - position
-            } else position
-            drawCircle(
-                color = thumbColor,
-                radius = 7.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(
-                    x = size.height / 2f + (size.width - size.height) * progress,
-                    y = size.height / 2f,
-                ),
+                color = colors.accentOrange.copy(alpha = 0.65f),
+                topLeft = trackOrigin - Offset(gap, gap),
+                size = Size(trackSize.width + gap * 2f, trackSize.height + gap * 2f),
+                cornerRadius = CornerRadius(trackRadius.x + gap),
+                style = Stroke(1.dp.toPx()),
             )
         }
+        drawRoundRect(lerp(offTrack, onTrack, progress), trackOrigin, trackSize, trackRadius)
+        drawRoundRect(
+            color = colors.onBackground.copy(alpha = 0.10f * (1f - progress)),
+            topLeft = trackOrigin,
+            size = trackSize,
+            cornerRadius = trackRadius,
+            style = Stroke(0.75.dp.toPx()),
+        )
+        val inset = 3.dp.toPx()
+        val thumbSize = Size((22f + 2f * press.value).dp.toPx(), 22.dp.toPx())
+        val thumbOrigin = trackOrigin + Offset(
+            inset + (trackSize.width - inset * 2f - thumbSize.width) * progress,
+            inset,
+        )
+        val thumbRadius = CornerRadius(thumbSize.height / 2f)
+        drawRoundRect(
+            color = Color.Black.copy(alpha = if (dark) 0.18f else 0.10f),
+            topLeft = thumbOrigin + Offset(0f, 0.75.dp.toPx()),
+            size = thumbSize,
+            cornerRadius = thumbRadius,
+        )
+        drawRoundRect(thumbColor, thumbOrigin, thumbSize, thumbRadius)
     }
 }
 

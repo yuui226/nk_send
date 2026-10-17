@@ -24,20 +24,13 @@ import java.io.File
 import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyFactory
-import java.security.MessageDigest
 import java.security.Signature
-import java.security.cert.CertificateException
-import java.security.cert.X509Certificate
 import java.security.spec.X509EncodedKeySpec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLSocketFactory
-import javax.net.ssl.X509TrustManager
 
 /**
  * 授权管理:免费/付费状态、每日免费额度、激活与静默续签。
@@ -49,25 +42,28 @@ import javax.net.ssl.X509TrustManager
  */
 object LicenseManager {
 
-    // ==================== 部署产出的三个常量(见 server/部署指南.md)====================
-    // 服务器地址列表,按序尝试。将来换 IP/上域名:在新版本里更新此列表即可。
-    private val SERVERS = listOf("https://106.15.239.203:8443")
-    // setup-keys.js init 输出的"App 内置公钥"(ECDSA P-256 SPKI)
+    // ==================== 部署产出的常量(见 server/部署指南.md)====================
+    // 临时地址。ztransfer.top 备案通过后改回 https://api.ztransfer.top。
+    private val SERVERS = listOf("https://www.au9999.net")
+    // setup-keys.js init 输出的"App 内置公钥"(ECDSA P-256 SPKI)。这是通行证签名公钥，与 TLS 证书无关。
     private const val PUBLIC_KEY_B64 =
         "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqiQGFyGSVfCF2d96gr9wEQcjhOzQ1Iyxbeml+4uEYLiWDSEmf0AstKOnvg2YNIKPg25bLaY+xg5hrvLPhBks3w=="
-    // setup-keys.js pin tls-cert.pem 输出的"App 内置证书指纹"(SPKI SHA-256)
-    private const val CERT_PIN_B64 = "9SNNH7dEGfIVJ0bMGIKxEYTjHUAMDy3+t/+dVZzJfzA="
     // =====================================================================================
 
     // 免费版限制(集中定义,调整数值只改这里)
     // 传输:每天完成 25 个(完成才计数,入队/跳过不计) + 单文件 ≤400MB;
-    // 监看:每天累计 3 分钟。
+    // 监看:每天累计 5 分钟。
     const val FREE_DAILY_TRANSFER_LIMIT = 25
     const val FREE_MAX_FILE_BYTES = 400L * 1024 * 1024
-    const val FREE_REMOTE_DAILY_MS = 3 * 60_000L
+    const val FREE_REMOTE_DAILY_MS = 5 * 60_000L
 
     // 软续签周期:有网时每天尝试换一张新通行证(顺带把服务器的"顶替/吊销"同步下来)。
     // 硬过期由服务器写进通行证的 exp(见 verifyToken);到期且续不上就降级。
+    //
+    // !! TEMPORARY EMERGENCY / 临时应急。回滚正常版：只把下一行改成 false，然后发强制更新。
+    // 授权服务器 HTTPS 不可达期间，已签名、指纹匹配、年费未到期的用户保持高级版，
+    // 不因通行证 exp 过期或续签失败降级。服务器恢复且在网设备完成一轮续签后再回滚。
+    private const val HOLD_PRO_IF_RENEW_UNREACHABLE = true
     private const val SOFT_RENEW_INTERVAL_MS = 24 * 3600_000L
     private const val PREFS = "license"
     private const val PINNED_FINGERPRINT_KEY = "device_fingerprint_v1"
@@ -242,11 +238,13 @@ object LicenseManager {
         maxOf(System.currentTimeMillis() / 1000, prefs.getLong("seen_time", 0L))
 
     /**
-     * 验签 + 指纹 + 硬过期核对,通过返回 payload,否则 null(降级免费)。
-     * 过期判定用 max(系统时间, 见过的最大服务器时间),把时钟回拨挡在门外。
+     * 验签 + 指纹核对,通过返回 payload,否则 null。
+     * [HOLD_PRO_IF_RENEW_UNREACHABLE] 为 false 时再核对 exp;过期判定用
+     * max(系统时间, 见过的最大服务器时间),把时钟回拨挡在门外。
      */
     private fun verifyToken(token: String?): JSONObject? {
         val obj = verifySig(token) ?: return null
+        if (HOLD_PRO_IF_RENEW_UNREACHABLE) return obj
         val exp = obj.optLong("exp", 0L)
         if (exp > 0L && seenTimeSec() >= exp) return null
         return obj
@@ -254,7 +252,7 @@ object LicenseManager {
 
     /**
      * 通行证里的订阅到期时刻(Unix 秒);0 = 永久有效(手动发的码)或本地无有效通行证。
-     * 读 sub 不读 exp:exp 是 7 天滚动的通行证寿命,每次续签都往后挪,跟订阅到期日无关。
+     * 读 sub 不读 exp:exp 是 20 天滚动的通行证寿命,每次续签都往后挪,跟订阅到期日无关。
      * 用 verifySig 而非 verifyToken——到期当天通行证自身也过期了,仍要能把日期说给用户听。
      */
     fun subExpiresAtSec(): Long =
@@ -404,7 +402,8 @@ object LicenseManager {
     /**
      * 静默续签:当前设备持有匹配的已签名通行证,且通行证已过期或距上次成功 ≥ 1 天时,
      * 有网就向服务器换新证。仅有激活码不触发静默恢复;激活码必须由用户主动输入或用于明确续费。
-     * 只有服务器明确吊销/解绑(被顶替)才清除本地授权;网络失败保持现状(离线不惩罚)。
+     * 只有服务器明确吊销/解绑(被顶替)或年费到期才清除本地授权。
+     * [HOLD_PRO_IF_RENEW_UNREACHABLE] 为真时,续签连不上也不因 exp 过期降级。
      */
     private suspend fun renewIfDue() {
         val code = prefs.getString("code", null) ?: return
@@ -419,8 +418,8 @@ object LicenseManager {
             put("fp", fingerprint)
         })
         if (resp == null) {
-            // 联不上:未过期则继续用(离线不惩罚);已过期(满 7 天仍无网)则降级并提示连网续期
-            if (expired) {
+            // 联不上:未过期则继续用。临时开关打开时,exp 已过期也不降级、不提示。
+            if (expired && !HOLD_PRO_IF_RENEW_UNREACHABLE) {
                 _isPro.value = false
                 _quotaLeft.value = quotaRemaining()
                 _renewalNeeded.value = true
@@ -429,7 +428,7 @@ object LicenseManager {
         }
         val token = resp.optString("token")
         if (resp.optBoolean("ok") && verifyToken(token) != null) {
-            saveToken(token, code)                        // 内部置 _isPro=true、清 renewalNeeded、滚动 7 天有效期
+            saveToken(token, code)                        // 内部置 _isPro=true、清 renewalNeeded、滚动 20 天有效期
         } else when (resp.optString("err")) {
             "CODE_REVOKED", "NOT_BOUND" -> revertToFree()  // 被吊销/顶替:降级并清 flag
             "CODE_EXPIRED" -> expireSubscription()         // 年费码到期即失效，清码后按新用户购买
@@ -945,7 +944,7 @@ object LicenseManager {
         readTimeoutMs: Int? = null,
     ): JSONObject? = request(path, null, connectTimeoutMs, readTimeoutMs)
 
-    /** [body] 非空走 POST(JSON),为空走 GET;证书 pin 与超时两者共用。 */
+    /** [body] 非空走 POST(JSON),为空走 GET。正式证书由系统证书库校验主机名。 */
     private fun request(
         path: String,
         body: JSONObject?,
@@ -955,9 +954,6 @@ object LicenseManager {
         for (base in SERVERS) {
             try {
                 val conn = URL(base + path).openConnection() as HttpsURLConnection
-                conn.sslSocketFactory = pinnedSocketFactory
-                // 证书本身已由 pin 唯一确认,无需再校验主机名(自签证书对裸 IP 签发)
-                conn.hostnameVerifier = HostnameVerifier { _, _ -> true }
                 conn.connectTimeout = connectTimeoutMs
                 // 兼容旧发布记录时可能仍需解析第三方地址；下载入口保留更完整的响应窗口。
                 conn.readTimeout = readTimeoutMs
@@ -978,24 +974,5 @@ object LicenseManager {
             }
         }
         return null
-    }
-
-    /** 只信任 pin 匹配的服务器证书(自签证书 + IP 直连场景的标准做法)。 */
-    private val pinnedSocketFactory: SSLSocketFactory by lazy {
-        val tm = object : X509TrustManager {
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
-                val spki = chain[0].publicKey.encoded
-                val pin = Base64.encodeToString(
-                    MessageDigest.getInstance("SHA-256").digest(spki), Base64.NO_WRAP
-                )
-                if (pin != CERT_PIN_B64) throw CertificateException("certificate pin mismatch")
-            }
-
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) =
-                throw CertificateException("client certs not supported")
-
-            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
-        }
-        SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }.socketFactory
     }
 }

@@ -942,9 +942,11 @@ internal fun materialBadgeContentColor(
  *
  * [materialContentColor]：钛合金主题中为凹刻填色，相机按键主题中作为键帽丝印色。
  * 适合品牌标志等需要成为视觉焦点的内容；未指定时使用各材质的默认印记。
+ * [preserveContentColors]：彩色内容保留自身配色，不经过材质的统一着色。
  * [enforceMinimumTouchTarget]：实体材质默认遵循 Material 的 48dp 最小触点；少量已有
  * 独立尺寸与外围布局保护的紧凑控件可关闭，毛玻璃分支的尺寸不受该开关影响。
  * [raised]：监看工具栏的棋子式微凸表面，保留主题材质，以连续弧面代替轮廓描边。
+ * [surfaceColor]：可选的按钮底色，保留现有材质、按压与选中效果。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -966,6 +968,8 @@ fun GlassButton(
     activeOutline: Boolean = false,
     enforceMinimumTouchTarget: Boolean = true,
     raised: Boolean = false,
+    surfaceColor: Color? = null,
+    preserveContentColors: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
@@ -1097,7 +1101,7 @@ fun GlassButton(
     // panel 是弹窗内容器里的低投影变体，不应该变成一枚高出面板的实体键帽。
     val appliedSkinTexture = if (isCameraControlButton && panel) null else skinTexture
     val isFrostedGlass = texturePalette?.skin == SkinPreset.FROSTED_GLASS
-    val baseColor = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface
+    val baseColor = surfaceColor ?: if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface
     val containerColor =
         if (isFrostedGlass && !panel && frostedOpacityBoost > 0f) {
             val boost = frostedOpacityBoost.coerceIn(0f, 1f)
@@ -1158,13 +1162,13 @@ fun GlassButton(
                 modifier = Modifier
                     .padding(contentPadding)
                     .titaniumStampedContent(
-                        enabled = isTitaniumButton,
+                        enabled = isTitaniumButton && !preserveContentColors,
                         dark = dark,
                         pressProgress = pressLight,
                         stampColor = materialContentColor
                     )
                     .cameraPrintedContent(
-                        enabled = isCameraControlCap,
+                        enabled = isCameraControlCap && !preserveContentColors,
                         activeColor = resolvedActiveColor,
                         activeProgress = activeProgress,
                         printColor = materialContentColor
@@ -1258,13 +1262,13 @@ fun GlassButton(
                         )
                         .padding(contentPadding)
                         .titaniumStampedContent(
-                            enabled = isTitaniumButton,
+                            enabled = isTitaniumButton && !preserveContentColors,
                             dark = dark,
                             pressProgress = pressLight,
                             stampColor = materialContentColor,
                         )
                         .cameraPrintedContent(
-                            enabled = isCameraControlCap,
+                            enabled = isCameraControlCap && !preserveContentColors,
                             activeColor = resolvedActiveColor,
                             activeProgress = activeProgress,
                             printColor = materialContentColor,

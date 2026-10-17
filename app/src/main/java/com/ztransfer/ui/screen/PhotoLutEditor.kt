@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import com.ztransfer.R
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.lut.*
+import com.ztransfer.presets.PresetFolderOwner
+import com.ztransfer.presets.retainSharedPresetFolderGrant
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.util.rememberHaptics
 
@@ -44,8 +46,7 @@ internal fun rememberPhotoLutDraft(role: String, initial: PhotoFilterSelection?,
     val store = remember { PhotoLutStore(context) }
     val state = remember {
         PhotoLutEditorState(store, LutFolderRepository(context.applicationContext.contentResolver) { uri ->
-            val monitorFolders = LutPreferences(context.getSharedPreferences("monitor_lut", android.content.Context.MODE_PRIVATE))
-            (monitorFolders.folder == uri).also { shared -> if (shared) monitorFolders.markFolderGrantOwned() }
+            retainSharedPresetFolderGrant(context, PresetFolderOwner.PHOTO_LUT, uri)
         }, scope,
             initial, store.uri(role), { selected() }, { Toast.makeText(context, context.getString(it), Toast.LENGTH_SHORT).show() })
     }
@@ -195,7 +196,7 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
                 shadowElevation = 6.dp,
             ) {
                 Column(Modifier.padding(10.dp).heightIn(max = maxHeight)) {
-                    LutChooserHeader(current == null, stringResource(R.string.lut_change_folder),
+                    LutChooserHeader(current == null, stringResource(R.string.lut_folder),
                         onOff = { haptics.tick(); state.choose(null); showChooser = false },
                         onFolder = { showChooser = false; openFolder() })
                     LutCategoryList(ordered, current, modifier = Modifier.weight(1f, fill = false).fillMaxWidth()) { file ->

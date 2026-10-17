@@ -1,0 +1,13 @@
+Public Flexible Color NP3 regression fixtures from:
+https://github.com/ssssota/nikon-flexible-color-picture-control
+Original paths: samples/vanilla.NP3, samples/tonecurve-noop.NP3,
+samples/comment-a.NP3. Downloaded 2026-10-16; see LICENSE (MIT).
+
+These independent samples cover NP3 0310 with base 0x0020, including
+optional tone-curve and comment fields. They are test inputs only;
+they are not bundled presets and do not establish camera write support.
+
+SHA-256:
+vanilla.NP3        1199d1e5ca7a1d0b39273e70be05d590ce1ee9fb6378f12e73aa91320d064483
+tonecurve-noop.NP3 0ac44780b31751d8f4265bfff988df4ed5320086f0c3a540948fdaf8b6982987
+comment-a.NP3      7dbd632bded3cce04052f729c154d85f2d1bf08a45effc46de9828d9161600fc

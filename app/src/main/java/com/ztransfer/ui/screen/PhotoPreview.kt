@@ -4,6 +4,7 @@ import com.ztransfer.util.HistogramMode
 
 import kotlinx.coroutines.CancellationException
 import android.os.SystemClock
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -37,6 +38,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -55,6 +57,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,11 +79,15 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -92,6 +99,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -117,6 +128,7 @@ import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.TransferTask
+import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 
@@ -132,6 +144,23 @@ private const val PREVIEW_QUEUE_DIRECTION_RATIO = 1.15f
 private const val PREVIEW_QUEUE_FLIGHT_DURATION_MS = 560
 private const val PREVIEW_QUEUE_GHOST_PREROLL_MS = 32L
 private const val PREVIEW_QUEUE_ANIMATION_TIMEOUT_MS = 1_000L
+
+private data class PreviewPhotoActions(
+    val photo: PhotoPreviewItem.Photo,
+    val canCollapseBurst: Boolean,
+)
+
+private data class PreviewEffectsRequest(
+    val file: NikonCamera.FileInfo,
+    val anchor: Rect?,
+    val rotationQuarterTurns: Int,
+)
+
+internal fun showPreviewPhotoEffects(
+    enabled: Boolean,
+    isReview: Boolean,
+    file: NikonCamera.FileInfo?,
+): Boolean = enabled && !isReview && file?.extension in setOf(".jpg", ".jpeg")
 
 internal enum class PreviewQueueDragDirection { UNDECIDED, UPWARD, REJECTED }
 
@@ -200,9 +229,11 @@ internal sealed interface PhotoPreviewItem {
 
     data class Photo(
         val file: NikonCamera.FileInfo,
-        val burstId: String? = null
+        val burstId: String? = null,
+        val pairedRawExtension: String? = null,
+        val reviewKey: Int? = null,
     ) : PhotoPreviewItem {
-        override val key: Any = file.handle
+        override val key: Any = reviewKey ?: file.handle
     }
 
     data class BurstCollection(
@@ -282,6 +313,10 @@ internal fun PhotoPreviewOverlay(
     cameraViewModel: CameraViewModel,
     hapticsEnabled: Boolean,
     transfersBusy: Boolean,
+    // Review reuses viewing gestures/loading, but exposes no queue or crop actions.
+    review: PhotoReviewOptions? = null,
+    photoEffectsViewModel: TransferViewModel? = null,
+    photoEffectsEnabled: Boolean = false,
     // 全局持久化方向：0..3 个逆时针 90°。只用作本次 overlay 初始值；
     // overlay 内部保留不取模的连续角度，保证 270°→0° 时仍是向左短转 90°。
     initialRotationQuarterTurns: Int = 0,
@@ -317,12 +352,24 @@ internal fun PhotoPreviewOverlay(
     // 会话内固定持有自己的分页快照；后台增量加载/筛选不会让正在看的页突然换内容。
     // 只有用户在合集页主动展开/收起时，才在当前页后插入/移除该组成员。
     var previewItems by remember { mutableStateOf(items) }
+    LaunchedEffect(items) { if (review != null) previewItems = items }
+    val latestReview by rememberUpdatedState(review)
+    val landscapeReview = review?.landscape == true
+    val reviewTap = remember { PreviewReviewTapGuard() }
+    var fhdRetry by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     // This overlay is an ephemeral open request, not a restorable workspace page. A saveable
     // pager would restore the previous photo after visiting the queue, overriding initialIndex.
     val pagerState = remember { PagerState(initialIndex, 0f) { previewItems.size } }
     val currentItem = previewItems.getOrNull(pagerState.currentPage)
     val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
     val currentHandle = currentFile?.handle
+    var effectsRequest by remember { mutableStateOf<PreviewEffectsRequest?>(null) }
+    var effectsButtonBounds by remember { mutableStateOf<Rect?>(null) }
+    val showEffectsButton = photoEffectsViewModel != null && showPreviewPhotoEffects(
+        enabled = photoEffectsEnabled,
+        isReview = review != null,
+        file = currentFile,
+    )
     var cropFile by remember { mutableStateOf<NikonCamera.FileInfo?>(null) }
     var cropPreview by remember { mutableStateOf<com.ztransfer.crop.CropPreview?>(null) }
     var cropFailed by remember { mutableStateOf(false) }
@@ -358,6 +405,13 @@ internal fun PhotoPreviewOverlay(
     }
     LaunchedEffect(closing) {
         if (closing) {
+            if (latestReview != null) {
+                // Monitor review owns a full-screen black surface outside this overlay.
+                // Let that host fade everything together instead of fading into its black
+                // backdrop first and then abruptly removing the backdrop and close button.
+                latestOnDismiss(null)
+                return@LaunchedEffect
+            }
             // 长列表的远距离预定位发生在不透明预览层之后；随后才向最新格子坐标缩回，
             // 因此既不会暴露 LazyGrid 的长距离跳段，也不会飞回已经失效的旧格位。
             val returnFile = latestCurrentFile
@@ -390,20 +444,21 @@ internal fun PhotoPreviewOverlay(
     var previewPlacement by remember(currentHandle) { mutableStateOf<PreviewImagePlacement?>(null) }
     var cropPlacement by remember { mutableStateOf<PreviewImagePlacement?>(null) }
     var cropBaseScale by remember { mutableFloatStateOf(1f) }
-    // Fixed viewport leaves the raised action row clear in both modes.
-    val previewImageBottomInset = with(LocalDensity.current) {
-        WindowInsets.navigationBars.getBottom(this).toDp() + 32.dp + 44.dp + 12.dp
+    // The monitor review surface already applies rotated safe-area insets. Only the album
+    // overlay reads raw system bars here; reading them again would double the review margins.
+    val previewImageBottomInset = if (landscapeReview) 0.dp else with(LocalDensity.current) {
+        (if (review == null) WindowInsets.navigationBars.getBottom(this).toDp() else 0.dp) + 32.dp + 44.dp + 12.dp
     }
     val previewInfoBottom = with(LocalDensity.current) {
-        WindowInsets.statusBars.getTop(this).toDp() +
+        (if (review == null) WindowInsets.statusBars.getTop(this).toDp() else 0.dp) +
             if (currentFile != null && (currentFile.handle in burstHandles || currentFile.isProtected)) 112.dp else 70.dp
     }
-    val previewImageTop = with(androidx.compose.ui.platform.LocalDensity.current) {
+    val previewImageTop = if (landscapeReview) null else with(androidx.compose.ui.platform.LocalDensity.current) {
         val ob = overlayBounds
         val target = queueTargetBounds
         if (ob != null && target != null && target.center.y < ob.center.y)
             (target.bottom-ob.top).coerceAtLeast(0f).toDp()+20.dp
-        else WindowInsets.statusBars.getTop(this).toDp()+62.dp
+        else (if (review == null) WindowInsets.statusBars.getTop(this).toDp() else 0.dp) + 62.dp
     }
     val cropLayoutProgress = remember { Animatable(0f) }
     LaunchedEffect(cropFile != null) {
@@ -459,11 +514,13 @@ internal fun PhotoPreviewOverlay(
         }
     }
     val startClose: () -> Unit = {
-        if (cropFile != null) closeCrop()
-        else if (!burstTransitionBusy && !cropRestoring) closing = true
+        if (effectsRequest == null) {
+            if (cropFile != null) closeCrop()
+            else if (!burstTransitionBusy && !cropRestoring) closing = true
+        }
     }
-    BackHandler(enabled = !closing) { startClose() }
-    val previewGesturesEnabled = cropFile == null && !cropRestoring && cropLayoutProgress.value == 0f
+    BackHandler(enabled = !closing && effectsRequest == null) { startClose() }
+    val previewGesturesEnabled = effectsRequest == null && cropFile == null && !cropRestoring && cropLayoutProgress.value == 0f
     LaunchedEffect(cropFile,cropRetry,cropFile?.handle?.let(highResolutionBitmaps::get),cropFile?.handle?.let(fhdUnavailable::get),cameraState.isConnectedToCamera) {
         val file=cropFile
         if(file==null) {
@@ -611,7 +668,7 @@ internal fun PhotoPreviewOverlay(
         cropVisual: CropQueueVisual? = null,
         enqueue: () -> Boolean,
     ): Boolean {
-        if (queueAnimating || closing) return false
+        if (review != null || queueAnimating || closing) return false
         // 父层先完成目录/连接校验并确认真实入队；被拒绝时不抬图、不放残影、
         // 不触发胶囊接收，避免视觉反馈与实际队列相矛盾。
         if (!enqueue()) return false
@@ -886,10 +943,13 @@ internal fun PhotoPreviewOverlay(
         try {
             var histogram: LuminanceHistogram? = null
             var previewOrientation: Int? = null
-            val res = cameraViewModel.loadFhdPreview(file) { bytes ->
+            val onJpeg: (ByteArray) -> Unit = { bytes ->
                 previewOrientation = com.ztransfer.crop.parseJpegCropOrientation(bytes)
                 histogram = previewHistogramFromJpeg(bytes)
-            } ?: run {
+            }
+            val reviewLoader = latestReview
+            val res = (if (reviewLoader != null) reviewLoader.loadPreview(file, onJpeg)
+                else cameraViewModel.loadFhdPreview(file, onJpeg)) ?: run {
                 fhdUnavailable[h] = true
                 return false
             }
@@ -944,7 +1004,8 @@ internal fun PhotoPreviewOverlay(
         pagerState.currentPage,
         currentHandle,
         cameraState.isConnectedToCamera,
-        deferredLoadsEnabled
+        deferredLoadsEnabled,
+        fhdRetry,
     ) {
         if (!deferredLoadsEnabled) return@LaunchedEffect
         val cp = pagerState.currentPage
@@ -956,6 +1017,7 @@ internal fun PhotoPreviewOverlay(
                 loadExifPage(cp)
             }
         }
+        if (review != null && cp >= previewItems.size - 3) latestReview?.loadMore?.invoke()
         val allowNeighborCameraRequest = !currentTransfersBusy &&
             cameraState.isConnectedToCamera
         if (cp > 0) {
@@ -1000,13 +1062,26 @@ internal fun PhotoPreviewOverlay(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned { overlayBounds = it.boundsInRoot() }
-            .pointerInput(currentHandle, currentZoomed, queueAnimating, closing, previewGesturesEnabled) {
+            .pointerInput(review != null) {
+                if (review == null) return@pointerInput
+                // Observe before the pager/image recognizers. A page replacement while dragging
+                // must not turn the end of that drag into a tap on the incoming image.
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    reviewTap.begin(down.position)
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        reviewTap.observe(event.changes.map { it.position }, viewConfiguration.touchSlop)
+                    } while (event.changes.any { it.pressed })
+                }
+            }
+            .pointerInput(currentHandle, currentZoomed, queueAnimating, closing, previewGesturesEnabled, review != null) {
                 val touchSlop = viewConfiguration.touchSlop
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val file = currentFile
                     val canSwipeToQueue =
-                        file != null && previewGesturesEnabled && !currentZoomed && !queueAnimating && !closing &&
+                        review == null && file != null && previewGesturesEnabled && !currentZoomed && !queueAnimating && !closing &&
                             progress.value >= 0.99f && !pagerState.isScrollInProgress &&
                             abs(pagerState.currentPageOffsetFraction) < 0.01f
 
@@ -1075,7 +1150,7 @@ internal fun PhotoPreviewOverlay(
                 .fillMaxSize()
                 // 透明黑直接绘制，不让 graphicsLayer(alpha) 创建全屏离屏缓冲。
                 .drawBehind {
-                    drawRect(Color.Black, alpha = 0.74f * progress.value)
+                    drawRect(Color.Black, alpha = (if (review != null) 1f else 0.74f) * progress.value)
                 }
         )
 
@@ -1137,6 +1212,8 @@ internal fun PhotoPreviewOverlay(
                         bottomInset = previewImageBottomInset,
                         imageTop = previewImageTop,
                         infoBottom = previewInfoBottom,
+                        modifier = if (landscapeReview) Modifier.padding(8.dp) else Modifier,
+                        tapWhenZoomed = review != null,
                         cropProgress = cropLayoutProgress.value,
                         isLoadingFhd = highResolutionLoading.containsKey(file.handle),
                         allowRemoteThumbnailFallback = allowPreviewRemoteThumbnailFallback(
@@ -1155,7 +1232,10 @@ internal fun PhotoPreviewOverlay(
                             else displayedBitmaps[file.handle] = bitmap
                         },
                         onZoomedChange = { reportedZoomed = it },
-                        onTap = startClose
+                        onTap = {
+                            if (review == null || (reviewTap.allowed && !pagerState.isScrollInProgress &&
+                                    abs(pagerState.currentPageOffsetFraction) < .01f)) startClose()
+                        }
                     )
                 }
                 is PhotoPreviewItem.BurstCollection -> {
@@ -1283,7 +1363,12 @@ internal fun PhotoPreviewOverlay(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .navigationBarsPadding()
-                        .padding(start = 20.dp, bottom = 72.dp)
+                        .padding(start = if (landscapeReview) 12.dp else 20.dp,
+                            bottom = when {
+                                landscapeReview -> 8.dp
+                                review == null -> 80.dp
+                                else -> 72.dp
+                            })
                         .graphicsLayer {
                             val swipe =
                                 (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
@@ -1299,7 +1384,10 @@ internal fun PhotoPreviewOverlay(
         // 文件名与下方曝光参数共用同一套无底框文字样式。随翻页跟手渐隐/渐显，
         // 内容在滑过半程、容器已接近透明时切换，避免新旧文件名硬叠在一起。
         currentFile?.let { file ->
-            val title = file.fileName
+            val rawExtension = (currentItem as? PhotoPreviewItem.Photo)?.pairedRawExtension
+            val title = file.fileName + (rawExtension?.let {
+                " +${it.removePrefix(".").uppercase(java.util.Locale.ROOT)}"
+            } ?: "")
             val task = currentFile?.let(queueTaskFor)
             val overlayTask = task?.takeIf { showsQueueStatusOverlay(it.status) }
             val transferred = currentFile?.let(isTransferred) == true
@@ -1308,7 +1396,7 @@ internal fun PhotoPreviewOverlay(
                     .align(Alignment.TopStart)
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(top = 6.dp, start = 12.dp, end = 184.dp)
+                    .padding(top = 6.dp, start = 12.dp, end = if (review != null) 64.dp else 184.dp)
                     // 与右上队列胶囊共用 36dp 顶栏高度，纯文本也保持同一条中心线。
                     .height(36.dp)
                     .graphicsLayer { alpha=1f-cropUiAlpha },
@@ -1448,6 +1536,30 @@ internal fun PhotoPreviewOverlay(
             )
         }
 
+        if (review != null) {
+            RemoteReviewCloseButton(landscape = landscapeReview, onClick = startClose)
+            val fhdFailed = currentHandle?.let { fhdUnavailable[it] == true } == true
+            val moreFailed = pagerState.currentPage == previewItems.lastIndex && review.loadMoreFailed
+            if (fhdFailed || !cameraState.isConnectedToCamera || moreFailed) {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        if (fhdFailed) { currentHandle?.let { fhdUnavailable.remove(it) }; fhdRetry++ }
+                        if (moreFailed) latestReview?.loadMore?.invoke()
+                    },
+                    enabled = cameraState.isConnectedToCamera,
+                    modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding()
+                        .padding(start = 12.dp, bottom = if (landscapeReview) 8.dp else 32.dp),
+                ) {
+                    Text(stringResource(if (!cameraState.isConnectedToCamera) R.string.remote_review_disconnected
+                        else R.string.remote_review_retry), color = Color.White)
+                }
+            }
+            if (review.loadingMore && pagerState.currentPage == previewItems.lastIndex) {
+                CircularProgressIndicator(Modifier.align(Alignment.CenterEnd).padding(12.dp).size(20.dp),
+                    color = Color.White, strokeWidth = 2.dp)
+            }
+        }
+
         // 文件名下方：当前照片的 EXIF 参数。
         // 跟手淡入淡出：alpha 由翻页滚动进度实时驱动——离开当前页时随手指滑动淡出、
         // 新页吸附到位时淡入，不等翻完。内容在滑过半（currentPage 翻转、此刻 alpha≈0
@@ -1491,106 +1603,161 @@ internal fun PhotoPreviewOverlay(
             }
         }
 
-        // 普通照片沿用右下旋转/入队；合集页改为底部左右双按钮，与列表卡的
-        // “左下 + / 右下 >”完全同语义。合集展开后自动进入第一张成员。
-        when (val item = currentItem) {
-            is PhotoPreviewItem.Photo -> {
+        // 工具行保留到淡出结束；翻到连拍合集也不能直接卸载按钮的显隐动画。
+        val photoActions = (currentItem as? PhotoPreviewItem.Photo)?.let { photo ->
+            PreviewPhotoActions(
+                photo,
+                (previewBurstCollectionPage(previewItems, pagerState.currentPage) ?: -1) in
+                    0 until pagerState.currentPage,
+            )
+        }
+        var retainedPhotoActions by remember { mutableStateOf(photoActions) }
+        SideEffect { if (photoActions != null) retainedPhotoActions = photoActions }
+        AnimatedVisibility(
+            visible = photoActions != null,
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(180)),
+            label = "previewPhotoTools",
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = if (landscapeReview) 12.dp else if (review != null) 20.dp else 76.dp,
+                    bottom = if (landscapeReview) 8.dp else 32.dp)
+                .graphicsLayer {
+                    translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                    alpha = progress.value * burstPagerAlpha.value * (1f-cropUiAlpha)
+                },
+        ) {
+            (photoActions ?: retainedPhotoActions)?.let { actions ->
+                val item = actions.photo
                 val current = item.file
-                val memberBurstId = item.burstId
-                val memberCollectionPage = previewBurstCollectionPage(
-                    previewItems,
-                    pagerState.currentPage,
-                ) ?: -1
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .navigationBarsPadding()
-                        .padding(end = 76.dp, bottom = 32.dp)
-                        .graphicsLayer {
-                            translationX =
-                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
-                            alpha = progress.value * burstPagerAlpha.value * (1f-cropUiAlpha)
-                        },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (memberCollectionPage in 0 until pagerState.currentPage) {
-                        BurstMemberCollapseButton(
-                            // 进入成员页时按钮直接以完整形态出现；连拍过渡的防重由
-                            // collapsePreviewBurstMember 统一拦截，不借禁用态制造透明渐变。
-                            enabled = previewGesturesEnabled && !queueAnimating && !queueGestureActive &&
-                                queueMotionJob?.isActive != true,
-                            onClick = {
-                                memberBurstId?.let(collapsePreviewBurstMember)
-                            },
-                        )
-                    }
-                    AnimatedVisibility(
-                        visible=current.extension in setOf(".jpg", ".jpeg"),
-                        enter=fadeIn(tween(180)),
-                        exit=fadeOut(tween(180)),
-                        label="previewCropButton",
+                // 淡出的旧页工具只供显示，不能触发上一张照片的编辑或传输。
+                val actionInputsEnabled = previewGesturesEnabled && !closing &&
+                    currentHandle == current.handle && !pagerState.isScrollInProgress &&
+                    abs(pagerState.currentPageOffsetFraction) < .01f
+                BoxWithConstraints {
+                    // 连拍成员最多多一个收起按钮；窄屏先减间距，再温和缩小按钮。
+                    val actionCount = 3 + (if (photoEffectsViewModel != null && photoEffectsEnabled) 1 else 0) +
+                        (if (actions.canCollapseBurst) 1 else 0)
+                    val actionGap = ((maxWidth - 44.dp * actionCount) / (actionCount - 1))
+                        .coerceIn(4.dp, 12.dp)
+                    val actionSize = ((maxWidth - actionGap * (actionCount - 1)) / actionCount)
+                        .coerceAtMost(44.dp)
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        GlassButton(onClick = {
-                            if (current.extension in setOf(".jpg", ".jpeg") && previewGesturesEnabled && !burstTransitionBusy && !queueAnimating && !queueGestureActive) {
-                                haptics.tick()
-                                cropPlacement=previewPlacement
-                                cropInitialScale=previewViewport.scale.floatValue
-                                cropInitialOffset=previewViewport.offset.value
-                                cropPreview = null; cropFailed = false; cropFile = current
-                            }
-                        }, modifier = Modifier.size(44.dp), shape = CircleShape,
-                            contentPadding = PaddingValues(0.dp)) {
-                            Icon(Icons.Default.Crop, stringResource(R.string.crop_title),
-                                tint = AppTheme.colors.accentBlue, modifier = Modifier.size(20.dp))
+                        if (actions.canCollapseBurst) {
+                            BurstMemberCollapseButton(
+                                buttonSize = actionSize,
+                                // 进入成员页时按钮直接以完整形态出现；连拍过渡的防重由
+                                // collapsePreviewBurstMember 统一拦截，不借禁用态制造透明渐变。
+                                enabled = actionInputsEnabled && !queueAnimating && !queueGestureActive &&
+                                    queueMotionJob?.isActive != true,
+                                onClick = {
+                                    item.burstId?.let(collapsePreviewBurstMember)
+                                },
+                            )
+                            Spacer(Modifier.width(actionGap))
                         }
-                    }
-                    if (current.extension !in VIDEO_EXTENSIONS) {
-                        PreviewHistogramButton(
-                            mode = histogramMode,
-                            onClick = {
-                                if(previewGesturesEnabled) onHistogramModeChanged(histogramMode.next())
-                            },
-                        )
-                        PreviewRotationButton(onClick = {
-                            if (previewGesturesEnabled && !burstTransitionBusy) {
-                                val nextDegrees = rotationDegrees - 90f
-                                rotationDegrees = nextDegrees
-                                // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
-                                val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
-                                onRotationChanged(nextTurns)
+                        PreviewPhotoActionVisibility(
+                            visible = photoEffectsViewModel != null && showPreviewPhotoEffects(
+                                photoEffectsEnabled, review != null, current,
+                            ),
+                            label = "previewEffectsButton",
+                            trailingSpace = actionGap,
+                        ) {
+                            GlassButton(
+                                onClick = {
+                                    if (showEffectsButton && actionInputsEnabled &&
+                                        !burstTransitionBusy && !queueAnimating && !queueGestureActive) {
+                                        haptics.tick()
+                                        effectsRequest = PreviewEffectsRequest(
+                                            current, effectsButtonBounds,
+                                            Math.floorMod((-rotationDegrees / 90f).roundToInt(), 4),
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.size(actionSize)
+                                    .onGloballyPositioned { effectsButtonBounds = it.boundsInRoot() },
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(0.dp),
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, stringResource(R.string.photo_effects_open_editor),
+                                    tint = AppTheme.colors.accentOrange, modifier = Modifier.size(20.dp))
                             }
-                        })
-                    }
+                        }
+                        PreviewPhotoActionVisibility(
+                            visible = review == null && current.extension in setOf(".jpg", ".jpeg"),
+                            label = "previewCropButton",
+                            trailingSpace = actionGap,
+                        ) {
+                            GlassButton(onClick = {
+                                if (current.extension in setOf(".jpg", ".jpeg") && actionInputsEnabled && !burstTransitionBusy && !queueAnimating && !queueGestureActive) {
+                                    haptics.tick()
+                                    cropPlacement=previewPlacement
+                                    cropInitialScale=previewViewport.scale.floatValue
+                                    cropInitialOffset=previewViewport.offset.value
+                                    cropPreview = null; cropFailed = false; cropFile = current
+                                }
+                            }, modifier = Modifier.size(actionSize), shape = CircleShape,
+                                contentPadding = PaddingValues(0.dp)) {
+                                Icon(Icons.Default.Crop, stringResource(R.string.crop_title),
+                                    tint = AppTheme.colors.accentBlue, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        PreviewPhotoActionVisibility(
+                            visible = current.extension !in VIDEO_EXTENSIONS,
+                            label = "previewImageTools",
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) {
+                                PreviewHistogramButton(
+                                    buttonSize = actionSize,
+                                    mode = histogramMode,
+                                    onClick = {
+                                        if(actionInputsEnabled) onHistogramModeChanged(histogramMode.next())
+                                    },
+                                )
+                                PreviewRotationButton(buttonSize = actionSize, onClick = {
+                                    if (actionInputsEnabled && !burstTransitionBusy) {
+                                        val nextDegrees = rotationDegrees - 90f
+                                        rotationDegrees = nextDegrees
+                                        // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
+                                        val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
+                                        onRotationChanged(nextTurns)
+                                    }
+                                })
+                            }
+                        }
 
+                    }
                 }
             }
-            is PhotoPreviewItem.BurstCollection -> {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(bottom = 112.dp)
-                        .graphicsLayer {
-                            translationX =
-                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
-                            alpha = progress.value * burstPagerAlpha.value * (1f-cropUiAlpha)
-                        },
-                    horizontalArrangement = Arrangement.spacedBy(22.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TransferQueueButton(
-                        onClick = {
-                            if (cropFile==null && cropUiAlpha==0f && !burstTransitionBusy) enqueueBurstFromPreview(item)
-                        },
-                        buttonSize = 48.dp
-                    )
-                    BurstCollectionExpandButton(
-                        onClick = { expandPreviewBurstCollection(item) }
-                    )
-                }
+        }
+        (currentItem as? PhotoPreviewItem.BurstCollection)?.let { item ->
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 112.dp)
+                    .graphicsLayer {
+                        translationX =
+                            (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                        alpha = progress.value * burstPagerAlpha.value * (1f-cropUiAlpha)
+                    },
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TransferQueueButton(
+                    onClick = {
+                        if (cropFile==null && cropUiAlpha==0f && !burstTransitionBusy) enqueueBurstFromPreview(item)
+                    },
+                    buttonSize = 48.dp
+                )
+                BurstCollectionExpandButton(
+                    onClick = { expandPreviewBurstCollection(item) }
+                )
             }
-            null -> Unit
         }
         AnimatedVisibility(visible = cropFile != null,
             enter = fadeIn(tween(180)), exit = fadeOut(tween(180))) {
@@ -1624,7 +1791,7 @@ internal fun PhotoPreviewOverlay(
                 )
         }
         // One fixed action slot: only its icon changes between queue and crop confirmation.
-        if (currentItem is PhotoPreviewItem.Photo) {
+        if (review == null && currentItem is PhotoPreviewItem.Photo) {
             val editing = cropFile != null
             val enabled = if (editing) cropGeometry?.hasCrop == true && !cropConfirming
                 else previewGesturesEnabled && !burstTransitionBusy && !queueAnimating
@@ -1666,6 +1833,74 @@ internal fun PhotoPreviewOverlay(
 
         queueFlightCrop?.let { visual ->
             CropQueueFlightGhost(visual,queueFlightProgress,queueFlightTarget,overlayBounds)
+        }
+        effectsRequest?.let { request ->
+            photoEffectsViewModel?.let { effectsViewModel ->
+                // 复用这张照片正在进行的 FHD/EXIF 加载；不另取最新照片、不另发相机请求。
+                val source = highResolutionBitmaps[request.file.handle] ?: displayedBitmaps[request.file.handle]
+                PreviewEffectsDialog {
+                    SettingsOverlay(
+                        viewModel = effectsViewModel,
+                        effectsOnly = true,
+                        effectPreviewSource = source?.asAndroidBitmap(),
+                        effectPreviewInitialRotationQuarterTurns = request.rotationQuarterTurns,
+                        effectPreviewExif = exifData[request.file.handle],
+                        effectPreviewCameraManufacturer = cameraState.cameraManufacturer,
+                        effectPreviewCameraModel = cameraState.cameraModel,
+                        anchorBounds = request.anchor,
+                        onDismiss = { effectsRequest = null },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 独立窗口覆盖根层队列控件，效果窗及其成片大图共用同一层级。 */
+@Composable
+private fun PreviewEffectsDialog(content: @Composable () -> Unit) {
+    val hostView = LocalView.current
+    val hostContext = LocalContext.current
+    val hostConfiguration = LocalConfiguration.current
+    Dialog(
+        // 所有返回/点外侧关闭仍由内部弹层处理，等原有收起动画结束才销毁窗口。
+        onDismissRequest = {},
+        properties = DialogProperties(
+            // 1.7.x 的 false 分支按 screenHeightDp 测量，会漏掉旧系统的系统栏区域。
+            // 保留窗口原生测量，再显式铺满，让遮罩及动画锚点与宿主根坐标一致。
+            usePlatformDefaultWidth = true,
+            decorFitsSystemWindows = false,
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        val view = LocalView.current
+        val window = (view.parent as DialogWindowProvider).window
+        SideEffect {
+            window.setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+            )
+            // 遮罩和动画统一交给 AnchorPopup，避免系统再叠一层暗色或退场动画。
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            window.setWindowAnimations(0)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            hostView.context.findActivity()?.window?.let { hostWindow ->
+                val hostController = WindowCompat.getInsetsController(hostWindow, hostView)
+                WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = hostController.isAppearanceLightStatusBars
+                    isAppearanceLightNavigationBars = hostController.isAppearanceLightNavigationBars
+                }
+            }
+        }
+        // Dialog 默认从 View.context 重建资源上下文；延续应用内即时切换的语言，
+        // 其余 Local（窗口、焦点、返回分发等）仍使用 Dialog 自己的实例。
+        CompositionLocalProvider(
+            LocalContext provides hostContext,
+            LocalConfiguration provides hostConfiguration,
+        ) {
+            Box(Modifier.fillMaxSize()) { content() }
         }
     }
 }
@@ -1973,10 +2208,12 @@ private fun BurstCollectionExpandButton(onClick: () -> Unit) =
 private fun BurstMemberCollapseButton(
     enabled: Boolean,
     onClick: () -> Unit,
+    buttonSize: Dp = 44.dp,
 ) = BurstCollectionNavigationButton(
     expand = false,
     enabled = enabled,
     onClick = onClick,
+    buttonSize = buttonSize,
 )
 
 /** 展开与缩起使用固定的右/左折角；按钮本身不跟随合集状态变形。 */
@@ -1985,13 +2222,14 @@ private fun BurstCollectionNavigationButton(
     expand: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    buttonSize: Dp = 44.dp,
 ) {
     val colors = AppTheme.colors
     val description = stringResource(if (expand) R.string.cd_expand else R.string.cd_collapse)
     GlassButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(44.dp),
+        modifier = Modifier.size(buttonSize),
         shape = CircleShape,
         contentPadding = PaddingValues(0.dp),
     ) {
@@ -2092,17 +2330,36 @@ private fun PreviewInfoText(
     }
 }
 
-/** Preview-styled switch around the monitor page's shared histogram icon and analysis overlay. */
+/** 预览工具共用原位淡入淡出，显隐期间保持按钮尺寸。 */
+@Composable
+private fun RowScope.PreviewPhotoActionVisibility(
+    visible: Boolean,
+    label: String,
+    trailingSpace: Dp = 0.dp,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(180)),
+        exit = fadeOut(tween(180)),
+        label = label,
+    ) {
+        // 按钮及其间距保持到淡出结束，不做横向展开或收缩。
+        Box(Modifier.padding(end = trailingSpace)) { content() }
+    }
+}
+
 @Composable
 private fun PreviewHistogramButton(
     mode: HistogramMode,
     onClick: () -> Unit,
+    buttonSize: Dp = 44.dp,
 ) {
     val colors = AppTheme.colors
     val description = stringResource(R.string.cd_preview_histogram)
     GlassButton(
         onClick = onClick,
-        modifier = Modifier.size(44.dp),
+        modifier = Modifier.size(buttonSize),
         shape = CircleShape,
         contentPadding = PaddingValues(0.dp),
         active = mode != HistogramMode.OFF,
@@ -2162,6 +2419,8 @@ private fun PreviewPage(
     bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
     imageTop: androidx.compose.ui.unit.Dp? = null,
     infoBottom: Dp = 0.dp,
+    modifier: Modifier = Modifier,
+    tapWhenZoomed: Boolean = false,
     cropProgress: Float = 0f,
     isLoadingFhd: Boolean,
     allowRemoteThumbnailFallback: Boolean,
@@ -2225,7 +2484,7 @@ private fun PreviewPage(
     }
     val isVideo = file.extension in VIDEO_EXTENSIONS
     ZoomablePreviewViewport(
-        modifier = Modifier.padding(bottom=bottomInset),
+        modifier = modifier.padding(bottom=bottomInset),
         imageTop = imageTop,
         infoBottom = infoBottom,
         cropProgress = cropProgress,
@@ -2236,6 +2495,7 @@ private fun PreviewPage(
         rotationDegrees = rotationDegrees,
         isCurrent = isCurrent,
         zoomEnabled = interactive && isCurrent && !isVideo && displayBitmap != null,
+        tapWhenZoomed = tapWhenZoomed,
         onZoomedChange = onZoomedChange,
         onTap = { if(interactive) onTap() },
     ) { imageTransform ->
@@ -2339,6 +2599,7 @@ private fun ZoomablePreviewViewport(
     zoomEnabled: Boolean,
     onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit,
+    tapWhenZoomed: Boolean = false,
     comparisonEnabled: Boolean = false,
     onComparisonChange: (Boolean) -> Unit = {},
     content: @Composable BoxScope.(Modifier) -> Unit,
@@ -2534,7 +2795,7 @@ private fun ZoomablePreviewViewport(
                     onLongPress = if (comparisonEnabled) ({
                         comparisonFeedback?.trigger { latestOnComparisonChange(true) }
                     }) else null,
-                    onTap = { if (scale <= 1.01f) onTap() },
+                    onTap = { if (scale <= 1.01f || tapWhenZoomed) onTap() },
                     onDoubleTap = { tap ->
                         val aspect = imageAspect
                         if (!zoomEnabled || aspect == null) return@detectTapGestures

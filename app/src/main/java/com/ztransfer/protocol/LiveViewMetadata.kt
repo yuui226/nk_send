@@ -66,7 +66,7 @@ data class LiveViewMetadata(
     /** `StartTracking(x, y)` 与 AF 框记录共同使用的完整画面坐标系。 */
     val trackingCoordinateWidth: Int,
     val trackingCoordinateHeight: Int,
-    /** 帧头声明的 AF 框/显示网格；它不是 `ChangeAfArea(x, y)` 的命令坐标范围。 */
+    /** 帧头声明的预览图尺寸；它不是 `ChangeAfArea(x, y)` 的命令坐标范围。 */
     val focusCoordinateWidth: Int?,
     val focusCoordinateHeight: Int?,
     /** 视频 Live View 的机内 L/R 电平；头型不支持或字段校验失败时为 null。 */
@@ -86,7 +86,9 @@ data class LiveViewPacket(
     /** 收到完整帧的单调时钟时间；用于排除 AF 完成前已排队的旧帧。 */
     val receivedAtElapsedMs: Long,
     /** Actual operation after any protocol fallback. */
-    val operation: Int = 0
+    val operation: Int = 0,
+    /** Independent of AF geometry: video time is also available in legacy frames. */
+    val remainingVideoTimeMs: Long? = metadata?.remainingVideoTimeMs
 )
 
 private fun ByteArray.be16(offset: Int): Int =
@@ -100,14 +102,27 @@ private const val COMPACT_SOUND_LEVELS_OFFSET = 388
 private const val EXTENDED_LIVE_VIEW_HEADER_SIZE = 1024
 private const val EXTENDED_SOUND_LEVELS_OFFSET = 824
 
+/** Keep version/length validation shared by geometry and the extended video block. */
+private fun ByteArray.hasKnownLiveViewLayout(headerSize: Int): Boolean {
+    if (headerSize != COMPACT_LIVE_VIEW_HEADER_SIZE && headerSize != EXTENDED_LIVE_VIEW_HEADER_SIZE) return false
+    if (size < headerSize || be32(8) != headerSize.toLong()) return false
+    return when (be16(0)) {
+        1 -> be16(2) == 0 // Existing Z30 v1.0 support, including the extended layout.
+        // Nikon ZfUsbMtpE_02, §9.7.1 (pp. 574–576): v2.1, 1024-byte header.
+        2 -> be16(2) == 1 && headerSize == EXTENDED_LIVE_VIEW_HEADER_SIZE
+        else -> false
+    }
+}
+
 /**
  * 解析 Nikon GetLiveViewImageEx(0x9428) 的 Display Information Data。
  *
- * 该布局由 Z 30 / fw 1.20 的 SnapBridge 实抓确认：
+ * Z 30 / fw 1.20 的 v1.0 布局由 SnapBridge 实抓确认；Zf 的 v2.1 扩展布局
+ * 按官方 ZfUsbMtpE_02 §9.7.1 核对，共用以下几何字段：
  * - 大端字段；
  * - +8 为头长，+12 为 JPEG 长度；
  * - +16/+18 为完整坐标系；
- * - +28/+30 为 AF 框/显示数据使用的网格；不能直接作为 `ChangeAfArea` 的命令坐标范围；
+ * - +28/+30 为预览图尺寸；不能直接作为 `ChangeAfArea` 的命令坐标范围；
  * - +42 为对焦判断（0 无信息、1 未合焦、2 合焦）；
  * - +44/+45 为 AF 框数量/选中索引；
  * - +48 起每框 8 字节：宽、高、中心 X、中心 Y。
@@ -138,10 +153,8 @@ internal fun parseLiveViewMetadata(
     ) {
         return null
     }
-    // 目前只验证过 Z 30 的 Display Information Data v1。新机型若换了头版本，
-    // 宁可退回应用请求点，也不能把未知字段误读成 AF 框。
-    if (payload.be16(0) != 1 || payload.be16(2) != 0) return null
-    if (payload.be32(8) != jpegOffset.toLong()) return null
+    // Accept only documented layouts; a newer major version is not necessarily compatible.
+    if (!payload.hasKnownLiveViewLayout(jpegOffset)) return null
     if (payload.be32(12) != (payload.size - jpegOffset).toLong()) return null
     if (
         payload[jpegOffset] != 0xFF.toByte() ||
@@ -333,15 +346,48 @@ internal fun parseCompactLiveViewAttitude(payload: ByteArray, headerSize: Int): 
 /** Video block, separate from the LV shutdown countdown.
  * Z30 V1.20 compact sample: +384 matches legacy 0x9203 +64 exactly (7,500,000).
  * +380 is not the remaining-time field. Recording flag remains +392, audio +388.
- * 1024-byte layout follows the darkgrade Nikon codec independently.
+ * 1024-byte v2.1 layout is documented in Nikon ZfUsbMtpE_02 §9.7.1.
  */
 internal fun parseLiveViewRemainingVideoTime(payload: ByteArray, headerSize: Int): Long? {
     val offset = when (headerSize) { 512 -> 384; 1024 -> 816; else -> return null }
-    if (payload.size < headerSize || payload.be16(0) != 1 || payload.be16(2) != 0 ||
-        payload.be32(8) != headerSize.toLong()) return null
+    if (!payload.hasKnownLiveViewLayout(headerSize)) return null
     val recording = payload[if (headerSize == 512) 392 else 828].toInt() and 0xFF
     if (recording !in 0..1) return null
     val millis = payload.be32(offset)
     // Reserved zero-filled standby blocks do not mean the card is full.
     return millis.takeIf { it in 0L..86_400_000L && (it > 0 || recording == 1) }
+}
+
+/** Read video time without requiring usable AF coordinates. Unknown layouts stay unknown. */
+internal fun parseLiveViewPacketVideoTime(
+    payload: ByteArray,
+    jpegOffset: Int,
+    operation: Int,
+    model: String?
+): Long? {
+    if ((jpegOffset != 384 && jpegOffset != 512 && jpegOffset != 1024) ||
+        payload.size < jpegOffset + 3
+    ) return null
+    if (payload[jpegOffset] != 0xFF.toByte() || payload[jpegOffset + 1] != 0xD8.toByte() ||
+        payload[jpegOffset + 2] != 0xFF.toByte()
+    ) return null
+    return when (operation) {
+        Lab.NK_GET_LIVE_VIEW_IMG_EX -> {
+            if (payload.be32(12) != (payload.size - jpegOffset).toLong()) return null
+            parseLiveViewRemainingVideoTime(payload, jpegOffset)
+        }
+        Lab.NK_GET_LIVE_VIEW_IMG -> {
+            // ZfUsbMtpE_02 §9.7.2: 8-byte size prefix + 376-byte display block.
+            // The Z30 V1.20 capture uses the same +64 time / +68 recording offsets.
+            val knownModel = model.orEmpty().trim().uppercase(java.util.Locale.ROOT)
+                .removePrefix("NIKON ").replace(" ", "")
+            if ((knownModel != "ZF" && knownModel != "Z30") || jpegOffset != 384 ||
+                payload.be32(4) != (payload.size - jpegOffset).toLong()
+            ) return null
+            val recording = payload[68].toInt() and 0xFF
+            val millis = payload.be32(64)
+            millis.takeIf { recording in 0..1 && it in 0L..7_500_000L && (it > 0 || recording == 1) }
+        }
+        else -> null
+    }
 }

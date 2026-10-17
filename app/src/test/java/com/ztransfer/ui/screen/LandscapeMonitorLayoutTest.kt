@@ -76,4 +76,47 @@ class LandscapeMonitorLayoutTest {
         }
     }
 
+    @Test fun photoReviewHasItsOwnFooterSpaceEvenOnNarrowRails() {
+        for (width in listOf(320f, 640f, 860f, 1000f)) {
+            for (height in listOf(240f, 360f, 500f, 800f)) {
+                for (aspect in listOf(1.5f, 2.35f, 3.56f)) {
+                    val layout = landscapeMonitorLayout(width, height, aspect, photoReview = true)
+                    assertTrue(layout.controls.width >= 128f)
+                    assertTrue(layout.footerHeight - layout.shutterSize >= 52f)
+                    assertTrue(layout.controls.bottom <= height)
+                    assertTrue(if (layout.bottomControls) layout.controls.y >= layout.image.bottom
+                        else layout.controls.x >= layout.image.right)
+                    val clusterWidth = if (layout.bottomControls)
+                        maxOf(128f, layout.shutterSize + 52f) else layout.controls.width
+                    val pair = landscapePhotoCaptureSizes(clusterWidth, layout.shutterSize)
+                    assertTrue(pair.width <= clusterWidth + .001f)
+                    assertTrue(pair.shutter >= 48f)
+                    assertTrue(pair.reviewWidth >= 27f)
+                    // DISP is on a different row and must not reduce capture width.
+                    val reviewLeft = 0f
+                    val shutterLeft = if (!layout.bottomControls && layout.columns == 2)
+                        (clusterWidth - pair.shutter) / 2f else clusterWidth - pair.shutter
+                    assertEquals(layout.shutterSize, pair.shutter, .001f)
+                    assertTrue(shutterLeft - (reviewLeft + pair.reviewWidth) >= pair.gap - .001f)
+                    assertTrue(maxOf(pair.shutter, pair.reviewHeight) <= layout.footerHeight - 40f)
+                }
+            }
+        }
+    }
+
+    @Test fun photoCapturePairOnlyShrinksWhenWidthRequiresIt() {
+        val normalRail = landscapePhotoCaptureSizes(128f, 74f)
+        assertEquals(74f, normalRail.shutter, .001f)
+        assertEquals(40f, normalRail.reviewWidth, .001f)
+        val wide = landscapePhotoCaptureSizes(200f, 74f)
+        assertEquals(74f, wide.shutter, .001f)
+        assertEquals(40f, wide.reviewWidth, .001f)
+        assertEquals(48f, wide.reviewHeight, .001f)
+        val narrow = landscapePhotoCaptureSizes(84f, 74f)
+        assertEquals(84f, narrow.width, .001f)
+        assertTrue(narrow.shutter < wide.shutter)
+        assertTrue(narrow.reviewWidth < wide.reviewWidth)
+        assertEquals(narrow.shutter / wide.shutter, narrow.reviewScale, .001f)
+    }
+
 }

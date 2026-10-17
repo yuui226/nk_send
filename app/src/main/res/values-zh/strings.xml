@@ -537,7 +537,10 @@
     <string name="check_update">更新</string>
     <string name="checking_update">检查中…</string>
     <string name="update_latest">已是最新版本</string>
-    <string name="update_check_failed">检查失败，请检查网络</string>
+    <string name="update_check_failed">检查失败</string>
+    <string name="update_copy_download_link">复制下载链接</string>
+    <string name="update_browser_download">浏览器下载</string>
+    <string name="update_browser_unavailable">无法打开浏览器，请复制链接</string>
     <string name="update_available_title">发现新版本</string>
     <string name="update_required_title">必须更新</string>
     <string name="update_version">版本 %1$s</string>
@@ -635,9 +638,8 @@
 
     <string name="remote_tool_lut">LUT</string>
     <string name="lut_off">关闭</string>
-    <string name="lut_choose_folder">选择文件夹</string>
-    <string name="lut_change_folder">更换文件夹</string>
-    <string name="lut_choose_hint">选择含 .cube 文件的文件夹，支持一层子文件夹分类。</string>
+    <string name="lut_folder">LUT目录</string>
+    <string name="lut_choose_hint">选择含 .cube 文件的文件夹，支持一层子文件夹作为分类。</string>
     <string name="lut_monitor_only">仅影响监看，不改变相机原片</string>
     <string name="lut_folder_empty">未找到 .cube 文件</string>
     <string name="lut_folder_missing">文件夹不存在</string>
@@ -658,7 +660,7 @@
     <string name="remote_parameters">曝光参数</string>
     <string name="remote_tool_dock">工具栏</string>
     <string name="photo_lut_set_folder">设置LUT文件目录</string>
-    <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹，支持一层子文件夹分类。长按拨轮可按分类选择 LUT 或更换文件夹。</string>
+    <string name="photo_lut_help">LUT：选择含 .cube 文件的文件夹，支持一层子文件夹作为分类。长按拨轮可按分类选择 LUT 或更换文件夹。</string>
     <string name="photo_frame_width">边框宽度</string>
     <string name="lut_uncategorized">未分类</string>
     <string name="lut_turn_off">关闭 LUT</string>
@@ -705,4 +707,8 @@
     <string name="filter_rating_help_description">开启会加载范围内的评级数据，实现按评级筛选功能。重新开启可重新加载最新评级数据。</string>
     <string name="filter_rating_off">关闭</string>
     <string name="filter_rating_on">开启</string>
+    <string name="remote_review">回看</string>
+    <string name="remote_review_empty">暂无照片</string>
+    <string name="remote_review_retry">加载失败 · 重试</string>
+    <string name="remote_review_disconnected">相机已断开</string>
 </resources>

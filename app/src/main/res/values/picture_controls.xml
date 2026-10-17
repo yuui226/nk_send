@@ -1,0 +1,37 @@
+<resources>
+    <string name="remote_tool_picture_control">Picture Control</string>
+    <string name="picture_control_loading">Loading…</string>
+    <string name="picture_control_write_failed">Operation failed</string>
+    <string name="picture_control_exposure_mode_required">Switch to P/S/A/M</string>
+    <string name="picture_control_failed_restored">Failed. Previous settings restored.</string>
+    <string name="picture_control_check_slot">Operation failed. Check C%1$d.</string>
+    <string name="picture_control_files_failed">Presets unavailable</string>
+    <string name="picture_control_busy_hint">Camera busy</string>
+    <string name="picture_control_test_log">Test log</string>
+    <string name="picture_control_report_use_share">Log too large. Share via Test log.</string>
+    <string name="picture_control_report_share_failed">Could not share log</string>
+    <string name="picture_control_report_save_failed">Log not saved. Share it now.</string>
+    <string name="picture_control_built_in">Built-in</string>
+    <string name="picture_control_folder">Preset folder</string>
+    <string name="picture_control_folder_empty">No .np3 files found</string>
+    <string name="picture_control_choose_folder_hint">Choose a folder containing .np3 files; one level of subfolders is supported as categories.</string>
+    <string name="picture_control_file_read_failed">Could not read file</string>
+    <string name="picture_control_file_invalid">Invalid NP3 file</string>
+    <string name="picture_control_file_unsupported">Unsupported preset</string>
+    <string name="picture_control_flexible_color_unsupported">Flexible Color presets are not supported yet</string>
+    <string name="picture_control_read_timeout">Read timed out</string>
+    <string name="picture_control_slots_title">Camera presets</string>
+    <string name="picture_control_edit_slot">Replace C%1$d</string>
+    <string name="picture_control_slot_empty">Empty</string>
+    <string name="picture_control_slot_unreadable">Could not read</string>
+    <string name="picture_control_slot_unsupported">Unsupported</string>
+    <string name="picture_control_back">Back</string>
+    <string name="picture_control_slots_read_failed">Camera disconnected</string>
+    <string name="picture_control_slot_applied">C%1$d activated</string>
+    <string name="picture_control_slot_cleared">C%1$d cleared</string>
+    <string name="picture_control_slot_busy">Working…</string>
+    <string name="picture_control_clear_slot">Clear</string>
+    <string name="picture_control_clear_confirm">Clear C%1$d?</string>
+    <string name="picture_control_cancel">Cancel</string>
+    <string name="picture_control_confirm">OK</string>
+</resources>

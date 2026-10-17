@@ -11,55 +11,77 @@ import android.os.Build
  */
 internal object HarmonyStorageCompatibility {
     private const val HARMONY_BRAND = "Harmony"
+    // The affected SLY-AL00 reports osBrand "emui" while running Harmony, and its
+    // build changed between field reports (System 104.5.0.001 -> 104.3.5.001).
+    // EMUI builds look like "SLY-AL00 13.0.0.xxx(C00E...)"; only the Harmony runtime
+    // uses the "System <major>.<minor>.<patch>.<build>" form.
+    private val HARMONY_RUNTIME_DISPLAY = Regex("""^System\s+\d+\.\d+\.\d+\.\d+""", RegexOption.IGNORE_CASE)
 
     data class Detection(
         val enabled: Boolean,
+        val huawei: Boolean,
         val manufacturer: String,
         val osBrand: String?,
+        val platformVersion: String?,
+        val display: String,
         val method: String,
         val error: String? = null,
     )
 
-    fun detect(): Detection {
-        val manufacturer = Build.MANUFACTURER.orEmpty()
-        if (!manufacturer.equals("HUAWEI", ignoreCase = true)) {
-            return Detection(false, manufacturer, null, "manufacturer")
-        }
-        return try {
-            val brand = Class.forName("com.huawei.system.BuildEx")
+    fun detect(): Detection = detect(
+        manufacturer = Build.MANUFACTURER.orEmpty(),
+        display = Build.DISPLAY.orEmpty(),
+        readOsBrand = {
+            Class.forName("com.huawei.system.BuildEx")
                 .getMethod("getOsBrand")
                 .invoke(null)
                 ?.toString()
-            val knownInvestigationRuntime = Build.MODEL.equals("SLY-AL00", ignoreCase = true) &&
-                Build.DISPLAY.contains("104.5.0.001", ignoreCase = true)
-            Detection(
-                enabled = brand?.contains(HARMONY_BRAND, ignoreCase = true) == true ||
-                    knownInvestigationRuntime,
-                manufacturer = manufacturer,
-                osBrand = brand,
-                method = if (knownInvestigationRuntime && brand?.contains(HARMONY_BRAND, true) != true) {
-                    "known-runtime-fallback"
-                } else {
-                    "BuildEx.getOsBrand"
-                },
-            )
-        } catch (error: Throwable) {
-            // Do not silently route an affected device through the unsafe SAF path.
-            // The exact fallback is deliberately narrow: it covers the Harmony runtime
-            // family reported by the investigation build while still leaving ordinary
-            // Huawei Android devices unchanged.
-            val model = Build.MODEL.orEmpty()
-            val display = Build.DISPLAY.orEmpty()
-            val knownInvestigationRuntime = model.equals("SLY-AL00", ignoreCase = true) &&
-                display.contains("104.5.0.001", ignoreCase = true)
-            Detection(
-                enabled = knownInvestigationRuntime,
-                manufacturer = manufacturer,
-                osBrand = null,
-                method = if (knownInvestigationRuntime) "known-runtime-fallback" else "BuildEx.getOsBrand",
-                error = "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
-            )
+        },
+        readPlatformVersion = {
+            Class.forName("android.os.SystemProperties")
+                .getMethod("get", String::class.java)
+                .invoke(null, "hw_sc.build.platform.version")
+                ?.toString()
+        },
+    )
+
+    internal fun detect(
+        manufacturer: String,
+        display: String,
+        readOsBrand: () -> String?,
+        readPlatformVersion: () -> String?,
+    ): Detection {
+        if (!manufacturer.equals("HUAWEI", ignoreCase = true)) {
+            return Detection(false, false, manufacturer, null, null, display, "manufacturer")
         }
+        var error: String? = null
+        val brand = try {
+            readOsBrand()
+        } catch (failure: Throwable) {
+            error = "${failure.javaClass.simpleName}: ${failure.message.orEmpty()}"
+            null
+        }
+        val platformVersion = try {
+            readPlatformVersion()?.takeIf { it.isNotBlank() }
+        } catch (_: Throwable) {
+            null
+        }
+        val method = when {
+            brand?.contains(HARMONY_BRAND, ignoreCase = true) == true -> "BuildEx.getOsBrand"
+            HARMONY_RUNTIME_DISPLAY.containsMatchIn(display.trim()) -> "build-display"
+            platformVersion != null -> "platform-version"
+            else -> "none"
+        }
+        return Detection(
+            enabled = method != "none",
+            huawei = true,
+            manufacturer = manufacturer,
+            osBrand = brand,
+            platformVersion = platformVersion,
+            display = display,
+            method = method,
+            error = error,
+        )
     }
 
 }

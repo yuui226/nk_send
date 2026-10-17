@@ -33,8 +33,6 @@ internal class UsbPtpConnection private constructor(
     private val bulkOutRequest: UsbRequest,
     private val interruptIn: UsbEndpoint?,
     private val interruptRequest: UsbRequest?,
-    private val usbVendorId: Int,
-    private val usbProductId: Int,
 ) : Closeable {
 
     data class StreamResult(
@@ -77,43 +75,6 @@ internal class UsbPtpConnection private constructor(
     private val interruptBuffer =
         interruptIn?.let { ByteBuffer.allocate(maxOf(64, it.maxPacketSize)) }
     private var interruptQueued = false
-
-    // Enabled only around a diagnostic download transaction.  Keeping these counters out of the
-    // ordinary read path avoids per-request objects and leaves the transport behavior unchanged.
-    private var diagnosticReadTracing = false
-    private var diagnosticReadRequests = 0L
-    private var diagnosticReadBytes = 0L
-    private var diagnosticZeroPackets = 0L
-    private var diagnosticReadTimeouts = 0L
-
-    internal fun beginDiagnosticReadTrace() {
-        diagnosticReadTracing = true
-        diagnosticReadRequests = 0L
-        diagnosticReadBytes = 0L
-        diagnosticZeroPackets = 0L
-        diagnosticReadTimeouts = 0L
-    }
-
-    internal fun endDiagnosticReadTrace(): UsbReadTraceStats {
-        val result = UsbReadTraceStats(
-            readRequests = diagnosticReadRequests,
-            readBytes = diagnosticReadBytes,
-            zeroPackets = diagnosticZeroPackets,
-            timeouts = diagnosticReadTimeouts,
-        )
-        diagnosticReadTracing = false
-        return result
-    }
-
-    /** Endpoint and request-buffer facts safe to expose in a diagnostic report. */
-    internal fun diagnosticDescription(): String =
-        "vendor=0x${usbVendorId.toString(16)} product=0x${usbProductId.toString(16)} " +
-            "bulkIn=0x${bulkIn.address.toString(16)} maxPacketIn=${bulkIn.maxPacketSize} " +
-            "bulkOut=0x${bulkOut.address.toString(16)} maxPacketOut=${bulkOut.maxPacketSize} " +
-            "readRequestBytes=${usbReadBuffer.size} ioBufferBytes=${ioBuffer.size}" +
-            (interruptIn?.let {
-                " interruptIn=0x${it.address.toString(16)} maxPacketInterrupt=${it.maxPacketSize}"
-            } ?: " interruptIn=none")
 
     /**
      * Keeps the PTP interrupt endpoint armed during Nikon USB remote control.
@@ -204,59 +165,40 @@ internal class UsbPtpConnection private constructor(
      */
     fun receiveDataTo(
         expectedTransactionId: Int,
-        trace: DownloadTrace? = null,
         onDataStart: () -> Unit = {},
         onChunk: (ByteArray, Int, Int) -> Unit
     ): StreamResult {
-        if (trace?.enabled == true) beginDiagnosticReadTrace()
-        try {
-            val first = readHeader()
-            trace?.usbHeader(first.type, first.code, first.transactionId, first.payloadLength)
-            checkTransaction(first, expectedTransactionId)
-            if (first.type == TYPE_RESPONSE) {
-                discardPayload(first.payloadLength)
-                return StreamResult(first.code, 0L, -1L)
-            }
-            if (first.type != TYPE_DATA) {
-                throw IOException("Expected PTP/USB data container, got ${first.type}")
-            }
-            // readHeader() includes the camera-side preparation wait and may prefetch payload bytes.
-            // Notify the caller here so its wall-clock rate accounts for that wait before buffered
-            // payload is copied at memory speed.
-            onDataStart()
-
-            var remaining = first.payloadLength
-            var written = 0L
-            while (remaining > 0L) {
-                val want = minOf(remaining, ioBuffer.size.toLong()).toInt()
-                val count = readSome(ioBuffer, 0, want)
-                onChunk(ioBuffer, 0, count)
-                remaining -= count
-                written += count
-            }
-
-            val response = readHeader()
-            trace?.usbHeader(response.type, response.code, response.transactionId, response.payloadLength)
-            checkTransaction(response, expectedTransactionId)
-            if (response.type != TYPE_RESPONSE) {
-                throw IOException("Expected PTP/USB response container, got ${response.type}")
-            }
-            discardPayload(response.payloadLength)
-            return StreamResult(response.code, written, first.payloadLength)
-        } finally {
-            // The caller consumes this snapshot after receiveDataTo returns; storing it on the
-            // connection keeps the API source-compatible while preserving exception diagnostics.
-            if (trace?.enabled == true) lastDiagnosticReadTrace = endDiagnosticReadTrace()
+        val first = readHeader()
+        checkTransaction(first, expectedTransactionId)
+        if (first.type == TYPE_RESPONSE) {
+            discardPayload(first.payloadLength)
+            return StreamResult(first.code, 0L, -1L)
         }
-    }
+        if (first.type != TYPE_DATA) {
+            throw IOException("Expected PTP/USB data container, got ${first.type}")
+        }
+        // readHeader() includes the camera-side preparation wait and may prefetch payload bytes.
+        // Notify the caller here so its wall-clock rate accounts for that wait before buffered
+        // payload is copied at memory speed.
+        onDataStart()
 
-    @Volatile
-    private var lastDiagnosticReadTrace: UsbReadTraceStats? = null
+        var remaining = first.payloadLength
+        var written = 0L
+        while (remaining > 0L) {
+            val want = minOf(remaining, ioBuffer.size.toLong()).toInt()
+            val count = readSome(ioBuffer, 0, want)
+            onChunk(ioBuffer, 0, count)
+            remaining -= count
+            written += count
+        }
 
-    internal fun takeDiagnosticReadTrace(): UsbReadTraceStats? {
-        val result = lastDiagnosticReadTrace
-        lastDiagnosticReadTrace = null
-        return result
+        val response = readHeader()
+        checkTransaction(response, expectedTransactionId)
+        if (response.type != TYPE_RESPONSE) {
+            throw IOException("Expected PTP/USB response container, got ${response.type}")
+        }
+        discardPayload(response.payloadLength)
+        return StreamResult(response.code, written, first.payloadLength)
     }
 
     override fun close() {
@@ -331,20 +273,16 @@ internal class UsbPtpConnection private constructor(
         while (true) {
             val buffer = usbReadRequestBuffer
             buffer.clear()
-            if (diagnosticReadTracing) diagnosticReadRequests++
             if (!bulkInRequest.queue(buffer)) {
                 throw IOException("PTP/USB bulk IN queue failed endpoint=0x${bulkIn.address.toString(16)}")
             }
             try {
                 waitForRequest(bulkInRequest, readTimeoutMs.coerceAtLeast(1))
             } catch (e: TimeoutException) {
-                if (diagnosticReadTracing) diagnosticReadTimeouts++
                 bulkInRequest.cancel()
                 throw SocketTimeoutException("PTP/USB bulk read timed out")
             }
             val result = buffer.position()
-            if (diagnosticReadTracing) diagnosticReadBytes += result.toLong()
-            if (result == 0 && diagnosticReadTracing) diagnosticZeroPackets++
             if (result > 0) {
                 buffer.flip()
                 buffer.get(usbReadBuffer, 0, result)
@@ -523,8 +461,6 @@ internal class UsbPtpConnection private constructor(
                 outRequest,
                 interruptIn,
                 interruptRequest,
-                device.vendorId,
-                device.productId,
             )
         }
     }

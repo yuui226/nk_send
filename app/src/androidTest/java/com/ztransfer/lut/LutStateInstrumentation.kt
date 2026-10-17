@@ -1,5 +1,6 @@
 package com.ztransfer.lut
 
+import com.ztransfer.presets.PresetIoQueue
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Context
@@ -147,7 +148,7 @@ class LutStateInstrumentation : Instrumentation() {
     }
     private fun drain() {
         val done = CountDownLatch(1)
-        main { LutIoQueue.submit({ Unit }) { done.countDown() } }
+        main { PresetIoQueue.submit({ Unit }) { done.countDown() } }
         check(done.await(4, TimeUnit.SECONDS)) { "IO queue did not settle" }
     }
     private fun table() = CubeLutParser.parse(("LUT_3D_SIZE 2\n" +

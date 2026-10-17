@@ -1,0 +1,63 @@
+{
+  "source": "User-exported Z 30 V1.20 Picture Controls, read from /Volumes/SAVE/NIKON/CUSTOMPC on 2026-10-15; card files unchanged.",
+  "paired_capture": "../z30-v3.tsv",
+  "purpose": "Private test fixtures for NP3 versus GetPicCtrlData comparisons; not app presets.",
+  "comparison": {
+    "camera": "Nikon Z 30 V1.20",
+    "np3_version": "0300",
+    "names": "All six 20-byte name fields match, including padding and the trailing space in C4.",
+    "base_mapping_observed": { "0001": 1, "03c2": 2, "080b": 111, "080c": 112 },
+    "curve_mapping": "NP3 tag 00000002 equals GetPicCtrlData bytes 36..613 in C3, C4 and C5, including all 578 bytes.",
+    "quick_sharp_flag_offset": 23,
+    "quick_sharp_flag_values_C1_through_C6": [0, 0, 0, 0, 0, 1],
+    "wire_contract": {
+      "source": "User-supplied Nikon Command/English/Z 30UsbMtpE_02.pdf, sections 6.2.2.43-46, 6.5.13 and 9.8-9.9",
+      "set_parameters": ["PicCtrlItem (fixed C9=209)", "ModifiedFlag (0=register, 1=adjust existing)", "ShootingMode (0=photo, 1=movie)"],
+      "quick_sharp_flag": "0=off; 1=on ignores the three individual sharpness values. The encoder intentionally writes 0 for these manual NP3 presets.",
+      "dataset": "GetPicCtrlData and SetPicCtrlData use the same classic 36/614-byte PictureControl DataSet."
+    },
+    "limits": [
+      "The wire contract is now documented, but an actual app-to-camera write still requires phone verification.",
+      "These six samples do not establish all NP3 base identifiers, monochrome parameters, automatic-value sentinels or other camera layouts.",
+      "This comparison never writes to the camera or the card. Destination policy remains C9 (209) only."
+    ]
+  },
+  "files": [
+    {
+      "file": "PICCON01.NP3",
+      "slot": 201,
+      "bytes": 248,
+      "sha256": "f4901c6019e4cf6e818b49e4c2a8c4cefd0e1f8b9cf2e0f40fda77026e3a48d1"
+    },
+    {
+      "file": "PICCON02.NP3",
+      "slot": 202,
+      "bytes": 248,
+      "sha256": "9789d7db49e8c266858c49ea49e3d8253e6a052a4ac457dfaf1b7a1b793672cb"
+    },
+    {
+      "file": "PICCON03.NP3",
+      "slot": 203,
+      "bytes": 834,
+      "sha256": "b75fcb0f61f42e74eb47490238459eda195ac4e8801c7e5fe38870356904a2a8"
+    },
+    {
+      "file": "PICCON04.NP3",
+      "slot": 204,
+      "bytes": 834,
+      "sha256": "b255d22a70a3d06fa3a6e29ff1fcd114dbb03d563fd5fd11a60c0795992b9bc8"
+    },
+    {
+      "file": "PICCON05.NP3",
+      "slot": 205,
+      "bytes": 834,
+      "sha256": "0cde2d884996cef2258b19c473cf30d1e3edae543df94cb387281b55afa936e4"
+    },
+    {
+      "file": "PICCON06.NP3",
+      "slot": 206,
+      "bytes": 248,
+      "sha256": "2086f160e345a3d6b60de4d62d0dcb3cb78560c5e01c59ee78d299c7d41f5d9d"
+    }
+  ]
+}

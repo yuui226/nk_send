@@ -20,14 +20,16 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     FOCUS_MODE("focus_mode", R.string.remote_tool_focus_mode),
     FOCUS_FRAME("focus_frame", R.string.remote_tool_focus_frame),
     LUT("lut", R.string.remote_tool_lut),
+    PICTURE_CONTROL("picture_control", R.string.remote_tool_picture_control),
     METER("meter", R.string.remote_tool_meter),
-    LOCK("lock", R.string.remote_tool_lock),
+    LOCK("lock", R.string.remote_tool_lock, true),
     COMPUTER_CONTROL("computer_control", R.string.remote_tool_computer_control),
     ROTATE("rotate", R.string.remote_tool_rotate, true);
 
     fun availableIn(movie: Boolean) = this != AUDIO || movie
 
     companion object {
+        val pinned = listOf(LOCK, ROTATE)
         val regular = entries.filterNot { it.fixed }
         fun ordered(ids: List<String>): List<RemoteTool> =
             (ids.mapNotNull { id -> regular.find { it.id == id } } + regular).distinct()
@@ -78,6 +80,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     val disp = enum("remote_disp_mode", MonitorDispMode.CAMERA)
     val fps = bool("remote_fps", true)
     val hd = bool("remote_hd")
+    val computerControl = bool("remote_computer_control")
     val histogram = enum("remote_histogram_mode", if (prefs.getBoolean("remote_histogram", false)) HistogramMode.LUMA else HistogramMode.OFF)
     val grid = enum("remote_grid", ViewfinderGrid.OFF)
     val exposure = enum("remote_exposure_assist", ExposureAssist.OFF)
@@ -100,6 +103,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     private fun disable(tool: RemoteTool) {
         when (tool) {
             RemoteTool.HD -> hd.value = false
+            RemoteTool.COMPUTER_CONTROL -> computerControl.value = false
             RemoteTool.FPS -> fps.value = false
             RemoteTool.AUDIO -> audio.value = false
             RemoteTool.HISTOGRAM -> histogram.value = HistogramMode.OFF
@@ -110,7 +114,6 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
             RemoteTool.FOCUS_FRAME -> focusFrame.value = false
             RemoteTool.METER -> meter.value = false
             RemoteTool.WAVEFORM -> waveform.value = WaveformMode.OFF
-            RemoteTool.LOCK -> locked.value = false
             else -> Unit // Actions and camera parameters are not reset by hiding their entry.
         }
     }
@@ -126,43 +129,54 @@ internal class RemoteToolLayout(
     private val mode = if (movie) "movie" else "photo"
     private val orderKey = "remote_tool_order_$mode"
     private val hiddenKey = "remote_hidden_tools_$mode"
-    private val lockPositionKey = "remote_lock_starts_second_row_$mode"
-    private var lockAtSecondRowStart by mutableStateOf(prefs.getBoolean(lockPositionKey, true))
-    val lockStartsSecondRow: Boolean get() = lockAtSecondRowStart && visible(RemoteTool.LOCK)
+    private val presetPlacementKey = "remote_picture_control_placement_v1_$mode"
     val available = RemoteTool.regular.filter { it.availableIn(movie) }
     var order by mutableStateOf(RemoteTool.ordered(prefs.getString(orderKey, "").orEmpty().split(',')).filter { it in available })
         private set
-    private var hidden by mutableStateOf(prefs.getStringSet(hiddenKey, emptySet()).orEmpty().toSet())
+    // Older versions allowed hiding/reordering LOCK. Fixed controls ignore those saved entries.
+    private var hidden by mutableStateOf(prefs.getStringSet(hiddenKey, emptySet()).orEmpty()
+        .filter { id -> available.any { it.id == id } }.toSet())
+
+    init {
+        if (!prefs.getBoolean(presetPlacementKey, false)) {
+            // Introduce Picture Control once, including on fresh installs. Persist all three
+            // values together so later launches respect the user's own moves and visibility.
+            val preset = RemoteTool.PICTURE_CONTROL
+            hidden = hidden - preset.id
+            val others = order.filterNot { it == preset }
+            val preceding = others.withIndex().filter { visible(it.value) }.take(5)
+            val insertion = preceding.lastOrNull()?.let { it.index + 1 } ?: 0
+            order = others.toMutableList().apply { add(insertion, preset) }
+            prefs.edit()
+                .putString(orderKey, order.joinToString(",") { it.id })
+                .putStringSet(hiddenKey, hidden)
+                .putBoolean(presetPlacementKey, true)
+                .apply()
+        }
+    }
+
     fun visible(tool: RemoteTool) = tool.fixed || (tool in available && tool.id !in hidden)
     val shownTools: List<RemoteTool> get() = order.filter(::visible)
     val hiddenTools: List<RemoteTool> get() = order.filterNot(::visible)
 
     /** Only visible regular tools can move; hidden tools retain their own tail order. */
-    fun move(tool: RemoteTool, toIndex: Int, displayedOrder: List<RemoteTool> = shownTools) {
+    fun move(tool: RemoteTool, toIndex: Int) {
         if (tool.fixed || !visible(tool)) return
-        val original = shownTools
-        val target = original.getOrNull(toIndex)
-        val detachLock = lockAtSecondRowStart && (tool == RemoteTool.LOCK || target == RemoteTool.LOCK)
-        val shown = (if (detachLock) displayedOrder else original).toMutableList()
-        val destination = if (detachLock && target != null) shown.indexOf(target) else toIndex
+        val shown = shownTools.toMutableList()
         if (!shown.remove(tool)) return
-        if (detachLock) lockAtSecondRowStart = false
-        shown.add(destination.coerceIn(0, shown.size), tool)
+        shown.add(toIndex.coerceIn(0, shown.size), tool)
         order = shown + hiddenTools
-        prefs.edit().putString(orderKey, order.joinToString(",") { it.id })
-            .putBoolean(lockPositionKey, lockAtSecondRowStart).apply()
+        prefs.edit().putString(orderKey, order.joinToString(",") { it.id }).apply()
     }
     fun setVisible(tool: RemoteTool, visible: Boolean) {
         if (tool.fixed || tool !in available) return
         if (!visible) onHide(tool)
         if (this.visible(tool) == visible) return
-        if (tool == RemoteTool.LOCK) lockAtSecondRowStart = false
         val others = order.filterNot { it == tool }
         hidden = if (visible) hidden - tool.id else hidden + tool.id
         order = if (visible) others.filter(this::visible) + tool + others.filterNot(this::visible)
             else others.filter(this::visible) + others.filterNot(this::visible) + tool
         prefs.edit().putStringSet(hiddenKey, hidden)
-            .putBoolean(lockPositionKey, lockAtSecondRowStart)
             .putString(orderKey, order.joinToString(",") { it.id }).apply()
     }
 }

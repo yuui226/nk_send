@@ -15,7 +15,7 @@ enum class RcTapFocusPath { TRACKING, MOVE_AREA, UNSUPPORTED, UNKNOWN }
  * Map a viewfinder fraction to a Nikon AF command coordinate.
  *
  * The command domain is the full Live View coordinate domain (the enhanced
- * frame's +16/+18 values), not the smaller AF-frame metadata grid at +28/+30.
+ * frame's +16/+18 values), not the smaller preview image size at +28/+30.
  */
 internal fun rcNormalizedToFocusCoordinate(normalized: Float, size: Int): Int {
     if (size <= 1) return 0

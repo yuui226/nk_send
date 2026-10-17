@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App-colored swatches from the same Nikon glyph as ic_picture_control.xml.
+     Keep both layers' viewport and transform identical; these colors are not Nikon branding. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="16dp"
+    android:viewportWidth="1249"
+    android:viewportHeight="800">
+    <group android:scaleY="-1" android:translateY="740">
+        <path android:fillColor="#DF6672"
+            android:pathData="M253,459l87,87l33,-131l-87,-87z" />
+        <path android:fillColor="#D29A32"
+            android:pathData="M494,544h123l-69,-116h-124z" />
+        <path android:fillColor="#35A47C"
+            android:pathData="M732,448l87,-87l-131,-33l-87,87z" />
+        <path android:fillColor="#398FD1"
+            android:pathData="M171,212v121l113,-68v-121z" />
+    </group>
+</vector>

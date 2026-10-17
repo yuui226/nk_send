@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 
 private class ChoicePopupGeometry {
@@ -33,11 +34,15 @@ internal fun RemoteChoicePopup(
     anchor: Rect?, landscape: Boolean, width: Dp, closeRequested: Boolean,
     onDismiss: () -> Unit,
     besideAnchor: Boolean = false,
+    onBack: (() -> Unit)? = null,
+    verticalContentPadding: Dp = 4.dp,
+    wrapContentWidth: Boolean = false,
     content: @Composable ColumnScope.(close: () -> Unit, closing: Boolean) -> Unit,
 ) {
     val progress=remember { Animatable(0f) }
     val geometry=remember { ChoicePopupGeometry() }
     val layer=rememberGraphicsLayer()
+    val prepared=remember { CompletableDeferred<Unit>() }
     val scope=rememberCoroutineScope()
     var closing by remember { mutableStateOf(false) }
     val latestDismiss by rememberUpdatedState(onDismiss)
@@ -51,11 +56,19 @@ internal fun RemoteChoicePopup(
         }
     }
     LaunchedEffect(Unit) {
+        // Let the invisible first draw measure and record the real content before starting
+        // the clock. Slow first composition must not eat the beginning of the animation.
+        prepared.await()
         withFrameNanos { }
         if(!closing) progress.animateTo(1f,tween(GENIE_EXPAND_DURATION_MS,easing=GenieExpandEasing))
     }
     LaunchedEffect(closeRequested) { if(closeRequested) close() }
-    BackHandler { close() }
+    BackHandler {
+        // Do not change an editor's page/size while its recorded layer is collapsing.
+        if (!closing) {
+            if (onBack != null) onBack() else close()
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density=LocalDensity.current
         val gap=6.dp
@@ -74,12 +87,17 @@ internal fun RemoteChoicePopup(
             interactionSource=remember { MutableInteractionSource() },indication=null,onClick=close)
             .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } })
         Layout(content={
-            Column(Modifier.width(menuWidth).heightIn(max=available)
+            // AnimatedContent can own the width while both pages keep their natural measurement.
+            val widthModifier = if (wrapContentWidth) Modifier.widthIn(max = menuWidth) else Modifier.width(menuWidth)
+            Column(widthModifier.heightIn(max=available)
                 .geniePopupLayer(layer,{progress.value},{anchor},{geometry.bounds},
-                    {geometry.recorded},{geometry.recorded=it},allowAboveAnchor=true)
+                    {geometry.recorded},{
+                        geometry.recorded=it
+                        if (it) prepared.complete(Unit)
+                    },allowAboveAnchor=true)
                 .clip(RoundedCornerShape(12.dp)).background(AppTheme.colors.surface)
                 .clickable(interactionSource=remember { MutableInteractionSource() },indication=null) { }
-                .padding(vertical=4.dp)) { content(close,closing) }
+                .padding(vertical=verticalContentPadding)) { content(close,closing) }
         },modifier=Modifier.fillMaxSize()) { measurables,constraints ->
             val panel=measurables.single().measure(constraints.copy(minWidth=0,minHeight=0))
             val inset=margin.roundToPx()

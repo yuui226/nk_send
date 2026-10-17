@@ -125,6 +125,7 @@ internal fun <T> ReleaseCommitWheel(
     burstProgress: Float = 0f,
     ambientEffectColor: Color? = null,
     ambientEffectAlpha: State<Float>? = null,
+    labelTextColor: Color? = null,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -324,7 +325,7 @@ internal fun <T> ReleaseCommitWheel(
             val compactBadge = wheelHeight <= 34.dp
             ControlTileCornerBadge(
                 text = label,
-                textColor = badgeText,
+                textColor = labelTextColor ?: badgeText,
                 backgroundColor = badgeBackground,
                 borderColor = badgeBorder,
                 borderWidth = 0.5.dp,

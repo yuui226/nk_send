@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 仅暴露 getExternalFilesDir(DOWNLOADS)/updates 下由更新器下载并做版本预检的 APK。 -->
     <external-files-path name="verified_updates" path="Download/updates/" />
+    <!-- Only diagnostic text files; no other internal app data is exposed. -->
+    <files-path name="picture_control_reports" path="picture_control_reports/" />
 </paths>

@@ -54,6 +54,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
@@ -1714,8 +1715,10 @@ private fun ConnectionSuccessOverlay(
             return@Canvas
         }
 
-        // 高级版成功效果保持原有绘制与节奏；免费版已在上方走独立的双脉冲分支。
+        // Every premium layer reaches transparency before the scene hands off.
+        if (p <= 0f || p >= 1f) return@Canvas
         val reveal = (p * 5f).coerceAtMost(1f)
+        val fade = premiumConnectionEffectFade(p)
         drawPremiumSuccessEffect(p)
 
         repeat(2) { index ->
@@ -1723,7 +1726,7 @@ private fun ConnectionSuccessOverlay(
             val ringScale = 0.72f + ringProgress * 1.72f
             drawCircle(
                 color = colors.statusConnected.copy(
-                    alpha = (1f - ringProgress) * 0.62f * reveal,
+                    alpha = (1f - ringProgress) * 0.62f * reveal * fade,
                 ),
                 radius = (41.dp.toPx() - 0.75.dp.toPx()) * ringScale,
                 style = Stroke(width = 1.5.dp.toPx() * ringScale),
@@ -1739,7 +1742,7 @@ private fun ConnectionSuccessOverlay(
                     Color(0xFFFFE082)
                 } else {
                     Color(0xFFF0A93B)
-                }).copy(alpha = (p * 5f).coerceAtMost(1f) * (1f - p)),
+                }).copy(alpha = reveal * (1f - p) * fade),
                 radius = (if (index % 3 == 0) 3.dp else 2.dp).toPx(),
                 center = Offset(
                     center.x + cos(angle) * distance,
@@ -1748,12 +1751,16 @@ private fun ConnectionSuccessOverlay(
             )
         }
 
-        // 不再绘制另一枚“成功图标”；只给原模式图标增加一圈确认脉冲。
-        val coreScale = 0.82f + kotlin.math.sin(p * Math.PI.toFloat()) * 0.22f
-        val coreAlpha = (1f - p).coerceAtLeast(0.16f)
+        // Expand outwards as the confirmation fades; never contract into a persistent badge.
+        val coreScale = 0.82f + p * 0.28f
+        val coreAlpha = (1f - p) * fade
+        val coreRadius = 39.dp.toPx() * coreScale
         drawCircle(
-            color = colors.statusConnected.copy(alpha = 0.08f * coreAlpha * reveal),
-            radius = 39.dp.toPx() * coreScale,
+            brush = Brush.radialGradient(
+                colors = listOf(colors.statusConnected.copy(alpha = 0.08f * coreAlpha * reveal), Color.Transparent),
+                center = center, radius = coreRadius,
+            ),
+            radius = coreRadius,
         )
         drawCircle(
             color = colors.statusConnected.copy(alpha = 0.70f * coreAlpha * reveal),
@@ -1905,21 +1912,29 @@ private fun DrawScope.drawPremiumSuccessEffect(progress: Float) {
     val warmGold = Color(0xFFF0A93B)
     val p = progress.coerceIn(0f, 1f)
     val appear = (p / 0.16f).coerceIn(0f, 1f)
-    val fade = ((1f - p) / 0.30f).coerceIn(0f, 1f)
+    val fade = premiumConnectionEffectFade(p)
     val visibility = appear * fade
     val center = this.center
 
     // 短促的暖金光晕先托起图标，不形成持续的大色块。
     val haloPulse = sin((p.coerceAtMost(0.72f) / 0.72f) * Math.PI.toFloat())
         .coerceAtLeast(0f)
+    val innerRadius = size.minDimension * (0.16f + p * 0.16f)
+    val outerRadius = size.minDimension * (0.24f + p * 0.12f)
     drawCircle(
-        color = gold.copy(alpha = 0.12f * haloPulse),
-        radius = size.minDimension * (0.16f + p * 0.16f),
+        brush = Brush.radialGradient(
+            colors = listOf(gold.copy(alpha = 0.12f * haloPulse * fade), Color.Transparent),
+            center = center, radius = innerRadius,
+        ),
+        radius = innerRadius,
         center = center
     )
     drawCircle(
-        color = warmGold.copy(alpha = 0.07f * haloPulse),
-        radius = size.minDimension * (0.24f + p * 0.12f),
+        brush = Brush.radialGradient(
+            colors = listOf(warmGold.copy(alpha = 0.07f * haloPulse * fade), Color.Transparent),
+            center = center, radius = outerRadius,
+        ),
+        radius = outerRadius,
         center = center
     )
 
@@ -1956,7 +1971,7 @@ private fun DrawScope.drawPremiumSuccessEffect(progress: Float) {
             (0.7f + sparkleFade * 0.6f)
         val shortArm = longArm * 0.42f
         val sparkleColor = if (index % 2 == 0) gold else Color.White
-        val alpha = sparkleFade * 0.95f
+        val alpha = sparkleFade * 0.95f * fade
         drawLine(
             sparkleColor.copy(alpha = alpha),
             Offset(sparkleCenter.x, sparkleCenter.y - longArm),
@@ -1972,6 +1987,12 @@ private fun DrawScope.drawPremiumSuccessEffect(progress: Float) {
             cap = StrokeCap.Round
         )
     }
+}
+
+/** Smoothly settle every premium light layer to zero, without a minimum-opacity tail. */
+internal fun premiumConnectionEffectFade(progress: Float): Float {
+    val tail = ((progress - 0.62f) / 0.38f).coerceIn(0f, 1f)
+    return 1f - tail * tail * (3f - 2f * tail)
 }
 
 internal fun connectionHeroProgress(elapsedMs: Long): Float =

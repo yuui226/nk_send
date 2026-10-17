@@ -251,6 +251,7 @@ internal data class FileListTransferUiState(
     val filterStorageSlot: Int?,
     val filterDateRange: PhotoDateRange?,
     val previewRotationQuarterTurns: Int,
+    val photoEffectsEnabled: Boolean,
     val previewHistogramMode: HistogramMode,
 )
 
@@ -278,6 +279,7 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         filterStorageSlot = filterStorageSlot,
         filterDateRange = filterDateRange,
         previewRotationQuarterTurns = previewRotationQuarterTurns,
+        photoEffectsEnabled = photoEffectsEnabled,
         previewHistogramMode = previewHistogramMode,
     )
 
@@ -2164,6 +2166,8 @@ fun FileListScreen(
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
                     transfersBusy = transfersBusy,
+                    photoEffectsViewModel = transferViewModel,
+                    photoEffectsEnabled = transferState.photoEffectsEnabled,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
                     histogramMode = transferState.previewHistogramMode,
                     burstHandles = burstHandles,

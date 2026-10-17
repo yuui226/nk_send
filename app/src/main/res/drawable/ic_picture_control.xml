@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nikon Picture Control glyph (h), Z50II official reference guide.
+     Source: https://onlinemanual.nikonimglib.com/z50II/fonts/z18haicn7.svg
+     Font coordinates are flipped vertically and centered in this viewport.
+     Neutral outline; the four swatches are in ic_picture_control_colors.xml. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="16dp"
+    android:viewportWidth="1249"
+    android:viewportHeight="800">
+    <group android:scaleY="-1" android:translateY="740">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M915,170l186,45l-120,55l-182,-39zM887,66v66l-169,88l-9,6l-7,5l-4,6l-2,6l2,6l5,6l9,4l11,4l164,35v316h-784v-548h784zM1209,210v-7l-2,-5l-6,-4l-8,-4l-10,-3l-233,-57v-127h-910v674h910v-365l36,8l201,-92l11,-6l7,-6z" />
+    </group>
+</vector>

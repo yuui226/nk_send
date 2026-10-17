@@ -1,3 +1,4 @@
+:; exec bash "$(dirname -- "$0")/build.command" "$@"
 @echo off
 setlocal
 
@@ -19,7 +20,7 @@ echo   %~dp0
 echo.
 
 set "DEBUG_APK="
-for /f "delims=" %%F in ('dir /b /a-d /o-d "%~dp0Zdebug-*.apk" 2^>nul') do if not defined DEBUG_APK set "DEBUG_APK=%~dp0%%F"
+for /f "delims=" %%F in ('dir /b /a-d /o-d "%~dp0ZD-*.apk" 2^>nul') do if not defined DEBUG_APK set "DEBUG_APK=%~dp0%%F"
 if not defined DEBUG_APK (
     echo Timestamped Debug APK was not found.
     pause

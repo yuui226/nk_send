@@ -29,7 +29,7 @@ if ($AdminIsMac) { $OutputEncoding = [System.Text.UTF8Encoding]::new($false) }
 # curl 输出是 UTF-8(备注可能含中文),让 PowerShell 按 UTF-8 解码
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$Server = if ($env:ZT_SERVER) { $env:ZT_SERVER } else { "https://106.15.239.203:8443" }
+$Server = if ($env:ZT_SERVER) { $env:ZT_SERVER } else { "https://www.au9999.net" }
 $TokenFile = Join-Path $PSScriptRoot "admin-token.txt"
 $MaxPriceFen = 10000000
 $OssBucket = "ztransfer-hk"
@@ -46,17 +46,15 @@ $OssCredentialDir = if ($AdminIsMac) { Join-Path $HOME "Library/Application Supp
 $OssKeychainService = "com.ztransfer.admin.oss-upload"
 $OssCredentialFile = Join-Path $OssCredentialDir "oss-upload-credential.json"
 
-# 与 Android App 的 CERT_PIN_B64 相同：curl -k 仅跳过自签名证书链/主机名校验，
-# --pinnedpubkey 仍会核对服务端 SPKI SHA-256，不能把管理员令牌交给冒充服务器的人。
-# ZT_SERVER_PIN 可在证书轮换或测试环境覆盖；接受 base64 摘要或 curl 的 sha256//... 形式。
-$DefaultServerPin = "sha256//9SNNH7dEGfIVJ0bMGIKxEYTjHUAMDy3+t/+dVZzJfzA="
+# 正式证书走系统证书库和主机名校验。只有连回旧的自签地址时才设置 ZT_SERVER_PIN，
+# 此时 curl -k 跳过证书链，并由 --pinnedpubkey 核对 SPKI SHA-256。
 function Normalize-ServerPin($value) {
     $pin = ([string]$value).Trim()
     if ($pin -match '^sha256//[A-Za-z0-9+/]{43}=$') { return $pin }
     if ($pin -match '^[A-Za-z0-9+/]{43}=$') { return "sha256//$pin" }
     throw "ZT_SERVER_PIN 格式无效：应为 44 位 base64 SPKI SHA-256，或 sha256//<base64>"
 }
-$ServerPin = Normalize-ServerPin $(if ($env:ZT_SERVER_PIN) { $env:ZT_SERVER_PIN } else { $DefaultServerPin })
+$ServerPin = if ($env:ZT_SERVER_PIN) { Normalize-ServerPin $env:ZT_SERVER_PIN } else { $null }
 
 function Get-SavedToken {
     if ($env:ZT_ADMIN_TOKEN) { return $env:ZT_ADMIN_TOKEN }
@@ -78,7 +76,6 @@ function Request-Token {
     return $t
 }
 
-# 自签名证书用 -k 跳过系统证书链/主机名校验，但必须由 --pinnedpubkey 验明服务端身份。
 # 仅 /admin/* 请求携带管理员令牌；公开查询绝不发送令牌。
 # 请求体走临时文件,避免 PowerShell 5.1 按 GBK 传中文参数导致乱码。
 function Call($method, $path, $bodyObj) {
@@ -87,10 +84,8 @@ function Call($method, $path, $bodyObj) {
         Write-Host "缺少管理员令牌，已拒绝管理请求" -ForegroundColor Red
         return $null
     }
-    $curlArgs = @(
-        "-k", "--pinnedpubkey", $ServerPin,
-        "-sS", "-X", $method
-    )
+    $curlArgs = @("-sS", "-X", $method)
+    if ($ServerPin) { $curlArgs += @("-k", "--pinnedpubkey", $ServerPin) }
     # 图形管理器可设置有限等待时间，避免服务器离线时窗口长期等待；
     # 命令行模式不设置这两个变量，因此保持原有行为。
     if ($script:AdminCurlConnectTimeoutSeconds) {

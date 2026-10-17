@@ -2,6 +2,7 @@
 # Native credential/network/clipboard/dialog commands are mocked: no remote state changes.
 $ErrorActionPreference = 'Stop'
 $env:ZT_ADMIN_TOKEN = 'mac-test-token'
+Remove-Item Env:ZT_SERVER, Env:ZT_SERVER_PIN -ErrorAction SilentlyContinue
 . (Join-Path $PSScriptRoot '../admin.ps1') -LibraryMode
 function Assert($condition, $message) { if (-not $condition) { throw $message } }
 Assert $AdminIsMac 'This test must run on macOS'
@@ -24,13 +25,15 @@ try {
     $CurlExecutable = 'Mock-Curl'
     $result = Call 'POST' '/admin/codes' @{ note = "中文 空格`n第二行 📷"; count = 1 }
     Assert $result.ok 'Admin request failed'
-    Assert ($CapturedArgs -contains $ServerPin) 'Certificate pin missing'
+    Assert ($Server -eq 'https://www.au9999.net') 'Default server must be the temporary public host'
+    Assert (-not ($CapturedArgs -contains '-k')) 'Public certificate must not skip verification'
+    Assert (-not ($CapturedArgs -contains '--pinnedpubkey')) 'Public certificate must not use the old self-signed pin'
     Assert ($CapturedArgs -contains 'X-Admin-Token: mac-test-token') 'Admin token missing'
     Assert ($CapturedBody.note -eq "中文 空格`n第二行 📷") 'UTF-8 body changed'
     Assert (-not (Test-Path -LiteralPath $BodyPath)) 'Temporary request body not removed'
     $null = Call 'GET' '/v1/pricing' $null
     Assert (-not ($CapturedArgs -match 'X-Admin-Token')) 'Public request leaked token'
-    Write-Host 'PASS: pinned admin transport and public token isolation'
+    Write-Host 'PASS: public certificate transport and public token isolation'
 
     # SDK discovery converts Windows filenames and handles paths with spaces/Chinese.
     $env:ANDROID_HOME = Join-Path $testDir '安卓 SDK'

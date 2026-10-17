@@ -1,6 +1,8 @@
 package com.ztransfer.lut
 
 import android.net.Uri
+import com.ztransfer.presets.PresetIoQueue
+import com.ztransfer.presets.PresetIoTicket
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -40,7 +42,7 @@ internal class LutMonitorState(
     var closeMenuRequested by mutableStateOf(false)
         private set
     private var generation = 0L
-    private var ticket: LutIoQueue.Ticket? = null
+    private var ticket: PresetIoTicket? = null
     private var timeout: Job? = null
     private var movie: Boolean? = null
     private var available = false
@@ -95,7 +97,7 @@ internal class LutMonitorState(
         }
         val id = begin(manual)
         loading = file.uri
-        ticket = LutIoQueue.submit({ repository.read(file, it) }) { result ->
+        ticket = PresetIoQueue.submit({ repository.read(file, it) }) { result ->
             if (!valid(id)) return@submit
             result.fold(
                 onSuccess = { candidate = LutLayer(id, file, it) },
@@ -151,7 +153,7 @@ internal class LutMonitorState(
             notice(R.string.lut_read_timeout)
         }
         scanning = true
-        ticket = LutIoQueue.submit({ signal -> repository.scan(uri, replacing, signal) },
+        ticket = PresetIoQueue.submit({ signal -> repository.scan(uri, replacing, signal) },
             discard = { result -> if (result.getOrNull()?.acquired == true) repository.releaseGrant(uri) }) { result ->
             if (!valid(id)) return@submit
             scanning = false
@@ -170,7 +172,7 @@ internal class LutMonitorState(
                     active = null
                     suppressedSelections.clear()
                     if (previous != null && previous != uri && ownedPrevious) {
-                        LutIoQueue.cleanup { repository.releaseGrant(previous) }
+                        PresetIoQueue.cleanup { repository.releaseGrant(previous) }
                     }
                 } else {
                     for (mode in listOf(false, true)) {
@@ -252,9 +254,4 @@ internal class LutMonitorState(
     fun close() { disposed = true; invalidate(); active = null }
 }
 
-internal fun folderMessage(reason: LutFolderFailure) = when (reason) {
-    LutFolderFailure.MISSING -> R.string.lut_folder_missing
-    LutFolderFailure.DENIED -> R.string.lut_folder_denied
-    LutFolderFailure.READ -> R.string.lut_folder_read_failed
-    LutFolderFailure.TOO_MANY -> R.string.lut_folder_too_many
-}
+internal fun folderMessage(reason: LutFolderFailure) = com.ztransfer.presets.presetFolderMessage(reason)

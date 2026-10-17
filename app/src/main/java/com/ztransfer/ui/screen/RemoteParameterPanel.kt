@@ -31,7 +31,9 @@ internal fun RemoteParameterPanel(param: RcParam, anchor: Rect?, landscape: Bool
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-    val width = with(density) { (labels.values.maxOfOrNull { measurer.measure(it, style).size.width } ?: 0).toDp() } + 28.dp
+    val width = remember(labels, measurer, density, style) {
+        with(density) { (labels.values.maxOfOrNull { measurer.measure(it, style).size.width } ?: 0).toDp() } + 28.dp
+    }
     val state = rememberLazyListState(initialFirstVisibleItemIndex =
         (param.values.indexOf(param.current) - 3).coerceAtLeast(0))
     RemoteChoicePopup(anchor, landscape, width.coerceIn(64.dp, 220.dp), false, onDismiss,

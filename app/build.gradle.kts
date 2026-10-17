@@ -15,19 +15,6 @@ val hasReleaseKeystore = keystorePropsFile.exists()
 val keystoreProps = Properties().apply {
     if (hasReleaseKeystore) FileInputStream(keystorePropsFile).use { load(it) }
 }
-// Temporary transfer-corruption diagnostics for Harmony, in either build type.
-// gradle.properties enables the current field test; removing that line restores the false default.
-// -PtransferCorruptionDiagnostic=false overrides it. Runtime code only activates the report on
-// devices positively identified as Harmony; ordinary Android keeps the original transfer path.
-val transferCorruptionDiagnostic = providers.gradleProperty("transferCorruptionDiagnostic")
-    .map { it.equals("true", ignoreCase = true) }
-    .orElse(false)
-    .get()
-
-if (transferCorruptionDiagnostic) {
-    logger.lifecycle("Transfer corruption diagnostics ON for Harmony devices: hashes, local readbacks and queue-end camera reread enabled.")
-}
-
 android {
     namespace = "com.ztransfer"
     compileSdk = 35
@@ -54,15 +41,11 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 67
-        versionName = "1.94"
+        versionCode = 70
+        versionName = "1.97"
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
-        buildConfigField("boolean", "TRANSFER_CORRUPTION_DIAGNOSTIC", transferCorruptionDiagnostic.toString())
-        // Shared by the passive protocol trace; keep the alias identical so the one-off release
-        // cannot accidentally collect trace data without the file-integrity report (or vice versa).
-        buildConfigField("boolean", "TRANSFER_DIAGNOSTICS", transferCorruptionDiagnostic.toString())
 
         // The app exposes exactly English, Simplified Chinese and Traditional
         // Chinese. Do not package translations contributed by AndroidX for
@@ -158,16 +141,15 @@ dependencies {
 // 不会被 QQ、网盘或文件管理器的同名缓存误认为旧安装包。
 val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
     group = "build"
-    description = "Copy the debug APK to dist with a unique build timestamp"
+    description = "Copy the debug APK to dist-debug with a unique build timestamp"
     outputs.upToDateWhen { false }
     doLast {
         val source = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
         check(source.isFile) { "Debug APK not found: ${source.absolutePath}" }
-        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-        val version = android.defaultConfig.versionName ?: "unknown"
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMdd-HHmmss"))
         val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
         val destination = destinationDirectory.resolve(
-            "Zdebug-$version-$stamp.apk"
+            "ZD-$stamp.apk"
         )
         source.copyTo(destination, overwrite = false)
         println("Timestamped debug APK: ${destination.absolutePath}")

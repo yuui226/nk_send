@@ -20,10 +20,8 @@ import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.diagnostics.PhotoGenerationProbe
-import com.ztransfer.diagnostics.TransferCorruptionDiagnostic
 import com.ztransfer.diagnostics.TransferFingerprint
 import com.ztransfer.diagnostics.FingerprintResult
-import com.ztransfer.diagnostics.fingerprintDifference
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
 import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
 import com.ztransfer.effects.PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY
@@ -83,6 +81,7 @@ import com.ztransfer.protocol.ResumeUnavailableException
 import com.ztransfer.protocol.endToEndBytesPerSecond
 import com.ztransfer.service.TransferService
 import com.ztransfer.storage.HarmonyStorageCompatibility
+import com.ztransfer.storage.fingerprintHarmonyPublication
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
@@ -97,7 +96,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -990,6 +988,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private companion object {
         const val TAG = "ZTransfer"
+        const val HARMONY_PUBLISH_ATTEMPTS = 4
         // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
         const val PART_PREFIX = ".nkpart_"
         // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
@@ -2197,7 +2196,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val self = coroutineContext[Job]
                 var serviceStarted = false
                 var stoppedAfterCurrent = false
-                var corruptionDiagnostic: TransferCorruptionDiagnostic? = null
 
                 try {
                     val prepareStartedAt = android.os.SystemClock.elapsedRealtime()
@@ -2257,34 +2255,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // 启动/选目录时已建立索引；这里复用同一单飞结果。正常连续队列不再重复
                 // query SAF，后续成功文件和断点文件会增量写回该索引。
                 val rootDirectoryIndex = getDirectoryIndex(uri, deleteParts = false)
-                // The temporary corruption report is only for the Harmony compatibility path.
-                // Ordinary Android keeps the original SAF transfer flow without diagnostic
-                // hashes, local readbacks, queue-end rereads, or a TXT file.
-                corruptionDiagnostic = if (harmonyStorage) {
-                    TransferCorruptionDiagnostic.start(
-                        resolver = contentResolver,
-                        // DocumentsContract.createDocument expects a document URI. The persisted
-                        // transfer directory is a tree URI, so use its root document counterpart;
-                        // this is also the parent used for original-file creation below.
-                        parent = rootDirectoryUri,
-                        camera = cameraProvider(),
-                        filesDir = getApplication<Application>().filesDir,
-                    )
-                } else {
-                    null
-                }
-                corruptionDiagnostic?.append(
-                    "storageCompatibility harmony=$harmonyStorage " +
-                        "staging=${if (harmonyStorage) "private" else "saf"} " +
-                        "resume=${if (harmonyStorage) "disabled" else "normal"} " +
-                        "manufacturer=${harmonyDetection.manufacturer} " +
-                        "osBrand=${harmonyDetection.osBrand ?: "unknown"} " +
-                        "method=${harmonyDetection.method} " +
-                        "detectError=${harmonyDetection.error?.replace(' ', '_') ?: "none"}",
-                )
                 if (harmonyStorage) {
                     val abandoned = withContext(Dispatchers.IO) { harmonyPublications.pending() }
-                    for (entry in abandoned) discardHarmonyPublication(entry, corruptionDiagnostic)
+                    for (entry in abandoned) discardHarmonyPublication(entry)
                 }
                 log {
                     "QUEUE_READY harmony=$harmonyStorage method=${harmonyDetection.method} " +
@@ -2326,7 +2299,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val localOriginal = directoryIndex.findOriginal(task.file)
                     if (localOriginal != null) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
-                        corruptionDiagnostic?.noteExistingFile(task.file.fileName)
                         recordExistingExport(
                             uri = uri,
                             destinationFolderName = task.destinationFolderName,
@@ -2433,11 +2405,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         null
                     }
                     var harmonyPublication: com.ztransfer.storage.PendingPublicationJournal.Entry? = null
-                    val transferFingerprint = when {
-                        corruptionDiagnostic != null -> TransferFingerprint()
-                        harmonyStorage -> TransferFingerprint(maxSegments = 0)
-                        else -> null
-                    }
+                    val transferFingerprint = if (harmonyStorage) TransferFingerprint() else null
                     if (!harmonyStorage && !videoTransfer) {
                         directoryIndex.partFor(task.file.fileName)?.let { deleteQuietly(it.uri) }
                         directoryIndex.removePart(task.file.fileName)
@@ -2510,28 +2478,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 所有这类预处理结束后统一消费撤回标记，绝不能把 CANCELLED 再改回传输中。
                     if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
 
-                    corruptionDiagnostic?.noteFileStart(
-                        name = task.file.fileName,
-                        handle = handle,
-                        expectedBytes = task.file.size,
-                        resumeOffset = resumeOffset,
-                        video = videoTransfer,
-                        transport = camera.connectionType.name,
-                    )
-                    if (resumeOffset > 0L && fileDocUri != null && transferFingerprint != null) {
-                        // Complete the R fingerprint with the already-present prefix before the
-                        // new suffix is observed. This makes R/T/F comparable for video resume;
-                        // the prefix is explicitly read from the provider, not from the camera.
-                        try {
-                            corruptionDiagnostic?.readPrefix(checkNotNull(fileDocUri), resumeOffset, transferFingerprint)
-                        } catch (failure: Exception) {
-                            corruptionDiagnostic?.append(
-                                "R prefix name=${task.file.fileName} bytes=$resumeOffset " +
-                                    "error=${failure.javaClass.simpleName}: ${failure.message}",
-                            )
-                        }
-                    }
-
                     // 完成所有“无需下载即可结束”的检查后，才进入传输态并发布高频进度，
                     // 避免完整断点文件仅改名时出现假进度或前台通知闪动。
                     updateTask(taskId) { it.copy(status = TransferStatus.TRANSFERING) }
@@ -2586,14 +2532,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     totalSize = task.file.size,
                                     // 协议层在首个数据命令前读取一次，随后整张文件固定该策略。
                                     preferHighThroughputAtStart = { preferHighThroughputTransfers },
-                                    trace = corruptionDiagnostic?.let { diagnostic ->
-                                        { message -> diagnostic.appendProtocol(message) }
-                                    },
-                                    diagnosticReferenceRead = false,
                                     onBytesReceived = transferFingerprint?.let { fingerprint ->
                                         { bytes, offset, count -> fingerprint.update(bytes, offset, count) }
                                     },
-                                    strictBytesObserver = harmonyStorage,
                                     captureHeader = task.framePreset != null &&
                                         task.frameBorderRequested &&
                                         (task.frameMetadataSettings ?: defaultPhotoFrameMetadataSettings(task.framePreset))
@@ -2652,30 +2593,19 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         // Harmony stage is private to the app until its complete bytes have
                         // been read back and matched with the protocol fingerprint.
                         val createdUri = fileDocUri
-                        val diagnosticReceivedResult = transferFingerprint?.finish()
-                        val diagnosticTemporary = when {
-                            corruptionDiagnostic == null -> null
-                            harmonyStorage -> corruptionDiagnostic.readFile(checkNotNull(harmonyStageFile))
-                            createdUri != null -> corruptionDiagnostic.readUri(createdUri)
-                            else -> null
-                        }
+                        val receivedResult = transferFingerprint?.finish()
                         val harmonyStageResult = if (harmonyStorage && result.isSuccess) {
-                            // In the diagnostic build the T readback is also the enforcement
-                            // observation. Avoid a second full private-file read and ensure the
-                            // report describes exactly the bytes used for acceptance.
-                            if (corruptionDiagnostic != null) diagnosticTemporary?.fingerprint
-                            else fingerprintHarmonyFile(checkNotNull(harmonyStageFile))
+                            fingerprintHarmonyFile(checkNotNull(harmonyStageFile))
                         } else {
                             null
                         }
                         val harmonyStageError = if (harmonyStorage && result.isSuccess) {
                             val stats = result.getOrThrow()
-                            val received = checkNotNull(diagnosticReceivedResult)
+                            val received = checkNotNull(receivedResult)
                             when {
                                 received.bytes != stats.bytes -> "received=${received.bytes} stats=${stats.bytes}"
                                 harmonyStageResult == null -> "stage-read-failed"
-                                !sameFingerprint(received, harmonyStageResult) ->
-                                    "R_vs_T=${fingerprintDifference(received, harmonyStageResult)}"
+                                !sameFingerprint(received, harmonyStageResult) -> "R_vs_T=CONTENT_MISMATCH"
                                 else -> null
                             }
                         } else {
@@ -2685,21 +2615,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         result.fold(
                             onSuccess = { stats ->
                                 if (harmonyStageError != null) {
-                                    val failure = HarmonyIntegrityException(harmonyStageError)
-                                    corruptionDiagnostic?.append(
-                                        "HARMONY_STAGE_VERIFY name=${task.file.fileName} result=failed reason=$harmonyStageError",
-                                    )
-                                    corruptionDiagnostic?.noteVerificationFailure(
-                                        name = task.file.fileName,
-                                        handle = handle,
-                                        expectedBytes = task.file.size,
-                                        video = videoTransfer,
-                                        reason = harmonyStageError,
-                                        received = diagnosticReceivedResult,
-                                        temporary = diagnosticTemporary,
-                                        final = null,
-                                    )
-                                    corruptionDiagnostic?.noteFileFailure(task.file.fileName, failure)
                                     updateTask(taskId) {
                                         it.copy(
                                             status = TransferStatus.FAILED,
@@ -2734,20 +2649,56 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         }
                                     }
                                     var saveError: Throwable? = null
+                                    var harmonyFinalResult: FingerprintResult? = null
                                     if (harmonyStorage) {
-                                        val copied = copyHarmonyStageAsFallback(
-                                            destinationDirectoryUri,
-                                            checkNotNull(harmonyStageFile),
-                                            finalName,
-                                            getMimeType(finalName),
-                                            stats.bytes,
-                                            onCreated = { harmonyPublication = it },
-                                        )
-                                        renamedUri = copied.getOrNull()
-                                        if (renamedUri == null) {
-                                            saveError = copied.exceptionOrNull()
-                                        } else {
-                                            savedName = displayNameOf(renamedUri) ?: finalName
+                                        // Field reports show the Harmony provider randomly persists
+                                        // wrong bytes for ~2-4% of writes, while the private stage
+                                        // stays intact. Republish from the verified stage instead of
+                                        // failing the photo and making the user retry.
+                                        for (attempt in 1..HARMONY_PUBLISH_ATTEMPTS) {
+                                            val copied = copyHarmonyStageAsFallback(
+                                                destinationDirectoryUri,
+                                                checkNotNull(harmonyStageFile),
+                                                finalName,
+                                                getMimeType(finalName),
+                                                stats.bytes,
+                                                onCreated = { harmonyPublication = it },
+                                            )
+                                            val candidate = copied.getOrNull()
+                                            if (candidate == null) {
+                                                saveError = copied.exceptionOrNull()
+                                                break
+                                            }
+                                            val finalResult = fingerprintHarmonyUri(candidate)
+                                            harmonyFinalResult = finalResult
+                                            if (finalResult != null && harmonyStageResult != null &&
+                                                sameFingerprint(harmonyStageResult, finalResult)
+                                            ) {
+                                                saveError = null
+                                                renamedUri = candidate
+                                                savedName = displayNameOf(candidate) ?: finalName
+                                                break
+                                            }
+                                            val reason = if (finalResult == null) {
+                                                "final-read-failed"
+                                            } else {
+                                                "T_vs_F=CONTENT_MISMATCH"
+                                            }
+                                            log {
+                                                "HARMONY_PUBLISH_VERIFY attempt=$attempt reason=$reason " +
+                                                    "provider=${candidate.authority} " +
+                                                    "expected=${harmonyStageResult?.bytes}/${harmonyStageResult?.sha256} " +
+                                                    "actual=${finalResult?.bytes}/${finalResult?.sha256}"
+                                            }
+                                            saveError = HarmonyIntegrityException(reason)
+                                            if (attempt == HARMONY_PUBLISH_ATTEMPTS) {
+                                                // The check below rejects this URI. The task finally
+                                                // deletes any publication that was not marked verified.
+                                                renamedUri = candidate
+                                                break
+                                            }
+                                            harmonyPublication?.let { discardHarmonyPublication(it) }
+                                            harmonyPublication = null
                                         }
                                     } else if (renamedUri == null) {
                                         val copyName = finalName
@@ -2767,20 +2718,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             saveError = copied.exceptionOrNull()
                                         }
                                     }
-                                    var harmonyFinalResult: FingerprintResult? = null
-                                    var harmonyFinalRead: TransferCorruptionDiagnostic.UriFingerprint? = null
                                     if (renamedUri != null) {
-                                        harmonyFinalResult = if (harmonyStorage) {
-                                            if (corruptionDiagnostic != null) {
-                                                val read = corruptionDiagnostic.readUri(renamedUri)
-                                                harmonyFinalRead = read
-                                                read.fingerprint
-                                            } else {
-                                                fingerprintHarmonyUri(renamedUri)
-                                            }
-                                        } else {
-                                            null
-                                        }
                                         if (harmonyStorage &&
                                             (harmonyFinalResult == null ||
                                                 harmonyStageResult == null ||
@@ -2789,25 +2727,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             val reason = if (harmonyFinalResult == null) {
                                                 "final-read-failed"
                                             } else {
-                                                "T_vs_F=${fingerprintDifference(harmonyStageResult!!, harmonyFinalResult)}"
+                                                "T_vs_F=CONTENT_MISMATCH"
                                             }
-                                            corruptionDiagnostic?.append(
-                                                "HARMONY_FINAL_VERIFY name=${task.file.fileName} result=failed reason=$reason",
-                                            )
-                                            corruptionDiagnostic?.noteVerificationFailure(
-                                                name = task.file.fileName,
-                                                handle = handle,
-                                                expectedBytes = task.file.size,
-                                                video = videoTransfer,
-                                                reason = reason,
-                                                received = diagnosticReceivedResult,
-                                                temporary = diagnosticTemporary,
-                                                final = harmonyFinalResult,
-                                            )
-                                            val failure = HarmonyIntegrityException(reason)
-                                            corruptionDiagnostic?.noteFileFailure(task.file.fileName, failure)
                                             renamedUri = null
-                                            saveError = failure
+                                            saveError = HarmonyIntegrityException(reason)
                                         }
                                     }
                                     if (renamedUri != null) {
@@ -2815,18 +2738,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         // published original, never a deletable download partial.
                                         fileDocUri = null
                                         if (originalSaveMode == "rename") savedName = displayNameOf(renamedUri) ?: savedName
-                                        val diagnosticFinal = if (corruptionDiagnostic != null) {
-                                            if (harmonyStorage) {
-                                                harmonyFinalRead ?: TransferCorruptionDiagnostic.UriFingerprint(
-                                                    actualSize = harmonyFinalResult?.bytes,
-                                                    fingerprint = harmonyFinalResult,
-                                                )
-                                            } else {
-                                                corruptionDiagnostic.readUri(renamedUri)
-                                            }
-                                        } else {
-                                            null
-                                        }
                                         if (harmonyStorage) {
                                             // A validated marker makes startup cleanup safe even if
                                             // deleting the tiny private journal is interrupted.
@@ -2857,19 +2768,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
                                         val elapsed = android.os.SystemClock.elapsedRealtime() -
                                             stats.startedAtElapsedMs
-                                        corruptionDiagnostic?.noteFileResult(
-                                            name = task.file.fileName,
-                                            handle = handle,
-                                            expectedBytes = task.file.size,
-                                            resumeOffset = resumeOffset,
-                                            video = videoTransfer,
-                                            saveMode = originalSaveMode,
-                                            received = diagnosticReceivedResult,
-                                            temporary = diagnosticTemporary,
-                                            final = diagnosticFinal,
-                                            finalUri = renamedUri,
-                                            elapsedMs = elapsed,
-                                        )
                                         val endToEndMBps = endToEndBytesPerSecond(
                                             transferredBytes = stats.transferredBytes,
                                             elapsedMs = elapsed,
@@ -2948,17 +2846,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                                 speed = 0,
                                             )
                                         }
-                                        corruptionDiagnostic?.noteFileFailure(
-                                            task.file.fileName,
-                                            saveError ?: IllegalStateException("rename and copy failed"),
-                                        )
                                     }
                                 } finally {
                                     directoryIndex.releaseDisplayName(finalName)
                                 }
                             },
                             onFailure = { e ->
-                                corruptionDiagnostic?.noteFileFailure(task.file.fileName, e)
                                 if (harmonyStorage || !videoTransfer || e is ResumeUnavailableException) {
                                     // 照片一律删除半成品；视频无法续传时也从头重试。
                                     deleteQuietly(fileDocUri)
@@ -2995,7 +2888,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
-                        corruptionDiagnostic?.noteFileFailure(task.file.fileName, e)
                         if (harmonyStorage) {
                             directoryIndex.removePart(task.file.fileName)
                         } else if (videoTransfer) {
@@ -3012,11 +2904,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                         }
                     } finally {
-                        harmonyPublication?.let { discardHarmonyPublication(it, corruptionDiagnostic) }
+                        harmonyPublication?.let { discardHarmonyPublication(it) }
                         if (harmonyStageFile != null) {
                             withContext(NonCancellable + Dispatchers.IO) {
-                                val deleted = !harmonyStageFile.exists() || harmonyStageFile.delete()
-                                corruptionDiagnostic?.append("CLEANUP stageDeleted=$deleted name=${task.file.fileName}")
+                                if (harmonyStageFile.exists()) harmonyStageFile.delete()
                             }
                         }
                     }
@@ -3054,40 +2945,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         })
                     }
                 } finally {
-                    if (corruptionDiagnostic != null) {
-                        // C is confined to this one investigation release. It is skipped when
-                        // the queue was paused/cancelled, so ordinary controls do not trigger a
-                        // second camera pass unexpectedly.
-                        if (!stoppedAfterCurrent && currentCoroutineContext().isActive) {
-                            try {
-                                corruptionDiagnostic.rereadPublished()
-                            } catch (cancelled: CancellationException) {
-                                corruptionDiagnostic.append("L phase=cancelled")
-                            } catch (failure: Exception) {
-                                corruptionDiagnostic.append(
-                                    "L phase=error type=${failure.javaClass.simpleName} " +
-                                        "message=${failure.message.orEmpty()}",
-                                )
-                            }
-                            try {
-                                corruptionDiagnostic.rereadSources(cameraProvider())
-                            } catch (cancelled: CancellationException) {
-                                corruptionDiagnostic.append("C phase=cancelled")
-                            } catch (failure: Exception) {
-                                corruptionDiagnostic.append(
-                                    "C phase=error type=${failure.javaClass.simpleName} " +
-                                        "message=${failure.message.orEmpty()}",
-                                )
-                            }
-                        } else {
-                            corruptionDiagnostic.append(
-                                "C phase=skipped reason=${if (stoppedAfterCurrent) "queue-paused" else "job-cancelled"}",
-                            )
-                        }
-                        corruptionDiagnostic.finish(
-                            if (stoppedAfterCurrent) "paused" else "queue-finished",
-                        )
-                    }
                     // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输
                     // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                     if (transferJob === self) {
@@ -3371,7 +3228,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun discardHarmonyPublication(
         entry: com.ztransfer.storage.PendingPublicationJournal.Entry,
-        diagnostic: TransferCorruptionDiagnostic?,
     ) = withContext(NonCancellable + Dispatchers.IO) {
         // Never forget an unverified URI after a failed provider delete. Directory scans
         // exclude it, and a later queue retries this cleanup without downloading anything.
@@ -3379,19 +3235,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             DocumentsContract.deleteDocument(contentResolver, Uri.parse(entry.uri))
         } catch (_: java.io.FileNotFoundException) {
             true
-        } catch (error: Exception) {
-            diagnostic?.append("CLEANUP final=failed uri=${entry.uri} error=${error.javaClass.simpleName}:${error.message}")
+        } catch (_: Exception) {
             false
         }
         if (deleted) harmonyPublications.removed(entry)
-        diagnostic?.append("CLEANUP finalDeleted=$deleted quarantined=${!deleted} uri=${entry.uri}")
     }
 
     private suspend fun fingerprintHarmonyFile(file: File): FingerprintResult? =
         withContext(Dispatchers.IO) {
             if (!file.isFile) return@withContext null
             try {
-                val fingerprint = TransferFingerprint(maxSegments = 0)
+                val fingerprint = TransferFingerprint()
                 file.inputStream().buffered(256 * 1024).use { input ->
                     val buffer = ByteArray(256 * 1024)
                     while (true) {
@@ -3411,25 +3265,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
 
     private suspend fun fingerprintHarmonyUri(uri: Uri): FingerprintResult? =
-        withContext(Dispatchers.IO) {
-            try {
-                val fingerprint = TransferFingerprint(maxSegments = 0)
-                contentResolver.openInputStream(uri)?.use { input ->
-                    val buffer = ByteArray(256 * 1024)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        check(count > 0) { "provider returned an empty read" }
-                        fingerprint.update(buffer, 0, count)
-                    }
-                } ?: error("provider returned null input stream")
-                fingerprint.finish()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                null
+        try {
+            fingerprintHarmonyPublication(contentResolver, uri) { mode ->
+                log { "HARMONY_PUBLISH_READ provider=${uri.authority} mode=$mode" }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            log { "HARMONY_PUBLISH_READ failed provider=${uri.authority} error=${error.javaClass.simpleName}" }
+            null
         }
 
     /** Harmony-only publication writer. Each provider write receives a fresh byte array. */
@@ -3454,7 +3298,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             onCreated(entry)
             journaled = true
             val copiedBytes = stageFile.inputStream().use { input ->
-                contentResolver.openOutputStream(createdUri)?.use { output ->
+                val pfd = contentResolver.openFileDescriptor(createdUri, "w")
+                    ?: throw Exception(str(R.string.error_open_file))
+                ParcelFileDescriptor.AutoCloseOutputStream(pfd).use { output ->
                     val reusableReadBuffer = ByteArray(256 * 1024)
                     var total = 0L
                     while (true) {
@@ -3466,8 +3312,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         total += count.toLong()
                     }
                     output.flush()
+                    // The readback verification must observe persisted bytes, not only
+                    // the provider's write-back cache. Pipe-backed descriptors cannot sync.
+                    try {
+                        output.fd.sync()
+                    } catch (_: java.io.SyncFailedException) {
+                    }
                     total
-                } ?: throw Exception(str(R.string.error_open_file))
+                }
             }
             if (copiedBytes != expectedBytes) {
                 throw Exception(str(R.string.error_copy_incomplete, copiedBytes, expectedBytes))

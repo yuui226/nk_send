@@ -539,7 +539,11 @@
     <string name="check_update">Update</string>
     <string name="checking_update">Checking…</string>
     <string name="update_latest">Up to date</string>
-    <string name="update_check_failed">Check failed. Check your network.</string>
+    <string name="update_fixed_download_url" translatable="false">https://apk.ztransfer.top/ZTransfer.apk</string>
+    <string name="update_check_failed">Check failed</string>
+    <string name="update_copy_download_link">Copy link</string>
+    <string name="update_browser_download">Browser download</string>
+    <string name="update_browser_unavailable">Cannot open a browser. Please copy the link.</string>
     <string name="update_available_title">Update available</string>
     <string name="update_required_title">Update required</string>
     <string name="update_version">Version %1$s</string>
@@ -637,8 +641,7 @@
 
     <string name="remote_tool_lut">LUT</string>
     <string name="lut_off">Off</string>
-    <string name="lut_choose_folder">Choose folder</string>
-    <string name="lut_change_folder">Change folder</string>
+    <string name="lut_folder">LUT folder</string>
     <string name="lut_choose_hint">Choose a folder containing .cube files; one level of subfolders is supported as categories.</string>
     <string name="lut_monitor_only">Monitor only; camera originals are unchanged</string>
     <string name="lut_folder_empty">No .cube files found</string>
@@ -707,4 +710,8 @@
     <string name="filter_rating_help_description">Enable to load ratings in the selected range and filter photos by rating. Turn it off and on again to reload the latest ratings.</string>
     <string name="filter_rating_off">Off</string>
     <string name="filter_rating_on">On</string>
+    <string name="remote_review">Review</string>
+    <string name="remote_review_empty">No photos</string>
+    <string name="remote_review_retry">Load failed · Retry</string>
+    <string name="remote_review_disconnected">Camera disconnected</string>
 </resources>

@@ -63,5 +63,8 @@ class FileListPresentationTest {
             initial,
             source.copy(thumbnailColumns = 4).toFileListTransferUiState(),
         )
+        val effectsOff = source.copy(photoEffectsEnabled = false).toFileListTransferUiState()
+        assertNotEquals(initial, effectsOff)
+        assertEquals(false, effectsOff.photoEffectsEnabled)
     }
 }

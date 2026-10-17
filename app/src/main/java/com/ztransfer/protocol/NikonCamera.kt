@@ -2080,8 +2080,13 @@ class NikonCamera(private val context: Context) {
     // 远程录像兼容模式的成对记账放在连接对象上，而不是 Compose 页面里：
     // 横竖屏重建或离开后重进监看页时仍能正确停止录像并恢复相机状态；
     // 断线会创建新的 NikonCamera，自然不会把旧连接的记账带过去。
-    @Volatile internal var remoteMovieApplicationPropSet = false
-    @Volatile internal var remoteMovieApplicationOpSet = false
+    internal val remoteMovieApplicationState = RemoteMovieApplicationState()
+    internal var remoteMovieApplicationPropSet: Boolean
+        get() = remoteMovieApplicationState.propertySet
+        set(value) { remoteMovieApplicationState.propertySet = value }
+    internal var remoteMovieApplicationOpSet: Boolean
+        get() = remoteMovieApplicationState.operationSet
+        set(value) { remoteMovieApplicationState.operationSet = value }
     // USB 录像期间持有的尼康完整远控模式（0x90C2）。开录前设 1，停录回待机时
     // 成对清 0；放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
     @Volatile internal var remoteControlModeSet = false
@@ -2130,31 +2135,6 @@ class NikonCamera(private val context: Context) {
 
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
-
-    /**
-     * Returns cached camera and transport facts suitable for a transfer diagnostic report.
-     * This method never sends a camera request and deliberately omits serial numbers, addresses,
-     * and other connection secrets.
-     */
-    fun transferDiagnosticDescription(): String {
-        val info = cachedDeviceInfo
-        val make = info?.manufacturer?.trim().orEmpty().ifEmpty { deviceManufacturer.orEmpty() }
-        val model = info?.model?.trim().orEmpty().ifEmpty { deviceModel.orEmpty() }
-        val firmware = info?.deviceVersion?.trim().orEmpty()
-        return buildString {
-            append("camera=")
-            append(listOf(make, model).filter(String::isNotEmpty).joinToString(" ").ifEmpty { "unknown" })
-            append(" firmware=")
-            append(firmware.ifEmpty { "unknown" })
-            append(" connection=")
-            append(connectionType.name)
-            usbPtp?.let {
-                append(" usb{")
-                append(it.diagnosticDescription())
-                append('}')
-            }
-        }
-    }
 
     private fun cacheDeviceInfo(data: ByteArray): LabDeviceInfo =
         parseDeviceInfo(data).also { info ->
@@ -2706,29 +2686,6 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    suspend fun getStorageIds(): List<Int> = withCameraTransaction(
-        CameraRequestKind.BACKGROUND_THUMBNAIL,
-        "GET_STORAGE_IDS",
-    ) {
-        withContext(Dispatchers.IO) {
-            try {
-                prefetchedStorageIds?.let { storageIds ->
-                    prefetchedStorageIds = null
-                    return@withContext storageIds
-                }
-                sendCmd(PtpConstants.GET_STORAGE_IDS)
-                val (respCode, data) = recvRespWithPayload()
-                if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
-                    return@withContext emptyList()
-                }
-                val count = data.getIntLE(0)
-                (0 until count).map { data.getIntLE(4 + it * 4) }
-            } catch (_: Exception) {
-                emptyList()
-            }
-        }
-    }
-
     internal data class StorageIdsResult(
         val storageIds: List<Int>,
         val successful: Boolean,
@@ -2737,13 +2694,13 @@ class NikonCamera(private val context: Context) {
         val error: String? = null,
     )
 
-    /** STA-only status-preserving variant; an IO/response failure must not become an empty card. */
-    internal suspend fun getStaStorageIdsWithStatus(): StorageIdsResult = withCameraTransaction(
+    /** All transports preserve status; an IO/response failure must not become an empty card. */
+    internal suspend fun getStorageIdsWithStatus(usePrefetched: Boolean = true): StorageIdsResult = withCameraTransaction(
         CameraRequestKind.BACKGROUND_THUMBNAIL,
-        "GET_STA_STORAGE_IDS",
+        "GET_STORAGE_IDS",
     ) {
         withContext(Dispatchers.IO) {
-            prefetchedStorageIds?.let { storageIds ->
+            prefetchedStorageIds?.takeIf { usePrefetched }?.let { storageIds ->
                 prefetchedStorageIds = null
                 return@withContext StorageIdsResult(
                     storageIds = storageIds,
@@ -2752,33 +2709,11 @@ class NikonCamera(private val context: Context) {
                     payloadBytes = 4 + storageIds.size * 4,
                 )
             }
+            prefetchedStorageIds = null
             try {
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (response, data) = recvRespWithPayload()
-                if (response != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
-                    return@withContext StorageIdsResult(
-                        storageIds = emptyList(),
-                        successful = false,
-                        responseCode = response,
-                        payloadBytes = data?.size ?: 0,
-                    )
-                }
-                val count = data.getIntLE(0)
-                if (count < 0 || count > (data.size - 4) / 4) {
-                    return@withContext StorageIdsResult(
-                        storageIds = emptyList(),
-                        successful = false,
-                        responseCode = response,
-                        payloadBytes = data.size,
-                        error = "malformed-count=$count",
-                    )
-                }
-                StorageIdsResult(
-                    storageIds = (0 until count).map { data.getIntLE(4 + it * 4) },
-                    successful = true,
-                    responseCode = response,
-                    payloadBytes = data.size,
-                )
+                parseCameraStorageIdsResponse(response, data)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -2819,12 +2754,13 @@ class NikonCamera(private val context: Context) {
 
     internal suspend fun getObjectHandlesWithStatus(
         storageId: Int = -1,
+        usePrefetched: Boolean = true,
     ): ObjectHandlesResult = withCameraTransaction(
         CameraRequestKind.BACKGROUND_THUMBNAIL,
         "GET_OBJECT_HANDLES",
     ) {
         withContext(Dispatchers.IO) {
-            prefetchedStaObjectHandles?.takeIf { it.queryStorageId == storageId }?.let { cached ->
+            prefetchedStaObjectHandles?.takeIf { usePrefetched && it.queryStorageId == storageId }?.let { cached ->
                 prefetchedStaObjectHandles = null
                 return@withContext ObjectHandlesResult(
                     handles = cached.handles,
@@ -2834,6 +2770,7 @@ class NikonCamera(private val context: Context) {
                     fromPrefetch = true,
                 )
             }
+            prefetchedStaObjectHandles = null
             try {
                 sendCmd(PtpConstants.GET_OBJECT_HANDLES, storageId, -1, 0)
                 val (respCode, data) = recvRespWithPayload()
@@ -4670,10 +4607,7 @@ class NikonCamera(private val context: Context) {
      * [resumeOffset] 非零时从该偏移续传（调用方须已把 output 定位到该偏移）。
      * [preferHighThroughputAtStart] 在首个文件数据命令前仅取值一次，之后页面切换不会改变当前文件。
      * [captureHeader] 在新文件传输时保留有限的文件头，供效果图导出复用；不会额外发起相机请求。
-     * [trace] 在显式诊断构建中接收有界协议摘要；回调异常不会改变传输结果。
-     * [onBytesReceived] 在每段数据写入 [output] 前同步观察收到的字节；默认回调异常会被忽略。
-     * [strictBytesObserver] 为兼容性校验开启时让观察器异常终止本文件，普通路径保持忽略。
-     * [diagnosticReferenceRead] 仅在显式诊断构建中把视频分块限制为 4 MiB。
+     * [onBytesReceived] 在每段数据写入 [output] 前同步观察收到的字节；观察器异常会终止本文件。
      *
      * 照片不续传：AP/USB 用 GetObject，STA 用一次 GetPartialObjectEx 请求整个范围；
      * 两者都使用固定缓冲的 pump 流式写盘，不将整张照片放进内存。
@@ -4689,15 +4623,10 @@ class NikonCamera(private val context: Context) {
         preferHighThroughputAtStart: () -> Boolean = { false },
         captureHeader: Boolean = false,
         videoTransfer: Boolean = false,
-        trace: ((String) -> Unit)? = null,
-        diagnosticReferenceRead: Boolean = false,
         onBytesReceived: ((ByteArray, Int, Int) -> Unit)? = null,
-        strictBytesObserver: Boolean = false,
     ): Result<DownloadStats> = ioGate.withDownloadActivity {
         withContext(Dispatchers.IO) {
             val scope = this
-            val downloadTrace = DownloadTrace(trace)
-            val diagnosticReference = diagnosticReferenceRead && BuildConfig.TRANSFER_DIAGNOSTICS
             if (!videoTransfer && resumeOffset != 0L) return@withContext Result.failure(ResumeUnavailableException())
             var totalDownloaded = resumeOffset
             // Only photos capture metadata; they always start at zero. Videos never allocate it.
@@ -4738,17 +4667,7 @@ class NikonCamera(private val context: Context) {
                 }
             }
             fun writeChunk(bytes: ByteArray, offset: Int, count: Int) {
-                if (onBytesReceived != null) {
-                    if (strictBytesObserver) {
-                        onBytesReceived.invoke(bytes, offset, count)
-                    } else {
-                        try {
-                            onBytesReceived.invoke(bytes, offset, count)
-                        } catch (_: Throwable) {
-                            // A receive observer is diagnostic-only and cannot change transfer state.
-                        }
-                    }
-                }
+                onBytesReceived?.invoke(bytes, offset, count)
                 try {
                     output.write(bytes, offset, count)
                 } catch (e: java.io.IOException) {
@@ -4779,7 +4698,6 @@ class NikonCamera(private val context: Context) {
                     val total = if (progressTotalHint > 0) progressTotalHint else 0L
                     val result = usb.receiveDataTo(
                         expectedTransactionId = tid,
-                        trace = downloadTrace.takeIf { it.enabled },
                         onDataStart = { emitProgress(total, force = true) },
                     ) { bytes, offset, count ->
                         scope.ensureActive()
@@ -4798,26 +4716,18 @@ class NikonCamera(private val context: Context) {
                     val buf = packet.buffer
                     val len = packet.payloadLen
                     when (packet.type) {
-                        PtpConstants.CMD_RESPONSE -> {
-                            val responseCode = if (len >= 2) buf.getUShortLE(0) else 0
-                            val responseTid = if (len >= 6) buf.getIntLE(2) else null
-                            downloadTrace.wifiResponse(responseTid, responseCode, len)
-                            return Triple(responseCode, written, expected)
-                        }
+                        PtpConstants.CMD_RESPONSE ->
+                            return Triple(if (len >= 2) buf.getUShortLE(0) else 0, written, expected)
                         PtpConstants.START_DATA_PACKET -> {
-                            val packetTid = if (len >= 4) buf.getIntLE(0) else null
                             expected = when {
                                 len >= 12 -> buf.getLongLE(4)
                                 len >= 8 -> buf.getIntLE(4).toLong() and 0xFFFFFFFFL
                                 else -> 0L
                             }
-                            downloadTrace.wifiPacket(packet.type, packetTid, len, expected)
                             val total = if (progressTotalHint > 0) progressTotalHint else expected
                             emitProgress(total, force = true)
                         }
                         PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
-                            val packetTid = if (len >= 4) buf.getIntLE(0) else null
-                            downloadTrace.wifiPacket(packet.type, packetTid, len)
                             if (len > 4) {
                                 writeChunk(buf, 4, len - 4)
                                 written += len - 4
@@ -4891,23 +4801,6 @@ class NikonCamera(private val context: Context) {
                     videoTransfer = videoTransfer,
                 )
 
-                val plannedChunkSize = if (usePartial) {
-                    val normal = downloadChunkSize(
-                        effectiveSize = effectiveSize,
-                        isUsbConnection = usbPtp != null,
-                        preferHighThroughput = preferHighThroughput,
-                        videoTransfer = videoTransfer,
-                    )
-                    if (diagnosticReference && videoTransfer) minOf(normal, CHUNK_SIZE) else normal
-                } else {
-                    null
-                }
-                downloadTrace.strategy(
-                    transport = if (usbPtp != null) "usb" else "wifi",
-                    mode = if (usePartial) "partial" else "full",
-                    chunkSize = plannedChunkSize,
-                )
-
                 fun noteStaDownload(message: String) {
                     if (staDirectObjectReadValidated && PhotoGenerationProbe.enabled) {
                         PhotoGenerationProbe.note("STA-DL", message)
@@ -4933,7 +4826,12 @@ class NikonCamera(private val context: Context) {
                     var offset = resumeOffset
                     var first = true
                     var fellBack = false
-                    val chunkSize = plannedChunkSize ?: error("missing partial download chunk size")
+                    val chunkSize = downloadChunkSize(
+                        effectiveSize = effectiveSize,
+                        isUsbConnection = usbPtp != null,
+                        preferHighThroughput = preferHighThroughput,
+                        videoTransfer = videoTransfer,
+                    )
                     if (!videoTransfer && effectiveSize > Int.MAX_VALUE) {
                         return@withContext Result.failure(java.io.IOException("Photo exceeds single-request size limit"))
                     }
@@ -4941,28 +4839,12 @@ class NikonCamera(private val context: Context) {
                         scope.ensureActive()
                         val reqSize = minOf(chunkSize, effectiveSize - offset).toInt()
                         log { "DL_CHUNK offset=$offset size=$reqSize" }
-                        val operation = PtpConstants.NK_GET_PARTIAL_OBJECT_EX
-                        val transactionId = tid + 1
-                        val requestBytes = if (usbPtp != null) 12 + 5 * 4 else 18 + 5 * 4
-                        downloadTrace.start(
-                            transport = if (usbPtp != null) "usb" else "wifi",
-                            operation = operation,
-                            transactionId = transactionId,
-                            offset = offset,
-                            requestBytes = requestBytes,
-                        )
                         val (resp, got, chunkExpected) = transferTransaction {
-                            sendCmd(operation, handle,
+                            sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle,
                                 (offset and 0xFFFFFFFFL).toInt(),
                                 (offset ushr 32).toInt(), reqSize, 0)
                             pump(effectiveSize)
                         }
-                        downloadTrace.end(
-                            response = resp,
-                            expected = chunkExpected,
-                            received = got,
-                            usb = usbPtp?.takeDiagnosticReadTrace(),
-                        )
                         log { "DL_CHUNK_RESP resp=0x${resp.toString(16)} got=$got" }
 
                         if (resp != PtpConstants.RESPONSE_OK) {
@@ -5004,35 +4886,14 @@ class NikonCamera(private val context: Context) {
                         )
                         return@withContext Result.success(buildStats())
                     }
-                    downloadTrace.strategy(
-                        transport = if (usbPtp != null) "usb" else "wifi",
-                        mode = "full-fallback",
-                        chunkSize = null,
-                    )
                     // fellBack：resumeOffset 必为 0，totalDownloaded 仍为 0，落入下方全量路径。
                 }
 
                 // ===== 全量路径（仅 resumeOffset==0：全新下载 或 分块不支持回退）=====
-                val fullOperation = PtpConstants.GET_OBJECT
-                val fullTransactionId = tid + 1
-                val fullRequestBytes = if (usbPtp != null) 12 + 4 else 18 + 4
-                downloadTrace.start(
-                    transport = if (usbPtp != null) "usb" else "wifi",
-                    operation = fullOperation,
-                    transactionId = fullTransactionId,
-                    offset = 0L,
-                    requestBytes = fullRequestBytes,
-                )
                 val (resp, _, expected) = transferTransaction {
-                    sendCmd(fullOperation, handle)
+                    sendCmd(PtpConstants.GET_OBJECT, handle)
                     pump(if (sizeKnown) effectiveSize else 0L)
                 }
-                downloadTrace.end(
-                    response = resp,
-                    expected = expected,
-                    received = totalDownloaded,
-                    usb = usbPtp?.takeDiagnosticReadTrace(),
-                )
                 log { "DL_FULL resp=0x${resp.toString(16)} total=$totalDownloaded" }
                 noteStaDownload(
                     "unexpected full-object handle=0x%08X response=0x%04X bytes=%d".format(
@@ -5051,10 +4912,8 @@ class NikonCamera(private val context: Context) {
             } catch (e: CancellationException) {
                 // 数据相位内的取消已由 transferTransaction 在持锁状态排空；块间取消没有
                 // 在途协议数据，直接传播即可。
-                downloadTrace.error("cancelled", e)
                 throw e
             } catch (e: Exception) {
-                downloadTrace.error("download", e)
                 if (staDirectObjectReadValidated && PhotoGenerationProbe.enabled) {
                     PhotoGenerationProbe.note(
                         "STA-DL",

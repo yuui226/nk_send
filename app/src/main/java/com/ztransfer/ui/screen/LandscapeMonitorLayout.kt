@@ -6,14 +6,27 @@ internal data class MonitorBounds(val x: Float, val y: Float, val width: Float, 
     val bottom get() = y + height
 }
 
+/** Sizes for the photo-only capture pair using the full width of its own row. */
+internal data class LandscapePhotoCaptureSizes(val shutter: Float, val reviewScale: Float, val gap: Float) {
+    val reviewWidth get() = 40f * reviewScale
+    val reviewHeight get() = 48f * reviewScale
+    val width get() = reviewWidth + gap + shutter
+}
+
+internal fun landscapePhotoCaptureSizes(availableWidth: Float, preferredShutter: Float): LandscapePhotoCaptureSizes {
+    val scale = (availableWidth.coerceAtLeast(0f) / (preferredShutter + 40f + 8f)).coerceIn(0f, 1f)
+    return LandscapePhotoCaptureSizes(preferredShutter * scale, scale, 8f * scale)
+}
+
 internal data class LandscapeMonitorLayout(
     val image: MonitorBounds,
     val controls: MonitorBounds,
     val columns: Int,
     val shutterSize: Float,
     val bottomControls: Boolean = false,
+    val photoReview: Boolean = false,
 ) {
-    val footerHeight: Float get() = maxOf(36f, shutterSize) + 40f
+    val footerHeight: Float get() = maxOf(36f, shutterSize) + if (photoReview) 52f else 40f
     // Use spare height on wide rails to bring capture closer to the parameter controls.
     val captureLift: Float get() = if (!bottomControls && columns == 2)
         ((controls.height - 36f - 8f - footerHeight - 98f) / 3f).coerceIn(0f, 48f) else 0f
@@ -32,6 +45,7 @@ internal fun landscapeMonitorLayout(
     width: Float,
     height: Float,
     imageAspect: Float,
+    photoReview: Boolean = false,
 ): LandscapeMonitorLayout {
     require(width.isFinite() && height.isFinite() && width >= 0f && height >= 0f)
     require(imageAspect.isFinite() && imageAspect > 0f)
@@ -39,12 +53,12 @@ internal fun landscapeMonitorLayout(
     val fullWidth = minOf((width - 8f).coerceAtLeast(0f),
         (height - 8f).coerceAtLeast(0f) * imageAspect)
     // Never reserve a two-column rail just because the viewport is short.
-    val minimumRail = 116f
+    val minimumRail = if (photoReview) 128f else 116f
     val sideWidth = minOf(fullWidth, (width - minimumRail - 16f).coerceAtLeast(0f))
     // Match the actual bottom layout: 36dp header + 4dp gap, then parameter
     // rows beside the capture cluster. A fixed 164dp reservation wastes the
     // space freed by desqueeze and can incorrectly keep the side rail.
-    val bottomHeight = 40f + maxOf(46f * 2f + 4f, maxOf(36f, shutter) + 40f)
+    val bottomHeight = 40f + maxOf(46f * 2f + 4f, maxOf(36f, shutter) + if (photoReview) 52f else 40f)
     val bottomWidth = if (width >= 360f && height >= bottomHeight + 16f)
         minOf(fullWidth, (height - bottomHeight - 16f) * imageAspect) else -1f
     val useBottom = bottomWidth > sideWidth + .01f
@@ -65,5 +79,5 @@ internal fun landscapeMonitorLayout(
     val columns = if (useBottom) 2 else if (controls.width >= 176f) 2 else 1
     // Enlarge within existing free width only; keep the left DISP/rotation column clear.
     val captureSize = if (useBottom) shutter else (controls.width - 56f).coerceIn(48f, 74f)
-    return LandscapeMonitorLayout(image, controls, columns, captureSize, useBottom)
+    return LandscapeMonitorLayout(image, controls, columns, captureSize, useBottom, photoReview)
 }

@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <instrumentation android:name="com.ztransfer.frame.FramePlaceLayoutInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.RemoteEntryInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.protocol.StaJpegThumbnailInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.frame.ParameterPosterInstrumentation"
@@ -28,5 +30,11 @@
     <instrumentation android:name="com.ztransfer.lut.LutColorInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.lut.LutStateInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.PresetCategoryInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.presets.PictureControlFolderInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.storage.HarmonyPublicationInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
 </manifest>

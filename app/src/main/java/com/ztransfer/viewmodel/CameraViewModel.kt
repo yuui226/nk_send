@@ -1166,11 +1166,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 参数加载/取帧争抢相机事务调度器（表现为进页要等半天、帧率骤降）。与"传输中停止"
     // 同一哲学——前台交互独占通道；退出遥控页自动恢复。
     private val remoteActiveFlow = MutableStateFlow(false)
+    private val remoteActivity = RemoteActivityTracker(::setRemoteActive)
+
+    /** Screen and camera-session cleanup own separate holds; only the last release resumes IO. */
+    internal fun acquireRemoteActivity(): java.io.Closeable = remoteActivity.acquire()
 
     private fun isFileScanPaused(): Boolean =
         remoteActiveFlow.value || fhdActiveFlow.value
 
-    fun setRemoteActive(active: Boolean) {
+    private fun setRemoteActive(active: Boolean) {
         val wasActive = remoteActiveFlow.value
         remoteActiveFlow.value = active
         if (active) {
@@ -1179,9 +1183,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             fileLoadJob?.cancel()
         } else if (wasActive) {
-            if (_state.value.isConnectedToCamera && !fhdActiveFlow.value) {
+            if (_state.value.isConnectedToCamera) {
                 log { "FILE_SCAN refresh after remote loaded=${_state.value.files.size}" }
                 // 监看期间完全不处理文件事件；退出后用连接级 knownHandles 一次性补差。
+                // FHD may already be open: loadFiles records pending and invalidates the stale
+                // snapshot without sending commands until that preview also releases the camera.
                 loadFiles(preserveExisting = true, detectNewHandles = true)
             }
         }
@@ -1222,9 +1228,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 loadFiles(preserveExisting = true, resumeSnapshot = snapshot)
             } else {
-                // 预览期间发生重连或暂停发生在 handles 取得之前：旧 handle 不可复用。
+                // 监看退页或重连可能使快照失效；重新枚举并补差，保留已显示的列表。
                 log { "FILE_SCAN resume after FHD with fresh handles" }
-                loadFiles()
+                loadFiles(preserveExisting = true, detectNewHandles = true)
             }
         }
     }
@@ -3137,6 +3143,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             var staScanRequiresReconnect = false
             try {
+                // Failed monitor cleanup must not turn Nikon's application-mode no-card
+                // response into a deletion of the last known album.
+                check(!cam.remoteControlModeSet && !cam.remoteMovieApplicationPropSet &&
+                    !cam.remoteMovieApplicationOpSet) { "Camera remote mode release is unconfirmed" }
                 var existingFiles =
                     if (preserveExisting && camera === cam) _state.value.files else emptyList()
                 var existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
@@ -3158,26 +3168,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // state: isStaConnection intentionally survives a disconnect for reconnect UI.
                     val staScan = cam.staAlbumAccessValidated
                     var storageAttempts = 1
-                    var staStorageResult = if (staScan) cam.getStaStorageIdsWithStatus() else null
-                    while (staScan && staStorageResult?.successful == false &&
-                        staStorageResult.responseCode == PtpConstants.DEVICE_BUSY &&
+                    var storageResult = cam.getStorageIdsWithStatus()
+                    while (!storageResult.successful &&
+                        storageResult.responseCode == PtpConstants.DEVICE_BUSY &&
                         storageAttempts < 3
                     ) {
-                        delay(STA_FILE_SCAN_RETRY_DELAY_MS)
+                        delay(FILE_SCAN_RETRY_DELAY_MS)
                         storageAttempts++
-                        staStorageResult = cam.getStaStorageIdsWithStatus()
+                        storageResult = cam.getStorageIdsWithStatus()
                     }
-                    if (staScan && staStorageResult?.successful == false) {
-                        val failure = checkNotNull(staStorageResult)
-                        staScanRequiresReconnect = true
+                    if (!storageResult.successful) {
+                        staScanRequiresReconnect = staScan
                         throw IOException(
-                            "STA GetStorageIDs failed: " +
-                                (failure.error ?: failure.responseCode?.let {
+                            "GetStorageIDs failed: " +
+                                (storageResult.error ?: storageResult.responseCode?.let {
                                     "response=0x%04X".format(it)
                                 } ?: "unknown"),
                         )
                     }
-                    val rawStorageIds = staStorageResult?.storageIds ?: cam.getStorageIds()
+                    val rawStorageIds = storageResult.storageIds
                     storageIds = usableStorageIds(rawStorageIds, staScan)
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
                     if (FileOrderProbe.enabled) FileOrderProbe.recordStorageIds(storageIds)
@@ -3235,13 +3244,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         val queryStorageId = objectHandleQueryStorageId(storageId, staScan)
                         var attempts = 1
                         var result = cam.getObjectHandlesWithStatus(queryStorageId)
-                        // The paired STA service can briefly answer DeviceBusy immediately after
-                        // the connected transition. Retry response-level failures in place; a
-                        // transport exception is handled by reconnecting the session below.
-                        while (staScan && !result.successful &&
+                        // Cameras can remain briefly busy after recording or a mode transition.
+                        // Retry only DeviceBusy, on every transport, before publishing a catalog.
+                        while (!result.successful &&
                             result.responseCode == PtpConstants.DEVICE_BUSY && attempts < 3
                         ) {
-                            delay(STA_FILE_SCAN_RETRY_DELAY_MS)
+                            delay(FILE_SCAN_RETRY_DELAY_MS)
                             attempts++
                             result = cam.getObjectHandlesWithStatus(queryStorageId)
                         }
@@ -3276,10 +3284,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 elapsedMs = SystemClock.elapsedRealtime() - startedAtMs,
                             )
                         }
-                        if (staScan && !result.successful) {
-                            staScanRequiresReconnect = true
+                        if (!result.successful) {
+                            staScanRequiresReconnect = staScan
                             throw IOException(
-                                "STA GetObjectHandles failed for 0x%08X: %s".format(
+                                "GetObjectHandles failed for 0x%08X: %s".format(
                                     storageId,
                                     result.error ?: result.responseCode?.let {
                                         "response=0x%04X".format(it)
@@ -3683,6 +3691,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 throw e
             } catch (e: Exception) {
                 // 扫描中断：保留已发布部分；STA 目录入口连续失败时立即重建会话。
+                log { "FILE_SCAN failed: ${e.javaClass.simpleName}: ${e.message.orEmpty()}" }
                 if (fileLoadGeneration == generation && camera === cam) {
                     fileScanHandleSnapshot = null
                     fileLoadPending = false
@@ -4322,6 +4331,65 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** A private, unfiltered review snapshot. It never publishes into or clears the album. */
+    internal suspend fun openRemoteReviewCatalog(expectedCamera: NikonCamera): RemoteReviewCatalog {
+        fun checkCamera() {
+            if (camera !== expectedCamera || !_state.value.isConnectedToCamera) {
+                throw CancellationException("Review camera changed")
+            }
+        }
+        checkCamera()
+        val sta = _state.value.isStaConnection
+        val cached = (indexedCameraFiles.values + _state.value.files).associateBy { it.handle }
+        var storage = expectedCamera.getStorageIdsWithStatus(usePrefetched = false)
+        repeat(2) {
+            if (!storage.successful && storage.responseCode == PtpConstants.DEVICE_BUSY) {
+                delay(250)
+                checkCamera()
+                storage = expectedCamera.getStorageIdsWithStatus(usePrefetched = false)
+            }
+        }
+        if (!storage.successful) throw IOException("Review storage: ${storage.responseCode}")
+        val storageIds = usableStorageIds(storage.storageIds, sta)
+        val handles = storageIds.map { storageId ->
+            val query = objectHandleQueryStorageId(storageId, sta)
+            var result = expectedCamera.getObjectHandlesWithStatus(query, usePrefetched = false)
+            repeat(2) {
+                if (!result.successful && result.responseCode == PtpConstants.DEVICE_BUSY) {
+                    delay(250)
+                    checkCamera()
+                    result = expectedCamera.getObjectHandlesWithStatus(query, usePrefetched = false)
+                }
+            }
+            if (!result.successful) throw IOException("Review handles: ${result.responseCode}")
+            storageId to result.handles
+        }
+        checkCamera()
+        return RemoteReviewCatalog(newestFirstHandleOrders(handles).map { it.newestFirstHandles }) { handle ->
+            checkCamera()
+            cached[handle] ?: run {
+                var file: NikonCamera.FileInfo? = null
+                var succeeded = false
+                repeat(3) { attempt ->
+                    if (!succeeded) {
+                        if (attempt > 0) delay(250)
+                        checkCamera()
+                        succeeded = if (expectedCamera.staDirectObjectReadValidated) {
+                            expectedCamera.streamStaDirectFileInfo(listOf(handle), storageIds, batchSize = 1,
+                                onBatch = { batch, _, _ -> file = batch.firstOrNull() })
+                        } else {
+                            expectedCamera.streamFileInfo(listOf(handle), batchSize = 1,
+                                onBatch = { batch, _, _ -> file = batch.firstOrNull() })
+                        }
+                    }
+                }
+                checkCamera()
+                if (!succeeded) throw IOException("Review ObjectInfo: $handle")
+                file
+            }
+        }
+    }
+
     /**
      * 长按预览专用：加载 FHD (1920×1080) 预览图。直接从相机拉 FHD JPEG 并解码。
      * 任何环节失败均返回 null，调用方静默回退到缩略图。
@@ -4713,7 +4781,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val STA_PAIRING_RECONNECT_DELAY_MS = 6_600L
         const val STA_SERVICE_READY_RETRY_DELAY_MS = 1_200L
         const val STA_EXPLORER_RECONNECT_DELAY_MS = 900L
-        const val STA_FILE_SCAN_RETRY_DELAY_MS = 750L
+        const val FILE_SCAN_RETRY_DELAY_MS = 750L
         val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
