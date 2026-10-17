@@ -71,6 +71,12 @@ struct SettingsView: View {
     @StateObject private var photoLUTStore = PhotoLUTStore(role: .camera)
     @State private var showingPicker = false
     @State private var feedbackHint = false
+    #if DEBUG
+    @State private var versionTaps = 0
+    @State private var lastVersionTapAt: TimeInterval?
+    @State private var revertedHintVisible = false
+    @State private var revertedHintNonce = 0
+    #endif
     @State private var settingsPage: SettingsPage = .main
     @Binding private var effectsDraft: PhotoEffectsSettings
     @Binding private var filterChooser: PhotoFilterChooserState
@@ -95,7 +101,7 @@ struct SettingsView: View {
     @AppStorage("keep_screen_on") private var keepScreenOn = true
     @AppStorage("theme_mode") private var themeMode = "SYSTEM"
     @AppStorage("app_language") private var appLanguage = "system"
-    @AppStorage("skin_preset") private var skinPreset = "FROSTED_GLASS"
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @AppStorage("main_settings_help_viewed") private var mainSettingsHelpViewed = false
     @AppStorage("photo_effects_help_viewed") private var photoEffectsHelpViewed = false
 
@@ -430,9 +436,11 @@ struct SettingsView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(ZTransferColors.secondaryText)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(AppLocalized.resource("cd_close"))
         }
         .frame(minHeight: 32)
     }
@@ -590,7 +598,7 @@ struct SettingsView: View {
                 }, onCommit: { skinPreset = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
             }
             SettingsDivider()
-            HStack(spacing: 8) { ToggleWheel(label: AppLocalized.resource("haptic_feedback"), isOn: $haptics, isHapticsPreference: true); ToggleWheel(label: AppLocalized.resource("keep_screen_on"), isOn: $keepScreenOn) }
+            HStack(spacing: 8) { ToggleWheel(label: AppLocalized.resource("haptic_feedback"), isOn: $haptics, isHapticsPreference: true, compact: true); ToggleWheel(label: AppLocalized.resource("keep_screen_on"), isOn: $keepScreenOn, compact: true) }
         }
     }
 
@@ -665,14 +673,63 @@ struct SettingsView: View {
         .background { Button(action: showEffectsSettings) { Color.clear }.buttonStyle(.plain) }
     }
 
+    // User-requested build marker belongs only to the settings version plaque.
+    private var versionPlaqueText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.94"
+        #if DEBUG
+        return AppLocalized.versionText(version + "-D")
+        #else
+        return AppLocalized.versionText(version)
+        #endif
+    }
+
     private var footer: some View {
         HStack(spacing: 8) {
-                        VersionPlaque(text: AppLocalized.versionText(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.94"))
+            VersionPlaque(text: versionPlaqueText)
+                #if DEBUG
+                .contentShape(Rectangle())
+                .onTapGesture(perform: handleVersionTap)
+                #endif
             Spacer()
             SettingsFooterButton(AppLocalized.resource("feedback")) { UIPasteboard.general.string = "953000922"; feedbackHint = true }
         }
+        #if DEBUG
+        .overlay(alignment: .bottom) {
+            if revertedHintVisible {
+                Text(AppLocalized.resource("revert_free"))
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
+                    .allowsHitTesting(false)
+            }
+        }
+        .task(id: revertedHintNonce) {
+            guard revertedHintVisible else { return }
+            do { try await Task.sleep(for: .milliseconds(1800)) }
+            catch { return }
+            revertedHintVisible = false
+        }
+        #endif
         .alert(AppLocalized.formattedResource("feedback_qq_copied", ["%1$s": "953000922"]), isPresented: $feedbackHint) { Button(AppLocalized.resource("cd_close"), role: .cancel) {} }
     }
+
+    #if DEBUG
+    /// Android SettingsScreen: seven taps, each gap strictly below 1500 ms.
+    /// Only local simulated ownership is cleared; StoreKit grants and usage stay intact.
+    private func handleVersionTap() {
+        let now = ProcessInfo.processInfo.systemUptime
+        versionTaps = lastVersionTapAt.map { now - $0 < 1.5 } == true ? versionTaps + 1 : 1
+        lastVersionTapAt = now
+        guard versionTaps >= 7, entitlements.entitlement.isPro(),
+              entitlements.developmentPurchase != nil else { return }
+        versionTaps = 0
+        entitlements.endSimulatedPurchase()
+        if !entitlements.entitlement.isPro() {
+            revertedHintVisible = true
+            revertedHintNonce += 1
+        }
+    }
+    #endif
 
     private func dismissHelp() {
         showingHelp = false
@@ -802,6 +859,7 @@ private struct ToggleWheel: View {
     @Binding var isOn: Bool
     var disabled = false
     var isHapticsPreference = false
+    var compact = false
     var body: some View {
         DetentWheel(
             label: label,
@@ -809,9 +867,10 @@ private struct ToggleWheel: View {
             selected: isOn,
             optionLabel: { AppLocalized.settingState($0) },
             onCommit: { isOn = $0 },
-            rowHeight: 18,
-            wheelHeight: 50,
+            rowHeight: compact ? 16 : 18,
+            wheelHeight: compact ? 42 : 50,
             enabled: !disabled,
+            optionFontSize: compact ? 13 : 14,
             accentColor: isOn ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
             emphasized: isOn,
             onDetent: { ZTransferHaptics.shared.tick(isPreferenceToggle: isHapticsPreference) },

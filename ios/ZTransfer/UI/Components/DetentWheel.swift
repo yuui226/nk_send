@@ -35,7 +35,7 @@ struct DetentWheel<Option: Hashable>: View {
     var prominentPressFeedback = false
     var contentAnchorSpace: AnyHashable? = nil
     var onContentAnchorChange: ((CGRect) -> Void)? = nil
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @State private var position: CGFloat
     @State private var dragging = false
     @State private var dragSession: DetentWheelDragSession<Option>
@@ -126,9 +126,15 @@ struct DetentWheel<Option: Hashable>: View {
                 }
                 wheelRows(center: center)
                 if !label.isEmpty {
-                    Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(accent)
-                        .padding(.horizontal, 5).frame(height: 16)
-                        .background(accent.opacity(0.10), in: UnevenRoundedRectangle(bottomTrailingRadius: 5))
+                    // Android ReleaseCommitWheel uses a smaller badge at <=34dp.
+                    Text(label)
+                        .font(.system(size: wheelHeight <= 34 ? 8 : 9, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, wheelHeight <= 34 ? 4 : 6)
+                        .padding(.vertical, 1)
+                        .frame(minHeight: wheelHeight <= 34 ? 11 : 15)
+                        .background(accent.opacity(0.10), in: UnevenRoundedRectangle(bottomTrailingRadius: wheelHeight <= 34 ? 4 : 5))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .opacity(dragging ? 0 : 1)
                 }

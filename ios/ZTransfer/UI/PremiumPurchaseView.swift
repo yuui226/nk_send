@@ -11,7 +11,8 @@ struct PremiumSettingsActions: View {
     let onPlayFireworks: () -> Void
     private var showManagement: Bool {
         #if DEBUG
-        if access.entitlement.isPro() { return true }
+        // Simulated ownership needs no separate settings management button.
+        if access.developmentPurchase != nil { return false }
         #endif
         if case .annual = access.entitlement { return true }
         guard access.entitlement == .lifetime else { return false }
@@ -25,7 +26,7 @@ struct PremiumSettingsActions: View {
             if showManagement {
                 // Lifetime owners retain the management route as well: their
                 // former annual renewal may still be active or unconfirmed.
-                Button(managementLabel, action: onShowPremium)
+                Button(AppLocalized.resource("iap_manage"), action: onShowPremium)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(ZTransferColors.accentBlue)
                     .padding(.horizontal, 8).frame(height: 28)
@@ -40,16 +41,9 @@ struct PremiumSettingsActions: View {
         }
     }
 
-    private var managementLabel: String {
-        #if DEBUG
-        if access.developmentPurchase != nil { return "测试权益" }
-        #endif
-        return AppLocalized.resource("iap_manage")
-    }
-
     private var badgeLabel: String {
         #if DEBUG
-        if access.developmentPurchase != nil { return "测试 Pro" }
+        if access.developmentPurchase != nil { return "Pro" }
         #endif
         return AppLocalized.resource(access.entitlement == .unresolved
             ? "iap_confirming" : (access.entitlement.isPro() ? "pro_label" : "unlock_pro"))

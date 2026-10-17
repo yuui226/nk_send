@@ -1878,7 +1878,7 @@ final class DomainModelTests: XCTestCase {
     }
 
     func testSkinPreferenceRestorationMatchesAndroidMigration() {
-        XCTAssertEqual(normalizedSkinPreset(nil), "FROSTED_GLASS")
+        XCTAssertEqual(normalizedSkinPreset(nil), ZTransferButtonSkin.defaultPreset.rawValue)
         XCTAssertEqual(normalizedSkinPreset("WOOD"), "WOOD")
         if #available(iOS 26.0, *) {
             XCTAssertEqual(normalizedSkinPreset("LIQUID_GLASS"), "LIQUID_GLASS")

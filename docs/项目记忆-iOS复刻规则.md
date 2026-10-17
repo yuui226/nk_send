@@ -3347,3 +3347,24 @@ U004本轮交付：最终版已安装到同一iPhone 15，应用目录1B7FB203-1
 U004交付后截图限制：/tmp/ztransfer-settings-render-device-after.png 与 /tmp/ztransfer-settings-render-device-review.png 均为新版本正常照片列表，尚未采到用户打开后的新设置窗；它们仅证明普通启动/相机列表正常，不能用作新设置窗真机外观验收。当前无运行中构建或诊断会话，等待用户实际反馈。
 
 2026-10-17 U004用户真机验收：在安装目录1B7FB203-1716-488D-8AEF-6975CD473D86的最终版上，用户回复打开一次设置窗、拖动空白处、关开后是否仍有标题独立白块/跳高/闪边的询问：“这次正常了”。据此本轮设置窗问题收尾，证据为用户明确真机反馈与此前7/7专项，非新截图或录屏；不扩展为其他页面、全部样式/动画均验收。本次仅更新记录，未新增构建、测试、安装、提交或推送，既有未提交修改保留。
+
+
+2026-10-17 按用户明确要求简化设置页开发标识：模拟权益生效时移除“测试权益”管理按钮，徽章改为“Pro”；Debug 版本铭牌追加“-D”，Release 保持原版本文本。模拟持久化、免费额度、真实订阅管理与徽章点击行为不变。此次为用户指定界面差异，无新增动画或业务流程。git diff --check通过；未新增或运行自动化测试，真机构建进行中，尚未提交/推送。
+
+2026-10-17 设置标识修改交付：/tmp/ztransfer-settings-pro-label-build.log BUILD SUCCEEDED、exit0；已覆盖安装同一iPhone，应用目录D52DBF62-9FD5-484E-9B5C-2A20D69EDEC7，普通无参数启动成功。未重置权益或额度；本轮未运行自动化测试，未确认真机新标签截图；git diff --check通过，未提交/推送。
+
+2026-10-17 用户要求版本铭牌连点恢复免费版。对照Android SettingsScreen.kt版本入口及LicenseManager.revertToFree：7次点击、相邻间隔严格小于1500ms（不是总时长1500ms），成功计数归零、底部原文提示1800ms。iOS仅Debug接入现有endSimulatedPurchase，清本地模拟购买并恢复真实StoreKit状态，不清免费用量、不撤销真实购买；当前模拟Pro可恢复免费后重新走模拟购买。无按压视觉提示，使用单调时钟，提示任务随视图退出/重复触发取消。此次未新增或运行自动化/UI测试，构建结果待补；未提交/推送。
+
+2026-10-17 铭牌恢复免费入口交付：/tmp/ztransfer-version-reset-build.log BUILD SUCCEEDED、exit0；已安装同一iPhone，目录A8EBC902-6D49-4627-AF21-52F6DD6D61FC。git diff --check通过；未代替用户触发重置、未运行手势测试，真机连点待用户使用确认；未提交/推送。
+
+2026-10-17 筛选窗高度及底部紧凑拨轮：真机截图/tmp/ztransfer-filter-height-before.png确认日期按钮下大片空白，旧ScrollView最大高度被宿主当作自然高度。对照Android FileListScreen.FilterOverlay包裹内容：改测量带14pt内边距的自然内容，页面分别缓存高度，外层显式限高并fillsProposedSize，首轮测量后展开，日期页同样可在小屏滚动；切页未测量时沿用上一页高度。用户追加设置最底部两个拨轮对齐截图；对照SettingsScreen.BooleanSettingsWheel compact=true，将触感反馈/屏幕常亮设42高、16行高、13字号，其余布尔拨轮保留原尺寸。无业务状态改动。筛选单独构建成功；组合首次构建因Swift参数顺序失败，已纠正，最终构建中。未运行UI自动化或新增测试，未提交/推送。
+
+2026-10-17 本轮交付：组合第二次构建发现compact替换误及存放方式拨轮，已还原原50/18规格；最终/tmp/ztransfer-filter-compact-delivery-build.log BUILD SUCCEEDED、exit0，已安装同一iPhone（12AD9CE5-932F-43A2-85A8-80E0C5C08825）并普通启动。静态diff检查通过；仅旧版截图证明问题，修复版真机外观尚待确认，无UI自动化，不声称已完成真机视觉验收；未提交/推送。
+
+2026-10-17 角标/关闭点击修正：用户反馈筛选角标挤占选项。两次新截图/tmp/ztransfer-filter-label-before.png及current.png实际为设置窗（首张动画中），不冒充筛选截图；此前filter-height-before截图可见评级角标压近选项。对照Android ReleaseCommitWheel/ControlTileCornerBadge，iOS统一10 semibold/16高误配，改为wheelHeight<=34时8 medium/最小11高/横4纵1padding，大控件9 medium/最小15高/横6纵1padding，单行。用户追加设置×偶发点不到；Android为32dp IconButton，iOS原30pt plain image未指定完整命中矩形，改32×32并contentShape(Rectangle)，补关闭辅助标签。未证实宿主永久禁用或系统手势问题，不能宣称全部偶发情况已复现/核销。未运行新增测试或UI自动化；构建中，未提交/推送。
+
+2026-10-17 角标/关闭按钮交付：/tmp/ztransfer-badge-close-build.log BUILD SUCCEEDED、exit0；同机安装E1CF1FE5-3454-489F-BD21-91A0BF60AABC并普通启动。静态检查通过，未执行真机手势自动化，角标观感和偶发关闭问题待用户复核；未提交/推送。
+
+2026-10-17 用户明确指定iOS默认按钮主题为液态玻璃：新增ZTransferButtonSkin.defaultPreset作为所有skin_preset AppStorage及启动缺省归一化的共同默认。iOS26及以上liquidGlass，旧系统按现有能力回退frostedGlass；不覆盖显式已存主题、不改损坏值迁移Titanium规则。属于用户指定平台差异，无需更改安卓默认。更新既有缺省断言，未运行模型测试/UI自动化；构建中，未提交/推送。
+
+2026-10-17 默认液态玻璃交付：/tmp/ztransfer-default-liquid-build.log BUILD SUCCEEDED、exit0；已安装同机F1945BD7-4DE2-4370-B8C4-98AC165CC809并普通启动。git diff --check通过，未清设置模拟首次安装，未运行测试；未提交/推送。

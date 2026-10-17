@@ -17,6 +17,7 @@ struct PhotoFilterPopupOverlay: View {
 
     @State private var working: PhotoFilterState
     @State private var editingDate = false
+    @State private var pageHeights: [Bool: CGFloat] = [:]
     @State private var showRatingTip = false
     @State private var ratingTipFrame: CGRect = .zero
     @State private var ratingTipSize: CGSize = .zero
@@ -51,7 +52,8 @@ struct PhotoFilterPopupOverlay: View {
             // only supplies the genie origin and the vertical attachment.
             let left = max(12, (proxy.size.width - width) / 2)
             let top = localAnchor.maxY + 8
-            let maxPanelHeight = max(100, proxy.size.height - top - 20)
+            let maxPanelHeight = max(1, proxy.size.height - top - 20)
+            let panelHeight = min(maxPanelHeight, pageHeights[editingDate] ?? pageHeights[!editingDate] ?? maxPanelHeight)
             let sourceAnchor = GeniePopupMotion.attachmentAnchor(
                 for: localAnchor, cornerRadius: 22
             )
@@ -68,12 +70,13 @@ struct PhotoFilterPopupOverlay: View {
                 GeniePopupPanel(
                     content: panelContent(width: width, maxHeight: maxPanelHeight),
                     trigger: .filter,
-                    targetProgress: isPresented ? 1 : 0,
+                    targetProgress: isPresented && !pageHeights.isEmpty ? 1 : 0,
                     anchorX: unitAnchorX,
                     anchorWidth: sourceAnchor.width / width,
-                    anchorGap: top - localAnchor.maxY
+                    anchorGap: top - localAnchor.maxY,
+                    fillsProposedSize: true
                 )
-                .frame(width: width, alignment: .top)
+                .frame(width: width, height: panelHeight, alignment: .top)
                 .padding(.leading, left)
                     .padding(.top, top)
                 .allowsHitTesting(!showRatingTip)
@@ -126,19 +129,32 @@ struct PhotoFilterPopupOverlay: View {
 
     @ViewBuilder
     private func panelContent(width: CGFloat, maxHeight: CGFloat) -> some View {
-        Group {
-            if editingDate {
-                dateEditor
-                    .transition(.opacity)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    filterForm.transition(.opacity)
+        // Measure the natural page inside the scroll view, never the flexible
+        // viewport. Android wraps its column; only oversized content scrolls.
+        ScrollView(.vertical, showsIndicators: false) {
+            Group {
+                if editingDate {
+                    dateEditor
+                } else {
+                    filterForm
                 }
-                .frame(maxHeight: maxHeight)
+            }
+            .frame(width: max(1, width - 28))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(14)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: FilterPageHeightKey.self,
+                                           value: [editingDate: geometry.size.height])
+                }
             }
         }
-        .frame(width: max(1, width - 28))
-        .padding(14)
+        .onPreferenceChange(FilterPageHeightKey.self) { heights in
+            for (page, height) in heights where height > 0 {
+                if pageHeights[page] != height { pageHeights[page] = height }
+            }
+        }
+        .frame(width: width, height: min(maxHeight, pageHeights[editingDate] ?? pageHeights[!editingDate] ?? maxHeight))
         // Shadow the panel surface once. Applying a shadow to the entire
         // content makes the synchronous Genie capture blur every child.
         .background {
@@ -541,5 +557,13 @@ private struct RatingTipSizePreferenceKey: PreferenceKey {
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         let next = nextValue()
         if next != .zero { value = next }
+    }
+}
+
+
+private struct FilterPageHeightKey: PreferenceKey {
+    static let defaultValue: [Bool: CGFloat] = [:]
+    static func reduce(value: inout [Bool: CGFloat], nextValue: () -> [Bool: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
     }
 }

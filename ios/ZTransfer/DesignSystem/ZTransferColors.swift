@@ -40,6 +40,12 @@ enum ZTransferButtonSkin: String {
     case wood = "WOOD"
     case cameraControls = "CAMERA_CONTROLS"
 
+    /// iOS default requested by the user; older systems retain supported glass.
+    static var defaultPreset: Self {
+        if #available(iOS 26.0, *) { return .liquidGlass }
+        return .frostedGlass
+    }
+
     init(storedValue: String) {
         let restored = Self(rawValue: storedValue) ?? .frostedGlass
         if restored == .liquidGlass {
@@ -162,7 +168,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
     var shadowElevation: CGFloat?
     var textureSeed: Int32
 
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled
 

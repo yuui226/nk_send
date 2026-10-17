@@ -1393,7 +1393,7 @@ struct PhotoEffectFavoriteButton: View {
     var description: String? = nil
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("skin_preset") private var skin = "FROSTED_GLASS"
+    @AppStorage("skin_preset") private var skin = ZTransferButtonSkin.defaultPreset.rawValue
 
     private var markColor: Color {
         let dark = colorScheme == .dark

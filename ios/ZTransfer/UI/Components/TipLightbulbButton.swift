@@ -11,7 +11,7 @@ struct TipLightbulbButton: View {
     var motionPaused = false
     var embeddedInPanel = false
     let action: () -> Void
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var attentionOrigin = Date()

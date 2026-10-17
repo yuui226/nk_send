@@ -3314,7 +3314,7 @@
         "C28"
       ],
       "role": "production",
-      "sha256": "0dddca3dd2ce8dbb43a6d640840255cc9278691937561fbed610babdbb30d930",
+      "sha256": "0fde787ce5cadcea494da6f5bcbb8a6ef1817e4bec494ccec6792d4ac78bca33",
       "audit_sha256": "7a21df4bd169e062b32899c6388eb9f407a551d4a34a151cb20415dd9f4cadfd",
       "repair_evidence": [
         "; 2026-10-16 F069 settings/persistence/180ms switch; f069-settings-fixed.log25/25 and f069-settings-ui.log1/1 TEST SUCCEEDED; actual SettingsView DEBUG host screenshot inspected, real camera/device unverified",
@@ -3503,7 +3503,7 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "338661bf31c4dc4ad37f8f3d947b44a55333bfeefc9d408e8be0a1173cc189ec",
+      "sha256": "c01772c941129fa571f58280068a4a8e44f859a3ade871034dd0d1c678e03450",
       "audit_sha256": "a0a1ef2bb79b32d53f1e630c998af351a53ab2acb2262c61fe9feb8515f46d7f",
       "repair_evidence": [
         "2026-10-16 F080 partial: pill 6pt corners, gradient fill/edge, semantic text color; f080-pill-surface-fixed UI1/1 passed; dark/skin/motion validation pending.",
@@ -3915,7 +3915,7 @@
         "C20"
       ],
       "role": "production",
-      "sha256": "e68c73293cf372520ef0f7f12c52d56308edd320045f3c8fe7cbc9acf5b78183",
+      "sha256": "f89159a059f2517edf7ba3f608bbe4671cdcc0606311be1dcd366bc550c5148a",
       "audit_sha256": "dd7991317a053718b2a66bba0b0d6b037a7aea4a76292df0955fc7a02ed880af",
       "repair_evidence": [
         "2026-10-17 F127像素几何模型：完整阅读Android CropEditorGeometry及对应5项测试，在CropGestureState.swift加入CropEditorGeometry，frame/image分别按视口像素维护，ratioReference稳定参考；原比例导出ratio=0/0，固定比例明确横竖互换，比例切换不移动图片；移植pan/zoom源像素下限/32倍限制、对齐后可见性、角拖建立新参考、resize保留选区。f127-pixel-geometry-20261017.log 7/7 TEST SUCCEEDED、退出0：横/竖/奇数尺寸×20轮全比例切换无累计缩小，横竖互换与手动参考20轮，EXIF1–8大位移缩放/对齐边界/转屏原选区误差≤MCU及旧模型回归。git diff --check通过。模型尚未替换PhotoCropEditor旧归一化手势，缺初始预览placement接入和触摸命中等F128逻辑；F127/F128不核销，累计105项，下一步接生产编辑器并删除旧状态实现，未UI/真机验证。"
@@ -3927,7 +3927,7 @@
         "C20"
       ],
       "role": "production",
-      "sha256": "441ed01c8bad264e884d0ee7a3fddaa6f66bea76cdb625fa217e678de1e5621d",
+      "sha256": "7cac66309d914983540e749d9064ff78e3d073f916fee3638cbd4c93b5d63b28",
       "audit_sha256": "0f39ebc71e3c2086e0306b59509b81e5ad01e24615c62425a39e3345bae8021a",
       "repair_evidence": [
         "2026-10-17 F125基准复核与错误分类：阅读Android CameraViewModel4308及PhotoPreview467–528，准备复用已加载FHD/EXIF orientation，缺方向才读取头；并非先获取原图完整几何，原图尺寸/MCU留到生成阶段，不应用缩略图猜测。iOS当前PhotoPreview651仍立即sheet+异步64KiB头、完成时猜尺寸/8MCU，F125/F126待生产修复。先修CropPreparationError.canRetry以统一分类函数判断，避免orientation携带detail后误可重试；f125-retry-classification-20261017.log 4/4 TEST SUCCEEDED、退出0，四种detail×三错误类型的属性/helper/state一致及旧状态回归通过。git diff --check通过。下一步以FHD+方向准备模型接线并移除提前recipe回退，累计103项不变；未UI/真机验证。",
@@ -3949,7 +3949,7 @@
         "C20"
       ],
       "role": "production",
-      "sha256": "e2afba60f4e0da948786275afac4c288e48f19f132ee7b84a884d6df5b14f437",
+      "sha256": "36a29b0f4a86930b48705d714c89bb26d352d6a79cf7e5f087beea43391ecba7",
       "audit_sha256": "77739864713f507ab5c3bab97fd31976505def1b2753ef2a29f08abd2855ebbe",
       "repair_evidence": [
         "2026-10-17 F125/F126准备模型：对照Android prepareCropPreview与PhotoPreview规范方向copy，新增prepareCropPreview(width/height/pixel)以有效内容黑边边界构造编辑几何，source MCU=1仅用于预览，canonicalized采用规范方向尺寸；选择保留originalOrientation供原图阶段解析。空预览/非法rotation及不支持canonical方向可处理失败。f125-prepared-model-20261017.log 7/7 TEST SUCCEEDED、退出0，含左右黑边、EXIF1/3/6/8与手动-90、规范后尺寸/原方向、镜像及非法规范方向拒绝、旧selection与错误分类。git diff --check通过。模型尚未接PhotoPreview页面，未声称真实裁切链路完成；F125/F126不核销，累计103项，未UI/真机验证。",
@@ -4067,7 +4067,7 @@
         "C20"
       ],
       "role": "production",
-      "sha256": "3d575c024c4c82d90c1ffec1b38ee08bd185465c5f0cdbbaf6bb5c4bc629b84a",
+      "sha256": "d10f8535d0bde8ea2bfbf59658e82266f3abaa5a92b47427d6ae0517a7d7e593",
       "audit_sha256": "f36d66039e2a2e1bb2c96bd1e28e8db25427aeaa7d037f238952435630dde3d3",
       "repair_evidence": [
         "2026-10-17 F127小选区安全：对照Android JpegCrop.align的可抛出require及CropEditorGeometry像素最小单位，iOS align改为throws，非法bounds/ratio及不足一个完整比例单位分别返回JpegCropError，不再用precondition使进程崩溃；生产selection.resolve传递错误到既有派生失败路径，整理selection定义以保持可读。f127-small-selection-20261017.log 5/5 TEST SUCCEEDED、退出0：EXIF1/3/6/8的8×8原图选择16:9拒绝但自由全图有效、4000×3000微小3:2选区、NaN边界/残缺比例及旧对齐回归；同时真实方向/黑边/FHD的24次原生裁切通过。git diff --check通过。比例参考稳定性、实际宽高、原比例/横竖互换及缩放下限仍待，F127不核销，累计105项，未UI/真机验证。"
@@ -4696,7 +4696,7 @@
         "C23"
       ],
       "role": "production",
-      "sha256": "6decdbe358e9203d364343dd4bf301406a2bff5bf920a2a87ce72e51d26386a6"
+      "sha256": "f26342f6a737f8e3f15d8f75c5064e0c15178258454c93f79655a644045abacd"
     },
     {
       "path": "ios/ZTransfer/Domain/RemoteDisplayOptions.swift",
@@ -4724,7 +4724,7 @@
         "C25"
       ],
       "role": "production",
-      "sha256": "2d37b48539c54196599ffacb94709e912c64fc3c96ddea1c248e80e651314796"
+      "sha256": "48ce88a4d82e72e8151cc97dcf2831f8e902ae1d485691a4b34750985b16aace"
     },
     {
       "path": "ios/ZTransfer/Domain/RemoteExposureMeter.swift",
@@ -4748,7 +4748,7 @@
         "C25"
       ],
       "role": "production",
-      "sha256": "e11be6d047b0ab9514e68ae68a807696d5bb9d5888364dedb994ac77a6bf15da"
+      "sha256": "826bd1b78d8e61198c29902a3bf12491c19e7f0d6134b2106496923b7404e106"
     },
     {
       "path": "ios/ZTransfer/Domain/RemoteFramingGrid.swift",
@@ -4918,7 +4918,7 @@
         "C23"
       ],
       "role": "production",
-      "sha256": "df668df4dc88ac5b3523ce4bb638413eb21edc11194447bffaf83af172c1ae06"
+      "sha256": "2312338d760f2bdf8307727d1fabcce3004457d471fab14135186254b36c34b2"
     },
     {
       "path": "ios/ZTransfer/Domain/RemoteState.swift",
@@ -4926,7 +4926,7 @@
         "C22"
       ],
       "role": "production",
-      "sha256": "d19ba63bd46a1037ea3729e3c49d8f85359c866230b90a4ec9d39cbea72b2b5c"
+      "sha256": "90c1461a396b64b141a5761ec094be4666cd1baa82fed187210ea05fbf706a00"
     },
     {
       "path": "ios/ZTransfer/Domain/RemoteToolLayout.swift",
@@ -4955,7 +4955,7 @@
         "C31"
       ],
       "role": "production",
-      "sha256": "9dd9347556f556c73ed13106e5b34901935002f13f0eb54f0644ffd54a8c6fd6"
+      "sha256": "21e42b65ecca144edd20aea27fbc209c9bfed3f86e9a83d202cb61daf29ff0fd"
     },
     {
       "path": "ios/ZTransfer/Domain/RemoteViewModel.swift",
@@ -5047,7 +5047,7 @@
         "C15"
       ],
       "role": "production",
-      "sha256": "38c1176053566341544adb0f2c24c0e752ecdde386f7ee97351c8640d9a1402e",
+      "sha256": "694fcb358663141732c461505bc7dc74e8dbb5b7a728b3d8be3262118f0a675e",
       "audit_sha256": "da657e92d0b7b66c0ef9fc1362a05d4717ec8f1ffa5dacdbea5f9778da586250",
       "repair_evidence": [
         "; F073 f073.log 45/45 TEST SUCCEEDED; page wiring statically inspected",
@@ -5423,7 +5423,7 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "2a3a66ad008076f91456cb337a3bb10c534dff3a5231a56a41c931d0bfa440fd",
+      "sha256": "033f7f320343087d8d7e247c13e0ba5b855f89dae7daee8da100070b61e9c551",
       "audit_sha256": "a468c40907bd908492c2b5cc6cd46870427bdc51e20c37ac96aa69b5bf32f3cc",
       "repair_evidence": [
         "F175: production configuration/session cancellation; /tmp/ztransfer-f175-config-20261017.log 2/2 TEST SUCCEEDED; no UI tests.",
@@ -5850,7 +5850,7 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "70008b92633a5e4382251ec1d94019f92a961c11accc68f1f65085bf979f0c03"
+      "sha256": "318b60b593a77946d7a64cc00daa859ccb0af8a84e21620466e054e2b8ed4815"
     },
     {
       "path": "ios/ZTransfer/UI/Components/TransferFileTitle.swift",
@@ -5871,7 +5871,7 @@
         "C04"
       ],
       "role": "production",
-      "sha256": "0249c95e6e5b2c4058d55dd6fc3bc2239bd56de5dcccba2b67dcdaab384dc5a7"
+      "sha256": "d329c250b9ebb65999ee55f571479bb6ad9c1a119538d05db4ef9a058845b0eb"
     },
     {
       "path": "ios/ZTransfer/UI/Connection/ConnectionPage.swift",
@@ -5964,7 +5964,7 @@
         "C20"
       ],
       "role": "production",
-      "sha256": "24f5d42fc227569654bcd0b09c456fc0b0fc48958f0dabc87a7fd6618e7c4243",
+      "sha256": "8ccba53db1f0316d0b38f1bf4724d64b967d769bd178f437c8930bbf3f6d616a",
       "audit_sha256": "6d73eed364fab9e09cb45fe6c49c45464dd09390e47d7cb6f185f06d89f34d19",
       "repair_evidence": [
         "2026-10-17 F125/F126编辑图像准备：对照Android prepareCropPreview与PhotoPreview规范方向流程，新增preparePhotoCrop，将已解码FHD转换为有界sRGB像素用于黑边识别，裁去预览黑边并按规范方向生成编辑图像；保留原方向及原预览，不读取或猜测原图MCU。入口限定既有1920预览上限，前后检查取消。f125-editor-image-20261017.log 6/6 TEST SUCCEEDED、退出0，新增真实UIImage黑边/EXIF1、3、6、8输出尺寸/up方向/源PNG不变/空图和镜像拒绝，连同既有选择模型回归；不是非对称像素旋转或页面生命周期全覆盖。git diff --check通过。尚待PhotoPreview入口接线、错误与重试及取消闭环，F125/F126不核销，累计103项。未UI/真机验证。",
@@ -5979,7 +5979,7 @@
         "C19"
       ],
       "role": "production",
-      "sha256": "23b0354d7b452081fbf78c71af65e87fe43550b7bc0d8b602a7df751a02168a4",
+      "sha256": "ea75301228c6740a2da444bd3f9fc45fc802dd367cf57f315ccd553687c32046",
       "audit_sha256": "3dedd87d758d36259bba492163260068577cf7d6e45d08389864355f97aadcc7",
       "repair_evidence": [
         "F087进行中：本地放大入口及共享大图长按对比接线，手势/弹层异步生命周期尚待验证，不核销。",
@@ -6025,7 +6025,7 @@
         "C18"
       ],
       "role": "production",
-      "sha256": "48767650800c721c6f715fe6c947e3cfc3f7ee802a8c8f6f8aceb323d74fe497",
+      "sha256": "b35afc9dc02bce33ebc88cb6f051716dd0896cd4e59e3fb7ab0651f4ed3dfa92",
       "audit_sha256": "81e4f625059a1c47d757b876a6a9019a04df23516e14c0bf862502ab4c82c437",
       "repair_evidence": [
         "F033功能输入隔离已补；/tmp/ztransfer-f033-help-build.log BUILD SUCCEEDED；动画延期，触摸待手工验收，不计核销。",
@@ -6074,7 +6074,7 @@
         "C21"
       ],
       "role": "production",
-      "sha256": "20adca1d2a2e6e30bf0708d9a836fe2648e88339c9c3917403af7dad641aa25c",
+      "sha256": "eab3ba64ec29de24dd3f7350983405679c5898d22fe89ab765fe893ae87fb8b5",
       "audit_sha256": "8240ba7c2ec5debcd489143ddf18f2340277e06fba2cf26d5571127225f229fe",
       "repair_evidence": [
         "; F073 f073.log 45/45 TEST SUCCEEDED; page wiring statically inspected; F034 partial admission and signal pulse; f034-admission-fixed 6/6; preview hint/UI still pending; F034 bottom hint 8/8 and preview host UI1/1; shadow and full list UI pending; F034 real-list UI3/3; burst and elevation pending; F034 burst UI four combinations1/1 and cell ID regression3/3; elevation pending；2026-10-16 F075顶栏直读运行态executionControl，移除飞行/延后偏好显隐门控；状态边界与生产单/多文件暂停3/3 TEST SUCCEEDED；未跑UI点击或真机。；2026-10-16 F077共享canRetry/真实连接/当前原片索引与清空抑制接线，12/12定向测试通过；真实按钮UI验收未完。",
@@ -6172,7 +6172,7 @@
         "C31"
       ],
       "role": "production",
-      "sha256": "64bce92b61ca475b847270b34412a145a87710fa536fd52e77b27589cdabe3e4",
+      "sha256": "3c0fa67904ea4109cfd9f1f589d38b2a3308cbb192ae0ebccec5df1fe8136d20",
       "audit_sha256": "1806a86f7ce78083922b32ec4860d619d4f198ba746072e54bdce470d0fd46c1",
       "repair_evidence": [
         "U005 用户授权DEBUG模拟购买/持久化/退出恢复；settings-payment-isolated 23/23中17权益+2队列通过，未替代Apple沙盒验收。"
@@ -6252,7 +6252,7 @@
         "C31"
       ],
       "role": "production",
-      "sha256": "e30be3c63faf4463708f395380388872a1aae37cb4ce69f5b029e1eac65f1749",
+      "sha256": "a7c76fc05248066286c4aa33b350495bf7d1e60a8a065b818523c73cb5dc4a9a",
       "audit_sha256": "aab78153e37abd7b765c041a9e4b01a77226e870ca46df8f8b7f6cf8884671f2",
       "repair_evidence": [
         "; 2026-10-16 F069 settings/persistence/180ms switch; f069-settings-fixed.log25/25 and f069-settings-ui.log1/1 TEST SUCCEEDED; actual SettingsView DEBUG host screenshot inspected, real camera/device unverified",
@@ -6502,7 +6502,7 @@
         "C20"
       ],
       "role": "test",
-      "sha256": "cc1f1915814695d6630b6df091f84539d6d674d197844349761f067db24eed12",
+      "sha256": "ea5db344f9d675f0b90e23f347f94086c19b169d3f97c30f8c33a0632d093742",
       "audit_sha256": "af6a0db4c5fb783758bd0a7c0f8b927d699fbdc2b5ed8494092508e392e0ffed",
       "repair_evidence": [
         "2026-10-17 F127像素几何模型：完整阅读Android CropEditorGeometry及对应5项测试，在CropGestureState.swift加入CropEditorGeometry，frame/image分别按视口像素维护，ratioReference稳定参考；原比例导出ratio=0/0，固定比例明确横竖互换，比例切换不移动图片；移植pan/zoom源像素下限/32倍限制、对齐后可见性、角拖建立新参考、resize保留选区。f127-pixel-geometry-20261017.log 7/7 TEST SUCCEEDED、退出0：横/竖/奇数尺寸×20轮全比例切换无累计缩小，横竖互换与手动参考20轮，EXIF1–8大位移缩放/对齐边界/转屏原选区误差≤MCU及旧模型回归。git diff --check通过。模型尚未替换PhotoCropEditor旧归一化手势，缺初始预览placement接入和触摸命中等F128逻辑；F127/F128不核销，累计105项，下一步接生产编辑器并删除旧状态实现，未UI/真机验证。"
@@ -6514,7 +6514,7 @@
         "C20"
       ],
       "role": "test",
-      "sha256": "0214cf093f12c09a070d94d37682c21a57bd00fb4cd081d8fd91ad1e1a5132dc"
+      "sha256": "140dfd3386d50c42b4b1767c1b7c13c7815a228a3b4d285886bd3ce9f7ccc802"
     },
     {
       "path": "ios/ZTransferTests/CropPreparationTests.swift",
@@ -6522,7 +6522,7 @@
         "C20"
       ],
       "role": "test",
-      "sha256": "4ab924a833c6c6f9525187bec6b608c8d6f530237e66acdadac7606f600cb1eb",
+      "sha256": "8632fbebd6a165938c201df0994413d8d0e6355317cfc2b598c745701e3c8b56",
       "audit_sha256": "df111e81bf84a647129b1792a611e8d3594510402460abb331dad0bc6a68cca8",
       "repair_evidence": [
         "2026-10-17 F125基准复核与错误分类：阅读Android CameraViewModel4308及PhotoPreview467–528，准备复用已加载FHD/EXIF orientation，缺方向才读取头；并非先获取原图完整几何，原图尺寸/MCU留到生成阶段，不应用缩略图猜测。iOS当前PhotoPreview651仍立即sheet+异步64KiB头、完成时猜尺寸/8MCU，F125/F126待生产修复。先修CropPreparationError.canRetry以统一分类函数判断，避免orientation携带detail后误可重试；f125-retry-classification-20261017.log 4/4 TEST SUCCEEDED、退出0，四种detail×三错误类型的属性/helper/state一致及旧状态回归通过。git diff --check通过。下一步以FHD+方向准备模型接线并移除提前recipe回退，累计103项不变；未UI/真机验证。",
@@ -6544,7 +6544,7 @@
         "C20"
       ],
       "role": "test",
-      "sha256": "c9c9e5f875d608232a17440ebce5b9b4b43eec6174a8f48506a4e6ccc6cc9bb7",
+      "sha256": "edcfad7e694884bfb10ec5c84ac4dfed86f504bd89b00a12036c6b59310797cc",
       "audit_sha256": "8c11881eec2f52c06f4474a400abec09807149f72074498c11ab966604f8b353",
       "repair_evidence": [
         "2026-10-17 F125/F126准备模型：对照Android prepareCropPreview与PhotoPreview规范方向copy，新增prepareCropPreview(width/height/pixel)以有效内容黑边边界构造编辑几何，source MCU=1仅用于预览，canonicalized采用规范方向尺寸；选择保留originalOrientation供原图阶段解析。空预览/非法rotation及不支持canonical方向可处理失败。f125-prepared-model-20261017.log 7/7 TEST SUCCEEDED、退出0，含左右黑边、EXIF1/3/6/8与手动-90、规范后尺寸/原方向、镜像及非法规范方向拒绝、旧selection与错误分类。git diff --check通过。模型尚未接PhotoPreview页面，未声称真实裁切链路完成；F125/F126不核销，累计103项，未UI/真机验证。",
@@ -6587,7 +6587,7 @@
         "C29"
       ],
       "role": "test",
-      "sha256": "29d28a063bf9f6754bf19327077e0796634e452fc85bf6082e538e894a60c836",
+      "sha256": "1dba54ba6c47d40fb7d689fa7ec5b8053c08d564dca5d008c96f8e92c5edead5",
       "audit_sha256": "f7902b5ce66f7822f53ac04ce9965a58c8bb3046b016c687288dcd49aa630359",
       "repair_evidence": [
         "2026-10-15 F056–F059; /tmp/ztransfer-20261015-f056-f059-fixed.log, 56/56 TEST SUCCEEDED; only affected download/queue/quota behavior revalidated；F064共享名称预留/隐藏暂存发布；PhotoFramePublicationTests及TransferQueueScenarioTests共17/17通过，/tmp/ztransfer-20261015-f064.log。；F145最终录制器/生产目录失败回退/JPEG发布6/6通过、0跳过，/tmp/ztransfer-20261015-f145-final.log，已修复待真机。；F117画廊照片完整性24配置+相关回归最终5/5通过，/tmp/ztransfer-20261015-f117-final.log；此前两轮失败保留，F116不核销。；F132有效头截断/非零起点重试iOS2/2通过，原生fflush/fclose故障与ASan/UBSan PASS；/tmp/ztransfer-20261015-f132-offset.log及f132-native-fixed.log。；F134会话/任务暂存、取消和发布记账及旧会话清理，最终21/21通过，/tmp/ztransfer-20261015-f134-fixed.log；旧会话为夹具，未实际杀进程重启。；F133 ICC-only/35字段EXIF重建，32元数据组合与压缩流/越界及回归7/7通过，/tmp/ztransfer-20261015-f133-rectangular.log；原生ASan/UBSan PASS。；F135资源边界与独立串行准入：f135-native.log ASan/UBSan PASS；f135-serial.log 25/25、20261016-f135-admission.log 3/3通过，真机内存压力未测。；F063原片共享预留/无限序号与同名copy，20261016-f063.log 56/56、f063-publication.log 1/1通过，真机Provider待验。；F060创建前目录名校验/重试/长度边界，20261016-f060.log 18/18通过。；F061目录授权lease生产持有，20261016-f061.log 25/25、f061-active.log 1/1通过；真实Provider权限待验。；F062共享启动清理屏障/取消/当前frame保护，20261016-f062-fixed.log 32/32通过；实际杀进程/Provider重启待验。；F065部分：单计算/4096准入生产接线，20261016-f065-admission.log 36/36；真实异步准备与旁路待F066，不核销。；F065生产准备旁路/容量/关闭，F066身份与补读异步及后台通道：20261016-f065-f066-handoff.log 97/97、f066-identity.log 32/32。F066捕获头parser交接仍未完。; 2026-10-16 F072 crop handoff/shared compute/publication; f072-handoff.log85/85, f072-routes.log42/42, f072-lifecycle.log12/12 TEST SUCCEEDED; F068 dynamic pause awaits F069；2026-10-16 F071：仅派生失败，保留原片成功，f071.log 90/90 TEST SUCCEEDED; F070 f070-fixed.log 91/91 TEST SUCCEEDED; F073 f073.log 45/45 TEST SUCCEEDED; page wiring statically inspected；2026-10-16 F075顶栏直读运行态executionControl，移除飞行/延后偏好显隐门控；状态边界与生产单/多文件暂停3/3 TEST SUCCEEDED；未跑UI点击或真机。",
@@ -7333,7 +7333,7 @@
         "C25"
       ],
       "role": "test",
-      "sha256": "032a9fac951a921fc8c916a028dba0549231cb01a0fad2edcba1fd608f8ca107"
+      "sha256": "dfea2e0f6847a642982bc245409aa5f13598936ccf84b6ef5e6388911267bb9f"
     },
     {
       "path": "ios/ZTransferTests/RemoteExposureMeterTests.swift",

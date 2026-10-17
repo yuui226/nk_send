@@ -275,7 +275,7 @@ private struct PhotoListSessionTaskID: Equatable {
     @AppStorage(TransferStorageMode.persistenceKey) private var storageModeRaw = ""
     @AppStorage("collapse_burst_photos") private var collapseBurstPhotos = true
     @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
     @State private var expandedBurstIDs: Set<String> = []
     @State private var previousBurstGroups: [BurstPhotoGroup] = []
@@ -2117,7 +2117,7 @@ struct PhotoListSignalIcon: View {
     let wirelessMode: WirelessMode?
     var connected = true
 
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -2456,7 +2456,7 @@ struct QueuePill: View {
     // Only TransferProgressContent observes this animator.
     @State private var progressAnimator = SmoothTransferProgressAnimator()
     @Environment(\.displayScale) private var displayScale
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
     private var usesNativeLiquidGlass: Bool {
@@ -2995,7 +2995,7 @@ private struct QueuePillPressEffect: ViewModifier {
 }
 
 private struct QueuePillButtonStyle: ButtonStyle {
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.modifier(QueuePillPressEffect(

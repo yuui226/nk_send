@@ -26,7 +26,7 @@ struct ConnectionMethodCard: View {
     var onAPHotspotSettings: (() -> Void)?
     var staHelpViewed = false
     var apHelpViewed = false
-    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.frostedGlass.rawValue
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }

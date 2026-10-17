@@ -92,7 +92,7 @@ struct RootView: View {
     @State private var transferQueue = TransferQueue()
     @AppStorage("theme_mode") private var themeMode = "SYSTEM"
     @AppStorage("app_language") private var appLanguage = "system"
-    @AppStorage("skin_preset") private var skinPreset = "FROSTED_GLASS"
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @AppStorage("thumbnail_columns") private var thumbnailColumns = 3
     @Environment(\.scenePhase) private var scenePhase
     // Keep HomeScreen alive for the connection-success celebration before
@@ -316,11 +316,10 @@ struct RootView: View {
     }
 }
 
-/// Android keeps a missing value on the current frosted-glass default, while
-/// retired or corrupt persisted values migrate to titanium and are written
-/// back immediately.
+/// iOS defaults to liquid glass where supported. Explicit saved choices stay
+/// intact; retired or corrupt values retain the existing titanium migration.
 func normalizedSkinPreset(_ stored: String?) -> String {
-    guard let stored else { return "FROSTED_GLASS" }
+    guard let stored else { return ZTransferButtonSkin.defaultPreset.rawValue }
     if stored == "LIQUID_GLASS" {
         if #available(iOS 26.0, *) { return stored }
         return "FROSTED_GLASS"
