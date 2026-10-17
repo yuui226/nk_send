@@ -367,7 +367,7 @@ struct RemoteLUTPanelStatus: Equatable {
 
     init(hasFolder: Bool, failure: RemoteLUTFolderFailure?, scanning: Bool, empty: Bool) {
         accessible = failure != .missing && failure != .denied
-        folderAction = !hasFolder || !accessible ? "lut_choose_folder" : "lut_change_folder"
+        folderAction = "lut_folder"
         showMonitorOnly = !hasFolder
         if !hasFolder { guidance = "lut_choose_hint" }
         else if let failure {

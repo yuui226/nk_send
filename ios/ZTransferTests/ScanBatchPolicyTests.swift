@@ -1227,6 +1227,88 @@ final class ScanBatchPolicyTests: XCTestCase {
         XCTAssertEqual(repeated, .settled)
     }
 
+    func testRejectedStorageQueryPreservesBaselineAndDoesNotBecomeNoCard() async throws {
+        for failure in [STAExchange(PTPConstants.getStorageIDs, response: 0x2002),
+                        STAExchange(PTPConstants.getStorageIDs, payload: Data([2, 0, 0, 0]))] {
+            let wire = STAScriptTransport([
+                .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+                .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([1])),
+                .init(PTPConstants.getObjectInfo, [1], payload: objectInfo(1)),
+                failure,
+                .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+                .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([1]))
+            ])
+            let repository = CameraRepository(session: PTPSession(transport: wire))
+            let first = try await repository.scanCatalog(nextBatchSize: { 48 })
+            XCTAssertEqual(first.files.map(\.id), [1])
+            do {
+                _ = try await repository.scanCatalog(preserveExisting: true, nextBatchSize: { 48 })
+                XCTFail("Rejected/malformed storage must fail, not publish an empty album")
+            } catch {}
+            let recovered = try await repository.scanCatalog(preserveExisting: true, nextBatchSize: { 48 })
+            XCTAssertEqual(recovered.files.map(\.id), [1])
+            XCTAssertTrue(recovered.removedHandles.isEmpty)
+            XCTAssertTrue(recovered.addedHandles.isEmpty)
+            let remaining = await wire.remaining
+            XCTAssertEqual(remaining, 0)
+        }
+    }
+
+    func testNonSTAStorageBusyRetriesAndSuccessfulEmptyRemovesBaseline() async throws {
+        let wire = STAScriptTransport([
+            .init(PTPConstants.getStorageIDs, response: PTPConstants.deviceBusy),
+            .init(PTPConstants.getStorageIDs, response: PTPConstants.deviceBusy),
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([1])),
+            .init(PTPConstants.getObjectInfo, [1], payload: objectInfo(1)),
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([]))
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire))
+        let first = try await repository.scanCatalog(nextBatchSize: { 48 })
+        XCTAssertEqual(first.files.map(\.id), [1])
+        let empty = try await repository.scanCatalog(preserveExisting: true, nextBatchSize: { 48 })
+        XCTAssertTrue(empty.files.isEmpty)
+        XCTAssertEqual(empty.removedHandles, [1])
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testMonitorPageAndSessionCleanupHoldIndependentBackgroundOwnership() async {
+        let repository = CameraRepository(session: PTPSession(transport: STAScriptTransport([])))
+        await repository.setRemoteActive(true)
+        await repository.setRemoteSessionActive(true)
+        await repository.setRemoteActive(false)
+        let duringCleanup = await repository.backgroundThumbnailFillAllowed()
+        XCTAssertFalse(duringCleanup)
+        await repository.setRemoteSessionActive(true)
+        await repository.setRemoteSessionActive(false)
+        let duringReplacement = await repository.backgroundThumbnailFillAllowed()
+        XCTAssertFalse(duringReplacement)
+        await repository.setRemoteSessionActive(false)
+        let idle = await repository.backgroundThumbnailFillAllowed()
+        XCTAssertTrue(idle)
+    }
+
+    func testReviewReadsFreshHandlesAndDeduplicatesAliasedCardsWhileMonitorOwnsCamera() async throws {
+        let wire = STAScriptTransport([
+            .init(PTPConstants.getStorageIDs, response: PTPConstants.deviceBusy),
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1, 0x10001])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([1, 2])),
+            .init(PTPConstants.getObjectHandles, [0x10001, .max, 0], payload: staU32Array([2, 3])),
+            .init(PTPConstants.getObjectInfo, [2], payload: objectInfo(2)),
+            .init(PTPConstants.getObjectInfo, [3], payload: objectInfo(3)),
+            .init(PTPConstants.getObjectInfo, [1], payload: objectInfo(1))
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire), isUSBConnection: true)
+        await repository.setRemoteActive(true)
+        let catalog = try await repository.openRemoteReviewCatalog()
+        let photos = try await catalog.loadNextPage()
+        XCTAssertEqual(photos.map(\.file.id), [2, 1, 3])
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+        await repository.setRemoteActive(false)
+    }
+
     private func objectInfo(_ handle: UInt32, storage: UInt32 = 1, date: String = "20261001T120000", name: String? = nil) -> Data {
         var bytes = Data(repeating: 0, count: 52)
         bytes.replaceSubrange(0..<4, with: staInteger(storage))

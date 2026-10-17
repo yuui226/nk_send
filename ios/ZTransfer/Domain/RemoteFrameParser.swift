@@ -60,9 +60,7 @@ enum RemoteFrameParser {
         let bytes = [UInt8](payload)
         guard jpegOffset == 512 || jpegOffset == 1024,
               bytes.count >= jpegOffset + 3,
-              be16(bytes, 0) == 1,
-              be16(bytes, 2) == 0,
-              be32(bytes, 8) == UInt32(jpegOffset),
+              hasKnownLayout(bytes, headerSize: jpegOffset),
               be32(bytes, 12) == UInt32(bytes.count - jpegOffset),
               bytes[jpegOffset] == 0xFF,
               bytes[jpegOffset + 1] == 0xD8,
@@ -239,6 +237,42 @@ enum RemoteFrameParser {
     /// Remaining movie time is a separate versioned video block in the
     /// Display Information Data header. Zero in standby is reserved and does
     /// not mean that the card is full.
+    private static func hasKnownLayout(_ bytes: [UInt8], headerSize: Int) -> Bool {
+        guard headerSize == 512 || headerSize == 1024,
+              bytes.count >= headerSize, be32(bytes, 8) == UInt32(headerSize) else { return false }
+        switch (be16(bytes, 0), be16(bytes, 2)) {
+        case (1, 0): return true
+        case (2, 1): return headerSize == 1024
+        default: return false
+        }
+    }
+
+    /// Android LiveViewMetadata: time remains usable when AF geometry is absent.
+    /// Copy only the bounded header and JPEG marker, not the entire frame.
+    static func packetVideoTime(_ payload: Data, jpegOffset: Int,
+                                operation: UInt16, model: String?) -> Int64? {
+        guard [384, 512, 1024].contains(jpegOffset),
+              payload.count >= jpegOffset + 3 else { return nil }
+        let bytes = Array(payload.prefix(jpegOffset + 3))
+        guard bytes[jpegOffset] == 0xFF, bytes[jpegOffset + 1] == 0xD8,
+              bytes[jpegOffset + 2] == 0xFF else { return nil }
+        if operation == PTPConstants.getLiveViewImageEx {
+            guard UInt64(be32(bytes, 12)) == UInt64(payload.count - jpegOffset) else { return nil }
+            return remainingVideoTime(in: bytes, headerSize: jpegOffset)
+        }
+        guard operation == PTPConstants.getLiveViewImage, jpegOffset == 384 else { return nil }
+        var name = (model ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if name.hasPrefix("NIKON ") { name.removeFirst(6) }
+        name = name.replacingOccurrences(of: " ", with: "")
+        guard ["ZF", "Z30"].contains(name),
+              UInt64(be32(bytes, 4)) == UInt64(payload.count - jpegOffset) else { return nil }
+        let recording = bytes[68]
+        let millis = Int64(be32(bytes, 64))
+        guard recording <= 1, millis <= 7_500_000,
+              millis > 0 || recording == 1 else { return nil }
+        return millis
+    }
+
     static func remainingVideoTime(in bytes: [UInt8], headerSize: Int) -> Int64? {
         let offset: Int
         let recordingOffset: Int
@@ -247,8 +281,8 @@ enum RemoteFrameParser {
         case 1024: offset = 816; recordingOffset = 828
         default: return nil
         }
-        guard bytes.count >= headerSize, be16(bytes, 0) == 1, be16(bytes, 2) == 0,
-              be32(bytes, 8) == UInt32(headerSize), recordingOffset < bytes.count else { return nil }
+        guard hasKnownLayout(bytes, headerSize: headerSize),
+              recordingOffset < bytes.count else { return nil }
         let recording = Int(bytes[recordingOffset])
         guard recording == 0 || recording == 1 else { return nil }
         let millis = UInt64(be32(bytes, offset))

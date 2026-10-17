@@ -62,7 +62,13 @@ struct RemoteView: View {
     private let isUSBSession: Bool
     private let toolDefaults: UserDefaults
     private let wirelessMode: WirelessMode?
+    private let reviewSession: CameraSession?
+    private let reviewQueue: TransferQueueViewModel?
+    @StateObject private var review: RemotePhotoReviewModel
     @StateObject private var model: RemoteViewModel
+    @State private var pictureControlPanel: PictureControlPanelModel?
+    @State private var pictureControlReport = ""
+    @State private var pictureControlPresented = false
     @State private var gridMenuPresented = false
     @State private var gridMenuClosing = false
     @State private var editingTools = false
@@ -137,7 +143,7 @@ struct RemoteView: View {
         return RemoteExposureParameters.format(descriptor.property, raw: descriptor.current)
     }
 
-    init(session: CameraSession?, presentationMode: CameraPresentationMode? = nil, recordingDirectory: URL? = nil,
+    init(session: CameraSession?, queueModel: TransferQueueViewModel? = nil, presentationMode: CameraPresentationMode? = nil, recordingDirectory: URL? = nil,
          isSessionConnected: Bool = true, toolDefaults: UserDefaults = .standard,
          remoteCamera: (any RemoteCameraControlling)? = nil, freeUsage: FreeUsageStore = .shared,
          entitlements: PremiumEntitlementStore = .shared,
@@ -166,10 +172,21 @@ struct RemoteView: View {
         self.wirelessMode = mode == .sta ? .sta : .ap
         let camera: any RemoteCameraControlling = remoteCamera ?? session.map { $0 as any RemoteCameraControlling }
             ?? DisconnectedRemoteCamera(isUSB: mode == .usb)
-        _model = StateObject(wrappedValue: RemoteViewModel(camera: camera,
+        let remoteModel = RemoteViewModel(camera: camera,
                                                             recordingDirectory: recordingDirectory,
                                                             onTransportLost: onTransportLost,
-                                                            entitlements: entitlements, freeUsage: freeUsage))
+                                                            entitlements: entitlements, freeUsage: freeUsage)
+        _model = StateObject(wrappedValue: remoteModel)
+        reviewSession = session
+        reviewQueue = queueModel
+        _review = StateObject(wrappedValue: RemotePhotoReviewModel(frames: remoteModel.reviewFrames,
+            openCatalog: {
+                guard let session else { throw CancellationError() }
+                return try await session.openRemoteReviewCatalog()
+            }, endLiveView: { await camera.endLiveView() },
+            restartLiveView: { remoteModel.restartAfterPhotoReview() },
+            isConnected: { !remoteModel.transportLossWasNotified },
+            onActiveChanged: { remoteModel.setPhotoReviewActive($0) }))
     }
 
     var body: some View {
@@ -191,6 +208,26 @@ struct RemoteView: View {
             }
             .opacity(rotationOpacity)
 
+        }
+        .overlay {
+            if review.active, let reviewSession, let reviewQueue {
+                GeometryReader { proxy in
+                    RemotePhotoReviewView(model: review, session: reviewSession, queue: reviewQueue,
+                                          connected: isSessionConnected)
+                        .frame(width: layoutOrientation.isLandscape ? proxy.size.height : proxy.size.width,
+                               height: layoutOrientation.isLandscape ? proxy.size.width : proxy.size.height)
+                        .rotationEffect(.degrees(layoutOrientation.rotationDegrees))
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+            }
+        }
+        .sheet(isPresented: $pictureControlPresented, onDismiss: {
+            pictureControlPanel?.close(); pictureControlPanel = nil
+        }) {
+            if let panel = pictureControlPanel {
+                RemotePictureControlPanel(model: panel, folders: panel.folders,
+                    dismiss: { pictureControlPresented = false })
+            }
         }
         .fileImporter(isPresented: $lutFolderPickerPresented, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
             guard case .success(let urls) = result, let url = urls.first else { return }
@@ -227,6 +264,10 @@ struct RemoteView: View {
         .animation(ZTransferMotion.standard, value: layoutOrientation)
         .statusBarHidden(false)
         .task {
+            model.preferredComputerControl = tools.computerControl
+            model.onComputerControlPreferenceChanged = { [weak tools] enabled in
+                tools?.computerControl = enabled
+            }
             await onPreparing?()
             guard !Task.isCancelled, !stopCleanupStarted, isSessionConnected else { return }
             model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
@@ -297,13 +338,20 @@ struct RemoteView: View {
             orientationStabilityTask?.cancel()
             rotationTransitionTask?.cancel()
             Task { @MainActor in
+                await review.close()
                 await model.stopAndWait()
                 await onStopped?(model.transportLossWasNotified)
             }
         }
         .onChange(of: model.movieMode) { _ in
+            pictureControlPanel?.close(); pictureControlPresented = false
+            if model.movieMode && review.active { Task { await review.close() } }
             gridMenuPresented = false
             model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
+        }
+        .onChange(of: isSessionConnected) { connected in
+            if !connected { pictureControlPanel?.close(); pictureControlPresented = false }
+            if !connected && review.active { Task { await review.close() } }
         }
         .onChange(of: dispMode) { mode in
             model.setMovieFormatMonitoring(mode.showsCameraInformation)
@@ -468,8 +516,12 @@ struct RemoteView: View {
 
             Spacer(minLength: 18)
 
-            shutterButton
-                .padding(.bottom, 18)
+            HStack(spacing: 30) {
+                reviewButton
+                shutterButton
+                Color.clear.frame(width: 48, height: 48)
+            }
+            .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, 4)
@@ -490,7 +542,7 @@ struct RemoteView: View {
                         for tool in hidden { setToolVisible(tool, false) }
                     }, rotate: AnyView(remoteRotateButton), back: AnyView(remoteBackButton),
                     disp: AnyView(remoteDispButton), shutter: AnyView(remoteShutter(diameter: layout.shutterSize)),
-                    recorder: AnyView(remoteRecordButton), parameter: { index, height in
+                    recorder: AnyView(remoteRecordButton), review: AnyView(reviewButton), parameter: { index, height in
                         AnyView(exposureTile(exposureFields[index], height: height))
                     })
                     .frame(width: layout.controls.width, height: layout.controls.height)
@@ -508,7 +560,33 @@ struct RemoteView: View {
         }
     }
 
+    private func openPictureControl() {
+        guard let session = reviewSession, isSessionConnected, model.initialLoaded else { return }
+        closeMonitorPanels()
+        let movie = model.movieMode
+        let current: @Sendable () async -> Bool = { [weak model] in
+            await MainActor.run { model.map { $0.movieMode == movie } ?? false }
+        }
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("picture_control_backups", isDirectory: true)
+        let panel = PictureControlPanelModel(folders: PictureControlFolderState(defaults: toolDefaults),
+            current: { model.movieMode == movie },
+            allowed: { model.pictureControlWritesAllowed && scenePhase == .active },
+            busy: { model.setPictureControlWriting($0) },
+            readOverview: { try await session.readPictureControlOverview(movie: movie, backupDirectory: directory, isCurrent: current) },
+            change: { slot, change, log in
+                try await session.changePictureControl(slot: slot, change: change, movie: movie,
+                    backupDirectory: directory, isCurrent: current, log: log)
+            })
+        panel.notice = { model.pictureControlNotice($0) }
+        panel.movie = movie
+        panel.onReport = { pictureControlReport = $0 }
+        panel.dismiss = { pictureControlPresented = false }
+        pictureControlPanel = panel; pictureControlPresented = true
+    }
+
     private func closeMonitorPanels() {
+        pictureControlPresented = false
         gridMenuPresented = false
         gridMenuClosing = false
         model.dismissCameraTool()
@@ -614,7 +692,7 @@ struct RemoteView: View {
                     withAnimation(ZTransferMotion.standard) { developerPanelPresented = true }
                 }
             }
-        }, trailing: remoteFixedToolControls, pinnedEndCount: 1, fixedRecorder: false,
+        }, trailing: remoteFixedToolControls, pinnedEndCount: 2, fixedRecorder: false,
                                 applyHidden: { hidden in
             for tool in hidden { setToolVisible(tool, false) }
         })
@@ -630,6 +708,7 @@ struct RemoteView: View {
                 .accessibilityIdentifier("remote-tools-manage")
             )))
         }
+        controls.append(RemoteFixedToolControl(id: "lock", view: remoteToolControls(movie: model.movieMode)[.lock]!))
         controls.append(RemoteFixedToolControl(id: "rotate", view: AnyView(remoteRotateButton)))
         return controls
     }
@@ -701,6 +780,11 @@ struct RemoteView: View {
             }) {
                 tools.meter.toggle()
             }),
+            .pictureControl: AnyView(configuredRemoteToolButton(.pictureControl, movie: movie,
+                active: pictureControlPresented, enabled: isSessionConnected && model.initialLoaded,
+                accessibilityLabel: AppLocalized.resource("remote_tool_picture_control"), label: {
+                    Image(systemName: "camera.filters").frame(width: 19, height: 19)
+                }) { openPictureControl() }),
             .lut: AnyView(configuredRemoteToolButton(.lut, movie: movie, active: lutMonitor.active != nil, accessibilityLabel: "LUT", label: {
                 Text("LUT").font(.system(size: 8, weight: .bold)).frame(width: 21, height: 19)
             }) {
@@ -752,6 +836,7 @@ struct RemoteView: View {
                 }) {
                     model.toggleComputerControl()
                 }),
+            .rotate: AnyView(remoteRotateButton),
             .record: AnyView(Group {
                 if editingTools {
                     remoteToolEditButton(.record, movie: movie) {
@@ -847,11 +932,11 @@ struct RemoteView: View {
     private func configuredRemoteToolButton<Label: View>(_ tool: RemoteTool, movie: Bool, active: Bool,
         enabled: Bool = true,
         accessibilityLabel: String, @ViewBuilder label: @escaping () -> Label, action: @escaping () -> Void) -> some View {
-        if editingTools {
+        if editingTools && !tool.fixed {
             remoteToolEditButton(tool, movie: movie, label: label)
         } else {
-            RemoteDockToolCell(id: tool.id, title: AppLocalized.resource(tool.titleKey), active: active, enabled: enabled, action: action) {
-                remoteToolButton(active: active, enabled: enabled, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: action)
+            RemoteDockToolCell(id: tool.id, title: AppLocalized.resource(tool.titleKey), active: active, enabled: enabled && !(editingTools && tool.fixed), action: action) {
+                remoteToolButton(active: active, enabled: enabled && !(editingTools && tool.fixed), accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: action)
                     .modifier(RemoteToolIconAnchor(tool: tool))
                     .accessibilityIdentifier("remote-tool-\(tool.id)")
             }
@@ -906,6 +991,7 @@ struct RemoteView: View {
             case .record: model.setLocalRecordingToolVisible(false, fixedRecorder: false)
             case .hd: model.setHDLiveView(false)
             case .lock: setRotationLocked(false, showHint: false)
+            case .pictureControl: pictureControlPresented = false
             case .computerControl: if model.computerControlEnabled { model.setComputerControl(false) }
             case .histogram:
                 histogramMode = .off
@@ -964,8 +1050,13 @@ struct RemoteView: View {
                         developerPanelButton(systemName: "doc.on.doc",
                                              accessibilityLabel: AppLocalized.resource("lab_copy_log")) {
                             let report = model.focusDiagnosticReport.isEmpty ? persistedFocusDiagnosticReport : model.focusDiagnosticReport
-                            UIPasteboard.general.string = (developerLogLines + [model.recordingErrorReport, report])
+                            let fullReport = (developerLogLines + [model.recordingErrorReport, report, pictureControlReport])
                                 .filter { !$0.isEmpty }.joined(separator: "\n")
+                            guard fullReport.utf8.count <= 180_000 else {
+                                model.showMonitorHint(AppLocalized.resource("picture_control_report_use_share"))
+                                return
+                            }
+                            UIPasteboard.general.string = fullReport
                             model.showMonitorHint(AppLocalized.resource("code_copied"))
                         }
                         developerPanelButton(systemName: "xmark",
@@ -1007,7 +1098,7 @@ struct RemoteView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 2) {
                                 let report = model.focusDiagnosticReport.isEmpty ? persistedFocusDiagnosticReport : model.focusDiagnosticReport
-                                let lines = developerLogLines + [model.recordingErrorReport, report]
+                                let lines = developerLogLines + [model.recordingErrorReport, report, pictureControlReport]
                                     .filter { !$0.isEmpty }.flatMap { $0.components(separatedBy: "\n") }
                                 ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                                     Text(line)
@@ -1087,6 +1178,21 @@ struct RemoteView: View {
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.48)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    @ViewBuilder private var reviewButton: some View {
+        if model.reviewVisible, reviewQueue != nil, reviewSession != nil {
+            Button {
+                model.detentFeedback()
+                closeMonitorPanels()
+                review.open()
+            } label: {
+                Image(systemName: "photo").frame(width: 48, height: 48)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+            .accessibilityLabel(AppLocalized.resource("remote_review"))
+            .disabled(!model.reviewAllowed || !isSessionConnected || switchingRotation || review.active)
+        }
     }
 
     private var shutterButton: some View {
@@ -1280,7 +1386,7 @@ struct RemoteView: View {
     private var monitorCameraDispOverlay: some View {
         let remaining: String? = {
             guard model.movieMode,
-                  let remainingMs = model.frameMetadata?.remainingVideoTimeMs else { return nil }
+                  let remainingMs = model.frameRemainingVideoTimeMs else { return nil }
             return RemoteMonitorTelemetry.remainingTimeLabel(seconds: remainingMs / 1000).map { "[\($0)]" }
         }()
         let items = RemoteMonitorTelemetry.cameraTopRowItems(
@@ -1669,7 +1775,7 @@ struct RemoteView: View {
     }
 
     private func applyDeviceOrientation(_ orientation: UIDeviceOrientation) {
-        guard !stopCleanupStarted, scenePhase == .active, !editingTools, !tools.locked else {
+        guard !stopCleanupStarted, scenePhase == .active, !editingTools, !tools.locked, !review.active else {
             pauseOrientationCandidate()
             return
         }

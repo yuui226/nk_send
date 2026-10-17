@@ -110,6 +110,8 @@ struct SettingsView: View {
     var onClose: (() -> Void)? = nil
     var dismissalRequested = false
     let popupMotionPaused: Bool
+    let effectsOnly: Bool
+    let effectPreviewInitialRotationQuarterTurns: Int
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
     let onEffectPreviewRequested: () -> Void
@@ -144,7 +146,8 @@ struct SettingsView: View {
     init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
          effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
          effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool,
-         popupMotionPaused: Bool = false,
+         popupMotionPaused: Bool = false, effectsOnly: Bool = false,
+         effectPreviewInitialRotationQuarterTurns: Int = 0,
          requestTransferDirectoryAttention: Bool = false,
          effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
          onEffectPreviewRequested: @escaping () -> Void = {},
@@ -152,6 +155,9 @@ struct SettingsView: View {
          onContentHeightChange: @escaping (CGFloat) -> Void = { _ in },
          onShowPremium: @escaping () -> Void = {}, onPlayFireworks: @escaping () -> Void = {},
          onClose: (() -> Void)? = nil) {
+        self.effectsOnly = effectsOnly
+        self.effectPreviewInitialRotationQuarterTurns = effectPreviewInitialRotationQuarterTurns
+        _settingsPage = State(initialValue: effectsOnly ? .effects : .main)
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.onClose = onClose
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
@@ -200,7 +206,9 @@ struct SettingsView: View {
                             PhotoEffectsSettingsPreview(source: effectPreviewSource,
                                 metadata: effectPreviewExif.map(PhotoFrameMetadata.init),
                                 settings: effectivePhotoEffectsSettings(effectsDraft, isPro: entitlements.access.isPro),
-                                onRequest: onEffectPreviewRequested)
+                                onRequest: onEffectPreviewRequested,
+                                initialRotationQuarterTurns: effectPreviewInitialRotationQuarterTurns,
+                                showSourceWhileRendering: effectsOnly)
                                 .padding(.horizontal, 16).padding(.top, 10)
                             PhotoEffectsControls(draft: $effectsDraft,
                                 showingWatermarkPicker: $showingWatermarkPicker,
@@ -378,7 +386,7 @@ struct SettingsView: View {
     }
 
     private func showEffectsSettings() {
-        effectsDraft = effectsStore.beginDraft()
+        effectsDraft = photoEffectsEditorDraft(effectsStore.beginDraft())
         settingsTransitionDirection = 1
         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) {
             showingHelp = false
@@ -388,6 +396,7 @@ struct SettingsView: View {
 
     private func showMainSettings() {
         commitEffectsDraft()
+        if effectsOnly { onClose?(); return }
         settingsTransitionDirection = -1
         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24)) {
             showingEffectsHelp = false

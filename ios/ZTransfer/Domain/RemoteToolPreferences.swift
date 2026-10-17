@@ -33,6 +33,7 @@ enum RemoteGridMode: String, CaseIterable {
 @MainActor
 final class RemoteToolPreferences: ObservableObject {
     private let defaults: UserDefaults
+    @Published var computerControl: Bool { didSet { save(computerControl, oldValue, "remote_computer_control") } }
     @Published var fps: Bool { didSet { save(fps, oldValue, "remote_fps") } }
     @Published var hd: Bool { didSet { save(hd, oldValue, "remote_hd") } }
     @Published var audio: Bool { didSet { save(audio, oldValue, "remote_audio_levels_visible") } }
@@ -72,6 +73,7 @@ final class RemoteToolPreferences: ObservableObject {
         func value<T: RawRepresentable>(_ key: String, _ fallback: T) -> T where T.RawValue == String {
             defaults.string(forKey: key).flatMap(T.init(rawValue:)) ?? fallback
         }
+        computerControl = bool("remote_computer_control")
         fps = bool("remote_fps", true)
         hd = bool("remote_hd")
         audio = bool("remote_audio_levels_visible", true)
@@ -106,7 +108,8 @@ final class RemoteToolPreferences: ObservableObject {
         case .meter: meter = false
         case .waveform: waveform = .off
         case .lock: locked = false
-        case .record, .whiteBalance, .focusArea, .focusMode, .lut, .computerControl, .rotate: break
+        case .computerControl: computerControl = false
+        case .record, .whiteBalance, .focusArea, .focusMode, .lut, .pictureControl, .rotate: break
         }
     }
 }

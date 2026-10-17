@@ -893,7 +893,7 @@ private struct PhotoListSessionTaskID: Equatable {
             }
         }
         .fullScreenCover(isPresented: $internalShowingRemote, onDismiss: RemoteTrialNotice.returnedToList) {
-            RemoteView(session: session, presentationMode: presentationMode,
+            RemoteView(session: session, queueModel: queueModel, presentationMode: presentationMode,
                        recordingDirectory: directoryStore.directoryURL,
                        isSessionConnected: isSessionConnected,
                        onRetrySTA: onRetrySTA,
@@ -951,6 +951,7 @@ private struct PhotoListSessionTaskID: Equatable {
         if let session {
         let files = model.sections.flatMap(\.files)
         PhotoPreviewView(session: session, queueModel: queueModel, files: files,
+                         effectsStore: effectsStore, effectsDirectory: directoryStore,
                          isSessionConnected: isSessionConnected,
                          burstIDByFile: model.burstIDByFile,
                          transferredFileIDs: model.transferredFileIDs, selectedFile: $selectedFile,

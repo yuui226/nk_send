@@ -153,7 +153,7 @@ struct SettingsPopupOverlay: View {
         // shrink above the keyboard so the text stays visible while editing.
         .ignoresSafeArea(.container, edges: [.top, .leading, .trailing])
         .zIndex(100)
-        .photoEffectsHint($effectsHint, duration: 1.8)
+        .photoEffectsHint($effectsHint, duration: 1.8, multilineDuration: 3.6)
         .onChange(of: effectsDraft) { value in
             effectsStore.persistEditorPreferences(from: value)
         }

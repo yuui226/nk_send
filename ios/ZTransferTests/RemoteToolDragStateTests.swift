@@ -41,7 +41,7 @@ final class RemoteToolDragStateTests: XCTestCase {
         }
     }
 
-    func testCrossRowMoveOntoLockUsesDisplayedOrderAndDisposalClearsGesture() {
+    func testCrossRowDragCannotReorderPinnedLockAndDisposalClearsGesture() {
         withLayout { layout in
             let drag = RemoteToolDragState()
             for (index, tool) in layout.shownTools.enumerated() {
@@ -49,8 +49,8 @@ final class RemoteToolDragStateTests: XCTestCase {
             }
             drag.slots[.lock] = CGRect(x: 0, y: 40, width: 36, height: 36)
             XCTAssertTrue(drag.begin(at: CGPoint(x: 18, y: 18), delta: CGSize(width: 0, height: 40), layout: layout))
-            XCTAssertFalse(layout.lockStartsSecondRow)
-            XCTAssertEqual(layout.shownTools.last, .hd)
+            XCTAssertTrue(layout.visible(.lock))
+            XCTAssertEqual(layout.shownTools.first, .hd)
             drag.remove(.hd)
             XCTAssertNil(drag.dragging)
             XCTAssertNil(drag.visualBounds(.hd))

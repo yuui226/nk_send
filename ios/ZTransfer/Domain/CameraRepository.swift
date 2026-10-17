@@ -310,6 +310,7 @@ actor CameraRepository {
     private let isUSBConnection: Bool
     nonisolated let usbSessionIdentity: USBSessionIdentity?
     private var remoteControlModeSet = false
+    private var movieApplicationCleanupTask: Task<Void, Never>?
     /// Android keeps diagnostic PC-control ownership separate from the USB movie
     /// owner so a movie cleanup cannot release a mode the user still holds.
     private var remoteDiagnosticControlModeSet = false
@@ -348,7 +349,9 @@ actor CameraRepository {
     private var prefetchedStorageIDs: [UInt32]?
     private var prefetchedHandles: (storageID: UInt32, handles: [UInt32])?
     private var activeForegroundReads = 0
-    private var remoteActive = false
+    private var remotePageActive = false
+    private var remoteSessionOwners = 0
+    private var remoteActive: Bool { remotePageActive || remoteSessionOwners > 0 }
     private var fhdActive = false
     private var fhdSupported: Bool?
     private var transfersBusy = false
@@ -891,22 +894,41 @@ actor CameraRepository {
     }
 
     func clearMovieApplicationMode(force: Bool = false) async {
+        if let cleanup = movieApplicationCleanupTask { await cleanup.value; return }
         if isUSBConnection && (remoteControlModeSet || remoteDiagnosticControlModeSet) && !force { return }
+        // Connection-owned, non-cancelled cleanup shared by concurrent stop/exit callers.
+        let cleanup = Task { await self.releaseMovieApplicationFlags() }
+        movieApplicationCleanupTask = cleanup
+        await cleanup.value
+        movieApplicationCleanupTask = nil
+    }
+
+    private func releaseMovieApplicationFlags() async {
         if movieApplicationOperationSet {
-            let response = try? await ioGate.withInteractive {
-                try await session.executeResponse(operation: PTPConstants.nikonChangeApplicationMode,
-                                                  parameters: [0]).code
-            }
+            let response = await clearMovieFlag(operation: PTPConstants.nikonChangeApplicationMode,
+                                               parameters: [0], data: nil)
             if response == PTPConstants.responseOK { movieApplicationOperationSet = false }
         }
         if movieApplicationPropertySet {
-            let response = try? await ioGate.withInteractive {
-                try await session.executeResponse(operation: PTPConstants.setDevicePropValue,
-                                                  parameters: [RemoteProperty.applicationMode.rawValue],
-                                                  data: Data([0])).code
-            }
+            let response = await clearMovieFlag(operation: PTPConstants.setDevicePropValue,
+                parameters: [RemoteProperty.applicationMode.rawValue], data: Data([0]))
             if response == PTPConstants.responseOK { movieApplicationPropertySet = false }
         }
+    }
+
+    private func clearMovieFlag(operation: UInt16, parameters: [UInt32], data: Data?) async -> UInt16? {
+        var response: UInt16?
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                guard response == PTPConstants.deviceBusy else { break }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            response = try? await ioGate.withInteractive {
+                try await session.executeResponse(operation: operation, parameters: parameters, data: data).code
+            }
+            if response != PTPConstants.deviceBusy { break }
+        }
+        return response
     }
 
     /// USB preflight/application/start is one uninterrupted command sequence.
@@ -1010,6 +1032,90 @@ actor CameraRepository {
     }
 
     func remoteDeviceModel() -> String? { cachedDeviceInfo?.model }
+
+    private func pictureControlContext(movie: Bool) throws -> (String, Set<UInt16>) {
+        guard let info = cachedDeviceInfo else { throw NikonPictureControlError.invalid("Camera information unavailable") }
+        guard info.manufacturer.localizedCaseInsensitiveContains("Nikon") else {
+            throw NikonPictureControlError.invalid("Not a Nikon camera")
+        }
+        let identity = thumbnailCacheIdentity()
+        guard identity.components(separatedBy: "\0").last != "unknown-device" else {
+            throw NikonPictureControlError.invalid("A stable camera identity is required for slot backups")
+        }
+        return (identity + "\0picture-control-" + (movie ? "movie" : "photo"), Set(info.operations))
+    }
+
+    func readPictureControlOverview(movie: Bool, backupDirectory: URL,
+                                    isCurrent: @escaping @Sendable () async -> Bool) async throws -> PictureControlOverview {
+        let (identity, operations) = try pictureControlContext(movie: movie)
+        let session = session, ioGate = ioGate
+        return try await focusGate.withCommand {
+            let access = try NikonPictureControlAccess(cameraIdentity: identity, slot: 201, movie: movie,
+                operations: operations, sessionCheck: {
+                    guard await isCurrent() else { return false }
+                    return !(await session.isInvalidated)
+                },
+                exchange: { code, parameters, data in
+                    try Task.checkCancellation()
+                    let response = try await ioGate.withInteractive {
+                        // Drain an accepted response before honoring caller cancellation.
+                        try await Task {
+                            try await session.executeResponse(operation: code, parameters: parameters, data: data,
+                                                              timeoutNanoseconds: 5_000_000_000)
+                        }.value
+                    }
+                    try Task.checkCancellation()
+                    return response
+                })
+            return try await access.overview(backup: PictureControlBackupStore(directory: backupDirectory))
+        }
+    }
+
+    func changePictureControl(slot: Int, change: PictureControlChange, movie: Bool, backupDirectory: URL,
+                              isCurrent: @escaping @Sendable () async -> Bool,
+                              log: (@Sendable (String) -> Void)? = nil) async throws {
+        let (identity, operations) = try pictureControlContext(movie: movie)
+        let dataset: Data?
+        if case .write(let file) = change { dataset = try file.encodeClassicPictureControl() } else { dataset = nil }
+        let session = session, ioGate = ioGate
+        try await focusGate.withCommand {
+            try await ioGate.withInteractive {
+                try await session.withCommandSequence { commands in
+                    let access = try NikonPictureControlAccess(cameraIdentity: identity, slot: slot, movie: movie,
+                        operations: operations, sessionCheck: {
+                    guard await isCurrent() else { return false }
+                    return !(await session.isInvalidated)
+                },
+                        exchange: { code, parameters, data in
+                            try Task.checkCancellation()
+                            let response = try await Task {
+                                try await commands.executeResponse(operation: code, parameters: parameters, data: data,
+                                                                   timeoutNanoseconds: 5_000_000_000)
+                            }.value
+                            try Task.checkCancellation()
+                            return response
+                        }, log: log)
+                    let replacement = PictureControlReplacement(backup: PictureControlBackupStore(directory: backupDirectory))
+                    switch change {
+                    case .write:
+                        guard let dataset else { throw NikonPictureControlError.invalid("Missing Picture Control dataset") }
+                        try await access.prepare(dataset: dataset)
+                        try await replacement.apply(access, dataset: NikonPictureControlSlotState(slot: slot, dataset: dataset).data)
+                    case .activate:
+                        try await access.prepareSelection()
+                        try await replacement.activate(access)
+                    case .clear:
+                        try await access.prepare()
+                        try await replacement.clear(access)
+                    case .restore:
+                        try await access.prepare()
+                        try await replacement.restoreOriginal(access)
+                    }
+                    log?("SUCCESS: C\(slot - 200) operation and active selection verified")
+                }
+            }
+        }
+    }
 
     func loadDeviceInfo() async throws -> PTPDeviceInfo {
         if let info = cachedDeviceInfo { return info }
@@ -1266,8 +1372,13 @@ actor CameraRepository {
     /// Remote page owns the foreground channel from the moment it appears,
     /// before parameter loading or Live View startup begins.
     func setRemoteActive(_ active: Bool) {
-        remoteActive = active
-        if !active { scheduleObjectResolver() }
+        remotePageActive = active
+        if !remoteActive { scheduleObjectResolver() }
+    }
+
+    func setRemoteSessionActive(_ active: Bool) {
+        remoteSessionOwners = active ? remoteSessionOwners + 1 : max(0, remoteSessionOwners - 1)
+        if !remoteActive { scheduleObjectResolver() }
     }
 
     private func waitForForegroundPreview() async throws {
@@ -1330,34 +1441,22 @@ actor CameraRepository {
         }
     }
 
-    /// Read-only developer diagnostic matching Android's fixed-layout legacy
-    /// video-time probe. It never starts/stops Live View or writes a property.
+    /// Android LiveViewVideoDiagnostic: current and legacy headers, no mode writes.
     func probeLegacyVideoTime() async throws -> String {
-        let response = try await ioGate.withInteractive {
-            try await session.executeResponse(operation: PTPConstants.getLiveViewImage)
-        }
-        var lines = ["Legacy video-time probe op=0x9203 response=0x\(String(format: "%04X", response.code)) bytes=\(response.data.count)"]
-        let scanLimit = min(response.data.count - 3, 2048 - 3)
-        var jpegOffset: Int?
-        if scanLimit >= 0 {
-            for index in 0...scanLimit where response.data[index] == 0xFF && response.data[index + 1] == 0xD8 && response.data[index + 2] == 0xFF {
-                jpegOffset = index
-                break
+        let current = liveViewImageOperation ?? PTPConstants.getLiveViewImage
+        let model = cachedDeviceInfo?.model
+        let transport = isUSBConnection ? "USB" : (staAlbum == nil ? "AP" : "STA")
+        var lines = ["camera=\(model ?? "unknown") transport=\(transport) pc=\(remoteControlModeSet) currentOp=\(String(current, radix: 16))"]
+        let operations = current == PTPConstants.getLiveViewImage
+            ? [current] : [current, PTPConstants.getLiveViewImage]
+        for operation in operations {
+            try Task.checkCancellation()
+            let response = try await ioGate.withInteractive {
+                try await session.executeResponse(operation: operation)
             }
+            lines.append(RemoteVideoDiagnostic.report(operation: operation, response: response.code,
+                                                       payload: response.data, model: model))
         }
-        guard response.code == PTPConstants.responseOK,
-              jpegOffset == 384,
-              response.data.count >= 69 else {
-            lines.append("unsupported layout jpegOffset=\(jpegOffset.map(String.init) ?? "none")")
-            return lines.joined(separator: "\n")
-        }
-        func bigEndianUInt16(_ offset: Int) -> UInt16 {
-            UInt16(response.data[offset]) << 8 | UInt16(response.data[offset + 1])
-        }
-        let minutes = bigEndianUInt16(64)
-        let seconds = bigEndianUInt16(66)
-        let recording = response.data[68]
-        lines.append("recording=\(recording == 1 ? "true" : "false") minutes=\(minutes) seconds=\(seconds)")
         return lines.joined(separator: "\n")
     }
 
@@ -1382,6 +1481,66 @@ actor CameraRepository {
                 return lines.joined(separator: "\n")
             }
         }
+    }
+
+    /// Android openRemoteReviewCatalog: fresh frozen handles, independent of list filters.
+    func openRemoteReviewCatalog() async throws -> RemoteReviewCatalog {
+        let response = try await reviewCommand(PTPConstants.getStorageIDs)
+        guard let raw = PTPDatasetParser.readStorageIDs(response.data) else {
+            throw CameraRepositoryError.invalidDataset
+        }
+        let stores = Array(Set(raw.filter { staAlbum != nil ? $0 != 0 && $0 != .max : $0 & 0xFFFF != 0 })).sorted()
+        var groups: [[UInt32]] = []
+        var storageByHandle: [UInt32: UInt32] = [:]
+        var seen = Set<UInt32>()
+        for store in stores {
+            let response = try await reviewCommand(PTPConstants.getObjectHandles, [queryStorageID(store), .max, 0])
+            guard let ids = PTPDatasetParser.readObjectHandles(response.data) else {
+                throw CameraRepositoryError.invalidDataset
+            }
+            groups.append(ids.reversed().filter { seen.insert($0).inserted })
+            for id in ids where storageByHandle[id] == nil { storageByHandle[id] = store }
+        }
+        let memberships = storageByHandle
+        let cached = catalogFiles
+        return RemoteReviewCatalog(handlesByStorage: groups) { [self] handle in
+            if let file = cached[handle] { return file }
+            return try await readReviewFile(handle, storage: memberships[handle] ?? .max)
+        }
+    }
+
+    private func reviewCommand(_ operation: UInt16, _ parameters: [UInt32] = []) async throws -> PTPResponse {
+        for attempt in 0..<3 {
+            let response = try await ioGate.withInteractive {
+                try await session.executeResponse(operation: operation, parameters: parameters)
+            }
+            if response.code == PTPConstants.responseOK { return response }
+            if response.code != PTPConstants.deviceBusy || attempt == 2 {
+                throw PTPSessionError.responseCode(response.code)
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        throw CameraRepositoryError.invalidDataset
+    }
+
+    private func readReviewFile(_ handle: UInt32, storage: UInt32) async throws -> CameraFile? {
+        for attempt in 0..<3 {
+            do {
+                return try await ioGate.withInteractive {
+                    if let directReader { return try await directReader.file(handle: handle, storage: storage) }
+                    let response = try await session.execute(operation: PTPConstants.getObjectInfo, parameters: [handle])
+                    let parsed = PTPDatasetParser.parseObjectInfoResult(handle: handle, response.data,
+                                                                       protectionAvailable: staAlbum == nil)
+                    guard parsed.successful else { throw CameraRepositoryError.invalidDataset }
+                    return parsed.file
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                if attempt == 2 { throw error }
+                try await Task.sleep(for: .milliseconds(250))
+            }
+        }
+        return nil
     }
 
     func loadObjectHandles(storageID: UInt32 = 0xFFFFFFFF) async throws -> [UInt32] {
@@ -2117,6 +2276,9 @@ actor CameraRepository {
         // that foreground owner with its first catalog command. FHD pauses
         // are held until the preview releases the same session.
         try await waitForForegroundPreview()
+        // Do not interpret temporary application-mode no-card responses as deletion.
+        guard !remoteControlModeSet, !movieApplicationOperationSet,
+              !movieApplicationPropertySet else { throw CameraRepositoryError.foregroundPreempted }
         // A deletion can arrive while foreground preview holds this scan.
         // Revalidate the caller's captured value after that suspension too.
         reusable = resumeSnapshot.flatMap { $0.catalogRevision == scanCatalogRevision ? $0 : nil }
@@ -2159,11 +2321,10 @@ actor CameraRepository {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                // Android's non-STA getStorageIds() maps a command/transport
-                // failure to an empty result; the no-usable-storage branch
-                // completes the scan without authorizing cache reconciliation.
+                // Android 1.97: only a successful empty response proves no card.
+                // Preserve the existing album on rejected/truncated queries.
                 if staAlbum != nil { throw CameraRepositoryError.transportLost }
-                raw = []
+                throw error
             }
             // Android ignores sentinel/invalid stores and, for non-STA
             // transports, stores whose low 16 bits are zero. STA also drops
@@ -2177,10 +2338,8 @@ actor CameraRepository {
                 return (id & 0xFFFF) != 0
             })).sorted()
             if storageIDs.isEmpty {
-                // An empty/failed storage response is not authoritative. The
-                // Android path removes only handles from an established
-                // baseline; a first scan keeps any rows already published by
-                // an earlier partial result.
+                // A validated empty response removes only the established
+                // baseline. Failed/malformed responses have already thrown.
                 let hasKnownBaseline = !knownHandles.isEmpty
                 removedHandles = hasKnownBaseline ? knownHandles.intersection(existingHandles) : []
                 for handle in removedHandles {
@@ -2458,7 +2617,8 @@ actor CameraRepository {
             }
             if response.code == PTPConstants.responseOK { return response }
             attempts += 1
-            if staAlbum != nil && response.code == PTPConstants.deviceBusy && attempts < 3 {
+            if (staAlbum != nil || operation == PTPConstants.getStorageIDs),
+               response.code == PTPConstants.deviceBusy && attempts < 3 {
                 try await Task.sleep(nanoseconds: 750_000_000)
             } else { throw PTPSessionError.responseCode(response.code) }
         }

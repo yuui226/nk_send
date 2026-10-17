@@ -587,7 +587,7 @@ import Metal
 
     func testPanelStatusAndVisibleNoticesCoverUnavailableAndOff() {
         let noFolder = RemoteLUTPanelStatus(hasFolder: false, failure: nil, scanning: false, empty: true)
-        XCTAssertEqual(noFolder.folderAction, "lut_choose_folder")
+        XCTAssertEqual(noFolder.folderAction, "lut_folder")
         XCTAssertEqual(noFolder.guidance, "lut_choose_hint")
         XCTAssertTrue(noFolder.showMonitorOnly)
         XCTAssertEqual(RemoteLUTPanelStatus(hasFolder: true, failure: nil, scanning: true, empty: true).guidance, "lut_reading_folder")
@@ -596,7 +596,7 @@ import Metal
             let status = RemoteLUTPanelStatus(hasFolder: true, failure: failure, scanning: false, empty: false)
             XCTAssertNotNil(status.guidance)
             XCTAssertEqual(status.accessible, failure != .missing && failure != .denied)
-            XCTAssertEqual(status.folderAction, status.accessible ? "lut_change_folder" : "lut_choose_folder")
+            XCTAssertEqual(status.folderAction, "lut_folder")
         }
         let state = RemoteLUTMonitorState()
         var closed = false

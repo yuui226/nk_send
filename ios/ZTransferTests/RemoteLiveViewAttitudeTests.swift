@@ -69,3 +69,81 @@ final class RemoteLiveViewAttitudeTests: XCTestCase {
         XCTAssertNotNil(parse(0, 65536))
     }
 }
+
+/// Android 1.97 ZfLiveViewFocusTest / MonitorRemainingTest boundary fixtures.
+final class Remote197FrameTests: XCTestCase {
+    private func put(_ value: UInt32, in bytes: inout [UInt8], at offset: Int, count: Int = 4) {
+        for i in 0..<count { bytes[offset + i] = UInt8(truncatingIfNeeded: value >> ((count - i - 1) * 8)) }
+    }
+    private func packet(size: Int = 1024, major: UInt32 = 2, minor: UInt32 = 1,
+                        millis: UInt32 = 125_000, recording: UInt8 = 0) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: size + 3)
+        put(major, in: &bytes, at: 0, count: 2); put(minor, in: &bytes, at: 2, count: 2)
+        put(UInt32(size), in: &bytes, at: 8); put(3, in: &bytes, at: 12)
+        for (offset, value): (Int, UInt32) in [(16, 6000), (18, 4000), (28, 640), (30, 424)] {
+            put(value, in: &bytes, at: offset, count: 2)
+        }
+        put(millis, in: &bytes, at: size == 512 ? 384 : 816)
+        bytes[size == 512 ? 392 : 828] = recording
+        bytes[size] = 0xFF; bytes[size + 1] = 0xD8; bytes[size + 2] = 0xFF
+        return bytes
+    }
+    func testZfV21UsesFullCoordinatesAndRejectsUnknownLayouts() throws {
+        let bytes = packet()
+        let value = try XCTUnwrap(RemoteFrameParser.metadata(from: Data(bytes), jpegOffset: 1024,
+                                                             operation: PTPConstants.getLiveViewImageEx))
+        XCTAssertEqual(value.trackingCoordinateWidth, 6000)
+        XCTAssertEqual(value.trackingCoordinateHeight, 4000)
+        XCTAssertEqual(value.focusCoordinateWidth, 640)
+        XCTAssertEqual(value.remainingVideoTimeMs, 125_000)
+        for (major, minor): (UInt32, UInt32) in [(2, 0), (2, 2), (3, 0)] {
+            let invalid = packet(major: major, minor: minor)
+            XCTAssertNil(RemoteFrameParser.metadata(from: Data(invalid), jpegOffset: 1024,
+                                                      operation: PTPConstants.getLiveViewImageEx))
+            XCTAssertNil(RemoteFrameParser.remainingVideoTime(in: invalid, headerSize: 1024))
+        }
+        XCTAssertNil(RemoteFrameParser.remainingVideoTime(in: packet(size: 512), headerSize: 512))
+        for fraction: Float in [0.1, 0.5, 0.9] {
+            XCTAssertEqual(rcNormalizedToFocusCoordinate(fraction, size: 6000),
+                           Int((fraction * 5999).rounded()))
+        }
+    }
+    func testEnhancedTimeSurvivesMissingAFGeometry() {
+        for (size, major, minor): (Int, UInt32, UInt32) in [(512, 1, 0), (1024, 1, 0), (1024, 2, 1)] {
+            var bytes = packet(size: size, major: major, minor: minor)
+            put(0, in: &bytes, at: 16)
+            XCTAssertNil(RemoteFrameParser.metadata(from: Data(bytes), jpegOffset: size,
+                                                      operation: PTPConstants.getLiveViewImageEx))
+            XCTAssertEqual(RemoteFrameParser.packetVideoTime(Data(bytes), jpegOffset: size,
+                operation: PTPConstants.getLiveViewImageEx, model: nil), 125_000)
+            bytes[12] = 1
+            XCTAssertNil(RemoteFrameParser.packetVideoTime(Data(bytes), jpegOffset: size,
+                operation: PTPConstants.getLiveViewImageEx, model: nil))
+        }
+    }
+    func testLegacyModelGateAndZeroRecording() {
+        var bytes = [UInt8](repeating: 0, count: 387)
+        put(3, in: &bytes, at: 4); put(125_000, in: &bytes, at: 64)
+        bytes[384] = 0xFF; bytes[385] = 0xD8; bytes[386] = 0xFF
+        for model in ["Zf", "NIKON Z f", "Z 30"] {
+            XCTAssertEqual(RemoteFrameParser.packetVideoTime(Data(bytes), jpegOffset: 384,
+                operation: PTPConstants.getLiveViewImage, model: model), 125_000)
+        }
+        XCTAssertNil(RemoteFrameParser.packetVideoTime(Data(bytes), jpegOffset: 384,
+            operation: PTPConstants.getLiveViewImage, model: "Z9"))
+        put(0, in: &bytes, at: 64)
+        XCTAssertNil(RemoteFrameParser.packetVideoTime(Data(bytes), jpegOffset: 384,
+            operation: PTPConstants.getLiveViewImage, model: "Zf"))
+        bytes[68] = 1
+        XCTAssertEqual(RemoteFrameParser.packetVideoTime(Data(bytes), jpegOffset: 384,
+            operation: PTPConstants.getLiveViewImage, model: "Zf"), 0)
+    }
+    func testMalformedOffsetsNeverReadOutOfBounds() {
+        for size in [0, 1, 383, 384, 386, 511, 512, 514, 1023, 1024, 1026] {
+            for offset in [Int.min, -1, 0, 376, 384, 512, 1024, Int.max] {
+                XCTAssertNil(RemoteFrameParser.packetVideoTime(Data(repeating: 0, count: size),
+                    jpegOffset: offset, operation: PTPConstants.getLiveViewImage, model: "Zf"))
+            }
+        }
+    }
+}

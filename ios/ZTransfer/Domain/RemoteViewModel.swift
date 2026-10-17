@@ -12,6 +12,8 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var frameImage: UIImage?
     @Published private(set) var frameData: Data?
     @Published private(set) var frameMetadata: RemoteLiveViewMetadata?
+    @Published private(set) var frameRemainingVideoTimeMs: Int64?
+    private var frameDeviceModel: String?
     @Published private(set) var focusDiagnosticReport = ""
     @Published private(set) var focusDiagnosticRunning = false
     @Published private(set) var frameHistogram: [Int]?
@@ -47,6 +49,8 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var videoDiagnosticBusy = false
     @Published private(set) var cameraToolPanel: RemoteCameraToolController?
     @Published private(set) var cameraToolWriting = false
+    var preferredComputerControl = false
+    var onComputerControlPreferenceChanged: ((Bool) -> Void)?
     @Published private(set) var computerControlEnabled = false
     @Published private(set) var computerControlBusy = false
     private var computerControlTask: Task<Void, Never>?
@@ -86,12 +90,35 @@ final class RemoteViewModel: ObservableObject {
     var transportLossWasNotified: Bool { transportLossNotified }
 
 
+    private var ownsMonitorSession = false
+    private var monitorSessionKey: ObjectIdentifier { ObjectIdentifier(camera as AnyObject) }
     private let camera: RemoteCameraControlling
     private let onTransportLost: (() -> Void)?
     private let haptics: ZTransferHaptics
     private let recordingDirectory: URL?
     private var transportLossNotified = false
     private var frameTask: Task<Void, Never>?
+    let reviewFrames = RemoteReviewFrameGate()
+    private var photoReviewActive = false
+    func setPhotoReviewActive(_ active: Bool) {
+        guard active != photoReviewActive else { return }
+        photoReviewActive = active
+        updateEffectiveISOPolling()
+        restartExposureMeter()
+        if active { levelRoll = nil; levelPitch = nil }
+    }
+    var reviewVisible: Bool {
+        !movieMode && (localRecordingPhase == .idle || localRecordingPhase == .saved)
+    }
+    var reviewAllowed: Bool {
+        reviewVisible && state.liveViewStable && !stopRequested && !cameraBusy &&
+            !cameraToolWriting && !computerControlBusy && !halfPressHeld &&
+            halfPressTask == nil && tapFocusTask == nil
+    }
+    func restartAfterPhotoReview() {
+        guard !stopRequested else { return }
+        restartLiveView = true
+    }
     private var modeTask: Task<Void, Never>?
     private var batteryTask: Task<Void, Never>?
     private var storageTask: Task<Void, Never>?
@@ -221,19 +248,34 @@ final class RemoteViewModel: ObservableObject {
         state = state.applying(.startRequested)
         frameTask = Task { [weak self] in
             guard let self else { return }
-            await camera.setRemoteActive(true)
+            do { try await RemoteMonitorSessionGate.shared.acquire(monitorSessionKey) }
+            catch { return }
+            ownsMonitorSession = true
+            await camera.setRemoteSessionActive(true)
+            frameDeviceModel = await camera.remoteDeviceModel()
             if !stopRequested {
                 let controlModeSet = await camera.hasRemoteControlMode()
                 let diagnosticControlModeSet = await camera.hasRemoteDiagnosticControlMode()
                 computerControlEnabled = controlModeSet && diagnosticControlModeSet
-                if camera.isUSB, controlModeSet, !computerControlEnabled {
-                    await releaseMovieSessionToStandby(resumeLiveView: false)
+                if camera.isUSB, controlModeSet {
+                    await releaseMovieSessionToStandby(resumeLiveView: false, releasingComputerControl: true)
+                    computerControlEnabled = await camera.hasRemoteDiagnosticControlMode()
                 }
                 // RemoteScreen: selector -> matching exposure group -> Auto ISO
                 // -> exposure mode -> focus -> battery, before starting Live View.
                 movieMode = false
                 movieMode = (try? await camera.remoteMovieMode()) ?? false
                 state.movieMode = movieMode
+                // Restore the explicit PC preference only after reading the physical lever.
+                if preferredComputerControl, !stopRequested {
+                    computerControlBusy = true
+                    let response = try? await camera.setRemoteDiagnosticControlMode(true)
+                    computerControlEnabled = response == PTPConstants.responseOK && !stopRequested
+                    computerControlBusy = false
+                    if response != PTPConstants.responseOK {
+                        computerControlLog = "!! ComputerControl restore failed"
+                    }
+                }
                 await loadExposure(movie: movieMode)
                 if !stopRequested { exposureProgram = try? await camera.remoteProperty(.exposureProgram) }
                 if !stopRequested { await refreshFocusMode() }
@@ -289,7 +331,10 @@ final class RemoteViewModel: ObservableObject {
                     var intervals = 0
                     while !Task.isCancelled && !stopRequested && !restartLiveView {
                         do {
-                            let packet = try await camera.liveViewFrame()
+                            let packet = try await reviewFrames.withFrame {
+                                guard !stopRequested, !restartLiveView else { throw CancellationError() }
+                                return try await camera.liveViewFrame()
+                            }
                             errors = 0
                             successes += 1
                             guard !stopRequested else { break }
@@ -339,7 +384,7 @@ final class RemoteViewModel: ObservableObject {
     }
 
     private var cameraBusy: Bool {
-        state.capture == .capturing || state.capture == .recording || recordingBusy
+        photoReviewActive || state.capture == .capturing || state.capture == .recording || recordingBusy
     }
 
     private func startPolling() {
@@ -347,6 +392,11 @@ final class RemoteViewModel: ObservableObject {
             guard let self else { return }
             var pollTick = 0
             while !Task.isCancelled && !stopRequested {
+                if photoReviewActive {
+                    try? await waitForPolling(for: .seconds(1))
+                    if photoReviewActive && !stopRequested { await camera.remoteKeepalive() }
+                    continue
+                }
                 if !state.liveViewStable {
                     try? await waitForPolling(for: .milliseconds(600))
                     // RemoteScreen's recovery loop retries a failed USB
@@ -800,7 +850,7 @@ final class RemoteViewModel: ObservableObject {
         let generation = exposureMeterGeneration
         exposureMeterTask?.cancel()
         clearExposureMeterSample()
-        guard exposureMeterEnabled, exposureMeterForeground, initialLoaded, state.liveViewStable,
+        guard exposureMeterEnabled, exposureMeterForeground, initialLoaded, state.liveViewStable, !photoReviewActive,
               !stopRequested else { return }
         exposureMeterTask = Task { [weak self] in
             guard let self else { return }
@@ -872,6 +922,7 @@ final class RemoteViewModel: ObservableObject {
         frameImage = nil
         frameData = nil
         frameMetadata = nil
+        frameRemainingVideoTimeMs = nil
         frameReceivedAtUptime = 0
         frameHistogram = nil
         frameHistogramRGB = nil
@@ -906,6 +957,9 @@ final class RemoteViewModel: ObservableObject {
         frameData = decoded.jpeg
         frameImage = decoded.image
         frameMetadata = decoded.metadata
+        frameRemainingVideoTimeMs = RemoteFrameParser.packetVideoTime(
+            decoded.rawBytes, jpegOffset: decoded.jpegOffset,
+            operation: decoded.operation, model: frameDeviceModel)
         frameReceivedAtUptime = decoded.receivedAtUptime
         scheduleFocusExpiry()
         frameHistogram = decoded.histogram
@@ -1166,6 +1220,10 @@ final class RemoteViewModel: ObservableObject {
             var fallbackUnavailable = false
             var wasHeader = false
             while active() {
+                if photoReviewActive {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    continue
+                }
                 let age = ProcessInfo.processInfo.systemUptime - frameReceivedAtUptime
                 if let attitude = frameMetadata?.attitude, age >= 0, age <= 1.5 {
                     levelRoll = Double(floor(attitude.roll * 10 + 0.5) / 10)
@@ -1206,12 +1264,12 @@ final class RemoteViewModel: ObservableObject {
         effectiveISOGeneration &+= 1
         let generation = effectiveISOGeneration
         let previous = effectiveISOTask
-        guard !stopRequested, autoISOEnabled, state.liveViewStable else { return }
+        guard !stopRequested, !photoReviewActive, autoISOEnabled, state.liveViewStable else { return }
         effectiveISOTask = Task { [weak self] in
             await previous?.value
             guard let self else { return }
             @MainActor func active() -> Bool {
-                !stopRequested && autoISOEnabled && state.liveViewStable && generation == effectiveISOGeneration
+                !stopRequested && !photoReviewActive && autoISOEnabled && state.liveViewStable && generation == effectiveISOGeneration
             }
             var current = effectiveISO
             var attempts = 0
@@ -1281,6 +1339,16 @@ final class RemoteViewModel: ObservableObject {
             if movieMode { exposureDescriptors[.iso] = await readExposure(.iso, movie: true) }
         }
     }
+
+    var pictureControlWritesAllowed: Bool {
+        cameraToolWritesAllowed && !computerControlBusy && !photoReviewActive && state.capture != .recording
+    }
+    func setPictureControlWriting(_ busy: Bool) -> Bool {
+        if busy && (cameraToolWriting || !pictureControlWritesAllowed) { return false }
+        cameraToolWriting = busy
+        return true
+    }
+    func pictureControlNotice(_ message: String) { showInteractionHint(message) }
 
     var cameraToolWritesAllowed: Bool {
         !stopRequested && initialLoaded && state.capture != .capturing && !recordingBusy &&
@@ -1354,6 +1422,8 @@ final class RemoteViewModel: ObservableObject {
     /// of the button's capture/recording gate.
     func setComputerControl(_ enabled: Bool) {
         guard !stopRequested, frameTask != nil, !computerControlBusy else { return }
+        preferredComputerControl = enabled
+        onComputerControlPreferenceChanged?(enabled)
         computerControlBusy = true
         computerControlLog = ""
         computerControlTask = Task { [weak self] in
@@ -1479,6 +1549,10 @@ final class RemoteViewModel: ObservableObject {
         usageMeter.stop()
         disposed = true
         stopRequested = true
+        // A queued replacement owns no camera transaction. Cancel its admission
+        // wait without interrupting an accepted command from the active monitor.
+        if !ownsMonitorSession { frameTask?.cancel() }
+        reviewFrames.resume()
         for delay in pollingDelays.values { delay.cancel() }
         dismissCameraTool()
         // A USB start response can arrive after the page has begun leaving but
@@ -1631,11 +1705,16 @@ final class RemoteViewModel: ObservableObject {
         recordingCommandTask = nil
         await movieCleanupTask?.value
         movieCleanupTask = nil
+        guard ownsMonitorSession else { return }
         if stopMovieOnExit { _ = try? await camera.endMovieRecording() }
         await releaseMovieSessionToStandby(resumeLiveView: false, releasingComputerControl: true)
         computerControlEnabled = false
         computerControlBusy = false
-        await camera.setRemoteActive(false)
+        if ownsMonitorSession {
+            await camera.setRemoteSessionActive(false)
+            ownsMonitorSession = false
+            RemoteMonitorSessionGate.shared.release(monitorSessionKey)
+        }
     }
 
     /// Starts the Android two-stage shutter AF. The initial tick is emitted
@@ -2117,6 +2196,7 @@ final class RemoteViewModel: ObservableObject {
         frameImage = nil
         frameData = nil
         frameMetadata = nil
+        frameRemainingVideoTimeMs = nil
         monitorStorageFreeBytes = [:]
         frameHistogram = nil
         frameZebraMask = nil
@@ -2139,5 +2219,40 @@ final class RemoteViewModel: ObservableObject {
         default:
             return false
         }
+    }
+}
+
+
+/// Android RemoteComputerControlState.sessionMutex: a replacement monitor cannot
+/// begin configuring the camera before the previous non-cancelled cleanup ends.
+@MainActor
+private final class RemoteMonitorSessionGate {
+    static let shared = RemoteMonitorSessionGate()
+    private var held: Set<ObjectIdentifier> = []
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
+    private var waiters: [ObjectIdentifier: [Waiter]] = [:]
+    func acquire(_ key: ObjectIdentifier) async throws {
+        try Task.checkCancellation()
+        if !held.contains(key) { held.insert(key); return }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { waiters[key, default: []].append(Waiter(id: id, continuation: continuation)) }
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancel(key, id: id) }
+        }
+    }
+    private func cancel(_ key: ObjectIdentifier, id: UUID) {
+        guard let index = waiters[key]?.firstIndex(where: { $0.id == id }) else { return }
+        waiters[key]?.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
+    func release(_ key: ObjectIdentifier) {
+        if waiters[key]?.isEmpty != false { held.remove(key); waiters[key] = nil }
+        else { waiters[key]?.removeFirst().continuation.resume() }
     }
 }

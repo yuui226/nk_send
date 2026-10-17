@@ -5,6 +5,30 @@ import UIKit
 
 @MainActor
 final class RemoteLifecycleTests: XCTestCase {
+    func testReviewPausesFramesAndHiddenEventPollingButKeepsLinkAlive() async throws {
+        let camera = RemoteLifecycleCamera()
+        let model = makeModel(camera: camera)
+        model.start()
+        try await waitFor { model.state.liveViewStable }
+        model.setPhotoReviewActive(true)
+        model.reviewFrames.pause()
+        try await model.reviewFrames.awaitIdle()
+        // Allow a previously admitted event iteration to finish.
+        try await Task.sleep(for: .milliseconds(100))
+        let before = await camera.log
+        try await waitFor(timeout: 2) { await camera.log.contains("keepalive") }
+        let paused = await camera.log
+        XCTAssertEqual(paused.filter { $0 == "frame" }.count, before.filter { $0 == "frame" }.count)
+        XCTAssertEqual(paused.filter { $0 == "events" }.count, before.filter { $0 == "events" }.count)
+        XCTAssertFalse(model.reviewAllowed)
+        model.setPhotoReviewActive(false)
+        model.reviewFrames.resume()
+        try await waitFor { await camera.log.filter { $0 == "frame" }.count > paused.filter { $0 == "frame" }.count }
+        await model.stopAndWait()
+        let finished = await camera.log
+        XCTAssertFalse(finished.contains("cancelled-frame"))
+    }
+
     /// Each test owns its natural-day ledger. Sharing .standard makes unrelated
     /// camera tests exhaust the 180s trial and fail later in the same simulator.
     private func makeModel(camera: any RemoteCameraControlling, recordingDirectory: URL? = nil,
@@ -1547,8 +1571,10 @@ final class RemoteLifecycleTests: XCTestCase {
         await camera.ensureMovieApplicationMode()
         let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
+        model.preferredComputerControl = true
         model.start()
         try await waitFor { model.state.session == .ready && model.computerControlEnabled }
+        await camera.ensureMovieApplicationMode()
         let starts = await camera.log.filter { $0 == "start" }.count
         await camera.setProperty(.init(property: .liveViewSelector, writable: false, current: 0, values: [0, 1]))
         await camera.queueEvents([.init(code: 0x4006, handle: RemoteProperty.liveViewSelector.rawValue)])
@@ -2504,6 +2530,45 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertTrue(diagnostic)
     }
 
+    func testCancelledReplacementNeverReleasesActiveMonitorCamera() async throws {
+        let camera = RemoteLifecycleCamera()
+        let first = makeModel(camera: camera)
+        addTeardownBlock { await first.stopAndWait() }
+        first.start()
+        try await waitFor { first.state.session == .ready }
+        let second = makeModel(camera: camera)
+        second.start()
+        await Task.yield()
+        await second.stopAndWait()
+        let calls = await camera.log
+        XCTAssertEqual(calls.filter { $0 == "gate:true" }.count, 1)
+        XCTAssertFalse(calls.contains("gate:false"))
+        XCTAssertEqual(first.state.session, .ready)
+        await first.stopAndWait()
+    }
+
+    func testReplacementMonitorWaitsForPreviousAcceptedControlAndCleanup() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.configureDiagnostic(delay: 200)
+        let first = makeModel(camera: camera)
+        first.start()
+        try await waitFor { first.state.session == .ready }
+        first.toggleComputerControl()
+        try await waitFor { await camera.log.contains("diagnostic:on") }
+        let stopping = Task { await first.stopAndWait() }
+        let second = makeModel(camera: camera)
+        addTeardownBlock { await second.stopAndWait() }
+        second.start()
+        await stopping.value
+        try await waitFor { second.state.session == .ready }
+        let calls = await camera.log
+        let release = try XCTUnwrap(calls.firstIndex(of: "gate:false"))
+        let acquired = try XCTUnwrap(calls.lastIndex(of: "gate:true"))
+        XCTAssertLessThan(release, acquired)
+        XCTAssertFalse(second.computerControlEnabled)
+        await second.stopAndWait()
+    }
+
     func testLeavingDuringComputerControlWaitsForAcceptedCommandBeforeReleasing() async throws {
         let camera = RemoteLifecycleCamera()
         await camera.configureDiagnostic(delay: 200)
@@ -2566,6 +2631,7 @@ final class RemoteLifecycleTests: XCTestCase {
         _ = try await camera.setRemoteDiagnosticControlMode(true)
         let model = makeModel(camera: camera)
         addTeardownBlock { await model.stopAndWait() }
+        model.preferredComputerControl = true
         model.start()
         try await waitFor { model.computerControlEnabled }
         model.setComputerControl(false)
@@ -3795,6 +3861,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
         defer { batteryEvent = false; queuedEvents = [] }
         return queuedEvents + (batteryEvent ? [.init(code: 0x4006, handle: RemoteProperty.batteryLevel.rawValue)] : [])
     }
+    func remoteKeepalive() { log.append("keepalive") }
     func setRemoteProperty(_ descriptor: RemotePropertyDescriptor, value: UInt64) async throws {
         log.append("set:\(descriptor.property)")
         log.append("write:\(descriptor.property):\(value)")
@@ -4206,6 +4273,26 @@ final class RemoteFrameProtocolTests: XCTestCase {
         }
     }
 
+    func testConcurrentApplicationCleanupSharesBusyRetryAndClearsOnlyAcknowledgedFlags() async throws {
+        let wire = RemoteWireReplay([
+            .init(PTPConstants.setDevicePropValue, parameters: [RemoteProperty.applicationMode.rawValue], sentData: Data([1])),
+            .init(PTPConstants.nikonChangeApplicationMode, parameters: [1]),
+            .init(PTPConstants.nikonChangeApplicationMode, parameters: [0], code: PTPConstants.deviceBusy),
+            .init(PTPConstants.nikonChangeApplicationMode, parameters: [0], code: PTPConstants.deviceBusy),
+            .init(PTPConstants.nikonChangeApplicationMode, parameters: [0]),
+            .init(PTPConstants.setDevicePropValue, parameters: [RemoteProperty.applicationMode.rawValue], sentData: Data([0]))
+        ])
+        let camera = repository(wire, usb: true)
+        try await camera.ensureMovieApplicationMode()
+        async let first: Void = camera.clearMovieApplicationMode(force: true)
+        async let second: Void = camera.clearMovieApplicationMode(force: true)
+        _ = await (first, second)
+        let retained = await camera.hasMovieApplicationMode()
+        let remaining = await wire.remaining
+        XCTAssertFalse(retained)
+        XCTAssertEqual(remaining, 0)
+    }
+
     func testWireShutterRangesAndLongEnumerationReachRepository() async throws {
         func description(_ property: RemoteProperty, form: UInt8, values: [Int64]) -> Data {
             var data = Data([UInt8(truncatingIfNeeded: property.rawValue), UInt8(truncatingIfNeeded: property.rawValue >> 8), 6, 0, 1])
@@ -4333,7 +4420,8 @@ final class RemoteFrameProtocolTests: XCTestCase {
         let wire = RemoteWireReplay([.init(PTPConstants.getLiveViewImage, payload: payload)])
         let result = try await repository(wire).probeLegacyVideoTime()
         XCTAssertFalse(result.contains("unsupported layout"))
-        XCTAssertTrue(result.contains("recording=true minutes=1 seconds=42"))
+        XCTAssertTrue(result.contains("video[64..68]=0001002A01"))
+        XCTAssertTrue(result.contains("remainingMs=null"))
         let remaining = await wire.remaining
         XCTAssertEqual(remaining, 0)
     }

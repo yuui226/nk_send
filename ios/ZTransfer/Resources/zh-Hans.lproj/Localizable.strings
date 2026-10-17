@@ -590,3 +590,47 @@
 "photo_effect_module_frame" = "边框";
 
 "photo_effect_module_watermark" = "水印";
+
+"remote_review" = "回看";
+
+"remote_review_empty" = "暂无照片";
+
+"remote_review_retry" = "加载失败 · 重试";
+
+"remote_review_disconnected" = "相机已断开";
+
+"remote_tool_picture_control" = "优化校准";
+"picture_control_loading" = "读取中…";
+"picture_control_write_failed" = "操作失败";
+"picture_control_exposure_mode_required" = "请切换至 P/S/A/M";
+"picture_control_failed_restored" = "操作失败，已恢复";
+"picture_control_check_slot" = "操作失败，请检查 C%d";
+"picture_control_files_failed" = "预设加载失败";
+"picture_control_busy_hint" = "相机忙碌";
+"picture_control_test_log" = "测试日志";
+"picture_control_report_use_share" = "日志过长，请通过「测试日志」分享";
+"picture_control_report_share_failed" = "日志分享失败";
+"picture_control_report_save_failed" = "日志保存失败，请及时分享";
+"picture_control_built_in" = "内置";
+"picture_control_folder" = "预设目录";
+"picture_control_folder_empty" = "未找到 .np3 文件";
+"picture_control_choose_folder_hint" = "选择含 .np3 文件的文件夹，支持一层子文件夹作为分类。";
+"picture_control_file_read_failed" = "文件读取失败";
+"picture_control_file_invalid" = "NP3 文件无效";
+"picture_control_file_unsupported" = "暂不支持此预设";
+"picture_control_flexible_color_unsupported" = "暂不支持灵活颜色预设";
+"picture_control_read_timeout" = "读取超时";
+"picture_control_slots_title" = "机内预设";
+"picture_control_edit_slot" = "更换 C%d";
+"picture_control_slot_empty" = "空";
+"picture_control_slot_unreadable" = "无法读取";
+"picture_control_slot_unsupported" = "不支持";
+"picture_control_back" = "返回";
+"picture_control_slots_read_failed" = "相机已断开";
+"picture_control_slot_applied" = "已启用 C%d";
+"picture_control_slot_cleared" = "已清除 C%d";
+"picture_control_slot_busy" = "处理中…";
+"picture_control_clear_slot" = "清除";
+"picture_control_clear_confirm" = "清除 C%d？";
+"picture_control_cancel" = "取消";
+"picture_control_confirm" = "确定";

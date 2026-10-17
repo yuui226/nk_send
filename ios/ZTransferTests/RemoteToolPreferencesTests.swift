@@ -53,11 +53,16 @@ final class RemoteToolPreferencesTests: XCTestCase {
             }
             prefs.layout(movie: true).setVisible(.audio, false)
             XCTAssertFalse(prefs.hd); XCTAssertFalse(prefs.fps); XCTAssertFalse(prefs.audio)
-            XCTAssertFalse(prefs.level); XCTAssertFalse(prefs.meter); XCTAssertFalse(prefs.locked)
+            XCTAssertFalse(prefs.level); XCTAssertFalse(prefs.meter)
+            // Android 1.97 pins lock/rotate: hiding a fixed tool is a no-op,
+            // including its enabled preference and persisted locked direction.
+            XCTAssertTrue(prefs.locked)
+            XCTAssertTrue(photo.visible(.lock)); XCTAssertTrue(photo.visible(.rotate))
             XCTAssertEqual(prefs.histogram, .off); XCTAssertEqual(prefs.waveform, .off)
             XCTAssertEqual(prefs.exposure, .off); XCTAssertEqual(prefs.grid, .off)
             XCTAssertEqual(prefs.desqueeze, 1)
             let restored = RemoteToolPreferences(defaults: defaults)
+            XCTAssertTrue(restored.locked)
             XCTAssertFalse(restored.fps)
             XCTAssertFalse(restored.layout(movie: true).visible(.audio))
             XCTAssertTrue(restored.layout(movie: true).visible(.hd))

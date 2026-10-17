@@ -196,7 +196,17 @@ enum RemoteExposureParameters {
         case .iso, .nikonISOEx, .nikonISOControlSensitivity, .movieISO: return "ISO\(raw)"
         case .nikonAutoISO, .nikonAutoISOAlternate, .movieAutoISO: return raw == 0 ? "Off" : "On"
         case .exposureProgram:
-            switch raw { case 1: return "M"; case 2: return "P"; case 3: return "A"; case 4: return "S"; case 0x8010: return "AUTO"; default: return String(format: "0x%llx", raw) }
+            switch raw {
+            case 1: return "M"
+            case 2: return "P"
+            case 3: return "A"
+            case 4: return "S"
+            case 0x8010: return "AUTO"
+            case 0x8050: return "U1"
+            case 0x8051: return "U2"
+            case 0x8052: return "U3"
+            default: return String(format: "0x%04llX", raw)
+            }
         case .liveViewSelector: return raw == 0 ? "照片" : "录像"
         case .focusMode:
             return [1: "MF", 2: "AF", 3: "AF Macro", 0x8010: "AF-S", 0x8011: "AF-C", 0x8012: "AF-A", 0x8013: "AF-F"][raw]

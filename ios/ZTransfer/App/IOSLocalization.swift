@@ -5,6 +5,13 @@ import Foundation
 /// guidance and setup steps live here so regeneration cannot remove them.
 enum IOSLocalization {
     static let byResource: [String: [String: String]] = [
+        "local_photo_ios_save_hint": ["zh": "效果图会作为新照片保存到系统照片图库", "en": "Edited photos are saved as new items in your photo library.", "hant": "效果圖會作為新照片儲存到系統照片圖庫"],
+        "local_photo_batch_generate": ["zh": "生成并保存（%1$d）", "en": "Generate and save (%1$d)", "hant": "產生並儲存（%1$d）"],
+        "lut_choose_folder": ["en": "Choose folder", "zh": "选择文件夹", "hant": "選擇資料夾"],
+        "cd_remote_fullscreen_exit": ["zh": "退出全屏", "en": "Exit fullscreen", "hant": "退出全螢幕"],
+        "lut_change_folder": ["en": "Change folder", "zh": "更换文件夹", "hant": "更換資料夾"],
+        "local_photo_replace": ["zh": "更换图片", "en": "Replace photo", "hant": "更換圖片"],
+        "skin_liquid_glass": ["zh": "液态玻璃", "en": "Liquid Glass", "hant": "液態玻璃"],
         "iap_confirming": ["zh": "正在确认购买权益，请稍后重试", "en": "Confirming purchases. Please try again shortly.", "hant": "正在確認購買權益，請稍後重試"],
         "iap_pending": ["zh": "购买待批准，批准后将自动解锁", "en": "Purchase awaiting approval. Pro will unlock when approved.", "hant": "購買待批准，批准後將自動解鎖"],
         "iap_purchase_failed": ["zh": "购买未完成，请稍后重试", "en": "Purchase could not be completed. Please try again.", "hant": "購買未完成，請稍後重試"],

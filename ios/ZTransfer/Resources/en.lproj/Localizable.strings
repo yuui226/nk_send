@@ -590,3 +590,47 @@
 "photo_effect_module_frame" = "Frame";
 
 "photo_effect_module_watermark" = "Watermark";
+
+"remote_review" = "Review";
+
+"remote_review_empty" = "No photos";
+
+"remote_review_retry" = "Load failed · Retry";
+
+"remote_review_disconnected" = "Camera disconnected";
+
+"remote_tool_picture_control" = "Picture Control";
+"picture_control_loading" = "Loading…";
+"picture_control_write_failed" = "Operation failed";
+"picture_control_exposure_mode_required" = "Switch to P/S/A/M";
+"picture_control_failed_restored" = "Failed. Previous settings restored.";
+"picture_control_check_slot" = "Operation failed. Check C%d.";
+"picture_control_files_failed" = "Presets unavailable";
+"picture_control_busy_hint" = "Camera busy";
+"picture_control_test_log" = "Test log";
+"picture_control_report_use_share" = "Log too large. Share via Test log.";
+"picture_control_report_share_failed" = "Could not share log";
+"picture_control_report_save_failed" = "Log not saved. Share it now.";
+"picture_control_built_in" = "Built-in";
+"picture_control_folder" = "Preset folder";
+"picture_control_folder_empty" = "No .np3 files found";
+"picture_control_choose_folder_hint" = "Choose a folder containing .np3 files; one level of subfolders is supported as categories.";
+"picture_control_file_read_failed" = "Could not read file";
+"picture_control_file_invalid" = "Invalid NP3 file";
+"picture_control_file_unsupported" = "Unsupported preset";
+"picture_control_flexible_color_unsupported" = "Flexible Color presets are not supported yet";
+"picture_control_read_timeout" = "Read timed out";
+"picture_control_slots_title" = "Camera presets";
+"picture_control_edit_slot" = "Replace C%d";
+"picture_control_slot_empty" = "Empty";
+"picture_control_slot_unreadable" = "Could not read";
+"picture_control_slot_unsupported" = "Unsupported";
+"picture_control_back" = "Back";
+"picture_control_slots_read_failed" = "Camera disconnected";
+"picture_control_slot_applied" = "C%d activated";
+"picture_control_slot_cleared" = "C%d cleared";
+"picture_control_slot_busy" = "Working…";
+"picture_control_clear_slot" = "Clear";
+"picture_control_clear_confirm" = "Clear C%d?";
+"picture_control_cancel" = "Cancel";
+"picture_control_confirm" = "OK";

@@ -88,6 +88,7 @@ final class PhotoListViewModel: ObservableObject {
     private var previewPausedScan = false
     private var previewActive = false
     private var remoteActive = false
+    private var remotePageOwners = 0
     private var remoteRefreshPending = false
     private var transferBusy = false
     private var newMediaHandler: (([CameraFile]) -> Void)?
@@ -826,6 +827,7 @@ final class PhotoListViewModel: ObservableObject {
     /// Drain the current command, then stop before the next metadata request;
     /// cancelling a live iOS PTP transaction would invalidate the connection.
     func pauseForRemote() async {
+        remotePageOwners += 1
         guard !remoteActive else { return }
         remoteActive = true
         updateRatingScanFromCurrentState()
@@ -836,7 +838,9 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     func resumeAfterRemote(isConnected: Bool) async {
-        guard remoteActive else { return }
+        guard remotePageOwners > 0 else { return }
+        remotePageOwners -= 1
+        guard remotePageOwners == 0, remoteActive else { return }
         remoteActive = false
         updateRatingScanFromCurrentState()
         // Balance pauseForRemote's ownership here instead of relying on the

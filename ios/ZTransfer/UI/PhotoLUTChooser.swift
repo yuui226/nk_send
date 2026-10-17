@@ -73,7 +73,7 @@ struct PhotoLUTChooser: View {
                         cancelPending(); onDisable(); showingChooser = false
                     }
                     Spacer()
-                    Button(AppLocalized.resource("lut_change_folder")) {
+                    Button(AppLocalized.resource("lut_folder")) {
                         cancelPending()
                         folderAfterChooser = true; showingChooser = false
                     }

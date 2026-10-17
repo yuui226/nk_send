@@ -1,17 +1,19 @@
 import Foundation
 
-struct RemoteLUTFile: Equatable, Sendable {
+struct PresetFile: Equatable, Sendable {
     let identifier: String
     let name: String
     let relativePath: String
     let size: Int64?
     var modified: Date? = nil
-    var label: String { String(name.dropLast(5)) }
+    var label: String { name.lastIndex(of: ".").map { String(name[..<$0]) } ?? name }
     var category: String? {
         let components = relativePath.split(separator: "/")
         return components.count == 2 ? String(components[0]) : nil
     }
 }
+
+typealias RemoteLUTFile = PresetFile
 
 enum RemoteLUTCatalog {
     /// Android lutFileLabels: derive numbering before favorites reorder the list.
@@ -51,9 +53,9 @@ enum RemoteLUTCatalog {
 
     /// Android scans LUT files in the selected root and one category level.
     /// Deeper descendants and non-cube files are intentionally excluded.
-    static func visibleFiles(_ files: [RemoteLUTFile]) -> [RemoteLUTFile] {
+    static func visibleFiles(_ files: [RemoteLUTFile], fileExtension: String = "cube") -> [RemoteLUTFile] {
         files.filter {
-            $0.name.lowercased().hasSuffix(".cube") &&
+            $0.name.lowercased().hasSuffix("." + fileExtension.lowercased()) &&
             $0.relativePath.split(separator: "/").count <= 2
         }.sorted {
             let first = $0.name.lowercased()
@@ -76,7 +78,10 @@ struct PhotoLUTCategorySelection {
         return files.map(\.category).filter { seen.insert($0).inserted }.sorted {
             guard let first = $0 else { return $1 != nil }
             guard let second = $1 else { return false }
-            return first.lowercased().utf16.lexicographicallyPrecedes(second.lowercased().utf16)
+            if first.lowercased() != second.lowercased() {
+                return first.lowercased().utf16.lexicographicallyPrecedes(second.lowercased().utf16)
+            }
+            return first.utf16.lexicographicallyPrecedes(second.utf16)
         }
     }
 

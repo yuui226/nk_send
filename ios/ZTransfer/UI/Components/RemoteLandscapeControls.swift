@@ -15,6 +15,7 @@ struct RemoteLandscapeControls: View {
     let disp: AnyView
     let shutter: AnyView
     let recorder: AnyView
+    var review: AnyView = AnyView(EmptyView())
     let parameter: (Int, CGFloat) -> AnyView
     // Only the layer views subscribe to frame changes. Label measurement and
     // the header are not rebuilt on every display-link tick.
@@ -39,7 +40,7 @@ struct RemoteLandscapeControls: View {
                 captureCluster.frame(maxHeight: .infinity, alignment: .bottom)
             }
             layer(dock: true) {
-                RemoteLandscapeDock(tools: toolLayout.shownTools.filter { $0 != .record }, controls: controls, bottom: layout.bottomControls)
+                RemoteLandscapeDock(tools: toolLayout.shownTools.filter { $0 != .record } + RemoteTool.pinned, controls: controls, bottom: layout.bottomControls)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.top, 40)
@@ -60,7 +61,7 @@ struct RemoteLandscapeControls: View {
                 .accessibilityIdentifier("remote-landscape-dock")
                 .accessibilityValue(dockOpen ? "open" : "closed")
                 Spacer(minLength: 0)
-                back
+                layer(dock: false) { back }
             }
             .frame(height: 36)
         }
@@ -98,6 +99,7 @@ struct RemoteLandscapeControls: View {
             VStack(spacing: 4) {
                 layer(dock: false) { disp }.frame(width: 36, height: 36)
                 layer(dock: false) { rotate }.frame(width: 36, height: 36)
+                layer(dock: false) { review }.frame(width: 36, height: 36)
             }.padding(.leading, 4)
             layer(dock: false) { shutter }
                 .frame(width: layout.shutterSize, height: layout.shutterSize)
@@ -175,7 +177,7 @@ struct RemoteDockMeasurements: Equatable {
     let columns: Int
     let lines: [Int]
     let cellWidth: CGFloat
-    @MainActor init(names: [String], width: CGFloat, bottom: Bool, scale: CGFloat = 1) {
+    @MainActor init(names: [String], width: CGFloat, bottom: Bool, scale: CGFloat = 1, minimumColumns: Int = 1) {
         let scale = max(1, scale)
         let width = max(0, (width * scale).rounded()), gap = (8 * scale).rounded()
         let words = names.flatMap { $0.split(whereSeparator: { $0 == " " || $0 == "-" }) }
@@ -185,9 +187,9 @@ struct RemoteDockMeasurements: Equatable {
         }.max() ?? 0
         let minimum = max((56 * scale).rounded(), wordWidth)
         let maximum = bottom ? max(1, min(max(1, names.count), Int((width + gap) / (minimum + gap)))) : 3
-        let count = (1...maximum).reversed().first { count in
+        let count = (minimumColumns...max(minimumColumns, maximum)).reversed().first { count in
             let cell = max(1, floor((width - gap * CGFloat(count - 1)) / CGFloat(count)))
-            return count == 1 || (cell >= minimum && names.allSatisfy { RemoteDockLabel.lineCount($0, width: cell / scale) <= 2 })
+            return count == minimumColumns || (cell >= minimum && names.allSatisfy { RemoteDockLabel.lineCount($0, width: cell / scale) <= 2 })
         } ?? 1
         columns = count
         let resolvedWidth = max(1, floor((width - gap * CGFloat(count - 1)) / CGFloat(count))) / scale
@@ -205,17 +207,18 @@ private struct RemoteLandscapeDock: View {
     var body: some View {
         GeometryReader { proxy in
             let measure = RemoteDockMeasurements(names: tools.map { AppLocalized.resource($0.titleKey) },
-                                                  width: max(0, proxy.size.width - 8), bottom: bottom, scale: scale)
+                                                  width: max(0, proxy.size.width - 8), bottom: bottom, scale: scale, minimumColumns: max(1, tools.filter(\.fixed).count))
+            let rows = monitorToolRows(tools, columns: measure.columns)
             RemoteDockScrollView {
                 VStack(spacing: 8) {
-                    ForEach(0..<((tools.count + measure.columns - 1) / measure.columns), id: \.self) { row in
+                    ForEach(0..<rows.count, id: \.self) { row in
                         HStack(alignment: .top, spacing: 8) {
                             ForEach(0..<measure.columns, id: \.self) { column in
-                                let index = row * measure.columns + column
+                                let tool = column < rows[row].count ? rows[row][column] : nil
                                 Group {
-                                    if index < tools.count {
-                                        controls[tools[index]]
-                                            .environment(\.remoteDockLabelLines, measure.rowLines(row))
+                                    if let tool {
+                                        controls[tool]
+                                            .environment(\.remoteDockLabelLines, 2)
                                     } else { Color.clear }
                                 }.frame(maxWidth: .infinity, alignment: .top)
                             }
@@ -338,5 +341,18 @@ private struct RemoteDockScrollView<Content: View>: View {
             topFade = bounds.minY < -0.5 ? 1 : 0
             bottomFade = bounds.maxY > height + 0.5 ? 1 : 0
         }
+    }
+}
+
+func monitorToolRows(_ tools: [RemoteTool], columns: Int) -> [[RemoteTool?]] {
+    guard !tools.isEmpty else { return [] }
+    let pinned = RemoteTool.pinned.filter { tools.contains($0) }
+    let regular = tools.filter { !$0.fixed }
+    let count = max(1, columns, pinned.count), firstCapacity = count - pinned.count
+    let first: [RemoteTool?] = Array(regular.prefix(firstCapacity)) +
+        Array(repeating: nil, count: max(0, firstCapacity - regular.count)) + pinned
+    let remaining = Array(regular.dropFirst(firstCapacity))
+    return [first] + stride(from: 0, to: remaining.count, by: count).map { start in
+        Array(remaining[start..<min(start + count, remaining.count)]).map(Optional.some)
     }
 }

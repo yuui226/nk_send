@@ -38,14 +38,7 @@ final class RemoteToolDragState: ObservableObject {
         guard let target = layout.shownTools.first(where: {
             $0 != tool && slots[$0].map { Self.contains($0, center) } == true
         }), let targetIndex = layout.shownTools.firstIndex(of: target) else { return }
-        let displayed = layout.shownTools.enumerated().sorted { lhs, rhs in
-            let left = slots[lhs.element]?.origin ?? CGPoint(x: CGFloat.greatestFiniteMagnitude, y: CGFloat.greatestFiniteMagnitude)
-            let right = slots[rhs.element]?.origin ?? CGPoint(x: CGFloat.greatestFiniteMagnitude, y: CGFloat.greatestFiniteMagnitude)
-            if left.y != right.y { return left.y < right.y }
-            if left.x != right.x { return left.x < right.x }
-            return lhs.offset < rhs.offset
-        }.map(\.element)
-        layout.move(tool, to: targetIndex, displayedOrder: displayed)
+        layout.move(tool, to: targetIndex)
     }
 
     func end() { dragging = nil }

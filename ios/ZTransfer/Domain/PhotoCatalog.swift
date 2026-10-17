@@ -100,6 +100,25 @@ enum PhotoPreviewEntry: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A review page represents a capture, while its preferred JPEG handle can
+/// arrive later. Keep the page/gesture identity separate from the I/O handle.
+struct PhotoPreviewPage: Identifiable {
+    let id: String
+    let index: Int
+    let entry: PhotoPreviewEntry
+}
+
+func photoPreviewPages(_ entries: [PhotoPreviewEntry], reviewPhotos: [RemoteReviewPhoto] = []) -> [PhotoPreviewPage] {
+    var captureByHandle: [UInt32: UInt32] = [:]
+    for photo in reviewPhotos {
+        for file in photo.files { captureByHandle[file.id] = photo.id }
+    }
+    return entries.enumerated().map { index, entry in
+        let identity = entry.file.flatMap { captureByHandle[$0.id] }.map { "review_\($0)" } ?? entry.id
+        return PhotoPreviewPage(id: identity, index: index, entry: entry)
+    }
+}
+
 /// Android bounds preview-only image state to the current page plus two pages
 /// on either side. Collection pages do not own a high-resolution bitmap.
 func retainedPhotoPreviewIDs(

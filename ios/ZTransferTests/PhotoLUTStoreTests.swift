@@ -479,7 +479,7 @@ import UIKit
         XCTAssertFalse(request.loading)
     }
 
-    func testLUTIOQueueKeepsOnlyLatestPendingAndDiscardsCancelledResult() async throws {
+    func testLUTIOQueueOwnerCancelsItsObsoletePendingAndActiveResults() async throws {
         let queue = LUTIOQueue()
         let gate = DispatchSemaphore(value: 0)
         let first = queue.submit(action: { _ in
@@ -495,6 +495,8 @@ import UIKit
             try ticket.checkCancellation()
             return 3
         }, deliver: { result = try? $0.get() })
+        XCTAssertFalse(replaced.isCancelled, "Other submissions must not cancel this owner")
+        replaced.cancel()
         XCTAssertTrue(replaced.isCancelled)
         first.cancel()
         gate.signal()
@@ -503,6 +505,47 @@ import UIKit
             try await Task.sleep(for: .milliseconds(5))
         }
         XCTAssertEqual(result, 3)
+    }
+
+    func testSharedPresetQueueKeepsOtherOwnersFIFOAndDrainsCleanupAfterThrowingDelivery() async throws {
+        enum Failure: Error { case callback }
+        let queue = PresetIOQueue()
+        let gate = DispatchSemaphore(value: 0)
+        var delivered: [Int] = []
+        let first = queue.submit(action: { _ in gate.wait(); return 1 }, deliver: { result in
+            delivered.append(try result.get())
+            queue.cleanup { throw Failure.callback }
+            throw Failure.callback
+        })
+        queue.submit(action: { _ in 2 }, deliver: { delivered.append(try $0.get()) })
+        queue.submit(action: { _ in 3 }, deliver: { delivered.append(try $0.get()) })
+        XCTAssertFalse(first.isCancelled)
+        gate.signal()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while delivered.count < 3 && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(delivered, [1, 2, 3])
+    }
+
+    func testSharedPresetQueueDiscardsCancelledAcceptedReadBeforeNextOwner() async throws {
+        let queue = PresetIOQueue()
+        let started = expectation(description: "Reader started")
+        let discarded = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        let first = queue.submit(action: { _ in
+            started.fulfill(); gate.wait(); return 1
+        }, discard: { _ in discarded.signal() }, deliver: { _ in XCTFail("Cancelled read delivered") })
+        await fulfillment(of: [started], timeout: 3)
+        first.cancel()
+        var complete = false
+        queue.submit(action: { _ in discarded.wait(timeout: .now() + 1) == .success }, deliver: {
+            XCTAssertTrue(try $0.get()); complete = true
+        })
+        gate.signal()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !complete && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(complete)
     }
 
     func testFolderPreparationDoesNotReplaceBookmarkUntilAccepted() throws {

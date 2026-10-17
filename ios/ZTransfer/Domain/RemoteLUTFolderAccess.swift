@@ -8,10 +8,14 @@ enum RemoteLUTFolderAccessError: Error, Equatable { case missing, denied, read, 
 /// are opened separately so a failed read cannot publish a partial folder snapshot.
 final class RemoteLUTFolderAccess {
     enum Scope {
-        case monitor, photo
+        case monitor, photo, pictureControl
 
         fileprivate var bookmarkKey: String {
-            self == .monitor ? "remote_lut_folder_bookmark" : "photo_lut_folder_bookmark"
+            switch self {
+            case .monitor: "remote_lut_folder_bookmark"
+            case .photo: "photo_lut_folder_bookmark"
+            case .pictureControl: "picture_control_folder_bookmark"
+            }
         }
     }
     // Foundation exposes the security-scope bit only to macOS in some iOS SDKs;
@@ -44,7 +48,7 @@ final class RemoteLUTFolderAccess {
 
     /// Prepare without replacing the live grant/bookmark. The caller publishes
     /// only after accepting the result (and, for async callers, its generation).
-    static func prepareFolder(_ folder: URL,
+    static func prepareFolder(_ folder: URL, fileExtension: String = "cube",
                               operations: DirectoryAccessOperations = .system,
                               checkCancelled: () throws -> Void = { try Task.checkCancellation() }) throws -> PreparedFolder {
         guard operations.start(folder) else { throw RemoteLUTFolderAccessError.denied }
@@ -55,7 +59,7 @@ final class RemoteLUTFolderAccess {
             bookmark = try folder.bookmarkData(options: securityScope,
                                                includingResourceValuesForKeys: nil, relativeTo: nil)
         } catch { throw folderFailure(error, isRoot: true) }
-        let files = try scanContents(folder, checkCancelled: checkCancelled)
+        let files = try scanContents(folder, fileExtension: fileExtension, checkCancelled: checkCancelled)
         try checkCancelled()
         return PreparedFolder(bookmark: bookmark, files: files)
     }
@@ -67,7 +71,7 @@ final class RemoteLUTFolderAccess {
                         relativeTo: nil, bookmarkDataIsStale: &stale)
     }
 
-    static func prepareBookmark(_ data: Data?, checkCancelled: () throws -> Void) throws -> PreparedFolder {
+    static func prepareBookmark(_ data: Data?, fileExtension: String = "cube", checkCancelled: () throws -> Void) throws -> PreparedFolder {
         try checkCancelled()
         guard let data else { throw RemoteLUTFolderAccessError.missing }
         var stale = false
@@ -76,7 +80,7 @@ final class RemoteLUTFolderAccess {
             folder = try URL(resolvingBookmarkData: data, options: resolveSecurityScope,
                              relativeTo: nil, bookmarkDataIsStale: &stale)
         } catch { throw RemoteLUTFolderAccessError.missing }
-        return try prepareFolder(folder, checkCancelled: checkCancelled)
+        return try prepareFolder(folder, fileExtension: fileExtension, checkCancelled: checkCancelled)
     }
 
     func commit(_ prepared: PreparedFolder) {
@@ -103,7 +107,7 @@ final class RemoteLUTFolderAccess {
     }
 
     /// Enumerate incrementally; the budget counts every entry, not only LUTs.
-    static func scanContents(_ root: URL, entryLimit: Int = 10_000,
+    static func scanContents(_ root: URL, fileExtension: String = "cube", entryLimit: Int = 10_000,
                              checkCancelled: () throws -> Void = { try Task.checkCancellation() }) throws -> [RemoteLUTFile] {
         try checkCancelled()
         do {
@@ -114,6 +118,8 @@ final class RemoteLUTFolderAccess {
         var result: [RemoteLUTFile] = []
         var categories: [URL] = []
         var total = 0
+        var seenFiles = Set<String>()
+        var seenDirectories: Set<String> = [root.resolvingSymlinksInPath().path]
         func enumerate(_ directory: URL, category: String?) throws {
             try checkCancelled()
             var enumerationError: Error?
@@ -130,10 +136,12 @@ final class RemoteLUTFolderAccess {
                 do { values = try item.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]) }
                 catch { throw RemoteLUTFolderAccessError.read }
                 if values.isDirectory == true {
-                    if category == nil { categories.append(item) }
+                    if category == nil && seenDirectories.insert(item.resolvingSymlinksInPath().path).inserted { categories.append(item) }
                     continue
                 }
                 let relative = category.map { $0 + "/" + item.lastPathComponent } ?? item.lastPathComponent
+                guard item.pathExtension.caseInsensitiveCompare(fileExtension) == .orderedSame,
+                      seenFiles.insert(item.resolvingSymlinksInPath().path).inserted else { continue }
                 append(item, relative: relative, size: values.fileSize, modified: values.contentModificationDate, into: &result)
             }
             try checkCancelled()
@@ -141,7 +149,7 @@ final class RemoteLUTFolderAccess {
         }
         try enumerate(root, category: nil)
         for category in categories { try enumerate(category, category: category.lastPathComponent) }
-        return RemoteLUTCatalog.visibleFiles(result)
+        return RemoteLUTCatalog.visibleFiles(result, fileExtension: fileExtension)
     }
 
     func read(_ file: RemoteLUTFile) throws -> Data {
@@ -178,7 +186,7 @@ final class RemoteLUTFolderAccess {
         }
     }
 
-    private static func withScopedFile<Value>(_ bookmark: Data?, file: RemoteLUTFile,
+    static func withScopedFile<Value>(_ bookmark: Data?, file: RemoteLUTFile,
                                               operations: DirectoryAccessOperations = .system,
                                               checkCancelled: () throws -> Void,
                                               body: (URL) throws -> Value) throws -> Value {
@@ -272,62 +280,79 @@ final class RemoteLUTFolderAccess {
     }
 
     private static func append(_ url: URL, relative: String, size: Int?, modified: Date?, into result: inout [RemoteLUTFile]) {
-        guard url.pathExtension.caseInsensitiveCompare("cube") == .orderedSame else { return }
         result.append(RemoteLUTFile(identifier: url.path, name: url.lastPathComponent, relativePath: relative, size: size.map(Int64.init), modified: modified))
     }
 }
 
-/// Android LutIoQueue: one process-wide reader plus one latest pending request.
-/// Cancelling a ticket never starts a replacement worker until the old IO returns.
+/// Android SerialPresetQueue: one process-wide reader, independent request tickets.
+/// Cancelling obsolete LUT work must not discard another feature's queued scan.
 @MainActor
-final class LUTIOQueue {
-    static let shared = LUTIOQueue()
+final class PresetIOQueue {
+    static let shared = PresetIOQueue()
 
     final class Ticket: @unchecked Sendable {
+        fileprivate let id = UUID()
         private let lock = NSLock()
         private var cancelled = false
-
-        func cancel() { lock.lock(); cancelled = true; lock.unlock() }
-        var isCancelled: Bool {
+        private let onCancel: @Sendable (UUID) -> Void
+        init(onCancel: @escaping @Sendable (UUID) -> Void = { _ in }) { self.onCancel = onCancel }
+        func cancel() {
             lock.lock()
-            defer { lock.unlock() }
+            let changed = !cancelled
+            cancelled = true
+            lock.unlock()
+            if changed { onCancel(id) }
+        }
+        var isCancelled: Bool {
+            lock.lock(); defer { lock.unlock() }
             return cancelled
         }
-        func checkCancellation() throws {
-            if isCancelled { throw CancellationError() }
-        }
+        func checkCancellation() throws { if isCancelled { throw CancellationError() } }
     }
-
     private struct Work: Sendable {
         let ticket: Ticket
         let run: @Sendable () async -> Void
     }
     private var active = false
-    private var pending: Work?
-
+    private var pending: [Work] = []
+    private var cleanups: [@Sendable () throws -> Void] = []
+    private let onCallbackFailure: @Sendable (Error) -> Void
+    init(onCallbackFailure: @escaping @Sendable (Error) -> Void = { _ in }) {
+        self.onCallbackFailure = onCallbackFailure
+    }
+    func cleanup(_ action: @escaping @Sendable () throws -> Void) { cleanups.append(action) }
+    private func takeCleanups() -> [@Sendable () throws -> Void] {
+        let result = cleanups; cleanups.removeAll(); return result
+    }
     @discardableResult
     func submit<Value: Sendable>(
         action: @escaping @Sendable (Ticket) throws -> Value,
-        deliver: @escaping @MainActor (Result<Value, Error>) -> Void
+        discard: @escaping @Sendable (Result<Value, Error>) throws -> Void = { _ in },
+        deliver: @escaping @MainActor (Result<Value, Error>) throws -> Void
     ) -> Ticket {
-        let ticket = Ticket()
-        let work = Work(ticket: ticket) {
+        let ticket = Ticket { [weak self] id in
+            Task { @MainActor in self?.pending.removeAll { $0.ticket.id == id } }
+        }
+        let failure = onCallbackFailure
+        let work = Work(ticket: ticket) { [weak self] in
             guard !ticket.isCancelled else { return }
             let result = Result { try action(ticket) }
-            await MainActor.run {
-                guard !ticket.isCancelled else { return }
-                deliver(result)
+            let delivered = await MainActor.run {
+                guard !ticket.isCancelled else { return false }
+                // A callback may commit before throwing; never discard afterward.
+                do { try deliver(result) } catch { failure(error) }
+                return true
+            }
+            if !delivered { do { try discard(result) } catch { failure(error) } }
+            while let self {
+                let cleanups = await self.takeCleanups()
+                if cleanups.isEmpty { break }
+                for cleanup in cleanups { do { try cleanup() } catch { failure(error) } }
             }
         }
-        if active {
-            pending?.ticket.cancel()
-            pending = work
-        } else {
-            start(work)
-        }
+        if active { pending.append(work) } else { start(work) }
         return ticket
     }
-
     private func start(_ work: Work) {
         active = true
         Task.detached(priority: .utility) {
@@ -335,14 +360,17 @@ final class LUTIOQueue {
             await self.finished()
         }
     }
-
     private func finished() {
         active = false
-        guard let next = pending else { return }
-        pending = nil
-        if !next.ticket.isCancelled { start(next) }
+        while !pending.isEmpty {
+            let next = pending.removeFirst()
+            if !next.ticket.isCancelled { start(next); return }
+        }
     }
 }
+
+// Preserve existing LUT call sites while sharing the same reader with NP3.
+typealias LUTIOQueue = PresetIOQueue
 
 /// UI request lifetime is independent of an uncooperative worker's lifetime.
 @MainActor

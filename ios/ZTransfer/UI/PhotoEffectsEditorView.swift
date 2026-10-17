@@ -517,24 +517,46 @@ struct PhotoEffectsAnimatedImage: View {
     let showComparison: Bool
     var cornerRadius: CGFloat = 0
     var restoreRevision = 0
+    var failed = false
 
     @State private var visible: PhotoEffectsPreviewFrame
     @State private var outgoing: PhotoEffectsPreviewFrame?
     @State private var incomingOpacity: CGFloat = 1
     @State private var replacementOpacity: CGFloat = 1
+    @State private var updates = ConflatedPreviewUpdates<Update>()
+    private struct Update {
+        let frame: PhotoEffectsPreviewFrame
+        let canvas: String
+        let restore: Int
+        let failed: Bool
+    }
+    private struct UpdateKey: Equatable {
+        let image: ObjectIdentifier
+        let comparison: ObjectIdentifier?
+        let frameCanvas: String
+        let requestedCanvas: String
+        let restore: Int
+        let failed: Bool
+    }
+    private var updateKey: UpdateKey {
+        .init(image: ObjectIdentifier(frame.image), comparison: frame.comparison.map(ObjectIdentifier.init),
+              frameCanvas: frame.canvasKey, requestedCanvas: requestedCanvasKey, restore: restoreRevision, failed: failed)
+    }
 
     init(
         frame: PhotoEffectsPreviewFrame,
         requestedCanvasKey: String,
         showComparison: Bool,
         cornerRadius: CGFloat = 0,
-        restoreRevision: Int = 0
+        restoreRevision: Int = 0,
+        failed: Bool = false
     ) {
         self.frame = frame
         self.requestedCanvasKey = requestedCanvasKey
         self.showComparison = showComparison
         self.cornerRadius = cornerRadius
         self.restoreRevision = restoreRevision
+        self.failed = failed
         _visible = State(initialValue: frame)
     }
 
@@ -566,60 +588,38 @@ struct PhotoEffectsAnimatedImage: View {
             )
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .task(id: requestedCanvasKey) {
-            if visible.canvasKey != requestedCanvasKey {
-                withAnimation(.linear(duration: 0.11)) { replacementOpacity = 0 }
-            } else {
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
-                    replacementOpacity = 1
-                }
-            }
-        }
-        .task(id: frameKey) {
-            let next = frame
-            guard ObjectIdentifier(next.image) != ObjectIdentifier(visible.image) else {
-                visible = next
-                if next.canvasKey == requestedCanvasKey {
-                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
-                        replacementOpacity = 1
+        .onAppear { enqueue() }
+        .onChange(of: updateKey) { _ in enqueue() }
+        .onDisappear { updates.close() }
+    }
+
+    private func enqueue() {
+        updates.submit(Update(frame: frame, canvas: requestedCanvasKey, restore: restoreRevision, failed: failed)) { target, latest in
+            let next = target.frame
+            // Never install an old rotation/border result after a newer request.
+            if next.canvasKey == target.canvas {
+                if ObjectIdentifier(next.image) == ObjectIdentifier(visible.image) {
+                    visible = next
+                } else if next.canvasKey != visible.canvasKey {
+                    withAnimation(.linear(duration: 0.11)) { replacementOpacity = 0 }
+                    do { try await Task.sleep(for: .milliseconds(110)) } catch { return }
+                    if next.canvasKey == latest().canvas {
+                        outgoing = nil; visible = next; incomingOpacity = 1
                     }
+                } else {
+                    outgoing = visible; visible = next; incomingOpacity = 0
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) { incomingOpacity = 1 }
+                    do { try await Task.sleep(for: .milliseconds(220)) } catch { return }
+                    outgoing = nil
                 }
-                return
             }
-            if next.canvasKey != visible.canvasKey {
-                withAnimation(.linear(duration: 0.11)) { replacementOpacity = 0 }
-                try? await Task.sleep(for: .milliseconds(110))
-                guard !Task.isCancelled else { return }
-                outgoing = nil
-                visible = next
-                incomingOpacity = 1
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
-                    replacementOpacity = 1
-                }
-            } else {
-                outgoing = visible
-                visible = next
-                replacementOpacity = 1
-                incomingOpacity = 0
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) {
-                    incomingOpacity = 1
-                }
-                try? await Task.sleep(for: .milliseconds(220))
-                guard !Task.isCancelled,
-                      ObjectIdentifier(visible.image) == ObjectIdentifier(next.image) else { return }
-                outgoing = nil
-            }
-        }
-        .task(id: restoreRevision) {
-            guard restoreRevision > 0 else { return }
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.19)) {
-                replacementOpacity = 1
+            guard !Task.isCancelled else { return }
+            let current = latest()
+            let show = visible.canvasKey == current.canvas || current.failed
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: show ? 0.19 : 0.11)) {
+                replacementOpacity = show ? 1 : 0
             }
         }
     }
@@ -643,6 +643,9 @@ struct PhotoEffectsSettingsPreview: View {
     let metadata: PhotoFrameMetadata?
     let settings: PhotoEffectsSettings
     let onRequest: () -> Void
+    @State private var completeCache = PhotoEffectsPreviewCachePool<UIImage>()
+    @State private var intermediateCache = PhotoEffectsPreviewCachePool<UIImage>(capacity: 1)
+    @State private var comparisonCache = PhotoEffectsPreviewCachePool<UIImage>(capacity: 1)
     @State private var rendered: UIImage?
     @State private var renderedRequestKey = ""
     @State private var renderedCanvasKey = ""
@@ -650,14 +653,20 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var previewRestoreRevision = 0
     @State private var previewFailed = false
     @State private var showUnfiltered = false
-    @State private var prefetched: [String: UIImage] = [:]
-    @State private var filteredSource: UIImage?
-    @State private var filteredSourceKey: PhotoFilterSelection?
     @State private var lastPreviewSettings: PhotoEffectsSettings?
     @State private var cachedContextKey = ""
     @State private var rotationQuarterTurns = 0
     @State private var expanded = false
     @State private var previewAnchor: CGRect = .zero
+
+    let showSourceWhileRendering: Bool
+    init(source: UIImage?, metadata: PhotoFrameMetadata?, settings: PhotoEffectsSettings,
+         onRequest: @escaping () -> Void, initialRotationQuarterTurns: Int = 0,
+         showSourceWhileRendering: Bool = false) {
+        self.source = source; self.metadata = metadata; self.settings = settings; self.onRequest = onRequest
+        self.showSourceWhileRendering = showSourceWhileRendering
+        _rotationQuarterTurns = State(initialValue: ((initialRotationQuarterTurns % 4) + 4) % 4)
+    }
 
     private var sourceIsPortrait: Bool {
         let portrait = source.map { $0.size.height > $0.size.width } ?? false
@@ -668,12 +677,14 @@ struct PhotoEffectsSettingsPreview: View {
         Self.makeRenderKey(settings: settings, source: source, metadata: metadata)
     }
 
-    private static func makeRenderKey(
+    static func makeRenderKey(
         settings: PhotoEffectsSettings,
         source: UIImage?,
         metadata: PhotoFrameMetadata?,
     ) -> String {
-        let data = try? JSONEncoder().encode(photoEffectsPreviewPixelSettings(settings))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try? encoder.encode(photoEffectsPreviewPixelSettings(settings))
         let settingsKey = String(data: data ?? Data(), encoding: .utf8) ?? ""
         let sourceKey: String
         if let source {
@@ -763,20 +774,42 @@ struct PhotoEffectsSettingsPreview: View {
         return lhs == rhs
     }
 
-    private static func comparisonPreview(
-        image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata?
-    ) async -> UIImage? {
-        do {
-            try await Task.sleep(for: .milliseconds(500))
-            return try await LocalPhotoOutput.unfilteredPreview(
-                image: image, settings: settings, metadata: metadata
-            )
-        } catch { return nil }
+    private static func cachedPreview(
+        image: UIImage, sourceIdentity: UIImage, settings: PhotoEffectsSettings,
+        metadata: PhotoFrameMetadata?, originalMetadata: PhotoFrameMetadata?, rotation: Int,
+        placeContext: String, cache: PhotoEffectsPreviewCachePool<UIImage>,
+        intermediate: PhotoEffectsPreviewCachePool<UIImage>?, comparison: Bool = false
+    ) async throws -> UIImage {
+        var decoration = settings
+        decoration.photoFilterEnabled = false; decoration.selectedFilter = nil
+        let context = makeRenderKey(settings: decoration, source: sourceIdentity, metadata: originalMetadata)
+            + "|rotation:\(rotation)|\(placeContext)"
+        let key = comparison ? context : makeRenderKey(settings: settings, source: sourceIdentity, metadata: originalMetadata)
+        let decorationSettings = decoration
+        let filterContext = makeSourceContextKey(source: sourceIdentity, metadata: nil, rotationQuarterTurns: rotation)
+        return try await cache.value(key: key, context: context) { cancelled in
+            let filtered: UIImage?
+            if !comparison, settings.photoFilterEnabled, let selection = settings.selectedFilter {
+                if let intermediate {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.sortedKeys]
+                    let data = try encoder.encode(selection)
+                    filtered = try await intermediate.value(key: data.base64EncodedString(), context: filterContext) { cancelled in
+                        if cancelled() { throw CancellationError() }
+                        return try await LocalPhotoOutput.filteredSource(image: image, selection: selection)
+                    }
+                } else { filtered = try await LocalPhotoOutput.filteredSource(image: image, selection: selection) }
+            } else { filtered = nil }
+            if cancelled() { throw CancellationError() }
+            if comparison { return try await LocalPhotoOutput.unfilteredPreview(image: image, settings: decorationSettings, metadata: metadata) }
+            return try await LocalPhotoOutput.preview(image: image, settings: settings, metadata: metadata, filteredSource: filtered).filtered
+        }
     }
 
     private static func prefetchedPreviews(
         image: UIImage, sourceIdentity: UIImage, settings: PhotoEffectsSettings,
-        metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int, placeContextKey: String
+        metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int, placeContextKey: String,
+        cache: PhotoEffectsPreviewCachePool<UIImage>
     ) async -> [(String, UIImage)] {
         var results: [(String, UIImage)] = []
         let resolvedMetadata = await resolvedPreviewMetadata(metadata, settings: settings)
@@ -786,15 +819,11 @@ struct PhotoEffectsSettingsPreview: View {
                 var next = settings
                 next.photoFilterEnabled = true
                 next.selectedFilter = selection
-                let nextFiltered = try await LocalPhotoOutput.filteredSource(
-                    image: image, selection: selection
-                )
-                let preview = try await LocalPhotoOutput.preview(
-                    image: image, settings: next, metadata: resolvedMetadata,
-                    filteredSource: nextFiltered
-                )
+                let preview = try await cachedPreview(image: image, sourceIdentity: sourceIdentity,
+                    settings: next, metadata: resolvedMetadata, originalMetadata: metadata,
+                    rotation: rotationQuarterTurns, placeContext: placeContextKey, cache: cache, intermediate: nil)
                 let base = makeRenderKey(settings: next, source: sourceIdentity, metadata: metadata)
-                results.append(("\(base)|rotation:\(rotationQuarterTurns)|\(placeContextKey)", preview.filtered))
+                results.append(("\(base)|rotation:\(rotationQuarterTurns)|\(placeContextKey)", preview))
             }
         } catch {}
         return results
@@ -833,17 +862,19 @@ struct PhotoEffectsSettingsPreview: View {
                     requestedCanvasKey: requestedCanvasKey,
                     showComparison: showUnfiltered,
                     cornerRadius: 12,
-                    restoreRevision: previewRestoreRevision
+                    restoreRevision: previewRestoreRevision, failed: previewFailed
                 )
                 .overlay(alignment: .bottom) {
                     if previewFailed { previewUnavailableBadge }
                 }
             } else if previewFailed, let source {
-                Image(uiImage: source)
+                Image(uiImage: Self.rotate(source, quarterTurns: rotationQuarterTurns))
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(alignment: .bottom) { previewUnavailableBadge }
+            } else if showSourceWhileRendering, let source {
+                Image(uiImage: Self.rotate(source, quarterTurns: rotationQuarterTurns)).resizable().scaledToFit()
             } else if source != nil {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(ZTransferColors.primaryText.opacity(0.045))
@@ -909,7 +940,16 @@ struct PhotoEffectsSettingsPreview: View {
                 }
             }
         }
+        .onDisappear {
+            if !expanded { completeCache.close(); intermediateCache.close(); comparisonCache.close() }
+        }
         .task(id: renderKeyWithRotation) {
+            var demanded = [Self.makeRenderKey(settings: settings, source: source, metadata: metadata)]
+            for selection in nextPhotoFilterSelections(for: settings) {
+                var next = settings; next.photoFilterEnabled = true; next.selectedFilter = selection
+                demanded.append(Self.makeRenderKey(settings: next, source: source, metadata: metadata))
+            }
+            completeCache.request(Set(demanded))
             let pixelSettings = photoEffectsPreviewPixelSettings(settings)
             if let previous = lastPreviewSettings,
                Self.differsOnlyInWatermarkText(previous, pixelSettings) {
@@ -921,7 +961,6 @@ struct PhotoEffectsSettingsPreview: View {
             lastPreviewSettings = pixelSettings
             if cachedPlaceContextKey != placeContextKey {
                 cachedPlaceContextKey = placeContextKey
-                prefetched.removeAll(keepingCapacity: true)
                 unfiltered = nil
                 showUnfiltered = false
             }
@@ -930,9 +969,6 @@ struct PhotoEffectsSettingsPreview: View {
                 // Rotation/source/EXIF changes invalidate every pixel cache;
                 // border and watermark edits deliberately do not.
                 cachedContextKey = sourceContextKey
-                prefetched.removeAll(keepingCapacity: true)
-                filteredSource = nil
-                filteredSourceKey = nil
             }
             guard let source else {
                 onRequest()
@@ -968,34 +1004,10 @@ struct PhotoEffectsSettingsPreview: View {
             let settings = settings
             let rotationQuarterTurns = rotationQuarterTurns
             let rotatedSource = Self.rotate(source, quarterTurns: rotationQuarterTurns)
-            let result: UIImage?
-            if let cached = prefetched.removeValue(forKey: renderKeyWithRotation) {
-                result = cached
-            } else {
-                let filterKey = settings.photoFilterEnabled ? settings.selectedFilter : nil
-                let preparedSource: UIImage?
-                if let filterKey {
-                    if filteredSourceKey == filterKey, let filteredSource {
-                        preparedSource = filteredSource
-                    } else {
-                        let next = try? await LocalPhotoOutput.filteredSource(
-                            image: rotatedSource, selection: filterKey
-                        )
-                        guard !Task.isCancelled else { return }
-                        filteredSource = next
-                        filteredSourceKey = filterKey
-                        preparedSource = next
-                    }
-                } else {
-                    filteredSource = nil
-                    filteredSourceKey = nil
-                    preparedSource = nil
-                }
-                result = try? await LocalPhotoOutput.preview(
-                    image: rotatedSource, settings: settings, metadata: metadata,
-                    filteredSource: preparedSource
-                ).filtered
-            }
+            let result = try? await Self.cachedPreview(image: rotatedSource, sourceIdentity: source,
+                settings: settings, metadata: metadata, originalMetadata: self.metadata,
+                rotation: rotationQuarterTurns, placeContext: placeContextKey,
+                cache: completeCache, intermediate: intermediateCache)
             guard !Task.isCancelled else { return }
             guard let result else {
                 previewFailed = true
@@ -1011,9 +1023,12 @@ struct PhotoEffectsSettingsPreview: View {
             // The comparison starts as soon as the current image is visible.
             // Neighbor warming is a separate task below so a favorite-order
             // change does not rebuild or animate the current frame.
-            let comparison = await Self.comparisonPreview(
-                image: rotatedSource, settings: settings, metadata: metadata
-            )
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            let comparison = try? await Self.cachedPreview(image: rotatedSource, sourceIdentity: source,
+                settings: settings, metadata: metadata, originalMetadata: self.metadata,
+                rotation: rotationQuarterTurns, placeContext: placeContextKey,
+                cache: comparisonCache, intermediate: nil, comparison: true)
             if let comparison, !Task.isCancelled {
                 unfiltered = comparison
             }
@@ -1022,17 +1037,11 @@ struct PhotoEffectsSettingsPreview: View {
             guard prefetchRequest.enabled, let source else { return }
             let rotation = rotationQuarterTurns
             let rotatedSource = Self.rotate(source, quarterTurns: rotation)
-            let warmedResults = await Self.prefetchedPreviews(
+            _ = await Self.prefetchedPreviews(
                 image: rotatedSource, sourceIdentity: source, settings: settings,
-                metadata: metadata, rotationQuarterTurns: rotation, placeContextKey: placeContextKey
+                metadata: metadata, rotationQuarterTurns: rotation, placeContextKey: placeContextKey, cache: completeCache
             )
-            guard !Task.isCancelled else { return }
-            for (key, image) in warmedResults where prefetched[key] == nil {
-                prefetched[key] = image
-                if prefetched.count > 2, let oldest = prefetched.keys.first {
-                    prefetched.removeValue(forKey: oldest)
-                }
-            }
+
         }
     }
 
@@ -1448,14 +1457,16 @@ struct PhotoEffectsHint: Equatable {
 }
 
 extension View {
-    func photoEffectsHint(_ hint: Binding<PhotoEffectsHint?>, duration: Double) -> some View {
-        modifier(PhotoEffectsHintModifier(hint: hint, duration: duration))
+    func photoEffectsHint(_ hint: Binding<PhotoEffectsHint?>, duration: Double,
+                          multilineDuration: Double? = nil) -> some View {
+        modifier(PhotoEffectsHintModifier(hint: hint, duration: duration, multilineDuration: multilineDuration))
     }
 }
 
 private struct PhotoEffectsHintModifier: ViewModifier {
     @Binding var hint: PhotoEffectsHint?
     let duration: Double
+    let multilineDuration: Double?
     @State private var height: CGFloat = 40
 
     func body(content: Content) -> some View {
@@ -1478,8 +1489,10 @@ private struct PhotoEffectsHintModifier: ViewModifier {
         }
         .animation(.spring(response: 0.35, dampingFraction: 1), value: hint != nil)
         .task(id: hint?.id) {
-            guard hint != nil else { return }
-            do { try await Task.sleep(for: .seconds(duration)) } catch { return }
+            guard let current = hint else { return }
+            let text = AppLocalized.resource(current.resource)
+            let delay = text.contains("\n") ? (multilineDuration ?? duration) : duration
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
             hint = nil
         }
     }

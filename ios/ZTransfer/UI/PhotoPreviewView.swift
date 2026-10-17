@@ -9,6 +9,7 @@ struct PhotoPreviewLoadIdentity: Equatable {
     let index: Int
     let deferredLoadsEnabled: Bool
     let connected: Bool
+    var retry: Int = 0
 }
 
 /// Eviction follows the live page window independently of asynchronous loading.
@@ -340,6 +341,12 @@ func videoPreviewMetadata(file: CameraFile) -> String {
 struct PhotoPreviewView: View {
     @ObservedObject var queueModel: TransferQueueViewModel
     let session: CameraSession
+    let review: RemotePhotoReviewModel?
+    let effectsStore: PhotoEffectsStore?
+    let effectsDirectory: DirectoryAccessStore?
+    @State private var effectsFile: CameraFile?
+    @State private var effectsPresented = false
+    @State private var effectsRotation = 0
     let isSessionConnected: Bool
     let files: [CameraFile]
     let burstGroups: [BurstPhotoGroup]
@@ -366,6 +373,7 @@ struct PhotoPreviewView: View {
     @State private var pagerSelection: Int
     @State private var pageOffsetFraction: CGFloat = 0
     @State private var exifLoadedAlpha: CGFloat = 0
+    @State private var reviewRetry = 0
     @State private var previewEntries: [PhotoPreviewEntry]
     @State private var rotationDegrees: Double = 0
     @State private var cropPresented = false
@@ -426,6 +434,8 @@ struct PhotoPreviewView: View {
     @State private var burstPagerAlpha: CGFloat = 1
     @State private var burstPagerSlide: CGFloat = 0
     init(session: CameraSession, queueModel: TransferQueueViewModel, files: [CameraFile],
+         review: RemotePhotoReviewModel? = nil,
+         effectsStore: PhotoEffectsStore? = nil, effectsDirectory: DirectoryAccessStore? = nil,
          isSessionConnected: Bool = true,
          burstIDByFile: [UInt32: String] = [:], transferredFileIDs: Set<UInt32> = [],
          selectedFile: Binding<CameraFile?>,
@@ -444,6 +454,8 @@ struct PhotoPreviewView: View {
          onDismiss: @escaping (CameraFile?) -> Void = { _ in },
          onCropConfirmed: @escaping (CameraFile, JpegCropSelection) async -> Bool = { _, _ in false }) {
         self.queueModel = queueModel
+        self.effectsStore = effectsStore; self.effectsDirectory = effectsDirectory
+        self.review = review
         self.isSessionConnected = isSessionConnected
         self.session = session; self.files = files; self.directory = directory
         self.burstGroups = PhotoCatalogGrouping.bursts(in: files)
@@ -474,9 +486,11 @@ struct PhotoPreviewView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
+            Color.black.opacity((review == nil ? 0.74 : 1) * presentationProgress).ignoresSafeArea()
             TabView(selection: $pagerSelection) {
-                ForEach(Array(previewEntries.enumerated()), id: \.element.id) { itemIndex, entry in
+                ForEach(previewPages) { page in
+                    let itemIndex = page.index
+                    let entry = page.entry
                     Group {
                         switch entry {
                         case .photo(let file, _):
@@ -508,7 +522,11 @@ struct PhotoPreviewView: View {
                                              } else {
                                                  histogram.clear()
                                              }
-                                         }, onTap: startClose,
+                                         }, onTap: {
+                                             if review == nil || (abs(pageOffsetFraction) < 0.01 && !magnificationActive) {
+                                                 startClose()
+                                             }
+                                         },
                                          onZoomedChange: { zoomed in if index == itemIndex { currentZoomed = zoomed } },
                                          onViewportChange: { viewport in
                                              if index == itemIndex { currentCropViewport = viewport }
@@ -521,7 +539,7 @@ struct PhotoPreviewView: View {
                                                  settleQueueDrag()
                                              }
                                          },
-                                         isCurrent: index == itemIndex)
+                                         isCurrent: index == itemIndex, tapWhenZoomed: review != nil)
                                 .padding(.bottom, previewSafeInsets.bottom + 88)
                         case .burst(let group):
                             BurstCollectionPreview(
@@ -614,7 +632,7 @@ struct PhotoPreviewView: View {
             if let file = currentPhoto {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 8) {
-                        PreviewInfoText(text: file.fileName)
+                        PreviewInfoText(text: reviewTitle(file))
                             .layoutPriority(1)
                             .opacity(previewInformationAlpha)
                             .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
@@ -688,7 +706,17 @@ struct PhotoPreviewView: View {
                                 }
                                 rotationQuarterTurns = ((Int(-nextDegrees / 90) % 4) + 4) % 4
                             }
-                            if isJPEG(file) {
+                            if showPreviewPhotoEffects(enabled: effectsStore?.isEnabled == true,
+                                                       isReview: review != nil, file: file), effectsDirectory != nil {
+                                Button {
+                                    effectsFile = file; effectsRotation = rotationQuarterTurns; effectsPresented = true
+                                } label: {
+                                    Image(systemName: "sparkles").frame(width: 44, height: 44)
+                                }
+                                .accessibilityLabel(AppLocalized.resource("photo_effects"))
+                                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                            }
+                            if review == nil && isJPEG(file) {
                                 PreviewCircleButton(icon: .crop, accessibilityKey: "cd_crop_photo") {
                                     ZTransferHaptics.shared.tick()
                                     cropPreparation.reset()
@@ -700,8 +728,10 @@ struct PhotoPreviewView: View {
                                 }
                             }
                         }
-                        PreviewCircleButton(icon: .add, accessibilityKey: "cd_transfer") {
-                            startQueueFlight(for: file)
+                        if review == nil {
+                            PreviewCircleButton(icon: .add, accessibilityKey: "cd_transfer") {
+                                startQueueFlight(for: file)
+                            }
                         }
                     }
                     .transition(.opacity)
@@ -719,6 +749,36 @@ struct PhotoPreviewView: View {
                     .animation(.easeInOut(duration: 0.18), value: histogramOverlayVisible)
                     .transition(.opacity)
                     .allowsHitTesting(false)
+            }
+        }
+        .sheet(isPresented: $effectsPresented, onDismiss: { effectsFile = nil }) {
+            if let store = effectsStore, let directory = effectsDirectory, let file = effectsFile {
+                PreviewPhotoEffectsEditor(store: store, directory: directory,
+                    source: highResolutionImages[file.id] ?? displayedImages[file.id],
+                    exif: exifByFile[file.id], rotation: effectsRotation)
+                    .presentationDetents([.large])
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let review {
+                let imageFailed = currentPhoto.map { fhdUnavailable.contains($0.id) } ?? false
+                let pageFailed = index == previewEntries.count - 1 && review.failed
+                if imageFailed || pageFailed || !isSessionConnected {
+                    Button(AppLocalized.resource(isSessionConnected ? "remote_review_retry" : "remote_review_disconnected")) {
+                        if imageFailed {
+                            if let file = currentPhoto { fhdUnavailable.remove(file.id) }
+                            reviewRetry += 1
+                        }
+                        if pageFailed { review.loadMore() }
+                    }
+                    .disabled(!isSessionConnected).foregroundStyle(.white)
+                    .padding(.leading, 12).padding(.bottom, 32)
+                }
+            }
+        }
+        .overlay(alignment: .trailing) {
+            if let review, review.loading, index == previewEntries.count - 1 {
+                ProgressView().tint(.white).padding(12)
             }
         }
         .background {
@@ -830,7 +890,14 @@ struct PhotoPreviewView: View {
             }
         }
         .onChange(of: currentEntryID) { _ in cancelQueueFlight() }
+        .onChange(of: files) { updated in
+            guard review != nil else { return }
+            previewEntries = updated.map { .photo($0) }
+            index = min(index, max(0, updated.count - 1))
+            pagerSelection = index
+        }
         .onChange(of: index) { value in
+            if review != nil && value >= previewEntries.count - 3 { review?.loadMore() }
             closeCrop()
             currentCropViewport = nil
             if previewEntries.indices.contains(value) {
@@ -882,7 +949,11 @@ struct PhotoPreviewView: View {
 
     private var currentEntryID: String? {
         guard previewEntries.indices.contains(index) else { return nil }
-        return previewEntries[index].id
+        return previewPages[index].id
+    }
+
+    private var previewPages: [PhotoPreviewPage] {
+        photoPreviewPages(previewEntries, reviewPhotos: review?.photos ?? [])
     }
 
     private var currentPhoto: CameraFile? {
@@ -923,7 +994,7 @@ struct PhotoPreviewView: View {
     private var previewQueueSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
-                guard currentPhoto != nil, !currentZoomed, !magnificationActive,
+                guard review == nil, currentPhoto != nil, !currentZoomed, !magnificationActive,
                       presentationProgress >= 0.99, abs(pageOffsetFraction) < 0.01, !queueFlightActive,
                       !closing, !burstTransitionBusy else {
                     queueDragDirection = .rejected
@@ -967,6 +1038,13 @@ struct PhotoPreviewView: View {
         }
     }
 
+    private func reviewTitle(_ file: CameraFile) -> String {
+        guard let raw = review?.photos.first(where: { $0.file.id == file.id })?.pairedRawExtension else {
+            return file.fileName
+        }
+        return file.fileName + " +" + raw.trimmingCharacters(in: CharacterSet(charactersIn: ".")).uppercased()
+    }
+
     private func startClose() {
         guard !closing, !burstTransitionBusy else { return }
         closing = true
@@ -989,7 +1067,7 @@ struct PhotoPreviewView: View {
 
     private var previewLoadIdentity: PhotoPreviewLoadIdentity {
         PhotoPreviewLoadIdentity(entryIDs: previewEntries.map(\.id), index: index,
-            deferredLoadsEnabled: deferredLoadsEnabled, connected: isSessionConnected)
+            deferredLoadsEnabled: deferredLoadsEnabled, connected: isSessionConnected, retry: reviewRetry)
     }
 
     @MainActor
@@ -1017,12 +1095,22 @@ struct PhotoPreviewView: View {
         } else if isVideo(file) {
             fhdUnavailable.insert(file.id)
         }
-        let (_, metadata) = await session.previewAndExif(
-            file: file, loadPreview: needsPreview, loadExif: needsExif,
-            onPreviewLoaded: { data in
+        let metadata: PhotoExif?
+        if let review, needsPreview {
+            metadata = try? await session.withInteractivePreviewPriority {
+                let data = try? await review.preview { try? await session.preview(handle: file.id) }
                 await finishRemoteImageLoad(file: file, data: data)
+                let (_, details) = await session.previewAndExif(file: file, loadPreview: false, loadExif: needsExif)
+                return details
             }
-        )
+        } else {
+            (_, metadata) = await session.previewAndExif(
+                file: file, loadPreview: needsPreview, loadExif: needsExif,
+                onPreviewLoaded: { data in
+                    await finishRemoteImageLoad(file: file, data: data)
+                }
+            )
+        }
         highResolutionLoading.remove(file.id)
         guard !Task.isCancelled else { return }
         finishRemoteExifLoad(file: file, metadata: metadata, loadedExif: needsExif)
@@ -1058,7 +1146,10 @@ struct PhotoPreviewView: View {
         fhdUnavailable.remove(id)
         highResolutionLoading.insert(id)
         defer { highResolutionLoading.remove(id) }
-        guard let data = try? await session.preview(handle: id),
+        let previewData: Data?
+        if let review { previewData = try? await review.preview { try? await session.preview(handle: id) } }
+        else { previewData = try? await session.preview(handle: id) }
+        guard let data = previewData,
               !Task.isCancelled,
               let content = try? await loadCameraPhotoPreviewContent(data),
               !Task.isCancelled else {
@@ -1301,7 +1392,7 @@ struct PhotoPreviewView: View {
     }
 
     private func startQueueFlight(for file: CameraFile, burstFiles: [CameraFile]? = nil) {
-        guard !closing, !burstTransitionBusy, !queueFlightActive else { return }
+        guard review == nil, !closing, !burstTransitionBusy, !queueFlightActive else { return }
         let flightCount = burstFiles?.count ?? 1
         // Android admits the real task before acquiring a visual hold.
         // A rejected enqueue must not publish transient queue state.
@@ -1847,6 +1938,7 @@ private struct PreviewImage: View {
     let onViewportChange: (PhotoPreviewCropViewport) -> Void
     let onMagnificationChange: (Bool) -> Void
     let isCurrent: Bool
+    var tapWhenZoomed = false
     @State private var thumbnail: UIImage?
     @State private var remoteThumbnailUnavailable = false
     @State private var highResolutionAlpha: CGFloat = 0
@@ -2086,6 +2178,7 @@ private struct PreviewImage: View {
         SpatialTapGesture(count: 2, coordinateSpace: CoordinateSpace.global)
             .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: CoordinateSpace.global))
             .onEnded { value in
+                guard isCurrent else { return }
                 switch value {
                 case .first(let doubleTap):
                     handleDoubleTap(
@@ -2097,7 +2190,7 @@ private struct PreviewImage: View {
                         imageSize: imageSize
                     )
                 case .second:
-                    if interactive, scale <= 1.01, !zoomAnimationActive { onTap() }
+                    if interactive, (tapWhenZoomed || scale <= 1.01), !magnifying, !zoomAnimationActive { onTap() }
                 }
             }
     }

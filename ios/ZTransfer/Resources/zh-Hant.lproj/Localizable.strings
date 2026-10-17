@@ -590,3 +590,47 @@
 "photo_effect_module_frame" = "邊框";
 
 "photo_effect_module_watermark" = "浮水印";
+
+"remote_review" = "回看";
+
+"remote_review_empty" = "暫無照片";
+
+"remote_review_retry" = "載入失敗 · 重試";
+
+"remote_review_disconnected" = "相機已中斷連線";
+
+"remote_tool_picture_control" = "優化校準";
+"picture_control_loading" = "讀取中…";
+"picture_control_write_failed" = "操作失敗";
+"picture_control_exposure_mode_required" = "請切換至 P/S/A/M";
+"picture_control_failed_restored" = "操作失敗，已還原";
+"picture_control_check_slot" = "操作失敗，請檢查 C%d";
+"picture_control_files_failed" = "預設載入失敗";
+"picture_control_busy_hint" = "相機忙碌";
+"picture_control_test_log" = "測試記錄";
+"picture_control_report_use_share" = "記錄過長，請透過「測試記錄」分享";
+"picture_control_report_share_failed" = "記錄分享失敗";
+"picture_control_report_save_failed" = "記錄儲存失敗，請及時分享";
+"picture_control_built_in" = "內建";
+"picture_control_folder" = "預設目錄";
+"picture_control_folder_empty" = "找不到 .np3 檔案";
+"picture_control_choose_folder_hint" = "選擇含 .np3 檔案的資料夾，支援一層子資料夾作為分類。";
+"picture_control_file_read_failed" = "檔案讀取失敗";
+"picture_control_file_invalid" = "NP3 檔案無效";
+"picture_control_file_unsupported" = "暫不支援此預設";
+"picture_control_flexible_color_unsupported" = "暫不支援靈活顏色預設";
+"picture_control_read_timeout" = "讀取逾時";
+"picture_control_slots_title" = "機內預設";
+"picture_control_edit_slot" = "更換 C%d";
+"picture_control_slot_empty" = "空";
+"picture_control_slot_unreadable" = "無法讀取";
+"picture_control_slot_unsupported" = "不支援";
+"picture_control_back" = "返回";
+"picture_control_slots_read_failed" = "相機已斷開";
+"picture_control_slot_applied" = "已啟用 C%d";
+"picture_control_slot_cleared" = "已清除 C%d";
+"picture_control_slot_busy" = "處理中…";
+"picture_control_clear_slot" = "清除";
+"picture_control_clear_confirm" = "清除 C%d？";
+"picture_control_cancel" = "取消";
+"picture_control_confirm" = "確定";

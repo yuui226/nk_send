@@ -10,6 +10,19 @@ final class RemoteToolLayoutTests: XCTestCase {
         body(defaults)
     }
 
+    func testPCPreferenceSurvivesRecreationAndHidingClearsOnlyPreference() {
+        withDefaults { defaults in
+            let first = RemoteToolPreferences(defaults: defaults)
+            XCTAssertFalse(first.computerControl)
+            first.computerControl = true
+            let restored = RemoteToolPreferences(defaults: defaults)
+            XCTAssertTrue(restored.computerControl)
+            restored.layout(movie: false).setVisible(.computerControl, false)
+            XCTAssertFalse(restored.computerControl)
+            XCTAssertFalse(RemoteToolPreferences(defaults: defaults).computerControl)
+        }
+    }
+
     func testAndroidDefaultOrderNormalizesStoredIDsAndPhotoExcludesAudio() {
         withDefaults { defaults in
             defaults.set("grid,unknown,rotate,grid,hd", forKey: "remote_tool_order_photo")
@@ -19,7 +32,7 @@ final class RemoteToolLayoutTests: XCTestCase {
             XCTAssertFalse(photo.order.contains(.audio))
             XCTAssertFalse(photo.order.contains(.rotate))
             XCTAssertTrue(photo.visible(.rotate))
-            XCTAssertTrue(photo.lockStartsSecondRow)
+            XCTAssertTrue(photo.visible(.lock))
         }
     }
 
@@ -56,23 +69,34 @@ final class RemoteToolLayoutTests: XCTestCase {
             XCTAssertTrue(photo.visible(.rotate))
             XCTAssertTrue(movie.visible(.hd))
             XCTAssertTrue(movie.visible(.audio))
-            XCTAssertTrue(movie.lockStartsSecondRow)
+            XCTAssertTrue(movie.visible(.lock))
         }
     }
 
-    func testLockDetachesFromSecondRowAndRestoreDoesNotReattach() {
+    func testPinnedLockIgnoresOldHiddenAndOrderValues() {
+        withDefaults { defaults in
+            defaults.set(["lock"], forKey: "remote_hidden_tools_photo")
+            defaults.set("lock,grid,hd", forKey: "remote_tool_order_photo")
+            let layout = RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in XCTFail() })
+            let original = layout.order
+            layout.move(.lock, to: 0)
+            layout.setVisible(.lock, false)
+            XCTAssertEqual(layout.order, original)
+            XCTAssertTrue(layout.visible(.lock)); XCTAssertFalse(layout.order.contains(.lock))
+            XCTAssertFalse(layout.hidden.contains("lock"))
+            XCTAssertEqual(monitorToolRows([.hd, .fps, .lock, .rotate], columns: 3).first!, [.hd, .lock, .rotate])
+            XCTAssertEqual(monitorToolRows([.lock, .rotate], columns: 1).first!, [.lock, .rotate])
+        }
+    }
+
+    func testPictureControlPlacementMigratesOnlyOncePerMode() {
         withDefaults { defaults in
             let layout = RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in })
-            var visual = layout.shownTools.filter { $0 != .lock }
-            visual.insert(.lock, at: 4)
-            layout.move(.lock, to: 0, displayedOrder: visual)
-            XCTAssertEqual(layout.shownTools.first, .lock)
-            XCTAssertFalse(layout.lockStartsSecondRow)
-            layout.setVisible(.lock, false)
-            layout.setVisible(.lock, true)
-            XCTAssertEqual(layout.shownTools.last, .lock)
-            XCTAssertFalse(layout.lockStartsSecondRow)
-            XCTAssertFalse(RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in }).lockStartsSecondRow)
+            XCTAssertEqual(layout.shownTools[5], .pictureControl)
+            layout.setVisible(.pictureControl, false)
+            let restored = RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in })
+            XCTAssertFalse(restored.visible(.pictureControl))
+            XCTAssertTrue(RemoteToolLayout(defaults: defaults, movie: true, onHide: { _ in }).visible(.pictureControl))
         }
     }
 

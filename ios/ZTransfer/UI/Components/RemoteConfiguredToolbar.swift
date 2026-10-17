@@ -34,7 +34,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
     var body: some View {
         RemoteAdaptiveToolLayout(displayScale: displayScale, horizontalSpacing: 6, verticalSpacing: 4,
                                  pinnedEndCount: pinnedEndCount,
-                                 secondRowFirst: layout.lockStartsSecondRow ? .lock : nil) {
+                                 secondRowFirst: nil) {
             leading
             ForEach(sequence) { tool in
                 if let control = controls[tool] {

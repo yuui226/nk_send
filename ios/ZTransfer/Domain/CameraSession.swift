@@ -263,8 +263,23 @@ actor CameraSession {
         await thumbnailStore.invalidate(files: files, identity: identity, directSTA: direct)
     }
 
+    func openRemoteReviewCatalog() async throws -> RemoteReviewCatalog {
+        try await repository.openRemoteReviewCatalog()
+    }
+    func readPictureControlOverview(movie: Bool, backupDirectory: URL,
+                                    isCurrent: @escaping @Sendable () async -> Bool) async throws -> PictureControlOverview {
+        try await repository.readPictureControlOverview(movie: movie, backupDirectory: backupDirectory, isCurrent: isCurrent)
+    }
+    func changePictureControl(slot: Int, change: PictureControlChange, movie: Bool, backupDirectory: URL,
+                              isCurrent: @escaping @Sendable () async -> Bool,
+                              log: (@Sendable (String) -> Void)? = nil) async throws {
+        try await repository.changePictureControl(slot: slot, change: change, movie: movie,
+            backupDirectory: backupDirectory, isCurrent: isCurrent, log: log)
+    }
+
     func setFHDActive(_ active: Bool) async { await repository.setFHDActive(active) }
     func setRemoteActive(_ active: Bool) async { await repository.setRemoteActive(active) }
+    func setRemoteSessionActive(_ active: Bool) async { await repository.setRemoteSessionActive(active) }
     func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async throws -> RemotePropertyDescriptor? {
         try await repository.refreshRemoteProperty(descriptor)
     }
@@ -339,6 +354,7 @@ actor CameraSession {
     /// The active transport is probed only when the command channel is idle.
     /// Both USB and Wi-Fi use the same Nikon GetStorageIDs liveness rule.
     func keepalive() async -> Bool { await repository.keepalive() }
+    func remoteKeepalive() async { _ = await repository.keepalive() }
     /// Android polls camera events for USB as well as PTP/IP. Keep the same
     /// idle catalog maintenance path for both transports.
     func maintainCatalogIfIdle() async { await repository.maintainCatalogIfIdle() }
@@ -531,9 +547,11 @@ actor CameraSession {
 }
 
 protocol RemoteCameraControlling: Sendable {
+    func remoteKeepalive() async
     var isUSB: Bool { get }
     func remoteDeviceModel() async -> String?
     func setRemoteActive(_ active: Bool) async
+    func setRemoteSessionActive(_ active: Bool) async
     func refreshRemoteProperty(_ descriptor: RemotePropertyDescriptor) async throws -> RemotePropertyDescriptor?
     func remoteFocusMode() async throws -> RemotePropertyDescriptor?
     func remoteEvents() async throws -> [STAEvent]
@@ -570,6 +588,9 @@ protocol RemoteCameraControlling: Sendable {
 }
 
 extension RemoteCameraControlling {
+    func remoteKeepalive() async { }
+    func setRemoteSessionActive(_ active: Bool) async { await setRemoteActive(active) }
+
     func focusAt(trackingX: UInt32, trackingY: UInt32,
                  focusX: UInt32, focusY: UInt32,
                  tapPath: RcTapFocusPath?) async throws -> RemoteFocusResult {

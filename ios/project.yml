@@ -49,6 +49,9 @@ targets:
     platform: iOS
     sources:
       - path: ZTransfer
+      - path: PictureControls
+        type: folder
+        buildPhase: resources
       - path: ThirdParty/libjpeg-8bit/LosslessJpegBridge.c
       - path: ThirdParty/libjpeg-8bit/src/transupp.c
       - path: ThirdParty/libjpeg-8bit/src/jaricom.c
@@ -196,7 +199,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios
-        MARKETING_VERSION: "1.94"
+        MARKETING_VERSION: "1.97"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -230,6 +233,9 @@ targets:
       - path: EffectsTests
       - path: RemoteTests
       - path: GPSTests
+      - path: PictureControlFixtures
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: ZTransfer
     settings:

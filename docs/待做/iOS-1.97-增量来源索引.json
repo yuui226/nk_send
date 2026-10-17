@@ -1,0 +1,1208 @@
+{
+  "base": "89d78b451d03e50da965a46f047744aa8a34877c",
+  "target": "9c8c1216e4a7bafbbc906f8ea47b851b14a3078d",
+  "merge": "a36b339c994e29d3d7a88306354c7f97c166bcbc",
+  "meaning": "172 exact Git paths and target hashes; source review classification only, task completion and actual verification are authoritative in the companion ledger. Pure visuals and hardware validation are not claimed complete.",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "status": "M",
+      "sha256": "ff6be71049b68113d1886ce0b9dcff4f4d1b1be5686873c47364cdcb239b075c",
+      "tasks": "D18/build reference",
+      "review": "Android build/instrumentation packaging retained; native iOS 1.97 project and model tests used; no APK packaging or UI automation run"
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "status": "M",
+      "sha256": "1922bf32b9894c34992caae3843207048dcd91423c7002d042272f4821789995",
+      "tasks": "D18/build reference",
+      "review": "Android build/instrumentation packaging retained; native iOS 1.97 project and model tests used; no APK packaging or UI automation run"
+    },
+    {
+      "path": "app/src/androidTest/AndroidManifest.xml",
+      "status": "M",
+      "sha256": "2dc0412a27d0b3fb07b27c46e945c94d1dac9e410988fbe1eb014c49b3d92055",
+      "tasks": "D18/build reference",
+      "review": "Android build/instrumentation packaging retained; native iOS 1.97 project and model tests used; no APK packaging or UI automation run"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/lut/LutStateInstrumentation.kt",
+      "status": "M",
+      "sha256": "1aa551732a3265970f8711b4510ef639db38d16989b66fb1ad96690017f5b5e4",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/presets/PictureControlFolderInstrumentation.kt",
+      "status": "A",
+      "sha256": "66844c4fc9b0eef48d09adce233579328ca5f5133c9036a02ca5d213143aff5c",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/storage/HarmonyPublicationInstrumentation.kt",
+      "status": "A",
+      "sha256": "35a54dc800014e455585af9d2d3e6c3490465ca193fc8cb6bf57c93acedf7393",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/PresetCategoryInstrumentation.kt",
+      "status": "A",
+      "sha256": "ec33c58ea59bdff7c6326f14170c7967e9ffc485b5ac98f6984ea4c0682c27b3",
+      "tasks": "D13",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteEntryInstrumentation.kt",
+      "status": "A",
+      "sha256": "285fd41985bf43ce949f4b24c28c60cab92503d6a2649d2ef4e3a834ab4aaac7",
+      "tasks": "D01-D06/D08/D13/D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteReviewChecks.kt",
+      "status": "A",
+      "sha256": "6cd3cc6f686c43c5b83b4cfcb03dddb0bf0fb9d8dad53d17ce083db99ee5d560",
+      "tasks": "D05/D06",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolEditorInstrumentation.kt",
+      "status": "M",
+      "sha256": "03643f5fd16b051a3dc90ff1631121771633055e5bc2c71e179bc19ebb55ba18",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+      "status": "M",
+      "sha256": "26a55632e641427d8f286829fc5ea236166d2d3119b9c3f9ed287933be4d2a33",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Agfa Optima.NP3",
+      "status": "A",
+      "sha256": "521f614e38a3091f3126ee552466c92b2a74277443633d5ba273e3394b0195ca",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Agfa Vista 200.NP3",
+      "status": "A",
+      "sha256": "ef2cf26ad283898ac56e2bbe0a0eb5937235ba09ada6ce0ae19d5ff0e9cdaf46",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/FUJI-SUPERIA.NP3",
+      "status": "A",
+      "sha256": "c2a7a95a34eb9d3f1360ee95cd126aaec695fc8331ff373071c67e8ae9528ae7",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Ferrania Solaris.NP3",
+      "status": "A",
+      "sha256": "98bebe3154a97e1bc3eaf8a9b26b0483611c483f5869db70f620e7c9626a272b",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Fuji Astia.NP3",
+      "status": "A",
+      "sha256": "d4e4b9f6a2be74dec2ef1221adb79b230d15e268883d9b22984a8eae91e1ec41",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Fuji Provia 100F.NP3",
+      "status": "A",
+      "sha256": "0fa8001625b1bbaa941993189debeaee34262a0761412fe689bb92a4eb84b8d0",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Fuji Provia.NP3",
+      "status": "A",
+      "sha256": "d03bcd5d9e5cc8497621e299096bd2adf2f611780e4b4625b66b4aaf1539b8b9",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Fuji Superia Reala.NP3",
+      "status": "A",
+      "sha256": "de5c8368a1c88d15be9981c962f0f34607e1b19a3feec804cb331ea1426987d9",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Fuji Velvia 100F.NP3",
+      "status": "A",
+      "sha256": "356b816a82bef8fef13011651aa68ceb763a081a5fc51b6776b1aa4aec1d7bb0",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Fuji Velvia.NP3",
+      "status": "A",
+      "sha256": "2e3150a88cc2cff65893c72ce6253c9c13e76035ece75b4e7aa8611b9361c769",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak E100 VS.NP3",
+      "status": "A",
+      "sha256": "78ecc0180ad4d694f9bf33c0677cab2decdd33cc4918f4f69a1b25fc2f754608",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak Ektachrome.NP3",
+      "status": "A",
+      "sha256": "de58a6337ecbeab4f9868937ffeafc6ed42f67e579d83bd72337b5cfe8942c69",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak Ektar Green.NP3",
+      "status": "A",
+      "sha256": "9553ef2653c74f4c7ba98cbd8f9a02dc205e478f3049ab97c5c26ef940d2004f",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak EliteChrome.NP3",
+      "status": "A",
+      "sha256": "37ea21a8b4d0e4093f0f7af5177ee1150823cdf208640445f18449040a7643d9",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak Gold 100.NP3",
+      "status": "A",
+      "sha256": "31981ac13cdd60e332c0225fdad68e55381bc03a9211bd75c864081ce35e60b0",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak Kodachrome 2.NP3",
+      "status": "A",
+      "sha256": "37c93cdd65c0961aef1e87fd3cdef0ee220ad76c8d906e6ac12c08ad2c911437",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak Portra 160NC.NP3",
+      "status": "A",
+      "sha256": "ec209a39e37441d7fbb9ff58f3ca47f0985061bedb87334dac20930c2a08a1c8",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak Portra NC.NP3",
+      "status": "A",
+      "sha256": "897a91aa9940e0618d96c66f203a33e94521cd4489a158ee1502cb3315c4102c",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/Kodak-Sun-Nature.NP3",
+      "status": "A",
+      "sha256": "6f00688f6ad44d95ccc75065232284f8084176224b45540a6f1cc863f6326d53",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/LINKS-Nature.NP3",
+      "status": "A",
+      "sha256": "41a499ca19e96197f06d527faab4a2c867a1f8284d2551406e660cb9f2331f9f",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/PORTRAIT-02.NP3",
+      "status": "A",
+      "sha256": "93708cee24a1814b5fdd83450e72e81bc6de04ed545112d76048722f4837ab58",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/PORTRAIT-03.NP3",
+      "status": "A",
+      "sha256": "620de54e5f3ba665d9fe99d2d140473a815877c4d59108cb6071b03d8d99d2d6",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/assets/picture_controls/catalog.json",
+      "status": "A",
+      "sha256": "4b0a9030c705cf86c1ed853fe17b82f2e35ed3e05b0af6e5a5155b631fc32ace",
+      "tasks": "D10",
+      "review": "exact resource copy; catalog SHA/size and 20 published presets verified in application Bundle; 2 research samples not offered"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/MainActivity.kt",
+      "status": "M",
+      "sha256": "eac86ba69c921dbc09897ed555216a6f291fb917a52ba2598bf4778a320eb8ec",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/diagnostics/TransferCorruptionDiagnostic.kt",
+      "status": "D",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/diagnostics/TransferFingerprint.kt",
+      "status": "M",
+      "sha256": "676859409ecb8516804dad7946ec8a2355cfa217fb67c9e3ebffd8ac0bc3d1a4",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/license/LicenseManager.kt",
+      "status": "M",
+      "sha256": "73dafd2c634f914d3c4558ee080f2c19e3968d866900802f5defc7dc6afa854c",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutFolderRepository.kt",
+      "status": "M",
+      "sha256": "f06a0ff51bb0c7f53452b33e88c7e7123eee0ca64b3ad4f6ee99038971547efb",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutIoQueue.kt",
+      "status": "D",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/LutMonitorState.kt",
+      "status": "M",
+      "sha256": "6dbf268e1c72319dfe02db5126610c95abefbb62000378a134a87a106de506af",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/lut/PhotoLutEditorState.kt",
+      "status": "M",
+      "sha256": "d07d07f27d26ad410b6fa06d4ebf59ded6cb1945cdb63781d9e82f8afdc577cc",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/presets/PictureControlFolderPreferences.kt",
+      "status": "A",
+      "sha256": "7d7732c9de1223fec9093a6d8c23bfd297bd6448578af6300880998a2bfe99c1",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/presets/PictureControlFolderState.kt",
+      "status": "A",
+      "sha256": "aa548c8e8c7cb3bc1f03b0440d851cf2e2cfd57a8c356511835531fd54d0f764",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/presets/PresetFolderGrants.kt",
+      "status": "A",
+      "sha256": "c257d11f4b4a6de0da0255315ac59052940a4e971eaeea3003afa78743de95c3",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/presets/PresetFolderRepository.kt",
+      "status": "A",
+      "sha256": "4a2ad338356130743e4b27c3b336ff95d41d4e73c01829ba568c59833791964c",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/presets/PresetIoQueue.kt",
+      "status": "A",
+      "sha256": "01a8db12d64b86e62eb1b5e66530e17ebbc72600c2d48e1265bab4227e10ae75",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/presets/SerialPresetQueue.kt",
+      "status": "A",
+      "sha256": "e55044362def7068fda33229eb99522dea43209b366d3f96e9bb12cfa848161b",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/BuiltInPictureControls.kt",
+      "status": "A",
+      "sha256": "3bccb80137907224cdda59302114a32f7d08233524e3c48671672167cbbf6f65",
+      "tasks": "D10",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/CameraStorageResponse.kt",
+      "status": "A",
+      "sha256": "35cc9261242f4362d44e0c02185f7927ef1f0394394529212e1d39ab67065aa9",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/DownloadTrace.kt",
+      "status": "D",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/LiveViewMetadata.kt",
+      "status": "M",
+      "sha256": "5773bd97efc49e2608d037c33fefbe3cfc092f10ae0630d443ce8341a82b0bc3",
+      "tasks": "D01/D02",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/LiveViewVideoDiagnostic.kt",
+      "status": "M",
+      "sha256": "2e61b72dbf57e795e69bbc9dbf864266e8533f49ebc0d4b1114de2ab0cea5b34",
+      "tasks": "D01/D02",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+      "status": "M",
+      "sha256": "54f33d154526f1af913aaee3e6ed9edbefcfee8f7b8db432a5485c4bd7fabff4",
+      "tasks": "D03/D04/D05",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlData.kt",
+      "status": "A",
+      "sha256": "1d9a92a66b1fb3348e92ce9beda2083b3ef6da74de29880606537e8017bc7d29",
+      "tasks": "D07",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlEncoder.kt",
+      "status": "A",
+      "sha256": "9244f2179dea540c89338df2fd8ca4cf6eacc82c38510057f4aca3e995780c89",
+      "tasks": "D07",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlFile.kt",
+      "status": "A",
+      "sha256": "8114f73f604f21968b529ebdfa5f7eb6e8f75ce3f0a1b4ed3966c107550b1a28",
+      "tasks": "D07",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlProbe.kt",
+      "status": "A",
+      "sha256": "f034d5b7b3bf4d2335c5fdff5a495f5ebf527f3138a528adcc607c535b234ad0",
+      "tasks": "D08",
+      "review": "research-only read plan; no Android production caller; actual nine-slot overview ported without adding a diagnostic entry"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlSelection.kt",
+      "status": "A",
+      "sha256": "225cc6c23eab7896c1f43aa7280532981d9755a983c43b9dd2fc3004d9015a2a",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlWriter.kt",
+      "status": "A",
+      "sha256": "faf8304afbaee1287b5a5eed4781aefbb9b07795b9b5bb0cc6ad16f6f8205b86",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/PictureControlBackupStore.kt",
+      "status": "A",
+      "sha256": "3f5d576bc06d9cc8dbb903511401dc0b830f6f3ce02e3c05ee90d23f6cb96dec",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/PictureControlReplacement.kt",
+      "status": "A",
+      "sha256": "d838902ae32fb42a50f904689711cd8c951268706b33894c2bdc949e13f91006",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteCameraTools.kt",
+      "status": "M",
+      "sha256": "d792c88912c5038cd9ce78a8de4c041c3092b0b48e70bfad960d448c2e4bc7f3",
+      "tasks": "source reference",
+      "review": "unused import or comment-only change; no runtime behavior delta"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteLab.kt",
+      "status": "M",
+      "sha256": "09cdb7dd1bbca5236c76f9d59985cf6b2de7f2c9372e2d5cd3a4b58ec9153fbe",
+      "tasks": "D08",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteMovieApplicationState.kt",
+      "status": "A",
+      "sha256": "8449e1b7d7e6de7d655d58e7dc567d68d342ee388e4bd92555ca91f8efa96588",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/UsbPtpConnection.kt",
+      "status": "M",
+      "sha256": "dc657a8ec223b4ea07630a49fe8edccac2809cc184a0f0abb9c277375569fd41",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/storage/HarmonyPublishedFile.kt",
+      "status": "A",
+      "sha256": "92b482d0b8559a3a3bfc2e07223c9dad08cbff2e4342998e22231c9bdbbd2b9a",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/storage/HarmonyStorageCompatibility.kt",
+      "status": "M",
+      "sha256": "46635e53489b22ca452a698333a6d598c3dfbeda269d6a60c70c584f1ba2b605",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt",
+      "status": "M",
+      "sha256": "047a4deb68dca9d17f35c454fae4f66f3014bcc34df055eca15b8a28e7674a69",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+      "status": "M",
+      "sha256": "646953fdc953ab9f3927c256d2da2cdf8b4c29ae6f050c4f7d1dad26a4b4357f",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/GlassBackButton.kt",
+      "status": "M",
+      "sha256": "b8df783f0a5a83e8d0a9c65b1514e170bc3464ec5d54af53aa0900af304e6ca1",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/GlassButton.kt",
+      "status": "M",
+      "sha256": "dcbfe5aaf66773a05c934c31a3cac7b7aaf5471f8bad543e6adb916b7ff19557",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/HomeScreen.kt",
+      "status": "M",
+      "sha256": "3255a84715f1283f74d70c530db6dd714a8f4803ead6d45ddb3bc4636006c1e9",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+      "status": "M",
+      "sha256": "4b9288c1a334de95dee66aac8b87fe8b7cf102e39809aa21c1c07196c10186cd",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorLayout.kt",
+      "status": "M",
+      "sha256": "a48199780ae4ab866ec6b928659a82cfaa2d1a3b106205c0c8a65a570b73c14b",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LutCategoryList.kt",
+      "status": "M",
+      "sha256": "507e84aeccd57a00db0097e9bf0f5faee410877e33f7e83d025bbe7bd93bd517",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoEffectsPreviewCache.kt",
+      "status": "A",
+      "sha256": "f8e51fbde580a0cdaa4fb4d0ed59865c3ab5bc606a417c963b2620855aa898b1",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt",
+      "status": "M",
+      "sha256": "1a3f92682246bfa76ff05e043e135d05d43ca7f8c80ebc38f9716191ab1f6e19",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt",
+      "status": "M",
+      "sha256": "6c43991cb92e5ddc1c4a1f1b4ffc51e4a849a83e4337c9b87e46f6289d382d42",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PictureControlPresetChooser.kt",
+      "status": "A",
+      "sha256": "cd86d99cf64434cab150e83fbbe49e08935edf2d4d426110272c811f91cfc879",
+      "tasks": "D13",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PictureControlReports.kt",
+      "status": "A",
+      "sha256": "168a1b9ed349da74a4e1986c705dea77e62e7ea3e70bab48397f281dabcefbcb",
+      "tasks": "D13",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PictureControlToolState.kt",
+      "status": "A",
+      "sha256": "e1d89e0173d2c09ea240a38edab5983378b4934858c92c5626100164af7c6bf4",
+      "tasks": "D13",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PreviewGestureGeometry.kt",
+      "status": "M",
+      "sha256": "f75ff85dcf27df36b4da7683f6f5f59c96f9f82d0469e38b57e53e99f105aba9",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/ReleaseCommitWheel.kt",
+      "status": "M",
+      "sha256": "bc3d760ec99e89f759fb7ef5f559ace23af55bc15a00d6414e835398ef6e14a9",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteCameraToolPanel.kt",
+      "status": "M",
+      "sha256": "ff8230f372b0cb7ca167dc940c3c44a902f492567dc1299ce7ccd11aecc54629",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteChoicePopup.kt",
+      "status": "M",
+      "sha256": "d499707b1d836742871ce46c99e0a60e6c02141c8f670ca79c05ace1004baa70",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteComputerControlState.kt",
+      "status": "A",
+      "sha256": "a854c87aad8af2f9d145da7f79aa7875c0e5d61171885a83ff6082ed4aa2442c",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteGridPanel.kt",
+      "status": "M",
+      "sha256": "4842fc10c5199639a9f03498e2776078496639e32b02bd9329958de634864bec",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteLutPanel.kt",
+      "status": "M",
+      "sha256": "3f6481715d09008d5f21c3f2f9acec175432dacd3164a1da1c4172105f6f4f32",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteMonitorScopes.kt",
+      "status": "M",
+      "sha256": "bb679e4447c9b7e9f98a9f7c1fd56d16cd63a7ac30e54196b34cb5a0765272c0",
+      "tasks": "source reference",
+      "review": "unused import or comment-only change; no runtime behavior delta"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteParameterPanel.kt",
+      "status": "M",
+      "sha256": "c81c8c7bfadb42228148ba72d3c0f6fafcd527eb90e83dd17a5dce5f4aa75df0",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemotePhotoReview.kt",
+      "status": "A",
+      "sha256": "00ff9a43290cd7de9912548b0996da3b456631938a4bde5a32bc40da213120ef",
+      "tasks": "D05/D06",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemotePictureControlPanel.kt",
+      "status": "A",
+      "sha256": "b7beafd8706722a058d41279332dd26f998d5a5a3ded18c7978451cd0db8201b",
+      "tasks": "D13",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteReviewFrameGate.kt",
+      "status": "A",
+      "sha256": "1dbc29b7f872989ea318a19cd756e9fc63fe948926533f61f994036c1fd36af2",
+      "tasks": "D05/D06",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+      "status": "M",
+      "sha256": "b6825f511ef66ec19c33f52559a639a5042652ed26d44f4166f77a9f8dcafe73",
+      "tasks": "D01-D06/D08/D13/D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+      "status": "M",
+      "sha256": "b2fb10af8454a7ae65eafd8a0b6f1ccaac3bad1fcc7fc5e49e385d07e74b9ba3",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+      "status": "M",
+      "sha256": "10a7be6bca1e301571bfd7137d5f6a9bbca9af99ec3426b42a80bde9efb7a366",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteViewfinderFeatures.kt",
+      "status": "M",
+      "sha256": "88a4c78d0df4f2843fc983f3302bb8fd6e16390259fd963c38434d886527d986",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+      "status": "M",
+      "sha256": "54d60bd29cde8292ed555cbec85f40efe275569094684d852edc42e4c0b56069",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/update/AppUpdateDialog.kt",
+      "status": "M",
+      "sha256": "aa89ddeb7432b86ba0920e615562f9e8b9d26a3a4619154cb2a211e72b84ac24",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/update/AppUpdateManager.kt",
+      "status": "M",
+      "sha256": "4ea04b5c4bf5117c3e4f087ccee853d17d379f1d0737d6f5d4074fe77bd741a0",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+      "status": "M",
+      "sha256": "6e38b5f6eb4c721fc0f7ddb10c9a4b2ada07c73d66e784ce777248ee884133fc",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/RemoteActivityTracker.kt",
+      "status": "A",
+      "sha256": "8eb3759224cf927df0e4106028ffb85f0a98794a2c3529bf3455f71dafd691b7",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/RemoteReviewCatalog.kt",
+      "status": "A",
+      "sha256": "d614540f53219bfc1113a95c5293c5a744f5824ad3c0b3c98f3193a3235d3442",
+      "tasks": "D05/D06",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+      "status": "M",
+      "sha256": "1cf568e3a43d32e6da77cfa28ddd4a74a1ce8aa55dff4bb87477e62745f21543",
+      "tasks": "excluded/mixed audited",
+      "review": "new retry/readback/hash/fsync staging guarded by Harmony compatibility; other changes remove passive diagnostics; no ordinary iOS transfer behavior to replace"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_monitor_rotate.xml",
+      "status": "A",
+      "sha256": "318a03290f2c2917e0b9487213cb3dc3ce8ef26f6b0caa494c1c69f40f56175f",
+      "tasks": "D16",
+      "review": "icon-only appearance deferred; functional entry and accessibility text supplied"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_picture_control.xml",
+      "status": "A",
+      "sha256": "acc5d7986978360baec31d0dcb3688daf4f9b99ae05395b8a8e44c45c0b81327",
+      "tasks": "D16",
+      "review": "icon-only appearance deferred; functional entry and accessibility text supplied"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_picture_control_colors.xml",
+      "status": "A",
+      "sha256": "6028c991750b4d3b72e2e2ef22222e50cd5db3db16ba3821d135461c95a49493",
+      "tasks": "D16",
+      "review": "icon-only appearance deferred; functional entry and accessibility text supplied"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/picture_controls.xml",
+      "status": "A",
+      "sha256": "2a3a65e0748d42d4fc67c8e6aad94e761cf492762575271fd73f4801b9b134d2",
+      "tasks": "D18",
+      "review": "all XML strings synchronized into actual AppLocalized lookup; independent iOS overrides retained"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/strings.xml",
+      "status": "M",
+      "sha256": "9377de209e32bab6779adbecf2f21d93160659838acba5c19e0a3eefa14d5f89",
+      "tasks": "D18",
+      "review": "all XML strings synchronized into actual AppLocalized lookup; independent iOS overrides retained"
+    },
+    {
+      "path": "app/src/main/res/values-zh/picture_controls.xml",
+      "status": "A",
+      "sha256": "f21dfbc49840a748e95238e6b5a8359f10c57387c78855b9e90b637e0355285a",
+      "tasks": "D18",
+      "review": "all XML strings synchronized into actual AppLocalized lookup; independent iOS overrides retained"
+    },
+    {
+      "path": "app/src/main/res/values-zh/strings.xml",
+      "status": "M",
+      "sha256": "b89dab983b6a1aaca39972a17caa1f1f61b9290fea6133df8b35c5209697b00b",
+      "tasks": "D18",
+      "review": "all XML strings synchronized into actual AppLocalized lookup; independent iOS overrides retained"
+    },
+    {
+      "path": "app/src/main/res/values/picture_controls.xml",
+      "status": "A",
+      "sha256": "bcdc21c8f7b292788c046b5550f094b664b9f93abe8d1bbe1fd903df5f2570a1",
+      "tasks": "D18",
+      "review": "all XML strings synchronized into actual AppLocalized lookup; independent iOS overrides retained"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "status": "M",
+      "sha256": "4c79224f92d77e618927d946c82581af0a0d695130547382aec491fda37f680d",
+      "tasks": "D18",
+      "review": "all XML strings synchronized into actual AppLocalized lookup; independent iOS overrides retained"
+    },
+    {
+      "path": "app/src/main/res/xml/update_file_paths.xml",
+      "status": "M",
+      "sha256": "4b0214cb8531d84f2c21c1aeaa7c4bf0687acb19244d42077fd4e9c97de028a9",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/diagnostics/TransferFingerprintTest.kt",
+      "status": "M",
+      "sha256": "1a13a7b8e547840efeb3015fc1a15e1e9b3dfca8c40add432d256b30f9006b23",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/presets/SerialPresetQueueTest.kt",
+      "status": "A",
+      "sha256": "60d89ead698a0661666807b5d96b47be63ad7983e2fa457ee799d70027ccad25",
+      "tasks": "D11/D12",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/CameraStorageResponseTest.kt",
+      "status": "A",
+      "sha256": "3cb9740ae3ec2cf9ff579a92ed43dcbfeaee1e85ce2475693f131bd17e57b31d",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/MonitorRemainingTest.kt",
+      "status": "M",
+      "sha256": "9ca74728adcdc074e5970c4d4381c5841e4f97a49c9f517bcc560bb239094fce",
+      "tasks": "D01/D02",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlDataTest.kt",
+      "status": "A",
+      "sha256": "9a315ff07d8f113a55f8e0d3a1b56773e904829df8ed87409cf4b31cfa8efe41",
+      "tasks": "D07",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlFileTest.kt",
+      "status": "A",
+      "sha256": "3779718666409d8e0bd33854387c2bce55f266db5f4200dfc7c21411b1d4c741",
+      "tasks": "D07",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlPairedExportTest.kt",
+      "status": "A",
+      "sha256": "d087748d172fd3e4d209bb0c075291eff2801c5ca2f8fed8a38b9b190eef1ae7",
+      "tasks": "D07",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlProbeTest.kt",
+      "status": "A",
+      "sha256": "45fb658825939fe935a0a91ee929859000634c828b88ee70e803e10e40bd670b",
+      "tasks": "D08",
+      "review": "research-only read plan; no Android production caller; actual nine-slot overview ported without adding a diagnostic entry"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlSelectionTest.kt",
+      "status": "A",
+      "sha256": "a55d6305d2408f92b0d0b3f3f72d54c813542fbb31e46b1d5512ab52b86bef09",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlSlotsTest.kt",
+      "status": "A",
+      "sha256": "ab10056bf4887699355769da10961336c84bd98e628db4f75b71cc4e5ccb6b86",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlWriterTest.kt",
+      "status": "A",
+      "sha256": "46b4b2262485946fae1d61c4b12300b403e74c23f2fbe38a9be3effd2ba8305b",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/PictureControlReplacementTest.kt",
+      "status": "A",
+      "sha256": "9400c0ec962294fb8fe5b9e154155cd838622c3f37749b10797d1bb1f1269606",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/RemoteExposureProgramTest.kt",
+      "status": "M",
+      "sha256": "3848abd52d5b2b3e412b66968ffaf63d4674383cae181f6a9b4a0dd1e30f6a20",
+      "tasks": "D08/D09",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/RemoteMovieApplicationStateTest.kt",
+      "status": "A",
+      "sha256": "d4d9731af9ad3c633ee6edc7b171a6515361c9c577617cf51095b2fcf8243180",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/ZfLiveViewFocusTest.kt",
+      "status": "A",
+      "sha256": "882ae9d0e03597fbd3b474fc69b5d462b1bc9e7992d0613251817af6c1a30108",
+      "tasks": "D01/D02",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/storage/HarmonyStorageCompatibilityTest.kt",
+      "status": "A",
+      "sha256": "8f243d46586b1ec1432980592ff962bc2fdad205cf38c50d8700b231a34f32d3",
+      "tasks": "excluded",
+      "review": "Harmony-only compatibility or removed passive transfer diagnostics; retain verified iOS public PTP connection/throughput implementation"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/FileListPresentationTest.kt",
+      "status": "M",
+      "sha256": "66e1f166719752f0065418fcbb0b855f706302c9700d0aed5cefaa046f736b00",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/HomeConnectionPresentationTest.kt",
+      "status": "M",
+      "sha256": "5664eb48bf885d01e3a6efdc0bed978de0659f63579594c4a42abbfe5f8a452c",
+      "tasks": "D17",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/LandscapeMonitorLayoutTest.kt",
+      "status": "M",
+      "sha256": "7c73af90b57e69857b99b70d76a8e0f4184a9d380f4a9813939a16fd365daddc",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PhotoEffectsPreviewCacheTest.kt",
+      "status": "A",
+      "sha256": "fae4f180f478758327623b261eaef55abb830930e5e77ad8a2dfdd265eb9111c",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PhotoEffectsPreviewTransitionTest.kt",
+      "status": "A",
+      "sha256": "509d5e8618effc822d7b392b64346afbac03a83ffcece61d869b270678a85533",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PhotoPreviewEffectsTest.kt",
+      "status": "A",
+      "sha256": "1d3907b9d8ea8cdbcc3cc4dae9ec17e6db0a986d27591ec802b5d2cbd82a4324",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PreviewGestureGeometryTest.kt",
+      "status": "M",
+      "sha256": "5adf1a560eebf45af63505b699f786863479d89b23f2a386f0109dcc46b502a9",
+      "tasks": "D14/D15",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteReviewFrameGateTest.kt",
+      "status": "A",
+      "sha256": "163ab5acffe2986b7ecfa412d2210b807fa8ca1ee34816ab270ebc1dd361327f",
+      "tasks": "D05/D06",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteToolLayoutTest.kt",
+      "status": "A",
+      "sha256": "bc1d2df65305469f824703dd20f620a3c312396abbdb313af49ef24e4aa09608",
+      "tasks": "D16",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/update/AppUpdateValidationTest.kt",
+      "status": "M",
+      "sha256": "dbc13ea10b8b431987536f3f74c7d51a09211777a5788d1c8a85bc1243664535",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/RemoteActivityTrackerTest.kt",
+      "status": "A",
+      "sha256": "5e397351248b7c32a4368090d6a96f22c95bc04882eca37614472571446a28b5",
+      "tasks": "D03/D04",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/RemoteReviewCatalogTest.kt",
+      "status": "A",
+      "sha256": "1c7c011ca026f8e1196801c5e93c03e30656e42a6b3128df8a17eeb80785eaf6",
+      "tasks": "D05/D06",
+      "review": "source/test hunks reviewed; implementation and verification tracked in task ledger"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/flexible-color/LICENSE",
+      "status": "A",
+      "sha256": "303e5d30dd5f3032ab43c34c4f7212597aafba06e17a6ab6b9b78d3743eef809",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/flexible-color/SOURCE.txt",
+      "status": "A",
+      "sha256": "674693cc479ea727e6be6fa0488b10b5f8cffa5b4e109bcce87a0f6c3e971c81",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/flexible-color/comment-a.NP3",
+      "status": "A",
+      "sha256": "7dbd632bded3cce04052f729c154d85f2d1bf08a45effc46de9828d9161600fc",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/flexible-color/tonecurve-noop.NP3",
+      "status": "A",
+      "sha256": "0ac44780b31751d8f4265bfff988df4ed5320086f0c3a540948fdaf8b6982987",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/flexible-color/vanilla.NP3",
+      "status": "A",
+      "sha256": "1199d1e5ca7a1d0b39273e70be05d590ce1ee9fb6378f12e73aa91320d064483",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/nikonpc-source.tsv",
+      "status": "A",
+      "sha256": "f08083a12b5a49d50a0af1977a198fe6468de00b8ddc2891b2531940e940af94",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-exported/PICCON01.NP3",
+      "status": "A",
+      "sha256": "f4901c6019e4cf6e818b49e4c2a8c4cefd0e1f8b9cf2e0f40fda77026e3a48d1",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-exported/PICCON02.NP3",
+      "status": "A",
+      "sha256": "9789d7db49e8c266858c49ea49e3d8253e6a052a4ac457dfaf1b7a1b793672cb",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-exported/PICCON03.NP3",
+      "status": "A",
+      "sha256": "b75fcb0f61f42e74eb47490238459eda195ac4e8801c7e5fe38870356904a2a8",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-exported/PICCON04.NP3",
+      "status": "A",
+      "sha256": "b255d22a70a3d06fa3a6e29ff1fcd114dbb03d563fd5fd11a60c0795992b9bc8",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-exported/PICCON05.NP3",
+      "status": "A",
+      "sha256": "0cde2d884996cef2258b19c473cf30d1e3edae543df94cb387281b55afa936e4",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-exported/PICCON06.NP3",
+      "status": "A",
+      "sha256": "2086f160e345a3d6b60de4d62d0dcb3cb78560c5e01c59ee78d299c7d41f5d9d",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-exported/manifest.json",
+      "status": "A",
+      "sha256": "40c6be279757da7cc95ba610663e9f5ad16d8e13a93e38abdd2465ff1428315f",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-v3.tsv",
+      "status": "A",
+      "sha256": "e0dfe4ffc7f6d3f698d0fde2bdb162da4b7f2b6b40c990690d6bcd7e39d16487",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "app/src/test/resources/picture_control/z30-write-v4.tsv",
+      "status": "A",
+      "sha256": "2a68ef29710f3064cb9e7e5cba5370c0ae906660205cede3880718629633a311",
+      "tasks": "D07/D09/D10",
+      "review": "retained fixture/provenance; actual camera datasets and exported NP3 exercised by native tests"
+    },
+    {
+      "path": "dist-debug/build-debug.bat",
+      "status": "M",
+      "sha256": "0036180204b5ed3db16020ef81be044feaa50e6d5dcee83651b78f01f8237513",
+      "tasks": "D18/build reference",
+      "review": "Android build/instrumentation packaging retained; native iOS 1.97 project and model tests used; no APK packaging or UI automation run"
+    },
+    {
+      "path": "dist-debug/build.command",
+      "status": "M",
+      "sha256": "7ebac09335bc068ebf317e3a6d41eabc9d8396754ae444ffe66cef7712f9c5a7",
+      "tasks": "D18/build reference",
+      "review": "Android build/instrumentation packaging retained; native iOS 1.97 project and model tests used; no APK packaging or UI automation run"
+    },
+    {
+      "path": "docs/发布与运维/授权服务临时迁移到腾讯云.md",
+      "status": "A",
+      "sha256": "93051e550d936f3c2a26c1bc0e5952fb4f4a2c6b38334a54af9a0555dd87d2cc",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    },
+    {
+      "path": "docs/发布与运维/授权服务器被拦截处理手册.md",
+      "status": "A",
+      "sha256": "f3c277266a7426f1f215e90dd9bc16d2d3a3a31be51268537b7062e5c20f8959",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    },
+    {
+      "path": "docs/待做/备案通过后迁移授权服务.md",
+      "status": "A",
+      "sha256": "6084b94ed37395224aeba073144aedcbb36ff0aae0c064fd71f32a84fc331984",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    },
+    {
+      "path": "docs/待做/官网启用HTTPS证书.md",
+      "status": "A",
+      "sha256": "aa21e76f69f031df44296591bea0f082280c20fde26cfdd6add9816bbecb8c04",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    },
+    {
+      "path": "docs/技术调研/Nikon PTP操作码清单.md",
+      "status": "M",
+      "sha256": "ad5bd2914d8cc4b673230517ed92c5074df76e56174fb177effdc6a5506f5b5b",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    },
+    {
+      "path": "docs/测试与验证/传输原片完整性临时诊断.md",
+      "status": "D",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    },
+    {
+      "path": "gradle.properties",
+      "status": "M",
+      "sha256": "c4664a9a10f1038560f223ff3de7f88088e618d9f9f17596ba8699955f1e2bff",
+      "tasks": "D18/build reference",
+      "review": "Android build/instrumentation packaging retained; native iOS 1.97 project and model tests used; no APK packaging or UI automation run"
+    },
+    {
+      "path": "server/admin.ps1",
+      "status": "M",
+      "sha256": "6e5f9190dcf96828a0c19cb6ee3992291527df7d4ac4d1692de96fc7d7daa8cc",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "server/license-server.js",
+      "status": "M",
+      "sha256": "b536076887ca67a64b53a8c520ab0063670a17468316ce03e5e18893fe17ee1c",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "server/tests/admin-mac.test.ps1",
+      "status": "M",
+      "sha256": "27a0a4571ee12de85c76613d43eb77944194837e78566d7ea821864c90a53ac1",
+      "tasks": "excluded",
+      "review": "Android licensing/server emergency and APK update/installer; existing StoreKit/App Store platform agreement applies"
+    },
+    {
+      "path": "tools/picture_control/build_nikonpc_presets.py",
+      "status": "A",
+      "sha256": "529d18f831b9adff0cdf9e5fcd9b8cb9732462e383add8dcc2a5024c6a918978",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    },
+    {
+      "path": "tools/picture_control/nikonpc-presets.json",
+      "status": "A",
+      "sha256": "68ecc0811fa5f62c0920631db610c4699e08145d7de2a035ed395fd33caa4e38",
+      "tasks": "source reference",
+      "review": "retained upstream research/operations/offline resource generation; runtime data covered by D07-D10; no iOS runtime service to implement"
+    }
+  ]
+}
