@@ -3,6 +3,67 @@ import XCTest
 @testable import ZTransfer
 
 final class ImageCaptureErrorMappingTests: XCTestCase {
+    @MainActor
+    func testBlockingControlPermissionDoesNotBlockMainThreadOrDuplicatePrompt() async throws {
+        let entered = expectation(description: "Permission call entered")
+        let provider = BlockingUSBPermission(contents: .authorized, entered: entered)
+        let transport = ImageCaptureUSBTransport(authorizationAccess: provider.access)
+        defer { provider.release.signal(); transport.stop() }
+        transport.startAuthorizationForTesting()
+        await fulfillment(of: [entered], timeout: 3)
+        // The provider is still synchronously blocked, exactly where the old
+        // first-launch path froze. MainActor and its cached status remain usable.
+        let heartbeat = expectation(description: "Main run loop responds during permission")
+        DispatchQueue.main.async { heartbeat.fulfill() }
+        await fulfillment(of: [heartbeat], timeout: 1)
+        for _ in 0..<5 { transport.refreshAuthorization() }
+        XCTAssertEqual(transport.currentAuthorization(), .notDetermined)
+        XCTAssertFalse(provider.usedMainThread)
+        provider.release.signal()
+        try await waitForAuthorization(.authorized, transport)
+        XCTAssertEqual(provider.controlRequests, 1)
+        XCTAssertFalse(provider.timedOut)
+    }
+
+    @MainActor
+    func testBlockingStatusReadDoesNotBlockResumeAndLateGrantAfterStopIsIgnored() async throws {
+        let entered = expectation(description: "Status read entered")
+        let provider = BlockingUSBPermission(contents: .authorized, entered: entered, blockRead: true)
+        let transport = ImageCaptureUSBTransport(authorizationAccess: provider.access)
+        defer { provider.release.signal(); transport.stop() }
+        transport.startAuthorizationForTesting()
+        await fulfillment(of: [entered], timeout: 3)
+        XCTAssertEqual(transport.currentAuthorization(), .notDetermined)
+        transport.refreshAuthorization()
+        transport.stop()
+        provider.release.signal()
+        await provider.waitUntilReturned()
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(transport.currentAuthorization(), .notDetermined)
+        XCTAssertEqual(provider.controlRequests, 0)
+        XCTAssertFalse(provider.usedMainThread)
+    }
+
+    @MainActor
+    func testDeniedContentsDoesNotRequestCameraControl() async throws {
+        let provider = BlockingUSBPermission(contents: .denied)
+        let transport = ImageCaptureUSBTransport(authorizationAccess: provider.access)
+        defer { transport.stop() }
+        transport.startAuthorizationForTesting()
+        try await waitForAuthorization(.denied, transport)
+        XCTAssertEqual(provider.controlRequests, 0)
+        XCTAssertFalse(provider.usedMainThread)
+    }
+
+    @MainActor
+    private func waitForAuthorization(_ expected: USBAuthorizationState, _ transport: ImageCaptureUSBTransport) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while transport.currentAuthorization() != expected && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(transport.currentAuthorization(), expected)
+    }
+
     func testPTPHandshakeToleratesMissingOrMalformedOptionalDeviceInfo() async throws {
         for payload in [Data(), Data([100]), Data([100, 0]) + Data(repeating: 0, count: 33)] {
             let script = USBHandshakeScript(deviceInfo: payload)
@@ -136,6 +197,49 @@ final class ImageCaptureErrorMappingTests: XCTestCase {
                 "unexpected mapping for ImageCaptureCore code \(code)"
             )
         }
+    }
+}
+
+private final class BlockingUSBPermission: @unchecked Sendable {
+    let release = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private let contentsStatus: ICAuthorizationStatus
+    private let entered: XCTestExpectation?
+    private let blockRead: Bool
+    private var main = false, timeout = false, returned = false
+    private var requests = 0
+    init(contents: ICAuthorizationStatus, entered: XCTestExpectation? = nil, blockRead: Bool = false) {
+        contentsStatus = contents; self.entered = entered; self.blockRead = blockRead
+    }
+    var access: ImageCaptureAuthorizationAccess {
+        .init(contents: { self.read() }, control: { self.observeThread(); return .notDetermined },
+              requestContents: { _ in XCTFail("Determined contents must not prompt again") },
+              requestControl: { done in
+                  self.lock.lock(); self.requests += 1; self.lock.unlock()
+                  self.observeThread(); self.block(); done(.authorized)
+              })
+    }
+    private func read() -> ICAuthorizationStatus {
+        observeThread()
+        if blockRead { block() }
+        return contentsStatus
+    }
+    private func observeThread() { lock.lock(); main = main || Thread.isMainThread; lock.unlock() }
+    private func block() {
+        entered?.fulfill()
+        let expired = release.wait(timeout: .now() + 5) == .timedOut
+        lock.lock(); timeout = expired; returned = true; lock.unlock()
+    }
+    var usedMainThread: Bool { lock.lock(); defer { lock.unlock() }; return main }
+    var timedOut: Bool { lock.lock(); defer { lock.unlock() }; return timeout }
+    var controlRequests: Int { lock.lock(); defer { lock.unlock() }; return requests }
+    private var hasReturned: Bool { lock.lock(); defer { lock.unlock() }; return returned }
+    func waitUntilReturned() async {
+        for _ in 0..<600 {
+            if hasReturned { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Blocked permission read did not drain")
     }
 }
 

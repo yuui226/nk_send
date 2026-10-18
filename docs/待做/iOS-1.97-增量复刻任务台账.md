@@ -106,6 +106,26 @@ D06/D08/D11阶段验证：`picture-protocol`8项中7通过、1失败，为测试
 
 ## 用户追加功能检查（2026-10-17，开发侧复核完成）
 
+### 2026-10-18 新手机首次启动授权阻塞
+
+用户在新iPhone 15 Plus首次启动后反馈开屏结束、全部动画停住且无法操作，并明确确认“出现权限提示，同意后恢复”。旧版诊断日志`/tmp/ztransfer-firstlaunch-console.log`记录browser.start仅约6ms返回；控制权限notDetermined到authorized约8.78秒。源码RootView.task→ConnectionViewModel.startUSBDiscovery/refreshUSBAuthorization在主线程同步执行ICDeviceBrowser授权查询和请求；回调形式不代表请求入口不会同步等待。现场线程采样未成功（xctrace等待超时、LLDB未获得暂停栈），因此不冒称取得阻塞栈或精确主线程卡顿时长。
+
+修复：只将授权状态查询、内容/控制授权请求及其完成处理放到专用串行队列；主线程及PTP准入读取锁保护的缓存，不执行授权IPC。发现浏览器仍保留原运行循环线程，内容→控制权限顺序、双授权准入、拒绝/受限处理、重复请求抑制、停止后的代次隔离保持；未恢复requestOpenSession或全卡枚举，也没有添加延迟掩盖冻结。安卓CameraViewModel.requestUsbPermission依据仍为异步等待授权、授权前不连接，相应iOS权限范围约定未改。
+
+`/tmp/ztransfer-firstlaunch-fix-tests.log`：38/38、0失败/跳过、TEST SUCCEEDED。新增真实生产授权入口的可控同步阻塞测试：控制请求阻塞期间主运行循环仍响应且多次刷新不重复请求；状态查询阻塞期间缓存读取/停止可返回且迟到结果被忽略；内容拒绝时不请求控制授权。原USB直通握手、错误映射及连接状态一起回归。未运行UI自动化。
+
+交付：`/tmp/ztransfer-firstlaunch-fix-device-build.log` BUILD SUCCEEDED、exit0；已覆盖安装新iPhone 15 Plus，目录88E6DC02-10B5-4124-ACB9-970554A62836，普通无参数启动成功。该机已获授权，未重置权限/清数据，因此此次启动不是修复版首次授权真机重演。git diff --check通过，未提交/推送；用户实际观感待反馈。
+
+后续真机确认：用户要求完整卸载后重新安装，devicectl卸载与安装均成功，新目录A56C36AE-A0D4-4FC5-B0DB-B7448DE5D9C1；保留首次启动给用户操作。用户明确反馈“这次首次启动不卡了”，据此本轮卡顿问题收尾，并按用户要求提交代码、测试及记录。不推断系统卸载后所有权限均被重置，也不扩大为所有机型已验收。本次未新增构建/测试或推送。
+
+### 安装后第二轮复核（2026-10-17）
+
+用户要求提交后的a53e1c6d已完成真机Debug构建（`/tmp/ztransfer-197-device-delivery.log`，BUILD SUCCEEDED），覆盖安装至iPhone 15，安装目录DDA22E75-A80C-4880-ACAB-93F31DAD3BD6，普通启动成功。用户随后再次要求检查。第二轮复查USB直通入口、预设写入取消后的验证/回滚、回看关闭隔离、目录书签恢复及共享预览缓存生命周期；未发现新的确定性功能缺陷，无生产代码修改。
+
+补充上一轮27类集中回归之外的CameraConnectionPresentationTests、CameraDownloadTests、MonitorStorageSchedulingTests和RemoteLUTLoadQueueTests；复用现有构建运行，`/tmp/ztransfer-197-second-audit.log`为57/57、0失败/跳过，TEST EXECUTE SUCCEEDED、exit0。涵盖USB/STA连接呈现、64MiB流式下载与大图导出并行及取消、下载完整性/重试/重名保护、存储查询排队后的权限重查、LUT文件变更和权限撤销后的缓存失效。
+
+只读查询真机进程时CoreDevice返回4016（当前不满足设备服务连接条件），未取得新运行状态证据，不据此推断应用异常；没有重启手机、操作相机或再次安装。本轮检查不能代替真实拔插、固件兼容与外部Provider验收。git diff --check通过，仅补充检查记录，未再次提交或推送。
+
 不能把此前18/18开发侧核销理解为“绝无异常”。用户追加检查后，对生产入口和失败恢复进行复核，发现以下缺口并修复，集中回归结果随后补记：
 
 1. **预览缓存键不稳定（D15）**：实际`PhotoEffectsSettingsPreview.makeRenderKey`用无排序JSON编码，重复相同参数会生成不同键，导致重复渲染/缓存丢失。此前缓存测试使用人工字符串键，未覆盖真实生成入口。新增实际入口测试在旧实现复现2个断言失败，日志`/tmp/ztransfer-197-audit-reproduction.log`（6项、2失败）；现已对完整预览及中间滤镜键固定JSON字段顺序。

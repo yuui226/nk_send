@@ -9,6 +9,15 @@ enum USBAuthorizationState: String, Sendable, Equatable {
     case authorized
 }
 
+/// Injectable boundary for the synchronous ImageCaptureCore permission calls.
+/// Even its completion-based request can block until the system prompt appears.
+struct ImageCaptureAuthorizationAccess: Sendable {
+    let contents: @Sendable () -> ICAuthorizationStatus
+    let control: @Sendable () -> ICAuthorizationStatus
+    let requestContents: @Sendable (@escaping @Sendable (ICAuthorizationStatus) -> Void) -> Void
+    let requestControl: @Sendable (@escaping @Sendable (ICAuthorizationStatus) -> Void) -> Void
+}
+
 struct USBDeviceDescriptor: Sendable, Equatable, Identifiable {
     let id: String
     let name: String
@@ -111,7 +120,10 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         #endif
     }
 
-    private let browser = ICDeviceBrowser()
+    private let browser: ICDeviceBrowser
+    private let authorizationAccess: ImageCaptureAuthorizationAccess
+    private let authorizationQueue = DispatchQueue(label: "com.ztransfer.usb.authorization", qos: .userInitiated)
+    private var authorizationState: USBAuthorizationState = .notDetermined
     private var cameras: [String: ICCameraDevice] = [:]
     private var cameraIDsByObject: [ObjectIdentifier: String] = [:]
     /// The object that owns the currently opened session.  ImageCaptureCore can
@@ -138,7 +150,16 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     private var authorizationRequestGeneration: UInt64?
     private var stopped = true
 
-    override init() {
+    override convenience init() { self.init(authorizationAccess: nil) }
+
+    init(authorizationAccess: ImageCaptureAuthorizationAccess?) {
+        let browser = ICDeviceBrowser()
+        self.browser = browser
+        self.authorizationAccess = authorizationAccess ?? ImageCaptureAuthorizationAccess(
+            contents: { browser.contentsAuthorizationStatus },
+            control: { browser.controlAuthorizationStatus },
+            requestContents: { browser.requestContentsAuthorization(completion: $0) },
+            requestControl: { browser.requestControlAuthorization(completion: $0) })
         super.init()
         browser.delegate = self
         browser.browsedDeviceTypeMask = ICDeviceTypeMask(
@@ -164,19 +185,23 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
 
     func start() {
         Self.trace("browser start requested")
-        lock.lock()
-        lifecycleGeneration &+= 1
-        let generation = lifecycleGeneration
-        stopped = false
-        operationsSuspended = browser.isSuspended
-        lock.unlock()
-        // ImageCaptureCore splits external-camera access into two permissions:
-        // contents covers catalog/file access, while control covers opening a
-        // controllable camera and sending pass-through PTP commands. ZTransfer
-        // needs both, so never expose a partially-authorized state as usable.
+        let generation = beginDiscovery(suspended: browser.isSuspended)
+        // Browser discovery retains its run-loop thread. Only permission IPC
+        // runs on the authorization queue; PTP discovery/handshake is unchanged.
         browser.start()
         Self.trace("browser start returned; browsing=\(browser.isBrowsing), suspended=\(browser.isSuspended)")
         refreshAuthorization(generation: generation)
+    }
+
+    private func beginDiscovery(suspended: Bool) -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        lifecycleGeneration &+= 1
+        stopped = false
+        authorizationState = .notDetermined
+        authorizationRequestGeneration = nil
+        operationsSuspended = suspended
+        return lifecycleGeneration
     }
 
     /// Re-evaluates app-scoped camera permissions after returning from Settings
@@ -200,16 +225,18 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     func currentAuthorization() -> USBAuthorizationState {
-        let contents = browser.contentsAuthorizationStatus
-        let control = browser.controlAuthorizationStatus
-        Self.trace("authorization contents=\(contents), control=\(control)")
-        return Self.combinedAuthorization(contents: contents, control: control)
+        // Called by the UI on resume and by PTP admission. Never perform
+        // synchronous system authorization IPC on either caller's thread.
+        lock.lock(); defer { lock.unlock() }
+        return authorizationState
     }
 
     private func refreshAuthorization(generation: UInt64) {
-        guard isCurrentGeneration(generation) else { return }
-        emit(.authorization(currentAuthorization()))
-        requestAuthorizationIfNeeded(generation: generation)
+        guard beginAuthorizationRequest(generation: generation) else { return }
+        authorizationQueue.async { [weak self] in
+            guard let self, self.isCurrentGeneration(generation) else { return }
+            self.requestAuthorizationIfNeeded(generation: generation)
+        }
     }
 
     func stop() {
@@ -233,6 +260,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         resumeWaiters.removeAll()
         operationsSuspended = false
         authorizationRequestGeneration = nil
+        authorizationState = .notDetermined
         lock.unlock()
         resume.forEach { _ = $0.finish(.failure(CameraTransportError.disconnected)) }
         finishThumbnailWaiters(with: CameraTransportError.disconnected)
@@ -685,24 +713,16 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     /// simultaneous system prompts is unreliable, and a denied contents grant
     /// already makes ZTransfer's browse/transfer workflow unusable.
     private func requestAuthorizationIfNeeded(generation: UInt64) {
-        guard beginAuthorizationRequest(generation: generation) else { return }
-        let contents = browser.contentsAuthorizationStatus
+        let contents = authorizationAccess.contents()
+        let control = authorizationAccess.control()
+        publishAuthorization(contents: contents, control: control, generation: generation)
+        guard isCurrentGeneration(generation) else { return }
         if contents == .notDetermined {
-            browser.requestContentsAuthorization { [weak self] status in
-                guard let self, self.isCurrentGeneration(generation) else { return }
-                let state = Self.combinedAuthorization(
-                    contents: status,
-                    control: self.browser.controlAuthorizationStatus
-                )
-                self.emit(.authorization(state))
-                guard status == .authorized else {
-                    self.endAuthorizationRequest(generation: generation)
-                    return
+            authorizationAccess.requestContents { [weak self] status in
+                self?.authorizationQueue.async { [weak self] in
+                    guard let self, self.isCurrentGeneration(generation) else { return }
+                    self.requestControlAuthorizationIfNeeded(generation: generation, contentsStatus: status)
                 }
-                self.requestControlAuthorizationIfNeeded(
-                    generation: generation,
-                    contentsStatus: status
-                )
             }
             return
         }
@@ -714,25 +734,39 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
         contentsStatus: ICAuthorizationStatus
     ) {
         guard isCurrentGeneration(generation) else { return }
-        let control = browser.controlAuthorizationStatus
+        let control = authorizationAccess.control()
+        publishAuthorization(contents: contentsStatus, control: control, generation: generation)
+        guard isCurrentGeneration(generation) else { return }
         guard contentsStatus == .authorized else {
-            emit(.authorization(Self.combinedAuthorization(contents: contentsStatus, control: control)))
             endAuthorizationRequest(generation: generation)
             return
         }
         if control == .notDetermined {
-            browser.requestControlAuthorization { [weak self] status in
-                guard let self, self.isCurrentGeneration(generation) else { return }
-                self.endAuthorizationRequest(generation: generation)
-                self.emit(.authorization(Self.combinedAuthorization(
-                    contents: contentsStatus,
-                    control: status
-                )))
+            Self.trace("control authorization request dispatched off main=\(!Thread.isMainThread)")
+            authorizationAccess.requestControl { [weak self] status in
+                self?.authorizationQueue.async { [weak self] in
+                    guard let self, self.isCurrentGeneration(generation) else { return }
+                    self.publishAuthorization(contents: contentsStatus, control: status, generation: generation)
+                    self.endAuthorizationRequest(generation: generation)
+                }
             }
+            Self.trace("control authorization request returned")
         } else {
             endAuthorizationRequest(generation: generation)
-            emit(.authorization(Self.combinedAuthorization(contents: contentsStatus, control: control)))
         }
+    }
+
+    private func publishAuthorization(contents: ICAuthorizationStatus, control: ICAuthorizationStatus,
+                                      generation: UInt64) {
+        let state = Self.combinedAuthorization(contents: contents, control: control)
+        lock.lock()
+        guard !stopped, lifecycleGeneration == generation else { lock.unlock(); return }
+        authorizationState = state
+        // Yield while validating the generation so stop/restart cannot receive
+        // a stale grant. AsyncStream delivery does not invoke a UI callback here.
+        continuation?.yield(.authorization(state))
+        lock.unlock()
+        Self.trace("authorization contents=\(contents), control=\(control)")
     }
 
     private func beginAuthorizationRequest(generation: UInt64) -> Bool {
@@ -771,6 +805,10 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     #if DEBUG
+    func startAuthorizationForTesting() {
+        refreshAuthorization(generation: beginDiscovery(suspended: false))
+    }
+
     static func combinedAuthorizationForTesting(
         contents: ICAuthorizationStatus,
         control: ICAuthorizationStatus
