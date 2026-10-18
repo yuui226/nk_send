@@ -17,6 +17,8 @@ final class PictureControlPanelModel: ObservableObject {
     @Published private(set) var loadFailed = false
     @Published private(set) var pending: Action?
     @Published var editingSlot: Int?
+    @Published private(set) var closeRequested = false
+    @Published var interactionAllowed = true
     @Published private(set) var presets: [BuiltInPictureControl] = []
     @Published private(set) var presetsFailed = false
     @Published private(set) var report = ""
@@ -24,24 +26,30 @@ final class PictureControlPanelModel: ObservableObject {
     var notice: (String) -> Void = { _ in }
     var dismiss: () -> Void = {}
     var onReport: (String) -> Void = { _ in }
+    var feedback: () -> Void = {}
     var movie = false
     private let readOverview: () async throws -> PictureControlOverview
     private let change: (Int, PictureControlChange, (@Sendable (String) -> Void)?) async throws -> Void
     private let current: () -> Bool
     private let allowed: () -> Bool
     private let busy: (Bool) -> Bool
+    private let closesFolders: Bool
     private var task: Task<Void, Never>?
     private var closed = false
+    private var opened = false
 
     init(folders: PictureControlFolderState,
          current: @escaping () -> Bool, allowed: @escaping () -> Bool, busy: @escaping (Bool) -> Bool,
          readOverview: @escaping () async throws -> PictureControlOverview,
-         change: @escaping (Int, PictureControlChange, (@Sendable (String) -> Void)?) async throws -> Void) {
+         change: @escaping (Int, PictureControlChange, (@Sendable (String) -> Void)?) async throws -> Void,
+         closesFolders: Bool = true) {
         self.folders = folders; self.current = current; self.allowed = allowed; self.busy = busy
         self.readOverview = readOverview; self.change = change
+        self.closesFolders = closesFolders
     }
     func open() {
-        guard task == nil, !closed else { return }
+        guard task == nil, !closed, !opened else { return }
+        opened = true
         if !loading { loading = true }
         task = Task { [self] in
             let result = await Task.detached { Result { try builtInPictureControls() } }.value
@@ -80,12 +88,19 @@ final class PictureControlPanelModel: ObservableObject {
         }
         if loadFailed && notifyFailure { notice(AppLocalized.resource("picture_control_slots_read_failed")) }
     }
-    var canBrowse: Bool { pending == nil && !loading && !closed }
+    var canBrowse: Bool { pending == nil && !loading && !closed && !closeRequested }
+    var opening: Bool { overview == nil }
+    func requestClose() {
+        guard !closed, !closeRequested else { return }
+        closeRequested = true
+        // Like Android, an opening spinner has no recorded popup to collapse.
+        if opening { dismiss() }
+    }
     func canEdit(_ slot: PictureControlSlotInfo) -> Bool {
-        canBrowse && allowed() && current() && !loadFailed && overview?.canEdit == true && slot.readable
+        canBrowse && interactionAllowed && allowed() && current() && !loadFailed && overview?.canEdit == true && slot.readable
     }
     func act(_ action: Action) {
-        guard canBrowse, allowed(), current(), !loadFailed,
+        guard canBrowse, interactionAllowed, allowed(), current(), !loadFailed,
               let state = overview, let target = state.slots.first(where: { $0.slot == action.slot }) else { return }
         let permitted: Bool
         switch action {
@@ -94,6 +109,7 @@ final class PictureControlPanelModel: ObservableObject {
         case .clear: permitted = state.canEdit && target.availability == .occupied
         }
         guard permitted, busy(true) else { return }
+        feedback()
         pending = action
         task = Task { [self] in
             defer { pending = nil; _ = busy(false); task = nil }
@@ -133,7 +149,10 @@ final class PictureControlPanelModel: ObservableObject {
             if journal.failed && !closed && !operationFailed { notice(AppLocalized.resource("picture_control_report_save_failed")) }
         }
     }
-    func close() { closed = true; task?.cancel(); folders.close() }
+    func close() {
+        closed = true; task?.cancel()
+        if closesFolders { folders.close() }
+    }
     static func message(_ error: Error, slot: Int) -> String {
         let key: String
         switch error {
@@ -151,6 +170,35 @@ final class PictureControlPanelModel: ObservableObject {
         default: key = "picture_control_write_failed"
         }
         return String(format: AppLocalized.resource(key), slot - 200)
+    }
+}
+
+/// The folder catalog/grant outlives individual popup reads, as on Android.
+/// Only the popup observes scanning/file changes; the live monitor does not.
+@MainActor final class PictureControlFolderLifetime: ObservableObject {
+    let folders: PictureControlFolderState
+    init(defaults: UserDefaults) { folders = PictureControlFolderState(defaults: defaults) }
+}
+
+/// Owned by the monitor, never by a transient/rotated popup. A cancelled
+/// picker still returns to its explicit slot; background results wait for resume.
+struct PictureControlFolderPickerState {
+    struct Return { let slot: Int; let folder: URL? }
+    var active = false
+    private(set) var didReturn = false
+    private var target: Int?
+    private var folder: URL?
+    mutating func begin(slot: Int) {
+        target = slot; folder = nil; didReturn = false; active = true
+    }
+    mutating func complete(folder: URL?) {
+        self.folder = folder; active = false; didReturn = true
+    }
+    mutating func consume(resumed: Bool) -> Return? {
+        guard resumed, didReturn, let target else { return nil }
+        let result = Return(slot: target, folder: folder)
+        self = Self()
+        return result
     }
 }
 

@@ -27,22 +27,12 @@ private enum RemoteLayoutOrientation: Int, Equatable {
     }
 }
 
-private struct RemoteToolTintKey: EnvironmentKey {
-    static let defaultValue = ZTransferColors.secondaryText
-}
-
-private extension EnvironmentValues {
-    var remoteToolTint: Color {
-        get { self[RemoteToolTintKey.self] }
-        set { self[RemoteToolTintKey.self] = newValue }
-    }
-}
-
 private struct RemoteToolIconAnchor: ViewModifier {
     let tool: RemoteTool
     private var trigger: GeniePopupTrigger? {
         switch tool {
         case .grid: .remoteGrid
+        case .pictureControl: .remotePictureControl
         case .whiteBalance: .remoteWhiteBalance
         case .focusArea: .remoteFocusArea
         case .focusMode: .remoteFocusMode
@@ -75,9 +65,11 @@ struct RemoteView: View {
     @StateObject private var reviewLifetime: RemotePhotoReviewLifetime
     private var review: RemotePhotoReviewModel { reviewLifetime.review }
     @StateObject private var model: RemoteViewModel
+    @StateObject private var pictureControlFolders: PictureControlFolderLifetime
     @State private var pictureControlPanel: PictureControlPanelModel?
     @State private var pictureControlReport = ""
     @State private var pictureControlPresented = false
+    @State private var pictureControlPicker = PictureControlFolderPickerState()
     @State private var gridMenuPresented = false
     @State private var gridMenuClosing = false
     @State private var editingTools = false
@@ -164,6 +156,7 @@ struct RemoteView: View {
         self.toolDefaults = toolDefaults
         _entitlements = ObservedObject(wrappedValue: entitlements)
         _tools = StateObject(wrappedValue: preferences)
+        _pictureControlFolders = StateObject(wrappedValue: PictureControlFolderLifetime(defaults: toolDefaults))
         _lutLifetime = StateObject(wrappedValue: RemoteLUTMonitorLifetime(RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: toolDefaults), access: RemoteLUTFolderAccess(defaults: toolDefaults))))
         _dispMode = State(initialValue: preferences.disp)
         _histogramMode = State(initialValue: preferences.histogram)
@@ -231,14 +224,15 @@ struct RemoteView: View {
                 }
             }
         }
-        .sheet(isPresented: $pictureControlPresented, onDismiss: {
-            pictureControlPanel?.close(); pictureControlPanel = nil
-        }) {
-            if let panel = pictureControlPanel {
-                RemotePictureControlPanel(model: panel, folders: panel.folders,
-                    dismiss: { pictureControlPresented = false })
+        .fileImporter(isPresented: $pictureControlPicker.active, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls): pictureControlPicker.complete(folder: urls.first)
+            case .failure(let error):
+                pictureControlPicker.complete(folder: nil)
+                if (error as NSError).code != NSUserCancelledError { model.pictureControlNotice(AppLocalized.resource("lut_folder_denied")) }
             }
         }
+        .onChange(of: pictureControlPicker.didReturn) { if $0 { finishPictureControlFolderPicker() } }
         .fileImporter(isPresented: $lutFolderPickerPresented, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
             guard case .success(let urls) = result, let url = urls.first else { return }
             lutPickedFolder = url
@@ -272,6 +266,7 @@ struct RemoteView: View {
                 lutMonitor.suspendRendering()
                 pauseOrientationCandidate()
             } else {
+                finishPictureControlFolderPicker()
                 refreshOrientationCandidate()
             }
         }
@@ -338,6 +333,8 @@ struct RemoteView: View {
             applyDeviceOrientation(device.orientation)
         }
         .onDisappear {
+            closePictureControl()
+            pictureControlFolders.folders.close()
             monitorHintAnimator.stop()
             lutMonitor.close()
             lutMonitor.onNotice = nil
@@ -359,15 +356,22 @@ struct RemoteView: View {
             }
         }
         .onChange(of: model.movieMode) { _ in
-            pictureControlPanel?.close(); pictureControlPresented = false
+            closePictureControl()
             if model.movieMode && review.active { Task { await review.close() } }
             gridMenuPresented = false
             model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
         }
         .onChange(of: isSessionConnected) { connected in
-            if !connected { pictureControlPanel?.close(); pictureControlPresented = false }
+            if !connected { closePictureControl() }
             if !connected && review.active { Task { await review.close() } }
         }
+        .onChange(of: editingTools) { _ in closePictureControl() }
+        .onChange(of: layoutOrientation) { _ in closePictureControl() }
+        .onChange(of: selectedField) { if $0 != nil { closePictureControl() } }
+        .onChange(of: developerPanelPresented) { if $0 { closePictureControl() } }
+        .onChange(of: gridMenuPresented) { if $0 { closePictureControl() } }
+        .onChange(of: model.cameraToolPanel?.id) { if $0 != nil { closePictureControl() } }
+        .onChange(of: lutListPresented) { if $0 { closePictureControl() } }
         .onChange(of: dispMode) { mode in
             model.setMovieFormatMonitoring(mode.showsCameraInformation)
             model.setStorageMonitoring(mode.showsCameraInformation)
@@ -502,32 +506,65 @@ struct RemoteView: View {
     }
 
     private func openPictureControl() {
-        guard let session = reviewSession, isSessionConnected, model.initialLoaded else { return }
+        if pictureControlPresented { pictureControlPanel?.requestClose(); return }
         closeMonitorPanels()
+        // Android permits browsing while camera controls are initializing; only
+        // mutations use canWrite. A missing/unreadable camera reports the same
+        // opening failure instead of silently swallowing the tool tap.
+        guard let session = reviewSession else {
+            model.pictureControlNotice(AppLocalized.resource("picture_control_slots_read_failed"))
+            return
+        }
         let movie = model.movieMode
         let current: @Sendable () async -> Bool = { [weak model] in
             await MainActor.run { model.map { $0.movieMode == movie } ?? false }
         }
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("picture_control_backups", isDirectory: true)
-        let panel = PictureControlPanelModel(folders: PictureControlFolderState(defaults: toolDefaults),
+        let panel = PictureControlPanelModel(folders: pictureControlFolders.folders,
             current: { model.movieMode == movie },
-            allowed: { model.pictureControlWritesAllowed && scenePhase == .active },
+            allowed: { model.pictureControlWritesAllowed },
             busy: { model.setPictureControlWriting($0) },
             readOverview: { try await session.readPictureControlOverview(movie: movie, backupDirectory: directory, isCurrent: current) },
             change: { slot, change, log in
                 try await session.changePictureControl(slot: slot, change: change, movie: movie,
                     backupDirectory: directory, isCurrent: current, log: log)
-            })
+            }, closesFolders: false)
         panel.notice = { model.pictureControlNotice($0) }
         panel.movie = movie
         panel.onReport = { pictureControlReport = $0 }
-        panel.dismiss = { pictureControlPresented = false }
+        panel.feedback = { model.detentFeedback() }
+        panel.interactionAllowed = scenePhase == .active
+        panel.dismiss = { [weak panel] in
+            guard let panel, pictureControlPanel === panel else { return }
+            closePictureControl()
+        }
         pictureControlPanel = panel; pictureControlPresented = true
+        panel.open()
+    }
+
+    private func choosePictureControlFolder(_ slot: Int) {
+        pictureControlPicker.begin(slot: slot)
+        pictureControlPanel?.interactionAllowed = false
+    }
+
+    private func finishPictureControlFolderPicker() {
+        guard let returned = pictureControlPicker.consume(resumed: scenePhase == .active) else { return }
+        if let folder = returned.folder { pictureControlFolders.folders.changeFolder(folder) }
+        guard tools.layout(movie: model.movieMode).visible(.pictureControl) else { return }
+        if !pictureControlPresented { openPictureControl() }
+        pictureControlPanel?.editingSlot = returned.slot
+        pictureControlPanel?.interactionAllowed = true
+    }
+
+    private func closePictureControl() {
+        pictureControlPanel?.close()
+        pictureControlPanel = nil
+        pictureControlPresented = false
     }
 
     private func closeMonitorPanels() {
-        pictureControlPresented = false
+        closePictureControl()
         gridMenuPresented = false
         gridMenuClosing = false
         model.dismissCameraTool()
@@ -549,7 +586,9 @@ struct RemoteView: View {
 
     private var remoteBackButton: some View {
         Button {
-            if gridMenuPresented {
+            if pictureControlPresented {
+                pictureControlPanel?.requestClose()
+            } else if gridMenuPresented {
                 gridMenuClosing = true
             } else if let panel = model.cameraToolPanel {
                 panel.requestClose()
@@ -655,9 +694,9 @@ struct RemoteView: View {
     }
 
     private var remoteRotateButton: some View {
-        remoteToolButton(active: false, enabled: !editingTools && !tools.locked,
+        remoteToolButton(active: false, enabled: !editingTools && !tools.locked, fixed: true,
                          accessibilityLabel: AppLocalized.resource("remote_tool_rotate"),
-                         label: { RemoteRotateIcon().frame(width: 19, height: 19) }) {
+                         label: { toolMark(.rotate) }) {
             cycleLayoutOrientation()
         }.accessibilityIdentifier("remote-tool-rotate")
     }
@@ -674,13 +713,13 @@ struct RemoteView: View {
     // visibility are independent of this renderer registry.
     private func remoteToolControls(movie: Bool) -> [RemoteTool: AnyView] {
         [
-            .hd: AnyView(configuredRemoteToolButton(.hd, movie: movie, active: model.hdLiveView, accessibilityLabel: AppLocalized.resource("dev_hd_liveview"), label: { Text("HD").font(.system(size: 13, weight: .bold)).fixedSize() }) {
+            .hd: AnyView(configuredRemoteToolButton(.hd, movie: movie, active: model.hdLiveView, accessibilityLabel: AppLocalized.resource("dev_hd_liveview"), label: { toolMark(.hd) }) {
                 withAnimation(ZTransferMotion.standard) { tools.hd.toggle() }
             }),
-            .fps: AnyView(configuredRemoteToolButton(.fps, movie: movie, active: tools.fps, accessibilityLabel: AppLocalized.resource("dev_fps_overlay"), label: { Text("FPS").font(.system(size: 10.5, weight: .bold)).fixedSize() }) {
+            .fps: AnyView(configuredRemoteToolButton(.fps, movie: movie, active: tools.fps, accessibilityLabel: AppLocalized.resource("dev_fps_overlay"), label: { toolMark(.fps) }) {
                 registerFpsTap()
             }),
-            .histogram: AnyView(configuredRemoteToolButton(.histogram, movie: movie, active: histogramMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_histogram"), label: { RemoteHistogramIcon().frame(width: 19, height: 19) }) {
+            .histogram: AnyView(configuredRemoteToolButton(.histogram, movie: movie, active: histogramMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_histogram"), label: { toolMark(.histogram) }) {
                 withAnimation(ZTransferMotion.standard) {
                     histogramMode = switch histogramMode {
                     case .off: .rgb
@@ -691,7 +730,7 @@ struct RemoteView: View {
                 }
             }),
             .waveform: AnyView(configuredRemoteToolButton(.waveform, movie: movie, active: tools.waveform != .off, accessibilityLabel: AppLocalized.resource("remote_tool_waveform"), label: {
-                Text("W").font(.system(size: 12, weight: .bold)).frame(width: 19, height: 19)
+                toolMark(.waveform)
             }) {
                 tools.waveform = switch tools.waveform {
                 case .off: .rgb
@@ -699,14 +738,14 @@ struct RemoteView: View {
                 case .luma: .off
                 }
             }),
-            .grid: AnyView(configuredRemoteToolButton(.grid, movie: movie, active: tools.grid != .off, accessibilityLabel: AppLocalized.resource("remote_tool_grid"), label: { RemoteFramingGridMark(grid: tools.grid).frame(width: 19, height: 19) }) {
+            .grid: AnyView(configuredRemoteToolButton(.grid, movie: movie, active: tools.grid != .off, accessibilityLabel: AppLocalized.resource("remote_tool_grid"), label: { toolMark(.grid) }) {
                 model.dismissCameraTool()
                 selectedField = nil
                 developerPanelPresented = false
                 if gridMenuPresented { gridMenuClosing = true }
                 else { gridMenuClosing = false; gridMenuPresented = true }
             }),
-            .exposure: AnyView(configuredRemoteToolButton(.exposure, movie: movie, active: exposureMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_zebra"), label: { RemoteZebraIcon().frame(width: 18, height: 18) }) {
+            .exposure: AnyView(configuredRemoteToolButton(.exposure, movie: movie, active: exposureMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_zebra"), label: { toolMark(.exposure) }) {
                 withAnimation(ZTransferMotion.standard) {
                     exposureMode = switch exposureMode {
                     case .off: .zebra
@@ -717,17 +756,19 @@ struct RemoteView: View {
                 }
             }),
             .meter: AnyView(configuredRemoteToolButton(.meter, movie: movie, active: tools.meter, accessibilityLabel: AppLocalized.resource("remote_tool_meter"), label: {
-                Text("EV").font(.system(size: 9, weight: .bold)).frame(width: 19, height: 19)
+                toolMark(.meter)
             }) {
                 tools.meter.toggle()
             }),
             .pictureControl: AnyView(configuredRemoteToolButton(.pictureControl, movie: movie,
-                active: pictureControlPresented, enabled: isSessionConnected && model.initialLoaded,
+                active: pictureControlPresented,
                 accessibilityLabel: AppLocalized.resource("remote_tool_picture_control"), label: {
-                    Image(systemName: "camera.filters").frame(width: 19, height: 19)
+                    if let panel = pictureControlPanel, pictureControlPresented {
+                        RemotePictureControlToolMark(panel: panel)
+                    } else { toolMark(.pictureControl) }
                 }) { openPictureControl() }),
             .lut: AnyView(configuredRemoteToolButton(.lut, movie: movie, active: lutLifetime.isActive, accessibilityLabel: "LUT", label: {
-                Text("LUT").font(.system(size: 8, weight: .bold)).frame(width: 21, height: 19)
+                toolMark(.lut)
             }) {
                 lutMonitor.openMenu()
                 lutListPresented = true
@@ -735,29 +776,23 @@ struct RemoteView: View {
             .desqueeze: AnyView(configuredRemoteToolButton(.desqueeze, movie: movie, active: effectiveDesqueeze > 1.001,
                              accessibilityLabel: "\(RemoteDisplayOptions.label(for: effectiveDesqueeze))×",
                              label: {
-                if effectiveDesqueeze > 1.001 {
-                    Text(RemoteDisplayOptions.label(for: effectiveDesqueeze))
-                        .font(.system(size: 12, weight: .bold))
-                        .fixedSize()
-                } else {
-                    RemoteAspectIcon().frame(width: 18, height: 18)
-                }
+                toolMark(.desqueeze)
             }) {
                 withAnimation(ZTransferMotion.standard) {
                     tools.desqueeze = RemoteDisplayOptions.nextDesqueeze(after: effectiveDesqueeze)
                 }
             }),
-            .level: AnyView(configuredRemoteToolButton(.level, movie: movie, active: model.levelVisible, accessibilityLabel: AppLocalized.resource("cd_remote_level"), label: { RemoteLevelIcon().frame(width: 18, height: 18) }) {
+            .level: AnyView(configuredRemoteToolButton(.level, movie: movie, active: model.levelVisible, accessibilityLabel: AppLocalized.resource("cd_remote_level"), label: { toolMark(.level) }) {
                 withAnimation(ZTransferMotion.standard) {
                     tools.level.toggle()
                 }
             }),
             .focusFrame: AnyView(configuredRemoteToolButton(.focusFrame, movie: movie, active: tools.focusFrame, accessibilityLabel: AppLocalized.resource("remote_tool_focus_frame"), label: {
-                RemoteFocusFrameMark().frame(width: 19, height: 19)
+                toolMark(.focusFrame)
             }) {
                 withAnimation(ZTransferMotion.standard) { tools.focusFrame.toggle() }
             }),
-            .audio: AnyView(configuredRemoteToolButton(.audio, movie: movie, active: tools.audio, accessibilityLabel: AppLocalized.resource("cd_remote_audio_levels"), label: { RemoteAudioIcon().frame(width: 18, height: 18) }) {
+            .audio: AnyView(configuredRemoteToolButton(.audio, movie: movie, active: tools.audio, accessibilityLabel: AppLocalized.resource("cd_remote_audio_levels"), label: { toolMark(.audio) }) {
                 withAnimation(ZTransferMotion.standard) { tools.audio.toggle() }
             }),
             .whiteBalance: AnyView(cameraToolButton(.whiteBalance, movie: movie)),
@@ -765,13 +800,13 @@ struct RemoteView: View {
             .focusMode: AnyView(cameraToolButton(.focusMode, movie: movie)),
             .lock: AnyView(configuredRemoteToolButton(.lock, movie: movie, active: tools.locked,
                 accessibilityLabel: AppLocalized.resource("remote_tool_lock"), label: {
-                    RemoteEditorIcon(kind: tools.locked ? .lock : .lockOpen).frame(width: 19, height: 19)
+                    toolMark(.lock)
                 }) { setRotationLocked(!tools.locked, showHint: true) }),
             .computerControl: AnyView(configuredRemoteToolButton(.computerControl, movie: movie,
                 active: model.computerControlEnabled,
                 enabled: model.computerControlToggleAllowed,
                 accessibilityLabel: AppLocalized.resource("remote_tool_computer_control"), label: {
-                    Text("PC").font(.system(size: 10, weight: .bold)).fixedSize()
+                    toolMark(.computerControl)
                 }) {
                     model.toggleComputerControl()
                 }),
@@ -779,7 +814,7 @@ struct RemoteView: View {
             .record: AnyView(Group {
                 if editingTools {
                     remoteToolEditButton(.record, movie: movie) {
-                        RemoteEditorIcon(kind: .videocam).frame(width: 19, height: 19)
+                        toolMark(.record)
                     }
                 } else { remoteRecordButton }
             })
@@ -795,6 +830,13 @@ struct RemoteView: View {
                         landscape: landscape, onSelect: { model.setExposure(field, value: $0) },
                         onDismiss: { selectedField = nil })
                         .id(field)
+                }
+                if pictureControlPresented, let panel = pictureControlPanel {
+                    RemotePictureControlPanel(model: panel, folders: panel.folders,
+                        anchor: anchors[.remotePictureControl].map { proxy[$0] }, hostSize: proxy.size,
+                        landscape: landscape, canWrite: model.pictureControlWritesAllowed,
+                        dismiss: { if pictureControlPanel === panel { closePictureControl() } },
+                        chooseFolder: choosePictureControlFolder, pickerActive: pictureControlPicker.active)
                 }
                 if gridMenuPresented {
                     RemoteGridMenu(tools: tools, anchor: anchors[.remoteGrid].map { proxy[$0] },
@@ -872,10 +914,10 @@ struct RemoteView: View {
         enabled: Bool = true,
         accessibilityLabel: String, @ViewBuilder label: @escaping () -> Label, action: @escaping () -> Void) -> some View {
         if editingTools && !tool.fixed {
-            remoteToolEditButton(tool, movie: movie, label: label)
+            remoteToolEditButton(tool, movie: movie) { toolMark(tool) }
         } else {
             RemoteDockToolCell(id: tool.id, title: AppLocalized.resource(tool.titleKey), active: active, enabled: enabled && !(editingTools && tool.fixed), action: action) {
-                remoteToolButton(active: active, enabled: enabled && !(editingTools && tool.fixed), accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: action)
+                remoteToolButton(active: active, enabled: enabled && !(editingTools && tool.fixed), fixed: tool.fixed, preserveContentColors: tool == .pictureControl, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: action)
                     .modifier(RemoteToolIconAnchor(tool: tool))
                     .accessibilityIdentifier("remote-tool-\(tool.id)")
             }
@@ -886,7 +928,7 @@ struct RemoteView: View {
         @ViewBuilder label: @escaping () -> Label) -> some View {
         let layout = tools.layout(movie: movie)
         return RemoteToolVisibilityContent(layout: layout, tool: tool) { visible in
-            remoteToolButton(active: visible, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: {
+            remoteToolButton(active: visible, preserveContentColors: tool == .pictureControl, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: {
                 RemoteToolAnimatedMark(content: label)
             }) { setToolVisible(tool, !layout.visible(tool)) }
             .overlay(alignment: .topTrailing) {
@@ -930,7 +972,7 @@ struct RemoteView: View {
             case .record: model.setLocalRecordingToolVisible(false, fixedRecorder: false)
             case .hd: model.setHDLiveView(false)
             case .lock: setRotationLocked(false, showHint: false)
-            case .pictureControl: pictureControlPresented = false
+            case .pictureControl: closePictureControl()
             case .computerControl: if model.computerControlEnabled { model.setComputerControl(false) }
             case .histogram:
                 histogramMode = .off
@@ -1090,28 +1132,23 @@ struct RemoteView: View {
             onStop: { model.stopLocalRecording() })
     }
 
+    private func toolMark(_ tool: RemoteTool) -> some View {
+        RemoteToolMark(tool: tool, histogramRGB: histogramMode == .rgb, waveformRGB: tools.waveform == .rgb,
+            falseColor: exposureMode == .falseColor, grid: tools.grid, desqueeze: effectiveDesqueeze, locked: tools.locked)
+    }
+
     private func remoteToolButton<Label: View>(
         active: Bool,
         enabled: Bool = true,
+        fixed: Bool = false,
+        preserveContentColors: Bool = false,
         accessibilityLabel: String,
         @ViewBuilder label: @escaping () -> Label,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            label()
-                .foregroundStyle(active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
-                .environment(\.remoteToolTint, active ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
-                .frame(minWidth: 20, minHeight: 20)
-                .frame(width: 36, height: 36)
-        }
-        .buttonStyle(ZTransferGlassButtonStyle(
-            cornerRadius: 18,
-            active: active,
-            activeColor: ZTransferColors.accentBlue
-        ))
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.48)
-        .accessibilityLabel(accessibilityLabel)
+        RemoteMonitorToolButton(active: active, enabled: enabled, fixed: fixed,
+            preserveContentColors: preserveContentColors, accessibilityLabel: accessibilityLabel,
+            label: label, action: action)
     }
 
     @ViewBuilder private var reviewButton: some View {
@@ -1453,245 +1490,6 @@ struct RemoteView: View {
             return "blocked=no-box \(metadata?.focusFrameStatus ?? "unsupported-header")"
         }
         return nil
-    }
-
-    private struct RemoteHistogramIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                let barWidth = (size.width - 7) / 5
-                let gap: CGFloat = 1.5
-                let heights: [CGFloat] = [0.38, 0.62, 0.85, 0.55, 0.28]
-                let baseY = size.height - 2
-                for (index, height) in heights.enumerated() {
-                    var bar = Path()
-                    let x = 2.5 + CGFloat(index) * (barWidth + gap)
-                    bar.move(to: CGPoint(x: x, y: baseY))
-                    bar.addLine(to: CGPoint(x: x, y: baseY - baseY * height))
-                    context.stroke(bar, with: .color(tint),
-                                   style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                }
-            }
-        }
-    }
-
-    private struct RemoteGridIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                let inset: CGFloat = 2
-                for x in [CGFloat(0.30), CGFloat(0.70)] {
-                    var path = Path()
-                    let coordinate = inset + (size.width - inset * 2) * x
-                    path.move(to: CGPoint(x: coordinate, y: inset))
-                    path.addLine(to: CGPoint(x: coordinate, y: size.height - inset))
-                    context.stroke(path, with: .color(tint), style: stroke)
-                }
-                for y in [CGFloat(0.30), CGFloat(0.70)] {
-                    var path = Path()
-                    let coordinate = inset + (size.height - inset * 2) * y
-                    path.move(to: CGPoint(x: inset, y: coordinate))
-                    path.addLine(to: CGPoint(x: size.width - inset, y: coordinate))
-                    context.stroke(path, with: .color(tint), style: stroke)
-                }
-            }
-        }
-    }
-
-    private struct RemoteZebraIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                for index in 0..<5 {
-                    let x = size.width * ((CGFloat(index) + 1) / 6)
-                    let d = size.height * 0.24
-                    var path = Path()
-                    path.move(to: CGPoint(x: x - d, y: size.height * 0.5 - d))
-                    path.addLine(to: CGPoint(x: x + d, y: size.height * 0.5 + d))
-                    context.stroke(path, with: .color(tint), style: stroke)
-                }
-            }
-        }
-    }
-
-    private struct RemoteFocusFrameMark: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                let inset = min(size.width, size.height) * 0.16
-                let arm = min(size.width, size.height) * 0.25
-                let left = inset, right = size.width - inset, top = inset, bottom = size.height - inset
-                let segments: [(CGPoint, CGPoint)] = [
-                    (CGPoint(x: left, y: top + arm), CGPoint(x: left, y: top)),
-                    (CGPoint(x: left, y: top), CGPoint(x: left + arm, y: top)),
-                    (CGPoint(x: right - arm, y: top), CGPoint(x: right, y: top)),
-                    (CGPoint(x: right, y: top), CGPoint(x: right, y: top + arm)),
-                    (CGPoint(x: left, y: bottom - arm), CGPoint(x: left, y: bottom)),
-                    (CGPoint(x: left, y: bottom), CGPoint(x: left + arm, y: bottom)),
-                    (CGPoint(x: right - arm, y: bottom), CGPoint(x: right, y: bottom)),
-                    (CGPoint(x: right, y: bottom), CGPoint(x: right, y: bottom - arm)),
-                ]
-                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                for (start, end) in segments {
-                    var path = Path(); path.move(to: start); path.addLine(to: end)
-                    context.stroke(path, with: .color(tint), style: stroke)
-                }
-            }
-        }
-    }
-
-    private struct RemoteAspectIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                // Material Icons.Outlined.AspectRatio, matching Android's
-                // four-corner crop glyph rather than a generic expand arrow.
-                let sx = size.width / 24
-                let sy = size.height / 24
-                context.scaleBy(x: sx, y: sy)
-                let stroke = StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
-                var frame = Path()
-                frame.addRect(CGRect(x: 4, y: 4, width: 16, height: 16))
-                context.stroke(frame, with: .color(tint), style: stroke)
-                var corners = Path()
-                corners.move(to: CGPoint(x: 8, y: 8)); corners.addLine(to: CGPoint(x: 11, y: 8))
-                corners.move(to: CGPoint(x: 8, y: 8)); corners.addLine(to: CGPoint(x: 8, y: 11))
-                corners.move(to: CGPoint(x: 16, y: 16)); corners.addLine(to: CGPoint(x: 13, y: 16))
-                corners.move(to: CGPoint(x: 16, y: 16)); corners.addLine(to: CGPoint(x: 16, y: 13))
-                context.stroke(corners, with: .color(tint), style: stroke)
-            }
-        }
-    }
-
-    private struct RemoteFullscreenIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                // Android uses a 2dp inset and 5dp arms in a 17dp mark.
-                let pad: CGFloat = 2
-                let arm: CGFloat = 5
-                let segments: [(CGPoint, CGPoint)] = [
-                    (CGPoint(x: pad, y: pad), CGPoint(x: pad + arm, y: pad)),
-                    (CGPoint(x: pad, y: pad), CGPoint(x: pad, y: pad + arm)),
-                    (CGPoint(x: size.width - pad, y: pad), CGPoint(x: size.width - pad - arm, y: pad)),
-                    (CGPoint(x: size.width - pad, y: pad), CGPoint(x: size.width - pad, y: pad + arm)),
-                    (CGPoint(x: pad, y: size.height - pad), CGPoint(x: pad + arm, y: size.height - pad)),
-                    (CGPoint(x: pad, y: size.height - pad), CGPoint(x: pad, y: size.height - pad - arm)),
-                    (CGPoint(x: size.width - pad, y: size.height - pad), CGPoint(x: size.width - pad - arm, y: size.height - pad)),
-                    (CGPoint(x: size.width - pad, y: size.height - pad), CGPoint(x: size.width - pad, y: size.height - pad - arm)),
-                ]
-                for (start, end) in segments {
-                    var path = Path()
-                    path.move(to: start)
-                    path.addLine(to: end)
-                    context.stroke(path, with: .color(tint), style: stroke)
-                }
-            }
-        }
-    }
-
-    private struct RemoteRotateIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                // Match Android's 20dp RotateMark: 225° open arc plus one
-                // outer arrow wing at the arc tangent.
-                let side = min(size.width, size.height)
-                let center = CGPoint(x: size.width * 0.5, y: size.height * 0.49)
-                let radius = side * 0.29
-                let stroke = StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                var arc = Path()
-                arc.addArc(center: center, radius: radius,
-                           startAngle: .degrees(-125), endAngle: .degrees(100), clockwise: false)
-                context.stroke(arc, with: .color(tint), style: stroke)
-                let endAngle = 100.0 * Double.pi / 180.0
-                let tip = CGPoint(x: center.x + cos(endAngle) * radius,
-                                  y: center.y + sin(endAngle) * radius)
-                let wingAngle = (100.0 + 90.0 + 180.0 + 32.0) * Double.pi / 180.0
-                let arrowLength = side * 0.16
-                let wingEnd = CGPoint(x: tip.x + cos(wingAngle) * arrowLength,
-                                      y: tip.y + sin(wingAngle) * arrowLength)
-                var wing = Path()
-                wing.move(to: tip)
-                wing.addLine(to: wingEnd)
-                context.stroke(wing, with: .color(tint), style: stroke)
-            }
-        }
-    }
-
-    private struct RemoteAudioIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                let sx = size.width / 24
-                let sy = size.height / 24
-                context.scaleBy(x: sx, y: sy)
-                var speaker = Path()
-                speaker.move(to: CGPoint(x: 3, y: 9)); speaker.addLine(to: CGPoint(x: 7, y: 9))
-                speaker.addLine(to: CGPoint(x: 12, y: 4)); speaker.addLine(to: CGPoint(x: 12, y: 20))
-                speaker.addLine(to: CGPoint(x: 7, y: 15)); speaker.addLine(to: CGPoint(x: 3, y: 15)); speaker.closeSubpath()
-                context.fill(speaker, with: .color(tint))
-                let wave = StrokeStyle(lineWidth: 1.7, lineCap: .round)
-                var near = Path(); near.addArc(center: CGPoint(x: 12, y: 12), radius: 4,
-                                                startAngle: .degrees(-48), endAngle: .degrees(48), clockwise: false)
-                var far = Path(); far.addArc(center: CGPoint(x: 12, y: 12), radius: 7,
-                                              startAngle: .degrees(-48), endAngle: .degrees(48), clockwise: false)
-                context.stroke(near, with: .color(tint), style: wave)
-                context.stroke(far, with: .color(tint), style: wave)
-            }
-        }
-    }
-
-    private struct RemoteLevelIcon: View {
-        @Environment(\.remoteToolTint) private var tint
-
-        var body: some View {
-            Canvas { context, size in
-                let left = size.width * 0.08, right = size.width * 0.92
-                let top = size.height * 0.24, bottom = size.height * 0.78
-                let corner = min(size.width, size.height) * 0.09
-                let vialLeft = size.width * 0.34, vialRight = size.width * 0.66
-                let vialBottom = size.height * 0.49
-                var body = Path()
-                body.move(to: CGPoint(x: left + corner, y: top))
-                body.addLine(to: CGPoint(x: vialLeft, y: top))
-                body.addCurve(to: CGPoint(x: vialRight, y: top),
-                              control1: CGPoint(x: vialLeft, y: vialBottom),
-                              control2: CGPoint(x: vialRight, y: vialBottom))
-                body.addLine(to: CGPoint(x: right - corner, y: top))
-                body.addQuadCurve(to: CGPoint(x: right, y: top + corner),
-                                  control: CGPoint(x: right, y: top))
-                body.addLine(to: CGPoint(x: right, y: bottom - corner))
-                body.addQuadCurve(to: CGPoint(x: right - corner, y: bottom),
-                                  control: CGPoint(x: right, y: bottom))
-                body.addLine(to: CGPoint(x: left + corner, y: bottom))
-                body.addQuadCurve(to: CGPoint(x: left, y: bottom - corner),
-                                  control: CGPoint(x: left, y: bottom))
-                body.addLine(to: CGPoint(x: left, y: top + corner))
-                body.addQuadCurve(to: CGPoint(x: left + corner, y: top),
-                                  control: CGPoint(x: left, y: top))
-                body.closeSubpath()
-                let stroke = StrokeStyle(lineWidth: 1.65, lineCap: .round, lineJoin: .round)
-                context.stroke(body, with: .color(tint), style: stroke)
-                var dividers = Path()
-                dividers.move(to: CGPoint(x: size.width * 0.27, y: top))
-                dividers.addLine(to: CGPoint(x: size.width * 0.27, y: bottom))
-                dividers.move(to: CGPoint(x: size.width * 0.73, y: top))
-                dividers.addLine(to: CGPoint(x: size.width * 0.73, y: bottom))
-                context.stroke(dividers, with: .color(tint), style: stroke)
-            }
-        }
     }
 
     private func pauseOrientationCandidate() {

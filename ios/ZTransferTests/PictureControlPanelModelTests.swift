@@ -128,7 +128,7 @@ final class PictureControlPanelModelTests: XCTestCase {
         model?.notice = { notices.append($0) }
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         var host: UIHostingController<RemotePictureControlPanel>? = UIHostingController(rootView:
-            RemotePictureControlPanel(model: try XCTUnwrap(model), folders: folders, dismiss: {}))
+            RemotePictureControlPanel(model: try XCTUnwrap(model), folders: folders, dismiss: {}, chooseFolder: { _ in XCTFail("Unexpected picker") }))
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 320, height: 600)
         window.rootViewController = host; window.makeKeyAndVisible()

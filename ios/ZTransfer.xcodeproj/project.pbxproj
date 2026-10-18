@@ -575,6 +575,10 @@
 		FDC455DA213E797E48B4CD02 /* STAEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F1C6844BE03BFF28A13A05 /* STAEvent.swift */; };
 		FFDA02E8E126B442FEECC834 /* jdlossls-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 5CB21FE4937AE8215CB58EA3 /* jdlossls-12.c */; };
 		FFF675ED9789571FA7B55D18 /* android15-shadow-integrated.json in Resources */ = {isa = PBXBuildFile; fileRef = 7746562452178FF5B9A3CF24 /* android15-shadow-integrated.json */; };
+		1247DA6DFC0B675D9077ACD7 /* RemoteToolMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */; };
+		98C6F606D1EA548025C88F15 /* RemotePictureControlGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */; };
+		55778E486ECD538D41EF36D9 /* RemotePictureControlMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */; };
+		0D0588FAB7E6A0FE083B2617 /* RemoteToolMarkAndPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1194,6 +1198,10 @@
 		FE4B8301EA73B6C49D96971D /* ButtonPressStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonPressStateTests.swift; sourceTree = "<group>"; };
 		FF0DBC489F5750977C11989A /* PremiumEntitlement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumEntitlement.swift; sourceTree = "<group>"; };
 		FF2055C352664BEFA3E8DA24 /* verify-photo-export.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "verify-photo-export.py"; sourceTree = "<group>"; };
+		FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolMark.swift; sourceTree = "<group>"; };
+		EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePictureControlGlyph.swift; sourceTree = "<group>"; };
+		EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePictureControlMotion.swift; sourceTree = "<group>"; };
+		97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolMarkAndPresetTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -1350,6 +1358,7 @@
 				0F703D47BDE986E85F3A5321 /* RemoteShutterTests.swift */,
 				2F4E1778458633C47A4B7C38 /* RemoteToolbarGeometryTests.swift */,
 				0E6220C572967539054EFC1A /* RemoteToolDragStateTests.swift */,
+				97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */,
 				AA746937F57F91A1A5DC2C00 /* RemoteToolLayoutTests.swift */,
 				22E1D672B4733BD5BCDE786B /* RemoteToolModeTransitionTests.swift */,
 				38F1B980C42BA7ED2F318409 /* RemoteToolPreferencesTests.swift */,
@@ -1529,6 +1538,9 @@
 				5A1870AC6A1B85DF8F95F4C1 /* RemoteCameraToolMenu.swift */,
 				D8B17F2DC53C015416FB4D42 /* RemoteChoicePopup.swift */,
 				C87E736EE473C8810873A141 /* RemoteConfiguredToolbar.swift */,
+				FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */,
+				EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */,
+				EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */,
 				F6C5D9CBF90643BBCF20085A /* RemoteEditorIcon.swift */,
 				F4A43D3CDCC85ED79FCF1B45 /* RemoteEntryButton.swift */,
 				125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */,
@@ -2428,6 +2440,7 @@
 				601ABFAD39A866300F2A56F9 /* RemoteShutterTests.swift in Sources */,
 				79DF53F7FB57B0EF6D965D7C /* RemoteStateTests.swift in Sources */,
 				1FCCB40574D1DA7E23BE18A6 /* RemoteToolDragStateTests.swift in Sources */,
+				0D0588FAB7E6A0FE083B2617 /* RemoteToolMarkAndPresetTests.swift in Sources */,
 				C4E9830EC6359E896006CC04 /* RemoteToolLayoutTests.swift in Sources */,
 				307D60C303D75C3EB71D6D5F /* RemoteToolModeTransitionTests.swift in Sources */,
 				F71D8A9B159231C86891AB85 /* RemoteToolPreferencesTests.swift in Sources */,
@@ -2620,6 +2633,9 @@
 				BF9CB5E4157F2E6259D88432 /* RemoteChoicePopup.swift in Sources */,
 				4111DA67E202D4EAC4B1468E /* RemoteConfiguredToolbar.swift in Sources */,
 				86ED54F4E3D196FAF34BBC0C /* RemoteDisplayOptions.swift in Sources */,
+				1247DA6DFC0B675D9077ACD7 /* RemoteToolMark.swift in Sources */,
+				98C6F606D1EA548025C88F15 /* RemotePictureControlGlyph.swift in Sources */,
+				55778E486ECD538D41EF36D9 /* RemotePictureControlMotion.swift in Sources */,
 				74669B68F587235071ACF437 /* RemoteEditorIcon.swift in Sources */,
 				588BB42D144D7E3C8BE692B1 /* RemoteEntryButton.swift in Sources */,
 				169B60F6D4A362EA10368369 /* RemoteEntryIntroPolicy.swift in Sources */,

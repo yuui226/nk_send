@@ -166,6 +166,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
     var activeOutline: Bool
     var liquidGlassBoundary: Bool
     var materialContentColor: Color?
+    var preserveContentColors: Bool
     var disabledAlpha: CGFloat
     var prominentPressFeedback: Bool
     var showSheen: Bool
@@ -187,6 +188,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
         activeOutline: Bool = false,
         liquidGlassBoundary: Bool = false,
         materialContentColor: Color? = nil,
+        preserveContentColors: Bool = false,
         disabledAlpha: CGFloat = 0.45,
         prominentPressFeedback: Bool = false,
         showSheen: Bool = true,
@@ -205,6 +207,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
         self.activeOutline = activeOutline
         self.liquidGlassBoundary = liquidGlassBoundary
         self.materialContentColor = materialContentColor
+        self.preserveContentColors = preserveContentColors
         self.disabledAlpha = disabledAlpha
         self.prominentPressFeedback = prominentPressFeedback
         self.showSheen = showSheen
@@ -236,7 +239,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
         // Android omits the entire graphics layer once scale has returned to 1.
         let translation: CGFloat = physical && transformed
             ? (skin == .cameraControls ? 2.1 : 1.6) * CGFloat(frame.light) : 0
-        return treatedLabel(label, skin: skin, press: CGFloat(frame.light), active: CGFloat(frame.active))
+        return iconContent(label, skin: skin, press: CGFloat(frame.light), active: CGFloat(frame.active))
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius,
                 style: nativeGlass ? .continuous : .circular))
             .background {
@@ -260,16 +263,16 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
     }
 
     @ViewBuilder
-    private func treatedLabel<Label: View>(_ label: Label, skin: ZTransferButtonSkin,
-                                           press: CGFloat, active: CGFloat) -> some View {
+    func iconContent<Label: View>(_ label: Label, skin: ZTransferButtonSkin,
+                                 press: CGFloat = 0, active: CGFloat = 0) -> some View {
         switch skin {
-        case .titanium:
+        case .titanium where !preserveContentColors:
             label.modifier(ZTransferTitaniumStamp(dark: colorScheme == .dark,
                 inlay: materialContentColor, pressProgress: press))
-        case .cameraControls where !panel:
+        case .cameraControls where !panel && !preserveContentColors:
             label.modifier(ZTransferCameraPrint(scheme: colorScheme, inlay: materialContentColor,
                 activeColor: activeColor, progress: active))
-        case .frostedGlass, .liquidGlass, .wood, .cameraControls:
+        case .frostedGlass, .liquidGlass, .wood, .cameraControls, .titanium:
             if let tint { label.foregroundStyle(tint) } else { label }
         }
     }

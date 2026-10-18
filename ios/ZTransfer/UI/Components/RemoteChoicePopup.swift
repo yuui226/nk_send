@@ -15,6 +15,7 @@ struct RemoteChoicePopup<Content: View>: View {
     let dismiss: () -> Void
     var besideAnchor = false
     var usesFullAnchor = false
+    var back: (() -> Void)? = nil
     @ViewBuilder var content: (RemoteCameraToolMenuPlacement) -> Content
 
     var body: some View {
@@ -40,7 +41,7 @@ struct RemoteChoicePopup<Content: View>: View {
                 .offset(x: placement.frame.minX, y: placement.frame.minY)
         }
         .frame(width: hostSize.width, height: hostSize.height, alignment: .topLeading)
-        .accessibilityAction(.escape, close)
+        .accessibilityAction(.escape) { (back ?? close)() }
         .onAppear { if closing && contentHeight == nil { dismiss() } }
         .onChange(of: closing) { if $0 && contentHeight == nil { dismiss() } }
     }

@@ -3503,13 +3503,14 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "c01772c941129fa571f58280068a4a8e44f859a3ade871034dd0d1c678e03450",
+      "sha256": "5d20deba10b9aa30e537e9f5a9bc687284fe5b6b66f3da865de01e8934cbdce1",
       "audit_sha256": "a0a1ef2bb79b32d53f1e630c998af351a53ab2acb2262c61fe9feb8515f46d7f",
       "repair_evidence": [
         "2026-10-16 F080 partial: pill 6pt corners, gradient fill/edge, semantic text color; f080-pill-surface-fixed UI1/1 passed; dark/skin/motion validation pending.",
         "2026-10-16 F080 partial: badge onAccent light/dark and surface 2pt inward border aligned to Android; static review only, build/UI not run; icon and motion pending.",
         "2026-10-16 F080 top scroll scrim and backgroundTop token; syntax parse only, coordinate/safe-area runtime checks pending.",
-        "2026-10-16 F080授权专项：models-r2 12/12；UI首轮5项回归通过、顶栏取消误显Done修复后top-final 2/2（共7个不同UI通过）。日志 /tmp/ztransfer-f080-authorized-*.log；首次失败保留，详见台账。F080未核销，逐帧/完整布局/真机仍待验。"
+        "2026-10-16 F080授权专项：models-r2 12/12；UI首轮5项回归通过、顶栏取消误显Done修复后top-final 2/2（共7个不同UI通过）。日志 /tmp/ztransfer-f080-authorized-*.log；首次失败保留，详见台账。F080未核销，逐帧/完整布局/真机仍待验。",
+        "2026-10-18监看图标/预设6/6开发侧：真实Android1.5.4矢量、主题保色、锚定九槽/双列/确认/目录返回/动画；70个不同专项最终通过，截图已查看；中间像素检测失败与真机/Files/实际写入未验证边界见docs/待做/iOS-监看工具图标与预设交互复刻.md。"
       ]
     },
     {
@@ -5662,7 +5663,11 @@
         "C23"
       ],
       "role": "production",
-      "sha256": "702579d849546e58b1b47d7be91016c94284cfe9046b424beef2ff01fd3479de"
+      "sha256": "a3e19fc1729831bfa08eab60de0dad82e8e9115fbad64521c37e5931d2c32819",
+      "audit_sha256": "702579d849546e58b1b47d7be91016c94284cfe9046b424beef2ff01fd3479de",
+      "repair_evidence": [
+        "2026-10-18监看图标/预设6/6开发侧：真实Android1.5.4矢量、主题保色、锚定九槽/双列/确认/目录返回/动画；70个不同专项最终通过，截图已查看；中间像素检测失败与真机/Files/实际写入未验证边界见docs/待做/iOS-监看工具图标与预设交互复刻.md。"
+      ]
     },
     {
       "path": "ios/ZTransfer/UI/Components/RemoteCameraToolMenu.swift",
@@ -5678,7 +5683,11 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "e1da2888ec27b39fb7563eefdab8ad9e604ccb4d048240e03b433a08defca8aa"
+      "sha256": "fcb9e941dd419cf4c11684ddfea99446b9eb8ebd1e86432440be3a4552973e5f",
+      "audit_sha256": "e1da2888ec27b39fb7563eefdab8ad9e604ccb4d048240e03b433a08defca8aa",
+      "repair_evidence": [
+        "2026-10-18监看图标/预设6/6开发侧：真实Android1.5.4矢量、主题保色、锚定九槽/双列/确认/目录返回/动画；70个不同专项最终通过，截图已查看；中间像素检测失败与真机/Files/实际写入未验证边界见docs/待做/iOS-监看工具图标与预设交互复刻.md。"
+      ]
     },
     {
       "path": "ios/ZTransfer/UI/Components/RemoteConfiguredToolbar.swift",
@@ -5694,7 +5703,11 @@
         "C27"
       ],
       "role": "production",
-      "sha256": "e7a1f3adcd175a07e7340ff1f04ceacaf4a534e8a61d226e828867dc671235aa"
+      "sha256": "d032803c46de6e1422ae03ff9e373622fe198b6cc557e72484a3ebcc5cdab0cf",
+      "audit_sha256": "e7a1f3adcd175a07e7340ff1f04ceacaf4a534e8a61d226e828867dc671235aa",
+      "repair_evidence": [
+        "2026-10-18监看图标/预设6/6开发侧：真实Android1.5.4矢量、主题保色、锚定九槽/双列/确认/目录返回/动画；70个不同专项最终通过，截图已查看；中间像素检测失败与真机/Files/实际写入未验证边界见docs/待做/iOS-监看工具图标与预设交互复刻.md。"
+      ]
     },
     {
       "path": "ios/ZTransfer/UI/Components/RemoteEntryButton.swift",
@@ -5925,14 +5938,15 @@
         "C29"
       ],
       "role": "production",
-      "sha256": "1d94a1664f54981693a2ab49ae6199858341bd52be73ad71cf8eac0eb9264d0d",
+      "sha256": "1860e57b14c76ba6aff23787b83b69bc36aaddadb70e98541008035e1a9cfa6a",
       "audit_sha256": "f53d21ce47b73385dbedd2d768a2f66c4033118bb3ee16c887cac9a326a9ede5",
       "repair_evidence": [
         "F078行内独立Genie/真实进度/退出挂载；f078-genie-progress 2/2、inline UI4/4、最终anchors UI1/1；其余验收未完。",
         "F078自然宽度/最终宽度重测多行及普通关闭帧：natural-layout-final UI2/2；早期fixedSize截断已撤掉，详见台账。",
         "U004 完整布局后下一帧取图、尺寸重捕获及内描边；settings-payment-isolated 23/23中4项宿主渲染/反转通过，非真机视觉验收。",
         "2026-10-17 U004按安卓标题/卡片/页脚整列滚动、当次内容测量后展开、明确视口尺寸；完整SettingsPopupOverlay首帧至展开高度/两入口/小屏/换高重开及原宿主回归6/6通过，settings-whole-column-isolated-tests.log TEST SUCCEEDED；已真机构建安装，用户观感待确认。",
-        "2026-10-17 U004用户再次否决后修正：实际网格保留上下12pt越界空间/物理像素裁片边界/Retina遮罩；设置列禁回弹和系统滚动边缘材质、单Surface单描边/安卓间距/卡片4%底/随显示进度遮罩。settings-render-final.log7/7 TEST SUCCEEDED，精确终点全图平均差0.2497/255；旧固定尺寸/源图测试证据缺口与中间失败均保留，真机观感另验。"
+        "2026-10-17 U004用户再次否决后修正：实际网格保留上下12pt越界空间/物理像素裁片边界/Retina遮罩；设置列禁回弹和系统滚动边缘材质、单Surface单描边/安卓间距/卡片4%底/随显示进度遮罩。settings-render-final.log7/7 TEST SUCCEEDED，精确终点全图平均差0.2497/255；旧固定尺寸/源图测试证据缺口与中间失败均保留，真机观感另验。",
+        "2026-10-18监看图标/预设6/6开发侧：真实Android1.5.4矢量、主题保色、锚定九槽/双列/确认/目录返回/动画；70个不同专项最终通过，截图已查看；中间像素检测失败与真机/Files/实际写入未验证边界见docs/待做/iOS-监看工具图标与预设交互复刻.md。"
       ]
     },
     {
@@ -6204,7 +6218,7 @@
         "C32"
       ],
       "role": "production",
-      "sha256": "d731b52ec7cf5acb951bc57cc2c9f6159577bfc2e2e269764a204f0ae6c5b966",
+      "sha256": "c7e89da7b7bb664c80f463c9cae00a8e899491ba5701050af5692d96159edc1e",
       "audit_sha256": "5e3e3e2306f33a712fe231a6e3a6b10fb439bba8ae7d15267d10fb8a8ea1d6fe",
       "repair_evidence": [
         "2026-10-17 F164 lifecycle and descriptor/scalar repair; details/mode/polling logs documented in ledger; final movie-format5/5 passed, no UI/device tests.",
@@ -6226,7 +6240,8 @@
         "2026-10-17 F161 functional completion: extracted existing production scope GeometryReader/card/data gates into RemoteMonitorScopesOverlay, directly used by RemoteView with original model inputs and CAMERA informationInset condition. No alternate test-only layout. Added actual ImageRenderer test across48 combinations (3 sizes x2 information insets x2 audio lanes x4 histogram/waveform enabled states); verifies rendered bounds, equal single/double slots, waveform relocation, bottom information reservation and all-off absence. Initial transparent render and diagnostic runs failed12 all-off assertions with previous single-chart bounds; fixed-background rendering removes ambiguous empty transparent surface reuse. Assertions remain: no pixels differing from background when both modes off, and same slot/bottom/height bounds when enabled. /tmp/ztransfer-monitor-scope-render-background-20261017.log actual1/1 TEST SUCCEEDED exit0, all48 combinations; earlier failed logs retained. Combined prior12/12 readout math and meter-layout tests plus actual source/data gates closes F161 functional/basic usable scope. This tests actual scope component, not complete camera screen, hardware, gesture or animation fidelity. Histogram fill styling, transition/fade timing and fine typography remain deferred; not claimed reproduced.166/182 closed,16 unclosed:8 functional/platform/validation (F013,F051,F078,F142,F160,F163,F171,F177),8 deferred visual tasks. No device/install/commit/push.",
         "2026-10-17 F160/F163 functional completion: exposed existing production RemoteExposureMeterOverlay and IOSSoundMeter internally for actual rendering tests (no alternate UI). EV rendering proves missing sample leaves dim scale/no pointer, zero renders balanced feedback, positive/negative overflow pointers appear at correct ends. Audio rendering proves silence has no bright segments, left/right full-current inputs affect only their channel, a peak-only input illuminates a small isolated region rather than the full bar. /tmp/ztransfer-meter-feedback-render-20261017.log actual7/7 TEST SUCCEEDED exit0 (2 actual-render tests,3 EV boundary tests,1 current/peak test,1 adaptive meter layout test across16 configurations). Root source retains connected/movie/audio gate, optional levels gate, independent EV enabled gate and metadata-driven readings; landscape right stack/portrait left lane use tested RemoteMonitorMeterLayout. Combined F161 actual48 scope bounds cases establishes reserved lanes/information row; no complete camera-screen screenshot or hardware/VoiceOver/gesture claim. Current basic usable functional feedback is closed; exact 160ms pointer/80-90ms audio animation and fine styling remain deferred by user.168/182 closed,14 unclosed:6 functional/platform/validation (F013,F051,F078,F142,F171,F177),8 deferred visual tasks. No device/install/commit/push.",
         "2026-10-17 F171 orientation resume admission: Android re-enables OrientationEventListener on resume and unfreezing. iOS paused/cleared candidates on background/lock/editing, but never resampled on return; UIDevice may emit no new event while stationary. Added refreshOrientationCandidate gated by active notification ownership and !stopCleanupStarted; invoked when scene becomes active, lock is released, and tool editing ends. It routes through existing valid-direction/foreground/unlocked gate and260ms generation check, preserving manual suppression and conflated pending semantics. applyDeviceOrientation now also rejects teardown. /tmp/ztransfer-orientation-resume-20261017.log actual3/3 TEST SUCCEEDED exit0 for invalid/pause tickets, manual suppression across pause and latest pending request/discard; compile verifies production wiring. No physical sensor/background replay claimed. Asked platform choice via async question: CoreMotion gravity mapped to Android angle bands vs retaining UIDevice classification; NO answer yet, source unchanged. Android bands read from RemoteScreen and RemoteOrientationPolicyTest:0...30/330...359 portrait,60...120 rotation2,240...300 rotation1; invalid/gaps/upside-down ignored. F171 remains open.168/182 closed,14 unclosed (6 functional/platform/validation,8 deferred visual). No UI/device/install/commit/push.",
-        "U003 用户覆盖旧安卓行为：USB/STA信号禁止点击，四处共用CameraSignalControl；源码复核，无UI手势测试。"
+        "U003 用户覆盖旧安卓行为：USB/STA信号禁止点击，四处共用CameraSignalControl；源码复核，无UI手势测试。",
+        "2026-10-18监看图标/预设6/6开发侧：真实Android1.5.4矢量、主题保色、锚定九槽/双列/确认/目录返回/动画；70个不同专项最终通过，截图已查看；中间像素检测失败与真机/Files/实际写入未验证边界见docs/待做/iOS-监看工具图标与预设交互复刻.md。"
       ]
     },
     {

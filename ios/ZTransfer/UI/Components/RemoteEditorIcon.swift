@@ -1,15 +1,15 @@
-// Generated from AndroidX Compose Material Icons 1.7.6; Copyright 2024 AOSP.
+// Generated from AndroidX Compose Material Icons 1.5.4; Copyright AOSP.
 // Apache-2.0; see Resources/licenses. Regenerate with generate-android-tool-icons.py.
 import SwiftUI
 
 struct RemoteEditorIcon: Shape {
-    enum Kind { case settings, check, videocam, visible, hidden, lock, lockOpen, focusArea, touch }
+    enum Kind: CaseIterable { case settings, check, videocam, visible, hidden, lock, lockOpen, focusArea, touch, volumeUp, aspectRatio, edit, arrowBack }
     let kind: Kind
     func path(in rect: CGRect) -> Path {
         var path = Path()
         switch kind {
         case .settings:
-            // filled/Settings.kt SHA256 f082244e6ae60bda206c9bbc6eb4e371641c4b35a118126acf58db5f1e0d6f30
+            // filled/Settings.kt SHA256 3802d7952de00000a89eaf1094f32ab5eb3eb08a6c2555b57c1527b24a1a4464
             path.move(to: CGPoint(x: 19.1399994, y: 12.9399996))
             path.addCurve(to: CGPoint(x: 19.1999989, y: 12), control1: CGPoint(x: 19.1800003, y: 12.6399994), control2: CGPoint(x: 19.1999989, y: 12.3299999))
             path.addCurve(to: CGPoint(x: 19.1299992, y: 11.0600004), control1: CGPoint(x: 19.1999989, y: 11.6800003), control2: CGPoint(x: 19.1799984, y: 11.3599997))
@@ -57,7 +57,7 @@ struct RemoteEditorIcon: Shape {
             path.addCurve(to: CGPoint(x: 12, y: 15.6000004), control1: CGPoint(x: 15.6000004, y: 13.9800005), control2: CGPoint(x: 13.9799995, y: 15.6000004))
             path.closeSubpath()
         case .check:
-            // filled/Check.kt SHA256 b8b74a9e72637e98060287f6d845ed4d24a1f2ff33ae2b44077e37ea315b7c6f
+            // filled/Check.kt SHA256 646d1f5f92a1d701b3370cfa201046fd2666a03db560728a1141e82b3a154576
             path.move(to: CGPoint(x: 9, y: 16.1700001))
             path.addLine(to: CGPoint(x: 4.82999992, y: 12))
             path.addLine(to: CGPoint(x: 3.40999985, y: 13.4099998))
@@ -66,7 +66,7 @@ struct RemoteEditorIcon: Shape {
             path.addLine(to: CGPoint(x: 19.5900002, y: 5.59000015))
             path.closeSubpath()
         case .videocam:
-            // filled/Videocam.kt SHA256 4191e8d459e7ba95c15bf72da24c721eab6b95cbef2559c4314f204101547d46
+            // filled/VideocamKt.class SHA256 893bee37f6844fc7d33f9cb3dae5f0c183c7554b10c6b2c094ebe276af4bfde5
             path.move(to: CGPoint(x: 17, y: 10.5))
             path.addLine(to: CGPoint(x: 17, y: 7))
             path.addCurve(to: CGPoint(x: 16, y: 6), control1: CGPoint(x: 17, y: 6.44999981), control2: CGPoint(x: 16.5499992, y: 6))
@@ -82,7 +82,7 @@ struct RemoteEditorIcon: Shape {
             path.addLine(to: CGPoint(x: 17, y: 10.5))
             path.closeSubpath()
         case .visible:
-            // outlined/Visibility.kt SHA256 646f20fa4eae0e6661280fe9a704abc2b9ee168f8678788e50ea36872ff2aa02
+            // outlined/VisibilityKt.class SHA256 8aecad169b8766bb88469202434a25adc8ec0575a23cded1d07ce676cb054d2e
             path.move(to: CGPoint(x: 12, y: 6))
             path.addCurve(to: CGPoint(x: 20.8199997, y: 11.5), control1: CGPoint(x: 15.79, y: 6), control2: CGPoint(x: 19.1700001, y: 8.13000011))
             path.addCurve(to: CGPoint(x: 12, y: 17), control1: CGPoint(x: 19.1700001, y: 14.8699999), control2: CGPoint(x: 15.79, y: 17))
@@ -106,7 +106,7 @@ struct RemoteEditorIcon: Shape {
             path.addCurve(to: CGPoint(x: 12, y: 7), control1: CGPoint(x: 16.5, y: 9.02000046), control2: CGPoint(x: 14.4799995, y: 7))
             path.closeSubpath()
         case .hidden:
-            // outlined/VisibilityOff.kt SHA256 780f62f77fac51ad1ed76e606f65eca47b1b3eec8e152699a55a561ce3d041a5
+            // outlined/VisibilityOffKt.class SHA256 1726b67674ef85bf7cbf61d1b2411258dae4431cdc7a784a2815f94e3473f8e0
             path.move(to: CGPoint(x: 12, y: 6))
             path.addCurve(to: CGPoint(x: 20.8199997, y: 11.5), control1: CGPoint(x: 15.79, y: 6), control2: CGPoint(x: 19.1700001, y: 8.13000011))
             path.addCurve(to: CGPoint(x: 18.4099998, y: 14.6199999), control1: CGPoint(x: 20.2299995, y: 12.7200003), control2: CGPoint(x: 19.3999996, y: 13.7700005))
@@ -152,7 +152,7 @@ struct RemoteEditorIcon: Shape {
             path.addCurve(to: CGPoint(x: 6.11000061, y: 7.96999836), control1: CGPoint(x: 3.88000035, y: 10.0699978), control2: CGPoint(x: 4.90000057, y: 8.88999844))
             path.closeSubpath()
         case .lock:
-            // filled/Lock.kt SHA256 49cc264d60f7cff1ef3e274940fbbb0fd163ae7c67fba5c0f3466b348af2e361
+            // filled/Lock.kt SHA256 35d17a99cd758c0e4c16c51ba15544d2e291e2e66e9748098dd1d73cd15d3199
             path.move(to: CGPoint(x: 18, y: 8))
             path.addLine(to: CGPoint(x: 17, y: 8))
             path.addLine(to: CGPoint(x: 17, y: 6))
@@ -182,7 +182,7 @@ struct RemoteEditorIcon: Shape {
             path.addLine(to: CGPoint(x: 15.1000004, y: 8))
             path.closeSubpath()
         case .lockOpen:
-            // filled/LockOpen.kt SHA256 a48933750ff02a157e1e4d397f4918ab7409be2f20dd3b061519cd5d022c517c
+            // filled/LockOpenKt.class SHA256 27b944735366fc521a130d3cabf540cd3499b0780501ed99f721f6e2d536d6f8
             path.move(to: CGPoint(x: 12, y: 17))
             path.addCurve(to: CGPoint(x: 14, y: 15), control1: CGPoint(x: 13.1000004, y: 17), control2: CGPoint(x: 14, y: 16.1000004))
             path.addCurve(to: CGPoint(x: 12, y: 13), control1: CGPoint(x: 14, y: 13.8999996), control2: CGPoint(x: 13.1000004, y: 13))
@@ -214,7 +214,7 @@ struct RemoteEditorIcon: Shape {
             path.addLine(to: CGPoint(x: 18, y: 20))
             path.closeSubpath()
         case .focusArea:
-            // filled/CenterFocusStrong.kt SHA256 7ba45aeee3070a8faf277e399945ed64141648f18b5540d6ed110948512a2c11
+            // filled/CenterFocusStrongKt.class SHA256 420b117536202a143bfde7f5765f08763462be0e0e60d710c579402821c549d2
             path.move(to: CGPoint(x: 12, y: 8))
             path.addCurve(to: CGPoint(x: 8, y: 12), control1: CGPoint(x: 9.78999996, y: 8), control2: CGPoint(x: 8, y: 9.78999996))
             path.addCurve(to: CGPoint(x: 12, y: 16), control1: CGPoint(x: 8, y: 14.21), control2: CGPoint(x: 9.78999996, y: 16))
@@ -258,7 +258,7 @@ struct RemoteEditorIcon: Shape {
             path.addLine(to: CGPoint(x: 19, y: 19))
             path.closeSubpath()
         case .touch:
-            // filled/TouchApp.kt SHA256 5107a35e7841b662c2c43fcd454b9c34cf332e7e319053394a91bfaa2de882e5
+            // filled/TouchAppKt.class SHA256 e752cc76ee08cf0fe578a332bc60462ae07039b3d7cea21218c0fb9787892632
             path.move(to: CGPoint(x: 9, y: 11.2399998))
             path.addLine(to: CGPoint(x: 9, y: 7.5))
             path.addCurve(to: CGPoint(x: 11.5, y: 5), control1: CGPoint(x: 9, y: 6.11999989), control2: CGPoint(x: 10.1199999, y: 5))
@@ -287,6 +287,93 @@ struct RemoteEditorIcon: Shape {
             path.addLine(to: CGPoint(x: 19.7300014, y: 17.4499989))
             path.addCurve(to: CGPoint(x: 19.7500019, y: 17.2499981), control1: CGPoint(x: 19.7400017, y: 17.3799992), control2: CGPoint(x: 19.7500019, y: 17.3099995))
             path.addCurve(to: CGPoint(x: 18.8400002, y: 15.8699999), control1: CGPoint(x: 19.75, y: 16.6299992), control2: CGPoint(x: 19.3700008, y: 16.0900002))
+            path.closeSubpath()
+        case .volumeUp:
+            // filled/VolumeUpKt.class SHA256 bd9c33a9c2efa51bfb6340c37c5d9c3b9da0c8f744dc6ac0e8aaaddbd9bf59ec
+            path.move(to: CGPoint(x: 3, y: 9))
+            path.addLine(to: CGPoint(x: 3, y: 15))
+            path.addLine(to: CGPoint(x: 7, y: 15))
+            path.addLine(to: CGPoint(x: 12, y: 20))
+            path.addLine(to: CGPoint(x: 12, y: 4))
+            path.addLine(to: CGPoint(x: 7, y: 9))
+            path.addLine(to: CGPoint(x: 3, y: 9))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 16.5, y: 12))
+            path.addCurve(to: CGPoint(x: 14, y: 7.96999979), control1: CGPoint(x: 16.5, y: 10.2299995), control2: CGPoint(x: 15.4799995, y: 8.71000004))
+            path.addLine(to: CGPoint(x: 14, y: 16.0200005))
+            path.addCurve(to: CGPoint(x: 16.5, y: 12), control1: CGPoint(x: 15.4799995, y: 15.2900009), control2: CGPoint(x: 16.5, y: 13.7700005))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 14, y: 3.23000002))
+            path.addLine(to: CGPoint(x: 14, y: 5.28999996))
+            path.addCurve(to: CGPoint(x: 19, y: 12), control1: CGPoint(x: 16.8899994, y: 6.1500001), control2: CGPoint(x: 19, y: 8.82999992))
+            path.addCurve(to: CGPoint(x: 14, y: 18.7099991), control1: CGPoint(x: 19, y: 15.1700001), control2: CGPoint(x: 16.8899994, y: 17.8500004))
+            path.addLine(to: CGPoint(x: 14, y: 20.7699986))
+            path.addCurve(to: CGPoint(x: 21, y: 11.9999981), control1: CGPoint(x: 18.0100002, y: 19.8599987), control2: CGPoint(x: 21, y: 16.2799988))
+            path.addCurve(to: CGPoint(x: 14, y: 3.22999763), control1: CGPoint(x: 21, y: 7.71999741), control2: CGPoint(x: 18.0100002, y: 4.13999796))
+            path.closeSubpath()
+        case .aspectRatio:
+            // outlined/AspectRatioKt.class SHA256 2312a430583f715f506c2f5980da048a1d13726c56eca959877d84ab5380b9b3
+            path.move(to: CGPoint(x: 19, y: 12))
+            path.addLine(to: CGPoint(x: 17, y: 12))
+            path.addLine(to: CGPoint(x: 17, y: 15))
+            path.addLine(to: CGPoint(x: 14, y: 15))
+            path.addLine(to: CGPoint(x: 14, y: 17))
+            path.addLine(to: CGPoint(x: 19, y: 17))
+            path.addLine(to: CGPoint(x: 19, y: 12))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 7, y: 9))
+            path.addLine(to: CGPoint(x: 10, y: 9))
+            path.addLine(to: CGPoint(x: 10, y: 7))
+            path.addLine(to: CGPoint(x: 5, y: 7))
+            path.addLine(to: CGPoint(x: 5, y: 12))
+            path.addLine(to: CGPoint(x: 7, y: 12))
+            path.addLine(to: CGPoint(x: 7, y: 9))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 21, y: 3))
+            path.addLine(to: CGPoint(x: 3, y: 3))
+            path.addCurve(to: CGPoint(x: 1, y: 5), control1: CGPoint(x: 1.89999998, y: 3), control2: CGPoint(x: 1, y: 3.9000001))
+            path.addLine(to: CGPoint(x: 1, y: 19))
+            path.addCurve(to: CGPoint(x: 3, y: 21), control1: CGPoint(x: 1, y: 20.1000004), control2: CGPoint(x: 1.89999998, y: 21))
+            path.addLine(to: CGPoint(x: 21, y: 21))
+            path.addCurve(to: CGPoint(x: 23, y: 19), control1: CGPoint(x: 22.1000004, y: 21), control2: CGPoint(x: 23, y: 20.1000004))
+            path.addLine(to: CGPoint(x: 23, y: 5))
+            path.addCurve(to: CGPoint(x: 21, y: 3), control1: CGPoint(x: 23, y: 3.9000001), control2: CGPoint(x: 22.1000004, y: 3))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 21, y: 19.0100002))
+            path.addLine(to: CGPoint(x: 3, y: 19.0100002))
+            path.addLine(to: CGPoint(x: 3, y: 4.98999977))
+            path.addLine(to: CGPoint(x: 21, y: 4.98999977))
+            path.addLine(to: CGPoint(x: 21, y: 19.0100002))
+            path.closeSubpath()
+        case .edit:
+            // filled/Edit.kt SHA256 694c9192f189834a6060af601d921b7ed872fb3ef76a460ff6df1d12ed49853d
+            path.move(to: CGPoint(x: 3, y: 17.25))
+            path.addLine(to: CGPoint(x: 3, y: 21))
+            path.addLine(to: CGPoint(x: 6.75, y: 21))
+            path.addLine(to: CGPoint(x: 17.8099995, y: 9.93999958))
+            path.addLine(to: CGPoint(x: 14.0599995, y: 6.18999958))
+            path.addLine(to: CGPoint(x: 3, y: 17.25))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 20.7099991, y: 7.03999996))
+            path.addCurve(to: CGPoint(x: 20.7099991, y: 5.63000011), control1: CGPoint(x: 21.0999985, y: 6.6500001), control2: CGPoint(x: 21.0999985, y: 6.01999998))
+            path.addLine(to: CGPoint(x: 18.3699989, y: 3.2900002))
+            path.addCurve(to: CGPoint(x: 16.9599991, y: 3.2900002), control1: CGPoint(x: 17.9799995, y: 2.9000001), control2: CGPoint(x: 17.3499985, y: 2.9000001))
+            path.addLine(to: CGPoint(x: 15.1299992, y: 5.12000036))
+            path.addLine(to: CGPoint(x: 18.8799992, y: 8.87000084))
+            path.addLine(to: CGPoint(x: 20.7099991, y: 7.04000092))
+            path.closeSubpath()
+        case .arrowBack:
+            // filled/ArrowBack.kt SHA256 7d846e63f7ad81fa6d369dae0ea8be782c1f0356a2bddc00bcba8a65a2c8ea45
+            path.move(to: CGPoint(x: 20, y: 11))
+            path.addLine(to: CGPoint(x: 7.82999992, y: 11))
+            path.addLine(to: CGPoint(x: 13.4200001, y: 5.40999985))
+            path.addLine(to: CGPoint(x: 12, y: 4))
+            path.addLine(to: CGPoint(x: 4, y: 12))
+            path.addLine(to: CGPoint(x: 12, y: 20))
+            path.addLine(to: CGPoint(x: 13.4099998, y: 18.5900002))
+            path.addLine(to: CGPoint(x: 7.82999992, y: 13))
+            path.addLine(to: CGPoint(x: 20, y: 13))
+            path.addLine(to: CGPoint(x: 20, y: 11))
             path.closeSubpath()
         }
         return path.applying(CGAffineTransform(scaleX: rect.width / 24, y: rect.height / 24))
