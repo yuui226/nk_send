@@ -140,15 +140,15 @@
     <string name="transfer_directory_required_hint">Please set a transfer folder first</string>
     <string name="settings_help_title">Settings guide</string>
     <string name="auto_transfer_new_media">Real-time transfer</string>
-    <string name="auto_transfer_new_media_summary">New files are queued automatically by mode: All, JPG, RAW (NEF photos), or Video (MOV/MP4). Existing tasks and manual transfers are unaffected.</string>
+    <string name="auto_transfer_new_media_summary">Automatically queue newly captured files of the selected type: all, JPG, RAW, or video.</string>
     <string name="defer_transfer_start">Transfer after selecting</string>
-    <string name="defer_transfer_start_summary">Items added to the transfer queue do not start transferring immediately, so you can keep previewing and selecting photos.</string>
+    <string name="defer_transfer_start_summary">Selected photos are queued without transferring immediately. Enable this when choosing photos in full-screen preview.</string>
     <string name="organize_transfers_by_date">Save by day</string>
     <string name="storage_mode">Storage mode</string>
     <string name="storage_mode_unified">Unified</string>
     <string name="storage_mode_by_day">By day</string>
     <string name="storage_mode_by_type">By type</string>
-    <string name="storage_mode_summary">Choose unified, by day, or by file type. Photo effects stay in their separate folder.</string>
+    <string name="storage_mode_summary">Save together, or group by shooting date or file type. Edited copies are saved separately.</string>
     <string name="organize_transfers_by_date_summary">Save files in folders by capture date. When off, save them directly in the transfer folder.</string>
     <string name="cd_start_transfers">Start transfers</string>
     <string name="cd_pause_after_current">Pause after the current item</string>
@@ -158,7 +158,7 @@
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Items per row</string>
     <string name="collapse_burst_photos">Group bursts</string>
-    <string name="collapse_burst_photos_summary">Burst photos appear as a collection so they do not flood the list.</string>
+    <string name="collapse_burst_photos_summary">Group burst photos together; expand a group to view each shot.</string>
     <string name="photo_interaction">Photo actions</string>
     <string name="tap_transfer_hold_preview">Tap: transfer\nHold: preview</string>
     <string name="tap_preview_hold_transfer">Tap: preview\nHold: transfer</string>
@@ -272,9 +272,9 @@
     <string name="photo_effects_editor_title">Effects</string>
     <string name="photo_effects_open_editor">Edit photo effects</string>
     <string name="photo_effects_info_title">About photo effects</string>
-    <string name="photo_effects_info_description">After the original is transferred, the edited version is saved separately.</string>
-    <string name="photo_effects_gesture_hint">Preview: Tap to enlarge · Double-tap to rotate · Hold to compare</string>
-    <string name="photo_effects_wheel_hint">Wheels: Hold and drag vertically for quick adjustments</string>
+    <string name="photo_effects_info_description">JPG/JPEG only; RAW and video are unchanged. Originals are preserved and edited copies saved separately. Changes apply to photos queued next.</string>
+    <string name="photo_effects_gesture_hint">Tap to enlarge, double-tap to rotate, and hold to compare color adjustments.</string>
+    <string name="photo_effects_wheel_hint">Drag up or down for quick adjustments, or tap to change options.</string>
     <string name="photo_effects_full_chooser_hint">Hold the photo filter wheel to choose by category</string>
     <string name="photo_filter_off_option">No filter</string>
     <string name="photo_filter_intensity_summary">%1$d%%</string>
@@ -388,8 +388,6 @@
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
     <string name="remote_rec_start_failed">Couldn\'t start recording</string>
     <string name="remote_rec_stop_failed">Couldn\'t stop recording — check the camera and try again</string>
-    <string name="remote_rec_no_audio">No microphone permission — recording without sound</string>
-    <string name="remote_rec_pro_only">On-device recording is a Pro feature</string>
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="remote_tracking_area_mode_required">Use Auto-area AF or Subject-tracking AF on the camera, then try again</string>
     <string name="dev_panel_title">Developer</string>
@@ -413,13 +411,6 @@
     <string name="cd_remote_zebra">Zebra stripes</string>
     <string name="cd_remote_level">Level</string>
     <string name="cd_remote_audio_levels">Audio levels</string>
-    <string name="cd_remote_rec_start">Record</string>
-    <string name="cd_remote_rec_pause">Pause recording</string>
-    <string name="cd_remote_rec_resume">Resume recording</string>
-    <string name="cd_remote_rec_stop">Stop recording</string>
-    <string name="cd_remote_rec_saved">Recording saved</string>
-    <string name="remote_rec_saved_label">Saved</string>
-    <string name="cd_remote_rec_toast_failed">Recording failed</string>
 
     <!-- License / activation -->
     <string name="license">License</string>
@@ -453,14 +444,12 @@
     <string name="compare_remote">Remote control</string>
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
-    <string name="compare_on_device_recording">Record live view</string>
     <string name="compare_generate_effect_image">Generate effect images</string>
     <string name="compare_effect_filters">Effect filters</string>
     <string name="compare_effect_frames">Effect frames</string>
     <string name="compare_effect_watermark">Effect watermarks</string>
     <string name="compare_watermark_free">Default</string>
     <string name="compare_watermark_pro">Custom</string>
-    <string name="compare_unavailable">No</string>
     <string name="compare_available">Supported</string>
     <string name="compare_duration">Duration</string>
     <string name="duration_free">Always free</string>
@@ -565,9 +554,9 @@
     <string name="update_failure_manual">%1$s. %2$s</string>
     <string name="update_open_download_page">Open download page</string>
     <string name="local_photo_effects_entry">Filter · LUT · Frame · Watermark</string>
-    <string name="local_photo_effects_info_description">Select multiple photos to apply the same filter, frame, and watermark. Edited photos are saved as new copies.</string>
+    <string name="local_photo_effects_info_description">Select multiple photos to apply the same effects. Edited photos are saved as new copies.</string>
     <string name="local_photo_effects_exif_hint">Frame: Images without EXIF data, such as screenshots, won’t show shooting details</string>
-    <string name="local_photo_effects_gesture_hint">Preview: Swipe between photos · Hold to compare with the unfiltered version</string>
+    <string name="local_photo_effects_gesture_hint">Tap to enlarge, swipe between photos, and hold to compare color adjustments.</string>
     <string name="local_photo_multi_select">(Select multiple photos)</string>
     <string name="local_photo_reselect">Choose again (%1$d)</string>
     <string name="local_photo_batch_generating">Generating</string>
@@ -663,7 +652,7 @@
     <string name="remote_parameters">Exposure controls</string>
     <string name="remote_tool_dock">Tools</string>
     <string name="photo_lut_set_folder">Set LUT folder</string>
-    <string name="photo_lut_help">LUT: Choose a folder containing .cube files; one level of subfolders is supported as categories. Long-press the wheel to choose LUTs by category or change folders.</string>
+    <string name="photo_lut_help">Choose a folder with .cube files; one level of subfolders becomes categories. Hold the LUT wheel to browse or change folders.</string>
     <string name="photo_frame_width">Frame width</string>
     <string name="lut_uncategorized">Uncategorized</string>
     <string name="lut_turn_off">Turn off LUT</string>

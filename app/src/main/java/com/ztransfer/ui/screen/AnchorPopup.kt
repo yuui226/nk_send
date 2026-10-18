@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +23,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -30,10 +32,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
 import kotlinx.coroutines.launch
@@ -48,6 +54,17 @@ private class PopupAnimationState(
     // re-rasterizing the whole settings tree on every animation frame.
     var layerRecorded: Boolean = false,
 )
+
+/** Let content scroll/fling first, then keep its unused motion inside the modal boundary. */
+private object PopupScrollBoundary : NestedScrollConnection {
+    override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: NestedScrollSource,
+    ): Offset = available
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+}
 
 /** Shared button-anchored genie shell. Content keeps its final layout throughout the animation.
  * Missing/invalid anchors use the renderer's fade fallback. Outside taps and back close it.
@@ -92,8 +109,14 @@ fun AnchorPopup(
     }
     BackHandler { startClose() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 遮罩：随进度淡入；点击外部收回。拖动一并消费，防止滚动穿透到底下的列表。
+    Box(modifier = Modifier
+        .fillMaxSize()
+        .nestedScroll(PopupScrollBoundary)
+        // Catch vertical drags on short content, headers and blank space after children.
+        // Match child vertical slop: a 2D detector could steal a diagonal scroll from them.
+        .pointerInput(Unit) { detectVerticalDragGestures { change, _ -> change.consume() } }
+    ) {
+        // 遮罩随进度淡入，点击外部收回；面板外保留各方向的拖动拦截。
         Box(
             modifier = Modifier
                 .fillMaxSize()

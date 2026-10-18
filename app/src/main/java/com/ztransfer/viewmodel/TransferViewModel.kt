@@ -472,7 +472,7 @@ private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
 enum class TransferStorageMode { UNIFIED, BY_DAY, BY_TYPE }
 
 /** 缩略图加载范围：按最新的实际拍摄日计数，0 表示全部。 */
-enum class PhotoLoadingRange(val days: Int) { ONE(1), THREE(3), FIVE(5), ALL(0) }
+enum class PhotoLoadingRange(val days: Int) { ONE(1), THREE(3), FIVE(5), TEN(10), ALL(0) }
 
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
@@ -499,6 +499,7 @@ data class TransferState(
     val keepScreenOn: Boolean = true,
     // 每个说明入口分别记录是否真正点击过；仅清除应用数据或卸载后恢复未读引导。
     val mainSettingsHelpViewed: Boolean = false,
+    val monitorHelpViewed: Boolean = false,
     val photoEffectsHelpViewed: Boolean = false,
     val apConnectionHelpViewed: Boolean = false,
     val staConnectionHelpViewed: Boolean = false,
@@ -999,6 +1000,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_v2_play_count"
         const val KEY_REMOTE_ENTRY_INTRO_USED = "remote_entry_intro_v2_used"
         const val KEY_MAIN_SETTINGS_HELP_VIEWED = "main_settings_help_viewed"
+        const val KEY_MONITOR_HELP_VIEWED = "monitor_help_viewed"
         const val KEY_RATING_FIVE_DAY_DEFAULT_MIGRATED = "filter_rating_five_day_default_migrated"
         const val KEY_PHOTO_EFFECTS_HELP_VIEWED = "photo_effects_help_viewed"
         const val KEY_AP_CONNECTION_HELP_VIEWED = "ap_connection_help_viewed"
@@ -1259,6 +1261,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     KEY_MAIN_SETTINGS_HELP_VIEWED,
                     false,
                 ),
+                monitorHelpViewed = prefs.getBoolean(
+                    KEY_MONITOR_HELP_VIEWED,
+                    false,
+                ),
                 photoEffectsHelpViewed = prefs.getBoolean(
                     KEY_PHOTO_EFFECTS_HELP_VIEWED,
                     false,
@@ -1444,6 +1450,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (_state.value.mainSettingsHelpViewed) return
         prefs.edit().putBoolean(KEY_MAIN_SETTINGS_HELP_VIEWED, true).apply()
         _state.update { it.copy(mainSettingsHelpViewed = true) }
+    }
+
+    fun markMonitorHelpViewed() {
+        if (_state.value.monitorHelpViewed) return
+        prefs.edit().putBoolean(KEY_MONITOR_HELP_VIEWED, true).apply()
+        _state.update { it.copy(monitorHelpViewed = true) }
     }
 
     fun markPhotoEffectsHelpViewed() {

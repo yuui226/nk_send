@@ -310,14 +310,6 @@ fun ProDialog(
                                     compact = compactTable,
                                 )
                                 CompareRow(
-                                    stringResource(R.string.compare_on_device_recording),
-                                    stringResource(R.string.compare_unavailable),
-                                    stringResource(R.string.compare_available),
-                                    stringResource(R.string.compare_available),
-                                    valueColumnWidth = valueColumnWidth,
-                                    compact = compactTable,
-                                )
-                                CompareRow(
                                     stringResource(R.string.compare_generate_effect_image),
                                     stringResource(R.string.compare_available),
                                     stringResource(R.string.compare_available),

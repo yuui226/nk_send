@@ -23,7 +23,7 @@ class LandscapeMonitorLayoutTest {
         }
     }
 
-    @Test fun tallNarrowRailKeepsFourCompactWheelsAndRecorderOutsideImage() {
+    @Test fun tallNarrowRailKeepsFourCompactWheelsAndCaptureOutsideImage() {
         val layout = landscapeMonitorLayout(860f, 500f, 1.5f)
         assertEquals(1, layout.columns)
         assertEquals(116f, layout.controls.width, .001f)
@@ -68,7 +68,7 @@ class LandscapeMonitorLayoutTest {
         assertEquals(392f, layout.image.height, .001f)
     }
 
-    @Test fun shutterSharesFooterWithoutOverlappingExpandedLocalRecorderOrDisp() {
+    @Test fun shutterSharesFooterWithoutOverlappingDispOrRotation() {
         for (height in listOf(240f, 360f, 500f, 800f)) {
             val layout = landscapeMonitorLayout(640f, height, 16f / 9f)
             assertTrue(layout.footerHeight - layout.shutterSize >= 40f)
