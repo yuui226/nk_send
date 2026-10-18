@@ -62,6 +62,19 @@ final class PhotoLUTStore: ObservableObject {
         if favoriteOrder != savedOrder { favoriteOrder = savedOrder }
     }
 
+    /// An editor can be reopened after another presenter changed the same role.
+    func reloadRole() {
+        reloadSharedPreferences()
+        selectedIdentifier = defaults.string(forKey: role.selectionKey)
+        if let recipe = defaults.dictionary(forKey: recipeKey) {
+            intensityPercent = restoredIntensity(recipe)
+            adjustments = restoredAdjustments(recipe)
+        } else {
+            intensityPercent = Np3FilterEngine.normalizeIntensity(defaults.object(forKey: role.intensityKey) as? Int ?? 80)
+            adjustments = .init()
+        }
+    }
+
     func setFolderBookmark(_ data: Data?) {
         defaults.set(data, forKey: "photo_lut_folder_bookmark")
         Self.sharedPreferencesChanged.send()
@@ -202,9 +215,9 @@ final class PhotoLUTStore: ObservableObject {
     }
 
     func ordered(_ files: [RemoteLUTFile]) -> [RemoteLUTFile] {
-        let byID = Dictionary(uniqueKeysWithValues: files.map { ($0.identifier, $0) })
-        let pinned = favoriteOrder.compactMap { byID[$0] }
-        return pinned + files.filter { !favorites.contains($0.identifier) }
+        // PhotoLutEditor.kt uses a stable partition: favorites first, while
+        // preserving the catalog order within both groups (not tap order).
+        files.filter { favorites.contains($0.identifier) } + files.filter { !favorites.contains($0.identifier) }
     }
 
     // UserDefaults supports concurrent reads. Read roles at deletion time rather

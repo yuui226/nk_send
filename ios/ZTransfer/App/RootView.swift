@@ -545,7 +545,7 @@ private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIView
 @MainActor
 final class WorkspacePagingController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let pages: [UIViewController]
-    private let scroll = UIScrollView()
+    private let scroll = WorkspacePagingScrollView()
     private(set) var currentPage: Int
     private var destination: Int
     private enum Motion { case idle, dragging, nested, settling, programmatic, interrupted }
@@ -707,6 +707,10 @@ final class WorkspacePagingController: UIViewController, UIScrollViewDelegate, U
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer === nestedPan, userScrollEnabled, currentPage == 1 else { return false }
         if nestedPan.numberOfTouches > 0 { return nestedScroll != nil }
+        guard !WheelDragRegionView.contains(touch.location(in: view), in: view) else {
+            restoreNestedScroll()
+            return false
+        }
         return prepareNestedDrag(from: touch.view)
     }
     func prepareNestedDrag(from touchedView: UIView?) -> Bool {
@@ -786,5 +790,18 @@ final class WorkspacePagingController: UIViewController, UIScrollViewDelegate, U
         nestedScroll = nil
         nestedClaimed = false
         scroll.isScrollEnabled = userScrollEnabled
+    }
+}
+
+/// The outer pan must also reject a wheel touch after nestedPan rejects it.
+final class WorkspacePagingScrollView: UIScrollView {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === panGestureRecognizer {
+            let position = panGestureRecognizer.location(in: self)
+            let translation = panGestureRecognizer.translation(in: self)
+            let origin = CGPoint(x: position.x - translation.x, y: position.y - translation.y)
+            if WheelDragRegionView.contains(origin, in: self) { return false }
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 }

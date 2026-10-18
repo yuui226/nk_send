@@ -27,6 +27,7 @@ struct PreviewPhotoEffectsEditor: View {
     let rotation: Int
     @Environment(\.dismiss) private var dismiss
     @State private var draft: PhotoEffectsSettings
+    @StateObject private var photoLUTEditor = PhotoLUTEditorState(role: .camera)
     @State private var chooser = PhotoFilterChooserState()
     @State private var hint: PhotoEffectsHint?
     init(store: PhotoEffectsStore, directory: DirectoryAccessStore, source: UIImage?, exif: PhotoExif?, rotation: Int) {
@@ -35,9 +36,14 @@ struct PreviewPhotoEffectsEditor: View {
     }
     var body: some View {
         SettingsView(showPhotoEffectsEntry: true, effectsStore: store, directory: directory,
-            effectsDraft: $draft, filterChooser: $chooser, effectsHint: $hint, dismissalRequested: false,
+            effectsDraft: $draft, filterChooser: $chooser, effectsHint: $hint, dismissalRequested: false, photoLUTEditor: photoLUTEditor,
             effectsOnly: true, effectPreviewInitialRotationQuarterTurns: rotation,
             effectPreviewSource: source, effectPreviewExif: exif, onClose: { dismiss() })
+            .overlay {
+                if photoLUTEditor.showingChooser { PhotoLUTChooserOverlay(editor: photoLUTEditor, draft: $draft) }
+                if chooser.isPresented { PhotoFilterChooserOverlay(draft: $draft, state: $chooser,
+                        onFilterSelected: { photoLUTEditor.cancelPending() }) }
+            }
             .photoEffectsHint($hint, duration: 1.8, multilineDuration: 3.6)
             .background(ZTransferColors.background)
             .interactiveDismissDisabled()

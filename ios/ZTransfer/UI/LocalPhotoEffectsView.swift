@@ -8,7 +8,8 @@ struct LocalPhotoEffectsView: View {
     let onNavigateUp: () -> Void
     @StateObject private var effectsStore = PhotoEffectsStore(scope: .localPhotos)
     @StateObject private var batch = LocalPhotoBatchViewModel()
-    @StateObject private var photoLUTStore = PhotoLUTStore(role: .local)
+    @StateObject private var photoLUTEditor = PhotoLUTEditorState(role: .local)
+    private var photoLUTStore: PhotoLUTStore { photoLUTEditor.store }
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var watermarkPickerItems: [PhotosPickerItem] = []
     @State private var previewPage = 0
@@ -34,7 +35,7 @@ struct LocalPhotoEffectsView: View {
                                        textFieldFocused: $watermarkTextFocused,
                                        showLocationFields: false,
                                        imageImporting: effectsStore.watermarkImageImporting,
-                                       photoLUTStore: photoLUTStore,
+                                       photoLUTEditor: photoLUTEditor,
                                        filterChooser: $filterChooser,
                                        onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
                 .padding(.top, 10).padding(.bottom, 18)
@@ -52,16 +53,11 @@ struct LocalPhotoEffectsView: View {
         // The Android pager takes over when the workbench is at its top edge.
         // Keeping this simultaneous avoids stealing vertical scrolling inside
         // the editor once the user has moved down the page.
-        .simultaneousGesture(DragGesture(minimumDistance: 18).onEnded { value in
-            // Wheel drags are vertical too, but short option controls no
-            // longer install a competing drag recognizer. Let a downward
-            // gesture from any part of the top-scrolled workbench reach the
-            // page pager; long option wheels still take precedence themselves.
-            // A horizontal drag belongs to the photo pager. Explicitly
-            // checking the dominant axis is important here because this
-            // gesture is attached to the enclosing vertical ScrollView and
-            // otherwise competes with TabView's page recognizer.
-            guard abs(value.translation.height) > abs(value.translation.width),
+        .simultaneousGesture(DragGesture(minimumDistance: 18, coordinateSpace: .global).onEnded { value in
+            // Use the touch origin, not its release position: dragging beyond
+            // a wheel's bounds must still belong to that wheel.
+            guard !WheelDragRegionView.contains(value.startLocation),
+                  abs(value.translation.height) > abs(value.translation.width),
                   !watermarkTextFocused,
                   scrollOffset >= -2,
                   value.translation.height > 70 else { return }
@@ -72,8 +68,12 @@ struct LocalPhotoEffectsView: View {
             draft: effectsBinding, lutStore: photoLUTStore, isPro: entitlements.access.isPro))
         .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
             ZStack(alignment: .topLeading) {
+                if photoLUTEditor.showingChooser {
+                    PhotoLUTChooserOverlay(editor: photoLUTEditor, draft: effectsBinding)
+                }
                 if filterChooser.isPresented {
-                    PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser)
+                    PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser,
+                        onFilterSelected: { photoLUTEditor.cancelPending() })
                 }
                 TipPopupLayer(isPresented: showingHelp) {
                     if let anchor = anchors[.localEffects] {
@@ -99,6 +99,9 @@ struct LocalPhotoEffectsView: View {
             guard !items.isEmpty, !batch.state.generating else { return }
             batch.select(items)
             previewPage = 0
+        }
+        .onChange(of: photoLUTEditor.notice) { notice in
+            if let notice { effectsHint = .init(resource: notice.resource) }
         }
         .onChange(of: watermarkPickerItems) { items in
             guard let item = items.last,
@@ -154,10 +157,10 @@ struct LocalPhotoEffectsView: View {
         HStack(spacing: 10) {
             Button(action: onNavigateUp) {
                 Image(systemName: "chevron.up").font(.system(size: 19, weight: .semibold))
-                    .frame(width: 44, height: 44)
+                    .frame(width: 38, height: 38)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 19))
             // UIPageViewController's rotated vertical pager can retain the
             // Button's internal tap recognizer after an interactive page
             // transition. Own the physical tap at the toolbar level and send
@@ -167,16 +170,6 @@ struct LocalPhotoEffectsView: View {
             .highPriorityGesture(TapGesture().onEnded { onNavigateUp() })
             Text(AppLocalized.resource("local_photo_effects_entry")).font(.system(size: 16, weight: .bold)).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if !batch.state.photos.isEmpty {
-                Button { openPhotoPicker() } label: {
-                    Text(AppLocalized.formattedResource("local_photo_reselect", ["%1$d": "\(batch.state.photos.count)"])).font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 10).frame(height: 38)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
-                .disabled(batch.state.generating)
-                .accessibilityLabel(AppLocalized.formattedResource(
-                    "local_photo_reselect", ["%1$d": "\(batch.state.photos.count)"]))
-            }
             PhotoEffectModuleMenuButton(isPresented: $showingModuleMenu)
             TipLightbulbButton(
                 attention: !localPhotoEffectsHelpViewed, size: 38,
@@ -250,26 +243,41 @@ struct LocalPhotoEffectsView: View {
     }
 
     private var batchButton: some View {
-        Button {
-            if batch.state.photos.isEmpty { openPhotoPicker() }
-            else {
-                watermarkTextFocused = false
-                batch.generate(settings: previewSettings)
+        HStack(spacing: 10) {
+            if !batch.state.photos.isEmpty {
+                Button { openPhotoPicker() } label: {
+                    Image(systemName: "photo.on.rectangle").font(.system(size: 23))
+                        .frame(width: 50, height: 50)
+                }
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 20))
+                .disabled(batch.state.generating)
+                .accessibilityLabel(AppLocalized.formattedResource("local_photo_reselect", ["%1$d": "\(batch.state.photos.count)"]))
+                .transition(.asymmetric(
+                    insertion: .opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)),
+                    removal: .opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.14))))
             }
-        } label: {
-            LocalPhotoBatchLabel(
-                state: batch.state,
-                pageLabel: batch.state.photos.isEmpty ? nil : "\(previewPage + 1) / \(batch.state.photos.count)"
-            )
-                .frame(maxWidth: .infinity).frame(height: 50).clipped()
+            Button {
+                if batch.state.photos.isEmpty { openPhotoPicker() }
+                else {
+                    watermarkTextFocused = false
+                    batch.generate(settings: previewSettings)
+                }
+            } label: {
+                LocalPhotoBatchLabel(
+                    state: batch.state,
+                    pageLabel: batch.state.photos.isEmpty ? nil : "\(previewPage + 1) / \(batch.state.photos.count)"
+                )
+                    .frame(maxWidth: .infinity).frame(height: 50).clipped()
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(
+                cornerRadius: 20,
+                active: batch.state.generating ||
+                    (!batch.state.photos.isEmpty && effectsStore.settings.hasEffect),
+                activeColor: ZTransferColors.accentBlue
+            ))
+            .disabled(batch.state.phase != .ready || (!batch.state.photos.isEmpty && !effectsStore.settings.hasEffect))
         }
-        .buttonStyle(ZTransferGlassButtonStyle(
-            cornerRadius: 16,
-            active: batch.state.generating ||
-                (!batch.state.photos.isEmpty && effectsStore.settings.hasEffect),
-            activeColor: ZTransferColors.accentBlue
-        ))
-        .disabled(batch.state.phase != .ready || (!batch.state.photos.isEmpty && !effectsStore.settings.hasEffect))
+        .animation(ZTransferMotion.inlineExpansion, value: batch.state.photos.isEmpty)
     }
 
     private func openPhotoPicker() {

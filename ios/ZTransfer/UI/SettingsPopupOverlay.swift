@@ -48,6 +48,7 @@ struct SettingsPopupOverlay: View {
     }
 
     @State private var effectsDraft = PhotoEffectsSettings()
+    @StateObject private var photoLUTEditor = PhotoLUTEditorState(role: .camera)
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
     @State private var contentHeight: CGFloat?
@@ -86,6 +87,7 @@ struct SettingsPopupOverlay: View {
                         filterChooser: $filterChooser,
                         effectsHint: $effectsHint,
                         dismissalRequested: !isPresented,
+                        photoLUTEditor: photoLUTEditor,
                         popupMotionPaused: !isPresented || showingPremium,
                         requestTransferDirectoryAttention: requestTransferDirectoryAttention,
                         effectPreviewSource: effectPreviewSource,
@@ -123,8 +125,12 @@ struct SettingsPopupOverlay: View {
                 .padding(.horizontal, panelLeft)
                 .padding(.top, panelTop)
                 .allowsHitTesting(!showingPremium)
+                if photoLUTEditor.showingChooser {
+                    PhotoLUTChooserOverlay(editor: photoLUTEditor, draft: $effectsDraft)
+                }
                 if filterChooser.isPresented {
-                    PhotoFilterChooserOverlay(draft: $effectsDraft, state: $filterChooser)
+                    PhotoFilterChooserOverlay(draft: $effectsDraft, state: $filterChooser,
+                        onFilterSelected: { photoLUTEditor.cancelPending() })
                 }
                 if showingPremium {
                     PremiumPurchaseView(onClose: { showingPremium = false },
@@ -136,6 +142,7 @@ struct SettingsPopupOverlay: View {
             .allowsHitTesting(isPresented || panelVisible)
             .onChange(of: isPresented) { presented in
                 if presented {
+                    photoLUTEditor.resetForPresentation()
                     effectsDraft = effectsStore.beginDraft()
                     filterChooser = PhotoFilterChooserState()
                     effectsHint = nil
@@ -143,6 +150,7 @@ struct SettingsPopupOverlay: View {
                     presentationID &+= 1
                 } else {
                     showingPremium = false
+                    photoLUTEditor.close()
                     filterChooser = PhotoFilterChooserState()
                     effectsHint = nil
                 }

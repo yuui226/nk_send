@@ -1904,11 +1904,21 @@ enum PhotoEffectsRenderer {
     private struct PosterMeasuredRow {
         let value: PhotoFrameTextRow
         let label: PhotoFrameTextRow?
+        let labelBox: CGRect?
+        let labelStroke: CGFloat
+        let labelRadius: CGFloat
+        let labelX: CGFloat
+        let labelBaseline: CGFloat
         let valueX: CGFloat
+        let valueBaseline: CGFloat
         let height: CGFloat
         let gap: CGFloat
         func scaled(by scale: CGFloat) -> Self {
-            Self(value: value.scaled(by: scale), label: label?.scaled(by: scale), valueX: valueX * scale,
+            Self(value: value.scaled(by: scale), label: label?.scaled(by: scale),
+                 labelBox: labelBox?.applying(CGAffineTransform(scaleX: scale, y: scale)),
+                 labelStroke: labelStroke * scale, labelRadius: labelRadius * scale,
+                 labelX: labelX * scale, labelBaseline: labelBaseline * scale,
+                 valueX: valueX * scale, valueBaseline: valueBaseline * scale,
                  height: height * scale, gap: gap * scale)
         }
     }
@@ -1970,10 +1980,25 @@ enum PhotoEffectsRenderer {
                 let values = item.logo || item.label != nil ? [row(item)]
                     : metadataDescriptionRows(item.text, font: item.font, color: .white.withAlphaComponent(item.alpha), width: width * 0.96)
                 return values.enumerated().map { index, value in
-                    let label = item.label.map { metadataRow($0, font: item.font.withSize(size * 0.86), color: .white) }
+                    // ParameterPosterFrame.drawPosterRows: only the FL/F/ISO/S
+                    // label is boxed. Measure once so preview/export scale the
+                    // outline, text centering, and value spacing together.
+                    let labelFont = item.font.withSize(size * 0.86)
+                    let label = item.label.map { metadataRow($0, font: labelFont, color: .white) }
+                    let height = label == nil ? max(item.font.lineHeight * 1.16, value.bounds.height + size * 0.16) : size * 2.65
+                    let boxWidth = min(width * 0.42, size * 3.65)
+                    let boxHeight = size * 1.88
+                    let boxTop = (height - boxHeight) / 2
+                    let stroke = size * 0.085
                     return PosterMeasuredRow(value: value, label: label,
-                        valueX: label == nil ? 0 : min(width * 0.42, size * 3.65) + size * 0.85,
-                        height: label == nil ? max(item.font.lineHeight * 1.16, value.bounds.height + size * 0.16) : size * 2.65,
+                        labelBox: label.map { _ in CGRect(x: stroke, y: boxTop, width: boxWidth - stroke, height: boxHeight) },
+                        labelStroke: stroke, labelRadius: size * 0.22,
+                        labelX: (boxWidth - (label?.width ?? 0)) / 2,
+                        labelBaseline: boxTop + (boxHeight + labelFont.ascender + labelFont.descender) / 2,
+                        valueX: label == nil ? 0 : boxWidth + size * 0.85,
+                        valueBaseline: label == nil ? (height - value.bounds.height) / 2 - value.bounds.minY
+                            : boxTop + (boxHeight + item.font.ascender + item.font.descender) / 2,
+                        height: height,
                         gap: index == values.count - 1 ? item.gap : 0)
                 }
             }
@@ -2036,12 +2061,19 @@ enum PhotoEffectsRenderer {
         for column in layout.posterColumns {
             var y = column.area.minY
             for row in column.rows {
-                if let label = row.label {
-                    label.draw(in: cg, x: column.area.minX,
-                        baseline: y + (row.height - label.bounds.height) / 2 - label.bounds.minY)
+                if let label = row.label, let box = row.labelBox {
+                    cg.saveGState()
+                    cg.setStrokeColor(UIColor.white.cgColor)
+                    cg.setLineWidth(row.labelStroke)
+                    cg.addPath(CGPath(roundedRect: box.offsetBy(dx: column.area.minX, dy: y),
+                                      cornerWidth: row.labelRadius, cornerHeight: row.labelRadius, transform: nil))
+                    cg.strokePath()
+                    cg.restoreGState()
+                    label.draw(in: cg, x: column.area.minX + row.labelX,
+                        baseline: y + row.labelBaseline)
                 }
                 row.value.draw(in: cg, x: column.area.minX + row.valueX,
-                    baseline: y + (row.height - row.value.bounds.height) / 2 - row.value.bounds.minY)
+                    baseline: y + row.valueBaseline)
                 y += row.height + row.gap
             }
         }

@@ -1,6 +1,16 @@
 import SwiftUI
 import UIKit
 
+/// A control's geometry and typography travel together; compact callers must
+/// not shrink only the container while retaining full-size row/badge text.
+struct DetentWheelSizing {
+    let height: CGFloat
+    let rowHeight: CGFloat
+    let cornerRadius: CGFloat
+    let fontSize: CGFloat
+    var fontWeight: Font.Weight? = nil
+}
+
 /// Shared wheel mirroring Android ReleaseCommitWheel. Short lists advance on
 /// tap; long lists preview while dragging and commit only after release.
 struct DetentWheel<Option: Hashable>: View {
@@ -17,6 +27,7 @@ struct DetentWheel<Option: Hashable>: View {
     var cornerRadius: CGFloat = 13
     var optionMaxLines = 1
     var optionFontSize: CGFloat = 14
+    var optionFontSizeFor: ((Option) -> CGFloat)? = nil
     var optionFontWeight: Font.Weight? = nil
     var optionTextColor: Color? = nil
     var accentColor: Color? = nil
@@ -48,10 +59,11 @@ struct DetentWheel<Option: Hashable>: View {
     init(label: String, options: [Option], selected: Option,
          optionLabel: @escaping (Option) -> String,
          onCommit: @escaping (Option) -> Void,
+         sizing: DetentWheelSizing? = nil,
          rowHeight: CGFloat = 18, wheelHeight: CGFloat = 50,
          enabled: Bool = true, readOnly: Bool = false,
          cornerRadius: CGFloat = 13, optionMaxLines: Int = 1,
-         optionFontSize: CGFloat = 14, optionFontWeight: Font.Weight? = nil,
+         optionFontSize: CGFloat = 14, optionFontSizeFor: ((Option) -> CGFloat)? = nil, optionFontWeight: Font.Weight? = nil,
          optionTextColor: Color? = nil,
          accentColor: Color? = nil, emphasized: Bool = false,
          showEmphasisBorder: Bool = true, showDragHint: Bool = true,
@@ -69,10 +81,12 @@ struct DetentWheel<Option: Hashable>: View {
         precondition(!options.isEmpty, "DetentWheel requires at least one option")
         self.label = label; self.options = options; self.selected = selected
         self.optionLabel = optionLabel; self.onCommit = onCommit
-        self.rowHeight = rowHeight; self.wheelHeight = wheelHeight
-        self.enabled = enabled; self.readOnly = readOnly; self.cornerRadius = cornerRadius
-        self.optionMaxLines = optionMaxLines; self.optionFontSize = optionFontSize
-        self.optionFontWeight = optionFontWeight; self.optionTextColor = optionTextColor; self.accentColor = accentColor
+        let resolvedRowHeight = sizing?.rowHeight ?? rowHeight
+        self.rowHeight = resolvedRowHeight; self.wheelHeight = sizing?.height ?? wheelHeight
+        self.enabled = enabled; self.readOnly = readOnly; self.cornerRadius = sizing?.cornerRadius ?? cornerRadius
+        self.optionMaxLines = optionMaxLines; self.optionFontSize = sizing?.fontSize ?? optionFontSize
+        self.optionFontSizeFor = optionFontSizeFor
+        self.optionFontWeight = sizing?.fontWeight ?? optionFontWeight; self.optionTextColor = optionTextColor; self.accentColor = accentColor
         self.emphasized = emphasized; self.showEmphasisBorder = showEmphasisBorder
         self.showDragHint = showDragHint; self.onDetent = onDetent
         self.onActivated = onActivated; self.onLongClick = onLongClick
@@ -86,7 +100,7 @@ struct DetentWheel<Option: Hashable>: View {
         self.onContentAnchorChange = onContentAnchorChange
         let initial = options.firstIndex(of: selected) ?? 0
         _position = State(initialValue: CGFloat(initial))
-        _dragSession = State(initialValue: DetentWheelDragSession(configuration: .init(options: options, rowHeight: rowHeight, enabled: enabled, readOnly: readOnly)))
+        _dragSession = State(initialValue: DetentWheelDragSession(configuration: .init(options: options, rowHeight: resolvedRowHeight, enabled: enabled, readOnly: readOnly)))
     }
 
     private var selectedIndex: Int { options.firstIndex(of: selected) ?? 0 }
@@ -144,12 +158,14 @@ struct DetentWheel<Option: Hashable>: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .opacity(dragging ? 0 : 1)
                 }
-                if canDrag && showDragHint {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(ZTransferColors.secondaryText.opacity(0.38))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                        .padding(.trailing, 7).padding(.bottom, 4).opacity(dragging ? 0 : 1)
+                if canDrag && showDragHint && enabled && !readOnly {
+                    DetentWheelDragHint()
+                        .stroke(ZTransferColors.secondaryText.opacity(0.42), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
+                        .frame(width: 6, height: 20)
+                        .padding(.trailing, 8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .opacity(dragging ? 0 : 1)
+                        .allowsHitTesting(false)
                 }
             }
             // Only a real, vertically draggable wheel gets first refusal in
@@ -188,6 +204,9 @@ struct DetentWheel<Option: Hashable>: View {
             }
         }
         .frame(height: wheelHeight).opacity(enabled ? 1 : 0.48)
+        .background {
+            if canDrag { WheelDragRegion() }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(AppLocalized.text(label.isEmpty ? "拨轮" : label)))
         .accessibilityValue(Text(AppLocalized.text(optionLabel(options[selectedIndex])) + (favoriteOption(options[selectedIndex]) ? "，已收藏" : "")))
@@ -237,6 +256,7 @@ struct DetentWheel<Option: Hashable>: View {
         let boundedPosition = min(max(displayPosition, 0), CGFloat(options.count - 1))
         let indices = previewing ? Array(max(0, Int(floor(boundedPosition)) - 1)...min(options.count - 1, Int(ceil(boundedPosition)) + 1)) : [centerIndex]
         ForEach(indices, id: \.self) { index in
+            let fontSize = optionFontSizeFor?(options[index]) ?? optionFontSize
             let distance = abs(CGFloat(index) - displayPosition); let active = distance < 0.5
             let baseColor = emphasized && active ? accent : (optionTextColor ?? ZTransferColors.primaryText)
             let color = baseColor
@@ -245,7 +265,7 @@ struct DetentWheel<Option: Hashable>: View {
                 if favoriteOption(options[index]) { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle((favoriteIconColor ?? accent).opacity(active ? 1 : 0.38)) }
                 if let centerIcon { centerIcon(color) }
                 Text(AppLocalized.text(optionLabel(options[index])))
-                    .font(.system(size: active ? optionFontSize : max(12, optionFontSize - 2), weight: optionFontWeight ?? (active ? .semibold : .regular)))
+                    .font(.system(size: active ? fontSize : max(optionFontSizeFor == nil ? 12 : 10, fontSize - 2), weight: optionFontWeight ?? (active ? .semibold : .regular)))
                     .lineLimit(optionMaxLines)
                     .fixedSize(horizontal: false, vertical: optionMaxLines > 1)
                     .multilineTextAlignment(.center)
@@ -366,6 +386,20 @@ struct DetentWheel<Option: Hashable>: View {
     }
 }
 
+/// ReleaseCommitWheel.WheelDragHint: two 6×20pt decorative chevrons.
+private struct DetentWheelDragHint: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: 0.5, y: 3))
+            path.addLine(to: CGPoint(x: rect.midX, y: 0.5))
+            path.addLine(to: CGPoint(x: rect.maxX - 0.5, y: 3))
+            path.move(to: CGPoint(x: 0.5, y: rect.maxY - 3))
+            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY - 0.5))
+            path.addLine(to: CGPoint(x: rect.maxX - 0.5, y: rect.maxY - 3))
+        }
+    }
+}
+
 private struct DetentWheelContentAnchorPreferenceKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
@@ -418,5 +452,37 @@ struct DetentWheelDragSession<Option: Hashable> {
         guard let position = preview(revision: revision, translation: translation) else { return nil }
         startIndex = nil
         return Int(position.rounded())
+    }
+}
+
+/// Hit-test-transparent markers let both native paging and the SwiftUI fallback
+/// respect Android ReleaseCommitWheel's consumed vertical drags. No recognizer
+/// is added, and short-list click controls keep their existing scroll behavior.
+struct WheelDragRegion: UIViewRepresentable {
+    func makeUIView(context: Context) -> WheelDragRegionView { WheelDragRegionView() }
+    func updateUIView(_ uiView: WheelDragRegionView, context: Context) {}
+}
+
+final class WheelDragRegionView: UIView {
+    private static let regions = NSHashTable<WheelDragRegionView>.weakObjects()
+
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        Self.regions.add(self)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    static func contains(_ point: CGPoint, in source: UIView? = nil) -> Bool {
+        regions.allObjects.contains { region in
+            guard let window = region.window,
+                  source == nil || source?.window === window else { return false }
+            var ancestor: UIView? = region
+            while let view = ancestor {
+                if view.isHidden || view.alpha <= 0.01 { return false }
+                ancestor = view.superview
+            }
+            return region.bounds.contains(region.convert(point, from: source ?? window))
+        }
     }
 }

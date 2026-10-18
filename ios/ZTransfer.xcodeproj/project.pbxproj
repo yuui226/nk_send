@@ -323,10 +323,12 @@
 		8AC6AF18D9DF05472B3AB990 /* QueueRetryInteractionHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E3A8EE6F48C93D62B1E246 /* QueueRetryInteractionHarness.swift */; };
 		8B4C510CB16D5AF3C724CEFE /* BuiltInPictureControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70613B41F5787FACBA789D35 /* BuiltInPictureControls.swift */; };
 		8CCA93635020531D7483F725 /* PhotoLUTStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4750F886691AC47E6801F907 /* PhotoLUTStore.swift */; };
+		BC50FE05F6E74F89837DF6C8 /* PhotoLUTEditorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A2930BD4F2D4EC3998590A9 /* PhotoLUTEditorState.swift */; };
 		8D09EED2361BD02A1CD95F60 /* RemoteReviewCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3486A449432EB3AA8F2B82CD /* RemoteReviewCatalogTests.swift */; };
 		8D6DA87271A2A18C83AAC752 /* GPSConnectionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */; };
 		8DB920E849C85D7C786C3437 /* CameraConnectionPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA76D93CA2E56F7B9B789751 /* CameraConnectionPresentationTests.swift */; };
 		8EEDBA32D35A11889C89C07A /* PhotoLUTChooser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F118DAAAE8C7F7F5A18002 /* PhotoLUTChooser.swift */; };
+		49052789734745099C7A5293 /* PhotoEffectChooserDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DDFA62E6D494816B30C09C8 /* PhotoEffectChooserDialog.swift */; };
 		8F84A801F84694E63C801A52 /* LosslessCropTaskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 350BA7DC36C8534E89AD6AFA /* LosslessCropTaskTests.swift */; };
 		8FA9EDF328D5762F505C1CE8 /* RemoteDispModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FD88D8110A65A5F21AE5E4A /* RemoteDispModeTests.swift */; };
 		8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */; };
@@ -456,6 +458,7 @@
 		C7E2CC56C6BA3E009920D93B /* jcprepct-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 9581D59C12F4579C2B43596B /* jcprepct-12.c */; };
 		C85E831899FE297C9D01D1B9 /* NikonPictureControlAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72BD4923C4F0D287252BABD /* NikonPictureControlAccess.swift */; };
 		C95B148D877FE03E80C799F4 /* PhotoLUTStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C147F04B379414C294CA4EF /* PhotoLUTStoreTests.swift */; };
+		127EDD8FF6E24750B98E8CD7 /* PhotoLUTEditorStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568340EBA7B449D4B7546A52 /* PhotoLUTEditorStateTests.swift */; };
 		CAB77B1C9934F4CDF69C0FD4 /* RemoteParameterWheel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37310FECE29AF5403D0A42AE /* RemoteParameterWheel.swift */; };
 		CB99922E4C5C868F6F4EAA41 /* PhotoFilterPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */; };
 		CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B13A99D0C74F65A242E106 /* CameraTransport.swift */; };
@@ -661,6 +664,7 @@
 		1AC1138C5A091551C7393C0F /* NikonGPSBluetoothClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NikonGPSBluetoothClient.swift; sourceTree = "<group>"; };
 		1BE6ED91EBE2C4A8FF721EAC /* AndroidColorInterpolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidColorInterpolationTests.swift; sourceTree = "<group>"; };
 		1C147F04B379414C294CA4EF /* PhotoLUTStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTStoreTests.swift; sourceTree = "<group>"; };
+		568340EBA7B449D4B7546A52 /* PhotoLUTEditorStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTEditorStateTests.swift; sourceTree = "<group>"; };
 		1C2A00CCF6BA2D73B89A2F32 /* RemoteLUTLoadQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTLoadQueue.swift; sourceTree = "<group>"; };
 		1C48325DF451C8857DFEA55C /* ImageCaptureUSBTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCaptureUSBTransport.swift; sourceTree = "<group>"; };
 		1C4FA1695B5A335C5C70E926 /* PhotoEffectsSettingsHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsSettingsHarness.swift; sourceTree = "<group>"; };
@@ -772,6 +776,7 @@
 		465B286F7A06BEC7225038F8 /* CropPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropPreparation.swift; sourceTree = "<group>"; };
 		46A581BA8442F4DD2E5DB1E3 /* jdlhuff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdlhuff.c; sourceTree = "<group>"; };
 		4750F886691AC47E6801F907 /* PhotoLUTStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTStore.swift; sourceTree = "<group>"; };
+		7A2930BD4F2D4EC3998590A9 /* PhotoLUTEditorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTEditorState.swift; sourceTree = "<group>"; };
 		47E6EFAE1E51765C2F07A090 /* RatingProtocolReplayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatingProtocolReplayTests.swift; sourceTree = "<group>"; };
 		47F1C6844BE03BFF28A13A05 /* STAEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAEvent.swift; sourceTree = "<group>"; };
 		48BD1D226D3EDFB117AE536B /* jpeg_nbits.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jpeg_nbits.c; sourceTree = "<group>"; };
@@ -1044,6 +1049,7 @@
 		C2CFAF2A1895996941BEC9EC /* huawei.svg */ = {isa = PBXFileReference; path = huawei.svg; sourceTree = "<group>"; };
 		C327CE176B8B9471281D46E2 /* RemoteHorizonRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHorizonRenderingTests.swift; sourceTree = "<group>"; };
 		C3F118DAAAE8C7F7F5A18002 /* PhotoLUTChooser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTChooser.swift; sourceTree = "<group>"; };
+		9DDFA62E6D494816B30C09C8 /* PhotoEffectChooserDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectChooserDialog.swift; sourceTree = "<group>"; };
 		C537587F3F20DEE8C60FA711 /* GPSCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSCoordinator.swift; sourceTree = "<group>"; };
 		C6B51959B0CA4F46B1909760 /* MonitorStorageSchedulingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorStorageSchedulingTests.swift; sourceTree = "<group>"; };
 		C7B8E7F98FA135BF5E55B709 /* PictureControlPanelModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureControlPanelModelTests.swift; sourceTree = "<group>"; };
@@ -1291,6 +1297,7 @@
 				DFCE274B28617B726971F013 /* PhotoGenerationTimingTests.swift */,
 				31DAC772EDDF21E548CF81FF /* PhotoListScrollActivityTests.swift */,
 				1C147F04B379414C294CA4EF /* PhotoLUTStoreTests.swift */,
+				568340EBA7B449D4B7546A52 /* PhotoLUTEditorStateTests.swift */,
 				34D352858226BF1F83138FC5 /* PhotoMetadataIdentityTests.swift */,
 				558EB92AB9673B59E1581EF2 /* PhotoMetadataPreparationTests.swift */,
 				F3CB71A3046CEE20E138E1EF /* PhotoPreviewEffectsTests.swift */,
@@ -1637,6 +1644,7 @@
 				21FE65A239E26AF1D7198CF5 /* PhotoListViewModel.swift */,
 				F48547F5A881D04F37BB5DA7 /* PhotoLUTRuntime.swift */,
 				4750F886691AC47E6801F907 /* PhotoLUTStore.swift */,
+				7A2930BD4F2D4EC3998590A9 /* PhotoLUTEditorState.swift */,
 				18B4B326B729FD6F2F937135 /* PhotoMetadataPreparation.swift */,
 				457C3F4F1FAA167CE42EF0C6 /* PhotoRatingScan.swift */,
 				A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */,
@@ -1841,6 +1849,7 @@
 				319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */,
 				0994973567FB60B02328A65F /* PhotoListView.swift */,
 				C3F118DAAAE8C7F7F5A18002 /* PhotoLUTChooser.swift */,
+				9DDFA62E6D494816B30C09C8 /* PhotoEffectChooserDialog.swift */,
 				9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */,
 				D30D50D08DD29F5CC98E366E /* PremiumFireworks.swift */,
 				A1DC8FD007EB06AB0B15D896 /* PremiumPurchaseView.swift */,
@@ -2361,6 +2370,7 @@
 				28B3F74FF921D952492C8C1C /* PhotoFrameTextLayoutTests.swift in Sources */,
 				0245D4B52E1942B715287732 /* PhotoGenerationTimingTests.swift in Sources */,
 				C95B148D877FE03E80C799F4 /* PhotoLUTStoreTests.swift in Sources */,
+				127EDD8FF6E24750B98E8CD7 /* PhotoLUTEditorStateTests.swift in Sources */,
 				51346779425A82E6CF6266F6 /* PhotoListScrollActivityTests.swift in Sources */,
 				6B4E1397BB07ACCC3CF8B4A5 /* PhotoMetadataIdentityTests.swift in Sources */,
 				918AB59D0864820C06D19861 /* PhotoMetadataPreparationTests.swift in Sources */,
@@ -2557,8 +2567,10 @@
 				C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */,
 				746A7F964235E98E8E845C88 /* PhotoGenerationTiming.swift in Sources */,
 				8EEDBA32D35A11889C89C07A /* PhotoLUTChooser.swift in Sources */,
+				49052789734745099C7A5293 /* PhotoEffectChooserDialog.swift in Sources */,
 				5D9BC0CEB4B90256B431C24B /* PhotoLUTRuntime.swift in Sources */,
 				8CCA93635020531D7483F725 /* PhotoLUTStore.swift in Sources */,
+				BC50FE05F6E74F89837DF6C8 /* PhotoLUTEditorState.swift in Sources */,
 				F4AE42628784C2832738BB79 /* PhotoListAdmissionHarness.swift in Sources */,
 				F8170B367BD71572C031D42E /* PhotoListHint.swift in Sources */,
 				976E4A7ED23DE481DD29FCF2 /* PhotoListScrollActivity.swift in Sources */,

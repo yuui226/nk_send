@@ -3464,7 +3464,34 @@ extension DomainModelTests {
         format.scale = 1
         let source = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 50), format: format).image { context in
             UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 80, height: 50))
+            for (color, point) in [(UIColor.red, CGPoint(x: 10, y: 10)),
+                                   (UIColor.green, CGPoint(x: 65, y: 35)),
+                                   (UIColor.blue, CGPoint(x: 40, y: 25))] {
+                color.setFill(); context.fill(CGRect(origin: point, size: CGSize(width: 3, height: 3)))
+            }
         }
+        func markerCenters(_ image: UIImage) throws -> [CGPoint] {
+            let cg = try XCTUnwrap(image.cgImage)
+            var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+                bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            return try (0..<3).map { channel in
+                let points = (0..<(cg.width * cg.height)).compactMap { pixel -> CGPoint? in
+                    let i = pixel * 4
+                    guard bytes[i + channel] > 250,
+                          bytes[i + (channel + 1) % 3] < 5, bytes[i + (channel + 2) % 3] < 5 else { return nil }
+                    return CGPoint(x: pixel % cg.width, y: pixel / cg.width)
+                }
+                XCTAssertEqual(points.count, 9, "Original 3×3 marker must retain all pixels")
+                let minX = try XCTUnwrap(points.map(\.x).min()), maxX = try XCTUnwrap(points.map(\.x).max())
+                let minY = try XCTUnwrap(points.map(\.y).min()), maxY = try XCTUnwrap(points.map(\.y).max())
+                XCTAssertEqual(maxX - minX, 2); XCTAssertEqual(maxY - minY, 2)
+                return CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
+            }
+        }
+        let originalCenters = try markerCenters(source)
         let metadata = PhotoFrameMetadata(make: "Nikon", model: "Z 8", lensModel: "24-70mm",
                                           focalLength: "50mm", aperture: "f/2.8", shutter: "1/125",
                                           iso: "ISO100", exposureCompensation: nil,
@@ -3481,10 +3508,16 @@ extension DomainModelTests {
             XCTAssertNotNil(size)
             XCTAssertGreaterThan(size?.width ?? 0, 80)
             XCTAssertGreaterThan(size?.height ?? 0, 50)
-            let expectedWidth: CGFloat = preset == .filmNegative ? 84 : 96
-            let expectedHeight: CGFloat = preset == .filmNegative ? 68 : 97
-            XCTAssertEqual(output.size.width, expectedWidth, accuracy: 0.01)
-            XCTAssertEqual(output.size.height, expectedHeight, accuracy: 0.01)
+            // Android's measured layouts expand around metadata. The original
+            // fixed canvas expectations predated that rule; verify the actual
+            // no-resize/no-crop contract with independent photo landmarks.
+            let centers = try markerCenters(output)
+            for index in 1..<centers.count {
+                XCTAssertEqual(centers[index].x - centers[0].x,
+                               originalCenters[index].x - originalCenters[0].x)
+                XCTAssertEqual(centers[index].y - centers[0].y,
+                               originalCenters[index].y - originalCenters[0].y)
+            }
         }
     }
 
@@ -7572,6 +7605,29 @@ final class RemoteToolInputRoutingTests: XCTestCase {
 
 
 final class WorkspacePagingTests: XCTestCase {
+    @MainActor
+    func testWheelRegionTracksLayoutVisibilityAndRemovalWithoutInterceptingTouches() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        let host = UIView(frame: window.bounds)
+        window.addSubview(host)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let marker = WheelDragRegionView()
+        marker.frame = CGRect(x: 20, y: 100, width: 120, height: 34)
+        host.addSubview(marker)
+        XCTAssertFalse(marker.isUserInteractionEnabled)
+        XCTAssertTrue(WheelDragRegionView.contains(CGPoint(x: 40, y: 110), in: host))
+        XCTAssertFalse(WheelDragRegionView.contains(CGPoint(x: 200, y: 110), in: host))
+        host.isHidden = true
+        XCTAssertFalse(WheelDragRegionView.contains(CGPoint(x: 40, y: 110), in: host))
+        host.isHidden = false
+        marker.frame.origin.y = 200
+        XCTAssertFalse(WheelDragRegionView.contains(CGPoint(x: 40, y: 110), in: host))
+        XCTAssertTrue(WheelDragRegionView.contains(CGPoint(x: 40, y: 210), in: host))
+        marker.removeFromSuperview()
+        XCTAssertFalse(WheelDragRegionView.contains(CGPoint(x: 40, y: 210), in: host))
+    }
+
     func testInterruptedEntryUsesNewDragDistanceAndNearestBound() {
         XCTAssertTrue(shouldEnterWorkspace(distance: 0.8, upwardVelocity: 0, dragTranslation: -20))
         XCTAssertFalse(shouldEnterWorkspace(distance: 0.8, upwardVelocity: 0, dragTranslation: -56))

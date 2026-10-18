@@ -660,46 +660,23 @@ import UIKit
         }
     }
 
-    func testLUTControlCommitsOnceCancelsAndAcceptsConsecutiveAccessibilitySteps() {
-        let slider = PhotoLUTReleaseSlider.ReleaseSlider()
-        slider.minimumValue = -100
-        slider.maximumValue = 100
-        slider.step = 5
-        slider.savedValue = 0
-        var commits: [Int] = []
-        var previews: [Int?] = []
-        slider.commit = { commits.append($0) }
-        slider.preview = { previews.append($0) }
-        slider.value = 23
-        slider.changed()
-        XCTAssertEqual(previews.last!, 25)
-        XCTAssertTrue(commits.isEmpty)
-        slider.cancelTracking(with: nil)
-        XCTAssertEqual(slider.value, 0)
-        XCTAssertTrue(commits.isEmpty)
-        slider.value = 23
-        slider.changed()
-        slider.endTracking(nil, with: nil)
-        slider.endTracking(nil, with: nil)
-        XCTAssertEqual(commits, [25])
-        slider.accessibilityIncrement()
-        slider.accessibilityIncrement()
-        slider.accessibilityDecrement()
-        XCTAssertEqual(commits, [25, 30, 35, 30])
-        slider.isEnabled = false
-        slider.value = 70
-        slider.endTracking(nil, with: nil)
-        slider.accessibilityIncrement()
-        XCTAssertEqual(commits, [25, 30, 35, 30])
-        slider.isEnabled = true
-        slider.savedValue = 100
-        slider.accessibilityIncrement()
-        XCTAssertEqual(commits.count, 4)
-        slider.minimumValue = 2
-        slider.step = 2
-        slider.savedValue = 2
-        slider.accessibilityDecrement()
-        XCTAssertEqual(commits.count, 4)
+    func testCompactLUTWheelPreviewsCancelsAndCommitsOnlyOnRelease() {
+        let options = Array(stride(from: -100, through: 100, by: 5))
+        var session = DetentWheelDragSession(configuration: DetentWheelConfiguration(
+            options: options, rowHeight: 16, enabled: true, readOnly: false))
+        let initial = options.firstIndex(of: 0)!
+        let cancelled = session.revision
+        XCTAssertTrue(session.begin(revision: cancelled, selectedIndex: initial))
+        XCTAssertEqual(session.preview(revision: cancelled, translation: -80), 25)
+        session.invalidate()
+        XCTAssertNil(session.release(revision: cancelled, translation: -80))
+        let revision = session.revision
+        XCTAssertTrue(session.begin(revision: revision, selectedIndex: initial))
+        let index = session.release(revision: revision, translation: -80)
+        XCTAssertEqual(index.map { options[$0] }, 25)
+        XCTAssertNil(session.release(revision: revision, translation: -80))
+        session.update(configuration: .init(options: options, rowHeight: 16, enabled: false, readOnly: false))
+        XCTAssertFalse(session.begin(revision: session.revision, selectedIndex: initial))
     }
 
     func testLegacyRoleRestoreUsesSameFallbackForControlsAndRenderedSelection() throws {

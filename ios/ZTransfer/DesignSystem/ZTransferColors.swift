@@ -18,6 +18,11 @@ enum ZTransferColors {
     static let accentYellow = adaptiveHex(light: (0xB7, 0x79, 0x00), dark: (0xFF, 0xD5, 0x4F))
     static let accentPurple = adaptiveHex(light: (0x7B, 0x1F, 0xA2), dark: (0xCE, 0x93, 0xD8))
 
+    // Android PhotoLutEditor: lerp(statusConnected, accentBlue, 0.35).
+    static let photoLUTAccent = adaptive(
+        light: ((46 * 0.65 + 2 * 0.35) / 255, (125 * 0.65 + 119 * 0.35) / 255, (50 * 0.65 + 189 * 0.35) / 255),
+        dark: ((76 * 0.65 + 79 * 0.35) / 255, (175 * 0.65 + 195 * 0.35) / 255, (80 * 0.65 + 247 * 0.35) / 255))
+
     private static func adaptive(light: (CGFloat, CGFloat, CGFloat), dark: (CGFloat, CGFloat, CGFloat)) -> Color {
         Color(uiColor: UIColor { traits in
             let rgb = traits.userInterfaceStyle == .dark ? dark : light

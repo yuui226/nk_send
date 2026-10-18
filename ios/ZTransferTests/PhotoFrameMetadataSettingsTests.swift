@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import ZTransfer
 
 final class PhotoFrameMetadataSettingsTests: XCTestCase {
@@ -43,6 +44,98 @@ final class PhotoFrameMetadataSettingsTests: XCTestCase {
         XCTAssertLessThan(outputs[0].size.width, outputs[1].size.width)
         XCTAssertLessThan(outputs[1].size.width, outputs[2].size.width)
         XCTAssertEqual(outputs.map { $0.size.height }, outputs.map { $0.size.height }.sorted())
+    }
+}
+
+final class ParameterPosterBadgeRenderingTests: XCTestCase {
+    private let exposure = PhotoFrameMetadata(make: nil, model: nil, lensModel: nil,
+        focalLength: "50mm", aperture: "f/2.8", shutter: "1/125", iso: "ISO100",
+        exposureCompensation: nil, dateTime: nil)
+
+    private func render(_ size: CGSize, percent: Int = 100, preview: CGFloat? = nil,
+                        showExposure: Bool = true) throws -> UIImage {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let source = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.black.setFill(); context.fill(CGRect(origin: .zero, size: size))
+        }
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true; settings.photoFrameBorderEnabled = true
+        settings.photoFramePreset = .parameterPoster; settings.watermark.enabled = false
+        settings.metadata = .defaults(for: .parameterPoster)
+        settings.metadata.widthPercent = percent
+        settings.metadata.showFocalLength = showExposure; settings.metadata.showExposure = showExposure
+        return try PhotoEffectsRenderer.render(source, settings: settings, metadata: exposure, previewLongEdge: preview)
+    }
+
+    // Reference coordinates from Android ParameterPosterFrame, with exposure
+    // only. Probe horizontal edges away from glyphs, so text alone cannot pass.
+    private func borderPoints(_ size: CGSize, percent: Int) -> [CGPoint] {
+        let portrait = size.height > size.width, ratio = CGFloat(percent) / 100
+        let s = size.width * (portrait ? 0.052 : 0.038)
+        let rowHeight = s * 2.65, total = rowHeight * 4, boxHeight = s * 1.88
+        let top = size.width * 0.11 * ratio
+        let bandHeight = max(size.width * 0.48 * ratio, total + size.width * 0.095 * ratio)
+        let x = portrait ? size.width * 0.36 * ratio : size.width * (0.10 * ratio + 0.025)
+        let y = portrait ? top + (size.height - total) / 2 : top + size.height + (bandHeight - total) / 2
+        return (0..<4).flatMap { row -> [CGPoint] in
+            let boxTop = y + CGFloat(row) * rowHeight + (rowHeight - boxHeight) / 2
+            return [CGPoint(x: x + s * 1.3, y: boxTop), CGPoint(x: x + s * 1.3, y: boxTop + boxHeight)]
+        }
+    }
+
+    private func brightestPixels(_ image: UIImage, around points: [CGPoint]) throws -> [UInt8] {
+        let cg = try XCTUnwrap(image.cgImage)
+        var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        return points.map { point in
+            var brightest: UInt8 = 0
+            for y in max(0, Int(point.y) - 1)...min(cg.height - 1, Int(point.y) + 1) {
+                for x in max(0, Int(point.x) - 1)...min(cg.width - 1, Int(point.x) + 1) {
+                    let i = (y * cg.width + x) * 4
+                    brightest = max(brightest, min(bytes[i], bytes[i + 1], bytes[i + 2]))
+                }
+            }
+            return brightest
+        }
+    }
+
+    func testAllFourBadgesHaveOutlinesAcrossOrientationsAndBorderWidths() throws {
+        for size in [CGSize(width: 400, height: 600), CGSize(width: 600, height: 400), CGSize(width: 400, height: 400)] {
+            for percent in [60, 100, 200] {
+                let output = try render(size, percent: percent)
+                let pixels = try brightestPixels(output, around: borderPoints(size, percent: percent))
+                // A 1.292px Android stroke can split across two pixel rows;
+                // half coverage is still an intact antialiased white outline.
+                XCTAssertTrue(pixels.allSatisfy { $0 > 127 }, "Missing badge edges: \(size), \(percent)%: \(pixels)")
+            }
+        }
+    }
+
+    func testPreviewScalesOutlinesTogetherWithLabelsAndValues() throws {
+        let size = CGSize(width: 400, height: 600)
+        let original = try render(size)
+        let preview = try render(size, preview: 600)
+        let scale = 600 / max(original.size.width, original.size.height)
+        let points = borderPoints(size, percent: 100).map { CGPoint(x: $0.x * scale, y: $0.y * scale) }
+        XCTAssertTrue(try brightestPixels(preview, around: points).allSatisfy { $0 > 100 })
+        let path = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ztransfer-parameter-poster.png")
+        try XCTUnwrap(preview.pngData()).write(to: path)
+        print("VISUAL_FIXTURE: \(path.path)")
+    }
+
+    func testDisabledExposureDoesNotLeaveEmptyBadgeFrames() throws {
+        let size = CGSize(width: 400, height: 600)
+        let output = try render(size, showExposure: false)
+        XCTAssertTrue(try brightestPixels(output, around: borderPoints(size, percent: 100)).allSatisfy { $0 < 128 })
+    }
+
+    func testLabelsKeepAndroidOrderAndStripOnlyApertureAndISOPrefixes() {
+        let rows = PhotoEffectsRenderer.parameterPosterExposure(exposure)
+        XCTAssertEqual(rows.map(\.label), ["FL", "F", "ISO", "S"])
+        XCTAssertEqual(rows.map(\.value), ["50mm", "2.8", "100", "1/125"])
     }
 }
 

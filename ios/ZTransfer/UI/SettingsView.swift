@@ -68,7 +68,8 @@ struct SettingsView: View {
     @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     @ObservedObject private var directory: DirectoryAccessStore
     @ObservedObject private var effectsStore: PhotoEffectsStore
-    @StateObject private var photoLUTStore = PhotoLUTStore(role: .camera)
+    @StateObject private var photoLUTEditor: PhotoLUTEditorState
+    private var photoLUTStore: PhotoLUTStore { photoLUTEditor.store }
     @State private var showingPicker = false
     @State private var feedbackHint = false
     #if DEBUG
@@ -146,6 +147,7 @@ struct SettingsView: View {
     init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
          effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
          effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool,
+         photoLUTEditor: PhotoLUTEditorState? = nil,
          popupMotionPaused: Bool = false, effectsOnly: Bool = false,
          effectPreviewInitialRotationQuarterTurns: Int = 0,
          requestTransferDirectoryAttention: Bool = false,
@@ -155,6 +157,7 @@ struct SettingsView: View {
          onContentHeightChange: @escaping (CGFloat) -> Void = { _ in },
          onShowPremium: @escaping () -> Void = {}, onPlayFireworks: @escaping () -> Void = {},
          onClose: (() -> Void)? = nil) {
+        _photoLUTEditor = StateObject(wrappedValue: photoLUTEditor ?? PhotoLUTEditorState(role: .camera))
         self.effectsOnly = effectsOnly
         self.effectPreviewInitialRotationQuarterTurns = effectPreviewInitialRotationQuarterTurns
         _settingsPage = State(initialValue: effectsOnly ? .effects : .main)
@@ -209,13 +212,13 @@ struct SettingsView: View {
                                 onRequest: onEffectPreviewRequested,
                                 initialRotationQuarterTurns: effectPreviewInitialRotationQuarterTurns,
                                 showSourceWhileRendering: effectsOnly)
-                                .padding(.horizontal, 16).padding(.top, 10)
+                                .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
                             PhotoEffectsControls(draft: $effectsDraft,
                                 showingWatermarkPicker: $showingWatermarkPicker,
                                 textFieldFocused: $watermarkTextFocused,
                                 showLocationFields: true,
                                 imageImporting: effectsStore.watermarkImageImporting,
-                                photoLUTStore: photoLUTStore,
+                                photoLUTEditor: photoLUTEditor,
                                 filterChooser: $filterChooser,
                                 onWatermarkTextCommitted: { _ in commitFrameDraft() },
                                 onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
@@ -269,6 +272,9 @@ struct SettingsView: View {
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
                       maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current)
+        .onChange(of: photoLUTEditor.notice) { notice in
+            if let notice { effectsHint = .init(resource: notice.resource) }
+        }
         .onChange(of: watermarkPickerItems) { items in
             guard let item = items.last else { return }
             // Persist the current frame draft before the picker result starts
@@ -299,7 +305,10 @@ struct SettingsView: View {
             commitFrameDraft()
         }
         .onChange(of: dismissalRequested) { closing in
-            if closing && settingsPage == .effects { commitEffectsDraft() }
+            if closing {
+                photoLUTEditor.close()
+                if settingsPage == .effects { commitEffectsDraft() }
+            }
         }
         .coordinateSpace(name: "settings-panel")
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: settingsPage)
@@ -363,12 +372,12 @@ struct SettingsView: View {
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12, panel: true))
             .accessibilityIdentifier("photo-effects-editor-back")
-            Text(AppLocalized.resource("photo_effects"))
+            Text(AppLocalized.resource("photo_effects_editor_title"))
                 .zTransferText(size: ZTransferMetrics.title, weight: .bold)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             Spacer()
-            PhotoEffectModuleMenuButton(isPresented: $showingModuleMenu)
+            PhotoEffectModuleMenuButton(isPresented: $showingModuleMenu, size: 28)
             TipLightbulbButton(
                 attention: !photoEffectsHelpViewed, size: 28,
                 accessibilityLabel: AppLocalized.resource("photo_effects_info_title"),
