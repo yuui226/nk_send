@@ -4,7 +4,7 @@ import Combine
 /// Android RemoteToolPreferences.kt declaration order is the fallback order for
 /// newly introduced tools; never derive it from localized titles.
 enum RemoteTool: String, CaseIterable, Identifiable, Sendable {
-    case hd, fps, audio, histogram, grid, exposure, desqueeze, level, record
+    case hd, fps, audio, histogram, grid, exposure, desqueeze, level
     case whiteBalance = "white_balance"
     case focusArea = "focus_area"
     case waveform, focusMode = "focus_mode", focusFrame = "focus_frame", lut, pictureControl = "picture_control", meter, lock
@@ -69,12 +69,6 @@ final class RemoteToolLayout: ObservableObject {
     }
     var shownTools: [RemoteTool] { order.filter(visible) }
     var hiddenTools: [RemoteTool] { order.filter { !visible($0) } }
-
-    /// Landscape always retains the recorder's stop/pause surface; visibility
-    /// still controls whether a new recording may be admitted.
-    func presentedTools(fixedRecorder: Bool) -> [RemoteTool] {
-        order.filter { visible($0) || (fixedRecorder && $0 == .record) }
-    }
 
     func move(_ tool: RemoteTool, to index: Int) {
         guard !tool.fixed, visible(tool) else { return }

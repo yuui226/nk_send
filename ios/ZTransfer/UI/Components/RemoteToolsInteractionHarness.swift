@@ -5,16 +5,12 @@ import UIKit
 struct RemoteToolsInteractionHarness: View {
     @StateObject private var store = Store()
     @State private var open = false
-    var body: some View {
-        if ProcessInfo.processInfo.arguments.contains("--remote-recorder-ui-test") {
-            RemoteRecorderInteractionHarness()
-        } else { monitorEntry }
-    }
+    var body: some View { monitorEntry }
     private var monitorEntry: some View {
         Button("Open monitor") { open = true }
             .accessibilityIdentifier("open-monitor")
             .fullScreenCover(isPresented: $open) {
-                RemoteView(session: nil, recordingDirectory: store.recordingDirectory,
+                RemoteView(session: nil,
                     toolDefaults: store.defaults, remoteCamera: store.camera,
                     freeUsage: store.freeUsage, entitlements: store.entitlements)
                     .overlay(alignment: .bottomTrailing) {
@@ -40,7 +36,6 @@ struct RemoteToolsInteractionHarness: View {
         let defaults: UserDefaults
         let freeUsage: FreeUsageStore
         let entitlements: PremiumEntitlementStore
-        let recordingDirectory: URL?
         let camera: (any RemoteCameraControlling)?
         @Published var shutterEvents = "focus=0 finished=0 capture=0"
         func observeShutterEvents() async {
@@ -57,43 +52,17 @@ struct RemoteToolsInteractionHarness: View {
             defaults = UserDefaults(suiteName: name)!
             defaults.removePersistentDomain(forName: name)
             freeUsage = FreeUsageStore(defaults: defaults)
-            let recording = ProcessInfo.processInfo.arguments.contains("--remote-recording-ui-test")
-            entitlements = PremiumEntitlementStore(access: PremiumAccess(recording ? .lifetime : .free))
-            recordingDirectory = recording ? FileManager.default.temporaryDirectory
-                .appendingPathComponent("RemoteRecordingUITest", isDirectory: true) : nil
-            if let recordingDirectory { try? FileManager.default.removeItem(at: recordingDirectory) }
+            entitlements = PremiumEntitlementStore(access: PremiumAccess(.free))
             if ProcessInfo.processInfo.arguments.contains("--remote-camera-tools-ui-test") {
                 let format = UIGraphicsImageRendererFormat()
                 format.scale = 1
-                let size = recording ? CGSize(width: 64, height: 48) : CGSize(width: 8, height: 8)
+                let size = CGSize(width: 8, height: 8)
                 let bytes = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
                     UIColor.black.setFill(); ctx.fill(CGRect(origin: .zero, size: size))
                 }.jpegData(compressionQuality: 0.5)!
                 camera = RemoteToolMenuTestCamera(frame: bytes,
                     levelTest: ProcessInfo.processInfo.arguments.contains("--remote-level-ui-test"))
             } else { camera = nil }
-        }
-    }
-}
-
-private struct RemoteRecorderInteractionHarness: View {
-    @State private var phase: RemoteLocalRecordingPhase = .idle
-    @State private var premium = false
-    @State private var compact = false
-    @State private var elapsed = RemoteRecordingElapsed(seconds: 65)
-    @State private var starts = 0
-    @State private var stops = 0
-    var body: some View {
-        VStack(spacing: 60) {
-            RemoteRecorderBar(phase: phase, elapsed: elapsed, enabled: premium, compactSaved: compact,
-                onStart: { starts += 1; phase = .recording },
-                onPauseResume: { phase = phase == .paused ? .recording : .paused },
-                onStop: { stops += 1; phase = .finalizing })
-            Text("phase=\(phase) starts=\(starts) stops=\(stops)").accessibilityIdentifier("test-recorder-state")
-            Button("Premium") { premium.toggle() }.accessibilityIdentifier("test-recorder-premium")
-            Button("Saved") { phase = .saved }.accessibilityIdentifier("test-recorder-saved")
-            Button("Compact") { compact.toggle() }.accessibilityIdentifier("test-recorder-compact")
-            Button("Idle") { phase = .idle }.accessibilityIdentifier("test-recorder-idle")
         }
     }
 }

@@ -2194,7 +2194,7 @@ final class DomainModelTests: XCTestCase {
 
         defaults.set(2, forKey: PhotoFilterPersistence.ratingDaysKey)
         restored = PhotoFilterPersistence.load(from: defaults)
-        XCTAssertEqual(restored.ratingDays, 3)
+        XCTAssertEqual(restored.ratingDays, 5)
         defaults.set(0, forKey: PhotoFilterPersistence.ratingDaysKey)
         XCTAssertEqual(PhotoFilterPersistence.load(from: defaults).ratingDays, 0)
     }

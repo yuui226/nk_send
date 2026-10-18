@@ -208,7 +208,6 @@
 		5EF94AA9C6E8F70913C613BB /* android15-shadow-polygons.json in Resources */ = {isa = PBXBuildFile; fileRef = A7280DF4BC351D5B8FB10BE8 /* android15-shadow-polygons.json */; };
 		5F1EFB891FFBE8904BB09C5D /* CropGestureStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A646EC0DF2998B2B14DA092F /* CropGestureStateTests.swift */; };
 		5F3EEC695D005864E1DF0A36 /* ZTransferShadowProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E266B753024251558A2A84ED /* ZTransferShadowProjection.swift */; };
-		5F41DAAABA7340084C598DBD /* RemoteRecorderMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649122A307F426C8E451C5F6 /* RemoteRecorderMotion.swift */; };
 		5FAFFE41870F28A4D42F3456 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = CCFAA104235DF2FB0FB9B928 /* README.md */; };
 		5FBBB0F1CE17449AE77AB47C /* ButtonInteractionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5385DA7EADE8A2BA8E6DAA4 /* ButtonInteractionUITests.swift */; };
 		601ABFAD39A866300F2A56F9 /* RemoteShutterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F703D47BDE986E85F3A5321 /* RemoteShutterTests.swift */; };
@@ -405,7 +404,6 @@
 		B2BCDA3EE87598367F1136BF /* ClassicUSBIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */; };
 		B2FC4C41DACE088F6CD957AF /* jcmainct-16.c in Sources */ = {isa = PBXBuildFile; fileRef = 74993BA8967581869EFD825C /* jcmainct-16.c */; };
 		B34B2B1ADB3FDE50B2287F76 /* NikonBrandGradients.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC452C56C688B088EF34665 /* NikonBrandGradients.swift */; };
-		B37C536A3E323713B283BC53 /* RemoteRecorderBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DD3B44DD392358BA91EB57 /* RemoteRecorderBar.swift */; };
 		B3EC02F7CC3C9E3845301127 /* jdapistd-16.c in Sources */ = {isa = PBXBuildFile; fileRef = E3F06EE32ED7006E27A04BBB /* jdapistd-16.c */; };
 		B4ACC847646BE0F5855F7AA6 /* jidctint-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 0426DEB172A9676DA3736D3B /* jidctint-12.c */; };
 		B52485D02BD44B118CFE849C /* PTPIPSocketConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF0A99134BFE6440B62D20A4 /* PTPIPSocketConnection.swift */; };
@@ -507,7 +505,7 @@
 		DC150D71EA8DD2558BBE1895 /* ButtonMotionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0281874E6565671EFB1BD4C /* ButtonMotionControllerTests.swift */; };
 		DC1B61ECEB7FE50F4B2B03E1 /* jddctmgr-8.c in Sources */ = {isa = PBXBuildFile; fileRef = E1E9E97784D8D29F9D64F7F8 /* jddctmgr-8.c */; };
 		DC69B36F0FE73CF8C0545367 /* transupp.c in Sources */ = {isa = PBXBuildFile; fileRef = 6426E77198ACFF1839CCB8A5 /* transupp.c */; };
-		DC80DDF78487CAFF164BD63D /* RemoteRecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DFADBC08D9B4E019BC048A /* RemoteRecorderTests.swift */; };
+		DC80DDF78487CAFF164BD63D /* RemoteCapturePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DFADBC08D9B4E019BC048A /* RemoteCapturePerformanceTests.swift */; };
 		DCCD413F72FF786A58BF71F4 /* PhotoMetadataPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18B4B326B729FD6F2F937135 /* PhotoMetadataPreparation.swift */; };
 		DEB58A69C568F36181C8CE98 /* Apache-2.0.txt in Resources */ = {isa = PBXBuildFile; fileRef = D1EB62AADCDF15964FB70883 /* Apache-2.0.txt */; };
 		DFC4E7BF20645C6EDB939734 /* TipAttentionMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94872EDA00F4ABDC5BEC055D /* TipAttentionMotion.swift */; };
@@ -848,7 +846,6 @@
 		6426E77198ACFF1839CCB8A5 /* transupp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = transupp.c; sourceTree = "<group>"; };
 		6465F292E3393A23E08BD473 /* jfdctint-8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jfdctint-8.c"; sourceTree = "<group>"; };
 		646BCBA0BD3F7AF6CA5AED36 /* CropPreviewBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropPreviewBoundsTests.swift; sourceTree = "<group>"; };
-		649122A307F426C8E451C5F6 /* RemoteRecorderMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecorderMotion.swift; sourceTree = "<group>"; };
 		64A847FECA21275B94488595 /* jcapimin.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jcapimin.c; sourceTree = "<group>"; };
 		6622108B9DE40B82F278E573 /* jddiffct-16.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jddiffct-16.c"; sourceTree = "<group>"; };
 		66B121CC0D58A97AD69EEF11 /* Np3FilterCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterCatalog.swift; sourceTree = "<group>"; };
@@ -897,7 +894,7 @@
 		792B946134C85A2249E485F3 /* jclossls-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jclossls-12.c"; sourceTree = "<group>"; };
 		79735AB03A21EBB50D28C3DA /* NikonPictureControlProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NikonPictureControlProtocolTests.swift; sourceTree = "<group>"; };
 		7994D9F303824C2E0C6DD846 /* jmemnobs.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jmemnobs.c; sourceTree = "<group>"; };
-		79DFADBC08D9B4E019BC048A /* RemoteRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecorderTests.swift; sourceTree = "<group>"; };
+		79DFADBC08D9B4E019BC048A /* RemoteCapturePerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCapturePerformanceTests.swift; sourceTree = "<group>"; };
 		7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSConnectionControl.swift; sourceTree = "<group>"; };
 		7AB867EB2BECB1D2DE3F9D52 /* CropViewportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropViewportTests.swift; sourceTree = "<group>"; };
 		7AD9D374C7D0C7B45D77B516 /* PhotoCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCatalog.swift; sourceTree = "<group>"; };
@@ -926,7 +923,6 @@
 		83180466B40E5CA9AE7D2B7E /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
 		836626974142C3B4F7947A43 /* QueueCardSwipeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueCardSwipeState.swift; sourceTree = "<group>"; };
 		841B6FF60D0F9D545C79BEEF /* PhotoRatingPairsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoRatingPairsTests.swift; sourceTree = "<group>"; };
-		84DD3B44DD392358BA91EB57 /* RemoteRecorderBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecorderBar.swift; sourceTree = "<group>"; };
 		85F8C62358F160B0746CFCB5 /* RemoteToolsInteractionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolsInteractionUITests.swift; sourceTree = "<group>"; };
 		86CEE16F4CB166FF233B98C2 /* PhotoFramePlace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFramePlace.swift; sourceTree = "<group>"; };
 		86E23E26E26C55D2BF312CDC /* PhotoListAdmissionHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListAdmissionHarness.swift; sourceTree = "<group>"; };
@@ -1353,7 +1349,7 @@
 				A04B419A267646369F123163 /* RemoteMonitorHintTests.swift */,
 				96B612A8BF3FB5AB025F9CED /* RemoteParameterWheelTests.swift */,
 				2F397D01DBAFC8B42C069FCE /* RemotePhotoReviewModelTests.swift */,
-				79DFADBC08D9B4E019BC048A /* RemoteRecorderTests.swift */,
+				79DFADBC08D9B4E019BC048A /* RemoteCapturePerformanceTests.swift */,
 				3486A449432EB3AA8F2B82CD /* RemoteReviewCatalogTests.swift */,
 				0F703D47BDE986E85F3A5321 /* RemoteShutterTests.swift */,
 				2F4E1778458633C47A4B7C38 /* RemoteToolbarGeometryTests.swift */,
@@ -1552,8 +1548,6 @@
 				18AD6A5BC7B19AAB406CB26B /* RemoteMonitorHintBubble.swift */,
 				27B26716BCDA09A3DCBC8C68 /* RemoteParameterInput.swift */,
 				1C83370A1FF2564237752BAC /* RemoteParameterPanel.swift */,
-				84DD3B44DD392358BA91EB57 /* RemoteRecorderBar.swift */,
-				649122A307F426C8E451C5F6 /* RemoteRecorderMotion.swift */,
 				1737C3BB17F59BA3C3346A1C /* RemoteShutterButton.swift */,
 				A55562BC16E9BB145A7532A7 /* RemoteToolDragState.swift */,
 				6A97BEF46C586CFF6734D901 /* RemoteToolEditorMotion.swift */,
@@ -2434,7 +2428,7 @@
 				867806A5DE87DE273956B1CF /* RemoteMonitorHintTests.swift in Sources */,
 				6D5E7439CCE3D8020E36A358 /* RemoteParameterWheelTests.swift in Sources */,
 				646885A879D0C630A90F7793 /* RemotePhotoReviewModelTests.swift in Sources */,
-				DC80DDF78487CAFF164BD63D /* RemoteRecorderTests.swift in Sources */,
+				DC80DDF78487CAFF164BD63D /* RemoteCapturePerformanceTests.swift in Sources */,
 				946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */,
 				8D09EED2361BD02A1CD95F60 /* RemoteReviewCatalogTests.swift in Sources */,
 				601ABFAD39A866300F2A56F9 /* RemoteShutterTests.swift in Sources */,
@@ -2672,8 +2666,6 @@
 				043D67115E440938913CBF03 /* RemotePhotoReviewView.swift in Sources */,
 				3E20FB1D5F2FAA80E9030D12 /* RemotePictureControlPanel.swift in Sources */,
 				D5F4DFE0596F042BD0AA0510 /* RemoteProperty.swift in Sources */,
-				B37C536A3E323713B283BC53 /* RemoteRecorderBar.swift in Sources */,
-				5F41DAAABA7340084C598DBD /* RemoteRecorderMotion.swift in Sources */,
 				E83ECCE5BCE39DD2EF826CB4 /* RemoteReviewCatalog.swift in Sources */,
 				43C9EBA903FDF6CB881EDDB4 /* RemoteShutterButton.swift in Sources */,
 				890FF18E8A13644E81F3779B /* RemoteState.swift in Sources */,

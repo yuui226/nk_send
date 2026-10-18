@@ -195,13 +195,6 @@ struct RootView: View {
         guard let session = connectionModel.cameraSession else { return false }
         return !session.isUSB && session.wirelessMode == .ap
     }
-    @State private var recordingSaveHint = PhotoListHintState()
-
-    private func presentRecordingSaveFailure() {
-        guard !monitorPresented, let message = RemoteRecordingSaveNotice.shared.take() else { return }
-        recordingSaveHint.show(message, duration: .seconds(3))
-    }
-
     var body: some View {
         #if DEBUG
         let _ = didRender?()
@@ -254,13 +247,8 @@ struct RootView: View {
         .accessibilityHidden(presentation.snapshot.directoryRestoring)
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
-        .overlay { PhotoListHint(state: recordingSaveHint) }
-        .onReceive(NotificationCenter.default.publisher(for: RemoteRecordingSaveNotice.changed, object: RemoteRecordingSaveNotice.shared)) { _ in
-            presentRecordingSaveFailure()
-        }
         .fullScreenCover(isPresented: $monitorPresented, onDismiss: {
             RemoteTrialNotice.returnedToList()
-            presentRecordingSaveFailure()
         }) {
             let session = workspaceSession
             let listModel = session.map { live in
@@ -269,7 +257,6 @@ struct RootView: View {
                 })
             }
             RemoteView(session: session, presentationMode: restoredPresentationMode,
-                       recordingDirectory: presentation.snapshot.directoryURL,
                        isSessionConnected: workspaceConnected,
                        onRetrySTA: { connectionModel.retrySTAConnection() },
                        onPreparing: { await listModel?.pauseForRemote() },
@@ -291,7 +278,6 @@ struct RootView: View {
             connectionModel.setGPSConnectionPaused(gpsCoordinator.state.enabled)
         }
         .onAppear {
-            presentRecordingSaveFailure()
             let restoredSkin = normalizedSkinPreset(UserDefaults.standard.string(forKey: "skin_preset"))
             if skinPreset != restoredSkin { skinPreset = restoredSkin }
             let restoredColumns = normalizedThumbnailColumns(thumbnailColumns)
@@ -820,7 +806,8 @@ final class WorkspacePagingController: UIViewController, UIScrollViewDelegate, U
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer === nestedPan, userScrollEnabled, currentPage == 1 else { return false }
         if nestedPan.numberOfTouches > 0 { return nestedScroll != nil }
-        guard !WheelDragRegionView.contains(touch.location(in: view), in: view) else {
+        guard !WheelDragRegionView.contains(touch.location(in: view), in: view),
+              !PopupDragBoundaryView.contains(touch.location(in: view), in: view) else {
             restoreNestedScroll()
             return false
         }
@@ -913,7 +900,7 @@ final class WorkspacePagingScrollView: UIScrollView {
             let position = panGestureRecognizer.location(in: self)
             let translation = panGestureRecognizer.translation(in: self)
             let origin = CGPoint(x: position.x - translation.x, y: position.y - translation.y)
-            if WheelDragRegionView.contains(origin, in: self) { return false }
+            if WheelDragRegionView.contains(origin, in: self) || PopupDragBoundaryView.contains(origin, in: self) { return false }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }

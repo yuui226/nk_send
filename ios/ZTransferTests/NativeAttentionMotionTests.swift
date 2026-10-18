@@ -740,3 +740,105 @@ final class SharedDisplayLinkLifecycleTests: XCTestCase {
         XCTAssertEqual(values, settled)
     }
 }
+
+@MainActor final class TipGuideTests: XCTestCase {
+    func testOneSectionAndDelayedRevealNeverRetargetsAfterCollapseOrSwitch() {
+        var state = TipGuideState(first: "first")
+        XCTAssertEqual(state.expanded, "first"); XCTAssertNil(state.reveal)
+        state.toggle("second"); XCTAssertEqual(state.expanded, "second"); XCTAssertEqual(state.reveal, "second")
+        state.toggle("third"); state.revealed("second")
+        XCTAssertEqual(state.expanded, "third"); XCTAssertEqual(state.reveal, "third")
+        state.toggle("third"); XCTAssertNil(state.expanded); XCTAssertNil(state.reveal)
+        state.toggle("first"); state.revealed("first")
+        XCTAssertEqual(state.expanded, "first"); XCTAssertNil(state.reveal)
+    }
+    func testSettingsConditionsAndBothEffectsScopesKeepAndroidSectionsAndAppleExceptions() {
+        for pro in [false, true] {
+            for effects in [false, true] {
+                for management in [false, true] {
+                    let sections = TipGuides.settings(showEffects: effects, isPro: pro, showManagement: management)
+                    let keys = sections.flatMap(\.items).map(\.textKey)
+                    XCTAssertEqual(sections.count, effects ? 5 : 4)
+                    XCTAssertEqual(sections.contains { $0.id == "settings_help_effects" }, effects)
+                    XCTAssertEqual(keys.contains("settings_help_pro"), !pro)
+                    XCTAssertEqual(keys.contains("iap_renewal_terms"), management)
+                    XCTAssertFalse(keys.contains("settings_help_switch_device")); XCTAssertFalse(keys.contains("settings_help_update"))
+                }
+            }
+        }
+        let local = TipGuides.effects(local: true), transfer = TipGuides.effects(local: false)
+        XCTAssertEqual(local.map(\.id), transfer.map(\.id))
+        XCTAssertEqual(local.dropFirst().flatMap(\.items).map(\.textKey), transfer.dropFirst().flatMap(\.items).map(\.textKey))
+        XCTAssertTrue(local[0].items.contains { $0.textKey == "local_photo_ios_save_hint" })
+        XCTAssertEqual(transfer[0].items.map(\.textKey), ["photo_effects_info_description", "photo_effects_gesture_hint"])
+        let tools = TipGuides.monitor.flatMap(\.items).compactMap(\.tool)
+        XCTAssertEqual(tools.count, 19); XCTAssertEqual(Set(tools).count, 19)
+        XCTAssertEqual(TipGuides.monitor.count, 5)
+    }
+    func testGuideClampsBelowTriggerAtNarrowPhoneAndLargeViewport() {
+        for host in [CGSize(width: 320, height: 568), .init(width: 393, height: 852), .init(width: 1024, height: 1366)] {
+            let anchor = CGRect(x: 260, y: 80, width: 36, height: 36)
+            let limit = TipGuidePlacement.limits(host: host, anchor: anchor, bottomInset: 34)
+            XCTAssertEqual(limit.width, min(420, host.width - 36))
+            XCTAssertLessThanOrEqual(limit.height, 560)
+            XCTAssertLessThanOrEqual(anchor.maxY + 8 + limit.height + 34 + 18, host.height)
+        }
+    }
+    func testRevealUsesMinimumDistanceAndOnlyRunsForObscuredHeading() throws {
+        XCTAssertEqual(TipGuideRevealCoordinator.distance(offset: 10, size: 48, container: 200), 0)
+        XCTAssertEqual(TipGuideRevealCoordinator.distance(offset: -10, size: 300, container: 200), 0)
+        XCTAssertEqual(TipGuideRevealCoordinator.distance(offset: -10, size: 48, container: 200), -10)
+        XCTAssertEqual(TipGuideRevealCoordinator.distance(offset: 180, size: 48, container: 200), 28)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 320, height: 568)
+        let controller = UIViewController(); window.rootViewController = controller; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        scroll.contentSize = CGSize(width: 300, height: 1000); controller.view.addSubview(scroll)
+        let heading = UIView(frame: CGRect(x: 0, y: 700, width: 300, height: 48)); scroll.addSubview(heading)
+        let owner = TipGuideRevealCoordinator(); owner.register(heading, id: "target")
+        owner.reveal("target"); XCTAssertTrue(owner.clockRunning)
+        owner.advance(0); owner.advance(80_000_000)
+        XCTAssertGreaterThan(scroll.contentOffset.y, 0); XCTAssertLessThan(scroll.contentOffset.y, 548)
+        for n in 6...120 { owner.advance(Int64(n) * 16_666_667) }
+        XCTAssertEqual(scroll.contentOffset.y, 548, accuracy: 0.01); XCTAssertFalse(owner.clockRunning)
+        owner.reveal("target"); XCTAssertFalse(owner.clockRunning)
+        scroll.setContentOffset(.zero, animated: false); owner.reveal("target"); XCTAssertTrue(owner.clockRunning)
+        owner.stop(); XCTAssertFalse(owner.clockRunning)
+        owner.advance(3_000_000_000); XCTAssertEqual(scroll.contentOffset.y, 0)
+    }
+
+    func testActualGuideScrollKeepsHeaderFixedAndModalRegionReleases() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let long = TipGuides.effects(local: true)
+        var host: UIHostingController<AnyView>? = UIHostingController(rootView: AnyView(
+            TipGuideContent(titleKey: "photo_effects_info_title", sections: long, close: {})
+                .frame(width: 357, height: 280).background(PopupDragBoundary())
+                .frame(width: 393, height: 852, alignment: .top)))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(120)); host?.view.layoutIfNeeded()
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        let root = try XCTUnwrap(host?.view)
+        let scroll = try XCTUnwrap(descendants(root).compactMap { $0 as? UIScrollView }.first)
+        let rect = scroll.convert(scroll.bounds, to: window)
+        XCTAssertGreaterThanOrEqual(rect.minY, 40); XCTAssertLessThanOrEqual(rect.height, 236)
+        XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+        let marker = try XCTUnwrap(descendants(root).compactMap { $0 as? PopupDragBoundaryView }.first)
+        XCTAssertGreaterThan(marker.bounds.width, 0); XCTAssertGreaterThan(marker.bounds.height, 0)
+        XCTAssertNotNil(marker.window)
+        XCTAssertTrue(PopupDragBoundaryView.contains(CGPoint(x: 196, y: 100), in: window))
+        XCTAssertTrue(PopupDragBoundaryView.contains(CGPoint(x: marker.bounds.midX, y: marker.bounds.midY), in: marker))
+        XCTAssertFalse(PopupDragBoundaryView.contains(CGPoint(x: 196, y: 700), in: window))
+        scroll.setContentOffset(CGPoint(x: 0, y: max(0, scroll.contentSize.height - scroll.bounds.height)), animated: false)
+        root.layoutIfNeeded()
+        XCTAssertEqual(scroll.convert(scroll.bounds, to: window).minY, rect.minY, accuracy: 0.1)
+        let image = UIGraphicsImageRenderer(bounds: root.bounds).image { _ in root.drawHierarchy(in: root.bounds, afterScreenUpdates: true) }
+        let attachment = XCTAttachment(image: image); attachment.name = "grouped-help-fixed-header"; attachment.lifetime = .keepAlways; add(attachment)
+        try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-1018-guide.png"))
+        window.rootViewController = nil; host = nil
+        await Task.yield()
+        XCTAssertFalse(PopupDragBoundaryView.contains(CGPoint(x: 196, y: 100), in: window))
+    }
+}

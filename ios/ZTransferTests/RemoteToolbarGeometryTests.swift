@@ -31,15 +31,6 @@ final class RemoteToolbarGeometryTests: XCTestCase {
         XCTAssertEqual(minimal.frames[0], result.frames[2])
     }
 
-    func testRecordingCapsuleSpansColumnsWithoutWideningAllTracks() {
-        let result = RemoteToolbarGeometry.arrange(items: [item(.hd), item(.record, width: 78), item(.fps), item(.rotate)],
-                                                   width: 162, pinnedEndCount: 1)
-        XCTAssertEqual(result.frames[1], CGRect(x: 42, y: 0, width: 78, height: 36))
-        XCTAssertEqual(result.frames[2].origin, CGPoint(x: 0, y: 40))
-        XCTAssertEqual(result.frames[3].origin, CGPoint(x: 126, y: 0))
-        XCTAssertEqual(result.height, 76)
-    }
-
     func testWiderTextDefinesSingleTrackAndZeroSizedEntriesConsumeNoSpace() {
         let result = RemoteToolbarGeometry.arrange(items: [item(.hd, width: 38), item(.fps), item(.grid, width: 0), item(.rotate)],
                                                    width: 170, pinnedEndCount: 1)

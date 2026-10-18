@@ -250,13 +250,16 @@ struct SettingsView: View {
                 TipPopupLayer(isPresented: showingHelp && settingsPage == .main) {
                     if let anchor = anchors[.settings] {
                         Color.clear.contentShape(Rectangle()).onTapGesture { dismissHelp() }
-                        AdaptiveTipPanel(anchor: anchor) { SettingsHelpBubble() }
+                            .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
+                        SettingsHelpBubble(anchor: anchor, showEffects: showPhotoEffectsEntry, close: dismissHelp)
                     }
                 }
                 TipPopupLayer(isPresented: showingEffectsHelp && settingsPage == .effects) {
                     if let anchor = anchors[.photoEffects] {
                         Color.clear.contentShape(Rectangle()).onTapGesture { dismissEffectsHelp() }
-                        AdaptiveTipPanel(anchor: anchor) { PhotoEffectsHelpBubble() }
+                            .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
+                        TipGuideBubble(anchor: anchor, titleKey: "photo_effects_info_title",
+                            sections: TipGuides.effects(local: false), close: dismissEffectsHelp)
                     }
                 }
             }
@@ -549,9 +552,9 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 DetentWheel(label: AppLocalized.resource("photo_interaction"), options: [false, true], selected: tapToPreview, optionLabel: { $0 ? AppLocalized.resource("tap_preview_hold_transfer") : AppLocalized.resource("tap_transfer_hold_preview") }, onCommit: { tapToPreview = $0 }, rowHeight: 32, wheelHeight: 56, optionMaxLines: 2, optionFontSize: 13)
                     .frame(maxWidth: .infinity)
-                DetentWheel(label: "照片加载范围", options: PhotoLoadingRange.allCases,
+                DetentWheel(label: AppLocalized.resource("photo_loading_range"), options: PhotoLoadingRange.allCases,
                             selected: PhotoLoadingRange(days: photoLoadingRangeDays),
-                            optionLabel: { $0 == .all ? "全部" : "\($0.days)日" },
+                            optionLabel: { $0 == .all ? AppLocalized.resource("filter_rating_range_all") : String(format: AppLocalized.resource("filter_rating_range_days"), $0.days) },
                             onCommit: { range in
                                 photoLoadingRangeDays = range.days
                                 onPhotoLoadingRangeChanged(range)
@@ -760,56 +763,18 @@ private struct PhotoEffectsSummaryTile: View {
 }
 
 
-/// Android MainSettingsInfoBubble equivalent. The four label/summary pairs
-/// and their order are copied from SettingsScreen; no iOS-only help text is
-/// introduced here.
+/// StoreKit changes are observed only while this guide is visible.
 private struct SettingsHelpBubble: View {
-    private let items = [
-        ("storage_mode", "storage_mode_summary"),
-        ("auto_transfer_new_media", "auto_transfer_new_media_summary"),
-        ("defer_transfer_start", "defer_transfer_start_summary"),
-        ("collapse_burst_photos", "collapse_burst_photos_summary"),
-    ]
-
+    let anchor: Anchor<CGRect>
+    let showEffects: Bool
+    let close: () -> Void
+    @ObservedObject private var access = PremiumEntitlementStore.shared
+    @ObservedObject private var purchases = StoreKitPurchaseStore.shared
     var body: some View {
-        TipBubbleContent {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(AppLocalized.resource("settings_help_title"))
-                    .zTransferTypography(.titleMedium, weight: .bold)
-                ForEach(items, id: \.0) { label, summary in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(AppLocalized.resource(label))
-                            .zTransferTypography(.labelMedium, weight: .bold)
-                            .foregroundStyle(ZTransferColors.accentOrange)
-                        Text(AppLocalized.resource(summary))
-                            .zTransferTypography(.bodySmall)
-                            .foregroundStyle(ZTransferColors.primaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Android PhotoEffectsInfoBubble equivalent. The strings and ordering are
-/// sourced from the same Android resource keys used by the detail page.
-private struct PhotoEffectsHelpBubble: View {
-    var body: some View {
-        TipBubbleContent {
-            VStack(alignment: .leading, spacing: 9) {
-                Text(AppLocalized.resource("photo_effects_info_title"))
-                    .zTransferTypography(.titleMedium, weight: .bold)
-                Text(AppLocalized.resource("photo_effects_info_description"))
-                    .zTransferTypography(.bodySmall)
-                Text(AppLocalized.resource("photo_effects_gesture_hint"))
-                    .zTransferTypography(.bodySmall)
-                    .fontWeight(.semibold)
-                Text(AppLocalized.resource("photo_effects_wheel_hint"))
-                    .zTransferTypography(.bodySmall)
-                    .fontWeight(.semibold)
-            }
-        }
+        TipGuideBubble(anchor: anchor, titleKey: "settings_help_title",
+            sections: TipGuides.settings(showEffects: showEffects, isPro: access.access.isPro,
+                showManagement: PremiumSettingsActions.showsManagement(access: access, purchases: purchases)),
+            introductionKey: "settings_help_wheels", alignLeading: true, close: close)
     }
 }
 

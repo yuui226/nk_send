@@ -16,4 +16,20 @@ final class IncrementalLocalizationTests: XCTestCase {
             XCTAssertNotEqual(AppLocalized.resource(key, language: "en"), key)
         }
     }
+
+    @MainActor
+    func testGroupedHelpResolvesEverySectionAndToolLabelInAllThreeLanguages() {
+        let sections = TipGuides.settings(showEffects: true, isPro: false, showManagement: true)
+            + TipGuides.effects(local: true) + TipGuides.effects(local: false) + TipGuides.monitor
+        let keys = Set(sections.map(\.id) + sections.flatMap(\.items).flatMap {
+            [$0.textKey] + ($0.labelKey.map { [$0] } ?? [])
+        })
+        for language in ["en", "zh", "hant"] {
+            for key in keys {
+                let text = AppLocalized.resource(key, language: language)
+                XCTAssertNotEqual(text, key, "Unresolved \(language)/\(key)")
+                XCTAssertFalse(text.isEmpty, "Empty \(language)/\(key)")
+            }
+        }
+    }
 }

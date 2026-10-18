@@ -4,10 +4,14 @@ import Foundation
 enum NikonPictureControlError: Error, LocalizedError, Equatable {
     case invalid(String)
     case flexibleColorUnsupported
+    case presetUnsupported(String)
+    case movieBankUnsupported
     var errorDescription: String? {
         switch self {
         case .invalid(let message): message
         case .flexibleColorUnsupported: "Flexible Color Picture Controls are not supported"
+        case .presetUnsupported(let detail): detail
+        case .movieBankUnsupported: "The separate/unknown movie Picture Control bank is not verified"
         }
     }
 }
@@ -39,6 +43,22 @@ struct NikonPictureControlToneCurve: Equatable, Sendable {
     }
 }
 
+/// Android NikonPictureControlFormat: only a read-only exchange chooses a layout.
+enum NikonPictureControlFormat: String, Sendable {
+    case classicZ = "CLASSIC_Z", legacyV2 = "LEGACY_V2"
+    var headerSize: Int { self == .classicZ ? 36 : 32 }
+    func supportsSize(_ size: Int) -> Bool { size == headerSize || size == headerSize + 578 }
+    func movieBank(_ movie: Bool) -> Bool { movie && self == .classicZ }
+    func selectionProperty(_ movie: Bool) -> UInt32 { movieBank(movie) ? 0xD237 : 0xD200 }
+    func parameters(_ movie: Bool, _ values: [UInt32]) -> [UInt32] {
+        self == .classicZ ? values + [movie ? 1 : 0] : values
+    }
+    var writeOperation: UInt16 { self == .classicZ ? 0x90CD : 0x940E }
+    func writeParameters(_ movie: Bool, slot: Int, modified: UInt32) -> [UInt32] {
+        self == .classicZ ? parameters(movie, [UInt32(slot), modified]) : [UInt32(slot), modified, 1]
+    }
+}
+
 struct NikonPictureControlData: Equatable, Sendable {
     static let customSlots = 201...209
     let requestedItem: Int
@@ -47,17 +67,37 @@ struct NikonPictureControlData: Equatable, Sendable {
     let isEmpty: Bool
     let curve: NikonPictureControlToneCurve?
     let data: Data
-    var parameterBytes: Data { data.subdata(in: 22..<35) }
+    let format: NikonPictureControlFormat
+    var parameterBytes: Data { data.subdata(in: (format == .classicZ ? 22 : 23)..<(format.headerSize - 1)) }
 
-    init(item: Int, responseCode: UInt16, data: Data?) throws {
+    init(item: Int, responseCode: UInt16, data: Data?, format: NikonPictureControlFormat = .classicZ) throws {
         try pictureControlRequire((1...65535).contains(item), "Invalid Picture Control item")
         try pictureControlRequire(responseCode == 0x2001,
                                   String(format: "Picture Control read failed: 0x%04X", responseCode))
         guard let data else { throw NikonPictureControlError.invalid("Missing Picture Control data") }
         let source = [UInt8](data)
-        try pictureControlRequire(source.count == 36 || source.count == 614, "Unrecognized Picture Control dataset size")
+        try pictureControlRequire(format.supportsSize(source.count), "Unrecognized \(format.rawValue) Picture Control dataset size: \(source.count)")
         requestedItem = item
         self.data = Data(source)
+        self.format = format
+        if format == .legacyV2 {
+            let custom = source[2]
+            isEmpty = custom == 2
+            curve = nil // Preserve legacy curve bytes verbatim, including unknown headers.
+            if isEmpty {
+                try pictureControlRequire(Self.customSlots.contains(item), "Only a custom slot may be unused")
+                baseItem = 0; name = ""; return
+            }
+            try pictureControlRequire(custom == (Self.customSlots.contains(item) ? 1 : 0), "Unexpected V2 Picture Control registration flag")
+            baseItem = Int(source[0])
+            try pictureControlRequire((1...199).contains(baseItem) && source[1] <= 1, "Invalid V2 Picture Control base")
+            let nameBytes = Array(source[3..<23])
+            let length = nameBytes.firstIndex(of: 0) ?? nameBytes.count
+            try pictureControlRequire((1...19).contains(length) && nameBytes.prefix(length).allSatisfy { (32...126).contains($0) }, "Unrecognized Picture Control name encoding")
+            name = String(decoding: nameBytes.prefix(length), as: UTF8.self)
+            try pictureControlRequire(source[31] == 0 || (source[31] == 1 && source.count == 610), "Invalid or truncated V2 Picture Control curve")
+            return
+        }
         isEmpty = source.allSatisfy { $0 == 0 }
         if isEmpty {
             try pictureControlRequire(Self.customSlots.contains(item) && source.count == 36,
@@ -234,5 +274,45 @@ func validatePictureControlCapabilities(dataset: Data, capabilities: Data) throw
         } else if flags[index] & 128 == 0 {
             try pictureControlRequire(values[offset] == 0, "Camera does not support this adjustment")
         }
+    }
+}
+
+// Android NikonPictureControlV2Encoder: quarter-step units are already encoded
+// in Classic Z. Preserve the 578-byte curve; reject unrepresentable adjustments.
+extension NikonPictureControlFile {
+    func encodePictureControl(format: NikonPictureControlFormat) throws -> Data {
+        let classic = try encodeClassicPictureControl()
+        return format == .classicZ ? classic : try encodeV2PictureControl(classic)
+    }
+}
+
+func encodeV2PictureControl(_ classic: Data) throws -> Data {
+    let parsed = try NikonPictureControlData(item: 201, responseCode: 0x2001, data: classic)
+    func supported(_ condition: Bool, _ detail: String) throws {
+        if !condition { throw NikonPictureControlError.presetUnsupported(detail) }
+    }
+    try supported(!parsed.isEmpty && (1...3).contains(parsed.baseItem), "V2 cannot use this NP3 base")
+    try supported(classic[25] <= 36, "V2 cannot use negative sharpening")
+    try supported(classic[26] == 0, "V2 has no mid-range sharpening")
+    try supported([22, 23, 24, 32, 33, 34].allSatisfy { classic[$0] == 0 }, "NP3 contains adjustments without a V2 equivalent")
+    var output = Data(repeating: 0, count: 32 + (parsed.curve?.data.count ?? 0))
+    output[0] = UInt8(parsed.baseItem); output[2] = 1
+    output.replaceSubrange(3..<23, with: classic[2..<22])
+    for (target, source) in [(25, 30), (26, 31), (27, 25), (28, 28), (29, 29), (30, 27), (31, 35)] { output[target] = classic[source] }
+    if let curve = parsed.curve { output.replaceSubrange(32..<output.count, with: curve.data) }
+    _ = try NikonPictureControlData(item: 201, responseCode: 0x2001, data: output, format: .legacyV2)
+    return output
+}
+
+func validateV2PictureControlCapabilityLayout(_ capabilities: Data) throws {
+    try pictureControlRequire(capabilities.count == 39 && capabilities[0] == 1, "Unsupported V2 Picture Control capability layout")
+    try pictureControlRequire(capabilities[1...7].allSatisfy { [0, 1, 128, 129].contains($0) }, "Invalid V2 Picture Control capabilities")
+}
+func validateV2PictureControlCapabilities(dataset: Data, capabilities: Data) throws {
+    try validateV2PictureControlCapabilityLayout(capabilities)
+    for (index, offset) in [24, 27, 30, 28, 29, 25, 26].enumerated() {
+        let capability = capabilities[index + 1], value = dataset[offset]
+        let supported = value == 128 ? capability & 1 != 0 : capability & 128 != 0 || value == 0
+        if !supported { throw NikonPictureControlError.presetUnsupported("Camera does not support adjustment at \(offset)") }
     }
 }

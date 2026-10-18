@@ -97,6 +97,8 @@ struct RemoteView: View {
     private let persistedFocusDiagnosticReport: String
     @State private var exposureMode: RemoteExposureAssist = .off
     @State private var batteryExpanded = false
+    @State private var monitorHelpPresented = false
+    @AppStorage private var monitorHelpViewed: Bool
     @State private var layoutOrientation: RemoteLayoutOrientation = .portrait
     @State private var orientationSession = RemoteOrientationSession<RemoteLayoutOrientation>()
     @State private var orientationStabilityTask: Task<Void, Never>?
@@ -145,7 +147,7 @@ struct RemoteView: View {
         return RemoteExposureParameters.format(descriptor.property, raw: descriptor.current)
     }
 
-    init(session: CameraSession?, queueModel: TransferQueueViewModel? = nil, presentationMode: CameraPresentationMode? = nil, recordingDirectory: URL? = nil,
+    init(session: CameraSession?, queueModel: TransferQueueViewModel? = nil, presentationMode: CameraPresentationMode? = nil,
          isSessionConnected: Bool = true, toolDefaults: UserDefaults = .standard,
          remoteCamera: (any RemoteCameraControlling)? = nil, freeUsage: FreeUsageStore = .shared,
          entitlements: PremiumEntitlementStore = .shared,
@@ -154,6 +156,7 @@ struct RemoteView: View {
          onTransportLost: (() -> Void)? = nil) {
         let preferences = RemoteToolPreferences(defaults: toolDefaults)
         self.toolDefaults = toolDefaults
+        _monitorHelpViewed = AppStorage(wrappedValue: false, "monitor_help_viewed", store: toolDefaults)
         _entitlements = ObservedObject(wrappedValue: entitlements)
         _tools = StateObject(wrappedValue: preferences)
         _pictureControlFolders = StateObject(wrappedValue: PictureControlFolderLifetime(defaults: toolDefaults))
@@ -176,7 +179,6 @@ struct RemoteView: View {
         let camera: any RemoteCameraControlling = remoteCamera ?? session.map { $0 as any RemoteCameraControlling }
             ?? DisconnectedRemoteCamera(isUSB: mode == .usb)
         let remoteModel = RemoteViewModel(camera: camera,
-                                                            recordingDirectory: recordingDirectory,
                                                             onTransportLost: onTransportLost,
                                                             entitlements: entitlements, freeUsage: freeUsage)
         _model = StateObject(wrappedValue: remoteModel)
@@ -211,6 +213,16 @@ struct RemoteView: View {
             }
             .opacity(rotationOpacity)
 
+        }
+        .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
+            TipPopupLayer(isPresented: monitorHelpPresented && !layoutOrientation.isLandscape && !reviewLifetime.active) {
+                if let anchor = anchors[.monitor] {
+                    Color.clear.contentShape(Rectangle()).onTapGesture { monitorHelpPresented = false }
+                        .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
+                    TipGuideBubble(anchor: anchor, titleKey: "monitor_help_title", sections: TipGuides.monitor,
+                        alignLeading: true, tools: tools, close: { monitorHelpPresented = false })
+                }
+            }
         }
         .overlay {
             if reviewLifetime.active, let reviewSession, let reviewQueue {
@@ -280,7 +292,6 @@ struct RemoteView: View {
             }
             await onPreparing?()
             guard !Task.isCancelled, !stopCleanupStarted, isSessionConnected else { return }
-            model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
             model.setHDLiveView(tools.hd)
             model.setMovieFormatMonitoring(dispMode.showsCameraInformation)
             model.setStorageMonitoring(dispMode.showsCameraInformation)
@@ -319,7 +330,6 @@ struct RemoteView: View {
                 if exposureMode == .falseColor { exposureMode = .off; tools.exposure = .off }
             }
             lutMonitor.onCloseMenu = { lutListPresented = false }
-            model.recordingDesqueeze = effectiveDesqueeze
             let normalizedDesqueeze = effectiveDesqueeze
             if tools.desqueeze != normalizedDesqueeze { tools.desqueeze = normalizedDesqueeze }
             model.setExposureMeterVisible(tools.meter)
@@ -359,14 +369,13 @@ struct RemoteView: View {
             closePictureControl()
             if model.movieMode && review.active { Task { await review.close() } }
             gridMenuPresented = false
-            model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
         }
         .onChange(of: isSessionConnected) { connected in
             if !connected { closePictureControl() }
             if !connected && review.active { Task { await review.close() } }
         }
-        .onChange(of: editingTools) { _ in closePictureControl() }
-        .onChange(of: layoutOrientation) { _ in closePictureControl() }
+        .onChange(of: editingTools) { _ in closePictureControl(); monitorHelpPresented = false }
+        .onChange(of: layoutOrientation) { _ in closePictureControl(); monitorHelpPresented = false }
         .onChange(of: selectedField) { if $0 != nil { closePictureControl() } }
         .onChange(of: developerPanelPresented) { if $0 { closePictureControl() } }
         .onChange(of: gridMenuPresented) { if $0 { closePictureControl() } }
@@ -391,14 +400,12 @@ struct RemoteView: View {
         .onChange(of: layoutOrientation) { _ in
             gridMenuPresented = false
             model.dismissCameraTool()
-            model.setLocalRecordingToolVisible(tools.layout(movie: model.movieMode).visible(.record), fixedRecorder: layoutOrientation.isLandscape)
         }
         .onChange(of: tools.locked) { locked in
             pauseOrientationCandidate()
             orientationSession.discardPending()
             if !locked { refreshOrientationCandidate() }
         }
-        .onChange(of: effectiveDesqueeze) { model.recordingDesqueeze = $0 }
         .onChange(of: tools.hd) { model.setHDLiveView($0) }
         .onChange(of: tools.level) { model.setLevelVisible($0) }
         .onChange(of: tools.meter) { model.setExposureMeterVisible($0) }
@@ -487,7 +494,7 @@ struct RemoteView: View {
                         for tool in hidden { setToolVisible(tool, false) }
                     }, rotate: AnyView(remoteRotateButton), back: AnyView(remoteBackButton),
                     disp: AnyView(remoteDispButton), shutter: AnyView(remoteShutter(diameter: layout.shutterSize)),
-                    recorder: AnyView(remoteRecordButton), review: AnyView(reviewButton), parameter: { index, height in
+                    review: AnyView(reviewButton), parameter: { index, height in
                         AnyView(exposureTile(exposureFields[index], height: height))
                     })
                     .frame(width: layout.controls.width, height: layout.controls.height)
@@ -511,10 +518,7 @@ struct RemoteView: View {
         // Android permits browsing while camera controls are initializing; only
         // mutations use canWrite. A missing/unreadable camera reports the same
         // opening failure instead of silently swallowing the tool tap.
-        guard let session = reviewSession else {
-            model.pictureControlNotice(AppLocalized.resource("picture_control_slots_read_failed"))
-            return
-        }
+        let session = reviewSession
         let movie = model.movieMode
         let current: @Sendable () async -> Bool = { [weak model] in
             await MainActor.run { model.map { $0.movieMode == movie } ?? false }
@@ -525,11 +529,15 @@ struct RemoteView: View {
             current: { model.movieMode == movie },
             allowed: { model.pictureControlWritesAllowed },
             busy: { model.setPictureControlWriting($0) },
-            readOverview: { try await session.readPictureControlOverview(movie: movie, backupDirectory: directory, isCurrent: current) },
+            readOverview: { log in
+                guard let session else { throw PTPSessionError.invalidResponse }
+                return try await session.readPictureControlOverview(movie: movie, backupDirectory: directory, isCurrent: current, log: log)
+            },
             change: { slot, change, log in
+                guard let session else { throw PTPSessionError.invalidResponse }
                 try await session.changePictureControl(slot: slot, change: change, movie: movie,
                     backupDirectory: directory, isCurrent: current, log: log)
-            }, closesFolders: false)
+            }, closesFolders: false, reports: pictureControlFolders.reports)
         panel.notice = { model.pictureControlNotice($0) }
         panel.movie = movie
         panel.onReport = { pictureControlReport = $0 }
@@ -578,6 +586,12 @@ struct RemoteView: View {
             HStack(spacing: 4) {
                 remoteSignalButton
                 remoteBatteryButton
+                TipLightbulbButton(attention: !monitorHelpViewed, size: 36,
+                    accessibilityLabel: AppLocalized.resource("monitor_help_title")) {
+                    guard !layoutOrientation.isLandscape else { return }
+                    monitorHelpViewed = true
+                    monitorHelpPresented = true
+                }.tipPopupAnchor(.monitor)
             }
             RemoteMonitorHintAnchor(horizontalInset: 6).frame(maxWidth: .infinity)
             remoteBackButton
@@ -586,7 +600,9 @@ struct RemoteView: View {
 
     private var remoteBackButton: some View {
         Button {
-            if pictureControlPresented {
+            if monitorHelpPresented {
+                monitorHelpPresented = false
+            } else if pictureControlPresented {
                 pictureControlPanel?.requestClose()
             } else if gridMenuPresented {
                 gridMenuClosing = true
@@ -672,7 +688,7 @@ struct RemoteView: View {
                     withAnimation(ZTransferMotion.standard) { developerPanelPresented = true }
                 }
             }
-        }, trailing: remoteFixedToolControls, pinnedEndCount: 2, fixedRecorder: false,
+        }, trailing: remoteFixedToolControls, pinnedEndCount: 2,
                                 applyHidden: { hidden in
             for tool in hidden { setToolVisible(tool, false) }
         })
@@ -811,13 +827,6 @@ struct RemoteView: View {
                     model.toggleComputerControl()
                 }),
             .rotate: AnyView(remoteRotateButton),
-            .record: AnyView(Group {
-                if editingTools {
-                    remoteToolEditButton(.record, movie: movie) {
-                        toolMark(.record)
-                    }
-                } else { remoteRecordButton }
-            })
         ]
     }
 
@@ -969,7 +978,6 @@ struct RemoteView: View {
             case .whiteBalance: if model.cameraToolPanel?.tool == .whiteBalance { model.dismissCameraTool() }
             case .focusArea: if model.cameraToolPanel?.tool == .focusArea { model.dismissCameraTool() }
             case .focusMode: if model.cameraToolPanel?.tool == .focusMode { model.dismissCameraTool() }
-            case .record: model.setLocalRecordingToolVisible(false, fixedRecorder: false)
             case .hd: model.setHDLiveView(false)
             case .lock: setRotationLocked(false, showHint: false)
             case .pictureControl: closePictureControl()
@@ -986,9 +994,6 @@ struct RemoteView: View {
             }
         }
         tools.layout(movie: model.movieMode).setVisible(tool, visible)
-        if tool == .record {
-            model.setLocalRecordingToolVisible(visible, fixedRecorder: layoutOrientation.isLandscape)
-        }
     }
 
     private func registerFpsTap() {
@@ -1122,14 +1127,6 @@ struct RemoteView: View {
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
         .accessibilityLabel(accessibilityLabel)
-    }
-
-    private var remoteRecordButton: some View {
-        RemoteRecorderBar(phase: model.localRecordingPhase, elapsed: model.localRecordingElapsed,
-            enabled: entitlements.access.isPro, compactSaved: layoutOrientation.isLandscape,
-            onStart: { model.startLocalRecording() },
-            onPauseResume: { model.toggleLocalRecordingPause() },
-            onStop: { model.stopLocalRecording() })
     }
 
     private func toolMark(_ tool: RemoteTool) -> some View {

@@ -4,7 +4,7 @@ import Foundation
 /// monitor, including repeated identical messages. Keep text while invisible
 /// so the outgoing AnimatedVisibility can finish without changing its content.
 struct RemoteMonitorHint: Equatable {
-    enum Source { case interaction, cameraRecording, localRecording, lut }
+    enum Source { case interaction, cameraRecording, lut }
     var text = ""
     var visible = false
     var source: Source = .interaction

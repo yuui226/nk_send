@@ -9,7 +9,8 @@ struct PremiumSettingsActions: View {
     let motionPaused: Bool
     let onShowPremium: () -> Void
     let onPlayFireworks: () -> Void
-    private var showManagement: Bool {
+    private var showManagement: Bool { Self.showsManagement(access: access, purchases: purchases) }
+    static func showsManagement(access: PremiumEntitlementStore, purchases: StoreKitPurchaseStore) -> Bool {
         #if DEBUG
         // Simulated ownership needs no separate settings management button.
         if access.developmentPurchase != nil { return false }
@@ -312,7 +313,6 @@ struct PremiumPurchaseView: View {
             row("compare_transfer", "compare_transfer_free", "compare_unlimited", "compare_unlimited", value: "25")
             row("compare_filesize", "compare_filesize_free", "compare_unlimited", "compare_unlimited", value: "400")
             row("compare_remote", "compare_remote_free", "compare_unlimited", "compare_unlimited", value: "3")
-            row("compare_on_device_recording", "compare_unavailable", "compare_available", "compare_available")
             row("compare_generate_effect_image", "compare_available", "compare_available", "compare_available")
             row("compare_effect_filters", "compare_available", "compare_available", "compare_available")
             row("compare_effect_frames", "compare_available", "compare_available", "compare_available")

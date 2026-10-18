@@ -1,0 +1,682 @@
+{
+  "baseline": "9c8c1216e4a7bafbbc906f8ea47b851b14a3078d",
+  "target": "401f55ff04ed0d16197e529a95beffb7b3b9259d",
+  "prior_ios_commit": "ab5f7753",
+  "merge": "257c6147",
+  "meaning": "50个基线差异文件的逐项源码对应；验证状态和完成数以任务台账为准，源文件哈希不代替运行证据。",
+  "files": [
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolEditorInstrumentation.kt",
+      "status": "M",
+      "tasks": [
+        "A09",
+        "A10"
+      ],
+      "sha256": "cc1e92b3d9ee1e9de462a23202625d320e62e0c1e4f739769ee813ea0baa09ee",
+      "ios_paths": [
+        "ios/ZTransferTests/RemoteToolLayoutTests.swift",
+        "ios/ZTransferTests/RemoteCapturePerformanceTests.swift",
+        "ios/ZTransferTests/RemoteLifecycleTests.swift"
+      ],
+      "review": "本地录制相关测试随功能退役，保留相机与帧链路回归；端到端UI自动化按用户要求未运行"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+      "status": "M",
+      "tasks": [
+        "A09",
+        "A10"
+      ],
+      "sha256": "9db9fc3dafa9d2c3747bb82ec4b37b69d4b5585cb39a79641eddc08e3a620b00",
+      "ios_paths": [
+        "ios/ZTransferTests/RemoteToolLayoutTests.swift",
+        "ios/ZTransferTests/RemoteCapturePerformanceTests.swift",
+        "ios/ZTransferTests/RemoteLifecycleTests.swift"
+      ],
+      "review": "本地录制相关测试随功能退役，保留相机与帧链路回归；端到端UI自动化按用户要求未运行"
+    },
+    {
+      "path": "app/src/main/AndroidManifest.xml",
+      "status": "M",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": "0b67a7d307157897e0c56c28a252f2a33f6ce64752806399721b408f3c2c08ef",
+      "ios_paths": [
+        "ios/ZTransfer/Info.plist",
+        "ios/ZTransfer/Domain/RemoteViewModel.swift"
+      ],
+      "review": "iOS原Info.plist已无麦克风说明，无需改清单；删除录制权限请求代码，保留图库保存/相机控制权限"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+      "status": "M",
+      "tasks": [
+        "A01"
+      ],
+      "sha256": "0a544ba4b04bfe2a393fc1be16272f804bd4a821c198bc7024af308e0fb4977c",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/CameraRepository.swift"
+      ],
+      "review": "连接级缓存随DeviceInfo/关闭清除"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlData.kt",
+      "status": "M",
+      "tasks": [
+        "A02",
+        "A03"
+      ],
+      "sha256": "dd9796281dda3f08f742da84b5ee3d28e4df8d3a5a72cf38441a7810ef0d1017",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/NikonPictureControl.swift",
+        "ios/ZTransfer/Domain/NikonPictureControlAccess.swift"
+      ],
+      "review": "显式格式解析与原始数据快照"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlFormat.kt",
+      "status": "A",
+      "tasks": [
+        "A01",
+        "A02",
+        "A03"
+      ],
+      "sha256": "3c73fec1ac5248dddb5ad33c917397ec12cf4855068b553e7c1cee8a05118fb5",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/NikonPictureControl.swift"
+      ],
+      "review": "32/610与36/614格式、读写参数及共享银行"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlProtocol.kt",
+      "status": "A",
+      "tasks": [
+        "A01",
+        "A04"
+      ],
+      "sha256": "2117afc157f83f425a032c668bc3ba402a1e8708a70dab879a78a6c71b3b663f",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/NikonPictureControlAccess.swift"
+      ],
+      "review": "只读STANDARD协议发现、D237确认与交换日志"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlV2Encoder.kt",
+      "status": "A",
+      "tasks": [
+        "A02"
+      ],
+      "sha256": "61be3d36e0f7332ee19b7e575e3dcfcf5038872d1a8c18fd82ab53c35562796f",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/NikonPictureControl.swift"
+      ],
+      "review": "严格旧格式转换与39字节能力校验"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonPictureControlWriter.kt",
+      "status": "M",
+      "tasks": [
+        "A03",
+        "A04"
+      ],
+      "sha256": "3142614bd326fd44c449f75abdec38b1fb210cb1b61d023c9acd088a071639a2",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/NikonPictureControlAccess.swift",
+        "ios/ZTransfer/Domain/CameraRepository.swift"
+      ],
+      "review": "九槽备份/默认当前数据/回滚及日志"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/recorder/ViewfinderRecorder.kt",
+      "status": "D",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": null,
+      "ios_paths": [
+        "ios/ZTransfer/Domain/RemoteMovieRecording.swift"
+      ],
+      "review": "删除手机编码器，保留同文件内相机PTP录像逻辑"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt",
+      "status": "M",
+      "tasks": [
+        "A06"
+      ],
+      "sha256": "8c513d04d0b1df17cc18c263b211c8d36404289fb6a928471c33ea960f9b4d12",
+      "ios_paths": [
+        "ios/ZTransfer/UI/Components/TipLightbulbButton.swift",
+        "ios/ZTransfer/App/RootView.swift",
+        "ios/ZTransfer/UI/SettingsPopupOverlay.swift",
+        "ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift",
+        "ios/ZTransfer/UI/Components/RemoteChoicePopup.swift",
+        "ios/ZTransfer/UI/LocalPhotoEffectsView.swift"
+      ],
+      "review": "分组帮助、设置/筛选/遥控共享弹窗保留子滚动/点按，空白及背景拖动不传给原生翻页；74项集中回归及3项真实筛选组件回归通过，端到端触摸未运行"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+      "status": "M",
+      "tasks": [
+        "A05",
+        "A09"
+      ],
+      "sha256": "18d81c09cffe2f822dc5ca2b80a48c9fe475cec4b8776f3093a28714ee7263ba",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/PhotoFilter.swift",
+        "ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift",
+        "ios/ZTransfer/UI/PhotoListView.swift"
+      ],
+      "review": "默认评级5日及删除监看前目录准入"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LandscapeMonitorControls.kt",
+      "status": "M",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": "a02dc3209e29c76f65dae052c03728fda1fa5aa2e8050c1025f43f9e7dd91633",
+      "ios_paths": [
+        "ios/ZTransfer/UI/Components/RemoteLandscapeControls.swift"
+      ],
+      "review": "移除手机端录制控件，保留快门/DISP/旋转"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/LicenseDialogs.kt",
+      "status": "M",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": "95b74fcb83024941cd404b6fce8bf76c29440e9461ec86b6e62f86ccf431ccd3",
+      "ios_paths": [
+        "ios/ZTransfer/UI/PremiumPurchaseView.swift"
+      ],
+      "review": "删除手机端录制权益行"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PictureControlReports.kt",
+      "status": "M",
+      "tasks": [
+        "A04"
+      ],
+      "sha256": "771669e43f522d5db7e71aac601c5ebe7749efd36780fcf84d1171a767a72715",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/PictureControlPanelModel.swift"
+      ],
+      "review": "概览和操作独立代次、分类磁盘恢复"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/PictureControlToolState.kt",
+      "status": "M",
+      "tasks": [
+        "A04"
+      ],
+      "sha256": "1e52bede8334493e349070de3d1826170bce7aa7d6cceee7712c654777f57651",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/PictureControlPanelModel.swift",
+        "ios/ZTransfer/UI/RemoteView.swift"
+      ],
+      "review": "跨弹窗报告生命周期"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RecControlBar.kt",
+      "status": "D",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": null,
+      "ios_paths": [],
+      "review": "删除RemoteRecorderBar/RemoteRecorderMotion，计时叶子移动到相机指示组件"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteLutImage.kt",
+      "status": "M",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": "152103f9002474ac1316f02b82b42f80a4ce6a4f3578efd843e3a08117019126",
+      "ios_paths": [],
+      "review": "仅注释移除recorder称呼；既有独立LUT显示链路不改"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteMonitorHelp.kt",
+      "status": "A",
+      "tasks": [
+        "A08"
+      ],
+      "sha256": "58464f5affdc1ceea3bc5bbf00e60bafb4d34c48e6d893f5c617f87c792a0bae",
+      "ios_paths": [
+        "ios/ZTransfer/UI/Components/TipLightbulbButton.swift",
+        "ios/ZTransfer/UI/RemoteView.swift"
+      ],
+      "review": "五组文案、工具图示、竖屏电池后入口和已读"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemotePictureControlPanel.kt",
+      "status": "M",
+      "tasks": [
+        "A02",
+        "A04"
+      ],
+      "sha256": "2e034600448b7854402146acb2498a5640775bf1b069a7375ec877198870f8c4",
+      "ios_paths": [
+        "ios/ZTransfer/UI/RemotePictureControlPanel.swift",
+        "ios/ZTransfer/Domain/PictureControlPanelModel.swift"
+      ],
+      "review": "不支持错误与Debug失败弹窗"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+      "status": "M",
+      "tasks": [
+        "A08",
+        "A09"
+      ],
+      "sha256": "0e23c465fbf116719151f3fd575e933fcbffdace37fe18db321a5b6b451f0bcd",
+      "ios_paths": [
+        "ios/ZTransfer/UI/RemoteView.swift",
+        "ios/ZTransfer/Domain/RemoteViewModel.swift"
+      ],
+      "review": "帮助、录制移除及回看准入，保留相机录像和接收帧率"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolBar.kt",
+      "status": "M",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": "6d6873630fe61223f9d644c5c251894817395e5d650e09c40b64b74a35e6cd48",
+      "ios_paths": [
+        "ios/ZTransfer/UI/Components/RemoteConfiguredToolbar.swift",
+        "ios/ZTransfer/UI/Components/RemoteAdaptiveToolLayout.swift"
+      ],
+      "review": "所有工具统一36，移除录制占槽与显隐例外"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+      "status": "M",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": "cf5a2ce634f42612a78d396e969abeac8c39e6e75572817b65aa7fe496dc04e0",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/RemoteToolLayout.swift",
+        "ios/ZTransfer/Domain/RemoteToolPreferences.swift"
+      ],
+      "review": "过滤旧record ID，保留顺序/隐藏/照片视频独立"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt",
+      "status": "M",
+      "tasks": [
+        "A05",
+        "A07"
+      ],
+      "sha256": "b323087d2f5ea66e59ec2760dbf1d673f6efc632384cc6ee9589a239b2b37a5c",
+      "ios_paths": [
+        "ios/ZTransfer/UI/SettingsView.swift",
+        "ios/ZTransfer/UI/LocalPhotoEffectsView.swift",
+        "ios/ZTransfer/UI/Components/TipLightbulbButton.swift"
+      ],
+      "review": "加载10日与共享分组帮助，iOS独立苹果订阅例外"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/TipLightbulbButton.kt",
+      "status": "M",
+      "tasks": [
+        "A06",
+        "A07",
+        "A08"
+      ],
+      "sha256": "acb9d4c02eb7f7cd84628fd5f91a9b440ce9ac0935957a592df88b3940676716",
+      "ios_paths": [
+        "ios/ZTransfer/UI/Components/TipLightbulbButton.swift"
+      ],
+      "review": "固定标题、单组展开、时序和延后最小距离滚入；灯泡遵守静态约定"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/ViewfinderViewport.kt",
+      "status": "M",
+      "tasks": [
+        "A09"
+      ],
+      "sha256": "a7663898af5a490eb5dfe91a50f8b773eccf3d01dd0ebd98329cd59d70afb8f1",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/RemoteViewfinderViewport.swift"
+      ],
+      "review": "仅注释移除recorder称呼；显示变换不改源帧"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+      "status": "M",
+      "tasks": [
+        "A05"
+      ],
+      "sha256": "608572cdcacbc5869e93586b4de71795afe298a9b21bc67deb3a82a63be4d154",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/PhotoFilter.swift",
+        "ios/ZTransfer/Domain/PhotoListViewModel.swift"
+      ],
+      "review": "十个实际拍摄日期进入缩略图加载范围"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt",
+      "status": "M",
+      "tasks": [
+        "A05",
+        "A08"
+      ],
+      "sha256": "791d20751808384133f62197e0dbb37dadad2c647e0f0fcae466366f9521a1d0",
+      "ios_paths": [
+        "ios/ZTransfer/Domain/PhotoFilter.swift",
+        "ios/ZTransfer/Domain/PhotoListViewModel.swift",
+        "ios/ZTransfer/UI/RemoteView.swift"
+      ],
+      "review": "旧全部仅迁移一次为5日、10日加载与monitor_help_viewed"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/monitor_help.xml",
+      "status": "A",
+      "tasks": [
+        "A08",
+        "A10"
+      ],
+      "sha256": "168b2cec80a53114ec6369a0efe5170e36a42a9e1befef9d43628ad7a83715d5",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/picture_controls.xml",
+      "status": "M",
+      "tasks": [
+        "A02",
+        "A04",
+        "A10"
+      ],
+      "sha256": "5a78bf4d20e33903750f3ead870e7899d4b845a05372783aa5fd94ea113a432e",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/remote_tools.xml",
+      "status": "M",
+      "tasks": [
+        "A09",
+        "A10"
+      ],
+      "sha256": "fedacb167fb0b0f5d94638b1d28f02c609841469fd7e3933975426b698576fc7",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/settings_help.xml",
+      "status": "A",
+      "tasks": [
+        "A07",
+        "A10"
+      ],
+      "sha256": "f0ca934fefcc98fc35086090e80407ce7152510fb657e47f3a02fb2102fba3ec",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/strings.xml",
+      "status": "M",
+      "tasks": [
+        "A05",
+        "A07",
+        "A09",
+        "A10"
+      ],
+      "sha256": "66dc3c55f213f5bb9adb3a6961788f9449578add8b29c3d1da244dd348bad636",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-zh/monitor_help.xml",
+      "status": "A",
+      "tasks": [
+        "A08",
+        "A10"
+      ],
+      "sha256": "414eb6703903c70ad7e4c9480d799fe6b2fbded852a24983cbbafb3559555edd",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-zh/picture_controls.xml",
+      "status": "M",
+      "tasks": [
+        "A02",
+        "A04",
+        "A10"
+      ],
+      "sha256": "21e311394307fa26a1377339d1d0be54ed918b585bc5d703463ada4effeeb2b7",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-zh/remote_tools.xml",
+      "status": "M",
+      "tasks": [
+        "A09",
+        "A10"
+      ],
+      "sha256": "f338e8c7a78898f3a95d5c516e13e0012238b91b40e90fa08872d4007b79ed59",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-zh/settings_help.xml",
+      "status": "A",
+      "tasks": [
+        "A07",
+        "A10"
+      ],
+      "sha256": "21374e59718062bec2820c595a64802e838efc55bbbec3e845213e7cc35fde7e",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values-zh/strings.xml",
+      "status": "M",
+      "tasks": [
+        "A05",
+        "A07",
+        "A09",
+        "A10"
+      ],
+      "sha256": "1b16b493a3ce8de4e63b8bf853094452eaec30faf4e2573bdb5695b5553db44e",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values/monitor_help.xml",
+      "status": "A",
+      "tasks": [
+        "A08",
+        "A10"
+      ],
+      "sha256": "8a33a089adbff94227701a136b8d6a93d6f3141fd431b1a27d85d7450c81dad3",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values/picture_controls.xml",
+      "status": "M",
+      "tasks": [
+        "A02",
+        "A04",
+        "A10"
+      ],
+      "sha256": "2d61112ade45da3d899bc01fe34c39a9fc496f5451194e67b2d01d19ee0fd68b",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values/remote_tools.xml",
+      "status": "M",
+      "tasks": [
+        "A09",
+        "A10"
+      ],
+      "sha256": "5b8d8e7c99d5968ce1794f6430487c3b93e2061d0e89dfb2b1dfa2b358690a0b",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values/settings_help.xml",
+      "status": "A",
+      "tasks": [
+        "A07",
+        "A10"
+      ],
+      "sha256": "2e0d86b292b1641fb8e3b722877b9f0309835b9b9c12734ff1153430d78e82d2",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "status": "M",
+      "tasks": [
+        "A05",
+        "A07",
+        "A09",
+        "A10"
+      ],
+      "sha256": "b590395810ebf850309ae119272a30d5349cce02c8a4d03e53ee9d63d1029e08",
+      "ios_paths": [
+        "ios/ZTransfer/App/AndroidLocalization.swift"
+      ],
+      "review": "资源生成器逐字同步；苹果差异由IOSLocalization覆盖"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonD5600PictureControlTest.kt",
+      "status": "A",
+      "tasks": [
+        "A01",
+        "A02",
+        "A03"
+      ],
+      "sha256": "aa333d62375c8ae7c238bb4521fcde1ed8200d56d07a072e5e32bc3e8aef037b",
+      "ios_paths": [
+        "ios/ZTransferTests/NikonPictureControlProtocolTests.swift"
+      ],
+      "review": "对应Swift模型/协议专项，详情见台账；非硬件验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlProtocolTest.kt",
+      "status": "A",
+      "tasks": [
+        "A01",
+        "A02",
+        "A03"
+      ],
+      "sha256": "c695ddd751c84e829d54d0013bec99689573e127682b2b4e2b9363640b361c54",
+      "ios_paths": [
+        "ios/ZTransferTests/NikonPictureControlProtocolTests.swift"
+      ],
+      "review": "对应Swift模型/协议专项，详情见台账；非硬件验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlSlotsTest.kt",
+      "status": "M",
+      "tasks": [
+        "A01",
+        "A02",
+        "A03"
+      ],
+      "sha256": "59d575f814ca8b67b48c55e155c15ffa164419f54e1b1a6806a9adac3520cef9",
+      "ios_paths": [
+        "ios/ZTransferTests/NikonPictureControlProtocolTests.swift"
+      ],
+      "review": "对应Swift模型/协议专项，详情见台账；非硬件验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/NikonPictureControlV2EncoderTest.kt",
+      "status": "A",
+      "tasks": [
+        "A01",
+        "A02",
+        "A03"
+      ],
+      "sha256": "46ac9215462a643b47b1a2ae0c5d795085de45b1590380767bddc86d1f6b4bd8",
+      "ios_paths": [
+        "ios/ZTransferTests/NikonPictureControlProtocolTests.swift"
+      ],
+      "review": "对应Swift模型/协议专项，详情见台账；非硬件验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/LandscapeMonitorLayoutTest.kt",
+      "status": "M",
+      "tasks": [
+        "A09",
+        "A10"
+      ],
+      "sha256": "f022d406022e52a99af0fb5ad5548e41eae1a46487ba2c394c498734cf5cb9cb",
+      "ios_paths": [
+        "ios/ZTransferTests/RemoteToolLayoutTests.swift",
+        "ios/ZTransferTests/RemoteCapturePerformanceTests.swift",
+        "ios/ZTransferTests/RemoteLifecycleTests.swift"
+      ],
+      "review": "本地录制相关测试随功能退役，保留相机与帧链路回归；端到端UI自动化按用户要求未运行"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/PictureControlReportsTest.kt",
+      "status": "A",
+      "tasks": [
+        "A04"
+      ],
+      "sha256": "b7388aa20abc5b4bab17e44135a3dcb1adad5ca888d80c2cf8f3a971fe93e9e8",
+      "ios_paths": [
+        "ios/ZTransferTests/PictureControlPanelModelTests.swift"
+      ],
+      "review": "对应Swift模型/协议专项，详情见台账；非硬件验收"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteToolLayoutTest.kt",
+      "status": "M",
+      "tasks": [
+        "A09",
+        "A10"
+      ],
+      "sha256": "1ae5f802aef6f0cfd6d536a5df5e4ec28f5a1405a24cb40d25ee05d94b8a6012",
+      "ios_paths": [
+        "ios/ZTransferTests/RemoteToolLayoutTests.swift",
+        "ios/ZTransferTests/RemoteCapturePerformanceTests.swift",
+        "ios/ZTransferTests/RemoteLifecycleTests.swift"
+      ],
+      "review": "本地录制相关测试随功能退役，保留相机与帧链路回归；端到端UI自动化按用户要求未运行"
+    }
+  ]
+}

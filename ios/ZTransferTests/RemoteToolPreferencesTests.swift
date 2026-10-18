@@ -79,7 +79,7 @@ final class RemoteToolPreferencesTests: XCTestCase {
             XCTAssertFalse(prefs.hd)
             prefs.disp = .exposure
             prefs.lockedRotation = 2
-            for tool in [RemoteTool.record, .whiteBalance, .focusArea, .lut] { photo.setVisible(tool, false) }
+            for tool in [RemoteTool.whiteBalance, .focusArea, .lut] { photo.setVisible(tool, false) }
             XCTAssertEqual(prefs.disp, .exposure)
             XCTAssertEqual(prefs.lockedRotation, 2)
             XCTAssertEqual(defaults.string(forKey: "remote_disp_mode"), "EXPOSURE")

@@ -79,7 +79,7 @@ struct PremiumGrant: Equatable, Sendable {
     }
 }
 
-/// Synchronous, constant-time read for queue/renderer/recording entry points.
+/// Synchronous, constant-time read for queue/renderer/monitor entry points.
 /// This is NOT persisted authorization. UI observation lives in the separate
 /// main-actor entitlement store, not in a global purchase-progress publisher.
 final class PremiumAccess: @unchecked Sendable {

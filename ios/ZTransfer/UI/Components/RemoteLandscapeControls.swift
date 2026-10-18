@@ -14,7 +14,6 @@ struct RemoteLandscapeControls: View {
     let back: AnyView
     let disp: AnyView
     let shutter: AnyView
-    let recorder: AnyView
     var review: AnyView = AnyView(EmptyView())
     let parameter: (Int, CGFloat) -> AnyView
     // Only the layer views subscribe to frame changes. Label measurement and
@@ -40,7 +39,7 @@ struct RemoteLandscapeControls: View {
                 captureCluster.frame(maxHeight: .infinity, alignment: .bottom)
             }
             layer(dock: true) {
-                RemoteLandscapeDock(tools: toolLayout.shownTools.filter { $0 != .record } + RemoteTool.pinned, controls: controls, bottom: layout.bottomControls)
+                RemoteLandscapeDock(tools: toolLayout.shownTools + RemoteTool.pinned, controls: controls, bottom: layout.bottomControls)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.top, 40)
@@ -72,7 +71,7 @@ struct RemoteLandscapeControls: View {
         .onDisappear { motion.stop() }
     }
 
-    private func applyLayout() { applyHidden(toolLayout.hiddenTools.filter { $0 != .record }) }
+    private func applyLayout() { applyHidden(toolLayout.hiddenTools) }
 
     private var parameters: some View {
         layer(dock: false) {
@@ -105,7 +104,6 @@ struct RemoteLandscapeControls: View {
                 .frame(width: layout.shutterSize, height: layout.shutterSize)
                 .frame(maxWidth: .infinity, maxHeight: .infinity,
                        alignment: !layout.bottomControls && layout.columns == 2 ? .top : .topTrailing)
-            layer(dock: false) { recorder }.frame(height: 36).padding(.leading, 44)
         }
         .frame(maxWidth: .infinity)
         .frame(height: layout.footerHeight + layout.captureLift)

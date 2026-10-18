@@ -729,7 +729,9 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
-    func setFilter(_ filter: PhotoFilterState) {
+    func setFilter(_ requested: PhotoFilterState) {
+        var filter = requested
+        filter.ratingDays = PhotoFilterPersistence.normalizedRatingDays(filter.ratingDays)
         if self.filter != filter { self.filter = filter }
         if !filter.untransferredOnly && !exitingTransferredFileIDs.isEmpty { exitingTransferredFileIDs.removeAll() }
         PhotoFilterPersistence.save(filter)
@@ -783,7 +785,7 @@ final class PhotoListViewModel: ObservableObject {
     /// cache, progress and cancellation semantics.
     func updateRatingScan(enabled: Bool, paused: Bool = false,
                           recentThumbnailReadyDays: Int = 0,
-                          ratingDays: Int = 3,
+                          ratingDays: Int = PhotoFilterState.defaultRatingDays,
                           files: [CameraFile]? = nil) {
         let input = PhotoRatingScanInput(
             files: files ?? allFiles,

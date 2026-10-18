@@ -98,7 +98,9 @@ bash ios/StoreKit/test-recovery-ui.sh SIMULATOR_ID
 
 购买页 UI 回归保留在 `ios/PopupUITests/PremiumPurchaseUITests.swift`，复用该目录的独立 runner。先构建并安装 Debug App，再把 runner 的配置及 Swift 文件复制到临时目录、运行 `xcodegen generate`，只执行 `PremiumPurchaseUITests`。UI runner 使用 `CODE_SIGN_IDENTITY=-` 本地签名；可用 `-collect-test-diagnostics never` 避免失败时耗时收集整机诊断。测试检查真实设置入口、按钮范围稳定、套餐／恢复／兑换可达，以及连续两次开关；不注入假的高级权益。
 
-## 录制失权后的实际 MP4 收尾验证
+## 历史验证：手机端录制（2026-10-18 随安卓删除）
+
+以下是旧版本证据，不再是当前测试指引。401f55ff 删除手机端录制、麦克风权限和对应权益，iOS 同步删除；相机自身录像和音量电平监看保留，已有文件不删除。旧录制用例随功能退役，监看权益期限、快门、相机录像和逐帧呈现专项继续保留。
 
 `ZTransferTests/RemoteLifecycleTests` 的 `testExpiryFinalizesPlayableRecordingBeforeExhaustedMonitorExits` 和 `testPausedRecordingFinalizesOnRevocationAndConcurrentPageExit` 使用生产解码、录制、到期回调及退出链路；相机 JPEG 与已验证权益输入受控，不通过 StoreKit 模拟真实退款。为避免采集麦克风或权限弹框，先在**专用测试模拟器**设置：
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// ViewfinderViewport.kt. Display-only state: no camera or recorder dependency.
+/// ViewfinderViewport.kt. Display-only state: no camera command or source-frame mutation.
 /// Keep Android Float arithmetic, including fitting and normalized crop bounds.
 struct RemoteViewfinderViewport {
     private(set) var scale: Float = 1

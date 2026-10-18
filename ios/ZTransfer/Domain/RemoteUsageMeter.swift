@@ -12,25 +12,6 @@ enum RemoteTrialNotice {
     }
 }
 
-/// Carries delayed save failure beyond the monitor's lifetime. Consumption
-/// belongs to the root host so camera/list replacement cannot drop the notice.
-@MainActor
-final class RemoteRecordingSaveNotice {
-    static let shared = RemoteRecordingSaveNotice()
-    static let changed = Notification.Name("ZTransfer.remoteRecordingSaveNotice")
-    private var pending: String?
-
-    func post(_ message: String) {
-        pending = message
-        NotificationCenter.default.post(name: Self.changed, object: self)
-    }
-
-    func take() -> String? {
-        defer { pending = nil }
-        return pending
-    }
-}
-
 /// RemoteScreen's ready-only daily countdown. UI observes this small object,
 /// not the video-frame model. No StoreKit lookup occurs on a tick or frame.
 @MainActor
@@ -162,7 +143,7 @@ final class RemoteUsageMeter: ObservableObject {
     private func reconcileExpiry() {
         // Paid monitoring has no per-second timer. Recheck only its verified
         // deadline so a slow StoreKit refresh cannot postpone recording's
-        // safety callback. Inactive monitoring must still finish a recording,
+        // entitlement callback. Inactive monitoring must still refresh its grant,
         // but does not consume free time until it becomes active again.
         let deadline = ready && !ended && isPro ? access.entitlement.deadline : nil
         guard deadline != scheduledExpiry else { return }

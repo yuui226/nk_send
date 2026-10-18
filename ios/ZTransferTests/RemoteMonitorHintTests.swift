@@ -11,19 +11,19 @@ final class RemoteMonitorHintTests: XCTestCase {
         let model = makeModel()
         defer { model.stop() }
         model.showMonitorHint("focus", durationNanoseconds: 100_000_000)
-        model.showMonitorHint("recording", source: .localRecording, durationNanoseconds: 300_000_000)
+        model.showMonitorHint("recording", source: .cameraRecording, durationNanoseconds: 300_000_000)
         XCTAssertNil(model.interactionHint)
-        XCTAssertEqual(model.localRecordingHint, "recording")
+        XCTAssertEqual(model.recordingHint, "recording")
         try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(model.localRecordingHint, "recording", "The cancelled first deadline must not hide its successor")
+        XCTAssertEqual(model.recordingHint, "recording", "The cancelled first deadline must not hide its successor")
         model.showMonitorHint("LUT", source: .lut, durationNanoseconds: 100_000_000)
-        XCTAssertNil(model.localRecordingHint)
+        XCTAssertNil(model.recordingHint)
         XCTAssertEqual(model.monitorHint.text, "LUT")
         try await Task.sleep(for: .milliseconds(180))
         XCTAssertFalse(model.monitorHint.visible)
         XCTAssertEqual(model.monitorHint.text, "LUT", "Retain the outgoing content for the fade")
         XCTAssertNil(model.interactionHint)
-        XCTAssertNil(model.localRecordingHint)
+        XCTAssertNil(model.recordingHint)
     }
 
     func testIdenticalMessageRestartsDeadlineAndStopRejectsLateHints() async throws {

@@ -145,13 +145,18 @@ final class PhotoRatingScanTests: XCTestCase {
         let suite = "rating-default-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        XCTAssertEqual(PhotoFilterPersistence.load(from: defaults).ratingDays, 3)
-        for (stored, expected) in [(0, 0), (1, 1), (3, 3), (5, 5), (-1, 3), (2, 3), (999, 3)] {
+        XCTAssertEqual(PhotoFilterPersistence.load(from: defaults).ratingDays, 5)
+        for (stored, expected) in [(0, 0), (1, 1), (3, 3), (5, 5), (-1, 5), (2, 5), (999, 5)] {
             defaults.set(stored, forKey: key)
             XCTAssertEqual(PhotoFilterPersistence.load(from: defaults).ratingDays, expected)
         }
         let previous = UserDefaults.standard.object(forKey: key)
+        let migrationKey = PhotoFilterPersistence.ratingFiveDayMigrationKey
+        let previousMigration = UserDefaults.standard.object(forKey: migrationKey)
+        UserDefaults.standard.set(true, forKey: migrationKey)
         defer {
+            if let previousMigration { UserDefaults.standard.set(previousMigration, forKey: migrationKey) }
+            else { UserDefaults.standard.removeObject(forKey: migrationKey) }
             if let previous { UserDefaults.standard.set(previous, forKey: key) }
             else { UserDefaults.standard.removeObject(forKey: key) }
         }
@@ -160,10 +165,48 @@ final class PhotoRatingScanTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: key) }
             let session = CameraSession(repository: CameraRepository(session: PTPSession(transport: STAScriptTransport([]))))
             let model = PhotoListViewModel(session: session)
-            XCTAssertEqual(model.filter.ratingDays, stored ?? 3)
+            XCTAssertEqual(model.filter.ratingDays, stored ?? 5)
             XCTAssertFalse(model.filter.ratingEnabled)
             model.cancelRatingScan()
         }
+    }
+
+    func testFiveDayMigrationRunsOnceAndPreservesExplicitRangesAndOtherFilters() {
+        for stored in [nil, 0, 1, 3, 5, -2, 10] as [Int?] {
+            let suite = "rating-migration-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            if let stored { defaults.set(stored, forKey: PhotoFilterPersistence.ratingDaysKey) }
+            defaults.set(true, forKey: "filter_protected")
+            defaults.set(4, forKey: "filter_rating")
+            defaults.set(true, forKey: "filter_rating_enabled")
+            let initial = PhotoFilterPersistence.load(from: defaults)
+            XCTAssertEqual(initial.ratingDays, [1, 3, 5].contains(stored ?? -1) ? stored! : 5)
+            XCTAssertTrue(initial.protectedOnly)
+            XCTAssertFalse(initial.ratingEnabled)
+            XCTAssertNil(initial.rating)
+            XCTAssertTrue(defaults.bool(forKey: PhotoFilterPersistence.ratingFiveDayMigrationKey))
+            var all = initial; all.ratingDays = 0
+            PhotoFilterPersistence.save(all, to: defaults)
+            XCTAssertEqual(PhotoFilterPersistence.load(from: defaults).ratingDays, 0)
+            XCTAssertEqual(PhotoFilterPersistence.load(from: defaults).ratingDays, 0)
+        }
+        XCTAssertEqual(PhotoFilterState().ratingDays, 5)
+    }
+
+    func testTenDayLoadingRangePersistsAndCountsCaptureDays() {
+        let suite = "loading-ten-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(PhotoLoadingRange.allCases.map(\.days), [1, 3, 5, 10, 0])
+        PhotoFilterPersistence.savePhotoLoadingRange(.ten, to: defaults)
+        XCTAssertEqual(PhotoFilterPersistence.loadPhotoLoadingRange(from: defaults), .ten)
+        let files = (1...12).map { day in
+            CameraFile(id: UInt32(day), storageID: 1, format: 0x3801, size: 1,
+                fileName: "\(day).JPG", captureDate: String(format: "202610%02dT120000", day * 2), isProtected: false)
+        }
+        XCTAssertEqual(newestCaptureDaysRange(files, days: PhotoFilterPersistence.loadPhotoLoadingRange(from: defaults).days),
+            PhotoDateRange(start: "20261006", end: "20261024"))
     }
 
     private actor Stub {

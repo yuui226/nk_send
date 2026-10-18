@@ -339,6 +339,7 @@ actor CameraRepository {
     private let focusGate = CameraIOGate()
     private let metadataSessionIdentity = UUID().uuidString
     private var cachedDeviceInfo: PTPDeviceInfo?
+    private var pictureControlProtocol: NikonPictureControlProtocol?
     private var liveViewImageOperation: UInt16?
     private var liveViewEnhancedFailures = 0
     private let staAlbum: STAAlbumAccess?
@@ -408,6 +409,7 @@ actor CameraRepository {
     /// business request is allowed to enter this session after this point.
     func beginShutdown(reason: String = "camera session closed") async {
         eventResolveTask?.cancel(); eventResolveTask = nil
+        pictureControlProtocol = nil
         await ioGate.beginShutdown(reason)
         catalogContinuations.values.forEach { $0.finish() }
         catalogContinuations.removeAll()
@@ -1033,7 +1035,10 @@ actor CameraRepository {
 
     func remoteDeviceModel() -> String? { cachedDeviceInfo?.model }
 
-    private func pictureControlContext(movie: Bool) throws -> (String, Set<UInt16>) {
+    private func pictureControlAccess(slot: Int, movie: Bool,
+        exchange: @escaping NikonPictureControlAccess.Exchange,
+        isCurrent: @escaping @Sendable () async -> Bool,
+        log: (@Sendable (String) -> Void)?) async throws -> NikonPictureControlAccess {
         guard let info = cachedDeviceInfo else { throw NikonPictureControlError.invalid("Camera information unavailable") }
         guard info.manufacturer.localizedCaseInsensitiveContains("Nikon") else {
             throw NikonPictureControlError.invalid("Not a Nikon camera")
@@ -1042,31 +1047,49 @@ actor CameraRepository {
         guard identity.components(separatedBy: "\0").last != "unknown-device" else {
             throw NikonPictureControlError.invalid("A stable camera identity is required for slot backups")
         }
-        return (identity + "\0picture-control-" + (movie ? "movie" : "photo"), Set(info.operations))
+        let session = session
+        let check: @Sendable () async -> Bool = {
+            guard await isCurrent() else { return false }
+            return !(await session.isInvalidated)
+        }
+        log?("camera=\(info.model) firmware=\(info.version) transport=\(isUSBConnection ? "USB" : "PTP/IP") movie=\(movie) target=C\(slot - 200)")
+        for (name, codes) in [("DeviceInfo.operations", info.operations), ("DeviceInfo.properties", info.properties)] {
+            log?(name + "=" + codes.sorted().map { String(format: "0x%04X", $0) }.joined(separator: ", "))
+        }
+        let resolved: NikonPictureControlProtocol
+        if let cached = pictureControlProtocol { resolved = cached }
+        else {
+            resolved = try await discoverPictureControlProtocol(operations: Set(info.operations), properties: Set(info.properties),
+                exchange: exchange, sessionCheck: check, movie: movie, log: log)
+            guard await check() else { throw NikonPictureControlError.invalid("Camera session changed during protocol discovery") }
+            if resolved.cacheable { pictureControlProtocol = resolved }
+        }
+        log?("protocol=\(resolved.format.rawValue) movieSupported=\(resolved.supportsMovie)")
+        try resolved.requireMode(movie)
+        let bankIdentity = identity + "\0picture-control-" + (resolved.format.movieBank(movie) ? "movie" : "photo")
+        return try NikonPictureControlAccess(cameraIdentity: bankIdentity, slot: slot, movie: movie,
+            operations: Set(info.operations), sessionCheck: check, exchange: exchange, log: log, format: resolved.format)
     }
 
     func readPictureControlOverview(movie: Bool, backupDirectory: URL,
-                                    isCurrent: @escaping @Sendable () async -> Bool) async throws -> PictureControlOverview {
-        let (identity, operations) = try pictureControlContext(movie: movie)
+                                    isCurrent: @escaping @Sendable () async -> Bool,
+                                    log: (@Sendable (String) -> Void)? = nil) async throws -> PictureControlOverview {
         let session = session, ioGate = ioGate
         return try await focusGate.withCommand {
-            let access = try NikonPictureControlAccess(cameraIdentity: identity, slot: 201, movie: movie,
-                operations: operations, sessionCheck: {
-                    guard await isCurrent() else { return false }
-                    return !(await session.isInvalidated)
-                },
-                exchange: { code, parameters, data in
-                    try Task.checkCancellation()
-                    let response = try await ioGate.withInteractive {
-                        // Drain an accepted response before honoring caller cancellation.
-                        try await Task {
-                            try await session.executeResponse(operation: code, parameters: parameters, data: data,
-                                                              timeoutNanoseconds: 5_000_000_000)
-                        }.value
-                    }
-                    try Task.checkCancellation()
-                    return response
-                })
+            let exchange: NikonPictureControlAccess.Exchange = { code, parameters, data in
+                try Task.checkCancellation()
+                let response = try await ioGate.withInteractive {
+                    // Read-only enumeration yields only after complete responses.
+                    try await Task {
+                        try await session.executeResponse(operation: code, parameters: parameters, data: data,
+                                                          timeoutNanoseconds: 5_000_000_000)
+                    }.value
+                }
+                try Task.checkCancellation()
+                return response
+            }
+            let access = try await self.pictureControlAccess(slot: 201, movie: movie,
+                exchange: exchange, isCurrent: isCurrent, log: log)
             return try await access.overview(backup: PictureControlBackupStore(directory: backupDirectory))
         }
     }
@@ -1074,33 +1097,27 @@ actor CameraRepository {
     func changePictureControl(slot: Int, change: PictureControlChange, movie: Bool, backupDirectory: URL,
                               isCurrent: @escaping @Sendable () async -> Bool,
                               log: (@Sendable (String) -> Void)? = nil) async throws {
-        let (identity, operations) = try pictureControlContext(movie: movie)
-        let dataset: Data?
-        if case .write(let file) = change { dataset = try file.encodeClassicPictureControl() } else { dataset = nil }
         let session = session, ioGate = ioGate
         try await focusGate.withCommand {
             try await ioGate.withInteractive {
                 try await session.withCommandSequence { commands in
-                    let access = try NikonPictureControlAccess(cameraIdentity: identity, slot: slot, movie: movie,
-                        operations: operations, sessionCheck: {
-                    guard await isCurrent() else { return false }
-                    return !(await session.isInvalidated)
-                },
-                        exchange: { code, parameters, data in
-                            try Task.checkCancellation()
-                            let response = try await Task {
-                                try await commands.executeResponse(operation: code, parameters: parameters, data: data,
-                                                                   timeoutNanoseconds: 5_000_000_000)
-                            }.value
-                            try Task.checkCancellation()
-                            return response
-                        }, log: log)
+                    let exchange: NikonPictureControlAccess.Exchange = { code, parameters, data in
+                        try Task.checkCancellation()
+                        let response = try await Task {
+                            try await commands.executeResponse(operation: code, parameters: parameters, data: data,
+                                                               timeoutNanoseconds: 5_000_000_000)
+                        }.value
+                        try Task.checkCancellation()
+                        return response
+                    }
+                    let access = try await self.pictureControlAccess(slot: slot, movie: movie,
+                        exchange: exchange, isCurrent: isCurrent, log: log)
                     let replacement = PictureControlReplacement(backup: PictureControlBackupStore(directory: backupDirectory))
                     switch change {
-                    case .write:
-                        guard let dataset else { throw NikonPictureControlError.invalid("Missing Picture Control dataset") }
+                    case .write(let file):
+                        let dataset = try file.encodePictureControl(format: access.format)
                         try await access.prepare(dataset: dataset)
-                        try await replacement.apply(access, dataset: NikonPictureControlSlotState(slot: slot, dataset: dataset).data)
+                        try await replacement.apply(access, dataset: NikonPictureControlSlotState(slot: slot, dataset: dataset, format: access.format).data)
                     case .activate:
                         try await access.prepareSelection()
                         try await replacement.activate(access)
@@ -1123,6 +1140,7 @@ actor CameraRepository {
             try await session.execute(operation: PTPConstants.getDeviceInfo)
         }
         guard let info = PTPDatasetParser.parseDeviceInfo(result.data) else { throw CameraRepositoryError.invalidDataset }
+        pictureControlProtocol = nil
         cachedDeviceInfo = info
         return info
     }

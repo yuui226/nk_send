@@ -331,7 +331,7 @@ final class RemoteToolbarPerformanceTests: XCTestCase {
         }
         let toolbar = RemoteConfiguredToolbar(layout: layout, editing: false, isActive: true,
             controls: controls, leading: EmptyView(), trailing: trailing, pinnedEndCount: 2,
-            fixedRecorder: false, applyHidden: { _ in }).frame(width: 330)
+            applyHidden: { _ in }).frame(width: 330)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let host = UIHostingController(rootView: toolbar)
         let window = UIWindow(windowScene: scene)

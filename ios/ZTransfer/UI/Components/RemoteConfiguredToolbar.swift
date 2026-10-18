@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Observes the active photo/movie layout directly: changing a layout must
-/// redraw even when no feature preference changed (for example moving RECORD).
+/// redraw even when no feature preference changed (for example moving HD).
 struct RemoteFixedToolControl: Identifiable {
     let id: String
     let view: AnyView
@@ -15,7 +15,6 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
     let leading: Leading
     let trailing: [RemoteFixedToolControl]
     let pinnedEndCount: Int
-    let fixedRecorder: Bool
     let applyHidden: ([RemoteTool]) -> Void
 
     @StateObject private var drag = RemoteToolDragState()
@@ -27,7 +26,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
     @GestureState private var gestureActive = false
 
     private var sequence: [RemoteTool] {
-        editing ? layout.shownTools + layout.hiddenTools : layout.presentedTools(fixedRecorder: fixedRecorder)
+        editing ? layout.shownTools + layout.hiddenTools : layout.shownTools
     }
 
     var body: some View {
@@ -41,10 +40,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
                         control.modifier(RemoteToolSlotTransform(
                             presentation: motion.presentation(tool, visible: layout.visible(tool))))
                     }
-                    // Android keeps normal and editor slots at 36 dp; only
-                    // the active recorder may expand across adjacent tracks.
-                    .frame(width: tool == .record && !editing ? nil : 36,
-                           height: tool == .record && !editing ? nil : 36)
+                    .frame(width: 36, height: 36)
                     .background {
                         GeometryReader { proxy in
                             Color.clear.preference(key: RemoteToolSlotPreference.self,
@@ -121,7 +117,6 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
         .onDisappear { mounted = false; endDrag(); motion.stop() }
         .onAppear { mounted = true; motion.setActive(true); applyLayout(); updateMotion() }
         .onChange(of: layout.hidden) { _ in applyLayout(); updateMotion() }
-        .onChange(of: fixedRecorder) { _ in applyLayout() }
         .onChange(of: isActive) { _ in applyLayout() }
     }
 
@@ -141,7 +136,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
         guard isActive else { return }
         // Android ApplyRemoteToolLayout preserves an active landscape recording
         // when the mode's portrait recording entry is hidden.
-        applyHidden(layout.hiddenTools.filter { !fixedRecorder || $0 != .record })
+        applyHidden(layout.hiddenTools)
     }
 }
 

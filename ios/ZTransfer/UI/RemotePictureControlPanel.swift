@@ -69,6 +69,10 @@ struct RemotePictureControlPanel: View {
                     .onAppear { motion.configure(page: page, size: targetSize, scale: scale) }
                     .onChange(of: page) { motion.configure(page: $0, size: layout.size(for: $0), scale: scale) }
                     .onChange(of: targetSize) { motion.configure(page: page, size: $0, scale: scale) }
+            } else {
+                #if DEBUG
+                if model.initialLoadFinished && model.loadFailed { failedOverview }
+                #endif
             }
         }
         .sheet(isPresented: $sharing) { if let shareURL { PictureControlShareSheet(url: shareURL) } }
@@ -152,12 +156,7 @@ struct RemotePictureControlPanel: View {
                         #if DEBUG
                         HStack {
                             Spacer(minLength: 0)
-                            Button { shareReport() } label: {
-                                Text(text("picture_control_test_log")).font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(enabled && !model.report.isEmpty ? ZTransferColors.accentBlue : ZTransferColors.secondaryText.opacity(0.35))
-                                    .lineLimit(1).frame(height: 20).padding(8)
-                                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(ZTransferColors.secondaryText.opacity(enabled && !model.report.isEmpty ? 0.28 : 0.12), lineWidth: 0.75))
-                            }.buttonStyle(.plain).disabled(!enabled || model.report.isEmpty)
+                            reportButton(enabled: enabled)
                         }.padding(.horizontal, 8)
                         #endif
                     }
@@ -235,8 +234,40 @@ struct RemotePictureControlPanel: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(color.opacity(enabled ? 0.28 : 0.12), lineWidth: 0.75))
         }.buttonStyle(.plain).disabled(!enabled)
     }
+    #if DEBUG
+    private var failedOverview: some View {
+        let message = text(model.loadFailureResource == "picture_control_movie_bank_unsupported" ?
+            model.loadFailureResource : "picture_control_slot_unreadable")
+        let font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        let buttonWidth = (text("picture_control_test_log") as NSString).size(withAttributes: [.font: font]).width + 16
+        let measured = (message as NSString).boundingRect(with: CGSize(width: max(1, 220 - 24 - buttonWidth), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font], context: nil)
+        let height = max(36, ceil(measured.height / font.lineHeight) * 20)
+        return RemoteChoicePopup(anchor: anchor, hostSize: hostSize, landscape: landscape, width: 220,
+            contentHeight: height, closing: model.closeRequested, trigger: .remotePictureControl,
+            accessibilityID: "remote-preset-backdrop", close: model.requestClose, dismiss: dismiss, usesFullAnchor: true) { _ in
+            HStack(spacing: 0) {
+                Text(message).lineSpacing(max(0, 20 - font.lineHeight))
+                    .font(.system(size: 14, weight: .medium)).foregroundStyle(ZTransferColors.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                reportButton(enabled: !model.closeRequested)
+            }.padding(.horizontal, 12).frame(height: height)
+                .background(ZTransferColors.surface, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("remote-preset-read-failure")
+        }
+    }
+    #endif
+    private func reportButton(enabled: Bool) -> some View {
+        Button { shareReport() } label: {
+            Text(text("picture_control_test_log")).font(.system(size: 14, weight: .medium))
+                .foregroundStyle(enabled && !model.report.isEmpty ? ZTransferColors.accentBlue : ZTransferColors.secondaryText.opacity(0.35))
+                .lineLimit(1).frame(height: 20).padding(8)
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(ZTransferColors.secondaryText.opacity(enabled && !model.report.isEmpty ? 0.28 : 0.12), lineWidth: 0.75))
+        }.buttonStyle(.plain).disabled(!enabled || model.report.isEmpty)
+            .accessibilityIdentifier("remote-preset-test-log")
+    }
     private func shareReport() {
-        guard idle, !model.report.isEmpty else { return }
+        guard model.canBrowse, !model.opening, !pickerActive, !model.report.isEmpty else { return }
         model.feedback()
         let report = model.report
         Task {

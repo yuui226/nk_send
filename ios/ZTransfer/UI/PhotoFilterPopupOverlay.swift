@@ -68,6 +68,7 @@ struct PhotoFilterPopupOverlay: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { close() }
+                    .gesture(DragGesture(minimumDistance: 8).onChanged { _ in })
 
                 // This shell is intentionally permanent. Presentation state
                 // drives only visual progress, so a late close completion can
@@ -104,6 +105,8 @@ struct PhotoFilterPopupOverlay: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .coordinateSpace(name: "filter-root")
             .onPreferenceChange(RatingTipSizePreferenceKey.self) { if ratingTipSize != $0 { ratingTipSize = $0 } }
+            .background { if isPresented { PopupDragBoundary() } }
+            .gesture(DragGesture(minimumDistance: 8).onChanged { _ in })
             .allowsHitTesting(isPresented)
         }
         .ignoresSafeArea()
@@ -258,7 +261,7 @@ struct PhotoFilterPopupOverlay: View {
                         DetentWheel(
                             label: AppLocalized.resource("filter_rating_range_label"),
                             options: [1, 3, 5, 0],
-                            selected: [1, 3, 5, 0].contains(working.ratingDays) ? working.ratingDays : 3,
+                            selected: PhotoFilterPersistence.normalizedRatingDays(working.ratingDays),
                             optionLabel: { days in
                                 days == 0
                                     ? AppLocalized.resource("filter_rating_range_all")

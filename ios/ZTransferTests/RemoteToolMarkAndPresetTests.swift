@@ -73,7 +73,7 @@ import SwiftUI
         let chart = VStack(spacing: 12) {
             ForEach(0..<4) { row in
                 HStack(spacing: 10) {
-                    ForEach(Array(RemoteTool.allCases[row*5..<row*5+5])) { tool in
+                    ForEach(Array(RemoteTool.allCases.dropFirst(row * 5).prefix(5))) { tool in
                         VStack { RemoteToolMark(tool: tool, histogramRGB: true, waveformRGB: true,
                             falseColor: true, grid: .thirds, locked: true).frame(width: 36, height: 36)
                             Text(tool.rawValue).font(.system(size: 9)) }
@@ -172,7 +172,7 @@ import SwiftUI
         var dismissed = 0, writes = 0
         let folders = PictureControlFolderState()
         let model = PictureControlPanelModel(folders: folders, current: { true }, allowed: { true }, busy: { _ in true },
-            readOverview: { await entered.signal(); await release.wait(); return Self.overview },
+            readOverview: { _ in await entered.signal(); await release.wait(); return Self.overview },
             change: { _,_,_ in writes += 1 }, closesFolders: false)
         defer { model.close(); folders.close() }
         model.dismiss = { dismissed += 1; model.close() }
@@ -183,14 +183,14 @@ import SwiftUI
         for _ in 0..<40 { if !model.loading { break }; try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertNil(model.overview); XCTAssertEqual(writes, 0)
         let replacement = PictureControlPanelModel(folders: folders, current: { true }, allowed: { true }, busy: { _ in true },
-            readOverview: { Self.overview }, change: { _,_,_ in }, closesFolders: false)
+            readOverview: { _ in Self.overview }, change: { _,_,_ in }, closesFolders: false)
         await replacement.refresh()
         XCTAssertTrue(replacement.canEdit(Self.overview.slots[0])); replacement.close()
     }
     func testBackgroundPickerAndClosingGatesCannotAcceptMutations() async {
         var changes = 0, feedback = 0
         let model = PictureControlPanelModel(folders: PictureControlFolderState(), current: { true }, allowed: { true }, busy: { _ in true },
-            readOverview: { Self.overview }, change: { _,_,_ in changes += 1 })
+            readOverview: { _ in Self.overview }, change: { _,_,_ in changes += 1 })
         defer { model.close() }
         model.feedback = { feedback += 1 }
         await model.refresh()
@@ -205,7 +205,7 @@ import SwiftUI
     func testActualPresetPopupOpensAtContentSizeAndSwitchesInsideSameHost() async throws {
         let folders = PictureControlFolderState()
         let model = PictureControlPanelModel(folders: folders, current: { true }, allowed: { true }, busy: { _ in true },
-            readOverview: { Self.overview }, change: { _,_,_ in XCTFail("Rendering must never mutate the camera") })
+            readOverview: { _ in Self.overview }, change: { _,_,_ in XCTFail("Rendering must never mutate the camera") })
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 700)

@@ -100,16 +100,22 @@ final class RemoteToolLayoutTests: XCTestCase {
         }
     }
 
-    func testLandscapeRetainsHiddenRecorderControlsWithoutRestoringPreference() {
+    func testRetiredRecorderIDIsIgnoredWithoutResettingEitherModesLayout() {
         withDefaults { defaults in
-            let layout = RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in })
-            layout.setVisible(.record, false)
-            layout.setVisible(.grid, false)
-            XCTAssertFalse(layout.presentedTools(fixedRecorder: false).contains(.record))
-            XCTAssertTrue(layout.presentedTools(fixedRecorder: true).contains(.record))
-            XCTAssertFalse(layout.presentedTools(fixedRecorder: true).contains(.grid))
-            XCTAssertFalse(layout.visible(.record))
-            XCTAssertEqual(layout.hiddenTools, [.record, .grid])
+            for mode in ["photo", "movie"] {
+                defaults.set(true, forKey: "remote_picture_control_placement_v1_\(mode)")
+                defaults.set("record,fps,grid,unknown,hd,record,lut,lock,rotate", forKey: "remote_tool_order_\(mode)")
+                defaults.set(["record", "grid", "unknown", "lock"], forKey: "remote_hidden_tools_\(mode)")
+                let layout = RemoteToolLayout(defaults: defaults, movie: mode == "movie", onHide: { _ in })
+                XCTAssertEqual(Array(layout.order.prefix(4)), [.fps, .grid, .hd, .lut])
+                XCTAssertEqual(layout.hidden, ["grid"])
+                XCTAssertEqual(layout.hiddenTools, [.grid])
+                XCTAssertEqual(RemoteTool.allCases.count, 19)
+                layout.move(.lut, to: 0)
+                let restored = RemoteToolLayout(defaults: defaults, movie: mode == "movie", onHide: { _ in })
+                XCTAssertEqual(restored.order.first, .lut); XCTAssertFalse(restored.visible(.grid))
+                XCTAssertFalse((defaults.string(forKey: "remote_tool_order_\(mode)") ?? "").contains("record"))
+            }
         }
     }
 

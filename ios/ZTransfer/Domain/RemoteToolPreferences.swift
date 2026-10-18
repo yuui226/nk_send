@@ -109,7 +109,7 @@ final class RemoteToolPreferences: ObservableObject {
         case .waveform: waveform = .off
         case .lock: locked = false
         case .computerControl: computerControl = false
-        case .record, .whiteBalance, .focusArea, .focusMode, .lut, .pictureControl, .rotate: break
+        case .whiteBalance, .focusArea, .focusMode, .lut, .pictureControl, .rotate: break
         }
     }
 }

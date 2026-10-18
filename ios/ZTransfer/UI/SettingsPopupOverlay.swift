@@ -138,6 +138,8 @@ struct SettingsPopupOverlay: View {
                 PremiumFireworksOverlay(state: fireworks)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background { if isPresented || panelVisible { PopupDragBoundary() } }
+            .gesture(DragGesture(minimumDistance: 8).onChanged { _ in })
             .allowsHitTesting(isPresented || panelVisible)
             .onAppear { if isPresented { beginPresentation() } }
             .onChange(of: isPresented) { presented in

@@ -4,25 +4,25 @@ struct NikonPictureControlSlotState: Equatable, Sendable {
     let defaults: NikonPictureControlData
     let current: NikonPictureControlData
     init(defaults: NikonPictureControlData, current: NikonPictureControlData) throws {
-        guard !defaults.isEmpty, !current.isEmpty, defaults.baseItem == current.baseItem else {
+        guard !defaults.isEmpty, !current.isEmpty, defaults.baseItem == current.baseItem, defaults.format == current.format else {
             throw NikonPictureControlError.invalid("Invalid Picture Control slot state")
         }
         self.defaults = defaults; self.current = current
     }
-    init(slot: Int, dataset: Data) throws {
-        let parsed = try NikonPictureControlData(item: slot, responseCode: 0x2001, data: dataset)
+    init(slot: Int, dataset: Data, format: NikonPictureControlFormat = .classicZ) throws {
+        let parsed = try NikonPictureControlData(item: slot, responseCode: 0x2001, data: dataset, format: format)
         try self.init(defaults: parsed, current: parsed)
     }
-    init(slot: Int, snapshot: Data) throws {
+    init(slot: Int, snapshot: Data, format: NikonPictureControlFormat = .classicZ) throws {
         var reader = PTPDataReader(snapshot)
         guard reader.readUInt32() == 0x31534350,
               let d = reader.readUInt32(), let c = reader.readUInt32(),
-              [36, 614].contains(d), [36, 614].contains(c), reader.remaining == Int(d + c),
+              format.supportsSize(Int(d)), format.supportsSize(Int(c)), reader.remaining == Int(d + c),
               let defaults = reader.readBytes(count: Int(d)), let current = reader.readBytes(count: Int(c)) else {
             throw NikonPictureControlError.invalid("Unknown or truncated slot snapshot format")
         }
-        try self.init(defaults: NikonPictureControlData(item: slot, responseCode: 0x2001, data: defaults),
-                      current: NikonPictureControlData(item: slot, responseCode: 0x2001, data: current))
+        try self.init(defaults: NikonPictureControlData(item: slot, responseCode: 0x2001, data: defaults, format: format),
+                      current: NikonPictureControlData(item: slot, responseCode: 0x2001, data: current, format: format))
     }
     var data: Data {
         var result = Data()
@@ -78,28 +78,23 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
     private var selection: NikonPictureControlSelection?
     private var writePrepared = false
     private var selectionPrepared = false
-    private let writeOperations: Set<UInt16> = [0x1014, 0x1015, 0x1016, 0x90CC, 0x90CD, 0x90CE, 0x90CF]
-    private var mode: UInt32 { movie ? 1 : 0 }
-    private var property: UInt32 { movie ? 0xD237 : 0xD200 }
+    nonisolated let format: NikonPictureControlFormat
+    private var writeOperations: Set<UInt16> { [0x1014, 0x1015, 0x1016, 0x90CC, format.writeOperation, 0x90CE, 0x90CF] }
+    private var property: UInt32 { format.selectionProperty(movie) }
 
     init(cameraIdentity: String, slot: Int, movie: Bool, operations: Set<UInt16>,
          sessionCheck: @escaping @Sendable () async -> Bool, exchange: @escaping Exchange,
-         log: (@Sendable (String) -> Void)? = nil) throws {
+         log: (@Sendable (String) -> Void)? = nil, format: NikonPictureControlFormat = .classicZ) throws {
         guard NikonPictureControlData.customSlots.contains(slot) else { throw NikonPictureControlError.invalid("Only C1–C9 are custom slots") }
         self.cameraIdentity = cameraIdentity; self.slot = slot; self.movie = movie; self.operations = operations
-        self.sessionCheck = sessionCheck; self.exchange = exchange; self.log = log
+        self.sessionCheck = sessionCheck; self.exchange = exchange; self.log = log; self.format = format
     }
     func checkSession() async throws {
         guard await sessionCheck() else { throw NikonPictureControlError.invalid("Camera session changed") }
     }
     private func command(_ code: UInt16, _ parameters: [UInt32], _ data: Data? = nil) async throws -> Data {
-        try await checkSession()
-        if let data { log?(String(format: "out op=0x%04X params=%@ bytes=%d data=%@", code,
-            parameters.map(String.init).joined(separator: ","), data.count, data.map { String(format: "%02x", $0) }.joined())) }
-        let response = try await exchange(code, parameters, data)
-        log?(String(format: "in op=0x%04X params=%@ rc=0x%04X bytes=%d data=%@", code,
-            parameters.map(String.init).joined(separator: ","), response.code, response.data.count,
-            response.data.map { String(format: "%02x", $0) }.joined()))
+        let response = try await pictureControlExchange(exchange, sessionCheck: sessionCheck, log: log,
+            code: code, parameters: parameters, data: data)
         guard response.code == 0x2001 else {
             throw NikonPictureControlError.invalid(String(format: "Picture Control op=0x%04X failed: 0x%04X", code, response.code))
         }
@@ -131,38 +126,49 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
         try require(writeOperations.isSubset(of: operations), "Camera does not advertise Picture Control editing")
         try await prepareSelection()
         if let dataset {
-            let parsed = try NikonPictureControlData(item: slot, responseCode: 0x2001, data: dataset)
+            let parsed = try NikonPictureControlData(item: slot, responseCode: 0x2001, data: dataset, format: format)
             try require(selection?.choices.contains(parsed.baseItem) == true, "Camera does not support this base Picture Control")
             let base = try await readData(item: parsed.baseItem, defaultFlag: 1)
             try require(!base.isEmpty && base.baseItem == parsed.baseItem, "Unexpected base Picture Control layout")
-            let capabilities = try await command(0x90CF, [UInt32(parsed.baseItem), mode])
-            try validatePictureControlCapabilities(dataset: dataset, capabilities: capabilities)
+            let capabilities = try await command(0x90CF, format.parameters(movie, [UInt32(parsed.baseItem)]))
+            if format == .classicZ { try validatePictureControlCapabilities(dataset: dataset, capabilities: capabilities) }
+            else { try validateV2PictureControlCapabilities(dataset: dataset, capabilities: capabilities) }
+        } else if format == .legacyV2 {
+            try await validateV2PictureControlCapabilityLayout(command(0x90CF, format.parameters(movie, [1])))
         }
         writePrepared = true
     }
     func overview(backup: PictureControlBackupStore) async throws -> PictureControlOverview {
         try require(Set<UInt16>([0x1014, 0x1015, 0x90CC]).isSubset(of: operations), "Picture Control reading is unavailable")
         let descriptor = try await selectionDescriptor(), selected = try await readSelection()
+        log?(String(format: "selection property=0x%04X writable=%@ current=%d choices=%@", property, String(descriptor.writable), selected, descriptor.choices.map(String.init).joined(separator: ", ")))
         var slots: [PictureControlSlotInfo] = []
         for item in NikonPictureControlData.customSlots {
             let hasOriginal = (try? backup.load(identity: cameraIdentity, slot: item)) != nil
-            guard descriptor.supportsSlot(item) else { slots.append(.init(slot: item, availability: .unsupported)); continue }
+            guard descriptor.supportsSlot(item) else {
+                log?("C\(item - 200) UNSUPPORTED: absent from selection descriptor")
+                slots.append(.init(slot: item, availability: .unsupported)); continue
+            }
             do {
                 let current = try await readData(item: item, defaultFlag: 0)
+                log?("C\(item - 200) \(current.isEmpty ? "EMPTY" : "OCCUPIED name=\(current.name)")")
                 slots.append(.init(slot: item, availability: current.isEmpty ? .empty : .occupied,
                                    name: current.isEmpty ? nil : current.name, hasOriginal: hasOriginal))
             } catch is CancellationError { throw CancellationError() }
             catch let error as PTPSessionError { throw error }
             catch let error as CameraTransportError { throw error }
             catch let error as URLError { throw error }
-            catch { slots.append(.init(slot: item, availability: .unreadable, hasOriginal: hasOriginal)) }
+            catch {
+                log?("C\(item - 200) READ_FAILED: \(type(of: error)): \(error.localizedDescription)")
+                slots.append(.init(slot: item, availability: .unreadable, hasOriginal: hasOriginal))
+            }
         }
         return PictureControlOverview(slots: slots, selected: selected,
             canActivate: descriptor.writable && operations.contains(0x1016),
             canEdit: descriptor.writable && writeOperations.isSubset(of: operations))
     }
     private func readData(item: Int, defaultFlag: UInt32) async throws -> NikonPictureControlData {
-        try await NikonPictureControlData(item: item, responseCode: 0x2001, data: command(0x90CC, [UInt32(item), defaultFlag, mode]))
+        try await NikonPictureControlData(item: item, responseCode: 0x2001, data: command(0x90CC, format.parameters(movie, [UInt32(item), defaultFlag])), format: format)
     }
     func readSlot() async throws -> Data? {
         let current = try await readData(item: slot, defaultFlag: 0)
@@ -172,23 +178,23 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
     }
     nonisolated func matchesSlot(expected: Data?, actual: Data?) throws -> Bool {
         guard let expected, let actual else { return expected == actual }
-        let wanted = try NikonPictureControlSlotState(slot: slot, snapshot: expected)
-        let received = try NikonPictureControlSlotState(slot: slot, snapshot: actual)
+        let wanted = try NikonPictureControlSlotState(slot: slot, snapshot: expected, format: format)
+        let received = try NikonPictureControlSlotState(slot: slot, snapshot: actual, format: format)
         guard wanted.current.data == received.current.data else { return false }
         let a = wanted.defaults.data, b = received.defaults.data
-        return a == b || (a.count == 614 && b.count == 36 && a[35] == 1 && b[35] == 0 && a.prefix(35) == b.prefix(35))
+        return a == b || (format == .classicZ && a.count == 614 && b.count == 36 && a[35] == 1 && b[35] == 0 && a.prefix(35) == b.prefix(35))
     }
     func writeSlot(_ data: Data) async throws {
         try require(writePrepared, "Slot write was not prepared")
-        let state = try NikonPictureControlSlotState(slot: slot, snapshot: data)
-        _ = try await command(0x90CD, [UInt32(slot), 0, mode], state.defaults.data)
+        let state = try NikonPictureControlSlotState(slot: slot, snapshot: data, format: format)
+        _ = try await command(format.writeOperation, format.writeParameters(movie, slot: slot, modified: 0), state.defaults.data)
         if state.current.data != state.defaults.data {
-            _ = try await command(0x90CD, [UInt32(slot), 1, mode], state.current.data)
+            _ = try await command(format.writeOperation, format.writeParameters(movie, slot: slot, modified: 1), state.current.data)
         }
     }
     func clearSlot() async throws {
         try require(writePrepared, "Slot deletion was not prepared")
-        _ = try await command(0x90CE, [UInt32(slot), mode])
+        _ = try await command(0x90CE, format.parameters(movie, [UInt32(slot)]))
     }
     private func readU16(_ property: UInt32) async throws -> Int {
         let data = try await command(0x1015, [property])
@@ -205,4 +211,63 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
     private func require(_ condition: Bool, _ message: String) throws {
         if !condition { throw NikonPictureControlError.invalid(message) }
     }
+}
+
+struct NikonPictureControlProtocol: Equatable, Sendable {
+    let format: NikonPictureControlFormat
+    let supportsMovie: Bool
+    var cacheable = true
+    func requireMode(_ movie: Bool) throws {
+        if movie && !supportsMovie { throw NikonPictureControlError.movieBankUnsupported }
+    }
+}
+
+/// Log outgoing reads too: a transport failure may have no response to log.
+func pictureControlExchange(_ exchange: NikonPictureControlAccess.Exchange,
+    sessionCheck: @Sendable () async -> Bool, log: (@Sendable (String) -> Void)?,
+    code: UInt16, parameters: [UInt32], data: Data? = nil) async throws -> PTPResponse {
+    guard await sessionCheck() else { throw NikonPictureControlError.invalid("Camera session changed") }
+    let params = parameters.map(String.init).joined(separator: ", ")
+    if let data {
+        log?(String(format: "out op=0x%04X params=%@ bytes=%d data=%@", code, params,
+            data.count, data.map { String(format: "%02x", $0) }.joined()))
+    } else { log?(String(format: "out op=0x%04X params=%@", code, params)) }
+    let response = try await exchange(code, parameters, data)
+    log?(String(format: "in op=0x%04X params=%@ rc=0x%04X bytes=%d data=%@", code, params,
+        response.code, response.data.count, response.data.map { String(format: "%02x", $0) }.joined()))
+    return response
+}
+
+/// Android 9d7dd882: STANDARD read-only discovery. Never retry writes or infer
+/// a protocol from the model name, Busy, malformed data, or an absent property.
+func discoverPictureControlProtocol(operations: Set<UInt16>, properties: Set<UInt16>,
+    exchange: NikonPictureControlAccess.Exchange, sessionCheck: @Sendable () async -> Bool,
+    movie: Bool, log: (@Sendable (String) -> Void)? = nil) async throws -> NikonPictureControlProtocol {
+    guard operations.contains(0x90CC) else { throw NikonPictureControlError.invalid("Picture Control reading is unavailable") }
+    func read(_ parameters: [UInt32]) async throws -> PTPResponse {
+        try await pictureControlExchange(exchange, sessionCheck: sessionCheck, log: log, code: 0x90CC, parameters: parameters)
+    }
+    func validate(_ response: PTPResponse, _ format: NikonPictureControlFormat) throws {
+        let value = try NikonPictureControlData(item: 1, responseCode: response.code, data: response.data, format: format)
+        guard !value.isEmpty && value.baseItem == 1 else { throw NikonPictureControlError.invalid("Unexpected STANDARD Picture Control response") }
+    }
+    let first = try await read([1, 0, movie ? 1 : 0])
+    if first.code == 0x2001 {
+        if NikonPictureControlFormat.classicZ.supportsSize(first.data.count) {
+            try validate(first, .classicZ)
+            return NikonPictureControlProtocol(format: .classicZ, supportsMovie: true)
+        }
+        try validate(first, .legacyV2)
+    } else if first.code != 0x2006 && first.code != 0x201D {
+        throw NikonPictureControlError.invalid(String(format: "Picture Control discovery failed: 0x%04X", first.code))
+    }
+    try await validate(read([1, 0]), .legacyV2)
+    if !properties.contains(0xD237) && operations.contains(0x1014) {
+        let movieProperty = try await pictureControlExchange(exchange, sessionCheck: sessionCheck, log: log,
+            code: 0x1014, parameters: [0xD237])
+        if movieProperty.code == 0x200A { return NikonPictureControlProtocol(format: .legacyV2, supportsMovie: true) }
+        let confirmed = movieProperty.code == 0x2001 && (try? NikonPictureControlSelection(movieProperty.data, property: 0xD237)) != nil
+        return NikonPictureControlProtocol(format: .legacyV2, supportsMovie: false, cacheable: confirmed)
+    }
+    return NikonPictureControlProtocol(format: .legacyV2, supportsMovie: false, cacheable: properties.contains(0xD237))
 }

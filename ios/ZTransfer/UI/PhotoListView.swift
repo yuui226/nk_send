@@ -916,7 +916,6 @@ private struct PhotoListSessionTaskID: Equatable {
         }
         .fullScreenCover(isPresented: $internalShowingRemote, onDismiss: RemoteTrialNotice.returnedToList) {
             RemoteView(session: session, queueModel: queueModel, presentationMode: presentationMode,
-                       recordingDirectory: directoryStore.directoryURL,
                        isSessionConnected: isSessionConnected,
                        onRetrySTA: onRetrySTA,
                        onPreparing: { await model.pauseForRemote() },
@@ -1379,13 +1378,6 @@ private struct PhotoListSessionTaskID: Equatable {
     }
 
     private func openRemote() {
-        // Android requires the shared transfer/recording destination before
-        // monitor entry. Local recording uses this same directory, so opening
-        // RemoteView first would only defer the failure until record is tapped.
-        guard directoryStore.directoryURL != nil else {
-            requestTransferDirectory()
-            return
-        }
         // Android keeps the PTP channel exclusive while a transfer worker is
         // active. Do the same here instead of allowing live view to collide
         // with an in-flight download and surface a session error.

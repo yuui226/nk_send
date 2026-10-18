@@ -108,3 +108,12 @@ struct RemoteCameraToolStaticMark: View {
         else { RemoteEditorIcon(kind: .focusArea).frame(width: 19, height: 19) }
     }
 }
+
+/// Camera-owned recording time, isolated from the monitor frame hierarchy.
+struct RemoteRecordingElapsedText: View {
+    @ObservedObject var elapsed: RemoteRecordingElapsed
+    var leadingSpace = false
+    var body: some View {
+        Text(String(format: leadingSpace ? " %d:%02d" : "%d:%02d", elapsed.seconds / 60, elapsed.seconds % 60))
+    }
+}

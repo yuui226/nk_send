@@ -67,7 +67,8 @@ struct LocalPhotoEffectsView: View {
         .simultaneousGesture(DragGesture(minimumDistance: 18, coordinateSpace: .global).onEnded { value in
             // Use the touch origin, not its release position: dragging beyond
             // a wheel's bounds must still belong to that wheel.
-            guard !WheelDragRegionView.contains(value.startLocation),
+            guard !showingHelp, !PopupDragBoundaryView.contains(value.startLocation),
+                  !WheelDragRegionView.contains(value.startLocation),
                   abs(value.translation.height) > abs(value.translation.width),
                   !watermarkTextFocused,
                   geometry.scrollOffset >= -2,
@@ -89,10 +90,10 @@ struct LocalPhotoEffectsView: View {
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture { showingHelp = false }
+                            .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
                             .zIndex(1)
-                        AdaptiveTipPanel(anchor: anchor, maxWidth: 300, gap: 8) {
-                            localHelpBubble
-                        }
+                        TipGuideBubble(anchor: anchor, titleKey: "photo_effects_info_title",
+                            sections: TipGuides.effects(local: true), close: { showingHelp = false })
                         .zIndex(2)
                     }
                 }
@@ -190,21 +191,6 @@ struct LocalPhotoEffectsView: View {
             .tipPopupAnchor(.localEffects)
         }
         .foregroundStyle(ZTransferColors.primaryText)
-    }
-
-    private var localHelpBubble: some View {
-        TipBubbleContent {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(AppLocalized.resource("photo_effects_info_title")).font(.headline)
-                Text([
-                    AppLocalized.resource("local_photo_effects_info_description"),
-                    AppLocalized.resource("local_photo_effects_gesture_hint"),
-                    AppLocalized.resource("local_photo_effects_exif_hint"),
-                    AppLocalized.resource("local_photo_ios_save_hint")
-                ].joined(separator: "\n"))
-                .font(.system(size: 13))
-            }
-        }
     }
 
     private var preview: some View {

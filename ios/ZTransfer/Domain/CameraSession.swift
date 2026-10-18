@@ -267,8 +267,9 @@ actor CameraSession {
         try await repository.openRemoteReviewCatalog()
     }
     func readPictureControlOverview(movie: Bool, backupDirectory: URL,
-                                    isCurrent: @escaping @Sendable () async -> Bool) async throws -> PictureControlOverview {
-        try await repository.readPictureControlOverview(movie: movie, backupDirectory: backupDirectory, isCurrent: isCurrent)
+                                    isCurrent: @escaping @Sendable () async -> Bool,
+                                    log: (@Sendable (String) -> Void)? = nil) async throws -> PictureControlOverview {
+        try await repository.readPictureControlOverview(movie: movie, backupDirectory: backupDirectory, isCurrent: isCurrent, log: log)
     }
     func changePictureControl(slot: Int, change: PictureControlChange, movie: Bool, backupDirectory: URL,
                               isCurrent: @escaping @Sendable () async -> Bool,

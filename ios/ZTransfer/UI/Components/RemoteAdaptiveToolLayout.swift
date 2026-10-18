@@ -5,7 +5,7 @@ struct RemoteToolLayoutID: LayoutValueKey {
 }
 
 /// Pixel-space port of RemoteScreen.AdaptiveRemoteToolBar. Shared tracks stay
-/// fixed even when only one regular control remains. Only RECORD spans tracks.
+/// fixed even when only one regular control remains.
 enum RemoteToolbarGeometry {
     struct Item {
         var size: CGSize
@@ -28,7 +28,7 @@ enum RemoteToolbarGeometry {
         let visible = items.indices.filter { sizes[$0].width > 0 && sizes[$0].height > 0 }
         var regular = visible.filter { $0 < regularEnd }
         let pinned = visible.filter { $0 >= regularEnd }
-        let cell = max(pixels(36), visible.filter { items[$0].tool != .record }.map { sizes[$0].width }.max() ?? 0)
+        let cell = max(pixels(36), visible.map { sizes[$0].width }.max() ?? 0)
         let columns = max(1, (maxWidth + gap) / (cell + gap))
         func span(_ index: Int) -> Int {
             min(columns, max(1, (sizes[index].width + gap + cell + gap - 1) / (cell + gap)))

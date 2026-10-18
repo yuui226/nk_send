@@ -65,6 +65,7 @@ enum PhotoLoadingRange: Int, CaseIterable, Codable, Sendable {
     case one = 1
     case three = 3
     case five = 5
+    case ten = 10
     case all = 0
 
     var days: Int { rawValue }
@@ -74,6 +75,7 @@ enum PhotoLoadingRange: Int, CaseIterable, Codable, Sendable {
         case 1: self = .one
         case 3: self = .three
         case 5: self = .five
+        case 10: self = .ten
         default: self = .all
         }
     }
@@ -132,7 +134,8 @@ struct PhotoFilterState: Equatable, Sendable, Codable {
     var rating: Int? = nil
     /// Only this range choice persists between launches. Android accepts
     /// exactly 0 (all), 1, 3, or 5 actual shooting days.
-    var ratingDays = 3
+    static let defaultRatingDays = 5
+    var ratingDays = defaultRatingDays
     var burstOnly = false
     var untransferredOnly = false
     /// Logical physical slot (1/2), not the camera's opaque PTP StorageID.
@@ -249,6 +252,7 @@ enum PhotoFilterPersistence {
     private static let extensionsKey = "filter_exts"
     private static let protectedKey = "filter_protected"
     static let ratingDaysKey = "filter_rating_days"
+    static let ratingFiveDayMigrationKey = "filter_rating_five_day_default_migrated"
     private static let burstKey = "filter_burst"
     private static let untransferredKey = "filter_untransferred"
     private static let startKey = "filter_date_start"
@@ -266,11 +270,19 @@ enum PhotoFilterPersistence {
 
     static func load(from defaults: UserDefaults = .standard) -> PhotoFilterState {
         let extensions = defaults.stringArray(forKey: extensionsKey).map { Set($0.map { $0.lowercased() }) }
+        // Android e887b0b6: migrate old ALL once; later explicit ALL survives.
+        let migrate = !defaults.bool(forKey: ratingFiveDayMigrationKey)
+        let stored = defaults.object(forKey: ratingDaysKey) as? Int ?? PhotoFilterState.defaultRatingDays
+        let days = normalizedRatingDays(migrate && stored == 0 ? PhotoFilterState.defaultRatingDays : stored)
+        if migrate {
+            defaults.set(days, forKey: ratingDaysKey)
+            defaults.set(true, forKey: ratingFiveDayMigrationKey)
+        }
         return PhotoFilterState(extensions: extensions?.isEmpty == false ? extensions : nil,
                                 protectedOnly: defaults.bool(forKey: protectedKey),
                                 ratingEnabled: false,
                                 rating: nil,
-                                ratingDays: normalizedRatingDays(defaults.object(forKey: ratingDaysKey) as? Int ?? 3),
+                                ratingDays: days,
                                 burstOnly: defaults.bool(forKey: burstKey),
                                 untransferredOnly: defaults.bool(forKey: untransferredKey),
                                 storageSlot: nil,
@@ -308,8 +320,8 @@ enum PhotoFilterPersistence {
         else { defaults.removeObject(forKey: key) }
     }
 
-    private static func normalizedRatingDays(_ value: Int) -> Int {
-        value == 0 || value == 1 || value == 3 || value == 5 ? value : 3
+    static func normalizedRatingDays(_ value: Int) -> Int {
+        value == 0 || value == 1 || value == 3 || value == 5 ? value : PhotoFilterState.defaultRatingDays
     }
 
     private static func hyphenated(_ value: String) -> String {

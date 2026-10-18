@@ -1,4 +1,3 @@
-import AVFoundation
 import Combine
 import Foundation
 import UIKit
@@ -132,15 +131,8 @@ final class RemoteViewModel: ObservableObject {
         get { cameraRecordingElapsed.seconds }
         set { cameraRecordingElapsed.set(newValue) }
     }
-    @Published private(set) var localRecordingPhase: RemoteLocalRecordingPhase = .idle
-    let localRecordingElapsed = RemoteRecordingElapsed()
-    private(set) var localRecordingSeconds: Int {
-        get { localRecordingElapsed.seconds }
-        set { localRecordingElapsed.set(newValue) }
-    }
     @Published private(set) var monitorHint = RemoteMonitorHint()
     @Published private(set) var recordingErrorReport = ""
-    var localRecordingHint: String? { monitorHint.message(for: .localRecording) }
     var interactionHint: String? { monitorHint.message(for: .interaction) }
     @Published private(set) var confirmedFocusMarker: RemoteConfirmedFocusMarker?
     @Published private(set) var halfPressVisualActive = false
@@ -151,7 +143,6 @@ final class RemoteViewModel: ObservableObject {
     @Published private(set) var batteryPercent: Int?
     @Published private(set) var trialEnded = false
     let usageMeter: RemoteUsageMeter
-    private let premiumAccess: PremiumAccess
 
     var recordingBusy: Bool { recordingOperations.isBusy }
     var recordingHint: String? { monitorHint.message(for: .cameraRecording) }
@@ -163,7 +154,6 @@ final class RemoteViewModel: ObservableObject {
     private let camera: RemoteCameraControlling
     private let onTransportLost: (() -> Void)?
     private let haptics: ZTransferHaptics
-    private let recordingDirectory: URL?
     private var transportLossNotified = false
     private var frameTask: Task<Void, Never>?
     let reviewFrames = RemoteReviewFrameGate()
@@ -176,7 +166,7 @@ final class RemoteViewModel: ObservableObject {
         if active { updateLevel(roll: nil, pitch: nil) }
     }
     var reviewVisible: Bool {
-        !movieMode && (localRecordingPhase == .idle || localRecordingPhase == .saved)
+        !movieMode
     }
     var reviewAllowed: Bool {
         reviewVisible && state.liveViewStable && !stopRequested && !cameraBusy &&
@@ -238,13 +228,7 @@ final class RemoteViewModel: ObservableObject {
     private var captureObjectAdded = false
     private var lastStopCommandAt: ContinuousClock.Instant?
     private var monitorHintTask: Task<Void, Never>?
-    var recordingDesqueeze: Double = 1
     private var recordingHintHostActive = true
-    private var localRecordingID = UUID()
-    private var localRecorder: RemoteViewfinderRecorder?
-    private var localRecordingTask: Task<Void, Never>?
-    private var localRecordingTimerTask: Task<Void, Never>?
-    private var localRecordingSavedTask: Task<Void, Never>?
     private var movieCleanupTask: Task<Void, Never>?
     private var movieSessionReleaseInProgress = false
     private var movieCompletionSequence = 0
@@ -257,9 +241,6 @@ final class RemoteViewModel: ObservableObject {
     private var cleanupComplete = false
     private var lastFrameAt: ContinuousClock.Instant?
     private var frameDecodeGeneration: UInt64 = 0
-    private let makeLocalRecorder: @MainActor (RemoteViewfinderRecorder.Configuration) -> RemoteViewfinderRecorder
-    private let onRecordingSaveFailure: @MainActor (String) -> Void
-    private let requestMicrophonePermission: (@MainActor () async -> Bool)?
     private let focusDiagnostic = RemoteLiveViewFocusDiagnostic()
     private var histogramEnabled = false
     private var zebraEnabled = false
@@ -270,27 +251,18 @@ final class RemoteViewModel: ObservableObject {
         self?.acceptDecodedFrame(decoded)
     }
 
-    init(camera: RemoteCameraControlling, recordingDirectory: URL? = nil,
+    init(camera: RemoteCameraControlling,
          onTransportLost: (() -> Void)? = nil,
          haptics: ZTransferHaptics = .shared,
-         entitlements: PremiumEntitlementStore = .shared, freeUsage: FreeUsageStore = .shared,
-         requestMicrophonePermission: (@MainActor () async -> Bool)? = nil,
-         onRecordingSaveFailure: @escaping @MainActor (String) -> Void = { RemoteRecordingSaveNotice.shared.post($0) },
-         makeLocalRecorder: @escaping @MainActor (RemoteViewfinderRecorder.Configuration) -> RemoteViewfinderRecorder = { RemoteViewfinderRecorder(configuration: $0) }) {
-        self.makeLocalRecorder = makeLocalRecorder
-        self.onRecordingSaveFailure = onRecordingSaveFailure
-        self.requestMicrophonePermission = requestMicrophonePermission
+         entitlements: PremiumEntitlementStore = .shared, freeUsage: FreeUsageStore = .shared) {
         self.camera = camera
-        self.recordingDirectory = recordingDirectory
         self.onTransportLost = onTransportLost
         self.haptics = haptics
-        premiumAccess = entitlements.access
         usageMeter = RemoteUsageMeter(entitlements: entitlements, usage: freeUsage)
-        usageMeter.onLostPremium = { [weak self] in self?.stopLocalRecording() }
         usageMeter.onExhausted = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // Finish writing the recording before closing monitoring.
+                // Release the camera before closing an exhausted monitor.
                 await stopAndWait()
                 trialEnded = true
             }
@@ -1059,165 +1031,9 @@ final class RemoteViewModel: ObservableObject {
             state = state.applying(.frameReceived(fps: decoded.fps))
         }
         if initialLoaded { usageMeter.markReady() }
-        if localRecordingPhase == .recording {
-            localRecorder?.append(image: decoded.image, receivedAtUptime: decoded.receivedAtUptime,
-                                  desqueeze: recordingDesqueeze)
-        }
-    }
-
-    private var localRecordingToolVisible = true
-
-    /// A hidden portrait entry closes recording; the landscape fixed recorder
-    /// keeps an existing recording alive. Both paths disallow starting a new
-    /// recording, including a microphone permission reply arriving later.
-    func setLocalRecordingToolVisible(_ visible: Bool, fixedRecorder: Bool) {
-        localRecordingToolVisible = visible
-        guard !visible else { return }
-        if localRecordingPhase == .idle || localRecordingPhase == .saved {
-            localRecordingTask?.cancel()
-            localRecordingTask = nil
-        }
-        if !fixedRecorder { stopLocalRecording() }
-    }
-
-    func startLocalRecording() {
-        guard premiumAccess.isPro else {
-            showLocalRecordingHint(AppLocalized.resource("remote_rec_pro_only"), durationNanoseconds: 2_500_000_000); return
-        }
-        guard localRecordingToolVisible else { return }
-        guard localRecordingPhase == .idle || localRecordingPhase == .saved,
-              localRecorder == nil, frameImage != nil else {
-            if frameImage == nil { showLocalRecordingHint(AppLocalized.resource("remote_rec_start_failed")) }
-            return
-        }
-        localRecordingTask?.cancel()
-        localRecordingTask = Task { [weak self] in
-            guard let self else { return }
-            let permission = await microphonePermission()
-            guard !Task.isCancelled, !stopRequested, localRecordingToolVisible else { return }
-            guard premiumAccess.isPro else {
-                showLocalRecordingHint(AppLocalized.resource("remote_rec_pro_only"), durationNanoseconds: 2_500_000_000)
-                localRecordingTask = nil
-                return
-            }
-            if !permission {
-                showLocalRecordingHint(AppLocalized.resource("remote_rec_no_audio"))
-            }
-            guard let image = frameImage else {
-                showLocalRecordingHint(AppLocalized.resource("remote_rec_start_failed"))
-                localRecordingTask = nil
-                return
-            }
-            startLocalRecordingResolved(size: image.size, withAudio: permission)
-            localRecordingTask = nil
-        }
-    }
-
-    func toggleLocalRecordingPause() {
-        switch localRecordingPhase {
-        case .recording:
-            localRecorder?.pause()
-            localRecordingPhase = .paused
-        case .paused:
-            guard premiumAccess.isPro else { stopLocalRecording(); return }
-            localRecorder?.resume()
-            localRecordingPhase = .recording
-        default: break
-        }
     }
 
     func markMonitorHintHostInactive() { recordingHintHostActive = false }
-
-    func stopLocalRecording() {
-        guard localRecordingPhase == .recording || localRecordingPhase == .paused,
-              let recorder = localRecorder else { return }
-        localRecorder = nil
-        localRecordingTimerTask?.cancel()
-        localRecordingTimerTask = nil
-        localRecordingSeconds = 0
-        localRecordingPhase = .finalizing
-        localRecordingTask = Task { [weak self] in
-            let url = await recorder.stop()
-            guard let self else { return }
-            localRecordingTask = nil
-            if url != nil {
-                haptics.success()
-                localRecordingPhase = .saved
-                localRecordingSavedTask?.cancel()
-                localRecordingSavedTask = Task { [weak self] in
-                    try? await Task.sleep(for: .milliseconds(1800))
-                    guard let self, localRecordingPhase == .saved else { return }
-                    localRecordingPhase = .idle
-                }
-            } else {
-                haptics.failure()
-                localRecordingPhase = .idle
-                let message = AppLocalized.resource("cd_remote_rec_toast_failed")
-                if !recordingHintHostActive { onRecordingSaveFailure(message) }
-                else { showLocalRecordingHint(message) }
-            }
-        }
-    }
-
-    private func startLocalRecordingResolved(size: CGSize, withAudio: Bool) {
-        guard localRecordingToolVisible, localRecorder == nil,
-              localRecordingPhase != .finalizing else { return }
-        let id = UUID()
-        localRecordingID = id
-        let onEncodingFailure: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, localRecordingID == id else { return }
-                stopLocalRecording()
-            }
-        }
-        let preferred = RemoteViewfinderRecorder.outputURL(preferredDirectory: recordingDirectory)
-        var recorder = makeLocalRecorder(.init(outputURL: preferred, sourceSize: size, withAudio: withAudio,
-                                                desqueeze: recordingDesqueeze, onEncodingFailure: onEncodingFailure))
-        var started = recorder.start()
-        if !started, recordingDirectory != nil {
-            recorder = makeLocalRecorder(.init(
-                outputURL: RemoteViewfinderRecorder.outputURL(preferredDirectory: nil),
-                sourceSize: size,
-                withAudio: withAudio, desqueeze: recordingDesqueeze, onEncodingFailure: onEncodingFailure
-            ))
-            started = recorder.start()
-        }
-        guard started else {
-            localRecordingPhase = .idle
-            showLocalRecordingHint(AppLocalized.resource("remote_rec_start_failed"))
-            return
-        }
-        localRecordingSavedTask?.cancel()
-        localRecordingPhase = .recording
-        localRecordingSeconds = 0
-        localRecorder = recorder
-        localRecordingTimerTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                guard let self else { return }
-                if localRecordingPhase == .recording { localRecordingSeconds += 1 }
-                if localRecordingPhase != .recording && localRecordingPhase != .paused { return }
-            }
-        }
-    }
-
-    private func microphonePermission() async -> Bool {
-        if let requestMicrophonePermission { return await requestMicrophonePermission() }
-        let session = AVAudioSession.sharedInstance()
-        switch session.recordPermission {
-        case .granted: return true
-        case .denied: return false
-        case .undetermined:
-            return await withCheckedContinuation { continuation in
-                session.requestRecordPermission { continuation.resume(returning: $0) }
-            }
-        @unknown default: return false
-        }
-    }
-
-    private func showLocalRecordingHint(_ message: String, durationNanoseconds: UInt64 = 3_000_000_000) {
-        showMonitorHint(message, source: .localRecording, durationNanoseconds: durationNanoseconds)
-    }
 
     private func readExposure(_ field: RemoteExposureField, movie: Bool) async -> RemotePropertyDescriptor? {
         var readable: RemotePropertyDescriptor?
@@ -1747,7 +1563,6 @@ final class RemoteViewModel: ObservableObject {
     }
 
     private func performStopAndWait() async {
-        if localRecordingPhase == .recording || localRecordingPhase == .paused { stopLocalRecording() }
         stop()
         let frame = frameTask
         let mode = modeTask
@@ -1781,8 +1596,6 @@ final class RemoteViewModel: ObservableObject {
         // A late SetControlMode success must be accounted for before returning
         // the camera to the photo list. Do not cancel a command on the wire.
         await computerControlTask?.value
-        await localRecordingTask?.value
-        localRecordingTask = nil
         await captureTask?.value
         captureTask = nil
         frameTask = nil

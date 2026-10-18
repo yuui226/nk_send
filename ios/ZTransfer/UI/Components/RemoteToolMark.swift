@@ -33,7 +33,6 @@ struct RemoteToolMark: View {
         case .computerControl: text("PC", 11)
         case .whiteBalance: text("WB", 11)
         case .focusMode: text("MODE", 9)
-        case .record: material(.videocam)
         case .audio: material(.volumeUp)
         case .focusArea: material(.focusArea)
         case .lock: material(locked ? .lock : .lockOpen)
