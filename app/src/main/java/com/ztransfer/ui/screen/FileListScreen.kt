@@ -244,7 +244,7 @@ internal data class FileListTransferUiState(
     val filterProtectedOnly: Boolean,
     val filterRatingEnabled: Boolean = false,
     val filterRating: Int? = null,
-    val filterRatingDays: Int = 3,
+    val filterRatingDays: Int = PhotoFilterCriteria.DEFAULT_RATING_DAYS,
     val photoLoadingDays: Int = 0,
     val filterBurstOnly: Boolean,
     val filterUntransferredOnly: Boolean,
@@ -4785,8 +4785,10 @@ private fun FilterOverlay(
                                         )
                                         ReleaseCommitWheel(
                                             options = rangeOptions,
-                                            selected = working.ratingDays.takeIf { it in rangeOptions } ?: 3,
-                                            optionLabel = { days -> rangeLabels[days] ?: rangeLabels.getValue(3) },
+                                            selected = working.ratingDays.takeIf { it in rangeOptions }
+                                                ?: PhotoFilterCriteria.DEFAULT_RATING_DAYS,
+                                            optionLabel = { days -> rangeLabels[days]
+                                                ?: rangeLabels.getValue(PhotoFilterCriteria.DEFAULT_RATING_DAYS) },
                                             onValueCommitted = { days -> commit(working.copy(ratingDays = days)) },
                                             onDetent = haptics::tick,
                                             label = stringResource(R.string.filter_rating_range_label),
