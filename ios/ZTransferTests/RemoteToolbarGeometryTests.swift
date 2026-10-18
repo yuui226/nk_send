@@ -6,15 +6,20 @@ final class RemoteToolbarGeometryTests: XCTestCase {
         .init(size: CGSize(width: width, height: height), tool: tool)
     }
 
-    func testDefaultLockStartsSecondRowAlignedWithHDAndRotationStaysTrailing() {
-        let tools = RemoteTool.regular.filter { $0 != .audio } + [.rotate]
-        let result = RemoteToolbarGeometry.arrange(items: tools.map { item($0) }, width: 330,
-                                                   pinnedEndCount: 1, secondRowFirst: .lock)
-        let lock = result.frames[tools.firstIndex(of: .lock)!]
-        XCTAssertEqual(lock.minX, result.frames[0].minX)
-        XCTAssertEqual(lock.minY, 40)
-        XCTAssertEqual(result.frames.last!.maxX, 330)
-        XCTAssertEqual(result.frames.last!.minY, 0)
+    func testPinnedLockAndRotationStayOnFirstRowAndRegularToolsKeepTheirOrder() throws {
+        // RemoteTool.regular no longer contains LOCK. Android RemoteToolBar
+        // appends manager + pinned controls and reserves two first-row tracks.
+        let regular = RemoteTool.regular.filter { $0.available(movie: false) }
+        let items = regular.map { item($0) } + [.init(size: CGSize(width: 36, height: 36))]
+            + RemoteTool.pinned.map { item($0) }
+        let result = RemoteToolbarGeometry.arrange(items: items, width: 330, pinnedEndCount: 2)
+        let lockIndex = try XCTUnwrap(items.firstIndex { $0.tool == .lock })
+        let rotateIndex = try XCTUnwrap(items.firstIndex { $0.tool == .rotate })
+        XCTAssertEqual(result.frames[lockIndex], CGRect(x: 252, y: 0, width: 36, height: 36))
+        XCTAssertEqual(result.frames[rotateIndex], CGRect(x: 294, y: 0, width: 36, height: 36))
+        XCTAssertEqual(result.frames[0].origin, .zero)
+        XCTAssertEqual(result.frames[6].origin, CGPoint(x: 0, y: 40))
+        XCTAssertEqual(result.frames.filter { !$0.isEmpty }.count, items.count)
     }
 
     func testHidingMostToolsDoesNotSpreadRemainingControlsAcrossRow() {

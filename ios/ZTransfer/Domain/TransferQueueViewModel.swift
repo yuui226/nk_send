@@ -152,5 +152,6 @@ final class TransferQueueViewModel: ObservableObject {
     func retryFailed(excluding ids: Set<UUID> = []) { Task { await queue.retryFailed(excluding: ids) } }
     func retry(id: UUID) { Task { await queue.retry(id: id) } }
     func remove(id: UUID) async -> Bool { await queue.remove(id: id) }
+    func remove(ids: Set<UUID>) async -> Set<UUID> { await queue.remove(ids: ids) }
     func clearFinished() { Task { await queue.clearFinished() } }
 }

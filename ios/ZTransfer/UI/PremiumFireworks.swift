@@ -14,15 +14,19 @@ final class PremiumFireworks: ObservableObject {
         sequence += 1
         active.append(Launch(id: sequence, drawing: PremiumFireworkDrawing(seed: sequence)))
     }
-    func finish(_ id: Int) { active.removeAll { $0.id == id } }
+    func finish(_ id: Int) {
+        guard let index = active.firstIndex(where: { $0.id == id }) else { return }
+        active.remove(at: index)
+    }
 }
 
 struct PremiumFireworksOverlay: View {
     @ObservedObject var state: PremiumFireworks
+    var onExploded: () -> Void = { ZTransferHaptics.shared.tick() }
     var body: some View {
         ZStack {
             ForEach(state.active) { launch in
-                PremiumFirework(drawing: launch.drawing) { state.finish(launch.id) }
+                PremiumFirework(drawing: launch.drawing, onExploded: onExploded) { state.finish(launch.id) }
             }
         }.allowsHitTesting(false).accessibilityHidden(true)
     }
@@ -30,11 +34,14 @@ struct PremiumFireworksOverlay: View {
 
 private struct PremiumFirework: View {
     private let drawing: PremiumFireworkDrawing
+    let onExploded: () -> Void
     let onFinished: () -> Void
     @State private var start = Date()
 
-    init(drawing: PremiumFireworkDrawing, onFinished: @escaping () -> Void) {
+    init(drawing: PremiumFireworkDrawing, onExploded: @escaping () -> Void,
+         onFinished: @escaping () -> Void) {
         self.drawing = drawing
+        self.onExploded = onExploded
         self.onFinished = onFinished
     }
 
@@ -48,7 +55,7 @@ private struct PremiumFirework: View {
             start = Date()
             do {
                 try await Task.sleep(for: .milliseconds(400))
-                ZTransferHaptics.shared.tick()
+                onExploded()
                 try await Task.sleep(for: .milliseconds(1600))
                 onFinished()
             } catch {}
@@ -75,6 +82,20 @@ struct PremiumFireworkDrawing {
         let sine: Double
         let speed: Double
         let phase: Double
+    }
+
+    private struct TailSample {
+        let time: Double
+        let expansion: Double
+        let fade: Double
+        let width: Double
+
+        init(segment: Int, progress: Double) {
+            time = max(0, progress - 0.035 * Double(segment))
+            expansion = 1 - pow(1 - time, 4)
+            fade = 1 - (Double(segment) - 0.5) / 3
+            width = (0.8 + 0.7 * (1 - progress)) * (0.35 + 0.65 * fade)
+        }
     }
 
     private let x: Double
@@ -172,6 +193,11 @@ struct PremiumFireworkDrawing {
                                                                 base.opacity((1 - flash) * 0.18), .clear]),
                                                center: center, startRadius: 0, endRadius: flashRadius))
         }
+        // All 36 sparks sample the same three earlier times. Evaluate the
+        // fourth-power expansion and stroke widths three times per frame,
+        // rather than repeating them for every particle. Keep operation order
+        // in each position/alpha expression to preserve the reference pixels.
+        let tails = (1...3).map { TailSample(segment: $0, progress: e) }
         for (k, spark) in sparks.enumerated() {
             let pe = min(1, e / spark.life)
             guard pe < 1 else { continue }
@@ -183,13 +209,12 @@ struct PremiumFireworkDrawing {
             let flicker = 1 - (0.45 * pe) * (0.5 + 0.5 * sin(e * 24 + Double(k) * 1.7))
             let alpha = min(1, max(0, (1 - pe * pe) * flicker))
             var tail = point
-            for s in 1...3 {
-                let es = max(0, e - 0.035 * Double(s))
-                let r = radius * speed * (1 - pow(1 - es, 4))
+            for sample in tails {
+                let es = sample.time
+                let r = radius * speed * sample.expansion
                 let next = CGPoint(x: cx + ca * r, y: cy + sa * r + fall * es * es)
-                let fade = 1 - (Double(s) - 0.5) / 3
-                line(tail, next, (0.8 + 0.7 * (1 - e)) * (0.35 + 0.65 * fade),
-                     spark.tint.opacity(alpha * 0.4 * fade))
+                line(tail, next, sample.width,
+                     spark.tint.opacity(alpha * 0.4 * sample.fade))
                 tail = next
             }
             circle(point, 3, spark.tint.opacity(alpha * 0.18))

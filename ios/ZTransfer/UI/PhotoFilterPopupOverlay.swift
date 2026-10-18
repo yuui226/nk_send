@@ -11,7 +11,7 @@ struct PhotoFilterPopupOverlay: View {
     let availableExtensions: [String]
     let availableStorageSlots: [UInt32]
     let suggestedDate: String?
-    let ratingProgress: PhotoRatingScan
+    let ratingProgress: PhotoRatingProgress
     let showProtectionFilter: Bool
     let onChange: (PhotoFilterState) -> Void
 
@@ -21,13 +21,15 @@ struct PhotoFilterPopupOverlay: View {
     @State private var showRatingTip = false
     @State private var ratingTipFrame: CGRect = .zero
     @State private var ratingTipSize: CGSize = .zero
-    @State private var ratingPulse: CGFloat = 1
+    #if DEBUG
+    var didRender: (() -> Void)? = nil
+    #endif
     @AppStorage("haptics_enabled") private var hapticsEnabled = true
 
     init(isPresented: Binding<Bool>, anchor: Anchor<CGRect>,
          initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
-         suggestedDate: String?, ratingProgress: PhotoRatingScan = PhotoRatingScan(),
+         suggestedDate: String?, ratingProgress: PhotoRatingProgress,
          showProtectionFilter: Bool = true,
          onChange: @escaping (PhotoFilterState) -> Void) {
         _isPresented = isPresented
@@ -43,6 +45,9 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = didRender?()
+        #endif
         GeometryReader { proxy in
             let localAnchor = proxy[anchor]
             // Android's final rating row fixes the panel at 14 + 81 + 8 +
@@ -98,7 +103,7 @@ struct PhotoFilterPopupOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .coordinateSpace(name: "filter-root")
-            .onPreferenceChange(RatingTipSizePreferenceKey.self) { ratingTipSize = $0 }
+            .onPreferenceChange(RatingTipSizePreferenceKey.self) { if ratingTipSize != $0 { ratingTipSize = $0 } }
             .allowsHitTesting(isPresented)
         }
         .ignoresSafeArea()
@@ -113,18 +118,9 @@ struct PhotoFilterPopupOverlay: View {
         .onChange(of: initial) { value in
             // Android's remember(current) follows an external clear while the
             // popup is still mounted; keep the draft from resurrecting it.
-            working = value
+            if working != value { working = value }
         }
-        .task(id: ratingProgress.loading) {
-            guard ratingProgress.loading else {
-                ratingPulse = 1
-                return
-            }
-            ratingPulse = 0.72
-            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: true)) {
-                ratingPulse = 1
-            }
-        }
+
     }
 
     @ViewBuilder
@@ -166,12 +162,18 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     private var filterForm: some View {
-            VStack(alignment: .leading, spacing: 0) {
+        let extensions = allExtensions
+        let columns = min(5, max(1, extensions.count + 1))
+        let choices: [String?] = [nil] + extensions.map(Optional.some)
+        let rows = stride(from: 0, to: choices.count, by: columns).map {
+            Array(choices[$0..<min($0 + columns, choices.count)])
+        }
+        return VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 8) {
-                ForEach(fileTypeRows.indices, id: \.self) { rowIndex in
-                    let row = fileTypeRows[rowIndex]
+                ForEach(rows.indices, id: \.self) { rowIndex in
+                    let row = rows[rowIndex]
                     HStack(spacing: 8) {
-                        ForEach(0..<fileTypeColumnCount, id: \.self) { columnIndex in
+                        ForEach(0..<columns, id: \.self) { columnIndex in
                             Group {
                                 if columnIndex < row.count {
                                     fileTypeChip(row[columnIndex])
@@ -237,43 +239,18 @@ struct PhotoFilterPopupOverlay: View {
     /// the concrete star filter: enabling it alone keeps the photo grid intact
     /// while it fills the connection-scoped snapshot.
     private var ratingFilterRow: some View {
-        let statusLabel: String = {
-            if !working.ratingEnabled { return AppLocalized.resource("filter_rating_off") }
-            if ratingProgress.waitingForRange {
-                return "0/\(ratingProgress.total)"
-            }
-            if ratingProgress.loading {
-                return "\(min(ratingProgress.completed, ratingProgress.total))/\(ratingProgress.total)"
-            }
-            return AppLocalized.resource("filter_rating_on")
-        }()
-        let accent: Color = {
-            if !working.ratingEnabled { return ZTransferColors.accentBlue }
-            if ratingProgress.waitingForRange { return ZTransferColors.accentYellow }
-            if ratingProgress.loading { return ZTransferColors.accentBlue }
-            return ZTransferColors.statusConnected
-        }()
-
-        return HStack(spacing: 8) {
-            FilterChip(
-                label: statusLabel,
-                selected: working.ratingEnabled,
-                accentColor: accent,
-                minHeight: 34,
-                cornerLabel: AppLocalized.resource("filter_rating_enabled"),
-                onLongPress: working.ratingEnabled ? {
-                    UIPasteboard.general.string = PhotoRatingDiagnostics.snapshot()
-                } : nil
-            ) {
+        // Genie captures the closing frame before hiding its live hierarchy.
+        // Stop at that boundary; waiting for settle would update an already
+        // hidden hosting tree whose SwiftUI layout may be deferred by UIKit.
+        HStack(spacing: 8) {
+            PhotoRatingProgressChip(progress: ratingProgress, enabled: working.ratingEnabled,
+                                    visible: isPresented) {
                 commit(working.withRating(
                     enabled: !working.ratingEnabled,
                     rating: working.ratingEnabled ? nil : working.rating
                 ))
                 ZTransferHaptics.shared.tick()
             }
-            .frame(width: 81)
-            .opacity(working.ratingEnabled && ratingProgress.loading ? ratingPulse : 1)
-            .accessibilityLabel(AppLocalized.resource("filter_rating_enabled"))
 
             ZStack(alignment: .leading) {
                 if !working.ratingEnabled {
@@ -339,7 +316,7 @@ struct PhotoFilterPopupOverlay: View {
             .animation(.linear(duration: 0.18), value: working.ratingEnabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onPreferenceChange(RatingTipFramePreferenceKey.self) { ratingTipFrame = $0 }
+        .onPreferenceChange(RatingTipFramePreferenceKey.self) { if ratingTipFrame != $0 { ratingTipFrame = $0 } }
     }
 
     @ViewBuilder
@@ -391,17 +368,6 @@ struct PhotoFilterPopupOverlay: View {
 
     private var allExtensions: [String] {
         Set(availableExtensions + (working.extensions ?? [])).sorted()
-    }
-
-    private var fileTypeColumnCount: Int {
-        min(5, max(1, allExtensions.count + 1))
-    }
-
-    private var fileTypeRows: [[String?]] {
-        let choices: [String?] = [nil] + allExtensions.map(Optional.some)
-        return stride(from: 0, to: choices.count, by: fileTypeColumnCount).map {
-            Array(choices[$0..<min($0 + fileTypeColumnCount, choices.count)])
-        }
     }
 
     @ViewBuilder

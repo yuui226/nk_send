@@ -48,8 +48,8 @@ final class TransferDirectoryPreparation: @unchecked Sendable {
 
     private func key(_ url: URL) -> URL { url.resolvingSymlinksInPath().standardizedFileURL }
 
-    func beginCleanup(access: DirectoryAccessLease) {
-        let root = key(access.url)
+    func beginCleanup(access: DirectoryAccessLease, resolvedKey: URL? = nil) {
+        let root = resolvedKey ?? key(access.url)
         lock.withLock {
             guard states[root] == nil else { return }
             let cleanup = cleanup
@@ -124,82 +124,173 @@ private final class DirectoryPreparationWaiter: @unchecked Sendable {
 @MainActor
 final class DirectoryAccessStore: ObservableObject {
     @Published private(set) var directoryURL: URL?
+    @Published private(set) var isRestoring = false
     private let defaults: UserDefaults
     private let accessOperations: DirectoryAccessOperations
     private let preparation: TransferDirectoryPreparation
+    private let makeBookmark: @Sendable (URL) throws -> Data
+    private let resolveBookmark: @Sendable (Data) throws -> ResolvedBookmark
     private var directoryAccess: DirectoryAccessLease?
+    private var selectionTask: Task<Void, Never>?
+    private var selectionID = UUID()
+    private var pendingURL: URL?
+    private var restorationWaiters: [UUID: DirectoryPreparationWaiter] = [:]
     // Android persists this setting under ztransfer/transfer_dir.  The value
     // is platform-specific (bookmark bytes on iOS, URI text on Android), but
     // the preference identity remains identical.
     private let bookmarkKey = "transfer_dir"
 
     init(defaults: UserDefaults = .standard, accessOperations: DirectoryAccessOperations = .system,
-         preparation: TransferDirectoryPreparation = .shared) {
+         preparation: TransferDirectoryPreparation = .shared,
+         makeBookmark: @escaping @Sendable (URL) throws -> Data = {
+             try $0.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+         }, resolveBookmark: @escaping @Sendable (Data) throws -> ResolvedBookmark = ResolvedBookmark.resolve) {
         self.defaults = defaults
         self.accessOperations = accessOperations
         self.preparation = preparation
+        self.makeBookmark = makeBookmark
+        self.resolveBookmark = resolveBookmark
         restore()
     }
 
-    func setDirectory(_ url: URL) {
-        let access = DirectoryAccessLease(url: url, operations: accessOperations)
-        guard access.isSecurityScoped else {
-            directoryAccess = nil
-            directoryURL = nil
-            defaults.removeObject(forKey: bookmarkKey)
-            return
+    struct ResolvedBookmark: Sendable {
+        let url: URL
+        let stale: Bool
+        nonisolated static func resolve(_ data: Data) throws -> Self {
+            var stale = false
+            let url = try URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+            return .init(url: url, stale: stale)
         }
-        do {
-            let bookmark = try url.bookmarkData(
-                // iOS document-provider URLs carry their security scope in the
-                // bookmark; the macOS-only withSecurityScope creation option is
-                // unavailable on iOS.
-                options: [],
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil,
-            )
-            defaults.set(bookmark, forKey: bookmarkKey)
-            directoryAccess = access
-            directoryURL = url
-        } catch {
-            directoryAccess = nil
-            directoryURL = nil
-            defaults.removeObject(forKey: bookmarkKey)
+    }
+
+    /// The root waits before starting connection discovery. Cancellation only
+    /// removes this waiter; it cannot cancel the app-owned restoration.
+    func waitUntilRestored() async throws {
+        try Task.checkCancellation()
+        guard isRestoring else { return }
+        let id = UUID(), waiter = DirectoryPreparationWaiter()
+        restorationWaiters[id] = waiter
+        defer { restorationWaiters.removeValue(forKey: id) }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { waiter.install($0) }
+        } onCancel: { waiter.finish(.failure(CancellationError())) }
+        try Task.checkCancellation()
+    }
+
+    private func finishRestoration() {
+        guard isRestoring else { return }
+        isRestoring = false
+        let pending = restorationWaiters.values
+        restorationWaiters.removeAll()
+        for waiter in pending { waiter.finish(.success(())) }
+    }
+
+    /// Android setTransferDirUri publishes only after the grant is retained.
+    /// A document provider may block both grant acquisition and bookmark creation;
+    /// keep them off MainActor and commit together, without releasing old workers'
+    /// leases. A replaced/cleared selection must never publish its late result.
+    @discardableResult
+    func setDirectory(_ url: URL) -> Task<Void, Never> {
+        if pendingURL == url, let selectionTask { return selectionTask }
+        selectionTask?.cancel()
+        let id = UUID()
+        selectionID = id
+        pendingURL = url
+        let operations = accessOperations, makeBookmark = makeBookmark
+        let worker = Task.detached(priority: .userInitiated) { () -> PreparedSelection? in
+            do {
+                try Task.checkCancellation()
+                let access = DirectoryAccessLease(url: url, operations: operations)
+                guard access.isSecurityScoped else { return nil }
+                try Task.checkCancellation()
+                // iOS document-provider bookmarks carry the acquired grant.
+                // macOS's withSecurityScope option is unavailable here.
+                let bookmark = try makeBookmark(url)
+                try Task.checkCancellation()
+                return PreparedSelection(access: access, bookmark: bookmark, cleanupKey: nil)
+            } catch { return nil }
         }
+        return accept(worker, id: id)
+    }
+
+    private func accept(_ worker: Task<PreparedSelection?, Never>, id: UUID) -> Task<Void, Never> {
+        let task = Task { [weak self] in
+            let result = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: { worker.cancel() }
+            guard let self, self.selectionID == id else { return }
+            self.selectionTask = nil
+            self.pendingURL = nil
+            guard !Task.isCancelled else {
+                // If an explicit selection superseded startup and was then
+                // cancelled, the saved startup grant must still be restored.
+                if self.isRestoring { self.restore() }
+                return
+            }
+            if let result {
+                if result.cleanupKey == nil || self.defaults.data(forKey: self.bookmarkKey) != result.bookmark {
+                    self.defaults.set(result.bookmark, forKey: self.bookmarkKey)
+                }
+                self.directoryAccess = result.access
+                if let key = result.cleanupKey {
+                    // Register before releasing startup waiters or exposing the
+                    // URL; cleanup itself runs independently in the background.
+                    self.preparation.beginCleanup(access: result.access, resolvedKey: key)
+                }
+                if self.directoryURL != result.access.url { self.directoryURL = result.access.url }
+            } else {
+                self.removeSelection()
+            }
+            self.finishRestoration()
+        }
+        selectionTask = task
+        return task
     }
 
     func clear() {
+        selectionID = UUID()
+        selectionTask?.cancel()
+        selectionTask = nil
+        pendingURL = nil
+        removeSelection()
+        finishRestoration()
+    }
+
+    private struct PreparedSelection: Sendable {
+        let access: DirectoryAccessLease
+        let bookmark: Data
+        let cleanupKey: URL?
+    }
+
+    private func removeSelection() {
         directoryAccess = nil
-        directoryURL = nil
+        if directoryURL != nil { directoryURL = nil }
         defaults.removeObject(forKey: bookmarkKey)
     }
 
+    deinit { selectionTask?.cancel() }
+
     private func restore() {
-        guard let data = defaults.data(forKey: bookmarkKey) else { return }
-        var stale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: data,
-            options: [],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale,
-        ) else {
-            defaults.removeObject(forKey: bookmarkKey)
-            return
+        guard let data = defaults.data(forKey: bookmarkKey) else { finishRestoration(); return }
+        if !isRestoring { isRestoring = true }
+        let id = UUID()
+        selectionID = id
+        let resolve = resolveBookmark, make = makeBookmark, operations = accessOperations
+        let worker = Task.detached(priority: .userInitiated) { () -> PreparedSelection? in
+            do {
+                try Task.checkCancellation()
+                let resolved = try resolve(data)
+                try Task.checkCancellation()
+                let access = DirectoryAccessLease(url: resolved.url, operations: operations)
+                guard access.isSecurityScoped else { return nil }
+                try Task.checkCancellation()
+                let bookmark = resolved.stale ? ((try? make(resolved.url)) ?? data) : data
+                let key = resolved.url.resolvingSymlinksInPath().standardizedFileURL
+                try Task.checkCancellation()
+                return PreparedSelection(access: access, bookmark: bookmark, cleanupKey: key)
+            } catch { return nil }
         }
-        let access = DirectoryAccessLease(url: url, operations: accessOperations)
-        guard access.isSecurityScoped else {
-            defaults.removeObject(forKey: bookmarkKey)
-            return
-        }
-        directoryAccess = access
-        if stale, let refreshed = try? url.bookmarkData(
-            options: [],
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil,
-        ) { defaults.set(refreshed, forKey: bookmarkKey) }
-        // Register synchronously before observers can enqueue into this root.
-        preparation.beginCleanup(access: access)
-        directoryURL = url
+        _ = accept(worker, id: id)
     }
 }
 
@@ -212,11 +303,19 @@ struct DirectoryPicker: UIViewControllerRepresentable {
         picker.allowsMultipleSelection = false
         return picker
     }
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {
+        context.coordinator.onPick = onPick
+    }
 
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onPick: (URL) -> Void
+        var onPick: (URL) -> Void
+        private var finished = false
         init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { if let url = urls.first { onPick(url) } }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard !finished, let url = urls.first else { return }
+            finished = true
+            onPick(url)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finished = true }
     }
 }

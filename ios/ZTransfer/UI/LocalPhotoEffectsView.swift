@@ -1,6 +1,16 @@
 import PhotosUI
 import SwiftUI
 
+/// Event-time geometry, not visual state. Android reads the current scroll
+/// position / preview bounds when admitting a gesture or opening the preview.
+/// Scrolling must keep these coordinates fresh without rebuilding the editor
+/// and its image pipeline on every pixel (performance ledger P12/P13).
+@MainActor
+final class PhotoEffectsGeometrySnapshot {
+    var scrollOffset: CGFloat = 0
+    var previewAnchor: CGRect = .zero
+}
+
 /// Android LocalPhotoEffectsPage: fixed 4:3 pager, batch action, inline editors.
 /// The picked list is the batch selection; there is no second selection grid.
 struct LocalPhotoEffectsView: View {
@@ -8,7 +18,8 @@ struct LocalPhotoEffectsView: View {
     let onNavigateUp: () -> Void
     @StateObject private var effectsStore = PhotoEffectsStore(scope: .localPhotos)
     @StateObject private var batch = LocalPhotoBatchViewModel()
-    @StateObject private var photoLUTEditor = PhotoLUTEditorState(role: .local)
+    @StateObject private var photoLUTLifetime = PhotoLUTEditorLifetime(role: .local)
+    private var photoLUTEditor: PhotoLUTEditorState { photoLUTLifetime.editor }
     private var photoLUTStore: PhotoLUTStore { photoLUTEditor.store }
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var watermarkPickerItems: [PhotosPickerItem] = []
@@ -20,7 +31,7 @@ struct LocalPhotoEffectsView: View {
     @State private var showingWatermarkPicker = false
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
-    @State private var scrollOffset: CGFloat = 0
+    @State private var geometry = PhotoEffectsGeometrySnapshot()
     @FocusState private var watermarkTextFocused: Bool
 
     var body: some View {
@@ -49,7 +60,7 @@ struct LocalPhotoEffectsView: View {
         }
         .coordinateSpace(name: "workbenchScroll")
         .coordinateSpace(name: "local-effects-page")
-        .onPreferenceChange(WorkbenchScrollOffsetKey.self) { scrollOffset = $0 }
+        .onPreferenceChange(WorkbenchScrollOffsetKey.self) { geometry.scrollOffset = $0 }
         // The Android pager takes over when the workbench is at its top edge.
         // Keeping this simultaneous avoids stealing vertical scrolling inside
         // the editor once the user has moved down the page.
@@ -59,7 +70,7 @@ struct LocalPhotoEffectsView: View {
             guard !WheelDragRegionView.contains(value.startLocation),
                   abs(value.translation.height) > abs(value.translation.width),
                   !watermarkTextFocused,
-                  scrollOffset >= -2,
+                  geometry.scrollOffset >= -2,
                   value.translation.height > 70 else { return }
             onNavigateUp()
         })
@@ -68,9 +79,7 @@ struct LocalPhotoEffectsView: View {
             draft: effectsBinding, lutStore: photoLUTStore, isPro: entitlements.access.isPro))
         .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
             ZStack(alignment: .topLeading) {
-                if photoLUTEditor.showingChooser {
-                    PhotoLUTChooserOverlay(editor: photoLUTEditor, draft: effectsBinding)
-                }
+                PhotoLUTChooserPresentation(editor: photoLUTEditor, draft: effectsBinding)
                 if filterChooser.isPresented {
                     PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser,
                         onFilterSelected: { photoLUTEditor.cancelPending() })
@@ -100,7 +109,7 @@ struct LocalPhotoEffectsView: View {
             batch.select(items)
             previewPage = 0
         }
-        .onChange(of: photoLUTEditor.notice) { notice in
+        .onReceive(photoLUTEditor.$notice.dropFirst()) { notice in
             if let notice { effectsHint = .init(resource: notice.resource) }
         }
         .onChange(of: watermarkPickerItems) { items in
@@ -368,13 +377,17 @@ private struct LocalPhotoBatchLabel: View {
 }
 
 /// Mirrors Android ExpandedEffectsPreview and its identity-gated comparison provider.
-struct LocalExpandedPreviewSnapshot {
+struct PhotoEffectsExpandedPreviewSnapshot {
     let image: UIImage
     let initialComparison: UIImage?
     let anchor: CGRect
 
     func comparison(current: LocalPhotoPreviewImages?) -> UIImage? {
-        current?.filtered === image ? (current?.unfiltered ?? initialComparison) : initialComparison
+        comparison(image: current?.filtered, unfiltered: current?.unfiltered)
+    }
+
+    func comparison(image currentImage: UIImage?, unfiltered: UIImage?) -> UIImage? {
+        currentImage === image ? (unfiltered ?? initialComparison) : initialComparison
     }
 }
 
@@ -383,9 +396,9 @@ private struct LocalEffectPreview: View {
     let settings: PhotoEffectsSettings
     let allowsFilterPrefetch: Bool
     let onWillOpen: () -> Void
-    @State private var expandedSnapshot: LocalExpandedPreviewSnapshot?
+    @State private var expandedSnapshot: PhotoEffectsExpandedPreviewSnapshot?
     @State private var expanded = false
-    @State private var previewAnchor = CGRect.zero
+    @State private var geometry = PhotoEffectsGeometrySnapshot()
     @State private var source: UIImage?
     @State private var metadata: PhotoFrameMetadata?
     @State private var images: LocalPhotoPreviewImages?
@@ -448,14 +461,14 @@ private struct LocalEffectPreview: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .background(GeometryReader { proxy in
             Color.clear
-                .onAppear { previewAnchor = proxy.frame(in: .global) }
-                .onChange(of: proxy.frame(in: .global)) { previewAnchor = $0 }
+                .onAppear { geometry.previewAnchor = proxy.frame(in: .global) }
+                .onChange(of: proxy.frame(in: .global)) { geometry.previewAnchor = $0 }
         })
         .onTapGesture {
             guard let images, !comparing else { return }
             onWillOpen()
-            expandedSnapshot = LocalExpandedPreviewSnapshot(image: images.filtered,
-                initialComparison: images.unfiltered, anchor: previewAnchor)
+            expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: images.filtered,
+                initialComparison: images.unfiltered, anchor: geometry.previewAnchor)
             expanded = true
         }
         .fullScreenCover(isPresented: $expanded, onDismiss: {

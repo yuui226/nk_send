@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 enum RemoteLUTFolderFailure: Equatable { case missing, denied, read, tooMany }
@@ -13,13 +14,38 @@ struct RemoteLUTLayer: Identifiable {
 
 enum RemoteLUTRenderFailure { case gpu, inputColor }
 
+/// The page observes only the toolbar's on/off state. Directory IO, candidate
+/// rendering and retry identities belong to the panel and image leaf instead.
+@MainActor
+final class RemoteLUTMonitorLifetime: ObservableObject {
+    let monitor: RemoteLUTMonitorState
+    @Published private(set) var isActive: Bool
+    private var observation: AnyCancellable?
+
+    init(_ monitor: RemoteLUTMonitorState) {
+        self.monitor = monitor
+        isActive = monitor.active != nil
+        observation = monitor.$active.map { $0 != nil }.removeDuplicates().dropFirst()
+            .sink { [weak self] in self?.isActive = $0 }
+    }
+}
+
 /// Main-thread coordinator matching Android's LutMonitorState commit rules.
 /// File-system and renderer adapters call `loaded` only after the candidate is ready;
 /// `presented` is the only operation that replaces the displayed LUT.
 @MainActor
 final class RemoteLUTMonitorState: ObservableObject {
     @Published private(set) var folder: URL?
-    @Published private(set) var files: [RemoteLUTFile] = []
+    @Published private(set) var files: [RemoteLUTFile] = [] {
+        didSet { catalogCache = nil }
+    }
+    private var catalogCache: PresetCatalogIndex?
+    var catalog: PresetCatalogIndex {
+        if let catalogCache { return catalogCache }
+        let result = PresetCatalogIndex(files: files)
+        catalogCache = result
+        return result
+    }
     @Published private(set) var folderFailure: RemoteLUTFolderFailure?
     @Published private(set) var scanning = false
     @Published private(set) var loadingIdentifier: String?
@@ -57,7 +83,7 @@ final class RemoteLUTMonitorState: ObservableObject {
                  return (replacement, try RemoteLUTFolderAccess.prepareFolder(replacement, checkCancelled: ticket.checkCancellation))
              }
              let prepared = try RemoteLUTFolderAccess.prepareBookmark(bookmark, checkCancelled: ticket.checkCancellation)
-             guard let root = RemoteLUTFolderAccess.resolveBookmark(prepared.bookmark) else { throw RemoteLUTFolderAccessError.missing }
+             guard let root = prepared.root else { throw RemoteLUTFolderAccessError.missing }
              return (root, prepared)
          },
          read: @escaping @Sendable (Data?, RemoteLUTFile, LUTIOQueue.Ticket) throws -> CubeLUT = { bookmark, file, ticket in
@@ -83,7 +109,7 @@ final class RemoteLUTMonitorState: ObservableObject {
         guard visible else { turnOff(); return }
         guard changed else { return }
         invalidate()
-        active = nil
+        if active != nil { active = nil }
         guard available else { return }
         if files.isEmpty, access.bookmarkData != nil { refreshFolder() }
         else { restoreSelection() }
@@ -93,7 +119,7 @@ final class RemoteLUTMonitorState: ObservableObject {
     func suspendRendering() {
         available = false
         invalidate()
-        active = nil
+        if active != nil { active = nil }
     }
 
     func refreshFolder(replacing replacement: URL? = nil) {
@@ -103,7 +129,14 @@ final class RemoteLUTMonitorState: ObservableObject {
         scanning = true
         let bookmark = access.bookmarkData
         let scan = scan
-        ticket = queue.submit(action: { ticket in try scan(replacement, bookmark, ticket) }) { [weak self] result in
+        ticket = queue.submit(action: { ticket in
+            let (root, prepared) = try scan(replacement, bookmark, ticket)
+            // Normalization is part of the IO request, never the UI delivery.
+            // Injected providers follow the same depth/extension/order rules.
+            let files = RemoteLUTCatalog.visibleFiles(prepared.files)
+            try ticket.checkCancellation()
+            return (root, RemoteLUTFolderAccess.PreparedFolder(bookmark: prepared.bookmark, files: files))
+        }) { [weak self] result in
             guard let self, self.generation == id, !self.disposed else { return }
             self.ticket = nil
             self.deadline?.cancel(); self.deadline = nil
@@ -112,27 +145,30 @@ final class RemoteLUTMonitorState: ObservableObject {
             case .success(let (root, prepared)):
                 let changedFolder = replacement != nil && root != self.folder
                 self.access.commit(prepared)
-                self.folder = root
+                if self.folder != root { self.folder = root }
                 self.preferences.setFolder(root.absoluteString)
-                self.files = RemoteLUTCatalog.visibleFiles(prepared.files)
-                self.folderFailure = nil
-                self.failure = nil
+                if self.files != prepared.files { self.files = prepared.files }
+                if self.folderFailure != nil { self.folderFailure = nil }
+                if self.failure != nil { self.failure = nil }
                 if changedFolder {
-                    self.active = nil
+                    if self.active != nil { self.active = nil }
                     self.suppressedSelections.removeAll()
                     self.preferences.setSelection(nil, movie: false)
                     self.preferences.setSelection(nil, movie: true)
                 } else {
                     for mode in [false, true] {
                         if let selected = self.preferences.selection(movie: mode),
-                           !self.files.contains(where: { $0.identifier == selected }) {
+                           self.catalog.filesByIdentifier[selected] == nil {
                             self.preferences.setSelection(nil, movie: mode)
-                            if mode == self.movie { self.active = nil; self.notify("lut_file_missing") }
+                            if mode == self.movie {
+                                if self.active != nil { self.active = nil }
+                                self.notify("lut_file_missing")
+                            }
                         }
                     }
                     if self.active == nil { self.restoreSelection() }
                     else if let current = self.active,
-                            let updated = self.files.first(where: { $0.identifier == current.file.identifier }),
+                            let updated = self.catalog.filesByIdentifier[current.file.identifier],
                             (updated.modified != nil && updated.modified != current.file.modified) ||
                             (updated.size != nil && updated.size != current.file.size) {
                         self.select(updated, manual: false)
@@ -162,7 +198,7 @@ final class RemoteLUTMonitorState: ObservableObject {
 
     private func restoreSelection() {
         guard available, let movie, let id = preferences.selection(movie: movie),
-              id != suppressedSelections[movie], let file = files.first(where: { $0.identifier == id }) else { return }
+              id != suppressedSelections[movie], let file = catalog.filesByIdentifier[id] else { return }
         select(file, manual: false)
     }
 
@@ -176,18 +212,27 @@ final class RemoteLUTMonitorState: ObservableObject {
     }
 
     func scanFailed(_ reason: RemoteLUTFolderFailure) {
-        scanning = false; failure = String(describing: reason); folderFailure = reason
-        if reason == .missing || reason == .denied { active = nil; candidate = nil }
+        if scanning { scanning = false }
+        let message = String(describing: reason)
+        if failure != message { failure = message }
+        if folderFailure != reason { folderFailure = reason }
+        if reason == .missing || reason == .denied {
+            if active != nil { active = nil }
+            if candidate != nil { candidate = nil }
+        }
         // Current native caller is the explicit replacement-folder picker.
         notify(Self.folderNotice(reason))
     }
 
     private func notify(_ resource: String) {
-        noticeResource = resource
+        if noticeResource != resource { noticeResource = resource }
         onNotice?(resource)
     }
 
-    func openMenu() { noticeResource = nil; refreshFolder() }
+    func openMenu() {
+        if noticeResource != nil { noticeResource = nil }
+        refreshFolder()
+    }
 
     func chooseOff() { turnOff(); onCloseMenu?() }
 
@@ -229,8 +274,8 @@ final class RemoteLUTMonitorState: ObservableObject {
             do { try await Task.sleep(for: timeout) } catch { return }
             guard let self, self.generation == id, !self.disposed else { return }
             self.invalidate()
-            if marksFolderReadFailure { self.folderFailure = .read }
-            self.failure = "timeout"
+            if marksFolderReadFailure, self.folderFailure != .read { self.folderFailure = .read }
+            if self.failure != "timeout" { self.failure = "timeout" }
             self.notify("lut_read_timeout")
         }
     }
@@ -241,7 +286,7 @@ final class RemoteLUTMonitorState: ObservableObject {
         if manual, let movie { suppressedSelections.removeValue(forKey: movie) }
         invalidate()
         manualRequest = manual
-        noticeResource = nil
+        if noticeResource != nil { noticeResource = nil }
         loadingIdentifier = file.identifier
         return generation
     }
@@ -269,7 +314,8 @@ final class RemoteLUTMonitorState: ObservableObject {
 
     func failed(generation id: UInt64, reason: String) {
         guard id == generation, !disposed else { return }
-        invalidate(); failure = reason
+        invalidate()
+        if failure != reason { failure = reason }
         // The current LUT remains active exactly as on Android.
         let key: String = switch reason {
         case "invalid": "lut_invalid"
@@ -296,22 +342,31 @@ final class RemoteLUTMonitorState: ObservableObject {
         }
         if let movie { suppressedSelections[movie] = layer.file.identifier }
         invalidate()
-        if isActive { active = nil }
-        failure = reason == .inputColor ? "inputColor" : "gpu"
+        if isActive, active != nil { active = nil }
+        let message = reason == .inputColor ? "inputColor" : "gpu"
+        if failure != message { failure = message }
         notify(reason == .inputColor ? "lut_input_color_unsupported" : "lut_gpu_failed")
     }
 
     func turnOff() {
-        invalidate(); active = nil
+        invalidate()
+        if active != nil { active = nil }
         if let movie { preferences.setSelection(nil, movie: movie) }
     }
 
-    func close() { disposed = true; invalidate(); active = nil; candidate = nil }
+    func close() {
+        disposed = true
+        invalidate()
+        if active != nil { active = nil }
+    }
 
     private func invalidate() {
         ticket?.cancel(); ticket = nil
         deadline?.cancel(); deadline = nil
-        generation &+= 1; scanning = false; loadingIdentifier = nil; candidate = nil
+        generation &+= 1
+        if scanning { scanning = false }
+        if loadingIdentifier != nil { loadingIdentifier = nil }
+        if candidate != nil { candidate = nil }
         manualRequest = false
     }
 }

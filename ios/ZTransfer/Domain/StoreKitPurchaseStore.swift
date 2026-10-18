@@ -41,7 +41,7 @@ final class PremiumEntitlementStore: ObservableObject {
 
     func endSimulatedPurchase() {
         developmentDefaults?.removeObject(forKey: Self.developmentKey)
-        developmentPurchase = nil
+        if developmentPurchase != nil { developmentPurchase = nil }
         apply(verifiedEntitlement)
     }
 
@@ -209,7 +209,7 @@ final class StoreKitPurchaseStore: ObservableObject {
         for task in running { await task.value }
     }
 
-    func clearMessage() { messageKey = nil }
+    func clearMessage() { if messageKey != nil { messageKey = nil } }
 
     func loadProducts() async {
         guard !loadingProducts else { return }
@@ -252,13 +252,13 @@ final class StoreKitPurchaseStore: ObservableObject {
         if entitlementStore.access.entitlement == .lifetime { return }
         if kind == .annual, entitlementStore.access.isPro { return }
         operation = .purchasing(kind)
-        messageKey = nil
+        clearMessage()
         defer { operation = .idle }
         do {
             switch try await product.purchase() {
             case .success(let result): await process(result, userPurchase: true)
             case .pending:
-                pendingProducts.insert(kind)
+                if !pendingProducts.contains(kind) { pendingProducts.insert(kind) }
                 messageKey = "iap_pending"
             case .userCancelled: break
             @unknown default: messageKey = "iap_purchase_failed"
@@ -272,7 +272,7 @@ final class StoreKitPurchaseStore: ObservableObject {
     func restore() async {
         guard operation == .idle else { return }
         operation = .restoring
-        messageKey = nil
+        clearMessage()
         defer { operation = .idle }
         do {
             try await AppStore.sync()
@@ -394,9 +394,13 @@ final class StoreKitPurchaseStore: ObservableObject {
         if let group {
             await readRenewal(group: group, generation: generation)
         } else if !unverified {
-            renewal = PremiumRenewal(state: .absent)
+            publishRenewal(PremiumRenewal(state: .absent))
         }
         armExpiry()
+    }
+
+    private func publishRenewal(_ next: PremiumRenewal) {
+        if renewal != next { renewal = next }
     }
 
     private func readRenewal(group: String, generation: UInt64) async {
@@ -430,7 +434,7 @@ final class StoreKitPurchaseStore: ObservableObject {
                 if grants[.annual].map({ candidate.0.mayReplace($0) }) ?? true {
                     grants[.annual] = candidate.0
                 }
-                renewal = candidate.1
+                publishRenewal(candidate.1)
                 publishGrants(allowFree: hasCompleteSnapshot && bootstrapComplete)
             } else if statuses.isEmpty {
                 // An empty ancillary status response cannot disprove an
@@ -441,13 +445,13 @@ final class StoreKitPurchaseStore: ObservableObject {
                 let validAnnual = grants[.annual].map {
                     PremiumGrant.resolve([$0], at: Date()).isPro()
                 } ?? false
-                renewal = PremiumRenewal(state: validAnnual ? .unknown : .absent)
+                publishRenewal(PremiumRenewal(state: validAnnual ? .unknown : .absent))
             } else {
-                renewal = PremiumRenewal()
+                publishRenewal(PremiumRenewal())
             }
         } catch {
             guard revision == generation else { return }
-            renewal = PremiumRenewal()
+            publishRenewal(PremiumRenewal())
             // This ancillary failure must not erase verified lifetime/annual.
         }
     }
@@ -474,7 +478,8 @@ final class StoreKitPurchaseStore: ObservableObject {
             // product has been scanned. Never announce free from that subset.
             publishGrants(allowFree: hasCompleteSnapshot && bootstrapComplete)
         }
-        let wasPending = pendingProducts.remove(value.product) != nil
+        let wasPending = pendingProducts.contains(value.product)
+        if wasPending { pendingProducts.remove(value.product) }
         // The update listener may deliver this purchase before purchase()
         // returns, and a scan may already hold a newer signature for the SAME
         // valid transaction. Rejecting its older data must not suppress the

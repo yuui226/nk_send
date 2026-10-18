@@ -14,36 +14,88 @@ enum RemoteRecorderAction: Equatable {
 
 @MainActor
 final class RemoteRecorderController: NSObject, ObservableObject {
-    @Published private(set) var motion: RemoteRecorderMotion
+    struct Visibility: Equatable {
+        let alpha: Float
+        let scale: Float
+        let slide: Float
+        let retained: Bool
+        init(_ value: RemoteRecorderVisibility) {
+            alpha = value.alpha.value; scale = value.scale.value
+            slide = value.slide.value; retained = value.retained
+        }
+    }
+    struct Display: Equatable {
+        let layoutWidth: Float
+        let surfaceWidth: Float
+        let pauseAlpha: Float
+        let icons: [Bool: Visibility]
+        let savedLabel: Visibility
+        let timer: Visibility
+        let lockedHint: Visibility
+        init(_ motion: RemoteRecorderMotion) {
+            layoutWidth = motion.layoutWidth.value; surfaceWidth = motion.surfaceWidth.value
+            pauseAlpha = motion.pauseAlpha.value; icons = motion.icons.mapValues(Visibility.init)
+            savedLabel = Visibility(motion.savedLabel); timer = Visibility(motion.timer)
+            lockedHint = Visibility(motion.lockedHint)
+        }
+    }
+    private(set) var motion: RemoteRecorderMotion
+    @Published private(set) var display: Display
+    private var active = true
+    var clockRunning: Bool { link != nil }
     private var link: CADisplayLink?
     private var hintTask: Task<Void, Never>?
     private let density: Float
     init(_ configuration: RemoteRecorderMotion.Configuration, density: Float) {
         self.density = density
-        motion = .init(configuration, density: density)
+        let initial = RemoteRecorderMotion(configuration, density: density)
+        motion = initial
+        display = Display(initial)
     }
-    func configure(_ next: RemoteRecorderMotion.Configuration) { motion.configure(next); schedule() }
+    func configure(_ next: RemoteRecorderMotion.Configuration) {
+        if motion.configuration != next { motion.configure(next); publish() }
+        schedule()
+    }
     func showLockedHint() {
+        guard active else { return }
         hintTask?.cancel()
-        motion.showLockedHint(true); schedule()
+        motion.showLockedHint(true); publish(); schedule()
         hintTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .milliseconds(1800)) } catch { return }
             guard let self else { return }
-            motion.showLockedHint(false); schedule(); hintTask = nil
+            motion.showLockedHint(false); publish(); schedule(); hintTask = nil
         }
     }
     private func schedule() {
-        guard motion.needsFrames, link == nil else { return }
-        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        guard active, motion.needsFrames, link == nil else { return }
+        let next = CADisplayLink(target: ClockTarget(self), selector: #selector(ClockTarget.frame(_:)))
         link = next; next.add(to: .main, forMode: .common)
     }
-    @objc private func frame(_ sender: CADisplayLink) {
-        motion.advance(Int64(sender.timestamp * 1_000_000_000))
+    func advance(_ now: Int64) {
+        guard active else { return }
+        motion.advance(now)
+        publish()
         if !motion.needsFrames { link?.invalidate(); link = nil }
     }
+    private func publish() {
+        let next = Display(motion)
+        if display != next { display = next }
+    }
+    func activate() { active = true; schedule() }
     func stop() {
+        active = false
         link?.invalidate(); link = nil; hintTask?.cancel(); hintTask = nil
         motion = .init(motion.configuration, density: density)
+        publish()
+    }
+    @MainActor
+    private final class ClockTarget: NSObject {
+        weak var owner: RemoteRecorderController?
+        init(_ owner: RemoteRecorderController) { self.owner = owner }
+        @objc func frame(_ sender: CADisplayLink) {
+            guard let owner else { sender.invalidate(); return }
+            owner.advance(Int64(sender.timestamp * 1_000_000_000))
+        }
     }
 }
 
@@ -51,7 +103,7 @@ final class RemoteRecorderController: NSObject, ObservableObject {
 /// orientations; only the saved label's compactness changes in landscape.
 struct RemoteRecorderBar: View {
     let phase: RemoteLocalRecordingPhase
-    let elapsedSeconds: Int
+    let elapsed: RemoteRecordingElapsed
     let enabled: Bool
     let compactSaved: Bool
     let onStart: () -> Void
@@ -60,33 +112,51 @@ struct RemoteRecorderBar: View {
     @Environment(\.displayScale) private var density
     var body: some View {
         RemoteRecorderContent(configuration: .init(phase: phase, compactSaved: compactSaved),
-            elapsedSeconds: elapsedSeconds, enabled: enabled, density: density,
+            elapsed: elapsed, enabled: enabled, density: density,
             onStart: onStart, onPauseResume: onPauseResume, onStop: onStop)
     }
 }
 
 private struct RemoteRecorderContent: View {
     let configuration: RemoteRecorderMotion.Configuration
-    let elapsedSeconds: Int
+    let elapsed: RemoteRecordingElapsed
     let enabled: Bool
     let density: CGFloat
     let onStart: () -> Void
     let onPauseResume: () -> Void
     let onStop: () -> Void
-    @StateObject private var controller: RemoteRecorderController
-    @Environment(\.colorScheme) private var colorScheme
-    init(configuration: RemoteRecorderMotion.Configuration, elapsedSeconds: Int, enabled: Bool,
+    @State private var controller: RemoteRecorderController
+    init(configuration: RemoteRecorderMotion.Configuration, elapsed: RemoteRecordingElapsed, enabled: Bool,
          density: CGFloat, onStart: @escaping () -> Void, onPauseResume: @escaping () -> Void,
          onStop: @escaping () -> Void) {
-        self.configuration = configuration; self.elapsedSeconds = elapsedSeconds
+        self.configuration = configuration; self.elapsed = elapsed
         self.enabled = enabled; self.density = density
         self.onStart = onStart; self.onPauseResume = onPauseResume; self.onStop = onStop
-        _controller = StateObject(wrappedValue: RemoteRecorderController(configuration, density: Float(density)))
+        _controller = State(initialValue: RemoteRecorderController(configuration, density: Float(density)))
     }
+    var body: some View {
+        RemoteRecorderDrawing(controller: controller, configuration: configuration, elapsed: elapsed,
+            enabled: enabled, density: density, onStart: onStart, onPauseResume: onPauseResume, onStop: onStop)
+            .onAppear { controller.activate(); controller.configure(configuration) }
+            .onChange(of: configuration) { controller.configure($0) }
+            .onDisappear { controller.stop() }
+    }
+}
+
+private struct RemoteRecorderDrawing: View {
+    @ObservedObject var controller: RemoteRecorderController
+    let configuration: RemoteRecorderMotion.Configuration
+    let elapsed: RemoteRecordingElapsed
+    let enabled: Bool
+    let density: CGFloat
+    let onStart: () -> Void
+    let onPauseResume: () -> Void
+    let onStop: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
     private var dark: Bool { colorScheme == .dark }
     private var heavyBase: Color { dark ? Color(white: 30 / 255) : .white }
     private var panelBorder: Color { dark ? .white.opacity(0.15) : .black.opacity(0.10) }
-    private var motion: RemoteRecorderMotion { controller.motion }
+    private var motion: RemoteRecorderController.Display { controller.display }
     private var startDescription: String {
         AppLocalized.resource(configuration.saved ? "cd_remote_rec_saved"
             : configuration.recording ? "cd_remote_rec_stop" : "cd_remote_rec_start")
@@ -96,7 +166,7 @@ private struct RemoteRecorderContent: View {
             RemoteRecorderPanel(dark: dark)
             ZStack(alignment: .leading) {
                 startButton.offset(x: 4)
-                if motion.pauseAlpha.value > 0.01 {
+                if motion.pauseAlpha > 0.01 {
                     pauseButton.offset(x: 38)
                 }
                 if motion.savedLabel.retained {
@@ -105,22 +175,22 @@ private struct RemoteRecorderContent: View {
                         .foregroundStyle(ZTransferColors.statusConnected)
                         .frame(height: 12).fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 5)
-                        .opacity(Double(motion.savedLabel.alpha.value))
-                        .scaleEffect(CGFloat(motion.savedLabel.scale.value), anchor: .leading)
+                        .opacity(Double(motion.savedLabel.alpha))
+                        .scaleEffect(CGFloat(motion.savedLabel.scale), anchor: .leading)
                         .offset(x: 37)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .opacity(enabled ? 1 : 0.4)
         }
-        .frame(width: CGFloat(motion.surfaceWidth.value), height: 36)
+        .frame(width: CGFloat(motion.surfaceWidth), height: 36)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .circular))
-        .frame(width: CGFloat(motion.layoutWidth.value), alignment: .leading)
+        .frame(width: CGFloat(motion.layoutWidth), alignment: .leading)
         .overlay(alignment: .topLeading) {
             if motion.timer.retained {
                 timerBubble
-                    .opacity(Double(motion.timer.alpha.value))
-                    .scaleEffect(CGFloat(motion.timer.scale.value), anchor: .bottom)
-                    .offset(y: CGFloat(floor(motion.timer.slide.value + 0.5)) / density)
+                    .opacity(Double(motion.timer.alpha))
+                    .scaleEffect(CGFloat(motion.timer.scale), anchor: .bottom)
+                    .offset(y: CGFloat(floor(motion.timer.slide + 0.5)) / density)
                     // Compose EnterExitTransition clips only size-changing
                     // transitions; this fade/scale/slide must remain unbounded.
                     .frame(height: 18)
@@ -137,17 +207,14 @@ private struct RemoteRecorderContent: View {
                     .background(heavyBase.opacity(dark ? 0.92 : 0.95), in: RoundedRectangle(cornerRadius: 18))
                     .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(panelBorder, lineWidth: 1))
                     .fixedSize()
-                    .opacity(Double(motion.lockedHint.alpha.value))
-                    .scaleEffect(CGFloat(motion.lockedHint.scale.value), anchor: .bottom)
+                    .opacity(Double(motion.lockedHint.alpha))
+                    .scaleEffect(CGFloat(motion.lockedHint.scale), anchor: .bottom)
                     .offset(y: -38)
                     .accessibilityIdentifier("remote-record-locked-hint")
                     .allowsHitTesting(false)
             }
         }
         .accessibilityElement(children: .contain)
-        .onAppear { controller.configure(configuration) }
-        .onChange(of: configuration) { controller.configure($0) }
-        .onDisappear { controller.stop() }
     }
     private var startButton: some View {
         Button {
@@ -164,7 +231,7 @@ private struct RemoteRecorderContent: View {
                         RemoteRecorderIcon(saved: saved,
                             stopping: configuration.recording || configuration.phase == .finalizing)
                             .frame(width: 14, height: 14)
-                            .opacity(Double(icon.alpha.value)).scaleEffect(CGFloat(icon.scale.value))
+                            .opacity(Double(icon.alpha)).scaleEffect(CGFloat(icon.scale))
                     }
                 }
             }.frame(width: 28, height: 28)
@@ -180,15 +247,15 @@ private struct RemoteRecorderContent: View {
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, showSheen: false, shadowElevation: 0))
         .disabled(!configuration.recording)
-        .opacity(Double(motion.pauseAlpha.value))
-        .scaleEffect(CGFloat(0.7 + 0.3 * motion.pauseAlpha.value))
+        .opacity(Double(motion.pauseAlpha))
+        .scaleEffect(CGFloat(0.7 + 0.3 * motion.pauseAlpha))
         .accessibilityLabel(AppLocalized.resource(configuration.phase == .paused ? "cd_remote_rec_resume" : "cd_remote_rec_pause"))
         .accessibilityIdentifier("remote-record-pause-resume")
     }
     private var timerBubble: some View {
         HStack(spacing: 0) {
             Text("●").font(.system(size: 8)).frame(height: 10).foregroundStyle(ZTransferColors.statusError)
-            Text(String(format: " %d:%02d", elapsedSeconds / 60, elapsedSeconds % 60))
+            RemoteRecordingElapsedText(elapsed: elapsed, leadingSpace: true)
                 .font(.system(size: 10, weight: .medium, design: .monospaced)).frame(height: 12)
                 .foregroundStyle(ZTransferColors.primaryText)
                 .accessibilityIdentifier("remote-record-elapsed")
@@ -271,5 +338,15 @@ private struct RemoteRecorderPanel: View {
                 startPoint: CGPoint(x: -size.width * 0.72, y: -size.height * 0.10),
                 endPoint: CGPoint(x: size.width * 0.92, y: size.height * 1.12)))
         }.allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+/// Both recording clocks preserve their one-second cadence; only their text
+/// subscribes, so ticks do not invalidate the viewfinder, tools or capsule.
+struct RemoteRecordingElapsedText: View {
+    @ObservedObject var elapsed: RemoteRecordingElapsed
+    var leadingSpace = false
+    var body: some View {
+        Text(String(format: leadingSpace ? " %d:%02d" : "%d:%02d", elapsed.seconds / 60, elapsed.seconds % 60))
     }
 }

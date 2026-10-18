@@ -43,34 +43,63 @@ struct RemoteToolModeTransition {
 }
 
 @MainActor
-private final class RemoteToolModeClock: NSObject, ObservableObject {
-    @Published private(set) var transition: RemoteToolModeTransition
+final class RemoteToolModeClock: NSObject, ObservableObject {
+    private(set) var transition: RemoteToolModeTransition
+    @Published private(set) var modes: [Bool]
+    let photoOpacity = RemoteToolModeOpacity()
+    let movieOpacity = RemoteToolModeOpacity()
     private var displayLink: CADisplayLink?
+    var clockRunning: Bool { displayLink != nil }
 
-    init(movie: Bool) { transition = RemoteToolModeTransition(movie: movie) }
-
+    init(movie: Bool) {
+        transition = RemoteToolModeTransition(movie: movie)
+        modes = [movie]
+        super.init()
+        publish()
+    }
+    func opacity(_ movie: Bool) -> RemoteToolModeOpacity { movie ? movieOpacity : photoOpacity }
     func setTarget(_ movie: Bool) {
         transition.setTarget(movie)
+        publish()
         guard transition.isRunning, displayLink == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let link = CADisplayLink(target: ClockTarget(self), selector: #selector(ClockTarget.frame(_:)))
         displayLink = link
         link.add(to: .main, forMode: .common)
     }
-
-    @objc private func frame(_ link: CADisplayLink) {
-        transition.advance(frameNanos: Int64(link.timestamp * 1_000_000_000))
+    func advance(_ nanos: Int64) {
+        transition.advance(frameNanos: nanos)
+        publish()
         if !transition.isRunning { invalidate() }
     }
-
-    func invalidate() {
-        displayLink?.invalidate()
-        displayLink = nil
+    private func publish() {
+        if modes != transition.modes { modes = transition.modes }
+        photoOpacity.update(transition.alpha(false))
+        movieOpacity.update(transition.alpha(true))
     }
-
+    @MainActor private final class ClockTarget: NSObject {
+        weak var owner: RemoteToolModeClock?
+        init(_ owner: RemoteToolModeClock) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.advance(Int64(link.timestamp * 1_000_000_000))
+        }
+    }
+    func invalidate() { displayLink?.invalidate(); displayLink = nil }
     func reset(movie: Bool) {
         invalidate()
         transition = RemoteToolModeTransition(movie: movie)
+        publish()
     }
+}
+
+@MainActor
+final class RemoteToolModeOpacity: ObservableObject {
+    @Published private(set) var value: Float = 0
+    func update(_ value: Float) { if self.value != value { self.value = value } }
+}
+private struct RemoteToolModeFade: ViewModifier {
+    @ObservedObject var opacity: RemoteToolModeOpacity
+    func body(content: Content) -> some View { content.opacity(Double(opacity.value)) }
 }
 
 struct RemoteToolModeCrossfade<Content: View>: View {
@@ -86,9 +115,9 @@ struct RemoteToolModeCrossfade<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .center) {
-            ForEach(clock.transition.modes, id: \.self) { mode in
+            ForEach(clock.modes, id: \.self) { mode in
                 content(mode)
-                    .opacity(Double(clock.transition.alpha(mode)))
+                    .modifier(RemoteToolModeFade(opacity: clock.opacity(mode)))
                     .allowsHitTesting(mode == movie)
                     // Keep an input surface above an outgoing layer. Merely
                     // disabling hit testing lets touches reach the next mode.

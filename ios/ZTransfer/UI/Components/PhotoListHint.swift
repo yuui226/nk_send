@@ -52,8 +52,8 @@ final class PhotoListHintState: ObservableObject {
         generation &+= 1
         let current = generation
         deadline?.cancel()
-        self.text = text
-        visible = true
+        if self.text != text { self.text = text }
+        if !visible { visible = true }
         deadline = Task { [weak self] in
             do { try await Task.sleep(for: duration) } catch { return }
             guard let self, generation == current else { return }
@@ -65,27 +65,53 @@ final class PhotoListHintState: ObservableObject {
         generation &+= 1
         deadline?.cancel()
         deadline = nil
-        visible = false
+        if visible { visible = false }
     }
     deinit { deadline?.cancel() }
 }
 
 @MainActor
-private final class PhotoListHintAnimator: NSObject, ObservableObject {
-    @Published private(set) var motion = PhotoListHintMotion()
+final class PhotoListHintAnimator: ObservableObject {
+    struct Frame: Equatable {
+        var retained = false
+        var alpha: Float = 0
+        var offset: Float = 0
+    }
+    private(set) var motion = PhotoListHintMotion()
+    @Published private(set) var frame = Frame()
+    private var height: Int?
     private var link: CADisplayLink?
     func setVisible(_ visible: Bool, height: Int) {
-        motion.setVisible(visible, height: height)
+        if visible != motion.visible || self.height != height {
+            self.height = height
+            motion.setVisible(visible, height: height)
+            publish()
+        }
         guard motion.isRunning, link == nil else { return }
-        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let next = CADisplayLink(target: DisplayLinkTarget(owner: self), selector: #selector(DisplayLinkTarget.frame(_:)))
         link = next
         next.add(to: .main, forMode: .common)
     }
-    @objc private func frame(_ sender: CADisplayLink) {
-        motion.advance(Int64(sender.timestamp * 1_000_000_000))
+    func advanceFrame(_ nanos: Int64) {
+        motion.advance(nanos)
+        publish()
         if !motion.isRunning { link?.invalidate(); link = nil }
     }
-    func stop() { link?.invalidate(); link = nil; motion = .init() }
+    private func publish() {
+        let next = Frame(retained: motion.retained, alpha: motion.alpha.value,
+                         offset: motion.offset.value.rounded(.toNearestOrAwayFromZero))
+        if next != frame { frame = next }
+    }
+    func stop() { link?.invalidate(); link = nil; motion = .init(); height = nil; publish() }
+
+    @MainActor private final class DisplayLinkTarget: NSObject {
+        weak var owner: PhotoListHintAnimator?
+        init(owner: PhotoListHintAnimator) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.advanceFrame(Int64(link.timestamp * 1_000_000_000))
+        }
+    }
 }
 
 private struct PhotoListHintHeight: PreferenceKey {
@@ -97,35 +123,31 @@ private struct PhotoListHintHeight: PreferenceKey {
 /// Surface elevation uses the shared Android shadow; parent fade includes it once.
 struct PhotoListHint: View {
     @ObservedObject var state: PhotoListHintState
-    @StateObject private var animator = PhotoListHintAnimator()
+    @State private var animator = PhotoListHintAnimator()
     @State private var height: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        Group {
-            if state.visible || animator.motion.retained {
-                Text(state.text)
-                    .zTransferTypography(.labelLarge)
-                    .foregroundStyle(ZTransferColors.primaryText)
-                    .padding(.horizontal, 20).padding(.vertical, 10)
-                    .background(colorScheme == .dark
-                        ? Color(white: 30 / 255).opacity(0.92) : Color.white.opacity(0.95),
-                        in: RoundedRectangle(cornerRadius: 22, style: .circular))
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .circular)
-                        .strokeBorder(colorScheme == .dark ? .white.opacity(0.15) : .black.opacity(0.10), lineWidth: 1))
-                    .background(GeometryReader { proxy in
-                        Color.clear.preference(key: PhotoListHintHeight.self, value: proxy.size.height)
-                    })
-                    .background(AndroidShadowView(cornerRadius: 22, elevation: 6))
-                    .opacity(Double(animator.motion.alpha.value))
-                    .offset(y: CGFloat(animator.motion.offset.value.rounded(.toNearestOrAwayFromZero)) / displayScale)
-                    .accessibilityIdentifier("photo-list-hint")
-            }
+        PhotoListHintPresentation(visible: state.visible, animator: animator) {
+            Text(state.text)
+                .zTransferTypography(.labelLarge)
+                .foregroundStyle(ZTransferColors.primaryText)
+                .padding(.horizontal, 20).padding(.vertical, 10)
+                .background(colorScheme == .dark
+                    ? Color(white: 30 / 255).opacity(0.92) : Color.white.opacity(0.95),
+                    in: RoundedRectangle(cornerRadius: 22, style: .circular))
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .circular)
+                    .strokeBorder(colorScheme == .dark ? .white.opacity(0.15) : .black.opacity(0.10), lineWidth: 1))
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: PhotoListHintHeight.self, value: proxy.size.height)
+                })
+                .background(AndroidShadowView(cornerRadius: 22, elevation: 6))
+                .accessibilityIdentifier("photo-list-hint")
         }
         .onPreferenceChange(PhotoListHintHeight.self) { next in
             guard next > 0 else { return }
-            height = next
+            if height != next { height = next }
             animator.setVisible(state.visible, height: Int((next * displayScale).rounded()))
         }
         .onChange(of: state.visible) { visible in
@@ -135,5 +157,20 @@ struct PhotoListHint: View {
         .padding(.bottom, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .allowsHitTesting(false)
+    }
+}
+
+/// Keep text, measurement and shadow content stable while only the fade/slide
+/// placement consumes display frames. Entry still mounts before measurement.
+struct PhotoListHintPresentation<Content: View>: View {
+    let visible: Bool
+    @ObservedObject var animator: PhotoListHintAnimator
+    @ViewBuilder let content: Content
+    @Environment(\.displayScale) private var displayScale
+    var body: some View {
+        if visible || animator.frame.retained {
+            content.opacity(Double(animator.frame.alpha))
+                .offset(y: CGFloat(animator.frame.offset) / displayScale)
+        }
     }
 }

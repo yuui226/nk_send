@@ -33,7 +33,7 @@ struct RemotePictureControlPanel: View {
                     ToolbarItem(placement: .primaryAction) {
                         Button(text("picture_control_folder")) {
                             if folders.folder == nil { folderConfirmation = true } else { choosingFolder = true }
-                        }.disabled(!model.canBrowse)
+                        }.disabled(!model.canBrowse || folders.isRestoring)
                     }
                 }
             }
@@ -42,7 +42,12 @@ struct RemotePictureControlPanel: View {
         .sheet(isPresented: $sharing) {
             if let shareURL { PictureControlShareSheet(url: shareURL) }
         }
-        .onAppear { model.open(); folders.onNotice = { model.notice(text($0)) } }
+        .onAppear {
+            model.open()
+            // Folder state belongs to the model. Capturing the whole View here
+            // retains model -> folders -> callback -> model after dismissal.
+            folders.onNotice = { [weak model] in model?.notice(AppLocalized.resource($0)) }
+        }
         .onChange(of: model.editingSlot) { slot in if slot != nil { category = "built-in"; folders.refresh() } }
         .onChange(of: phase) { if $0 == .active && model.editingSlot != nil { folders.refresh() } }
         .onChange(of: folders.failure) {
@@ -122,9 +127,11 @@ struct RemotePictureControlPanel: View {
     }
     private func editor(_ slot: PictureControlSlotInfo) -> some View {
         let accessible = folders.failure != .missing && folders.failure != .denied
-        let files = accessible ? folders.files : []
-        let categories = PhotoLUTCategorySelection.categories(in: files)
-        let labels = RemoteLUTCatalog.labels(files, uncategorized: text("lut_uncategorized"))
+        let catalog = folders.catalog
+        let categories = accessible ? catalog.categories : []
+        let selectedCategory = String(category.dropFirst("folder:".count))
+        let files = accessible ? catalog.filesByCategory[selectedCategory.isEmpty ? nil : selectedCategory] ?? [] : []
+        let labels = category == "built-in" ? [:] : catalog.labels(uncategorized: text("lut_uncategorized"))
         return List {
             if slot.availability == .occupied {
                 Button(text("picture_control_clear_slot"), role: .destructive) { clearConfirmation = true }
@@ -141,7 +148,7 @@ struct RemotePictureControlPanel: View {
                     Button(preset.name) { model.act(.write(slot.slot, .builtIn(preset))) }.disabled(!model.canEdit(slot))
                 }
             } else {
-                ForEach(files.filter { "folder:" + ($0.category ?? "") == category }, id: \.identifier) { file in
+                ForEach(files, id: \.identifier) { file in
                     Button(labels[file.identifier] ?? file.label) { model.act(.write(slot.slot, .document(file))) }
                         .disabled(!model.canEdit(slot) || folders.scanning)
                 }

@@ -113,6 +113,10 @@ func photoPreviewPages(_ entries: [PhotoPreviewEntry], reviewPhotos: [RemoteRevi
     for photo in reviewPhotos {
         for file in photo.files { captureByHandle[file.id] = photo.id }
     }
+    return photoPreviewPages(entries, captureByHandle: captureByHandle)
+}
+
+func photoPreviewPages(_ entries: [PhotoPreviewEntry], captureByHandle: [UInt32: UInt32]) -> [PhotoPreviewPage] {
     return entries.enumerated().map { index, entry in
         let identity = entry.file.flatMap { captureByHandle[$0.id] }.map { "review_\($0)" } ?? entry.id
         return PhotoPreviewPage(id: identity, index: index, entry: entry)
@@ -168,19 +172,93 @@ struct PhotoPreviewOpeningSnapshot {
     let entries: [PhotoPreviewEntry]
     let index: Int
 
+    init(entries: [PhotoPreviewEntry], index: Int) {
+        self.entries = entries
+        self.index = index
+    }
+
     init(files: [CameraFile], burstIDByFile: [UInt32: String], collapseBursts: Bool,
          expandedBurstIDs: Set<String>, selectedFileID: UInt32?) {
-        var entries = collapseBursts
+        let collapsed = collapseBursts
             ? collapsedPhotoPreviewEntries(files: files, burstIDByFile: burstIDByFile)
             : files.map { PhotoPreviewEntry.photo($0, burstID: burstIDByFile[$0.id]) }
-        for position in entries.indices.reversed() {
-            if case .burst(let group) = entries[position], expandedBurstIDs.contains(group.id) {
-                entries = expandPhotoPreviewBurst(entries, at: position)
+        var entries: [PhotoPreviewEntry] = []
+        entries.reserveCapacity(collapsed.count)
+        for entry in collapsed {
+            entries.append(entry)
+            if case .burst(let group) = entry, expandedBurstIDs.contains(group.id) {
+                entries.append(contentsOf: group.files.map { .photo($0, burstID: group.id) })
             }
         }
         self.entries = entries
         let selected = selectedFileID ?? files.first?.id
         index = selected.flatMap { id in entries.firstIndex { $0.file?.id == id } } ?? 0
+    }
+}
+
+/// Data projection only, owned independently by each list/review entry point.
+/// It never owns paging, drafts, loading or gesture state. Opening and current
+/// pages use separate keys because Android freezes the ordinary opening set.
+final class PhotoPreviewProjectionCache {
+    private struct OpeningInput: Equatable {
+        let files: [CameraFile]
+        let burstIDs: [UInt32: String]
+        let collapse: Bool
+        let expanded: Set<String>
+    }
+    struct Pages {
+        let values: [PhotoPreviewPage]
+        let loadIDs: [String]
+    }
+    private var openingInput: OpeningInput?
+    private var openingEntries: [PhotoPreviewEntry] = []
+    private var indexByHandle: [UInt32: Int] = [:]
+    private var entries: [PhotoPreviewEntry]?
+    private var captures: [UInt32: UInt32] = [:]
+    private var pageValue = Pages(values: [], loadIDs: [])
+    #if DEBUG
+    private(set) var openingBuildCount = 0
+    private(set) var pageBuildCount = 0
+    #endif
+
+    func opening(files: [CameraFile], burstIDByFile: [UInt32: String], collapseBursts: Bool,
+                 expandedBurstIDs: Set<String>, selectedFileID: UInt32?) -> PhotoPreviewOpeningSnapshot {
+        let next = OpeningInput(files: files, burstIDs: burstIDByFile, collapse: collapseBursts, expanded: expandedBurstIDs)
+        if openingInput != next {
+            openingEntries = PhotoPreviewOpeningSnapshot(files: files, burstIDByFile: burstIDByFile,
+                collapseBursts: collapseBursts, expandedBurstIDs: expandedBurstIDs, selectedFileID: nil).entries
+            indexByHandle.removeAll(keepingCapacity: true)
+            for (index, entry) in openingEntries.enumerated() {
+                if let file = entry.file, indexByHandle[file.id] == nil { indexByHandle[file.id] = index }
+            }
+            openingInput = next
+            #if DEBUG
+            openingBuildCount += 1
+            #endif
+        }
+        let selected = selectedFileID ?? files.first?.id
+        return PhotoPreviewOpeningSnapshot(entries: openingEntries, index: selected.flatMap { indexByHandle[$0] } ?? 0)
+    }
+
+    func pages(_ next: [PhotoPreviewEntry], captureByHandle: [UInt32: UInt32]) -> Pages {
+        if entries != next || captures != captureByHandle {
+            pageValue = Pages(values: photoPreviewPages(next, captureByHandle: captureByHandle), loadIDs: next.map(\.id))
+            entries = next
+            captures = captureByHandle
+            #if DEBUG
+            pageBuildCount += 1
+            #endif
+        }
+        return pageValue
+    }
+
+    func clear() {
+        openingInput = nil
+        openingEntries = []
+        indexByHandle = [:]
+        entries = nil
+        captures = [:]
+        pageValue = Pages(values: [], loadIDs: [])
     }
 }
 

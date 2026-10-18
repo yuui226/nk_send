@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Display-referred monitor exposure math copied from Android's
 /// RemoteExposureAnalysis. This intentionally uses Android's 77/150/29 integer weights so
@@ -6,6 +7,30 @@ import Foundation
 enum RemoteExposureAnalysis {
     static let waveformWidth = 256
     static let waveformHeight = 128
+
+    /// Worker-side ARGB → immutable RGBA image, shared by false-color and
+    /// waveform rendering. Android produces both bitmaps during analysis too;
+    /// UI layout must not repeat pixel conversion or thousands of draw calls.
+    static func image(pixels: [UInt32], width: Int, height: Int) -> CGImage? {
+        guard width > 0, height > 0, width <= pixels.count / height,
+              width * height <= Int.max / 4 else { return nil }
+        let count = width * height
+        var data = Data(count: count * 4)
+        data.withUnsafeMutableBytes { (bytes: UnsafeMutableRawBufferPointer) in
+            for index in 0..<count {
+                let color = pixels[index], offset = index * 4
+                bytes[offset] = UInt8((color >> 16) & 255)
+                bytes[offset + 1] = UInt8((color >> 8) & 255)
+                bytes[offset + 2] = UInt8(color & 255)
+                bytes[offset + 3] = UInt8(color >> 24)
+            }
+        }
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
     static func luma(red: UInt8, green: UInt8, blue: UInt8) -> Int {
         (77 * Int(red) + 150 * Int(green) + 29 * Int(blue)) >> 8
     }

@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import Combine
 @testable import ZTransfer
 
 final class RemoteParameterWheelTests: XCTestCase {
@@ -225,5 +227,186 @@ final class RemoteParameterWheelTests: XCTestCase {
         input.handOff(to: CGPoint(x: 10, y: 10))
         XCTAssertEqual(input.move(CGPoint(x: 10, y: 13), bounds: bounds, writable: true), [.delta(3)])
         XCTAssertEqual(input.up(CGPoint(x: 10, y: 13), bounds: bounds), [.end])
+    }
+}
+
+
+@MainActor
+final class RemoteParameterPerformanceTests: XCTestCase {
+    func testStableConfigurationAndDisplayFramesDoNotRepeatFormattingOrPublishIdleState() {
+        var formats = 0
+        let cache = RemoteParameterPresentationCache { property, value in
+            formats += 1
+            return RemoteExposureParameters.monitorFormat(property, raw: value)
+        }
+        let descriptor = RemotePropertyDescriptor(property: .iso, writable: true, current: 400,
+            values: [100, 200, 400, 800, 1600, 3200])
+        let driver = RemoteParameterWheelDriver()
+        let config = cache.configuration(descriptor: descriptor, autoEnabled: nil, hasAutoControl: false)
+        driver.configure(config)
+        driver.advance(0); driver.advance(180_000_000); driver.advance(330_000_000)
+        var notifications = 0
+        let subscription = driver.objectWillChange.sink { notifications += 1 }
+        defer { subscription.cancel() }
+        for frame in 0..<120 {
+            driver.configure(cache.configuration(descriptor: descriptor, autoEnabled: nil, hasAutoControl: false))
+            driver.advance(400_000_000 + Int64(frame) * 16_666_667)
+            for row in driver.display.rows { _ = cache.label(.iso, value: row.value) }
+        }
+        XCTAssertEqual(notifications, 0)
+        XCTAssertEqual(formats, 5)
+        driver.begin()
+        XCTAssertEqual(driver.drag(18), 1, "Crossing must still emit before finger release")
+        XCTAssertTrue(driver.display.dragging)
+        let before = notifications
+        _ = driver.drag(0)
+        XCTAssertEqual(notifications, before)
+        XCTAssertEqual(cache.label(.iso, value: 300), "300", "Non-enumerated physical value remains literal")
+        XCTAssertEqual(cache.label(.fNumber, value: 300), "f/3.0", "Property changes invalidate labels")
+    }
+
+    func testClockStopsAtRestAndOffscreenAndDoesNotRetainOwner() throws {
+        var driver: RemoteParameterWheelDriver? = RemoteParameterWheelDriver()
+        weak var weakDriver = driver
+        driver?.setActive(true)
+        XCTAssertTrue(try XCTUnwrap(driver).clockRunning, "Unloaded dash retains its 900ms pulse")
+        driver?.advance(0); driver?.advance(900_000_000)
+        XCTAssertEqual(try XCTUnwrap(driver).display.loadingAlpha, 0.55, accuracy: 0.00001)
+        let descriptor = RemotePropertyDescriptor(property: .iso, writable: true, current: 100, values: [100, 200])
+        driver?.configure(.init(descriptor: descriptor))
+        XCTAssertFalse(try XCTUnwrap(driver).clockRunning)
+        driver?.begin(); XCTAssertTrue(try XCTUnwrap(driver).clockRunning)
+        driver?.setActive(false)
+        XCTAssertFalse(try XCTUnwrap(driver).clockRunning)
+        XCTAssertFalse(try XCTUnwrap(driver).display.dragging)
+        driver?.configure(.init()) // late offscreen descriptor updates must not restart a timer
+        XCTAssertFalse(try XCTUnwrap(driver).clockRunning)
+        driver?.setActive(true)
+        XCTAssertTrue(try XCTUnwrap(driver).clockRunning)
+        driver = nil
+        XCTAssertNil(weakDriver, "CADisplayLink must not own its driver")
+    }
+
+    func testMenuCacheRetainsLabelsAndMeasuredWidthAcrossSelectionAndScaleChanges() {
+        let cache = RemoteParameterMenuCache()
+        var descriptor = RemotePropertyDescriptor(property: .iso, writable: true, current: 400,
+            values: Array(0..<10_000).map(UInt64.init))
+        var formats = 0, measures = 0
+        func resolve(_ scale: CGFloat) -> RemoteParameterMenuCache.Catalog {
+            cache.resolve(descriptor: descriptor, scale: scale, format: { property, value in
+                formats += 1; return RemoteExposureParameters.monitorFormat(property, raw: value)
+            }, measure: { label, scale in measures += 1; return CGFloat(label.count) * 9 / scale })
+        }
+        let initial = resolve(2)
+        XCTAssertEqual(formats, 10_000); XCTAssertEqual(measures, 10_000)
+        for value in 0..<120 { descriptor.current = UInt64(value); XCTAssertTrue(resolve(2) === initial) }
+        XCTAssertEqual(formats, 10_000); XCTAssertEqual(measures, 10_000)
+        let scaled = resolve(3)
+        XCTAssertFalse(scaled === initial)
+        XCTAssertEqual(formats, 10_000); XCTAssertEqual(measures, 20_000)
+        descriptor = .init(property: .iso, writable: true, current: 100, values: [100, 200])
+        XCTAssertEqual(resolve(3).labels, [100: "100", 200: "200"])
+        XCTAssertEqual(formats, 10_002)
+    }
+
+    func testHostedParameterMenuIsBoundedPositionsMinusThreeAndKeepsPositionOnCurrentUpdates() async throws {
+        let state = MenuState()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: MenuHarness(state: state))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 600)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(450))
+        let table = try XCTUnwrap(find(UITableView.self, in: host.view))
+        XCTAssertEqual(table.numberOfRows(inSection: 0), 3_000)
+        XCTAssertLessThan(table.visibleCells.count, 25)
+        let first = IndexPath(row: 2_497, section: 0)
+        XCTAssertEqual(table.indexPathsForVisibleRows?.min(), first)
+        XCTAssertEqual(table.rectForRow(at: first).minY - table.contentOffset.y, 0, accuracy: 1)
+        let cell = try XCTUnwrap(table.cellForRow(at: first))
+        let reference = ImageRenderer(content: RemoteParameterChoice(value: 2_497, label: "2497",
+            selected: false, closing: false) {}.frame(width: table.bounds.width))
+        let expected = try XCTUnwrap(reference.uiImage)
+        XCTAssertEqual(cell.bounds.height, expected.size.height, accuracy: 0.001)
+        table.setContentOffset(CGPoint(x: 0, y: table.contentOffset.y + 85), animated: false)
+        try await Task.sleep(for: .milliseconds(50))
+        let anchor = try XCTUnwrap(table.indexPathsForVisibleRows?.min())
+        let y = table.rectForRow(at: anchor).minY - table.contentOffset.y
+        state.current = 2_510
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(table.indexPathsForVisibleRows?.min(), anchor)
+        XCTAssertEqual(table.rectForRow(at: anchor).minY - table.contentOffset.y, y, accuracy: 1)
+        state.count = 2; state.current = 0
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(table.numberOfRows(inSection: 0), 2)
+        XCTAssertEqual(table.bounds.height, expected.size.height * 2, accuracy: 1,
+            "Short domain wraps its two rows without a tall empty scroll area")
+        let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        try XCTUnwrap(image.pngData()).write(to: URL(fileURLWithPath: "/tmp/ztransfer-p20-short-menu.png"))
+    }
+
+    func testProductionTileDragAnimatesPixelsWithoutRebuildingParentOrLosingDetents() async throws {
+        let probe = TileProbe()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: TileHarness(probe: probe))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 240, height: 140)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(420))
+        let input = try XCTUnwrap(find(RemoteParameterInput.InputView.self, in: host.view))
+        let beforeBodies = probe.bodies
+        func screenshot() -> Data? {
+            UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }.pngData()
+        }
+        let before = try XCTUnwrap(screenshot())
+        input.deliver([.begin])
+        for _ in 0..<20 {
+            input.deliver([.delta(0.75)])
+            try await Task.sleep(for: .milliseconds(8))
+        }
+        XCTAssertEqual(probe.steps, [1])
+        XCTAssertEqual(probe.bodies, beforeBodies)
+        XCTAssertNotEqual(try XCTUnwrap(screenshot()), before, "Real wheel pixels must move")
+        input.deliver([.end])
+        try await Task.sleep(for: .milliseconds(420))
+        XCTAssertEqual(probe.bodies, beforeBodies)
+        XCTAssertEqual(probe.steps, [1], "Release must not write a second value")
+    }
+
+    private func find<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+        if let result = view as? T { return result }
+        return view.subviews.lazy.compactMap { self.find(type, in: $0) }.first
+    }
+    private final class MenuState: ObservableObject {
+        @Published var current: UInt64 = 2_500
+        @Published var count = 3_000
+    }
+    private struct MenuHarness: View {
+        @ObservedObject var state: MenuState
+        var body: some View {
+            RemoteParameterPanel(field: .iso,
+                descriptor: .init(property: .iso, writable: true, current: state.current,
+                                  values: Array(0..<state.count).map(UInt64.init)),
+                anchor: CGRect(x: 100, y: 40, width: 120, height: 54),
+                hostSize: CGSize(width: 320, height: 600), landscape: false,
+                onSelect: { state.current = $0 }, onDismiss: {})
+        }
+    }
+    private final class TileProbe { var bodies = 0; var steps: [Int] = [] }
+    private struct TileHarness: View {
+        let probe: TileProbe
+        var body: some View {
+            let _ = { probe.bodies += 1 }()
+            RemoteExposureTile(field: .iso,
+                descriptor: .init(property: .iso, writable: true, current: 400, values: [100, 200, 400, 800, 1600, 3200]),
+                onOpenList: {}, onStep: { probe.steps.append($0) })
+                .frame(width: 180, height: 54)
+        }
     }
 }

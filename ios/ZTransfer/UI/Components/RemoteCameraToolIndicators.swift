@@ -28,22 +28,36 @@ enum RemoteCameraToolIndicatorMotion {
 }
 
 @MainActor
-private final class RemoteCameraToolLoop: NSObject, ObservableObject {
+final class RemoteCameraToolLoop: NSObject, ObservableObject {
     @Published private(set) var milliseconds: Double = 0
     private var first: CFTimeInterval?
     private var link: CADisplayLink?
+    var clockRunning: Bool { link != nil }
     func start() {
         guard link == nil else { return }
-        first = nil; milliseconds = 0
-        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        first = nil
+        if milliseconds != 0 { milliseconds = 0 }
+        let next = CADisplayLink(target: ClockTarget(self), selector: #selector(ClockTarget.frame(_:)))
         link = next
         next.add(to: .main, forMode: .common)
     }
-    @objc private func frame(_ sender: CADisplayLink) {
-        if first == nil { first = sender.timestamp }
-        milliseconds = (sender.timestamp - first!) * 1000
+    func advance(_ timestamp: CFTimeInterval) {
+        if first == nil { first = timestamp }
+        let next = (timestamp - first!) * 1000
+        if milliseconds != next { milliseconds = next }
     }
-    func stop() { link?.invalidate(); link = nil; first = nil; milliseconds = 0 }
+    @MainActor private final class ClockTarget: NSObject {
+        weak var owner: RemoteCameraToolLoop?
+        init(_ owner: RemoteCameraToolLoop) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.advance(link.timestamp)
+        }
+    }
+    func stop() {
+        link?.invalidate(); link = nil; first = nil
+        if milliseconds != 0 { milliseconds = 0 }
+    }
 }
 
 struct RemoteCameraToolLoading: View {

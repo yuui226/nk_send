@@ -7,6 +7,7 @@ enum PhotoCubeLUTMapper {
         let width = image.width, height = image.height
         guard width > 0, height > 0 else { return nil }
         let intensity = Float(min(max(intensityPercent, 0), 100)) / 100
+        let finishing = LUTColorPipeline.Prepared(adjustments: adjustments)
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                                        bytesPerRow: width * 4, space: space,
@@ -32,11 +33,10 @@ enum PhotoCubeLUTMapper {
             }
             let mixed = (alpha << 24) | (mix(original.x, mapped.x) << 16) |
                 (mix(original.y, mapped.y) << 8) | mix(original.z, mapped.z)
-            let finished = LUTColorPipeline.apply(mixed, adjustments: adjustments, preserveAlpha: true)
-            for (channel, shift) in [16, 8, 0].enumerated() {
-                let straight = (finished >> shift) & 255
-                buffer[offset + channel] = UInt8((straight * alpha + 127) / 255)
-            }
+            let finished = finishing.apply(mixed, preserveAlpha: true)
+            buffer[offset] = UInt8((((finished >> 16) & 255) * alpha + 127) / 255)
+            buffer[offset + 1] = UInt8((((finished >> 8) & 255) * alpha + 127) / 255)
+            buffer[offset + 2] = UInt8(((finished & 255) * alpha + 127) / 255)
         }
         try checkCancelled()
         return context.makeImage()
@@ -50,30 +50,50 @@ private extension Float {
 /// Android LutColorPipeline: finishing in the sRGB byte domain, after LUT mixing.
 enum LUTColorPipeline {
     static func apply(_ color: UInt32, adjustments: LUTAdjustments, preserveAlpha: Bool) -> UInt32 {
-        let adjustments = adjustments.normalized
-        guard !adjustments.isNeutral else { return color }
-        let alpha = preserveAlpha ? (color >> 24) & 255 : 255
-        guard alpha != 0 else { return color }
-        var r = Float((color >> 16) & 255) / 255
-        var g = Float((color >> 8) & 255) / 255
-        var b = Float(color & 255) / 255
-        let luma = (r * 0.2126 + g * 0.7152 + b * 0.0722).clamped(to: 0...1)
-        let shadows = -Float(adjustments.shadows) / 100 * 0.28 * smoothStep(0, 0.68, 1 - luma)
-        let highlights = Float(adjustments.highlights) / 100 * 0.28 * smoothStep(0.32, 1, luma)
-        r = (r + shadows + highlights).clamped(to: 0...1)
-        g = (g + shadows + highlights).clamped(to: 0...1)
-        b = (b + shadows + highlights).clamped(to: 0...1)
-        let contrast = 1 + Float(adjustments.contrast) / 100 * 0.75
-        r = ((r - 0.5) * contrast + 0.5).clamped(to: 0...1)
-        g = ((g - 0.5) * contrast + 0.5).clamped(to: 0...1)
-        b = ((b - 0.5) * contrast + 0.5).clamped(to: 0...1)
-        let postLuma = (r * 0.2126 + g * 0.7152 + b * 0.0722).clamped(to: 0...1)
-        let saturation = 1 + Float(adjustments.saturation) / 100
-        r = (postLuma + (r - postLuma) * saturation).clamped(to: 0...1)
-        g = (postLuma + (g - postLuma) * saturation).clamped(to: 0...1)
-        b = (postLuma + (b - postLuma) * saturation).clamped(to: 0...1)
-        return (alpha << 24) | (UInt32(r * 255 + 0.5) << 16) |
-            (UInt32(g * 255 + 0.5) << 8) | UInt32(b * 255 + 0.5)
+        Prepared(adjustments: adjustments).apply(color, preserveAlpha: preserveAlpha)
+    }
+
+    /// One immutable preparation per bitmap. Keep Android's operation order
+    /// and Float arithmetic, including byte rounding, inside the pixel pass.
+    struct Prepared: Sendable {
+        private let neutral: Bool
+        private let shadowScale: Float
+        private let highlightScale: Float
+        private let contrast: Float
+        private let saturation: Float
+
+        init(adjustments: LUTAdjustments) {
+            let adjustments = adjustments.normalized
+            neutral = adjustments.isNeutral
+            shadowScale = -Float(adjustments.shadows) / 100 * 0.28
+            highlightScale = Float(adjustments.highlights) / 100 * 0.28
+            contrast = 1 + Float(adjustments.contrast) / 100 * 0.75
+            saturation = 1 + Float(adjustments.saturation) / 100
+        }
+
+        func apply(_ color: UInt32, preserveAlpha: Bool) -> UInt32 {
+            guard !neutral else { return color }
+            let alpha = preserveAlpha ? (color >> 24) & 255 : 255
+            guard alpha != 0 else { return color }
+            var r = Float((color >> 16) & 255) / 255
+            var g = Float((color >> 8) & 255) / 255
+            var b = Float(color & 255) / 255
+            let luma = (r * 0.2126 + g * 0.7152 + b * 0.0722).clamped(to: 0...1)
+            let shadows = shadowScale * smoothStep(0, 0.68, 1 - luma)
+            let highlights = highlightScale * smoothStep(0.32, 1, luma)
+            r = (r + shadows + highlights).clamped(to: 0...1)
+            g = (g + shadows + highlights).clamped(to: 0...1)
+            b = (b + shadows + highlights).clamped(to: 0...1)
+            r = ((r - 0.5) * contrast + 0.5).clamped(to: 0...1)
+            g = ((g - 0.5) * contrast + 0.5).clamped(to: 0...1)
+            b = ((b - 0.5) * contrast + 0.5).clamped(to: 0...1)
+            let postLuma = (r * 0.2126 + g * 0.7152 + b * 0.0722).clamped(to: 0...1)
+            r = (postLuma + (r - postLuma) * saturation).clamped(to: 0...1)
+            g = (postLuma + (g - postLuma) * saturation).clamped(to: 0...1)
+            b = (postLuma + (b - postLuma) * saturation).clamped(to: 0...1)
+            return (alpha << 24) | (UInt32(r * 255 + 0.5) << 16) |
+                (UInt32(g * 255 + 0.5) << 8) | UInt32(b * 255 + 0.5)
+        }
     }
 
     private static func smoothStep(_ lower: Float, _ upper: Float, _ value: Float) -> Float {

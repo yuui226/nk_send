@@ -5,9 +5,13 @@ import UIKit
 /// detail is an overflow layer so expanding it never moves either card or the
 /// bottom workbench entry.
 struct ConnectionPage: View {
+    #if DEBUG
+    var didRender: (() -> Void)?
+    #endif
     @ObservedObject var model: ConnectionViewModel
     let effectsStore: PhotoEffectsStore
-    @ObservedObject var gpsCoordinator: GPSCoordinator
+    let gpsCoordinator: GPSCoordinator
+    @StateObject private var gps: GPSEnabledObservation
     let directory: DirectoryAccessStore
     let celebrationStart: Date?
     let onOpenWorkspace: () -> Void
@@ -22,7 +26,21 @@ struct ConnectionPage: View {
     @State private var attentionOrigin = Date()
     @State private var connectionHint: PhotoEffectsHint?
 
+    init(model: ConnectionViewModel, effectsStore: PhotoEffectsStore,
+         gpsCoordinator: GPSCoordinator, directory: DirectoryAccessStore,
+         celebrationStart: Date?, onOpenWorkspace: @escaping () -> Void,
+         gpsPanelPresented: Binding<Bool>) {
+        self.model = model; self.effectsStore = effectsStore
+        self.gpsCoordinator = gpsCoordinator; self.directory = directory
+        self.celebrationStart = celebrationStart; self.onOpenWorkspace = onOpenWorkspace
+        _gpsPanelPresented = gpsPanelPresented
+        _gps = StateObject(wrappedValue: GPSEnabledObservation(gpsCoordinator))
+    }
+
     var body: some View {
+        #if DEBUG
+        let _ = didRender?()
+        #endif
         pageBody()
     }
 
@@ -38,14 +56,14 @@ struct ConnectionPage: View {
                         ConnectionMethodCard(
                             mode: .usb, state: model.state,
                             height: layout.usbHeight,
-                            dimmed: gpsCoordinator.state.enabled,
-                            attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
+                            dimmed: gps.enabled,
+                            attentionActive: model.cameraSession == nil && !gps.enabled,
                             attentionOrigin: attentionOrigin,
                             selected: model.cameraSession?.isUSB == true,
                             celebrationStart: celebrationStart,
                             previewPremiumCelebration: model.previewsPremiumConnectionAnimation)
                             .modifier(GPSBlockedConnectionCard(
-                                blocked: gpsCoordinator.state.enabled,
+                                blocked: gps.enabled,
                                 onBlockedTap: showGPSConnectionBlockedHint
                             ))
                         ConnectionSceneFadeTimeline(start: celebrationStart) {
@@ -62,8 +80,8 @@ struct ConnectionPage: View {
                     ConnectionMethodCard(
                         mode: .wifi, state: model.state,
                         height: layout.wifiHeight,
-                        dimmed: gpsCoordinator.state.enabled,
-                        attentionActive: model.cameraSession == nil && !gpsCoordinator.state.enabled,
+                        dimmed: gps.enabled,
+                        attentionActive: model.cameraSession == nil && !gps.enabled,
                         attentionOrigin: attentionOrigin,
                         selected: model.cameraSession != nil && model.cameraSession?.isUSB == false,
                         celebrationStart: celebrationStart,
@@ -93,7 +111,7 @@ struct ConnectionPage: View {
                         apHelpViewed: apHelpViewed)
                         .frame(width: layout.cardWidth)
                         .modifier(GPSBlockedConnectionCard(
-                            blocked: gpsCoordinator.state.enabled,
+                            blocked: gps.enabled,
                             onBlockedTap: showGPSConnectionBlockedHint
                         ))
                     }
@@ -144,7 +162,7 @@ struct ConnectionPage: View {
                 .overlay(alignment: .bottom) {
                     ConnectionSceneFadeTimeline(start: celebrationStart) {
                         ConnectionWorkspaceButton(
-                            enabled: !gpsCoordinator.state.enabled,
+                            enabled: !gps.enabled,
                             action: onOpenWorkspace,
                         )
                         .padding(.bottom, 18)
@@ -205,7 +223,7 @@ struct ConnectionPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .photoEffectsHint($connectionHint, duration: 1.8)
-        .onChange(of: gpsCoordinator.state.enabled) { enabled in
+        .onChange(of: gps.enabled) { enabled in
             if !enabled { attentionOrigin = Date() }
         }
         // HomeScreen resets the STA guide after a failed discovery so the
@@ -277,10 +295,41 @@ private struct ConnectionSceneFadeTimeline<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 120.0, paused: start == nil)) { context in
-            let elapsed = connectionCelebrationElapsed(start: start, now: context.date)
+        ConnectionAnimationTimeline(start: start, duration: 0.62) { elapsed in
             let hero = CGFloat(min(1, max(0, elapsed / 620)))
             content.opacity(1 - connectionCelebrationEase(hero))
+        }
+    }
+}
+
+/// Keep one mounted content identity, but stop frame updates once this stage
+/// reaches its final value. A replacement epoch cancels the old deadline;
+/// foreground return samples the original absolute clock, never restarts it.
+struct ConnectionAnimationTimeline<Content: View>: View {
+    private struct Epoch: Equatable {
+        let start: Date?
+        let duration: Double
+    }
+    let start: Date?
+    let duration: Double
+    @ViewBuilder let content: (Double) -> Content
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var completed: Epoch?
+    private var epoch: Epoch { Epoch(start: start, duration: duration) }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 120.0,
+            paused: start == nil || completed == epoch || scenePhase != .active)) { context in
+                let elapsed = completed == epoch ? duration * 1_000 :
+                    min(duration * 1_000, connectionCelebrationElapsed(start: start, now: context.date))
+                content(start == nil ? 0 : elapsed)
+        }
+        .task(id: epoch) {
+            guard let start else { return }
+            let remaining = max(0, duration - Date().timeIntervalSince(start))
+            do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+            guard !Task.isCancelled else { return }
+            completed = epoch
         }
     }
 }

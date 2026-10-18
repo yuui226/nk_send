@@ -38,8 +38,8 @@ private struct SettingsScrollBounds: UIViewRepresentable {
             var ancestor = superview
             while let view = ancestor {
                 if let scroll = view as? UIScrollView {
-                    scroll.bounces = false
-                    scroll.alwaysBounceVertical = false
+                    if scroll.bounces { scroll.bounces = false }
+                    if scroll.alwaysBounceVertical { scroll.alwaysBounceVertical = false }
                     return
                 }
                 ancestor = view.superview
@@ -68,7 +68,8 @@ struct SettingsView: View {
     @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     @ObservedObject private var directory: DirectoryAccessStore
     @ObservedObject private var effectsStore: PhotoEffectsStore
-    @StateObject private var photoLUTEditor: PhotoLUTEditorState
+    @StateObject private var photoLUTLifetime: PhotoLUTEditorLifetime
+    private var photoLUTEditor: PhotoLUTEditorState { photoLUTLifetime.editor }
     private var photoLUTStore: PhotoLUTStore { photoLUTEditor.store }
     @State private var showingPicker = false
     @State private var feedbackHint = false
@@ -89,7 +90,6 @@ struct SettingsView: View {
     @State private var showingEffectsHelp = false
     @State private var showingModuleMenu = false
     @State private var settingsTransitionDirection: CGFloat = 1
-    @State private var directoryAttentionProgress: CGFloat = 0
     @AppStorage(TransferStorageMode.persistenceKey) private var storageModeRaw = ""
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
     @AppStorage("auto_transfer_mode") private var autoTransferModeRaw = ""
@@ -157,7 +157,7 @@ struct SettingsView: View {
          onContentHeightChange: @escaping (CGFloat) -> Void = { _ in },
          onShowPremium: @escaping () -> Void = {}, onPlayFireworks: @escaping () -> Void = {},
          onClose: (() -> Void)? = nil) {
-        _photoLUTEditor = StateObject(wrappedValue: photoLUTEditor ?? PhotoLUTEditorState(role: .camera))
+        _photoLUTLifetime = StateObject(wrappedValue: PhotoLUTEditorLifetime(photoLUTEditor ?? PhotoLUTEditorState(role: .camera)))
         self.effectsOnly = effectsOnly
         self.effectPreviewInitialRotationQuarterTurns = effectPreviewInitialRotationQuarterTurns
         _settingsPage = State(initialValue: effectsOnly ? .effects : .main)
@@ -272,7 +272,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showingPicker) { DirectoryPicker { url in directory.setDirectory(url); showingPicker = false } }
         .photosPicker(isPresented: $showingWatermarkPicker, selection: $watermarkPickerItems,
                       maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current)
-        .onChange(of: photoLUTEditor.notice) { notice in
+        .onReceive(photoLUTEditor.$notice.dropFirst()) { notice in
             if let notice { effectsHint = .init(resource: notice.resource) }
         }
         .onChange(of: watermarkPickerItems) { items in
@@ -322,28 +322,7 @@ struct SettingsView: View {
             let restoredSkin = normalizedSkinPreset(skinPreset)
             if skinPreset != restoredSkin { skinPreset = restoredSkin }
         }
-        .task(id: directoryAttentionActive) {
-            guard directoryAttentionActive else {
-                directoryAttentionProgress = 0
-                return
-            }
-            directoryAttentionProgress = 0.25
-            for _ in 0..<2 {
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) {
-                    directoryAttentionProgress = 1
-                }
-                try? await Task.sleep(nanoseconds: 180_000_000)
-                guard !Task.isCancelled else { return }
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.28)) {
-                    directoryAttentionProgress = 0.32
-                }
-                try? await Task.sleep(nanoseconds: 280_000_000)
-                guard !Task.isCancelled else { return }
-            }
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) {
-                directoryAttentionProgress = 0.55
-            }
-        }
+
     }
 
     private var mainSettingsContent: some View {
@@ -462,12 +441,11 @@ struct SettingsView: View {
     }
 
     private var directoryCard: some View {
-        SettingsCard(
+        SettingsDirectoryAttentionCard(
             borderColor: directory.directoryURL == nil
                 ? ZTransferColors.accentOrange.opacity(0.8)
                 : ZTransferColors.primaryText.opacity(0.10),
-            attentionColor: directoryAttentionActive ? ZTransferColors.accentOrange : nil,
-            attentionProgress: directoryAttentionProgress
+            active: directoryAttentionActive
         ) {
             HStack(spacing: 10) {
                 Image(systemName: "location.fill").foregroundStyle(directory.directoryURL == nil ? ZTransferColors.accentOrange : .green)
@@ -499,7 +477,6 @@ struct SettingsView: View {
                 ToggleWheel(label: AppLocalized.resource("defer_transfer_start"), isOn: $deferStart, disabled: directory.directoryURL == nil)
             }
         }
-        .scaleEffect(1 + directoryAttentionProgress * 0.008)
     }
 
     private var directoryAttentionActive: Bool {
@@ -841,6 +818,49 @@ extension PhotoFramePreset {
         switch self {
         case .mist: return AppLocalized.resource("photo_frame_mist"); case .cinema: return AppLocalized.resource("photo_frame_cinema"); case .minimal: return AppLocalized.resource("photo_frame_minimal"); case .frosted: return AppLocalized.resource("photo_frame_frosted"); case .plaque: return AppLocalized.resource("photo_frame_plaque"); case .immersive: return AppLocalized.resource("photo_frame_immersive"); case .brandInset: return AppLocalized.resource("photo_frame_brand_inset"); case .brandGallery: return AppLocalized.resource("photo_frame_brand_gallery"); case .classicSignature: return AppLocalized.resource("photo_frame_classic_signature"); case .galleryMat: return AppLocalized.resource("photo_frame_gallery_mat"); case .colorArchive: return AppLocalized.resource("photo_frame_color_archive"); case .filmGallery: return AppLocalized.resource("photo_frame_film_gallery"); case .filmEdge: return AppLocalized.resource("photo_frame_film_edge"); case .filmNegative: return AppLocalized.resource("photo_frame_film_negative"); case .parameterPoster: return AppLocalized.resource("photo_frame_parameter_poster")
         }
+    }
+}
+
+/// Android SettingsScreen's two 180/280ms prompts and 220ms settle.
+/// Local state keeps these finite visual updates out of the complete form.
+struct SettingsDirectoryAttentionCard<Content: View>: View {
+    let borderColor: Color
+    let active: Bool
+    @ViewBuilder let content: Content
+    @State private var progress: CGFloat = 0
+    #if DEBUG
+    var didRender: ((CGFloat) -> Void)?
+    #endif
+    var body: some View {
+        #if DEBUG
+        let _ = didRender?(progress)
+        #endif
+        SettingsCard(borderColor: borderColor,
+                     attentionColor: active ? ZTransferColors.accentOrange : nil,
+                     attentionProgress: progress) { content }
+            .scaleEffect(1 + progress * 0.008)
+            .task(id: active) {
+                guard active else {
+                    progress = 0
+                    return
+                }
+                progress = 0.25
+                for _ in 0..<2 {
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) {
+                        progress = 1
+                    }
+                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.28)) {
+                        progress = 0.32
+                    }
+                    try? await Task.sleep(nanoseconds: 280_000_000)
+                    guard !Task.isCancelled else { return }
+                }
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) {
+                    progress = 0.55
+                }
+            }
     }
 }
 

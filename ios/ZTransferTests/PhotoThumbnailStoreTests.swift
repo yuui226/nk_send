@@ -490,3 +490,216 @@ private actor ThumbnailWriteFailureGate {
         continuation = nil
     }
 }
+
+final class PhotoThumbnailPerformanceTests: XCTestCase {
+    func testByteBoundedAccessOrderOverwriteRemovalAndOversizedEntry() {
+        var cache = PhotoThumbnailMemoryCache(budget: 6)
+        cache.insert(Data([1, 1]), for: "a")
+        cache.insert(Data([2, 2]), for: "b")
+        cache.insert(Data([3, 3]), for: "c")
+        XCTAssertEqual(cache.value(for: "a"), Data([1, 1]))
+        cache.insert(Data([4, 4]), for: "d")
+        XCTAssertNil(cache.value(for: "b"))
+        cache.insert(Data([5, 5, 5]), for: "a")
+        XCTAssertNil(cache.value(for: "c"))
+        XCTAssertEqual(cache.byteCount, 5)
+        cache.remove("missing")
+        cache.remove("d")
+        cache.insert(Data([6]), for: "e")
+        cache.insert(Data([7]), for: "f")
+        cache.retainOnly(["a", "f"])
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertEqual(cache.byteCount, 4)
+        cache.insert(Data(repeating: 8, count: 7), for: "oversized")
+        XCTAssertEqual(cache.count, 0)
+        XCTAssertEqual(cache.byteCount, 0)
+        cache.insert(Data([9]), for: "new")
+        XCTAssertEqual(cache.value(for: "new"), Data([9]))
+        cache.removeAll(keepingCapacity: true)
+        cache.insert(Data([10]), for: "after-clear")
+        XCTAssertEqual(cache.count, 1)
+        XCTAssertEqual(cache.byteCount, 1)
+    }
+
+    func testRandomAccessMatchesExistingArrayPolicyAcrossReplacementAndPruning() {
+        // Independent reference is the former dictionary + removeAll policy.
+        // Compare externally observable hits/costs, not internal list links.
+        var cache = PhotoThumbnailMemoryCache(budget: 111)
+        var values: [String: Data] = [:]
+        var order: [String] = []
+        var seed: UInt64 = 0x32_2026_1018
+        func random() -> Int {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Int(seed >> 33)
+        }
+        for iteration in 0..<20_000 {
+            let key = String(random() % 64)
+            switch random() % 16 {
+            case 0...7:
+                let value = Data(repeating: UInt8(iteration % 256), count: random() % 130)
+                cache.insert(value, for: key)
+                values[key] = value
+                order.removeAll { $0 == key }; order.append(key)
+                while values.values.reduce(0, { $0 + $1.count }) > 111 {
+                    values.removeValue(forKey: order.removeFirst())
+                }
+            case 8...12:
+                XCTAssertEqual(cache.value(for: key), values[key], "operation \(iteration)")
+                if values[key] != nil { order.removeAll { $0 == key }; order.append(key) }
+            case 13:
+                cache.remove(key)
+                values.removeValue(forKey: key); order.removeAll { $0 == key }
+            case 14:
+                let retained = Set((0..<64).filter { $0 % 3 != iteration % 3 }.map(String.init))
+                cache.retainOnly(retained)
+                values = values.filter { retained.contains($0.key) }
+                order.removeAll { !retained.contains($0) }
+            default:
+                cache.removeAll(keepingCapacity: iteration.isMultiple(of: 2))
+                values.removeAll(); order.removeAll()
+            }
+            XCTAssertEqual(cache.count, values.count, "operation \(iteration)")
+            XCTAssertEqual(cache.byteCount, values.values.reduce(0) { $0 + $1.count })
+        }
+    }
+
+    func testLargeCatalogAccessKeepsExactValuesAndBoundedCost() {
+        var cache = PhotoThumbnailMemoryCache(budget: 50_000)
+        for index in 0..<50_000 { cache.insert(Data([UInt8(index % 251)]), for: String(index)) }
+        let clock = ContinuousClock()
+        let start = clock.now
+        for index in 0..<20_000 {
+            let item = (index * 3571) % 50_000
+            XCTAssertEqual(cache.value(for: String(item)), Data([UInt8(item % 251)]))
+        }
+        print("P32: 20000 hits in 50000-entry thumbnail LRU: \(start.duration(to: clock.now))")
+        XCTAssertEqual(cache.count, 50_000)
+        XCTAssertEqual(cache.byteCount, 50_000)
+        cache.retainOnly(Set((0..<50_000).filter { $0.isMultiple(of: 100) }.map(String.init)))
+        XCTAssertEqual(cache.count, 500)
+        XCTAssertEqual(cache.byteCount, 500)
+    }
+
+    func testConcurrentVisibleLoadsDecodeOnceEvenIfTooLargeForMemory() async throws {
+        for valid in [true, false] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root), memoryBudget: 0)
+            let gate = ThumbnailWriteFailureGate()
+            let transforms = LockedCounter()
+            let validations = LockedCounter()
+            let fetches = LockedCounter()
+            let photo = file(1)
+            let requests = (0..<24).map { _ in Task {
+                try await store.load(file: photo, identity: "shared", allowRemote: true,
+                    transform: { data in transforms.increment(); return data + Data([3]) },
+                    validate: { _ in validations.increment(); return valid }) {
+                        fetches.increment()
+                        return await gate.wait()
+                    }
+            } }
+            try await waitForWaiters(24, store: store)
+            await gate.release()
+            for request in requests {
+                let result = try await request.value
+                XCTAssertEqual(result, valid ? Data([2, 3]) : nil)
+            }
+            XCTAssertEqual(fetches.value, 1)
+            XCTAssertEqual(transforms.value, 1)
+            XCTAssertEqual(validations.value, 1)
+            // No oversized memory entry: valid raw disk bytes decode again;
+            // invalid remote bytes remain negatively cached for this session.
+            let again = try await store.load(file: photo, identity: "shared", allowRemote: true,
+                transform: { data in transforms.increment(); return data + Data([3]) }) {
+                    XCTFail("Shared result must have been persisted or negatively cached")
+                    return Data()
+                }
+            XCTAssertEqual(again, valid ? Data([2, 3]) : nil)
+            XCTAssertEqual(transforms.value, valid ? 2 : 1)
+        }
+    }
+
+    func testProductionEvictionUsesDiskThenInvalidationAndResetReloadCorrectly() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = PhotoThumbnailDiskCache(root: root)
+        let store = PhotoThumbnailStore(disk: disk, memoryBudget: 4)
+        let transforms = LockedCounter()
+        let fetches = LockedCounter()
+        func load(_ id: UInt32, identity: String = "camera") async throws -> Data? {
+            try await store.load(file: file(id), identity: identity, allowRemote: true,
+                transform: { data in transforms.increment(); return data + Data([9]) }) {
+                    fetches.increment(); return Data([UInt8(id)])
+                }
+        }
+        _ = try await load(1); _ = try await load(2); _ = try await load(1)
+        _ = try await load(3)
+        XCTAssertEqual(transforms.value, 3)
+        _ = try await load(1)
+        XCTAssertEqual(transforms.value, 3)
+        let reloaded = try await load(2)
+        XCTAssertEqual(reloaded, Data([2, 9]))
+        XCTAssertEqual(transforms.value, 4)
+        XCTAssertEqual(fetches.value, 3)
+        await store.invalidate(files: [file(2)], identity: "camera", directSTA: false)
+        _ = try await load(2)
+        XCTAssertEqual(transforms.value, 5)
+        XCTAssertEqual(fetches.value, 3) // Handle invalidation retains stable disk entries.
+        await store.resetForScan(identity: "camera")
+        _ = try await load(2)
+        XCTAssertEqual(transforms.value, 6)
+        await store.reconcile(files: [file(1)], identity: "camera", directSTA: false)
+        _ = try await load(2)
+        XCTAssertEqual(fetches.value, 4) // Authoritative reconciliation removes stale disk too.
+        _ = try await load(2, identity: "different-camera")
+        XCTAssertEqual(fetches.value, 5)
+        await store.clear()
+        _ = try await load(2, identity: "different-camera")
+        XCTAssertEqual(fetches.value, 5)
+    }
+
+    func testCancellingOneVisibleWaiterPreservesSharedDecodeForRemainingOwner() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = PhotoThumbnailStore(disk: PhotoThumbnailDiskCache(root: root))
+        let gate = ThumbnailWriteFailureGate()
+        let transforms = LockedCounter()
+        let photo = file(1)
+        let first = Task {
+            try await store.load(file: photo, identity: "camera", allowRemote: true,
+                transform: { data in transforms.increment(); return data }) { await gate.wait() }
+        }
+        try await waitForWaiters(1, store: store)
+        let second = Task {
+            try await store.load(file: photo, identity: "camera", allowRemote: true,
+                transform: { data in transforms.increment(); return data }) {
+                    XCTFail("Must share the original request"); return Data()
+                }
+        }
+        try await waitForWaiters(2, store: store)
+        first.cancel()
+        try await waitForWaiters(1, store: store)
+        await gate.release()
+        let value = try await second.value
+        _ = try? await first.value
+        XCTAssertEqual(value, Data([2]))
+        XCTAssertEqual(transforms.value, 1)
+        let remaining = await store.activeWaiterCount
+        XCTAssertEqual(remaining, 0)
+    }
+
+    private func file(_ id: UInt32) -> CameraFile {
+        CameraFile(id: id, storageID: 1, format: 0x3801, size: 100,
+                   fileName: "photo-\(id).JPG", captureDate: "20261018T120000", isProtected: false)
+    }
+
+    private func waitForWaiters(_ count: Int, store: PhotoThumbnailStore) async throws {
+        for _ in 0..<400 {
+            if await store.activeWaiterCount == count { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let actual = await store.activeWaiterCount
+        XCTFail("Expected \(count) shared waiters, got \(actual)")
+        throw CancellationError()
+    }
+}

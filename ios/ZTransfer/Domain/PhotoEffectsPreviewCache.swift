@@ -1,4 +1,88 @@
 import Foundation
+import UIKit
+
+/// SettingsScreen rotates its source on Dispatchers.Default once per source /
+/// direction, before filter/comparison/prefetch consumers share it. Retain just
+/// the current source and one rotated bitmap, with the existing cancellation gate.
+@MainActor
+final class PhotoEffectsRotatedSourceCache {
+    typealias Renderer = @Sendable (UIImage, Int) throws -> UIImage
+    private let cache = PhotoEffectsPreviewCachePool<UIImage>(capacity: 1)
+    private let renderer: Renderer
+    private var source: UIImage?
+    private var rotation: Int?
+
+    init(renderer: @escaping Renderer = PhotoEffectsSourceRotation.rotate) { self.renderer = renderer }
+
+    func image(_ source: UIImage, quarterTurns: Int) async throws -> UIImage {
+        try Task.checkCancellation()
+        let turns = ((quarterTurns % 4) + 4) % 4
+        // Keep identity alive while cached: a deallocated UIImage address must
+        // never be reused as the identity of a different source.
+        if self.source !== source || rotation != turns {
+            cache.close(); self.source = source; rotation = turns
+        }
+        guard turns != 0 else { return source }
+        let renderer = renderer
+        return try await cache.value(key: "rotated", context: "\(ObjectIdentifier(source))|\(turns)") { cancelled in
+            if cancelled() { throw CancellationError() }
+            return try await PhotoEffectsPreviewRenderGate.render {
+                if cancelled() { throw CancellationError() }
+                return try renderer(source, turns)
+            }
+        }
+    }
+
+    func close() { cache.close(); source = nil; rotation = nil }
+}
+
+enum PhotoEffectsSourceRotation {
+    /// Metadata-only wrapper for the temporary source view. UIImage/SwiftUI
+    /// fits the final oriented size, avoiding pre-rotation pixel-rounding drift.
+    nonisolated static func displayImage(_ image: UIImage, quarterTurns: Int) -> UIImage {
+        let turns = ((quarterTurns % 4) + 4) % 4
+        guard turns != 0 else { return image }
+        let normal: [UIImage.Orientation] = [.up, .left, .down, .right]
+        let mirrored: [UIImage.Orientation] = [.upMirrored, .leftMirrored, .downMirrored, .rightMirrored]
+        let cycle = normal.contains(image.imageOrientation) ? normal : mirrored
+        let orientation = cycle[((cycle.firstIndex(of: image.imageOrientation) ?? 0) + turns) % 4]
+        if let cgImage = image.cgImage { return UIImage(cgImage: cgImage, scale: image.scale, orientation: orientation) }
+        if let ciImage = image.ciImage { return UIImage(ciImage: ciImage, scale: image.scale, orientation: orientation) }
+        return image
+    }
+
+    nonisolated static func rotate(_ image: UIImage, quarterTurns: Int) -> UIImage {
+        let turns = ((quarterTurns % 4) + 4) % 4
+        guard turns != 0 else { return image }
+        let sourceSize = image.size
+        let rotatedSize = turns.isMultiple(of: 2)
+            ? sourceSize : CGSize(width: sourceSize.height, height: sourceSize.width)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        format.opaque = image.cgImage != nil
+        return UIGraphicsImageRenderer(size: rotatedSize, format: format).image { renderer in
+            let context = renderer.cgContext
+            context.translateBy(x: rotatedSize.width / 2, y: rotatedSize.height / 2)
+            context.rotate(by: -.pi / 2 * CGFloat(turns))
+            context.translateBy(x: -sourceSize.width / 2, y: -sourceSize.height / 2)
+            image.draw(in: CGRect(origin: .zero, size: sourceSize))
+        }
+    }
+}
+
+@MainActor
+final class PhotoEffectsDisplaySourceCache {
+    private var source: UIImage?
+    private var turns: Int?
+    private var prepared: UIImage?
+    func image(_ source: UIImage, quarterTurns: Int) -> UIImage {
+        let turns = ((quarterTurns % 4) + 4) % 4
+        if self.source === source, self.turns == turns, let prepared { return prepared }
+        let image = PhotoEffectsSourceRotation.displayImage(source, quarterTurns: turns)
+        self.source = source; self.turns = turns; prepared = image
+        return image
+    }
+}
 
 /// Android PhotoEffectsPreviewCache: awaiter cancellation never owns shared rendering.
 /// Closing a target cancels its worker permanently and releases every waiting caller.

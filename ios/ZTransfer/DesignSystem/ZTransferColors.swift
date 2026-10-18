@@ -384,8 +384,6 @@ struct ZTransferButtonMaterialSurface: View, Animatable {
     private var activeAmount: CGFloat { panel ? 0 : min(max(activeProgress ?? (active ? 1 : 0), 0), 1) }
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.displayScale) private var displayScale
-    @ObservedObject private var textureStore = ZTransferMaterialTextureStore.shared
     private var dark: Bool { colorScheme == .dark }
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cornerRadius, style: skin == .liquidGlass ? .continuous : .circular)
@@ -428,9 +426,6 @@ struct ZTransferButtonMaterialSurface: View, Animatable {
         // every skin (including native liquid glass) leaves the Button label
         // as the sole interaction owner.
         .allowsHitTesting(false)
-        .task(id: textureKey) {
-            if let key = textureKey { await textureStore.load(key) }
-        }
     }
 
     private var textureKey: ZTransferTextureKey? {
@@ -438,9 +433,8 @@ struct ZTransferButtonMaterialSurface: View, Animatable {
     }
 
     @ViewBuilder private var materialTexture: some View {
-        if let key = textureKey, let image = textureStore.image(for: key) {
-            shape.fill(ImagePaint(image: Image(decorative: image, scale: max(displayScale, 1)),
-                                  scale: 1))
+        if let key = textureKey {
+            ZTransferMaterialTextureFill(key: key, cornerRadius: cornerRadius)
         }
     }
 
@@ -605,8 +599,13 @@ private struct ZTransferRoundedPathShadow: UIViewRepresentable {
     }
 }
 
-private final class ZTransferRoundedShadowView: UIView {
+final class ZTransferRoundedShadowView: UIView {
     private var configuredCornerRadius: CGFloat = 0
+    private var pathBounds: CGRect?
+    private var pathRadius: CGFloat?
+    #if DEBUG
+    private(set) var pathBuildCount = 0
+    #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -620,15 +619,23 @@ private final class ZTransferRoundedShadowView: UIView {
     required init?(coder: NSCoder) { nil }
 
     func configure(cornerRadius: CGFloat, opacity: CGFloat, radius: CGFloat, y: CGFloat) {
-        configuredCornerRadius = cornerRadius
-        layer.shadowOpacity = Float(opacity)
-        layer.shadowRadius = radius
-        layer.shadowOffset = CGSize(width: 0, height: y)
-        setNeedsLayout()
+        if configuredCornerRadius != cornerRadius {
+            configuredCornerRadius = cornerRadius
+            setNeedsLayout()
+        }
+        if layer.shadowOpacity != Float(opacity) { layer.shadowOpacity = Float(opacity) }
+        if layer.shadowRadius != radius { layer.shadowRadius = radius }
+        let offset = CGSize(width: 0, height: y)
+        if layer.shadowOffset != offset { layer.shadowOffset = offset }
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        guard pathBounds != bounds || pathRadius != configuredCornerRadius else { return }
+        pathBounds = bounds; pathRadius = configuredCornerRadius
+        #if DEBUG
+        pathBuildCount += 1
+        #endif
         layer.shadowPath = UIBezierPath(
             roundedRect: bounds,
             cornerRadius: configuredCornerRadius

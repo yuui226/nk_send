@@ -27,17 +27,20 @@ struct PhotoEffectsSwitchMotion {
 }
 
 @MainActor
-private final class PhotoEffectsSwitchClock: NSObject, ObservableObject {
+final class PhotoEffectsSwitchClock: NSObject, ObservableObject {
     @Published var motion: PhotoEffectsSwitchMotion?
     private var link: CADisplayLink?
+    private var lastInput: (checked: Bool, palette: [UInt32])?
     func update(checked: Bool, palette: [UInt32]) {
         if motion == nil {
             motion = .init(checked: checked, accent: palette[0], foreground: palette[1], secondary: palette[2])
-        } else {
+        } else if lastInput?.checked != checked || lastInput?.palette != palette {
             motion?.update(checked: checked, accent: palette[0], foreground: palette[1], secondary: palette[2])
         }
+        lastInput = (checked, palette)
+        // An unchanged target must still resume an interrupted onDisappear.
         guard motion?.isRunning == true, link == nil else { return }
-        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let next = ZTransferDisplayLink.make(owner: self) { $0.frame($1) }
         link = next; next.add(to: .main, forMode: .common)
     }
     @objc private func frame(_ sender: CADisplayLink) {

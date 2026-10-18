@@ -36,7 +36,7 @@ struct PhotoEffectsControls: View {
     var imageImporting = false
     @State private var metadataExpanded = false
     @State private var watermarkExpanded = false
-    @ObservedObject var photoLUTEditor: PhotoLUTEditorState
+    let photoLUTEditor: PhotoLUTEditorState
     private var photoLUTStore: PhotoLUTStore { photoLUTEditor.store }
     @Binding var filterChooser: PhotoFilterChooserState
     var onWatermarkTextCommitted: (String) -> Void = { _ in }
@@ -605,6 +605,38 @@ func photoEffectsPreviewCanvasKey(_ settings: PhotoEffectsSettings, rotationQuar
     return "rotation:\(rotationQuarterTurns)|frame:\(border)"
 }
 
+/// Local view state (comparison, transitions, layout) must not serialize the
+/// full filter recipe again. Equality compares normalized pixel inputs; the
+/// memo retains only one identity and never shares independent editor drafts.
+@MainActor
+final class PhotoEffectsPreviewIdentityCache {
+    private var settings: PhotoEffectsSettings?
+    private var source: UIImage?
+    private var metadata: PhotoFrameMetadata?
+    private var identity: String?
+    func key(settings: PhotoEffectsSettings, source: UIImage?, metadata: PhotoFrameMetadata?,
+             build: (PhotoEffectsSettings, UIImage?, PhotoFrameMetadata?) -> String = {
+                 PhotoEffectsSettingsPreview.makeRenderKey(settings: $0, source: $1, metadata: $2)
+             }) -> String {
+        let pixels = photoEffectsPreviewPixelSettings(settings)
+        if let identity, self.settings == pixels, self.source === source, self.metadata == metadata { return identity }
+        let key = build(pixels, source, metadata)
+        self.settings = pixels; self.source = source; self.metadata = metadata; identity = key
+        return key
+    }
+}
+
+/// Metadata-only rotation for the temporary original/failure view. Creating a
+/// physically rotated UIImage in body redraws every pixel during layout updates.
+struct PhotoEffectsSourceImage: View {
+    let source: UIImage
+    let quarterTurns: Int
+    @State private var cache = PhotoEffectsDisplaySourceCache()
+    var body: some View {
+        Image(uiImage: cache.image(source, quarterTurns: quarterTurns)).resizable().scaledToFit()
+    }
+}
+
 /// Android keeps the last rendered effect visible while a new preview is
 /// prepared. Rendering is detached from SwiftUI so wheel interaction remains
 /// responsive and a cancelled generation cannot replace a newer one.
@@ -619,6 +651,8 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var completeCache = PhotoEffectsPreviewCachePool<UIImage>()
     @State private var intermediateCache = PhotoEffectsPreviewCachePool<UIImage>(capacity: 1)
     @State private var comparisonCache = PhotoEffectsPreviewCachePool<UIImage>(capacity: 1)
+    @State private var rotatedSourceCache = PhotoEffectsRotatedSourceCache()
+    @State private var identityCache = PhotoEffectsPreviewIdentityCache()
     @State private var rendered: UIImage?
     @State private var renderedRequestKey = ""
     @State private var renderedCanvasKey = ""
@@ -627,10 +661,10 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var previewFailed = false
     @State private var showUnfiltered = false
     @State private var lastPreviewSettings: PhotoEffectsSettings?
-    @State private var cachedContextKey = ""
     @State private var rotationQuarterTurns = 0
     @State private var expanded = false
-    @State private var previewAnchor: CGRect = .zero
+    @State private var geometry = PhotoEffectsGeometrySnapshot()
+    @State private var expandedSnapshot: PhotoEffectsExpandedPreviewSnapshot?
 
     let showSourceWhileRendering: Bool
     init(source: UIImage?, metadata: PhotoFrameMetadata?, settings: PhotoEffectsSettings,
@@ -647,7 +681,7 @@ struct PhotoEffectsSettingsPreview: View {
     }
 
     private var renderKey: String {
-        Self.makeRenderKey(settings: settings, source: source, metadata: metadata)
+        identityCache.key(settings: settings, source: source, metadata: metadata)
     }
 
     static func makeRenderKey(
@@ -675,12 +709,13 @@ struct PhotoEffectsSettingsPreview: View {
             metadata.make ?? "", metadata.model ?? "", metadata.aperture ?? "",
             metadata.shutter ?? "", metadata.iso ?? "", metadata.focalLength ?? "",
             metadata.lensModel ?? "", metadata.dateTime ?? "",
+            metadata.exposureCompensation ?? "",
             metadata.latitude.map { String($0) } ?? "",
             metadata.longitude.map { String($0) } ?? "",
             metadata.altitude.map { String($0) } ?? "",
             metadata.city ?? "", metadata.region ?? "",
         ]
-        return "meta:" + fields.joined(separator: "|")
+        return "meta:" + fields.map { "\($0.utf8.count):\($0)" }.joined(separator: "|")
     }
 
     private var placeContextKey: String {
@@ -708,11 +743,6 @@ struct PhotoEffectsSettingsPreview: View {
 
     private var requestedCanvasKey: String {
         photoEffectsPreviewCanvasKey(settings, rotationQuarterTurns: rotationQuarterTurns)
-    }
-
-    private var sourceContextKey: String {
-        Self.makeSourceContextKey(source: source, metadata: metadata,
-                                  rotationQuarterTurns: rotationQuarterTurns)
     }
 
     private static func makeSourceContextKey(
@@ -783,8 +813,7 @@ struct PhotoEffectsSettingsPreview: View {
         image: UIImage, sourceIdentity: UIImage, settings: PhotoEffectsSettings,
         metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int, placeContextKey: String,
         cache: PhotoEffectsPreviewCachePool<UIImage>
-    ) async -> [(String, UIImage)] {
-        var results: [(String, UIImage)] = []
+    ) async {
         let resolvedMetadata = await resolvedPreviewMetadata(metadata, settings: settings)
         do {
             for selection in nextPhotoFilterSelections(for: settings) {
@@ -792,33 +821,11 @@ struct PhotoEffectsSettingsPreview: View {
                 var next = settings
                 next.photoFilterEnabled = true
                 next.selectedFilter = selection
-                let preview = try await cachedPreview(image: image, sourceIdentity: sourceIdentity,
+                _ = try await cachedPreview(image: image, sourceIdentity: sourceIdentity,
                     settings: next, metadata: resolvedMetadata, originalMetadata: metadata,
                     rotation: rotationQuarterTurns, placeContext: placeContextKey, cache: cache, intermediate: nil)
-                let base = makeRenderKey(settings: next, source: sourceIdentity, metadata: metadata)
-                results.append(("\(base)|rotation:\(rotationQuarterTurns)|\(placeContextKey)", preview))
             }
         } catch {}
-        return results
-    }
-
-    private static func rotate(_ image: UIImage, quarterTurns: Int) -> UIImage {
-        let turns = ((quarterTurns % 4) + 4) % 4
-        guard turns != 0 else { return image }
-        let sourceSize = image.size
-        let rotatedSize = turns.isMultiple(of: 2)
-            ? sourceSize
-            : CGSize(width: sourceSize.height, height: sourceSize.width)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = image.scale
-        format.opaque = image.cgImage != nil
-        return UIGraphicsImageRenderer(size: rotatedSize, format: format).image { renderer in
-            let context = renderer.cgContext
-            context.translateBy(x: rotatedSize.width / 2, y: rotatedSize.height / 2)
-            context.rotate(by: -.pi / 2 * CGFloat(turns))
-            context.translateBy(x: -sourceSize.width / 2, y: -sourceSize.height / 2)
-            image.draw(in: CGRect(origin: .zero, size: sourceSize))
-        }
     }
 
     private var expandedImage: UIImage? { rendered ?? source }
@@ -841,13 +848,11 @@ struct PhotoEffectsSettingsPreview: View {
                     if previewFailed { previewUnavailableBadge }
                 }
             } else if previewFailed, let source {
-                Image(uiImage: Self.rotate(source, quarterTurns: rotationQuarterTurns))
-                    .resizable()
-                    .scaledToFit()
+                PhotoEffectsSourceImage(source: source, quarterTurns: rotationQuarterTurns)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(alignment: .bottom) { previewUnavailableBadge }
             } else if showSourceWhileRendering, let source {
-                Image(uiImage: Self.rotate(source, quarterTurns: rotationQuarterTurns)).resizable().scaledToFit()
+                PhotoEffectsSourceImage(source: source, quarterTurns: rotationQuarterTurns)
             } else if source != nil {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(ZTransferColors.primaryText.opacity(0.045))
@@ -881,7 +886,7 @@ struct PhotoEffectsSettingsPreview: View {
                     )
             }
         }
-        .onPreferenceChange(PhotoEffectsPreviewAnchorPreferenceKey.self) { previewAnchor = $0 }
+        .onPreferenceChange(PhotoEffectsPreviewAnchorPreferenceKey.self) { geometry.previewAnchor = $0 }
         .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
             if !pressing { showUnfiltered = false }
         }, perform: {
@@ -897,16 +902,20 @@ struct PhotoEffectsSettingsPreview: View {
                         guard expanded == false else { return }
                         rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
                     case .second:
-                        guard expandedImage != nil else { return }
+                        guard let expandedImage else { return }
+                        expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: expandedImage,
+                            initialComparison: unfiltered, anchor: geometry.previewAnchor)
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
                         withTransaction(transaction) { expanded = true }
                     }
                 }
         )
-        .fullScreenCover(isPresented: $expanded) {
-            if let expandedImage {
-                PhotoEffectsExpandedPreview(image: expandedImage, initialAnchor: previewAnchor) {
+        .fullScreenCover(isPresented: $expanded, onDismiss: { expandedSnapshot = nil }) {
+            if let expandedSnapshot {
+                PhotoEffectsExpandedPreview(image: expandedSnapshot.image,
+                    comparison: expandedSnapshot.comparison(image: rendered, unfiltered: unfiltered),
+                    initialAnchor: expandedSnapshot.anchor) {
                     var transaction = Transaction()
                     transaction.disablesAnimations = true
                     withTransaction(transaction) { expanded = false }
@@ -914,7 +923,9 @@ struct PhotoEffectsSettingsPreview: View {
             }
         }
         .onDisappear {
-            if !expanded { completeCache.close(); intermediateCache.close(); comparisonCache.close() }
+            if !expanded {
+                completeCache.close(); intermediateCache.close(); comparisonCache.close(); rotatedSourceCache.close()
+            }
         }
         .task(id: renderKeyWithRotation) {
             var demanded = [Self.makeRenderKey(settings: settings, source: source, metadata: metadata)]
@@ -938,22 +949,18 @@ struct PhotoEffectsSettingsPreview: View {
                 showUnfiltered = false
             }
             previewFailed = false
-            if cachedContextKey != sourceContextKey {
-                // Rotation/source/EXIF changes invalidate every pixel cache;
-                // border and watermark edits deliberately do not.
-                cachedContextKey = sourceContextKey
-            }
             guard let source else {
                 onRequest()
                 // Android gives the real thumbnail/FHD request a 2200 ms
                 // grace period before showing its deterministic demo source.
                 try? await Task.sleep(nanoseconds: 2_200_000_000)
                 guard !Task.isCancelled else { return }
-                let fallback = PhotoEffectsFallbackSource.make()
-                let rotatedFallback = Self.rotate(fallback, quarterTurns: rotationQuarterTurns)
+                let rotation = rotationQuarterTurns
                 let fallbackSettings = settings
                 let fallbackResult = try? await PhotoEffectsPreviewRenderGate.render {
-                    try PhotoEffectsRenderer.render(
+                    let rotatedFallback = PhotoEffectsSourceRotation.rotate(
+                        PhotoEffectsFallbackSource.make(), quarterTurns: rotation)
+                    return try PhotoEffectsRenderer.render(
                         rotatedFallback, settings: fallbackSettings, metadata: nil,
                         previewPlaceholders: true, previewLongEdge: 1_920, filterExecution: .preview
                     )
@@ -976,7 +983,8 @@ struct PhotoEffectsSettingsPreview: View {
             guard !Task.isCancelled else { return }
             let settings = settings
             let rotationQuarterTurns = rotationQuarterTurns
-            let rotatedSource = Self.rotate(source, quarterTurns: rotationQuarterTurns)
+            guard let rotatedSource = try? await rotatedSourceCache.image(source, quarterTurns: rotationQuarterTurns),
+                  !Task.isCancelled else { return }
             let result = try? await Self.cachedPreview(image: rotatedSource, sourceIdentity: source,
                 settings: settings, metadata: metadata, originalMetadata: self.metadata,
                 rotation: rotationQuarterTurns, placeContext: placeContextKey,
@@ -1009,8 +1017,9 @@ struct PhotoEffectsSettingsPreview: View {
         .task(id: prefetchRequest) {
             guard prefetchRequest.enabled, let source else { return }
             let rotation = rotationQuarterTurns
-            let rotatedSource = Self.rotate(source, quarterTurns: rotation)
-            _ = await Self.prefetchedPreviews(
+            guard let rotatedSource = try? await rotatedSourceCache.image(source, quarterTurns: rotation),
+                  !Task.isCancelled else { return }
+            await Self.prefetchedPreviews(
                 image: rotatedSource, sourceIdentity: source, settings: settings,
                 metadata: metadata, rotationQuarterTurns: rotation, placeContextKey: placeContextKey, cache: completeCache
             )
@@ -1041,14 +1050,10 @@ private struct ConnectedPhotoEffectsPrefetchRequest: Equatable {
 struct PhotoEffectsExpandedPreview: View {
     let image: UIImage
     var comparison: UIImage? = nil
-    @GestureState private var comparing = false
     let initialAnchor: CGRect
     let onDismiss: () -> Void
-    @State private var scale: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @State private var magnifying = false
-    @State private var gestureStartOffset: CGSize = .zero
-    @State private var rotationDegrees: Double = 0
+    @State private var interaction = PhotoEffectsExpandedInteraction()
+    @State private var closeTask: Task<Void, Never>?
     @State private var presentationProgress: CGFloat = 0
     @State private var closing = false
 
@@ -1057,83 +1062,9 @@ struct PhotoEffectsExpandedPreview: View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
-                ZStack {
-                    Image(uiImage: comparing ? (comparison ?? image) : image)
-                        .resizable()
-                        .scaledToFit()
-                        .rotationEffect(.degrees(rotationDegrees))
-                        .scaleEffect(scale * photoPreviewPlacement(imageSize: image.size,
-                            viewportSize: proxy.size, rotationDegrees: rotationDegrees).scale)
-                        .offset(offset)
-                        .contentShape(Rectangle())
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                                .onChanged { value in
-                                    guard !magnifying, !closing, scale > 1.01 else { return }
-                                    offset = clamped(
-                                        CGSize(width: gestureStartOffset.width + value.translation.width,
-                                               height: gestureStartOffset.height + value.translation.height),
-                                        scale: scale,
-                                        viewport: proxy.size
-                                    )
-                                }
-                                .onEnded { _ in gestureStartOffset = offset }
-                        )
-                        .simultaneousGesture(
-                            LongPressGesture(minimumDuration: 0.5)
-                                .sequenced(before: DragGesture(minimumDistance: 12))
-                                .updating($comparing) { value, state, _ in
-                                    guard comparison != nil, !closing, !magnifying else { return }
-                                    switch value {
-                                    case .first(true), .second(true, _): state = true
-                                    default: break
-                                    }
-                                }
-                        )
-                        .simultaneousGesture(
-                            SpatialTapGesture(count: 2, coordinateSpace: .global)
-                                .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: .global))
-                                .onEnded { gesture in
-                                    guard !magnifying, !closing else { return }
-                                    switch gesture {
-                                    case .first(let tap):
-                                        let target: CGFloat = scale > 1.01 ? 1 : 2.5
-                                        let frame = proxy.frame(in: .global)
-                                        let nextOffset = target == 1 ? CGSize.zero : photoPreviewDoubleTapOffset(
-                                            location: CGPoint(x: tap.location.x - frame.minX, y: tap.location.y - frame.minY),
-                                            scale: target, imageSize: image.size,
-                                            viewportSize: proxy.size, rotationDegrees: rotationDegrees)
-                                        withAnimation(.easeInOut(duration: 0.24)) {
-                                            scale = target
-                                            offset = nextOffset
-                                        }
-                                        gestureStartOffset = nextOffset
-                                    case .second:
-                                        if scale <= 1.01 { startClose() }
-                                    }
-                                }
-                        )
-                }
+                PhotoEffectsExpandedImageSurface(image: image, comparison: comparison,
+                    interaction: interaction, closing: closing, onClose: startClose)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay {
-                    PreviewPinchObserver(enabled: !closing, onActive: { active in
-                        magnifying = active
-                        if !active {
-                            if scale <= 1.01 { resetZoom() }
-                            gestureStartOffset = offset
-                        }
-                    }, onChange: { factor, centroid, pan in
-                        let next = min(max(scale * factor, 1), photoPreviewMaximumZoom(
-                            imageSize: image.size, viewportSize: proxy.size, rotationDegrees: rotationDegrees))
-                        let placement = photoPreviewPlacement(imageSize: image.size,
-                            viewportSize: proxy.size, rotationDegrees: rotationDegrees)
-                        let proposed = previewPinchOffset(offset: offset,
-                            centroidFromCenter: CGPoint(x: centroid.x - placement.center.x, y: centroid.y - placement.center.y),
-                            factor: next / max(scale, 0.01), pan: pan)
-                        scale = next
-                        offset = clamped(proposed, scale: next, viewport: proxy.size)
-                    })
-                }
                 .modifier(PhotoPreviewAnchorTransform(
                     progress: presentationProgress,
                     anchor: initialAnchor == .zero ? nil : initialAnchor,
@@ -1151,8 +1082,7 @@ struct PhotoEffectsExpandedPreview: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                 Button {
-                    rotationDegrees -= 90
-                    resetZoom()
+                    interaction.rotate()
                 } label: {
                     Image(systemName: "rotate.left")
                         .font(.system(size: 19, weight: .semibold))
@@ -1173,6 +1103,7 @@ struct PhotoEffectsExpandedPreview: View {
             .allowsHitTesting(!closing)
         }
         .statusBarHidden(true)
+        .onDisappear { closeTask?.cancel(); closeTask = nil }
         .onAppear {
             withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.34)) {
                 presentationProgress = 1
@@ -1180,28 +1111,19 @@ struct PhotoEffectsExpandedPreview: View {
         }
     }
 
-    private func resetZoom() {
-        scale = 1
-        offset = .zero
-        gestureStartOffset = .zero
-    }
-
     private func startClose() {
         guard !closing else { return }
         closing = true
-        Task { @MainActor in
+        closeTask = Task { @MainActor in
             withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
                 presentationProgress = 0
             }
             try? await Task.sleep(for: .milliseconds(260))
+            guard !Task.isCancelled else { return }
             onDismiss()
         }
     }
 
-    private func clamped(_ proposed: CGSize, scale: CGFloat, viewport: CGSize) -> CGSize {
-        photoPreviewClampedOffset(proposed, scale: scale, imageSize: image.size,
-            viewportSize: viewport, rotationDegrees: rotationDegrees)
-    }
 }
 
 private struct PhotoEffectsPreviewAnchorPreferenceKey: PreferenceKey {
@@ -1266,13 +1188,13 @@ struct PhotoFilterChooserOverlay: View {
     @Binding var state: PhotoFilterChooserState
     var onFilterSelected: () -> Void = {}
 
-    private var items: [PhotoFilterPreset] { state.items(in: draft) }
-
     private func label(_ preset: PhotoFilterPreset) -> String {
         AppLocalized.resource("photo_filter_builtin_\(Np3FilterCatalog.preset(id: preset.id)?.legacyID ?? preset.id)")
     }
 
     var body: some View {
+        let items = state.items(in: draft)
+        let initialID = items.first { draft.photoFilterEnabled && draft.selectedFilter?.preset.id == $0.id }?.id ?? items.first?.id
         PhotoEffectChooserDialog(categoryLabels: PhotoEffectFilterCategory.allCases.map(\.title),
             optionLabels: items.map(label), onDismiss: { state.isPresented = false }) {
             PhotoEffectChooserAction(label: AppLocalized.resource("photo_filter_turn_off"), selected: !draft.photoFilterEnabled) {
@@ -1280,29 +1202,16 @@ struct PhotoFilterChooserOverlay: View {
             }
         } content: { width in
             HStack(spacing: 6) {
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(PhotoEffectFilterCategory.allCases) { category in
-                            PhotoEffectChooserRow(label: category.title, selected: state.category == category, category: true) {
-                                state.category = category
-                            }
-                        }
+                PhotoEffectChooserList(items: PhotoEffectFilterCategory.allCases, id: \.id) { category in
+                    PhotoEffectChooserRow(label: category.title, selected: state.category == category, category: true) {
+                        state.category = category
                     }
                 }.frame(width: max(0, width - 6) * 0.36)
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(spacing: 2) {
-                            ForEach(items) { preset in
-                                PhotoEffectChooserRow(label: label(preset),
-                                    selected: draft.photoFilterEnabled && draft.selectedFilter?.preset.id == preset.id,
-                                    favorite: draft.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id))) {
-                                    ZTransferHaptics.shared.tick(); onFilterSelected(); state.select(preset.id, in: &draft)
-                                }.id(preset.id)
-                            }
-                        }
-                    }
-                    .onAppear {
-                        if let target = state.initialItemID(in: draft) { scroll.scrollTo(target, anchor: .top) }
+                PhotoEffectChooserList(items: items, id: \.id, initialID: initialID) { preset in
+                    PhotoEffectChooserRow(label: label(preset),
+                        selected: draft.photoFilterEnabled && draft.selectedFilter?.preset.id == preset.id,
+                        favorite: draft.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id))) {
+                        ZTransferHaptics.shared.tick(); onFilterSelected(); state.select(preset.id, in: &draft)
                     }
                 }.id(state.category)
             }

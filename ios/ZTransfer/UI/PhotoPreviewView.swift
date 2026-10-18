@@ -46,9 +46,16 @@ struct PhotoPreviewHistogramPreferences: DynamicProperty {
 /// a synchronous image operation has already started.
 @MainActor
 final class PhotoPreviewHistogramModel: ObservableObject {
-    @Published private(set) var result = PhotoPreviewHistogram()
-    var bars: [CGFloat] { result.luma }
-    @Published private(set) var fileID: UInt32?
+    struct Snapshot: Equatable {
+        var result = PhotoPreviewHistogram()
+        var fileID: UInt32?
+    }
+    @Published private(set) var snapshot = Snapshot()
+    var result: PhotoPreviewHistogram { snapshot.result }
+    var bars: [CGFloat] { snapshot.result.luma }
+    var fileID: UInt32? { snapshot.fileID }
+    private var sourceImage: UIImage?
+    private var sourceFileID: UInt32?
     private var requestID: UUID?
     private var task: Task<Void, Never>?
     private let calculate: @Sendable (UIImage) async -> PhotoPreviewHistogram
@@ -65,32 +72,46 @@ final class PhotoPreviewHistogramModel: ObservableObject {
         self.calculate = calculate
     }
 
-    func clear() {
+    private func cancelPending() {
         task?.cancel()
         task = nil
         requestID = nil
-        fileID = nil
-        result = PhotoPreviewHistogram()
+        sourceImage = nil
+        sourceFileID = nil
+    }
+
+    private func publish(_ next: Snapshot) {
+        if snapshot != next { snapshot = next }
+    }
+
+    func clear() {
+        cancelPending()
+        publish(Snapshot())
     }
 
     func load(fileID: UInt32, image: UIImage) {
+        // Android's produceState keys include the actual bitmap. Repeated
+        // delivery of that same bitmap shares pending/completed analysis;
+        // a replacement image of the same handle still starts a new request.
+        if sourceImage === image && sourceFileID == fileID &&
+            (task != nil || (snapshot.fileID == fileID && !bars.isEmpty)) { return }
         clear()
+        sourceImage = image
+        sourceFileID = fileID
         let id = UUID()
         requestID = id
         let calculate = calculate
         task = Task { [weak self] in
             let result = await calculate(image)
             guard !Task.isCancelled, let self, self.requestID == id else { return }
-            self.result = result
-            self.fileID = fileID
+            self.publish(Snapshot(result: result, fileID: fileID))
             self.task = nil
         }
     }
 
     func show(fileID: UInt32, cached: PhotoPreviewHistogram) {
-        clear()
-        result = cached
-        self.fileID = fileID
+        cancelPending()
+        publish(Snapshot(result: cached, fileID: fileID))
     }
 
     deinit { task?.cancel() }
@@ -349,7 +370,7 @@ struct PhotoPreviewView: View {
     @State private var effectsRotation = 0
     let isSessionConnected: Bool
     let files: [CameraFile]
-    let burstGroups: [BurstPhotoGroup]
+    private let projection: PhotoPreviewProjectionCache
     let burstIDByFile: [UInt32: String]
     let transferredFileIDs: Set<UInt32>
     let queueTarget: CGRect?
@@ -371,21 +392,34 @@ struct PhotoPreviewView: View {
     private let initialIndex: Int
     @State private var index: Int
     @State private var pagerSelection: Int
-    @State private var pageOffsetFraction: CGFloat = 0
+    @State private var pageFeedback = PhotoPreviewPageFeedback()
+    private var pageOffsetFraction: CGFloat {
+        get { pageFeedback.offset }
+        nonmutating set { if pageFeedback.offset != newValue { pageFeedback.offset = newValue } }
+    }
     @State private var exifLoadedAlpha: CGFloat = 0
     @State private var reviewRetry = 0
     @State private var previewEntries: [PhotoPreviewEntry]
     @State private var rotationDegrees: Double = 0
     @State private var cropPresented = false
-    @State private var cropSelection = JpegCropSelection(bounds: .init(left: 0, top: 0, right: 1, bottom: 1), orientation: 1)
+    @State private var cropEditor = PhotoCropEditingState()
+    @State private var cropRestoring = false
+    @State private var cropEnteredAt: TimeInterval = 0
+    @State private var cropCloseTask: Task<Void, Never>?
     @StateObject private var cropPreparation = PhotoCropPreparation()
     private var preparedCrop: PreparedPhotoCrop? { cropPreparation.prepared }
     private var cropFailure: CropPreparationError? { cropPreparation.failure }
     @State private var cropRetry = 0
     @State private var cropLoadingVisible = false
-    @State private var currentCropViewport: PhotoPreviewCropViewport?
-    @State private var cropEntryViewport: PhotoPreviewCropViewport?
-    @State private var cropEntryBounds: CropBounds?
+    @State private var geometrySnapshot = PhotoPreviewGeometrySnapshot()
+    private var currentCropViewport: PhotoPreviewCropViewport? {
+        get { geometrySnapshot.viewport }
+        nonmutating set { geometrySnapshot.viewport = newValue }
+    }
+    private var cropTop: CGFloat {
+        if let queueTarget, queueTarget.midY < UIScreen.main.bounds.midY { return queueTarget.maxY + 20 }
+        return previewSafeInsets.top + 62
+    }
     @AppStorage("preview_rotation_quarter_turns") private var rotationQuarterTurns = 0
     @State private var previewSafeInsets = EdgeInsets()
     @State private var exif: PhotoExif?
@@ -395,9 +429,7 @@ struct PhotoPreviewView: View {
     private var histogramPreferences = PhotoPreviewHistogramPreferences()
     private var histogramMode: RemoteHistogramMode { histogramPreferences.mode }
     private var histogramVisible: Bool { histogramMode != .off }
-    @StateObject private var histogram = PhotoPreviewHistogramModel()
-    private var histogramBars: [CGFloat] { histogram.bars }
-    private var histogramFileID: UInt32? { histogram.fileID }
+    @State private var histogram = PhotoPreviewHistogramModel()
     // The preview page publishes the bitmap it is already displaying. Keep
     // that reference so enabling the histogram never starts another camera
     // read or decodes the same image a second time.
@@ -412,7 +444,11 @@ struct PhotoPreviewView: View {
     @State private var deferredLoadsEnabled = false
     @State private var previousTransfersBusy = false
     @State private var neighborPrefetchTask: Task<Void, Never>?
-    @State private var queueDragOffset: CGFloat = 0
+    @State private var queueMotion = PhotoPreviewQueueMotion()
+    private var queueDragOffset: CGFloat {
+        get { queueMotion.offset }
+        nonmutating set { if queueMotion.offset != newValue { queueMotion.offset = newValue } }
+    }
     @State private var queueDragDirection: PhotoPreviewQueueDragDirection = .undecided
     @State private var currentZoomed = false
     @State private var magnificationActive = false
@@ -422,6 +458,9 @@ struct PhotoPreviewView: View {
     @State private var queueFlightImage: UIImage?
     @State private var queueFlightImages: [UIImage?] = []
     @State private var queueFlightCount = 0
+    @State private var queueFlightCropFrame: CGRect?
+    @State private var queueFlightSourceFrame: CGRect?
+    @State private var queueFlightRotation: Double = 0
     @State private var expandedBurstIDs: Set<String> = []
     @State private var presentationProgress: CGFloat = 0
     @State private var closing = false
@@ -434,6 +473,7 @@ struct PhotoPreviewView: View {
     @State private var burstPagerAlpha: CGFloat = 1
     @State private var burstPagerSlide: CGFloat = 0
     init(session: CameraSession, queueModel: TransferQueueViewModel, files: [CameraFile],
+         projection: PhotoPreviewProjectionCache = PhotoPreviewProjectionCache(),
          review: RemotePhotoReviewModel? = nil,
          effectsStore: PhotoEffectsStore? = nil, effectsDirectory: DirectoryAccessStore? = nil,
          isSessionConnected: Bool = true,
@@ -454,11 +494,11 @@ struct PhotoPreviewView: View {
          onDismiss: @escaping (CameraFile?) -> Void = { _ in },
          onCropConfirmed: @escaping (CameraFile, JpegCropSelection) async -> Bool = { _, _ in false }) {
         self.queueModel = queueModel
+        self.projection = projection
         self.effectsStore = effectsStore; self.effectsDirectory = effectsDirectory
         self.review = review
         self.isSessionConnected = isSessionConnected
         self.session = session; self.files = files; self.directory = directory
-        self.burstGroups = PhotoCatalogGrouping.bursts(in: files)
         self.burstIDByFile = burstIDByFile
         self.transferredFileIDs = transferredFileIDs
         self.queueTarget = queueTarget
@@ -472,7 +512,7 @@ struct PhotoPreviewView: View {
         self.prepareDismissTarget = prepareDismissTarget
         self.onDismiss = onDismiss
         self.onCropConfirmed = onCropConfirmed
-        let opening = PhotoPreviewOpeningSnapshot(
+        let opening = projection.opening(
             files: files, burstIDByFile: burstIDByFile, collapseBursts: collapseBursts,
             expandedBurstIDs: initialExpandedBurstIDs, selectedFileID: selectedFile.wrappedValue?.id
         )
@@ -498,8 +538,9 @@ struct PhotoPreviewView: View {
                                          highResolutionImage: highResolutionImages[file.id],
                                          rotationDegrees: rotationDegrees,
                                          infoBottom: previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
-                                         interactive: !closing && !cropPresented && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
+                                         interactive: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
                                          cropActive: cropPresented && itemIndex == index,
+                                         cropTop: cropTop, cropEditor: cropEditor,
                                          zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
                                             !file.fileExtension.lowercased().hasSuffix(".mp4"),
                                          loadEnabled: deferredLoadsEnabled,
@@ -527,7 +568,7 @@ struct PhotoPreviewView: View {
                                                  startClose()
                                              }
                                          },
-                                         onZoomedChange: { zoomed in if index == itemIndex { currentZoomed = zoomed } },
+                                         onZoomedChange: { zoomed in if index == itemIndex, currentZoomed != zoomed { currentZoomed = zoomed } },
                                          onViewportChange: { viewport in
                                              if index == itemIndex { currentCropViewport = viewport }
                                          },
@@ -570,12 +611,12 @@ struct PhotoPreviewView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .coordinateSpace(name: "photoPreviewPager")
             .onPreferenceChange(PreviewPageOffsets.self) { offsets in
-                guard !closing, !burstTransitionBusy,
+                guard !closing, effectsFile == nil, !burstTransitionBusy,
                       let page = nearestPreviewPage(offsets: offsets),
                       previewEntries.indices.contains(page.index) else { return }
                 // Observation changes current content at halfway; it never sends
                 // a programmatic selection back into the moving TabView.
-                index = page.index
+                if index != page.index { index = page.index }
                 pageOffsetFraction = page.offset
             }
             .onChange(of: pagerSelection) { index = $0 }
@@ -593,16 +634,16 @@ struct PhotoPreviewView: View {
             .scaleEffect(burstPagerScale)
             .opacity(burstPagerAlpha)
             .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
-            .offset(y: queueDragOffset)
+            .modifier(PhotoPreviewQueueMotionTransform(motion: queueMotion))
             // Once an upward queue drag wins direction arbitration, cancel
             // the page scroll recognizer for the rest of this touch. A normal
             // horizontal drag keeps the pager enabled.
             .scrollDisabled(
-                currentZoomed || magnificationActive || queueDragDirection == .upward ||
+                effectsFile != nil || cropPresented || cropRestoring || currentZoomed || magnificationActive || queueDragDirection == .upward ||
                     queueFlightActive || burstTransitionBusy
             )
             .allowsHitTesting(
-                !queueFlightActive && !closing && !burstTransitionBusy &&
+                effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !closing && !burstTransitionBusy &&
                     queueDragDirection != .upward
             )
             if queueFlightActive, previewEntries.indices.contains(index) {
@@ -611,19 +652,31 @@ struct PhotoPreviewView: View {
                     let resolvedTarget = queueTarget.flatMap { frame in
                         frame.isEmpty || frame.isInfinite || frame.isNull ? nil : frame
                     } ?? CGRect(x: screen.maxX - 13, y: 48, width: 1, height: 36)
+                    let viewport = currentCropViewport
+                    let placement = photoPreviewPlacement(imageSize: queueFlightImage?.size,
+                        viewportSize: viewport?.size ?? proxy.size, rotationDegrees: rotationDegrees,
+                        infoBottom: viewport?.infoBottom)
+                    let square = min(proxy.size.width * 0.72, proxy.size.height * 0.46, 360)
+                    let frame = queueFlightCropFrame ?? queueFlightSourceFrame ?? (queueFlightCount > 1
+                        ? CGRect(x: (proxy.size.width - square) / 2, y: (proxy.size.height - square) / 2, width: square, height: square)
+                        : CGRect(x: placement.center.x - placement.size.width / 2, y: placement.center.y - placement.size.height / 2,
+                                 width: placement.size.width, height: placement.size.height))
+                    let swapped = queueFlightCropFrame == nil && queueFlightCount == 1 && abs(Int((queueFlightRotation / 90).rounded())) % 2 == 1
                     PhotoPreviewQueueFlightView(
                         startedAt: queueFlightStartedAt,
                         image: queueFlightImage,
                         images: queueFlightImages,
-                        from: CGPoint(x: proxy.size.width / 2, y: proxy.size.height * 0.46),
+                        from: CGPoint(x: frame.midX, y: frame.midY),
                         target: CGPoint(
                             // Match the list/Android landing point: the stable
                             // right edge of the carrier, inset into the capsule.
                             x: resolvedTarget.maxX - 28 - proxy.frame(in: .global).minX,
                             y: resolvedTarget.midY - proxy.frame(in: .global).minY
                         ),
-                        size: CGSize(width: proxy.size.width * 0.72, height: proxy.size.height * 0.52),
-                        stackCount: queueFlightCount
+                        size: swapped ? CGSize(width: frame.height, height: frame.width) : frame.size,
+                        stackCount: queueFlightCount,
+                        rotation: queueFlightCropFrame == nil && queueFlightCount == 1 ? queueFlightRotation : 0,
+                        isCrop: queueFlightCropFrame != nil
                     )
                     .allowsHitTesting(false)
                 }
@@ -634,7 +687,7 @@ struct PhotoPreviewView: View {
                     HStack(spacing: 8) {
                         PreviewInfoText(text: reviewTitle(file))
                             .layoutPriority(1)
-                            .opacity(previewInformationAlpha)
+                            .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: presentationProgress * burstPagerAlpha))
                             .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                         if let task = queueModel.task(for: file.id), task.status != .completed {
                             PhotoPreviewLiveTransferBadge(
@@ -651,7 +704,7 @@ struct PhotoPreviewView: View {
                         else { Color.clear }
                     }
                     .frame(height: 26, alignment: .topLeading)
-                    .opacity(previewInformationAlpha * exifLoadedAlpha)
+                    .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: presentationProgress * burstPagerAlpha * exifLoadedAlpha))
                     .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                     if burstIDByFile[file.id] != nil || file.isProtected {
                         HStack(spacing: 8) {
@@ -669,10 +722,12 @@ struct PhotoPreviewView: View {
                         }
                         .font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
                         .padding(.top, 8)
-                        .opacity(previewInformationAlpha)
+                        .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: presentationProgress * burstPagerAlpha))
                         .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                     }
                 }
+                .opacity(cropPresented ? 0 : 1)
+                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
                 .padding(.top, 6).padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -686,6 +741,7 @@ struct PhotoPreviewView: View {
             ZStack {
                 if let file = currentPhoto {
                     HStack(spacing: 12) {
+                        Group {
                         if photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil {
                             PreviewCircleButton(icon: .collapse, accessibilityKey: "cd_collapse") {
                                 collapseCurrentBurst()
@@ -709,11 +765,17 @@ struct PhotoPreviewView: View {
                             if showPreviewPhotoEffects(enabled: effectsStore?.isEnabled == true,
                                                        isReview: review != nil, file: file), effectsDirectory != nil {
                                 Button {
+                                    guard !queueFlightActive, !burstTransitionBusy, !closing else { return }
+                                    ZTransferHaptics.shared.tick()
                                     effectsFile = file; effectsRotation = rotationQuarterTurns; effectsPresented = true
                                 } label: {
-                                    Image(systemName: "sparkles").frame(width: 44, height: 44)
+                                    QueueBadgeIcon(state: .generating)
+                                        .fill(ZTransferColors.accentOrange)
+                                        .frame(width: 20, height: 20)
+                                        .frame(width: 44, height: 44)
                                 }
-                                .accessibilityLabel(AppLocalized.resource("photo_effects"))
+                                .accessibilityLabel(AppLocalized.resource("photo_effects_open_editor"))
+                                .anchorPreference(key: PreviewEffectsButtonAnchorKey.self, value: .bounds) { $0 }
                                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
                             }
                             if review == nil && isJPEG(file) {
@@ -722,17 +784,20 @@ struct PhotoPreviewView: View {
                                     cropPreparation.reset()
                                     cropRetry = 0
                                     cropLoadingVisible = false
-                                    cropEntryViewport = currentCropViewport
-                                    cropEntryBounds = nil
-                                    cropPresented = true
+                                    cropCloseTask?.cancel()
+                                    cropEditor.reset()
+                                    cropEnteredAt = ProcessInfo.processInfo.systemUptime
+                                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { cropPresented = true }
                                 }
                             }
                         }
-                        if review == nil {
-                            PreviewCircleButton(icon: .add, accessibilityKey: "cd_transfer") {
-                                startQueueFlight(for: file)
-                            }
                         }
+                        .opacity(cropPresented ? 0 : 1)
+                        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
+                        .allowsHitTesting(!cropPresented && !cropRestoring && !queueFlightActive)
+                        // The persistent action is above the transparent crop controls below.
+                        if review == nil { Color.clear.frame(width: 44, height: 44) }
+
                     }
                     .transition(.opacity)
                 }
@@ -741,22 +806,16 @@ struct PhotoPreviewView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .animation(.easeInOut(duration: 0.18), value: currentPhoto == nil)
             .allowsHitTesting(currentPhoto != nil)
-            if !histogramBars.isEmpty {
-                PreviewHistogramOverlay(values: histogramBars, rgb: histogramMode == .rgb ? histogram.result.rgb : nil)
-                    .padding(.leading, 20).padding(.bottom, 72)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .opacity(histogramOverlayVisible ? previewInformationAlpha : 0)
-                    .animation(.easeInOut(duration: 0.18), value: histogramOverlayVisible)
-                    .transition(.opacity)
-                    .allowsHitTesting(false)
-            }
+            PhotoPreviewHistogramLayer(model: histogram, mode: histogramMode,
+                currentPhoto: currentPhoto, cropPresented: cropPresented,
+                alpha: presentationProgress * burstPagerAlpha, feedback: pageFeedback)
         }
-        .sheet(isPresented: $effectsPresented, onDismiss: { effectsFile = nil }) {
-            if let store = effectsStore, let directory = effectsDirectory, let file = effectsFile {
-                PreviewPhotoEffectsEditor(store: store, directory: directory,
+        .overlayPreferenceValue(PreviewEffectsButtonAnchorKey.self) { anchor in
+            if let anchor, let store = effectsStore, let directory = effectsDirectory, let file = effectsFile {
+                PreviewPhotoEffectsEditor(isPresented: $effectsPresented, store: store, directory: directory,
                     source: highResolutionImages[file.id] ?? displayedImages[file.id],
-                    exif: exifByFile[file.id], rotation: effectsRotation)
-                    .presentationDetents([.large])
+                    exif: exifByFile[file.id], rotation: effectsRotation, anchor: anchor,
+                    onDismissed: { if !effectsPresented { effectsFile = nil } })
             }
         }
         .overlay(alignment: .bottomLeading) {
@@ -798,69 +857,37 @@ struct PhotoPreviewView: View {
         }
         #endif
         .allowsHitTesting(!burstTransitionBusy && !closing)
-        .sheet(isPresented: $cropPresented, onDismiss: {
-            cropPreparation.reset()
-        }) {
-            if let file = currentPhoto {
-                NavigationStack {
-                    Group {
-                        if let preparedCrop {
-                            PhotoCropEditor(image: preparedCrop.image, orientation: 1, selection: $cropSelection, initialBounds: cropEntryBounds)
-                        } else if let cropFailure {
-                            VStack(spacing: 16) {
-                                Text(AppLocalized.resource(cropFailure.messageKey))
-                                if cropFailure.canRetry {
-                                    Button(AppLocalized.resource("crop_retry")) {
-                                        ZTransferHaptics.shared.tick()
-                                        cropRetry += 1
-                                    }
-                                }
-                            }
-                        } else if cropLoadingVisible {
-                            ProgressView(AppLocalized.resource("crop_loading"))
-                        } else {
-                            Color.clear
-                        }
-                    }
-                    .allowsHitTesting(!cropPreparation.confirming)
-                    .interactiveDismissDisabled(cropPreparation.confirming)
-                    .navigationTitle(AppLocalized.resource("crop_title"))
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(AppLocalized.resource("crop_cancel")) {
-                                ZTransferHaptics.shared.tick()
-                                closeCrop()
-                            }.disabled(cropPreparation.confirming)
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button(AppLocalized.resource("crop_confirm")) {
-                                let requested = cropSelection
-                                Task { @MainActor in
-                                    let accepted = await cropPreparation.confirm(selection: requested) { selection in
-                                        ZTransferHaptics.shared.tick()
-                                        return await onCropConfirmed(file, selection)
-                                    }
-                                    if accepted, cropPresented, currentPhoto?.id == file.id { closeCrop() }
-                                }
-                            }.disabled(preparedCrop == nil || !cropSelection.hasCrop || cropPreparation.confirming)
-                        }
-                    }
-                    // Android launches explicit FHD retry separately from the
-                    // effect observing FHD availability. Clearing unavailable
-                    // must not cancel the download that just cleared it.
-                    .task(id: "\(file.id)|\(cropRetry)") {
-                        guard cropRetry > 0, highResolutionImages[file.id] == nil,
-                              isSessionConnected else { return }
-                        _ = await loadHighResolution(at: index, awaitExisting: true, allowCameraRequest: true)
-                    }
-                    .task(id: cropPreparationKey(file)) { await prepareCrop(file) }
-                    .task(id: "\(cropPreparationKey(file))|\(preparedCrop != nil)|\(cropFailure != nil)") {
-                        cropLoadingVisible = false
-                        guard preparedCrop == nil, cropFailure == nil else { return }
-                        try? await Task.sleep(for: .milliseconds(400))
-                        if !Task.isCancelled { cropLoadingVisible = true }
-                    }
+        .overlay {
+            if cropPresented, let file = currentPhoto {
+                PhotoCropEditor(editor: cropEditor, confirming: cropPreparation.confirming,
+                    loading: cropLoadingVisible, failure: cropFailure,
+                    bottomClearance: previewSafeInsets.bottom + 32,
+                    onRetry: { ZTransferHaptics.shared.tick(); cropRetry += 1 },
+                    onCancel: { ZTransferHaptics.shared.tick(); closeCrop() })
+                .ignoresSafeArea()
+                .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)))
+                .task(id: "\(file.id)|\(cropRetry)") {
+                    guard cropRetry > 0, highResolutionImages[file.id] == nil, isSessionConnected else { return }
+                    fhdUnavailable.remove(file.id)
+                    _ = await loadHighResolution(at: index, awaitExisting: true, allowCameraRequest: true)
                 }
+                .task(id: cropPreparationKey(file)) { await prepareCrop(file) }
+                .task(id: "\(cropPreparationKey(file))|\(preparedCrop != nil)|\(cropFailure != nil)") {
+                    cropLoadingVisible = false
+                    guard preparedCrop == nil, cropFailure == nil else { return }
+                    try? await Task.sleep(for: .milliseconds(400))
+                    if !Task.isCancelled { cropLoadingVisible = true }
+                }
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if review == nil, let file = currentPhoto {
+                PhotoPreviewQueueAction(editor: cropEditor, editing: cropPresented,
+                    confirming: cropPreparation.confirming,
+                    enabled: !closing && !cropRestoring && !queueFlightActive && !burstTransitionBusy) {
+                    if cropPresented { confirmCrop(file) } else { startQueueFlight(for: file) }
+                }
+                .padding(.trailing, 20).padding(.bottom, 32)
             }
         }
         // Keep the arbiter on the stable overlay rather than the TabView. The
@@ -876,7 +903,10 @@ struct PhotoPreviewView: View {
             }
         }
         .onDisappear {
-            closeCrop()
+            projection.clear()
+            cropCloseTask?.cancel()
+            cropPresented = false; cropRestoring = false
+            cropPreparation.reset(); cropEditor.reset()
             histogram.clear()
             burstTransitionTask?.cancel()
             burstTransitionTask = nil
@@ -943,17 +973,17 @@ struct PhotoPreviewView: View {
         }
     }
 
-    private var previewInformationAlpha: Double {
-        Double(presentationProgress * burstPagerAlpha * previewPageInformationAlpha(pageOffsetFraction))
-    }
-
     private var currentEntryID: String? {
         guard previewEntries.indices.contains(index) else { return nil }
         return previewPages[index].id
     }
 
+    private var previewProjection: PhotoPreviewProjectionCache.Pages {
+        projection.pages(previewEntries, captureByHandle: review?.displaySnapshot.captureByHandle ?? [:])
+    }
+
     private var previewPages: [PhotoPreviewPage] {
-        photoPreviewPages(previewEntries, reviewPhotos: review?.photos ?? [])
+        previewProjection.values
     }
 
     private var currentPhoto: CameraFile? {
@@ -961,25 +991,11 @@ struct PhotoPreviewView: View {
         return previewEntries[index].file
     }
 
-    private var histogramOverlayVisible: Bool {
-        photoPreviewHistogramOverlayVisible(
-            enabled: photoPreviewHistogramCanAnalyze(
-                enabled: histogramVisible, fileExtension: currentPhoto?.fileExtension
-            ),
-            currentPhotoID: currentPhoto?.id,
-            histogramFileID: histogramFileID,
-            binCount: histogramBars.count
-        )
-    }
 
     private func refreshHistogramForCurrentPhoto() {
-        histogram.clear()
         guard let file = currentPhoto,
-              photoPreviewHistogramCanAnalyze(enabled: histogramVisible,
-                                               fileExtension: file.fileExtension) else { return }
-        guard let image = displayedImages[file.id] else {
-            return
-        }
+              photoPreviewHistogramCanAnalyze(enabled: histogramVisible, fileExtension: file.fileExtension),
+              let image = displayedImages[file.id] else { histogram.clear(); return }
         showHistogram(for: file, image: image)
     }
 
@@ -994,8 +1010,9 @@ struct PhotoPreviewView: View {
     private var previewQueueSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
+                guard effectsFile == nil, !cropPresented, !cropRestoring else { return }
                 guard review == nil, currentPhoto != nil, !currentZoomed, !magnificationActive,
-                      presentationProgress >= 0.99, abs(pageOffsetFraction) < 0.01, !queueFlightActive,
+                      effectsFile == nil, presentationProgress >= 0.99, abs(pageOffsetFraction) < 0.01, !queueFlightActive,
                       !closing, !burstTransitionBusy else {
                     queueDragDirection = .rejected
                     return
@@ -1010,6 +1027,7 @@ struct PhotoPreviewView: View {
                 )
             }
             .onEnded { value in
+                guard effectsFile == nil, !cropPresented, !cropRestoring else { return }
                 let resolved = queueDragDirection == .undecided
                     ? photoPreviewQueueDragDirection(translation: value.translation)
                     : queueDragDirection
@@ -1033,19 +1051,21 @@ struct PhotoPreviewView: View {
             queueDragOffset = 0
             return
         }
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+        withAnimation(.interpolatingSpring(mass: 1, stiffness: 400, damping: 2 * 0.82 * sqrt(400))) {
             queueDragOffset = 0
         }
     }
 
     private func reviewTitle(_ file: CameraFile) -> String {
-        guard let raw = review?.photos.first(where: { $0.file.id == file.id })?.pairedRawExtension else {
+        guard let raw = review?.displaySnapshot.photosByPreferredHandle[file.id]?.pairedRawExtension else {
             return file.fileName
         }
         return file.fileName + " +" + raw.trimmingCharacters(in: CharacterSet(charactersIn: ".")).uppercased()
     }
 
     private func startClose() {
+        if cropPresented { closeCrop(); return }
+        guard !cropRestoring else { return }
         guard !closing, !burstTransitionBusy else { return }
         closing = true
         queueFlightTask?.cancel()
@@ -1066,7 +1086,7 @@ struct PhotoPreviewView: View {
     }
 
     private var previewLoadIdentity: PhotoPreviewLoadIdentity {
-        PhotoPreviewLoadIdentity(entryIDs: previewEntries.map(\.id), index: index,
+        PhotoPreviewLoadIdentity(entryIDs: previewProjection.loadIDs, index: index,
             deferredLoadsEnabled: deferredLoadsEnabled, connected: isSessionConnected, retry: reviewRetry)
     }
 
@@ -1224,8 +1244,10 @@ struct PhotoPreviewView: View {
 
     @MainActor
     private func prepareCrop(_ file: CameraFile) async {
-        guard preparedCrop == nil else { return }
-        guard let prepared = await cropPreparation.load({
+        guard cropEditor.geometry == nil else { return }
+        let prepared: PreparedPhotoCrop?
+        if let cached = preparedCrop { prepared = cached }
+        else { prepared = await cropPreparation.load({
             try Task.checkCancellation()
             guard let image = highResolutionImages[file.id] else {
                 if !isSessionConnected { throw CropPreparationError.connection() }
@@ -1246,22 +1268,62 @@ struct PhotoPreviewView: View {
             return try await withTaskCancellationHandler {
                 try await operation.value
             } onCancel: { operation.cancel() }
-        }), cropPresented, currentPhoto?.id == file.id else { return }
+        }) }
+        guard let prepared, !Task.isCancelled, cropPresented, currentPhoto?.id == file.id else { return }
         let corrected = prepared.preview.correctedRotation(from: rotationDegrees)
-        if corrected != rotationDegrees {
-            rotationDegrees = corrected
+        let rotationChanged = corrected != rotationDegrees
+        if rotationChanged {
+            withAnimation(photoPreviewRotationAnimation) { rotationDegrees = corrected }
             rotationQuarterTurns = ((Int(-corrected / 90) % 4) + 4) % 4
             currentZoomed = false
-            cropEntryBounds = nil
-        } else if let cropEntryViewport {
-            cropEntryBounds = try? cropEntryViewport.visibleBounds(for: prepared.preview)
         }
-        cropSelection = .init(bounds: cropEntryBounds ?? .init(left: 0, top: 0, right: 1, bottom: 1), orientation: 1)
+        // Android waits for the entry layout, and only adds 240ms when it
+        // corrects orientation. A slow FHD read must not add another fixed wait.
+        let remaining = rotationChanged ? 0.24 : max(0, cropEnteredAt + 0.22 - ProcessInfo.processInfo.systemUptime)
+        if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+        await Task.yield()
+        guard !Task.isCancelled, cropPresented, currentPhoto?.id == file.id,
+              let viewport = currentCropViewport else { return }
+        let placement = photoPreviewPlacement(imageSize: CGSize(width: prepared.preview.imageWidth,
+            height: prepared.preview.imageHeight), viewportSize: viewport.size,
+            rotationDegrees: corrected, infoBottom: viewport.infoBottom, cropTop: cropTop, cropProgress: 1)
+        let frame = CGRect(x: placement.center.x - placement.size.width / 2,
+            y: placement.center.y - placement.size.height / 2, width: placement.size.width, height: placement.size.height)
+        try? cropEditor.begin(preview: prepared.preview,
+            placement: CropImagePlacement(image: frame, viewport: viewport.size, rotation: corrected))
     }
 
     private func closeCrop() {
-        cropPresented = false
-        cropPreparation.reset()
+        guard cropPresented else { return }
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { cropPresented = false }
+        cropRestoring = true
+        cropCloseTask?.cancel()
+        cropCloseTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard !Task.isCancelled else { return }
+            cropPreparation.reset()
+            cropEditor.reset()
+            cropRestoring = false
+        }
+    }
+
+    private func confirmCrop(_ file: CameraFile) {
+        guard let selection = cropEditor.selection, let prepared = preparedCrop,
+              let geometry = cropEditor.geometry else { return }
+        Task { @MainActor in
+            let accepted = await cropPreparation.confirm(selection: selection) { selection in
+                ZTransferHaptics.shared.tick()
+                return await onCropConfirmed(file, selection)
+            }
+            guard accepted, cropPresented, currentPhoto?.id == file.id else { return }
+            let bounds = selection.bounds
+            let source = prepared.image.cgImage
+            let rect = CGRect(x: bounds.left * Double(source?.width ?? 0), y: bounds.top * Double(source?.height ?? 0),
+                width: (bounds.right - bounds.left) * Double(source?.width ?? 0), height: (bounds.bottom - bounds.top) * Double(source?.height ?? 0))
+            let image = source?.cropping(to: rect).map { UIImage(cgImage: $0) }
+            startQueueFlight(for: file, acceptedCrop: (image, geometry.frame))
+            closeCrop()
+        }
     }
 
     private func isVideo(_ file: CameraFile) -> Bool {
@@ -1279,7 +1341,7 @@ struct PhotoPreviewView: View {
     }
 
     private func collapseCurrentBurst() {
-        guard !closing, !burstTransitionBusy, !queueFlightActive,
+        guard !closing, effectsFile == nil, !burstTransitionBusy, !queueFlightActive,
               abs(queueDragOffset) < 0.5 else { return }
         guard let collectionIndex = photoPreviewCollectionIndex(previewEntries, memberIndex: index),
               case let .burst(group) = previewEntries[collectionIndex] else { return }
@@ -1325,7 +1387,7 @@ struct PhotoPreviewView: View {
     }
 
     private func expandBurst(_ group: BurstPhotoGroup) {
-        guard !closing, !burstTransitionBusy, !group.files.isEmpty else { return }
+        guard !closing, effectsFile == nil, !burstTransitionBusy, !group.files.isEmpty else { return }
         guard let collectionIndex = previewEntries.firstIndex(where: { entry in
             if case .burst(let value) = entry { return value.id == group.id }
             return false
@@ -1386,50 +1448,53 @@ struct PhotoPreviewView: View {
         queueFlightStartedAt = nil
         queueFlightImage = nil
         queueFlightImages = []
+        queueFlightCropFrame = nil; queueFlightSourceFrame = nil
         // Match Android's finally cleanup before notifying the parent.
         // A retained preview must be able to admit another flight on return.
         if cancelledCount > 0 { onQueueFlightCancelled(cancelledCount) }
     }
 
-    private func startQueueFlight(for file: CameraFile, burstFiles: [CameraFile]? = nil) {
+    private func startQueueFlight(for file: CameraFile, burstFiles: [CameraFile]? = nil, acceptedCrop: (UIImage?, CGRect)? = nil) {
         guard review == nil, !closing, !burstTransitionBusy, !queueFlightActive else { return }
         let flightCount = burstFiles?.count ?? 1
         // Android admits the real task before acquiring a visual hold.
         // A rejected enqueue must not publish transient queue state.
-        guard burstFiles.map(onEnqueueBurst) ?? onEnqueue(file) else { return }
+        guard acceptedCrop != nil || (burstFiles.map(onEnqueueBurst) ?? onEnqueue(file)) else { return }
         onQueueFlightStarted(flightCount)
         ZTransferHaptics.shared.tick()
         queueFlightCount = flightCount
         queueFlightActive = true
         queueFlightStartedAt = Date().addingTimeInterval(0.032)
-        queueFlightImage = nil
-        queueFlightImages = []
+        let flightFiles = burstFiles?.prefix(3).map { $0 } ?? [file]
+        queueFlightImages = flightFiles.map { displayedImages[$0.id] ?? session.memoryThumbnailImage(file: $0) }
+        queueFlightImage = acceptedCrop?.0 ?? highResolutionImages[file.id] ?? displayedImages[file.id]
+            ?? queueFlightImages.compactMap { $0 }.first
+        queueFlightCropFrame = acceptedCrop?.1
+        queueFlightRotation = rotationDegrees
+        queueFlightSourceFrame = nil
+        if acceptedCrop == nil, burstFiles == nil, let viewport = currentCropViewport {
+            let placement = photoPreviewPlacement(imageSize: queueFlightImage?.size, viewportSize: viewport.size,
+                rotationDegrees: rotationDegrees, infoBottom: viewport.infoBottom)
+            let size = CGSize(width: placement.size.width * viewport.scale, height: placement.size.height * viewport.scale)
+            queueFlightSourceFrame = CGRect(x: placement.center.x + viewport.offset.width - size.width / 2,
+                y: placement.center.y + viewport.offset.height - size.height / 2, width: size.width, height: size.height)
+        }
         let riseDuration: UInt64 = queueDragOffset < -1 ? 105_000_000 : 155_000_000
         withAnimation(.timingCurve(
             0.4, 0.0, 0.2, 1.0,
             duration: Double(riseDuration) / 1_000_000_000
         )) {
-            queueDragOffset = -132
+            if acceptedCrop == nil { queueDragOffset = -132 }
         }
         queueFlightTask?.cancel()
         queueFlightTask = Task { @MainActor in
             // Cancellation can precede the first actor turn, before any sleep.
             guard !Task.isCancelled, queueFlightActive else { return }
-            let flightFiles = burstFiles?.prefix(3).map { $0 } ?? [file]
-            var cachedLayers: [UIImage?] = []
-            for candidate in flightFiles {
-                cachedLayers.append(
-                    displayedImages[candidate.id] ?? session.memoryThumbnailImage(file: candidate)
-                )
-            }
-            queueFlightImages = cachedLayers
-            queueFlightImage = displayedImages[file.id]
-                ?? cachedLayers.compactMap { $0 }.first
             // The immutable start time already includes Android's 32 ms
             // preroll. Wait for the complete rise before issuing the return.
             try? await Task.sleep(nanoseconds: riseDuration)
             guard !Task.isCancelled, queueFlightActive else { return }
-            withAnimation(.spring(response: 0.36, dampingFraction: 0.78)) {
+            withAnimation(.interpolatingSpring(mass: 1, stiffness: 1500, damping: 2 * 0.78 * sqrt(1500))) {
                 queueDragOffset = 0
             }
             try? await Task.sleep(nanoseconds: 592_000_000 - riseDuration)
@@ -1437,6 +1502,8 @@ struct PhotoPreviewView: View {
             queueDragOffset = 0
             queueFlightActive = false
             queueFlightCount = 0
+            queueFlightStartedAt = nil; queueFlightImage = nil; queueFlightImages = []
+            queueFlightCropFrame = nil; queueFlightSourceFrame = nil
             queueFlightTask = nil
             onQueueFlightFinished(flightCount)
         }
@@ -1473,7 +1540,7 @@ func photoPreviewHistogramOverlayVisible(
     enabled && currentPhotoID != nil && currentPhotoID == histogramFileID && binCount > 0
 }
 
-struct PhotoPreviewHistogram: Sendable {
+struct PhotoPreviewHistogram: Equatable, Sendable {
     var luma: [CGFloat] = []
     var rgb: [[CGFloat]] = []
 }
@@ -1508,6 +1575,37 @@ func calculatePhotoPreviewHistogram(_ image: UIImage, sampleLimit: Int = 24_000)
     let rgbPeak = CGFloat(max(1, channels.flatMap { $0 }.max() ?? 1))
     return PhotoPreviewHistogram(luma: bins.map { CGFloat($0) / peak },
                                 rgb: channels.map { $0.map { CGFloat($0) / rgbPeak } })
+}
+
+/// Analysis results invalidate only this overlay, never the pager, EXIF,
+/// cropping or transfer controls. The previous opacity/transition stays local.
+struct PhotoPreviewHistogramLayer: View {
+    @ObservedObject var model: PhotoPreviewHistogramModel
+    let mode: RemoteHistogramMode
+    let currentPhoto: CameraFile?
+    let cropPresented: Bool
+    let alpha: CGFloat
+    let feedback: PhotoPreviewPageFeedback
+    #if DEBUG
+    var didRender: ((Bool) -> Void)? = nil
+    #endif
+    var body: some View {
+        let visible = photoPreviewHistogramOverlayVisible(
+            enabled: photoPreviewHistogramCanAnalyze(enabled: mode != .off, fileExtension: currentPhoto?.fileExtension),
+            currentPhotoID: currentPhoto?.id, histogramFileID: model.fileID, binCount: model.bars.count)
+        #if DEBUG
+        let _ = didRender?(visible)
+        #endif
+        if !model.bars.isEmpty {
+            PreviewHistogramOverlay(values: model.bars, rgb: mode == .rgb ? model.result.rgb : nil)
+                .padding(.leading, 20).padding(.bottom, 72)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .modifier(PhotoPreviewInformationFade(feedback: feedback, base: visible && !cropPresented ? alpha : 0))
+                .animation(.easeInOut(duration: 0.18), value: visible)
+                .transition(.opacity)
+                .allowsHitTesting(false)
+        }
+    }
 }
 
 /// Android's shared 118x62 histogram: 256-bin filled luminance curve, bright
@@ -1572,107 +1670,55 @@ private struct PhotoPreviewQueueFlightView: View {
     let target: CGPoint
     let size: CGSize
     let stackCount: Int
+    let rotation: Double
+    let isCrop: Bool
 
     var body: some View {
-        // The view exists for less than a second, so keep its timeline live.
-        // The immutable future start date supplies the transparent preroll
-        // without asking a paused timeline to resume after insertion.
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
-            let linear = startedAt.map {
-                min(max(timeline.date.timeIntervalSince($0) / 0.56, 0), 1)
-            } ?? 0
-            let layerCount = stackCount > 1 ? min(stackCount, 3) : 1
-            ZStack {
-                ForEach(Array(0..<layerCount), id: \.self) { layer in
-                    Group {
-                        if let image = (images.indices.contains(layer) ? images[layer] : nil) ?? image {
-                            Image(uiImage: image).resizable().scaledToFill()
-                        } else {
-                            RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.26))
-                        }
-                    }
-                    .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.32), lineWidth: 1))
-                    .offset(
-                        x: layerCount > 1 ? CGFloat(layer - 1) * 12 : 0,
-                        y: layerCount > 1 ? CGFloat(1 - layer) * 5 : 0
-                    )
-                    .rotationEffect(.degrees(layerCount > 1 ? Double(layer - 1) * 9 : 0))
+        let count = stackCount > 1 ? min(stackCount, 3) : 1
+        let specs = (0..<count).map { layer in
+            QueueFlightLayerSpec(image: count > 1 ? (images.indices.contains(layer) ? images[layer] : nil) : image,
+                size: size, corner: count > 1 ? 12 : 0, borderAlpha: count > 1 ? 0.32 : 0,
+                background: count > 1 ? UIColor.white.withAlphaComponent(0.14) : .clear,
+                aspectFill: count > 1)
+        }
+        if let startedAt {
+            QueueFlightLayers(startedAt: startedAt, duration: 0.56, specs: specs) { elapsed in
+                let p = queueFlightEasedProgress(CGFloat(min(max(elapsed / 0.56, 0), 1)))
+                let center = queueFlightPoint(progress: p, start: from, end: target)
+                let initial: CGFloat = isCrop ? 1 : 0.82
+                let scale = initial + (18 / max(max(size.width, size.height), 1) - initial) * p
+                let angle: CGFloat = CGFloat(rotation) + (isCrop ? 0 : 2.2 * sin(.pi * p))
+                let alpha = min(p / 0.12, 1) * (p > 0.94 ? (1 - p) / 0.06 : 1) * (isCrop ? 1 : count > 1 ? 0.86 : 0.82)
+                return (0..<count).map { layer in
+                    let dx: CGFloat = count > 1 ? CGFloat(layer - 1) * 12 : 0
+                    let dy: CGFloat = count > 1 ? CGFloat(1 - layer) * 5 : 0
+                    let rad = angle * .pi / 180
+                    return QueueFlightLayerFrame(center: CGPoint(x: center.x + (dx * cos(rad) - dy * sin(rad)) * scale,
+                        y: center.y + (dx * sin(rad) + dy * cos(rad)) * scale), scale: scale,
+                        rotation: angle + (count > 1 ? CGFloat(layer - 1) * 9 : 0), alpha: alpha)
                 }
             }
-            // TimelineView advances the path itself. This avoids the SwiftUI
-            // insertion + implicit-animation coalescing that could leave only
-            // the fully transparent endpoint and make the flight disappear.
-            .modifier(PhotoPreviewQueueFlightArc(
-                progress: queueFlightEasedProgress(CGFloat(linear)),
-                start: from,
-                end: target,
-                baseSize: size
-            ))
         }
     }
 }
 
-@preconcurrency
-private struct PhotoPreviewQueueFlightArc: AnimatableModifier {
-    var progress: CGFloat
-    let start: CGPoint
-    let end: CGPoint
-    let baseSize: CGSize
-
-    nonisolated var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        let t = min(max(progress, 0), 1)
-        let dx = abs(end.x - start.x)
-        let lift = min(90, 36 + 0.35 * dx)
-        let control = CGPoint(
-            x: (start.x + end.x) / 2 - 52 * (1 - min(dx / 160, 1)),
-            y: max(min(start.y, end.y) - lift, (48 - start.y - end.y) / 2)
-        )
-        let point = photoPreviewQuadraticBezier(start: start, control: control, end: end, t: t)
-        let appear = min(t / 0.12, 1)
-        let endScale = 18 / max(max(baseSize.width, baseSize.height), 1)
-        let scale = 0.82 + (endScale - 0.82) * t
-        let arc = sin(.pi * t)
-        return content
-            .scaleEffect(scale)
-            .rotationEffect(.degrees(Double(2.2 * arc)))
-            .opacity(appear * (t > 0.94 ? (1 - t) / 0.06 : 1) * 0.86)
-            .position(point)
-    }
+enum PreviewControlIcon: Equatable {
+    case collapse, expand, histogram, rotateLeft, crop, add, check, close
 }
 
-private func photoPreviewQuadraticBezier(
-    start: CGPoint, control: CGPoint, end: CGPoint, t: CGFloat
-) -> CGPoint {
-    let remaining = 1 - t
-    return CGPoint(
-        x: remaining * remaining * start.x + 2 * remaining * t * control.x + t * t * end.x,
-        y: remaining * remaining * start.y + 2 * remaining * t * control.y + t * t * end.y
-    )
-}
-
-private enum PreviewControlIcon: Equatable {
-    case collapse, expand, histogram, rotateLeft, crop, add
-}
-
-private struct PreviewCircleButton: View {
+struct PreviewCircleButton: View {
     let icon: PreviewControlIcon
     let accessibilityKey: String
     var active = false
     var size: CGFloat = 44
+    var tint: Color = ZTransferColors.accentBlue
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            PreviewControlMark(icon: icon)
+            PreviewControlMark(icon: icon, tint: tint)
                 .frame(width: markSize, height: markSize)
-                .foregroundStyle(ZTransferColors.accentBlue)
+                .foregroundStyle(tint)
                 .frame(width: size, height: size)
         }
         // Android BurstCollectionNavigationButton,
@@ -1689,7 +1735,7 @@ private struct PreviewCircleButton: View {
         switch icon {
         case .collapse, .expand: return 25
         case .histogram: return 20
-        case .rotateLeft, .crop, .add: return size * 0.5
+        case .rotateLeft, .crop, .add, .check, .close: return size * 0.5
         }
     }
 }
@@ -1697,12 +1743,13 @@ private struct PreviewCircleButton: View {
 /// Code-drawn copies of the Android Material/control marks. SF Symbols use a
 /// different taper, optical width and bar count, which is obvious when the
 /// four controls are stacked together.
-private struct PreviewControlMark: View {
+struct PreviewControlMark: View {
     let icon: PreviewControlIcon
+    var tint: Color = ZTransferColors.accentBlue
 
     var body: some View {
         Canvas { context, size in
-            let tint = GraphicsContext.Shading.color(ZTransferColors.accentBlue)
+            let tint = GraphicsContext.Shading.color(tint)
             switch icon {
             case .histogram:
                 let lineWidth: CGFloat = 1.5
@@ -1759,9 +1806,28 @@ private struct PreviewControlMark: View {
 
             case .crop:
                 let scale = min(size.width, size.height) / 24
+                // Material 1.5.4 filled CropKt, verified against the Android
+                // dependency bytecode: two separate L paths and rounded joints.
+                func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * scale, y: y * scale) }
                 var crop = Path()
-                crop.addRect(CGRect(x: 5 * scale, y: 5 * scale, width: 14 * scale, height: 14 * scale))
-                context.stroke(crop, with: tint, style: StrokeStyle(lineWidth: 2 * scale, lineCap: .square))
+                crop.move(to: p(17, 15)); crop.addLine(to: p(19, 15)); crop.addLine(to: p(19, 7))
+                crop.addCurve(to: p(17, 5), control1: p(19, 5.9), control2: p(18.1, 5))
+                crop.addLine(to: p(9, 5)); crop.addLine(to: p(9, 7)); crop.addLine(to: p(17, 7)); crop.closeSubpath()
+                crop.move(to: p(7, 17)); crop.addLine(to: p(7, 1)); crop.addLine(to: p(5, 1))
+                crop.addLine(to: p(5, 5)); crop.addLine(to: p(1, 5)); crop.addLine(to: p(1, 7)); crop.addLine(to: p(5, 7))
+                crop.addLine(to: p(5, 17))
+                crop.addCurve(to: p(7, 19), control1: p(5, 18.1), control2: p(5.9, 19))
+                crop.addLine(to: p(17, 19)); crop.addLine(to: p(17, 23)); crop.addLine(to: p(19, 23))
+                crop.addLine(to: p(19, 19)); crop.addLine(to: p(23, 19)); crop.addLine(to: p(23, 17)); crop.closeSubpath()
+                context.fill(crop, with: tint)
+            case .check, .close:
+                let scale = min(size.width, size.height) / 24
+                let points: [CGPoint] = icon == .check
+                    ? [CGPoint(x: 9, y: 16.17), CGPoint(x: 4.83, y: 12), CGPoint(x: 3.41, y: 13.41), CGPoint(x: 9, y: 19), CGPoint(x: 21, y: 7), CGPoint(x: 19.59, y: 5.59)]
+                    : [CGPoint(x: 19, y: 6.41), CGPoint(x: 17.59, y: 5), CGPoint(x: 12, y: 10.59), CGPoint(x: 6.41, y: 5), CGPoint(x: 5, y: 6.41), CGPoint(x: 10.59, y: 12), CGPoint(x: 5, y: 17.59), CGPoint(x: 6.41, y: 19), CGPoint(x: 12, y: 13.41), CGPoint(x: 17.59, y: 19), CGPoint(x: 19, y: 17.59), CGPoint(x: 13.41, y: 12)]
+                var path = Path()
+                path.addLines(points.map { CGPoint(x: $0.x * scale, y: $0.y * scale) }); path.closeSubpath()
+                context.fill(path, with: tint)
             }
         }
     }
@@ -1929,6 +1995,8 @@ private struct PreviewImage: View {
     let infoBottom: CGFloat
     let interactive: Bool
     let cropActive: Bool
+    let cropTop: CGFloat
+    let cropEditor: PhotoCropEditingState
     let zoomEnabled: Bool
     let loadEnabled: Bool
     let allowRemoteThumbnailFallback: Bool
@@ -1949,6 +2017,9 @@ private struct PreviewImage: View {
     @State private var zoomAnimationTask: Task<Void, Never>?
     @State private var zoomAnimationActive = false
     @State private var magnifying = false
+    @State private var cropProgress: CGFloat = 0
+    @State private var cropReturnScale: CGFloat = 1
+    @State private var cropReturnOffset: CGSize = .zero
 
     var body: some View {
         let cachedThumbnail = thumbnail ?? session.memoryThumbnailImage(file: file)
@@ -2002,9 +2073,10 @@ private struct PreviewImage: View {
                 imageSize: zoomEnabled ? (highResolutionImage ?? cachedThumbnail)?.size : nil,
                 viewportSize: proxy.size,
                 infoBottom: infoBottom,
-                zoomScale: scale
+                zoomScale: scale, cropTop: cropTop, cropProgress: cropProgress
             ))
             .offset(offset)
+            .modifier(PhotoCropImageTransform(editor: cropEditor, active: cropActive))
             .simultaneousGesture(panGesture(
                 viewportSize: proxy.size,
                 imageSize: (highResolutionImage ?? cachedThumbnail)?.size
@@ -2031,15 +2103,15 @@ private struct PreviewImage: View {
             .onChange(of: isCurrent) { if $0 { onViewportChange(cropViewport) } }
         }
         .onChange(of: cropActive) { active in
-            guard active else { return }
-            // The sheet preserves this logical viewport. Retire completion
-            // callbacks from a double-tap so they cannot change return state.
-            zoomAnimationTask?.cancel()
-            zoomAnimationTask = nil
-            zoomAnimationActive = false
-            magnifying = false
-            gestureStartScale = scale
-            gestureStartOffset = offset
+            zoomAnimationTask?.cancel(); zoomAnimationTask = nil
+            zoomAnimationActive = false; magnifying = false
+            if active { cropReturnScale = scale; cropReturnOffset = offset }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) {
+                cropProgress = active ? 1 : 0
+                scale = active ? 1 : cropReturnScale
+                offset = active ? .zero : cropReturnOffset
+            }
+            gestureStartScale = scale; gestureStartOffset = offset
             onZoomedChange(scale > 1.01)
         }
         .onChange(of: magnifying) { active in
@@ -2058,6 +2130,7 @@ private struct PreviewImage: View {
             }
         }
         .onChange(of: rotationDegrees) { _ in
+            if cropActive { cropReturnScale = 1; cropReturnOffset = .zero }
             // Zoom reset is not part of the rotation tween. Keeping it out of
             // the inherited transaction prevents a scale jump from looking
             // like a one-frame image replacement.
@@ -2085,15 +2158,12 @@ private struct PreviewImage: View {
                 return
             }
             highResolutionAlpha = 0
-            let started = ProcessInfo.processInfo.systemUptime
-            while !Task.isCancelled {
-                let elapsed = ProcessInfo.processInfo.systemUptime - started
-                highResolutionAlpha = CGFloat(ZTransferAndroidMotion.fastOutSlowIn(
-                    Float(min(max(elapsed / 0.3, 0), 1))
-                ))
-                if elapsed >= 0.3 { break }
-                do { try await Task.sleep(nanoseconds: 16_000_000) }
-                catch { return }
+            // Keep the 300ms Android curve in the render transaction rather
+            // than rebuilding the image/gesture hierarchy with a 60Hz Task.
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) {
+                highResolutionAlpha = 1
             }
         }
         .task(id: file.id) {
@@ -2311,7 +2381,8 @@ struct PhotoPreviewPlacement {
 /// portrait lift and rotation all contribute to the actual resting geometry.
 func photoPreviewPlacement(imageSize: CGSize?, viewportSize: CGSize,
                            rotationDegrees: Double, infoBottom: CGFloat? = nil,
-                           targetRotationDegrees: Double? = nil) -> PhotoPreviewPlacement {
+                           targetRotationDegrees: Double? = nil, cropTop: CGFloat = 0,
+                           cropProgress: CGFloat = 0) -> PhotoPreviewPlacement {
     let center = CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
     guard let imageSize, imageSize.width > 0, imageSize.height > 0,
           viewportSize.width > 0, viewportSize.height > 0 else {
@@ -2330,8 +2401,9 @@ func photoPreviewPlacement(imageSize: CGSize?, viewportSize: CGSize,
         return PhotoPreviewPlacement(scale: fit, size: CGSize(width: width * fit, height: height * fit), center: center)
     }
     let layout = previewPhotoLayout(viewportHeight: viewportSize.height, imageHeight: height * fit,
-                                    infoBottom: infoBottom, cropTop: 0, cropExtraBottom: 84, progress: 0)
-    let lift: CGFloat = orientedAspect < 1 ? min(12, max(0, layout.centerY - height * fit * layout.scale / 2 - infoBottom)) : 0
+                                    infoBottom: infoBottom, cropTop: cropTop + (orientedAspect > 1 ? 60 : 0),
+                                    cropExtraBottom: 84, progress: cropProgress, cropTopAlignment: orientedAspect > 1 ? 0.5 : 1)
+    let lift: CGFloat = orientedAspect < 1 ? min(12 * (1 - cropProgress), max(0, layout.centerY - height * fit * layout.scale / 2 - infoBottom)) : 0
     let scale = fit * layout.scale
     return PhotoPreviewPlacement(scale: scale, size: CGSize(width: width * scale, height: height * scale),
                                  center: CGPoint(x: center.x, y: layout.centerY - lift))
@@ -2446,23 +2518,25 @@ func photoPreviewMaximumZoom(
 }
 
 @preconcurrency
-private struct PreviewRotationTransform: AnimatableModifier {
+struct PreviewRotationTransform: AnimatableModifier {
     var rotationDegrees: Double
     let targetRotationDegrees: Double
     let imageSize: CGSize?
     let viewportSize: CGSize
     var infoBottom: CGFloat? = nil
     var zoomScale: CGFloat = 1
+    var cropTop: CGFloat = 0
+    var cropProgress: CGFloat = 0
 
-    nonisolated var animatableData: AnimatablePair<Double, CGFloat> {
-        get { AnimatablePair(rotationDegrees, zoomScale) }
-        set { rotationDegrees = newValue.first; zoomScale = newValue.second }
+    nonisolated var animatableData: AnimatablePair<Double, AnimatablePair<CGFloat, CGFloat>> {
+        get { AnimatablePair(rotationDegrees, AnimatablePair(zoomScale, cropProgress)) }
+        set { rotationDegrees = newValue.first; zoomScale = newValue.second.first; cropProgress = newValue.second.second }
     }
 
     func body(content: Content) -> some View {
         let placement = photoPreviewPlacement(imageSize: imageSize, viewportSize: viewportSize,
                                               rotationDegrees: rotationDegrees, infoBottom: infoBottom,
-                                              targetRotationDegrees: targetRotationDegrees)
+                                              targetRotationDegrees: targetRotationDegrees, cropTop: cropTop, cropProgress: cropProgress)
         content
             .scaleEffect(placement.scale * zoomScale)
             .rotationEffect(.degrees(rotationDegrees))
@@ -2492,5 +2566,75 @@ private struct PreviewExifBar: View {
         if !values.isEmpty {
             PreviewInfoText(text: values.joined(separator: "\u{2009}·\u{2009}"))
         }
+    }
+}
+
+@MainActor
+final class PhotoPreviewPageFeedback: ObservableObject {
+    @Published var offset: CGFloat = 0
+}
+
+/// Only lightweight information layers observe the per-frame pager offset.
+/// The parent keeps the exact offset for gesture admission without observing it.
+struct PhotoPreviewInformationFade: ViewModifier {
+    @ObservedObject var feedback: PhotoPreviewPageFeedback
+    let base: CGFloat
+    func body(content: Content) -> some View {
+        content.opacity(Double(base * previewPageInformationAlpha(feedback.offset)))
+    }
+}
+
+private struct PreviewEffectsButtonAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+@MainActor
+final class PhotoPreviewGeometrySnapshot {
+    var viewport: PhotoPreviewCropViewport?
+}
+
+@MainActor
+final class PhotoPreviewQueueMotion: ObservableObject {
+    @Published var offset: CGFloat = 0
+}
+
+struct PhotoPreviewQueueMotionTransform: ViewModifier {
+    @ObservedObject var motion: PhotoPreviewQueueMotion
+    func body(content: Content) -> some View {
+        let lift = min(max(-motion.offset / 132, 0), 1)
+        content.scaleEffect(1 - lift * 0.055).opacity(1 - lift * 0.07).offset(y: motion.offset)
+    }
+}
+
+struct PhotoPreviewQueueAction: View {
+    @ObservedObject private var controls: PhotoCropControlState
+    let editing: Bool
+    let confirming: Bool
+    let enabled: Bool
+    let action: () -> Void
+    init(editor: PhotoCropEditingState, editing: Bool, confirming: Bool, enabled: Bool, action: @escaping () -> Void) {
+        controls = editor.controls
+        self.editing = editing
+        self.confirming = confirming
+        self.enabled = enabled
+        self.action = action
+    }
+    var body: some View {
+        let admitted = enabled && (!editing || (controls.snapshot.hasCrop && !confirming))
+        Button(action: action) {
+            ZStack {
+                PreviewControlMark(icon: .add).opacity(editing ? 0 : 1)
+                PreviewControlMark(icon: .check).opacity(editing ? 1 : 0)
+            }
+            .frame(width: 22, height: 22).opacity(admitted ? 1 : 0.35)
+            .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: editing)
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+        .accessibilityLabel(AppLocalized.resource(editing ? "crop_confirm" : "cd_transfer"))
+        .disabled(!admitted)
     }
 }

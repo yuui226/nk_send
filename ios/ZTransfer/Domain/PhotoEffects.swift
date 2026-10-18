@@ -684,6 +684,9 @@ func photoEffectsPreviewPixelSettings(_ settings: PhotoEffectsSettings) -> Photo
     } else if !result.watermark.enabled {
         result.watermark = PhotoFrameWatermark(enabled: false)
     }
+    // Android requestedRenderWatermark uses displayText. Whitespace-equivalent
+    // text edits render identical pixels and must not restart preview work.
+    if result.watermark.content == .text { result.watermark.text = result.watermark.displayText }
     return result
 }
 
@@ -1048,11 +1051,15 @@ final class PhotoEffectsStore: ObservableObject {
     func setEnabled(_ enabled: Bool) {
         guard scope == .cameraTransfer else { return }
         defaults.set(enabled, forKey: "photo_effects_enabled")
-        isEnabled = enabled
+        if isEnabled != enabled { isEnabled = enabled }
     }
 
     func update(_ value: PhotoEffectsSettings) {
-        settings = Self.normalized(value, scope: scope)
+        let normalized = Self.normalized(value, scope: scope)
+        if settings != normalized { settings = normalized }
+        // Persistence remains explicit even for equal values: first-save and
+        // legacy/shared defaults can still need writing. Only UI publication
+        // is deduplicated; no draft, entitlement or disk-validation gate moves.
         if scope == .cameraTransfer {
             Self.persistAndroidTransferSettings(settings, defaults: self.defaults)
         } else {

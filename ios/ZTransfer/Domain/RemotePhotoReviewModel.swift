@@ -1,6 +1,38 @@
 import Combine
 import Foundation
 
+/// Only showing/hiding the review affects the monitor beneath it. Its catalog,
+/// loading and retry state are observed by the review surface itself.
+@MainActor
+final class RemotePhotoReviewLifetime: ObservableObject {
+    let review: RemotePhotoReviewModel
+    @Published private(set) var active: Bool
+    private var observation: AnyCancellable?
+    init(_ review: RemotePhotoReviewModel) {
+        self.review = review
+        active = review.active
+        observation = review.$active.removeDuplicates().dropFirst()
+            .sink { [weak self] in self?.active = $0 }
+    }
+}
+
+/// One projection per accepted catalog snapshot, shared by page construction
+/// and the RAW/JPEG title. Capture identity stays independent of preferred IO.
+final class RemoteReviewDisplaySnapshot {
+    let files: [CameraFile]
+    let captureByHandle: [UInt32: UInt32]
+    let photosByPreferredHandle: [UInt32: RemoteReviewPhoto]
+    init(_ photos: [RemoteReviewPhoto]) {
+        files = photos.map(\.file)
+        photosByPreferredHandle = Dictionary(uniqueKeysWithValues: zip(files, photos).map { ($0.0.id, $0.1) })
+        var identities: [UInt32: UInt32] = [:]
+        for photo in photos {
+            for file in photo.files { identities[file.id] = photo.id }
+        }
+        captureByHandle = identities
+    }
+}
+
 /// RemotePhotoReview.kt: a frozen catalog per opening, one compatibility stop,
 /// and a generation boundary that prevents late reads entering a new opening.
 @MainActor
@@ -8,7 +40,16 @@ final class RemotePhotoReviewModel: ObservableObject {
     @Published private(set) var active = false
     @Published private(set) var loading = false
     @Published private(set) var failed = false
-    @Published private(set) var photos: [RemoteReviewPhoto] = []
+    @Published private(set) var photos: [RemoteReviewPhoto] = [] {
+        didSet { displayCache = nil }
+    }
+    private var displayCache: RemoteReviewDisplaySnapshot?
+    var displaySnapshot: RemoteReviewDisplaySnapshot {
+        if let displayCache { return displayCache }
+        let result = RemoteReviewDisplaySnapshot(photos)
+        displayCache = result
+        return result
+    }
     @Published private(set) var hasMore = false
     private let frames: RemoteReviewFrameGate
     private let openCatalog: () async throws -> RemoteReviewCatalog
@@ -42,9 +83,9 @@ final class RemotePhotoReviewModel: ObservableObject {
         generation = UUID()
         active = true
         onActiveChanged(true)
-        photos = []
+        if !photos.isEmpty { photos = [] }
         catalog = nil
-        hasMore = false
+        if hasMore { hasMore = false }
         frames.pause()
         retry()
     }
@@ -57,7 +98,7 @@ final class RemotePhotoReviewModel: ObservableObject {
         guard active, !closing, !loading else { return }
         if !photos.isEmpty { loadMore(); return }
         loading = true
-        failed = false
+        if failed { failed = false }
         let id = generation
         loadTask = Task { [self] in
             defer { if generation == id { loading = false; loadTask = nil } }
@@ -88,14 +129,14 @@ final class RemotePhotoReviewModel: ObservableObject {
         try Task.checkCancellation()
         guard current(id) else { throw CancellationError() }
         catalog = snapshot
-        photos = result
-        hasMore = more
+        if photos != result { photos = result }
+        if hasMore != more { hasMore = more }
     }
 
     func loadMore() {
         guard let catalog, active, !closing, !loading, hasMore else { return }
         loading = true
-        failed = false
+        if failed { failed = false }
         let id = generation
         loadTask = Task { [self] in
             defer { if generation == id { loading = false; loadTask = nil } }
@@ -104,8 +145,8 @@ final class RemotePhotoReviewModel: ObservableObject {
                 let more = await catalog.hasMore
                 try Task.checkCancellation()
                 guard current(id) else { return }
-                photos = result
-                hasMore = more
+                if photos != result { photos = result }
+                if hasMore != more { hasMore = more }
             } catch is CancellationError { }
             catch { if current(id) { failed = true } }
         }
@@ -149,7 +190,7 @@ final class RemotePhotoReviewModel: ObservableObject {
         catalog = nil
         active = false
         onActiveChanged(false)
-        loading = false
+        if loading { loading = false }
         frames.resume()
         closing = false
     }

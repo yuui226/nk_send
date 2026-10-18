@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A4E0E77D663548B78D0E6A24 /* RemoteLUTPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E0E77D663548B78D0E6A23 /* RemoteLUTPanel.swift */; };
 		0017B12265DF2B75A6026010 /* firework-1-1200.png in Resources */ = {isa = PBXBuildFile; fileRef = 95E04AB25ADC7EE62B3DAE30 /* firework-1-1200.png */; };
 		0073BCF4497DD37C3661B7DE /* RemoteLUTState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873F9C8A1B94288FB1C66886 /* RemoteLUTState.swift */; };
 		00DC4529DA733509F741F333 /* RestoredCameraWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 963159759C53600E4797F989 /* RestoredCameraWorkspaceTests.swift */; };
@@ -279,6 +280,7 @@
 		78393FF3CAA66DA21ABB70E4 /* CropAnimationTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDB895389A73FACE264D1CC /* CropAnimationTimingTests.swift */; };
 		787EFF0B5BF6D95EF5E669A8 /* ZTransferAndroidColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80E9480B37EC28D8C56DE93 /* ZTransferAndroidColor.swift */; };
 		7884258CDE091748C39C081A /* RemoteHorizonOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00DFB5370FE62695737A8492 /* RemoteHorizonOverlay.swift */; };
+		D65C227E49E2438E8EC71932 /* PhotoEffectsExpandedImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B2C65F67084973A13B8961 /* PhotoEffectsExpandedImage.swift */; };
 		78F70C867D96D34E4C409B3D /* CropPreparationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26732137A810847EF35EF3C /* CropPreparationState.swift */; };
 		799B31751855E74416F9A579 /* PictureControlPanelModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7B8E7F98FA135BF5E55B709 /* PictureControlPanelModelTests.swift */; };
 		79DEFEAB43C56CB6A324F2F1 /* NikonPictureControlSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E79F3FA26C3DC0035B69A30 /* NikonPictureControlSelectionTests.swift */; };
@@ -607,7 +609,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A4E0E77D663548B78D0E6A23 /* RemoteLUTPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTPanel.swift; sourceTree = "<group>"; };
 		00DFB5370FE62695737A8492 /* RemoteHorizonOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHorizonOverlay.swift; sourceTree = "<group>"; };
+		A4B2C65F67084973A13B8961 /* PhotoEffectsExpandedImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsExpandedImage.swift; sourceTree = "<group>"; };
 		0217CE88D9C38A7150F3C00E /* CameraIOGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraIOGateTests.swift; sourceTree = "<group>"; };
 		02FA4635ABE0F5B79D477678 /* jdcolor-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jdcolor-12.c"; sourceTree = "<group>"; };
 		03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocolTests.swift; sourceTree = "<group>"; };
@@ -1531,6 +1535,7 @@
 				BF7E2304FF41DD0FEC3E95E0 /* RemoteFramingGridOverlay.swift */,
 				622FB11FA5ECB4E0C8F9C339 /* RemoteGridMenu.swift */,
 				00DFB5370FE62695737A8492 /* RemoteHorizonOverlay.swift */,
+				A4B2C65F67084973A13B8961 /* PhotoEffectsExpandedImage.swift */,
 				E6B162C26FC2DE71F1E53C79 /* RemoteLandscapeControls.swift */,
 				18AD6A5BC7B19AAB406CB26B /* RemoteMonitorHintBubble.swift */,
 				27B26716BCDA09A3DCBC8C68 /* RemoteParameterInput.swift */,
@@ -1855,6 +1860,7 @@
 				A1DC8FD007EB06AB0B15D896 /* PremiumPurchaseView.swift */,
 				C835825BFF8A24B401975734 /* PreviewPhotoEffectsEditor.swift */,
 				9967A06A7297A08CC0763403 /* RemoteLUTMetalView.swift */,
+				A4E0E77D663548B78D0E6A23 /* RemoteLUTPanel.swift */,
 				A7564F9A5DB5742E5AE8F875 /* RemotePhotoReviewView.swift */,
 				409437DA67206B67DA4FCEC1 /* RemotePictureControlPanel.swift */,
 				2482C61B58C4A4EE95210CDA /* RemoteView.swift */,
@@ -2628,11 +2634,13 @@
 				E55B5D7F8AC94EACC1404CC3 /* RemoteHorizon.swift in Sources */,
 				C3C9FE27A93F76EF94AEEC4F /* RemoteHorizonAnimation.swift in Sources */,
 				7884258CDE091748C39C081A /* RemoteHorizonOverlay.swift in Sources */,
+				D65C227E49E2438E8EC71932 /* PhotoEffectsExpandedImage.swift in Sources */,
 				6066F71D6F80B32B36020C1B /* RemoteLUTCatalog.swift in Sources */,
 				9C138419D1790D0D7591271D /* RemoteLUTFolderAccess.swift in Sources */,
 				30146DB9556B2A1FACF06D2F /* RemoteLUTLoadQueue.swift in Sources */,
 				4F05D95DA449C2CFADFB4344 /* RemoteLUTMetalRenderer.swift in Sources */,
 				DAA5C8C2E23830F5C8B6971E /* RemoteLUTMetalView.swift in Sources */,
+				A4E0E77D663548B78D0E6A24 /* RemoteLUTPanel.swift in Sources */,
 				81810CC6C13DC80C7462847D /* RemoteLUTMonitorState.swift in Sources */,
 				C51345BB8B27F312BBA25647 /* RemoteLUTPreferences.swift in Sources */,
 				0073BCF4497DD37C3661B7DE /* RemoteLUTState.swift in Sources */,

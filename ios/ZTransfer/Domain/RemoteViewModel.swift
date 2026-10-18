@@ -1,33 +1,93 @@
 import AVFoundation
+import Combine
 import Foundation
 import UIKit
 
+/// Frame notifications belong to the viewfinder, not the toolbars/panels. A
+/// decoded image, its analysis and timestamp are one synchronous update, just
+/// like Android RemoteScreen's decoded frame value. No acquisition, analysis,
+/// recording cadence or state transition is throttled here (ledger P17).
+@MainActor
+final class RemoteFrameUpdates: @preconcurrency ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+    private var updating = false
+    private var notified = false
+
+    func performUpdate(_ body: () -> Void) {
+        let nested = updating
+        if !nested { notified = false }
+        updating = true
+        defer { updating = nested }
+        body()
+    }
+
+    func invalidate() {
+        guard !updating || !notified else { return }
+        notified = true
+        objectWillChange.send()
+    }
+}
+
+/// A label-specific observable, separate for camera and local recording.
+/// The existing recording tasks remain the sole owners of elapsed time.
+@MainActor
+final class RemoteRecordingElapsed: ObservableObject {
+    @Published private(set) var seconds: Int
+    init(seconds: Int = 0) { self.seconds = seconds }
+    func set(_ next: Int) { if seconds != next { seconds = next } }
+}
+
 @MainActor
 final class RemoteViewModel: ObservableObject {
-    @Published private(set) var state = RemoteState() {
+    let frameUpdates = RemoteFrameUpdates()
+    private(set) var state = RemoteState() {
+        willSet {
+            // All control/lifecycle changes still update the page. Only the
+            // per-frame counter/FPS are observed by the viewfinder instead.
+            var controls = state
+            controls.frameSequence = newValue.frameSequence
+            controls.fps = newValue.fps
+            if controls != newValue { objectWillChange.send() }
+            if state.frameSequence != newValue.frameSequence || state.fps != newValue.fps {
+                frameUpdates.invalidate()
+            }
+        }
         didSet {
             if oldValue.liveViewStable != state.liveViewStable { restartExposureMeter() }
         }
     }
-    @Published private(set) var frameImage: UIImage?
-    @Published private(set) var frameData: Data?
-    @Published private(set) var frameMetadata: RemoteLiveViewMetadata?
-    @Published private(set) var frameRemainingVideoTimeMs: Int64?
+    private(set) var frameImage: UIImage? {
+        willSet {
+            // Layout and enabled controls outside the viewfinder need the
+            // first/cleared frame and size changes, but not each new bitmap.
+            if frameImage?.size != newValue?.size { objectWillChange.send() }
+            frameUpdates.invalidate()
+        }
+    }
+    private(set) var frameData: Data?
+    private(set) var frameMetadata: RemoteLiveViewMetadata? { willSet { frameUpdates.invalidate() } }
+    private(set) var frameRemainingVideoTimeMs: Int64? { willSet { frameUpdates.invalidate() } }
     private var frameDeviceModel: String?
-    @Published private(set) var focusDiagnosticReport = ""
+    let focusDiagnosticOutput = RemoteDiagnosticReport()
+    private(set) var focusDiagnosticReport: String {
+        get { focusDiagnosticOutput.text }
+        set { focusDiagnosticOutput.replace(newValue) }
+    }
     @Published private(set) var focusDiagnosticRunning = false
-    @Published private(set) var frameHistogram: [Int]?
-    @Published private(set) var frameHistogramRGB: [[Int]]?
-    @Published private(set) var frameWaveform: [[Int]]?
-    @Published private(set) var frameFalseColorPixels: [UInt32]?
-    @Published private(set) var frameFalseColorSize: CGSize = .zero
+    private(set) var frameHistogram: [Int]? { willSet { frameUpdates.invalidate() } }
+    private(set) var frameHistogramRGB: [[Int]]? { willSet { frameUpdates.invalidate() } }
+    private(set) var frameWaveform: [[Int]]? { willSet { frameUpdates.invalidate() } }
+    private(set) var frameFalseColorPixels: [UInt32]? { willSet { frameUpdates.invalidate() } }
+    private(set) var frameFalseColorImage: CGImage? { willSet { frameUpdates.invalidate() } }
+    private(set) var frameWaveformImage: CGImage? { willSet { frameUpdates.invalidate() } }
+    private(set) var frameFalseColorSize: CGSize = .zero { willSet { frameUpdates.invalidate() } }
     @Published private(set) var exposureMeterEV: Float?
     private var exposureMeterTask: Task<Void, Never>?
     private var exposureMeterExpiryTask: Task<Void, Never>?
     private var exposureMeterGeneration: UInt64 = 0
     private var exposureMeterEnabled = false
     private var exposureMeterForeground = true
-    @Published private(set) var frameZebraMask: RemoteZebraMask?
+    private(set) var frameZebraMask: RemoteZebraMask? { willSet { frameUpdates.invalidate() } }
     @Published private(set) var exposureDescriptors: [RemoteExposureField: RemotePropertyDescriptor] = [:]
     private var exposureDescriptorCache: [Bool: [RemoteExposureField: RemotePropertyDescriptor]] = [:]
     @Published private(set) var movieMode = false {
@@ -67,19 +127,27 @@ final class RemoteViewModel: ObservableObject {
     private var pendingSets: [RemoteProperty: Task<Void, Never>] = [:]
     private var pendingSetGenerations: [RemoteProperty: Int] = [:]
     @Published private(set) var focusModeDescriptor: RemotePropertyDescriptor?
-    @Published private(set) var recordingSeconds = 0
+    let cameraRecordingElapsed = RemoteRecordingElapsed()
+    private(set) var recordingSeconds: Int {
+        get { cameraRecordingElapsed.seconds }
+        set { cameraRecordingElapsed.set(newValue) }
+    }
     @Published private(set) var localRecordingPhase: RemoteLocalRecordingPhase = .idle
-    @Published private(set) var localRecordingSeconds = 0
+    let localRecordingElapsed = RemoteRecordingElapsed()
+    private(set) var localRecordingSeconds: Int {
+        get { localRecordingElapsed.seconds }
+        set { localRecordingElapsed.set(newValue) }
+    }
     @Published private(set) var monitorHint = RemoteMonitorHint()
     @Published private(set) var recordingErrorReport = ""
     var localRecordingHint: String? { monitorHint.message(for: .localRecording) }
     var interactionHint: String? { monitorHint.message(for: .interaction) }
     @Published private(set) var confirmedFocusMarker: RemoteConfirmedFocusMarker?
     @Published private(set) var halfPressVisualActive = false
-    @Published private(set) var frameReceivedAtUptime: TimeInterval = 0
+    private(set) var frameReceivedAtUptime: TimeInterval = 0 { willSet { frameUpdates.invalidate() } }
     @Published private var recordingOperations = RemoteRecordingOperationGate()
-    @Published private(set) var levelPitch: Double?
-    @Published private(set) var levelRoll: Double?
+    private(set) var levelPitch: Double?
+    private(set) var levelRoll: Double?
     @Published private(set) var batteryPercent: Int?
     @Published private(set) var trialEnded = false
     let usageMeter: RemoteUsageMeter
@@ -105,7 +173,7 @@ final class RemoteViewModel: ObservableObject {
         photoReviewActive = active
         updateEffectiveISOPolling()
         restartExposureMeter()
-        if active { levelRoll = nil; levelPitch = nil }
+        if active { updateLevel(roll: nil, pitch: nil) }
     }
     var reviewVisible: Bool {
         !movieMode && (localRecordingPhase == .idle || localRecordingPhase == .saved)
@@ -151,7 +219,9 @@ final class RemoteViewModel: ObservableObject {
     private var displayDetailsMonitoringEnabled = false
     private var displayDetailsGeneration: UInt64 = 0
     @Published private(set) var exposureProgram: RemotePropertyDescriptor?
-    @Published private(set) var focusFrameExpired = false
+    private(set) var focusFrameExpired = false {
+        willSet { if focusFrameExpired != newValue { frameUpdates.invalidate() } }
+    }
     @Published private(set) var focusValidAfterUptime = 0.0
     private var focusExpiryTask: Task<Void, Never>?
     private var focusHideTask: Task<Void, Never>?
@@ -808,10 +878,12 @@ final class RemoteViewModel: ObservableObject {
         waveformMode = waveform
         falseColorEnabled = falseColor
         histogramRGBEnabled = histogramRGB
-        if !histogram { frameHistogram = nil; frameHistogramRGB = nil }
-        if !zebra { frameZebraMask = nil }
-        if waveform == .off { frameWaveform = nil }
-        if !falseColor { frameFalseColorPixels = nil; frameFalseColorSize = .zero }
+        frameUpdates.performUpdate {
+            if !histogram { frameHistogram = nil; frameHistogramRGB = nil }
+            if !zebra { frameZebraMask = nil }
+            if waveform == .off { frameWaveform = nil; frameWaveformImage = nil }
+            if !falseColor { frameFalseColorPixels = nil; frameFalseColorImage = nil; frameFalseColorSize = .zero }
+        }
         Task { [weak self] in await self?.applyFrameAnalysis() }
     }
 
@@ -919,17 +991,21 @@ final class RemoteViewModel: ObservableObject {
     /// Android clears the displayed frame on a new HD session, but retains it
     /// across acquisition retries, movie compatibility and computer-control restarts.
     private func clearDisplayedFrame() {
-        frameImage = nil
-        frameData = nil
-        frameMetadata = nil
-        frameRemainingVideoTimeMs = nil
-        frameReceivedAtUptime = 0
-        frameHistogram = nil
-        frameHistogramRGB = nil
-        frameWaveform = nil
-        frameFalseColorPixels = nil
-        frameFalseColorSize = .zero
-        frameZebraMask = nil
+        frameUpdates.performUpdate {
+            frameImage = nil
+            frameData = nil
+            frameMetadata = nil
+            frameRemainingVideoTimeMs = nil
+            frameReceivedAtUptime = 0
+            frameHistogram = nil
+            frameHistogramRGB = nil
+            frameWaveform = nil
+            frameWaveformImage = nil
+            frameFalseColorImage = nil
+            frameFalseColorPixels = nil
+            frameFalseColorSize = .zero
+            frameZebraMask = nil
+        }
     }
 
     private func invalidateFocusFrame() {
@@ -952,32 +1028,36 @@ final class RemoteViewModel: ObservableObject {
         }
     }
 
-    private func acceptDecodedFrame(_ decoded: RemoteDecodedFrame) {
+    func acceptDecodedFrame(_ decoded: RemoteDecodedFrame) {
         guard !stopRequested, decoded.generation == frameDecodeGeneration else { return }
-        frameData = decoded.jpeg
-        frameImage = decoded.image
-        frameMetadata = decoded.metadata
-        frameRemainingVideoTimeMs = RemoteFrameParser.packetVideoTime(
-            decoded.rawBytes, jpegOffset: decoded.jpegOffset,
-            operation: decoded.operation, model: frameDeviceModel)
-        frameReceivedAtUptime = decoded.receivedAtUptime
-        scheduleFocusExpiry()
-        frameHistogram = decoded.histogram
-        frameHistogramRGB = decoded.histogramRGB
-        frameWaveform = decoded.waveform
-        frameFalseColorPixels = decoded.falseColorPixels
-        frameFalseColorSize = CGSize(width: decoded.falseColorWidth, height: decoded.falseColorHeight)
-        frameZebraMask = decoded.zebraMask
-        if focusDiagnostic.running {
-            let packet = RemoteLiveViewPacket(bytes: decoded.rawBytes, jpegOffset: decoded.jpegOffset,
-                                               operation: decoded.operation,
-                                               receivedAtUptime: decoded.receivedAtUptime)
-            let context = "movie=\(movieMode) rec=\(String(describing: state.capture)) af=\(focusModeDescriptor.map { String($0.current) } ?? "unknown")"
-            focusDiagnostic.sample(packet: packet, metadata: decoded.metadata, context: context)
-            focusDiagnosticReport = focusDiagnostic.report()
-            if !focusDiagnostic.running { focusDiagnosticRunning = false }
+        frameUpdates.performUpdate {
+            frameData = decoded.jpeg
+            frameImage = decoded.image
+            frameMetadata = decoded.metadata
+            frameRemainingVideoTimeMs = RemoteFrameParser.packetVideoTime(
+                decoded.rawBytes, jpegOffset: decoded.jpegOffset,
+                operation: decoded.operation, model: frameDeviceModel)
+            frameReceivedAtUptime = decoded.receivedAtUptime
+            scheduleFocusExpiry()
+            frameHistogram = decoded.histogram
+            frameHistogramRGB = decoded.histogramRGB
+            frameWaveform = decoded.waveform
+            frameWaveformImage = decoded.waveformImage
+            frameFalseColorImage = decoded.falseColorImage
+            frameFalseColorPixels = decoded.falseColorPixels
+            frameFalseColorSize = CGSize(width: decoded.falseColorWidth, height: decoded.falseColorHeight)
+            frameZebraMask = decoded.zebraMask
+            if focusDiagnostic.running {
+                let packet = RemoteLiveViewPacket(bytes: decoded.rawBytes, jpegOffset: decoded.jpegOffset,
+                                                   operation: decoded.operation,
+                                                   receivedAtUptime: decoded.receivedAtUptime)
+                let context = "movie=\(movieMode) rec=\(String(describing: state.capture)) af=\(focusModeDescriptor.map { String($0.current) } ?? "unknown")"
+                focusDiagnostic.sample(packet: packet, metadata: decoded.metadata, context: context)
+                focusDiagnosticReport = focusDiagnostic.report()
+                if !focusDiagnostic.running { focusDiagnosticRunning = false }
+            }
+            state = state.applying(.frameReceived(fps: decoded.fps))
         }
-        state = state.applying(.frameReceived(fps: decoded.fps))
         if initialLoaded { usageMeter.markReady() }
         if localRecordingPhase == .recording {
             localRecorder?.append(image: decoded.image, receivedAtUptime: decoded.receivedAtUptime,
@@ -1197,14 +1277,22 @@ final class RemoteViewModel: ObservableObject {
 
     var autoISOEnabled: Bool { autoISODescriptor.map { $0.current != 0 } ?? false }
 
+    /// Android's equality-based level state: constant 250ms samples do not
+    /// redraw anything. A changed pair refreshes only the viewfinder once.
+    func updateLevel(roll: Double?, pitch: Double?) {
+        guard levelRoll != roll || levelPitch != pitch else { return }
+        frameUpdates.invalidate()
+        levelRoll = roll
+        levelPitch = pitch
+    }
+
     func setLevelVisible(_ visible: Bool) {
         guard visible != levelVisible, !stopRequested else { return }
         levelVisible = visible
         levelGeneration &+= 1
         let generation = levelGeneration
         let previous = levelTask
-        levelRoll = nil
-        levelPitch = nil
+        updateLevel(roll: nil, pitch: nil)
         guard visible else { return }
         levelTask = Task { [weak self] in
             // Finish an in-flight PTP transaction before replacing its owner.
@@ -1226,24 +1314,23 @@ final class RemoteViewModel: ObservableObject {
                 }
                 let age = ProcessInfo.processInfo.systemUptime - frameReceivedAtUptime
                 if let attitude = frameMetadata?.attitude, age >= 0, age <= 1.5 {
-                    levelRoll = Double(floor(attitude.roll * 10 + 0.5) / 10)
-                    levelPitch = Double(floor(attitude.pitch * 10 + 0.5) / 10)
+                    updateLevel(roll: Double(floor(attitude.roll * 10 + 0.5) / 10),
+                                pitch: Double(floor(attitude.pitch * 10 + 0.5) / 10))
                     wasHeader = true
                 } else {
-                    levelPitch = nil
-                    if wasHeader { levelRoll = nil }
+                    updateLevel(roll: wasHeader ? nil : levelRoll, pitch: nil)
                     wasHeader = false
                     if !fallbackUnavailable {
                         if let previous = param { param = try? await camera.refreshRemoteProperty(previous) }
                         else { param = try? await camera.remoteProperty(.angleLevel) }
                         guard active() else { return }
                         if let roll = param?.angleLevelRoll {
-                            levelRoll = Double(floor(Float(roll) * 10 + 0.5) / 10)
+                            updateLevel(roll: Double(floor(Float(roll) * 10 + 0.5) / 10), pitch: nil)
                             failures = 0
                         } else {
                             failures += 1
                             if failures >= 3 {
-                                levelRoll = nil
+                                updateLevel(roll: nil, pitch: nil)
                                 fallbackUnavailable = true
                             }
                         }
@@ -1568,8 +1655,7 @@ final class RemoteViewModel: ObservableObject {
         exposureMeterGeneration &+= 1
         exposureMeterTask?.cancel()
         clearExposureMeterSample()
-        levelRoll = nil
-        levelPitch = nil
+        updateLevel(roll: nil, pitch: nil)
         focusHideTask?.cancel()
         recordingOperations.invalidate()
         recordingTimerTask?.cancel()
@@ -1586,9 +1672,6 @@ final class RemoteViewModel: ObservableObject {
         storageGeneration &+= 1
         storageTask?.cancel()
         storageTask = nil
-        frameReceivedAtUptime = 0
-        frameHistogram = nil
-        frameZebraMask = nil
         frameDecodeGeneration &+= 1
         lastFrameAt = nil
         state.focus = .init()
@@ -1607,16 +1690,18 @@ final class RemoteViewModel: ObservableObject {
 
     func stopFocusDiagnostic(reason: String = "stopped") {
         focusDiagnostic.stop(reason: reason)
-        focusDiagnosticRunning = false
+        if focusDiagnosticRunning { focusDiagnosticRunning = false }
         focusDiagnosticReport = focusDiagnostic.report()
     }
 
     func markFocusDiagnostic(_ text: String) {
+        guard focusDiagnostic.running else { return }
         focusDiagnostic.mark(nowMs: Int64((ProcessInfo.processInfo.systemUptime * 1000).rounded()), text: text)
         focusDiagnosticReport = focusDiagnostic.report()
     }
 
     func displayFocusDiagnostic(_ state: String) {
+        guard focusDiagnostic.running else { return }
         focusDiagnostic.display(state)
         focusDiagnosticReport = focusDiagnostic.report()
     }
@@ -2193,13 +2278,8 @@ final class RemoteViewModel: ObservableObject {
         stopRequested = true
         dismissCameraTool()
         modeTask?.cancel()
-        frameImage = nil
-        frameData = nil
-        frameMetadata = nil
-        frameRemainingVideoTimeMs = nil
+        clearDisplayedFrame()
         monitorStorageFreeBytes = [:]
-        frameHistogram = nil
-        frameZebraMask = nil
         computerControlEnabled = false
         computerControlBusy = false
         frameDecodeGeneration &+= 1

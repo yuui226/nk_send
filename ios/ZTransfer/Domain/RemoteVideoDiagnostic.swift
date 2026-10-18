@@ -1,4 +1,43 @@
 import Foundation
+import Combine
+
+/// Focus report updates belong to the diagnostic panel, not the monitor's
+/// camera/control state. Identical reports do not publish or persist again.
+@MainActor
+final class RemoteDiagnosticReport: ObservableObject {
+    @Published private(set) var text = ""
+    func replace(_ next: String) {
+        guard text != next else { return }
+        text = next
+    }
+}
+
+/// Cache the display/copy projection once per report change, including empty
+/// lines and the independent recording/focus/Picture Control report scopes.
+@MainActor
+final class RemoteDeveloperReportCache {
+    @MainActor final class Snapshot {
+        let lines: [String]
+        private let copyParts: [String]
+        lazy var copyText = copyParts.filter { !$0.isEmpty }.joined(separator: "\n")
+        init(log: [String], reports: [String]) {
+            let reports = reports.filter { !$0.isEmpty }
+            lines = log + reports.flatMap { $0.components(separatedBy: "\n") }
+            copyParts = log + reports
+        }
+    }
+    private struct Input: Equatable { let log: [String]; let reports: [String] }
+    private var input: Input?
+    private var cached: Snapshot?
+
+    func resolve(log: [String], recording: String, focus: String, pictureControl: String) -> Snapshot {
+        let next = Input(log: log, reports: [recording, focus, pictureControl])
+        if input == next, let cached { return cached }
+        let result = Snapshot(log: next.log, reports: next.reports)
+        input = next; cached = result
+        return result
+    }
+}
 
 /// Android LiveViewVideoDiagnostic.kt: bounded header-only debug output.
 enum RemoteVideoDiagnostic {

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 enum AppLocalized {
     private static func decodeAndroidEscapes(_ value: String) -> String {
@@ -84,12 +85,82 @@ enum AppLocalized {
     }
 }
 
+/// Own the services once, but publish only inputs consumed by the root route.
+/// Android HomeWorkspacePager similarly projects enabled/release bits before
+/// observing; GPS fixes, connection-card details and editor drafts stay local.
+@MainActor
+final class RootPresentationModel: ObservableObject {
+    struct Snapshot: Equatable {
+        var session: CameraSession?
+        var mode: CameraPresentationMode
+        var effectsEnabled: Bool
+        var gpsEnabled: Bool
+        var directoryURL: URL?
+        var directoryRestoring: Bool
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.session === rhs.session && lhs.mode == rhs.mode &&
+            lhs.effectsEnabled == rhs.effectsEnabled && lhs.gpsEnabled == rhs.gpsEnabled &&
+            lhs.directoryURL == rhs.directoryURL && lhs.directoryRestoring == rhs.directoryRestoring
+        }
+    }
+
+    let connection: ConnectionViewModel
+    let effects: PhotoEffectsStore
+    let gps: GPSCoordinator
+    let directory: DirectoryAccessStore
+    let queue: TransferQueue
+    @Published private(set) var snapshot: Snapshot
+    private var observations = Set<AnyCancellable>()
+
+    init(connection: ConnectionViewModel? = nil, effects: PhotoEffectsStore? = nil,
+         gps: GPSCoordinator? = nil, directory: DirectoryAccessStore? = nil,
+         queue: TransferQueue = TransferQueue()) {
+        let connection = connection ?? ConnectionViewModel()
+        let effects = effects ?? PhotoEffectsStore()
+        let gps = gps ?? GPSCoordinator()
+        let directory = directory ?? DirectoryAccessStore()
+        self.connection = connection; self.effects = effects; self.gps = gps
+        self.directory = directory; self.queue = queue
+        snapshot = Snapshot(session: connection.cameraSession,
+            mode: connection.state.presentationMode(transport: nil, isSTA: false),
+            effectsEnabled: effects.isEnabled, gpsEnabled: gps.state.enabled,
+            directoryURL: directory.directoryURL, directoryRestoring: directory.isRestoring)
+        // Use Published's incoming values, not a willSet-time read of the model.
+        connection.$cameraSession.sink { [weak self] in self?.update(\.session, $0) }.store(in: &observations)
+        connection.$state.map { $0.presentationMode(transport: nil, isSTA: false) }.removeDuplicates()
+            .sink { [weak self] in self?.update(\.mode, $0) }.store(in: &observations)
+        effects.$isEnabled.removeDuplicates()
+            .sink { [weak self] in self?.update(\.effectsEnabled, $0) }.store(in: &observations)
+        gps.$state.map(\.enabled).removeDuplicates()
+            .sink { [weak self] in self?.update(\.gpsEnabled, $0) }.store(in: &observations)
+        directory.$directoryURL.removeDuplicates()
+            .sink { [weak self] in self?.update(\.directoryURL, $0) }.store(in: &observations)
+        directory.$isRestoring.removeDuplicates()
+            .sink { [weak self] in self?.update(\.directoryRestoring, $0) }.store(in: &observations)
+    }
+
+    private func update<Value>(_ key: WritableKeyPath<Snapshot, Value>, _ value: Value) {
+        var next = snapshot
+        next[keyPath: key] = value
+        if next != snapshot { snapshot = next }
+    }
+}
+
 struct RootView: View {
-    @StateObject private var connectionModel = ConnectionViewModel()
-    @StateObject private var effectsStore = PhotoEffectsStore()
-    @StateObject private var gpsCoordinator = GPSCoordinator()
-    @StateObject private var directoryStore = DirectoryAccessStore()
-    @State private var transferQueue = TransferQueue()
+    #if DEBUG
+    var didRender: (() -> Void)?
+    #endif
+    @StateObject private var presentation: RootPresentationModel
+    private var connectionModel: ConnectionViewModel { presentation.connection }
+    private var effectsStore: PhotoEffectsStore { presentation.effects }
+    private var gpsCoordinator: GPSCoordinator { presentation.gps }
+    private var directoryStore: DirectoryAccessStore { presentation.directory }
+    private var transferQueue: TransferQueue { presentation.queue }
+
+    init(presentation: @autoclosure @escaping () -> RootPresentationModel = RootPresentationModel()) {
+        _presentation = StateObject(wrappedValue: presentation())
+    }
     @AppStorage("theme_mode") private var themeMode = "SYSTEM"
     @AppStorage("app_language") private var appLanguage = "system"
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
@@ -112,10 +183,10 @@ struct RootView: View {
     @State private var workspaceEntered = false
     @State private var monitorPresented = false
 
-    private var workspaceSession: CameraSession? { connectionModel.cameraSession ?? establishedSession }
-    private var workspaceConnected: Bool { workspaceSession != nil && connectionModel.cameraSession === workspaceSession }
+    private var workspaceSession: CameraSession? { presentation.snapshot.session ?? establishedSession }
+    private var workspaceConnected: Bool { workspaceSession != nil && presentation.snapshot.session === workspaceSession }
     private var restoredPresentationMode: CameraPresentationMode {
-        connectionModel.state.presentationMode(transport: nil, isSTA: false)
+        presentation.snapshot.mode
     }
 
     private var locale: Locale { AppLocalized.locale(for: appLanguage) }
@@ -124,7 +195,7 @@ struct RootView: View {
         guard let session = connectionModel.cameraSession else { return false }
         return !session.isUSB && session.wirelessMode == .ap
     }
-    @StateObject private var recordingSaveHint = PhotoListHintState()
+    @State private var recordingSaveHint = PhotoListHintState()
 
     private func presentRecordingSaveFailure() {
         guard !monitorPresented, let message = RemoteRecordingSaveNotice.shared.take() else { return }
@@ -132,6 +203,9 @@ struct RootView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = didRender?()
+        #endif
         Group {
             if workspaceSession != nil || workspaceEntered {
                 let session = workspaceSession
@@ -173,6 +247,11 @@ struct RootView: View {
                                        celebrationStart: connectionCelebrationStart)
             }
         }
+        // Restoring used to block RootView's initialization. Keep the same
+        // startup admission boundary while letting its existing scene render;
+        // no action may mistake an unresolved saved folder for an unset one.
+        .allowsHitTesting(!presentation.snapshot.directoryRestoring)
+        .accessibilityHidden(presentation.snapshot.directoryRestoring)
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
         .overlay { PhotoListHint(state: recordingSaveHint) }
@@ -190,7 +269,7 @@ struct RootView: View {
                 })
             }
             RemoteView(session: session, presentationMode: restoredPresentationMode,
-                       recordingDirectory: directoryStore.directoryURL,
+                       recordingDirectory: presentation.snapshot.directoryURL,
                        isSessionConnected: workspaceConnected,
                        onRetrySTA: { connectionModel.retrySTAConnection() },
                        onPreparing: { await listModel?.pauseForRemote() },
@@ -202,10 +281,11 @@ struct RootView: View {
                        })
                 .id(session.map(ObjectIdentifier.init))
         }
-        .task(id: effectsStore.isEnabled) {
-            await transferQueue.setPhotoEffectsEnabled(effectsStore.isEnabled)
+        .task(id: presentation.snapshot.effectsEnabled) {
+            await transferQueue.setPhotoEffectsEnabled(presentation.snapshot.effectsEnabled)
         }
         .task {
+            do { try await directoryStore.waitUntilRestored() } catch { return }
             connectionModel.startUSBDiscovery()
             connectionModel.startWiFiDiscovery()
             connectionModel.setGPSConnectionPaused(gpsCoordinator.state.enabled)
@@ -226,7 +306,7 @@ struct RootView: View {
                 connectionCelebrationActive = true
             }
         }
-        .onChange(of: connectionModel.cameraSession.map { ObjectIdentifier($0) }) { sessionID in
+        .onChange(of: presentation.snapshot.session.map { ObjectIdentifier($0) }) { sessionID in
             let connected = sessionID != nil
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
             if connected {
@@ -284,7 +364,7 @@ struct RootView: View {
         .onChange(of: connectionModel.cameraSession?.wirelessMode) { _ in
             gpsCoordinator.setAPModeBlocked(gpsBlockedByAPCamera)
         }
-        .onChange(of: gpsCoordinator.state.enabled) { enabled in
+        .onChange(of: presentation.snapshot.gpsEnabled) { enabled in
             connectionModel.setGPSConnectionPaused(enabled)
         }
         .onChange(of: scenePhase) { phase in
@@ -294,7 +374,7 @@ struct RootView: View {
                 StoreKitPurchaseStore.shared.refresh()
             }
         }
-        .task(id: connectionModel.cameraSession != nil) {
+        .task(id: presentation.snapshot.session != nil) {
             guard connectionModel.cameraSession != nil, connectionCelebrationActive else { return }
             do {
                 try await Task.sleep(nanoseconds: UInt64(CONNECTION_HANDOFF_FADE_START_MS) * 1_000_000)
@@ -357,28 +437,61 @@ struct WorkspaceDiscoveryState {
 
 /// Android HomeWorkspacePager equivalent. The workbench is the page below the
 /// connection page; it is never presented as a sheet or a modal route.
-private struct HomeWorkspacePagerIOS: View {
-    @ObservedObject var connection: ConnectionViewModel
+@MainActor
+final class HomeWorkspacePresentation: ObservableObject {
+    @Published private(set) var releaseLocalWorkspace: Bool
+    @Published private(set) var gpsEnabled: Bool
+    private var observations = Set<AnyCancellable>()
+
+    init(connection: ConnectionViewModel, gps: GPSCoordinator) {
+        releaseLocalWorkspace = Self.shouldRelease(state: connection.state, hasSession: connection.cameraSession != nil)
+        gpsEnabled = gps.state.enabled
+        Publishers.CombineLatest(connection.$state, connection.$cameraSession)
+            .map { Self.shouldRelease(state: $0.0, hasSession: $0.1 != nil) }.removeDuplicates()
+            .sink { [weak self] value in
+                if self?.releaseLocalWorkspace != value { self?.releaseLocalWorkspace = value }
+            }.store(in: &observations)
+        gps.$state.map(\.enabled).removeDuplicates().sink { [weak self] value in
+            if self?.gpsEnabled != value { self?.gpsEnabled = value }
+        }.store(in: &observations)
+    }
+
+    static func shouldRelease(state: ConnectionState, hasSession: Bool) -> Bool {
+        if hasSession { return true }
+        if case .connecting = state.usbPhase { return true }
+        switch state.wifiPhase {
+        case .discovering, .pairing, .connecting, .reconnecting: return true
+        default: return false
+        }
+    }
+}
+
+struct HomeWorkspacePagerIOS: View {
+    #if DEBUG
+    var didRender: (() -> Void)?
+    #endif
+    let connection: ConnectionViewModel
     let effectsStore: PhotoEffectsStore
-    @ObservedObject var gpsCoordinator: GPSCoordinator
+    let gpsCoordinator: GPSCoordinator
     let directory: DirectoryAccessStore
     let celebrationStart: Date?
+    @StateObject private var presentation: HomeWorkspacePresentation
     @State private var page = 0
     @State private var discovery = WorkspaceDiscoveryState()
     @State private var gpsPanelPresented = false
 
-    private var localWorkspaceMustRelease: Bool {
-        if connection.cameraSession != nil { return true }
-        if case .connecting = connection.state.usbPhase { return true }
-        switch connection.state.wifiPhase {
-        case .discovering, .pairing, .connecting, .reconnecting:
-            return true
-        default:
-            return false
-        }
+    init(connection: ConnectionViewModel, effectsStore: PhotoEffectsStore,
+         gpsCoordinator: GPSCoordinator, directory: DirectoryAccessStore, celebrationStart: Date?) {
+        self.connection = connection; self.effectsStore = effectsStore
+        self.gpsCoordinator = gpsCoordinator; self.directory = directory
+        self.celebrationStart = celebrationStart
+        _presentation = StateObject(wrappedValue: HomeWorkspacePresentation(connection: connection, gps: gpsCoordinator))
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = didRender?()
+        #endif
         GeometryReader { proxy in
             VerticalWorkspacePager(
                 selection: $page,
@@ -386,7 +499,7 @@ private struct HomeWorkspacePagerIOS: View {
                 // GPS session, while still allowing a page already below to
                 // return upward to the connection page.
                 isScrollEnabled: workspacePagerUserScrollEnabled(
-                    gpsEnabled: gpsCoordinator.state.enabled,
+                    gpsEnabled: presentation.gpsEnabled,
                     currentPage: page,
                     gpsPanelPresented: gpsPanelPresented
                 ),
@@ -413,7 +526,7 @@ private struct HomeWorkspacePagerIOS: View {
                 },
                 secondPage: {
                 Group {
-                    if localWorkspaceMustRelease {
+                    if presentation.releaseLocalWorkspace {
                         ZTransferColors.background
                     } else {
                         LocalPhotoEffectsView(onNavigateUp: {

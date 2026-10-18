@@ -63,5 +63,9 @@ final class RemoteEntryIntroController: ObservableObject {
         expanded = false
     }
 
-    func collapse() { expanded = false }
+    func collapse() {
+        // Native scroll observation calls this repeatedly while dragging and
+        // decelerating. Publishing false again would rebuild the entire list.
+        if expanded { expanded = false }
+    }
 }

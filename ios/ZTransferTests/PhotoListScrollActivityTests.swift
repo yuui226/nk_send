@@ -286,3 +286,48 @@ final class PhotoListScrollActivityTests: XCTestCase {
         XCTAssertEqual(activity, [true, false, true], "Detached observers must not deliver late stop callbacks")
     }
 }
+
+extension PhotoListScrollActivityTests {
+    func testLargeGridProjectionReusesEntriesAndRebuildsForEveryStructuralInput() {
+        let files = (1...5000).map { id in
+            CameraFile(id: UInt32(id), storageID: 1, format: 0x3801, size: 1,
+                       fileName: "\(id).JPG", captureDate: "20261018T120000", isProtected: false)
+        }
+        let sections = stride(from: 0, to: files.count, by: 100).map { i in
+            PhotoDaySection(day: "day\(i)", files: Array(files[i..<i + 100]))
+        }
+        let bursts = Dictionary(uniqueKeysWithValues: files.map { ($0.id, "burst\($0.id / 10)") })
+        let cache = PhotoListGridCache()
+        let initial = PhotoListScrollLayout(sections: sections, burstIDs: bursts, collapseBursts: true,
+            expandedBursts: [], collapsedDays: [], collapsingDay: nil, keepCount: 2)
+        let first = cache.snapshot(for: initial)
+        for _ in 0..<120 {
+            let next = cache.snapshot(for: initial)
+            XCTAssertEqual(next.indices, first.indices)
+        }
+        XCTAssertEqual(cache.buildCount, 1)
+        for collapsed in [false, true] {
+            for expanded in [Set<String>(), ["burst1", "burst2"]] {
+                for days in [Set<String>(), ["day0"]] {
+                    for collapsing in [nil, "day0"] as [String?] {
+                        let input = PhotoListScrollLayout(sections: sections, burstIDs: bursts,
+                            collapseBursts: collapsed, expandedBursts: expanded, collapsedDays: days,
+                            collapsingDay: collapsing, keepCount: 2)
+                        let snapshot = cache.snapshot(for: input)
+                        XCTAssertEqual(snapshot.indices, input.indices())
+                        for section in sections {
+                            XCTAssertEqual(snapshot.entriesByDay[section.day],
+                                photoGridEntries(section.files, burstIDByFile: bursts,
+                                                 collapse: collapsed, expandedIDs: expanded))
+                        }
+                    }
+                }
+            }
+        }
+        let changed = PhotoListScrollLayout(sections: Array(sections.dropFirst()), burstIDs: [:], collapseBursts: true,
+            expandedBursts: [], collapsedDays: [], collapsingDay: nil, keepCount: 0)
+        let snapshot = cache.snapshot(for: changed)
+        XCTAssertNil(snapshot.entriesByDay["day0"])
+        XCTAssertEqual(snapshot.indices, changed.indices())
+    }
+}

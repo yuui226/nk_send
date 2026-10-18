@@ -1,6 +1,202 @@
 import SwiftUI
 import XCTest
+import Combine
 @testable import ZTransfer
+
+@MainActor
+final class CommonHintPerformanceTests: XCTestCase {
+    func testIdenticalHintExtendsDeadlineWithoutRedundantPublicationsAndStopCancelsIt() async throws {
+        let state = PhotoListHintState()
+        var updates = 0
+        let subscription = state.objectWillChange.sink { updates += 1 }
+        defer { subscription.cancel(); state.stop() }
+        state.show("相机未连接", duration: .milliseconds(250))
+        XCTAssertEqual(updates, 2)
+        try await Task.sleep(for: .milliseconds(50))
+        let before = updates
+        for _ in 0..<120 { state.show("相机未连接", duration: .milliseconds(500)) }
+        XCTAssertEqual(updates, before)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(state.visible, "The old deadline must not dismiss a renewed message")
+        for _ in 0..<100 {
+            if !state.visible { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(state.visible)
+        XCTAssertEqual(state.text, "相机未连接", "Outgoing content remains available throughout the fade")
+        state.show("请选择目录", duration: .milliseconds(100))
+        state.stop()
+        let stopped = updates
+        for _ in 0..<120 { state.stop() }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(updates, stopped)
+        XCTAssertFalse(state.visible)
+    }
+
+    func testStableHintInputsDoNotPublishAndBothClocksReleaseWithoutStop() {
+        let photo = PhotoListHintAnimator(), remote = RemoteMonitorHintAnimator()
+        var photoUpdates = 0, remoteUpdates = 0
+        let first = photo.objectWillChange.sink { photoUpdates += 1 }
+        let second = remote.objectWillChange.sink { remoteUpdates += 1 }
+        defer { first.cancel(); second.cancel(); photo.stop(); remote.stop() }
+        for _ in 0..<120 {
+            photo.setVisible(false, height: 40); photo.advanceFrame(0)
+            remote.setVisible(false); remote.advanceFrame(0)
+        }
+        XCTAssertEqual(photoUpdates, 0); XCTAssertEqual(remoteUpdates, 0)
+        photo.setVisible(true, height: 40); remote.setVisible(true)
+        photo.advanceFrame(0); remote.advanceFrame(0)
+        photo.advanceFrame(80_000_000); remote.advanceFrame(80_000_000)
+        let photoCount = photoUpdates, remoteCount = remoteUpdates
+        for _ in 0..<120 {
+            photo.setVisible(true, height: 40); photo.advanceFrame(80_000_000)
+            remote.setVisible(true); remote.advanceFrame(80_000_000)
+        }
+        XCTAssertEqual(photoUpdates, photoCount); XCTAssertEqual(remoteUpdates, remoteCount)
+        photo.advanceFrame(2_000_000_000); remote.advanceFrame(2_000_000_000)
+        XCTAssertEqual(photo.frame.alpha, 1); XCTAssertEqual(remote.frame.alpha, 1)
+        photo.stop(); remote.stop()
+        XCTAssertEqual(photo.frame, .init()); XCTAssertEqual(remote.frame, .init())
+        photo.setVisible(true, height: 40); remote.setVisible(true)
+        XCTAssertTrue(photo.motion.isRunning); XCTAssertTrue(remote.motion.alpha.isRunning)
+        var departingPhoto: PhotoListHintAnimator? = PhotoListHintAnimator()
+        var departingRemote: RemoteMonitorHintAnimator? = RemoteMonitorHintAnimator()
+        weak var weakPhoto = departingPhoto, weakRemote = departingRemote
+        departingPhoto?.setVisible(true, height: 40); departingRemote?.setVisible(true)
+        departingPhoto = nil; departingRemote = nil
+        XCTAssertNil(weakPhoto); XCTAssertNil(weakRemote)
+    }
+
+    private final class Probe {
+        var parents = 0, contents = 0
+        func parent() { parents += 1 }
+        func content() { contents += 1 }
+    }
+    private struct Fixture: View {
+        let animator: PhotoListHintAnimator
+        let probe: Probe
+        var body: some View {
+            let _ = probe.parent()
+            PhotoListHintPresentation(visible: true, animator: animator) {
+                StableContent(probe: probe)
+            }.frame(width: 240, height: 100).background(Color.white)
+        }
+    }
+    private struct StableContent: View {
+        let probe: Probe
+        var body: some View {
+            let _ = probe.content()
+            Color(.sRGB, red: 1, green: 0, blue: 0).frame(width: 120, height: 40)
+        }
+    }
+    private struct FullHintFixture: View {
+        let state: PhotoListHintState
+        let probe: Probe
+        var body: some View {
+            let _ = probe.parent()
+            PhotoListHint(state: state)
+                .frame(width: 320, height: 240).background(Color.white)
+        }
+    }
+
+    func testProductionHintMeasuresBeforeEntryKeepsParentStableAndCanShowAgain() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 240)
+        let state = PhotoListHintState(), probe = Probe()
+        let host = UIHostingController(rootView: FullHintFixture(state: state, probe: probe).ignoresSafeArea())
+        window.rootViewController = host; window.isHidden = false
+        defer { state.stop(); window.isHidden = true }
+        host.view.frame = window.bounds; host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        func snapshot() throws -> Data {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
+                XCTAssertTrue(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true))
+            }
+            return try XCTUnwrap(image.pngData())
+        }
+        let empty = try snapshot(), parents = probe.parents
+        state.show("相机未连接", duration: .seconds(5))
+        try await Task.sleep(for: .milliseconds(600))
+        let shown = try snapshot()
+        XCTAssertNotEqual(shown, empty, "The production text/measurement/shadow path must actually appear")
+        XCTAssertEqual(probe.parents, parents)
+        state.stop()
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(try snapshot(), empty)
+        state.show("相机未连接", duration: .seconds(5))
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(try snapshot(), shown)
+        XCTAssertEqual(probe.parents, parents)
+    }
+
+    func testActualHintFramesMoveOnlyPresentationAndLeaveParentAndContentStable() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 240, height: 100)
+        let animator = PhotoListHintAnimator(), probe = Probe()
+        let host = UIHostingController(rootView: Fixture(animator: animator, probe: probe).ignoresSafeArea())
+        window.rootViewController = host; window.isHidden = false
+        defer { animator.stop(); window.isHidden = true }
+        host.view.frame = window.bounds; host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(80))
+        let parents = probe.parents, contents = probe.contents
+        animator.setVisible(true, height: 40)
+        for _ in 0..<100 {
+            if !animator.motion.isRunning { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(animator.frame.alpha, 1); XCTAssertEqual(animator.frame.offset, 0)
+        XCTAssertEqual(probe.parents, parents); XCTAssertEqual(probe.contents, contents)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
+            XCTAssertTrue(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true))
+        }
+        let cg = try XCTUnwrap(image.cgImage)
+        var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let reds = stride(from: 0, to: bytes.count, by: 4).filter { bytes[$0] > 250 && bytes[$0 + 1] < 5 && bytes[$0 + 2] < 5 }
+        try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-p31-hint.png"))
+        // Capture UIKit at the same screen scale; its downsampling filters the
+        // boundary pixels, so compare against an identically hosted static box.
+        let reference = UIHostingController(rootView: StableContent(probe: Probe())
+            .frame(width: 240, height: 100).background(Color.white).ignoresSafeArea())
+        let referenceWindow = UIWindow(windowScene: scene)
+        referenceWindow.frame = window.frame; referenceWindow.rootViewController = reference
+        referenceWindow.isHidden = false
+        defer { referenceWindow.isHidden = true }
+        reference.view.frame = referenceWindow.bounds; reference.view.layoutIfNeeded()
+        let referenceImage = UIGraphicsImageRenderer(size: reference.view.bounds.size, format: format).image { _ in
+            XCTAssertTrue(reference.view.drawHierarchy(in: reference.view.bounds, afterScreenUpdates: true))
+        }
+        let referenceCG = try XCTUnwrap(referenceImage.cgImage)
+        var referenceBytes = [UInt8](repeating: 0, count: bytes.count)
+        let referenceContext = try XCTUnwrap(CGContext(data: &referenceBytes, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+        referenceContext.draw(referenceCG, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        XCTAssertGreaterThan(reds.count, 4_000)
+        XCTAssertEqual(bytes, referenceBytes, "Real animation must finish at the exact static rendering")
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Hint presentation after real display frames"; attachment.lifetime = .keepAlways; add(attachment)
+        var exitFrames: [String] = []
+        let frames = animator.$frame.sink { exitFrames.append("\(ProcessInfo.processInfo.systemUptime):\($0.alpha)") }
+        defer { frames.cancel() }
+        animator.setVisible(false, height: 40)
+        for _ in 0..<100 {
+            if animator.frame.alpha > 0 && animator.frame.alpha < 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let alpha = animator.frame.alpha
+        XCTAssertTrue(alpha > 0 && alpha < 1, "Expected a real intermediate exit frame, got \(alpha); frames=\(exitFrames)")
+        animator.setVisible(true, height: 40)
+        XCTAssertEqual(animator.frame.alpha, alpha)
+    }
+}
 
 final class RemoteMonitorHintMotionTests: XCTestCase {
     func testNormalFadeKeepsContentUntil200msExitAndRepeatedVisibleDoesNotRestart() {

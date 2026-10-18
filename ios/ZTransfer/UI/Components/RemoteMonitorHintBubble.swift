@@ -29,20 +29,42 @@ struct RemoteMonitorHintMotion {
 }
 
 @MainActor
-final class RemoteMonitorHintAnimator: NSObject, ObservableObject {
-    @Published private(set) var motion = RemoteMonitorHintMotion()
+final class RemoteMonitorHintAnimator: ObservableObject {
+    struct Frame: Equatable {
+        var retained = false
+        var alpha: Float = 0
+    }
+    private(set) var motion = RemoteMonitorHintMotion()
+    @Published private(set) var frame = Frame()
     private var link: CADisplayLink?
     func setVisible(_ visible: Bool) {
-        motion.setVisible(visible)
+        if motion.visible != visible {
+            motion.setVisible(visible)
+            publish()
+        }
         guard motion.alpha.isRunning, link == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let link = CADisplayLink(target: DisplayLinkTarget(owner: self), selector: #selector(DisplayLinkTarget.frame(_:)))
         self.link = link; link.add(to: .main, forMode: .common)
     }
-    @objc private func frame(_ link: CADisplayLink) {
-        motion.advance(Int64(link.timestamp * 1_000_000_000))
-        if !motion.alpha.isRunning { link.invalidate(); self.link = nil }
+    func advanceFrame(_ nanos: Int64) {
+        motion.advance(nanos)
+        publish()
+        if !motion.alpha.isRunning { link?.invalidate(); link = nil }
     }
-    func stop() { link?.invalidate(); link = nil; motion = .init() }
+    private func publish() {
+        let next = Frame(retained: motion.retained, alpha: motion.alpha.value)
+        if next != frame { frame = next }
+    }
+    func stop() { link?.invalidate(); link = nil; motion = .init(); publish() }
+
+    @MainActor private final class DisplayLinkTarget: NSObject {
+        weak var owner: RemoteMonitorHintAnimator?
+        init(owner: RemoteMonitorHintAnimator) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.advanceFrame(Int64(link.timestamp * 1_000_000_000))
+        }
+    }
 }
 
 struct RemoteMonitorHintAnchorKey: PreferenceKey {
@@ -210,10 +232,10 @@ struct RemoteMonitorHintOverlay: View {
     @Environment(\.displayScale) private var density
     var body: some View {
         GeometryReader { proxy in
-            if let anchor, animator.motion.retained {
+            if let anchor, animator.frame.retained {
                 let rect = proxy[anchor]
                 RemoteMonitorHintBubble(text: text, compact: compact)
-                    .opacity(Double(animator.motion.alpha.value))
+                    .opacity(Double(animator.frame.alpha))
                     .frame(width: rect.width, height: rect.height)
                     .position(x: floor(rect.minX * density + 0.5) / density + rect.width / 2,
                               y: floor(rect.minY * density + 0.5) / density + rect.height / 2)

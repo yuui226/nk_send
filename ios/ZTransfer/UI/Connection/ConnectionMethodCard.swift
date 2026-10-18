@@ -155,12 +155,9 @@ struct ConnectionMethodCard: View {
     /// the surface underneath fades. The unselected card's badge fades with
     /// its card, matching Android's external 42dp flying container.
     private var celebrationLayer: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 120.0,
-                                paused: celebrationStart == nil)) { context in
+        ConnectionAnimationTimeline(start: celebrationStart, duration: 1.38) { elapsed in
             let values = ConnectionCelebrationValues(
-                elapsedMilliseconds: connectionCelebrationElapsed(
-                    start: celebrationStart, now: context.date
-                )
+                elapsedMilliseconds: elapsed
             )
             GeometryReader { _ in
                 let scene = connectionCelebrationEase(values.hero)
@@ -449,8 +446,7 @@ private struct ConnectionCardSurfaceTimeline<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 120.0, paused: start == nil)) { context in
-            let elapsed = connectionCelebrationElapsed(start: start, now: context.date)
+        ConnectionAnimationTimeline(start: start, duration: 0.62) { elapsed in
             let hero = CGFloat(min(1, max(0, elapsed / 620)))
             content.modifier(ConnectionCelebrationModifier(progress: hero))
         }

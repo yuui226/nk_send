@@ -49,11 +49,10 @@ struct RemoteLUTMetalView: UIViewRepresentable {
         return view
     }
     func updateUIView(_ view: MTKView, context: Context) {
-        context.coordinator.image = image
         context.coordinator.onPresented = onPresented
         context.coordinator.onUnavailable = onUnavailable
         context.coordinator.onFailure = onFailure
-        view.setNeedsDisplay()
+        context.coordinator.updateImage(image, in: view)
     }
     static func dismantleUIView(_ view: MTKView, coordinator: Coordinator) {
         coordinator.disposed = true
@@ -64,7 +63,7 @@ struct RemoteLUTMetalView: UIViewRepresentable {
         let device: MTLDevice?
         private let commandQueue: MTLCommandQueue?
         private let renderer: RemoteLUTMetalRenderer?
-        var image: CGImage
+        private(set) var image: CGImage
         let lut: CubeLUT
         var onPresented: @MainActor () -> Void
         var onUnavailable: @MainActor () -> Void
@@ -72,6 +71,7 @@ struct RemoteLUTMetalView: UIViewRepresentable {
         var disposed = false
         private var failed = false
         private var presentation = RemoteLUTPresentationGate()
+        private(set) var needsDisplay = true
 
         init(image: CGImage, lut: CubeLUT, onPresented: @escaping @MainActor () -> Void,
              onUnavailable: @escaping @MainActor () -> Void, onFailure: @escaping @MainActor (RemoteLUTRenderFailure) -> Void) {
@@ -86,10 +86,26 @@ struct RemoteLUTMetalView: UIViewRepresentable {
             renderer = selected.flatMap { try? RemoteLUTMetalRenderer(device: $0) }
         }
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            needsDisplay = true
             unavailable()
+            view.setNeedsDisplay()
+        }
+        func updateImage(_ next: CGImage, in view: MTKView) {
+            if image !== next {
+                image = next
+                needsDisplay = true
+            }
+            if needsDisplay { view.setNeedsDisplay() }
+        }
+        private func resumePendingDisplay(in view: MTKView?) {
+            // A frame may arrive while the previous drawable is in flight. Its
+            // earlier setNeedsDisplay can be consumed by the busy draw guard;
+            // schedule the latest image after completion even if no more arrive.
+            if !presentation.inFlight, needsDisplay { view?.setNeedsDisplay() }
         }
         func draw(in view: MTKView) {
-            guard !disposed, !failed, !presentation.inFlight else { return }
+            guard !disposed, !failed, !presentation.inFlight,
+                  needsDisplay || !presentation.isPresented else { return }
             guard let commandQueue, let renderer else { fail(.gpu); return }
             guard let drawable = view.currentDrawable else { unavailable(); return }
             guard let buffer = commandQueue.makeCommandBuffer() else { fail(.gpu); return }
@@ -97,15 +113,17 @@ struct RemoteLUTMetalView: UIViewRepresentable {
                 try renderer.setLUT(lut)
                 try renderer.encode(image: image, into: drawable.texture, commandBuffer: buffer)
                 guard let frame = presentation.begin() else { return }
+                needsDisplay = false
                 #if !targetEnvironment(simulator)
-                drawable.addPresentedHandler { [weak self] _ in
+                drawable.addPresentedHandler { [weak self, weak view] _ in
                     Task { @MainActor in
                         guard let self, !self.disposed, !self.failed, self.presentation.accepts(frame) else { return }
                         if self.presentation.present(frame) { self.onPresented() }
+                        self.resumePendingDisplay(in: view)
                     }
                 }
                 #endif
-                buffer.addCompletedHandler { [weak self] command in
+                buffer.addCompletedHandler { [weak self, weak view] command in
                     let succeeded = command.status == .completed
                     Task { @MainActor in
                         guard let self, !self.disposed, !self.failed, self.presentation.accepts(frame) else { return }
@@ -117,6 +135,7 @@ struct RemoteLUTMetalView: UIViewRepresentable {
                         ready = self.presentation.present(frame) || ready
                         #endif
                         if ready { self.onPresented() }
+                        self.resumePendingDisplay(in: view)
                     }
                 }
                 buffer.present(drawable)
@@ -126,6 +145,7 @@ struct RemoteLUTMetalView: UIViewRepresentable {
             }
         }
         private func unavailable() {
+            needsDisplay = true
             presentation.invalidate()
             Task { @MainActor [weak self] in
                 guard let self, !self.disposed else { return }

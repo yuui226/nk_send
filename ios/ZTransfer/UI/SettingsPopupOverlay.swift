@@ -14,27 +14,17 @@ struct SettingsPopupOverlay: View {
     let onEffectPreviewRequested: () -> Void
     let onPhotoLoadingRangeChanged: (PhotoLoadingRange) -> Void
 
-    init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
-         directory: DirectoryAccessStore, anchor: Anchor<CGRect>,
-         requestTransferDirectoryAttention: Bool = false, effectPreviewSource: UIImage? = nil,
-         effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {}) {
-        _isPresented = isPresented
-        self.showPhotoEffectsEntry = showPhotoEffectsEntry
-        self.effectsStore = effectsStore
-        self.directory = directory
-        self.anchor = anchor
-        self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
-        self.effectPreviewSource = effectPreviewSource
-        self.effectPreviewExif = effectPreviewExif
-        self.onEffectPreviewRequested = onEffectPreviewRequested
-        self.onPhotoLoadingRangeChanged = { _ in }
-    }
+    let onDismissed: () -> Void
+    let effectsOnly: Bool
+    let effectPreviewInitialRotationQuarterTurns: Int
 
     init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
          directory: DirectoryAccessStore, anchor: Anchor<CGRect>,
          requestTransferDirectoryAttention: Bool = false, effectPreviewSource: UIImage? = nil,
          effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {},
-         onPhotoLoadingRangeChanged: @escaping (PhotoLoadingRange) -> Void) {
+         onPhotoLoadingRangeChanged: @escaping (PhotoLoadingRange) -> Void = { _ in },
+         effectsOnly: Bool = false, effectPreviewInitialRotationQuarterTurns: Int = 0,
+         onDismissed: @escaping () -> Void = {}) {
         _isPresented = isPresented
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.effectsStore = effectsStore
@@ -45,10 +35,14 @@ struct SettingsPopupOverlay: View {
         self.effectPreviewExif = effectPreviewExif
         self.onEffectPreviewRequested = onEffectPreviewRequested
         self.onPhotoLoadingRangeChanged = onPhotoLoadingRangeChanged
+        self.onDismissed = onDismissed
+        self.effectsOnly = effectsOnly
+        self.effectPreviewInitialRotationQuarterTurns = effectPreviewInitialRotationQuarterTurns
     }
 
     @State private var effectsDraft = PhotoEffectsSettings()
-    @StateObject private var photoLUTEditor = PhotoLUTEditorState(role: .camera)
+    @StateObject private var photoLUTLifetime = PhotoLUTEditorLifetime(role: .camera)
+    private var photoLUTEditor: PhotoLUTEditorState { photoLUTLifetime.editor }
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
     @State private var contentHeight: CGFloat?
@@ -56,7 +50,9 @@ struct SettingsPopupOverlay: View {
     @State private var showingPremium = false
     @State private var backdropProgress = SettingsBackdropProgress()
     @State private var panelVisible = false
-    @StateObject private var fireworks = PremiumFireworks()
+    // The overlay observes launch membership. Its owner only retains lifetime,
+    // so starting/finishing a firework does not rebuild the settings/editor tree.
+    @State private var fireworks = PremiumFireworks()
 
     var body: some View {
         GeometryReader { proxy in
@@ -64,11 +60,11 @@ struct SettingsPopupOverlay: View {
             let localAnchor = proxy[anchor]
             let panelLeft: CGFloat = 12
             let panelWidth = max(1, proxy.size.width - panelLeft * 2)
-            let panelTop = localAnchor.maxY + 8
+            let panelTop = effectsOnly ? proxy.safeAreaInsets.top + 8 : localAnchor.maxY + 8
             // The geometry already excludes the bottom safe area (including
             // the keyboard). Add a gap only when no system inset provides one;
             // subtracting that inset again would collapse the editor twice.
-            let bottomGap: CGFloat = proxy.safeAreaInsets.bottom > 0 ? 0 : 12
+            let bottomGap: CGFloat = effectsOnly ? proxy.safeAreaInsets.bottom + 8 : (proxy.safeAreaInsets.bottom > 0 ? 0 : 12)
             let availableHeight = max(1, proxy.size.height - panelTop - bottomGap)
             let sourceAnchor = GeniePopupMotion.attachmentAnchor(
                 for: localAnchor, cornerRadius: 22
@@ -89,6 +85,8 @@ struct SettingsPopupOverlay: View {
                         dismissalRequested: !isPresented,
                         photoLUTEditor: photoLUTEditor,
                         popupMotionPaused: !isPresented || showingPremium,
+                        effectsOnly: effectsOnly,
+                        effectPreviewInitialRotationQuarterTurns: effectPreviewInitialRotationQuarterTurns,
                         requestTransferDirectoryAttention: requestTransferDirectoryAttention,
                         effectPreviewSource: effectPreviewSource,
                         effectPreviewExif: effectPreviewExif,
@@ -113,6 +111,9 @@ struct SettingsPopupOverlay: View {
                     anchorWidth: sourceAnchor.width / max(1, panelWidth),
                     anchorGap: max(0, -sourceAnchor.maxY),
                     fillsProposedSize: true,
+                    gentleMotion: effectsOnly,
+                    gentleAnchorY: min(1, max(0, (localAnchor.midY - panelTop) / availableHeight)),
+                    onSettled: { if $0 == 0 && !isPresented { onDismissed() } },
                     onProgress: {
                         backdropProgress.value = $0
                         if panelVisible != ($0 > 0) { panelVisible = $0 > 0 }
@@ -121,13 +122,11 @@ struct SettingsPopupOverlay: View {
                 .frame(width: panelWidth)
                 // Natural whole-page height, capped by the available viewport.
                 // The provisional full height is never used by the animation.
-                .frame(height: min(contentHeight ?? availableHeight, availableHeight), alignment: .top)
+                .frame(height: effectsOnly ? availableHeight : min(contentHeight ?? availableHeight, availableHeight), alignment: .top)
                 .padding(.horizontal, panelLeft)
                 .padding(.top, panelTop)
                 .allowsHitTesting(!showingPremium)
-                if photoLUTEditor.showingChooser {
-                    PhotoLUTChooserOverlay(editor: photoLUTEditor, draft: $effectsDraft)
-                }
+                PhotoLUTChooserPresentation(editor: photoLUTEditor, draft: $effectsDraft)
                 if filterChooser.isPresented {
                     PhotoFilterChooserOverlay(draft: $effectsDraft, state: $filterChooser,
                         onFilterSelected: { photoLUTEditor.cancelPending() })
@@ -140,14 +139,10 @@ struct SettingsPopupOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(isPresented || panelVisible)
+            .onAppear { if isPresented { beginPresentation() } }
             .onChange(of: isPresented) { presented in
                 if presented {
-                    photoLUTEditor.resetForPresentation()
-                    effectsDraft = effectsStore.beginDraft()
-                    filterChooser = PhotoFilterChooserState()
-                    effectsHint = nil
-                    contentHeight = nil
-                    presentationID &+= 1
+                    beginPresentation()
                 } else {
                     showingPremium = false
                     photoLUTEditor.close()
@@ -165,6 +160,16 @@ struct SettingsPopupOverlay: View {
         .onChange(of: effectsDraft) { value in
             effectsStore.persistEditorPreferences(from: value)
         }
+    }
+
+    private func beginPresentation() {
+        photoLUTEditor.resetForPresentation()
+        let stored = effectsStore.beginDraft()
+        effectsDraft = effectsOnly ? photoEffectsEditorDraft(stored) : stored
+        filterChooser = PhotoFilterChooserState()
+        effectsHint = nil
+        contentHeight = nil
+        presentationID &+= 1
     }
 
     private func close() {

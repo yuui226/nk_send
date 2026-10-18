@@ -44,6 +44,10 @@ final class RemoteLUTFolderAccess {
     struct PreparedFolder: Sendable {
         let bookmark: Data
         let files: [RemoteLUTFile]
+        let root: URL?
+        init(bookmark: Data, files: [RemoteLUTFile], root: URL? = nil) {
+            self.bookmark = bookmark; self.files = files; self.root = root
+        }
     }
 
     /// Prepare without replacing the live grant/bookmark. The caller publishes
@@ -61,7 +65,7 @@ final class RemoteLUTFolderAccess {
         } catch { throw folderFailure(error, isRoot: true) }
         let files = try scanContents(folder, fileExtension: fileExtension, checkCancelled: checkCancelled)
         try checkCancelled()
-        return PreparedFolder(bookmark: bookmark, files: files)
+        return PreparedFolder(bookmark: bookmark, files: files, root: folder)
     }
 
     static func resolveBookmark(_ data: Data?) -> URL? {
@@ -87,15 +91,29 @@ final class RemoteLUTFolderAccess {
         defaults.set(prepared.bookmark, forKey: bookmarkKey)
     }
 
-    func resolve() -> URL? {
-        guard let data = defaults.data(forKey: bookmarkKey) else { return nil }
+    struct ResolvedFolder: Sendable {
+        let url: URL
+        let bookmark: Data
+    }
+
+    static func prepareResolution(_ data: Data?) -> ResolvedFolder? {
+        guard let data else { return nil }
         var stale = false
         guard let url = try? URL(resolvingBookmarkData: data, options: Self.resolveSecurityScope,
                                  relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
-        if stale, let refreshed = try? url.bookmarkData(options: Self.securityScope,
-                                                         includingResourceValuesForKeys: nil,
-                                                         relativeTo: nil) { defaults.set(refreshed, forKey: bookmarkKey) }
-        return url
+        let refreshed = stale ? (try? url.bookmarkData(options: Self.securityScope,
+            includingResourceValuesForKeys: nil, relativeTo: nil)) : nil
+        return ResolvedFolder(url: url, bookmark: refreshed ?? data)
+    }
+
+    func commitResolution(_ resolved: ResolvedFolder) {
+        if bookmarkData != resolved.bookmark { defaults.set(resolved.bookmark, forKey: bookmarkKey) }
+    }
+
+    func resolve() -> URL? {
+        guard let resolved = Self.prepareResolution(bookmarkData) else { return nil }
+        commitResolution(resolved)
+        return resolved.url
     }
 
     func scan() throws -> [RemoteLUTFile] {
@@ -389,8 +407,8 @@ final class LUTRequestController: ObservableObject {
         ticket = nil
         timer?.cancel()
         timer = nil
-        loading = false
-        pendingIdentifier = nil
+        if loading { loading = false }
+        if pendingIdentifier != nil { pendingIdentifier = nil }
     }
 
     func submit<Value: Sendable>(
@@ -401,16 +419,16 @@ final class LUTRequestController: ObservableObject {
         deliver: @escaping @MainActor (Result<Value, Error>) -> Void
     ) {
         cancel()
-        pendingIdentifier = selectionIdentifier
-        loading = true
+        if pendingIdentifier != selectionIdentifier { pendingIdentifier = selectionIdentifier }
+        if !loading { loading = true }
         let id = generation
         ticket = queue.submit(action: action) { [weak self] result in
             guard let self, self.generation == id else { return }
             self.timer?.cancel()
             self.timer = nil
             self.ticket = nil
-            self.loading = false
-            self.pendingIdentifier = nil
+            if self.loading { self.loading = false }
+            if self.pendingIdentifier != nil { self.pendingIdentifier = nil }
             deliver(result)
         }
         timer = Task { [weak self] in

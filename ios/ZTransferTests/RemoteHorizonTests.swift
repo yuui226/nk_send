@@ -2,6 +2,34 @@ import XCTest
 @testable import ZTransfer
 
 final class RemoteHorizonTests: XCTestCase {
+    @MainActor
+    func testDuplicateInputsDoNotPublishAndStoppedAnimationCanResume() async throws {
+        let clock = RemoteHorizonClock(roll: 10, pitch: 0)
+        var updates = 0
+        let observation = clock.objectWillChange.sink { updates += 1 }
+        defer { observation.cancel(); clock.stop() }
+        clock.update(roll: 0, pitch: 0)
+        XCTAssertEqual(updates, 1)
+        for _ in 0..<120 { clock.update(roll: 0, pitch: 0) }
+        XCTAssertEqual(updates, 1, "Repeated input must not mutate the published animation")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(clock.state.isRunning)
+        XCTAssertEqual(clock.state.angle.value, 0)
+        XCTAssertEqual(clock.state.tint.value, RemoteHorizonAnimation.green)
+        let settled = updates
+        for _ in 0..<120 { clock.update(roll: 0, pitch: 0) }
+        XCTAssertEqual(updates, settled)
+        clock.update(roll: 5, pitch: 10)
+        clock.stop()
+        let stopped = updates
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(updates, stopped)
+        clock.update(roll: 5, pitch: 10) // Reappear with the same target must re-arm the clock.
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(clock.state.angle.value, 5)
+        XCTAssertFalse(clock.state.isRunning)
+    }
+
     // The two horizon cases from Android ViewfinderViewportTest.
     func testPortraitDirectionAndAlignmentTargets() {
         for axis in [Float(-180), -90, 0, 90, 180, 270] {

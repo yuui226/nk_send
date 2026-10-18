@@ -180,14 +180,14 @@ struct PhotoListScrollLayout: Equatable {
     let collapsingDay: String?
     let keepCount: Int
 
-    func indices() -> [String: Int] {
+    func indices(entriesByDay: [String: [PhotoGridEntry]]? = nil) -> [String: Int] {
         var result: [String: Int] = [:]
         var index = 0
         for section in sections {
             result["header_\(section.day)"] = index
             index += 1
             guard !collapsedDays.contains(section.day) || collapsingDay == section.day else { continue }
-            let entries = photoGridEntries(section.files, burstIDByFile: burstIDs,
+            let entries = entriesByDay?[section.day] ?? photoGridEntries(section.files, burstIDByFile: burstIDs,
                                            collapse: collapseBursts, expandedIDs: expandedBursts)
             let count = collapsingDay == section.day ? min(keepCount, entries.count) : entries.count
             for entry in entries.prefix(count) {
@@ -196,6 +196,33 @@ struct PhotoListScrollLayout: Equatable {
             }
         }
         return result
+    }
+}
+
+/// Grid cells and scroll indices share one catalog/configuration projection.
+/// Geometry, transfer animation frames and popup state reuse these arrays.
+final class PhotoListGridCache {
+    struct Snapshot {
+        let entriesByDay: [String: [PhotoGridEntry]]
+        let indices: [String: Int]
+    }
+    private var input: PhotoListScrollLayout?
+    private var value = Snapshot(entriesByDay: [:], indices: [:])
+    #if DEBUG
+    private(set) var buildCount = 0
+    #endif
+    func snapshot(for layout: PhotoListScrollLayout) -> Snapshot {
+        guard input != layout else { return value }
+        let entries = Dictionary(uniqueKeysWithValues: layout.sections.map { section in
+            (section.day, photoGridEntries(section.files, burstIDByFile: layout.burstIDs,
+                                          collapse: layout.collapseBursts, expandedIDs: layout.expandedBursts))
+        })
+        value = Snapshot(entriesByDay: entries, indices: layout.indices(entriesByDay: entries))
+        input = layout
+        #if DEBUG
+        buildCount += 1
+        #endif
+        return value
     }
 }
 
@@ -254,9 +281,7 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var previewAnchor: CGRect?
     @State private var previewExpandedBurstIDs: Set<String> = []
     @Environment(\.displayScale) private var displayScale
-    private var remoteEntryAtTop: Bool {
-        PhotoListScrollActivity.isAtTop(offset: -photoListScrollOffset, scale: displayScale)
-    }
+    @State private var remoteEntryAtTop = true
     private var storageMode: TransferStorageMode {
         TransferStorageMode.restored(
             from: storageModeRaw.isEmpty ? nil : storageModeRaw,
@@ -281,6 +306,8 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var previousBurstGroups: [BurstPhotoGroup] = []
     @State private var collapsedDays: Set<String> = []
     @State private var presentedSections: [PhotoDaySection] = []
+    @State private var gridCache = PhotoListGridCache()
+    @State private var previewProjection = PhotoPreviewProjectionCache()
     @State private var presentedCameraFiles: [CameraFile] = []
     @State private var cameraRemovalAffectedDays: Set<String> = []
     @State private var cameraRemovalTask: Task<Void, Never>?
@@ -298,9 +325,7 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var activeBurstReflowID: String?
     @State private var burstAnimationTask: Task<Void, Never>?
     @StateObject private var backTop = PhotoListBackTopController()
-    @State private var scrollItemIndices: [String: Int] = [:]
-    @State private var scrollItemFrames: [String: CGRect] = [:]
-    @State private var photoListScrollOffset: CGFloat = 0
+    @State private var scrollGeometry = PhotoListGeometryCache()
     @State private var internalShowingRemote = false
     private let remotePresentation: Binding<Bool>?
     private var showingRemote: Bool {
@@ -317,8 +342,8 @@ private struct PhotoListSessionTaskID: Equatable {
     @SceneStorage("camera_workspace_intro_handled") private var remoteIntroHandled = false
     @State private var showingSettings = false
     @State private var transferDirectoryAttention = false
-    @StateObject private var signalAttention = PhotoListSignalAttentionClock()
-    @StateObject private var admissionHint = PhotoListHintState()
+    @State private var signalAttention = PhotoListSignalAttentionClock()
+    @State private var admissionHint = PhotoListHintState()
     @State private var effectPreviewSource: UIImage?
     @State private var effectPreviewExif: PhotoExif?
     @State private var effectPreviewGeneration = 0
@@ -327,10 +352,8 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var effectPreviewAttemptKey: String?
     @State private var effectPreviewLoadingKey: String?
     @State private var topControlsVisible = true
-    @State private var cellBounds: [PhotoListCellID: CGRect] = [:]
     @State private var photoListViewportBounds: CGRect = .zero
     @State private var photoListTopControlsBounds: CGRect = .zero
-    @State private var sectionEnqueueBounds: [String: CGRect] = [:]
     @State private var queueTargetBounds: CGRect = .zero
     @State private var queueFlights: [PhotoListQueueFlight] = []
     @State private var queueFlightTasks: [UUID: Task<Void, Never>] = [:]
@@ -368,12 +391,14 @@ private struct PhotoListSessionTaskID: Equatable {
     }
 
     private func updateBackTopPosition() {
-        backTop.update(frames: scrollItemFrames, indices: scrollItemIndices,
+        backTop.update(frames: scrollGeometry.scrollItemFrames, indices: scrollGeometry.scrollItemIndices,
                        viewport: photoListVisibleViewport, scale: displayScale)
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        let layout = scrollLayout
+        let grid = gridCache.snapshot(for: layout)
+        return ZStack(alignment: .top) {
             ZTransferColors.background.ignoresSafeArea()
             if showingQueue {
                 TransferQueueView(model: queueModel, session: session, directory: directoryStore,
@@ -423,12 +448,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     // entire camera scan completes.
                     if !presentedSections.isEmpty {
                             ForEach(presentedSections) { section in
-                                let allEntries = photoGridEntries(
-                                    section.files,
-                                    burstIDByFile: model.burstIDByFile,
-                                    collapse: collapseBurstPhotos,
-                                    expandedIDs: expandedBurstIDs
-                                )
+                                let allEntries = grid.entriesByDay[section.day] ?? []
                                 let collapsingThis = collapsingDay == section.day
                                 let displayedEntries = collapsingThis
                                     ? Array(allEntries.prefix(collapsingDayKeepCount))
@@ -464,7 +484,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
                                 Spacer(minLength: 0)
                                 Button {
-                                    enqueueSection(section.files, source: sectionEnqueueBounds[section.day])
+                                    enqueueSection(section.files, source: scrollGeometry.sectionEnqueueBounds[section.day])
                                 } label: {
                                     Image(systemName: "plus").font(.system(size: 20, weight: .medium))
                                         .foregroundStyle(ZTransferColors.accentBlue)
@@ -504,7 +524,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                                                    onExpand: { toggleBurst(group.id) },
                                                                    onEnqueue: {
                                                                        enqueueSection(group.files, source: visiblePhotoListCellBounds(
-                                                                        .burstEnqueue(group.id), bounds: cellBounds, viewport: photoListVisibleViewport))
+                                                                        .burstEnqueue(group.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
                                                                    }, onPreview: {
                                                                        guard !burstAnimationBusy, collapsingDay == nil,
                                                                              cameraRemovalAffectedDays.isEmpty else { return }
@@ -608,10 +628,10 @@ private struct PhotoListSessionTaskID: Equatable {
                             case let .failed(message):
                                 Text(message).zTransferText(size: ZTransferMetrics.body).padding()
                             case .loaded:
-                                PhotoListEmptyState(filterActive: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled),
-                                                    showNoMatchMessage: model.filter.showsNoMatchMessage(ratingLoading: model.ratingScan.loading),
-                                                    usb: (presentationMode == .usb),
-                                                    onClearFilter: model.clearFilter)
+                                PhotoListRatingEmptyState(progress: model.ratingProgress, filter: model.filter,
+                                                          protectionAvailable: model.protectionFilteringEnabled,
+                                                          usb: presentationMode == .usb,
+                                                          onClearFilter: model.clearFilter)
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 150)
                             }
@@ -634,16 +654,16 @@ private struct PhotoListSessionTaskID: Equatable {
                 }
                 .onAppear {
                     photoListScrollProxy = reader
-                    scrollItemIndices = scrollLayout.indices()
+                    scrollGeometry.scrollItemIndices = grid.indices
                     updateBackTopPosition()
                 }
                 .onDisappear { backTop.reset() }
-                .onChange(of: scrollLayout) { layout in
-                    scrollItemIndices = layout.indices()
+                .onChange(of: layout) { layout in
+                    scrollGeometry.scrollItemIndices = gridCache.snapshot(for: layout).indices
                     updateBackTopPosition()
                 }
                 .onPreferenceChange(PhotoListScrollItemsPreferenceKey.self) { frames in
-                    scrollItemFrames = frames
+                    scrollGeometry.scrollItemFrames = frames
                     updateBackTopPosition()
                 }
                 .onPreferenceChange(PhotoListViewportPreferenceKey.self) { bounds in
@@ -654,17 +674,19 @@ private struct PhotoListSessionTaskID: Equatable {
                     // Lazy-grid cells unregister when they leave composition.
                     // Keep only the current preference snapshot so preview
                     // dismissal never flies toward a stale off-screen frame.
-                    cellBounds = bounds
+                    scrollGeometry.cellBounds = bounds
                 }
                 .onPreferenceChange(PhotoListSectionEnqueueBoundsPreferenceKey.self) { bounds in
-                    sectionEnqueueBounds = bounds
+                    scrollGeometry.sectionEnqueueBounds = bounds
                 }
                 .onPreferenceChange(PhotoDateGridHeightPreferenceKey.self) { heights in
-                    for (day, height) in heights where height > 0 { dateGridHeights[day] = height }
+                    for (day, height) in heights where height > 0 && dateGridHeights[day] != height { dateGridHeights[day] = height }
                 }
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
-                    photoListScrollOffset = value
-                    if PhotoListScrollActivity.isAtTop(offset: -value, scale: displayScale) {
+                    scrollGeometry.photoListScrollOffset = value
+                    let atTop = PhotoListScrollActivity.isAtTop(offset: -value, scale: displayScale)
+                    if remoteEntryAtTop != atTop { remoteEntryAtTop = atTop }
+                    if atTop {
                         remoteExpandedAwayFromTop = false
                         backTop.finishReturn()
                     }
@@ -939,7 +961,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     availableStorageSlots: model.availableStorageSlots.count > 1
                         ? model.availableStorageSlots : [],
                     suggestedDate: model.latestKnownCaptureDay,
-                    ratingProgress: model.ratingScan,
+                    ratingProgress: model.ratingProgress,
                     showProtectionFilter: model.protectionFilteringEnabled,
                     onChange: applyFilter
                 )
@@ -949,8 +971,8 @@ private struct PhotoListSessionTaskID: Equatable {
 
     @ViewBuilder private var previewOverlay: some View {
         if let session {
-        let files = model.sections.flatMap(\.files)
-        PhotoPreviewView(session: session, queueModel: queueModel, files: files,
+        let files = model.previewFiles
+        PhotoPreviewView(session: session, queueModel: queueModel, files: files, projection: previewProjection,
                          effectsStore: effectsStore, effectsDirectory: directoryStore,
                          isSessionConnected: isSessionConnected,
                          burstIDByFile: model.burstIDByFile,
@@ -1051,7 +1073,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                 wirelessMode: presentationMode == .sta ? .sta : .ap,
                                 connected: isSessionConnected,
                                 height: photoListTopControlsHeight)
-                .scaleEffect(CGFloat(signalAttention.motion.scale.value))
+                .modifier(PhotoListSignalAttention(clock: signalAttention))
 
             let filterPalette = zTransferButtonAccentPalette(
                 skin: .init(storedValue: skinPreset),
@@ -1108,8 +1130,10 @@ private struct PhotoListSessionTaskID: Equatable {
             }
 
             Spacer(minLength: 0)
-            queueTopRightControls
         }
+        // The trailing cluster is anchored to the viewport, not negotiated
+        // with the intrinsic widths of the leading controls in one HStack.
+        .overlay(alignment: .topTrailing) { queueTopRightControls }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
         .frame(height: photoListTopControlsHeight, alignment: .top)
@@ -1149,7 +1173,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                 wirelessMode: presentationMode == .sta ? .sta : .ap,
                                 connected: isSessionConnected,
                                 height: photoListTopControlsHeight)
-                .scaleEffect(CGFloat(signalAttention.motion.scale.value))
+                .modifier(PhotoListSignalAttention(clock: signalAttention))
         }
         .transition(.opacity)
     }
@@ -1515,7 +1539,7 @@ private struct PhotoListSessionTaskID: Equatable {
 
         let viewport = photoListVisibleViewport
         let lastVisible = entries.indices.last { index in
-            visiblePhotoListCellBounds(entries[index].cellID, bounds: cellBounds, viewport: viewport) != nil
+            visiblePhotoListCellBounds(entries[index].cellID, bounds: scrollGeometry.cellBounds, viewport: viewport) != nil
         }
         guard let lastVisible else {
             collapsedDays.insert(section.day)
@@ -1585,13 +1609,13 @@ private struct PhotoListSessionTaskID: Equatable {
         if !deferTransferStart {
             ZTransferHaptics.shared.tick()
             startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
-                .photo(file.id), bounds: cellBounds, viewport: photoListVisibleViewport))
+                .photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
             queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL,
                                storageMode: storageMode, effects: effectsStore.settings)
         } else {
             ZTransferHaptics.shared.tick()
             startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
-                .photo(file.id), bounds: cellBounds, viewport: photoListVisibleViewport))
+                .photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
             queueModel.enqueue(file, storageMode: storageMode, effects: effectsStore.settings)
         }
     }
@@ -1632,7 +1656,7 @@ private struct PhotoListSessionTaskID: Equatable {
         // The underlying grid is reconciled when returning to a member.
         previewExpandedBurstIDs = expandedBurstIDs
         if let expandingBurst { previewExpandedBurstIDs.insert(expandingBurst) }
-        previewAnchor = visiblePhotoListCellBounds(anchor, bounds: cellBounds, viewport: photoListVisibleViewport)
+        previewAnchor = visiblePhotoListCellBounds(anchor, bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport)
         selectedFile = file
     }
 
@@ -1673,7 +1697,7 @@ private struct PhotoListSessionTaskID: Equatable {
         }
 
         let viewport = photoListVisibleViewport
-        let initialFrame = cellBounds[.photo(file.id)]
+        let initialFrame = scrollGeometry.cellBounds[.photo(file.id)]
         if let initialFrame,
            photoFrameIsFullyVisible(initialFrame, in: viewport) {
             return initialFrame
@@ -1692,7 +1716,7 @@ private struct PhotoListSessionTaskID: Equatable {
             entry.scrollID == "photo_\(file.id)"
         }) else { return nil }
         let visibleIndex = visibleEntries.firstIndex { entry in
-            cellBounds[entry.cellID]?.intersects(viewport) == true
+            scrollGeometry.cellBounds[entry.cellID]?.intersects(viewport) == true
         } ?? targetIndex
         let runway = min(max(thumbnailColumns, 1), 4) * 3
         if abs(targetIndex - visibleIndex) > runway * 2 {
@@ -1719,7 +1743,7 @@ private struct PhotoListSessionTaskID: Equatable {
         }
         try? await Task.sleep(nanoseconds: 280_000_000)
         await Task.yield()
-        guard let frame = cellBounds[.photo(file.id)],
+        guard let frame = scrollGeometry.cellBounds[.photo(file.id)],
               photoFrameIsFullyVisible(frame, in: photoListVisibleViewport) else { return nil }
         return frame
     }
@@ -1773,8 +1797,8 @@ private struct PhotoListSessionTaskID: Equatable {
             image: topImage
         ))
         queueFlightTasks[id] = Task { @MainActor in
-            // startedAt is immutable and 32 ms in the future. The live
-            // TimelineView crosses that boundary by itself, so the animation
+            // startedAt is immutable and 32 ms in the future.
+            // The native display clock crosses that boundary, so the animation
             // no longer depends on a second parent-state mutation being
             // delivered after insertion.
             try? await Task.sleep(nanoseconds: UInt64((0.032 + packDuration + 0.56) * 1_000_000_000))
@@ -1812,7 +1836,7 @@ private struct PhotoListSessionTaskID: Equatable {
         let viewport = photoListVisibleViewport
         var candidates: [PhotoListQueuePackSoul] = []
         for file in files {
-            guard let bounds = visiblePhotoListCellBounds(.photo(file.id), bounds: cellBounds,
+            guard let bounds = visiblePhotoListCellBounds(.photo(file.id), bounds: scrollGeometry.cellBounds,
                                                           viewport: viewport) else { continue }
             candidates.append(PhotoListQueuePackSoul(
                 bounds: bounds,
@@ -1857,129 +1881,47 @@ private struct PhotoListQueueFlightView: View {
     let target: CGRect
 
     var body: some View {
-        // Keep the short-lived timeline running from insertion. Its immutable
-        // start time is 32 ms in the future, so the first two frames are the
-        // transparent preroll and no follow-up state write is required.
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
-            let elapsed = timeline.date.timeIntervalSince(flight.startedAt)
-            let packLinear = flight.packDuration > 0
-                ? min(max(elapsed / flight.packDuration, 0), 1)
-                : 1
-            let linear = min(max((elapsed - flight.packDuration) / 0.56, 0), 1)
-            let layers = flight.count > 1 ? min(flight.count, 3) : 1
-            ZStack {
-                ForEach(Array(flight.packs.enumerated()), id: \.offset) { index, soul in
-                    PhotoListQueuePackSoulView(
-                        soul: soul,
-                        index: index,
-                        count: flight.packs.count,
-                        progress: CGFloat(packLinear),
-                        destination: CGPoint(
-                            x: flight.from.midX - viewport.minX,
-                            y: flight.from.midY - viewport.minY
-                        ),
-                        viewport: viewport
-                    )
-                }
-                ForEach(0..<layers, id: \.self) { layer in
-                    Group {
-                        if layer == layers - 1, let image = flight.image {
-                            Image(uiImage: image).resizable().scaledToFill()
-                        } else {
-                            ZTransferColors.accentBlue.opacity(layer == layers - 1 ? 1 : 0.48)
-                                .overlay {
-                                    if layer == layers - 1 {
-                                        Image(systemName: "photo").foregroundStyle(.white)
-                                    }
-                                }
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(.white.opacity(0.8), lineWidth: 1))
-                    .offset(
-                        x: layers > 1 ? CGFloat(layer - 1) * 3 : 0,
-                        y: layers > 1 ? CGFloat(1 - layer) * 2 : 0
-                    )
-                    .rotationEffect(.degrees(layers > 1 ? Double(layer - 1) * 9 : 0))
-                }
-            }
-            .modifier(QueueFlightArc(
-                progress: queueFlightEasedProgress(CGFloat(linear)),
-                start: CGPoint(x: flight.from.midX - viewport.minX, y: flight.from.midY - viewport.minY),
-                end: CGPoint(x: target.maxX - 28 - viewport.minX, y: target.midY - viewport.minY)
-            ))
+        let count = flight.count > 1 ? 3 : 1
+        let destination = CGPoint(x: flight.from.midX - viewport.minX, y: flight.from.midY - viewport.minY)
+        let end = CGPoint(x: target.maxX - 28 - viewport.minX, y: target.midY - viewport.minY)
+        let packSpecs = flight.packs.map {
+            QueueFlightLayerSpec(image: $0.image, size: $0.bounds.size, corner: 8,
+                                 background: UIColor(ZTransferColors.accentBlue.opacity(0.4)))
         }
-    }
-}
-
-private struct PhotoListQueuePackSoulView: View {
-    let soul: PhotoListQueuePackSoul
-    let index: Int
-    let count: Int
-    let progress: CGFloat
-    let destination: CGPoint
-    let viewport: CGRect
-
-    var body: some View {
-        let step: CGFloat = count <= 1 ? 0 : 0.28 / CGFloat(count - 1)
-        let span: CGFloat = count <= 1 ? 1 : 0.72
-        let t = min(max((progress - CGFloat(index) * step) / span, 0), 1)
-        let rise = min(t / 0.3, 1)
-        let suckLinear = min(max((t - 0.3) / 0.7, 0), 1)
-        let suck = suckLinear * suckLinear
-        let start = CGPoint(
-            x: soul.bounds.midX - viewport.minX,
-            y: soul.bounds.midY - viewport.minY - 10 * rise
-        )
-        let point = CGPoint(
-            x: start.x + (destination.x - start.x) * suck,
-            y: start.y + (destination.y - start.y) * suck
-        )
-        let scale = (1 + 0.06 * rise) * (1 - 0.85 * suck)
-        Group {
-            if let image = soul.image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                ZTransferColors.accentBlue.opacity(0.4)
-            }
+        let cardSpecs = (0..<count).map { layer in
+            QueueFlightLayerSpec(image: layer == count - 1 ? flight.image : nil,
+                size: CGSize(width: 44, height: 44), corner: 9,
+                borderAlpha: layer == count - 1 && flight.image != nil ? 0.8 : 0,
+                background: UIColor(ZTransferColors.accentBlue.opacity(layer == count - 1 ? 1 : 0.35)),
+                showsPlaceholder: layer == count - 1 && flight.image == nil)
         }
-        .frame(width: soul.bounds.width, height: soul.bounds.height)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .scaleEffect(scale)
-        .opacity(t <= 0 || t >= 1 ? 0 : 0.75 * rise * (1 - 0.3 * suck))
-        .position(point)
-    }
-}
-
-/// Interpolate the path parameter, not the resulting endpoints. This recomputes
-/// the Bezier position on each animation frame and never rotates the viewport.
-@preconcurrency
-private struct QueueFlightArc: AnimatableModifier {
-    var progress: CGFloat
-    let start: CGPoint
-    let end: CGPoint
-
-    nonisolated var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        let t = min(max(progress, 0), 1)
-        let dx = abs(end.x - start.x)
-        let lift = min(90, 36 + 0.35 * dx)
-        let control = CGPoint(
-            x: (start.x + end.x) / 2 - 52 * (1 - min(dx / 160, 1)),
-            y: max(min(start.y, end.y) - lift, (48 - start.y - end.y) / 2)
-        )
-        let point = quadraticBezier(start: start, control: control, end: end, t: t)
-        let appear = min(t / 0.12, 1)
-        let scale = (0.7 + 0.3 * appear) * (1 - 0.62 * t)
-        return content
-            .scaleEffect(scale)
-            .opacity(appear * (t > 0.94 ? (1 - t) / 0.06 : 1))
-            .position(point)
+        QueueFlightLayers(startedAt: flight.startedAt, duration: flight.packDuration + 0.56,
+                          specs: packSpecs + cardSpecs) { elapsed in
+            let pack = flight.packDuration > 0 ? CGFloat(min(max(elapsed / flight.packDuration, 0), 1)) : 1
+            let t = queueFlightEasedProgress(CGFloat(min(max((elapsed - flight.packDuration) / 0.56, 0), 1)))
+            var frames = flight.packs.enumerated().map { index, soul in
+                let step: CGFloat = flight.packs.count <= 1 ? 0 : 0.28 / CGFloat(flight.packs.count - 1)
+                let span: CGFloat = flight.packs.count <= 1 ? 1 : 0.72
+                let p = min(max((pack - CGFloat(index) * step) / span, 0), 1)
+                let rise = min(p / 0.3, 1)
+                let suck = pow(min(max((p - 0.3) / 0.7, 0), 1), 2)
+                let start = CGPoint(x: soul.bounds.midX - viewport.minX, y: soul.bounds.midY - viewport.minY - 10 * rise)
+                return QueueFlightLayerFrame(center: CGPoint(x: start.x + (destination.x - start.x) * suck,
+                    y: start.y + (destination.y - start.y) * suck), scale: (1 + 0.06 * rise) * (1 - 0.85 * suck),
+                    alpha: p <= 0 || p >= 1 ? 0 : 0.75 * rise * (1 - 0.3 * suck))
+            }
+            let point = queueFlightPoint(progress: t, start: destination, end: end)
+            let appear = min(t / 0.12, 1)
+            let scale = (0.7 + 0.3 * appear) * (1 - 0.62 * t)
+            for layer in 0..<count {
+                let dx: CGFloat = count > 1 ? CGFloat(layer - 1) * 3 : 0
+                let dy: CGFloat = count > 1 ? CGFloat(1 - layer) * 2 : 0
+                frames.append(QueueFlightLayerFrame(center: CGPoint(x: point.x + dx * scale, y: point.y + dy * scale),
+                    scale: scale, rotation: count > 1 ? CGFloat(layer - 1) * 9 : 0,
+                    alpha: appear * (t > 0.94 ? (1 - t) / 0.06 : 1)))
+            }
+            return frames
+        }
     }
 }
 
@@ -1996,6 +1938,7 @@ private func quadraticBezier(start: CGPoint, control: CGPoint, end: CGPoint, t: 
 /// committing an implicit animation transaction.
 func queueFlightEasedProgress(_ linear: CGFloat) -> CGFloat {
     let x = min(max(linear, 0), 1)
+    if x == 0 || x == 1 { return x }
     var lower: CGFloat = 0
     var upper: CGFloat = 1
     for _ in 0..<12 {
@@ -2236,6 +2179,22 @@ private func formatDateHeader(_ raw: String) -> String {
     return "\(chars[0])\(chars[1])\(chars[2])\(chars[3])-\(chars[4])\(chars[5])-\(chars[6])\(chars[7])"
 }
 
+/// Only the empty-state sentence depends on rating progress. A loader with no
+/// concrete star must never invalidate the list's grid or preview input.
+struct PhotoListRatingEmptyState: View {
+    @ObservedObject var progress: PhotoRatingProgress
+    let filter: PhotoFilterState
+    let protectionAvailable: Bool
+    let usb: Bool
+    let onClearFilter: () -> Void
+
+    var body: some View {
+        PhotoListEmptyState(filterActive: filter.isActive(protectionAvailable: protectionAvailable),
+                            showNoMatchMessage: filter.showsNoMatchMessage(ratingLoading: progress.snapshot.loading),
+                            usb: usb, onClearFilter: onClearFilter)
+    }
+}
+
 private struct PhotoListEmptyState: View {
     let filterActive: Bool
     let showNoMatchMessage: Bool
@@ -2244,14 +2203,10 @@ private struct PhotoListEmptyState: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            TimelineView(.animation) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: 1.6) / 1.6
-                let alpha = 0.35 + 0.25 * ((sin(phase * 2 * .pi) + 1) / 2)
-                Image(systemName: filterActive ? "line.3.horizontal.decrease.circle" : "folder")
-                    .font(.system(size: 48, weight: .regular))
-                    .foregroundStyle(ZTransferColors.secondaryText.opacity(alpha))
-            }
+            Image(systemName: filterActive ? "line.3.horizontal.decrease.circle" : "folder")
+                .font(.system(size: 48, weight: .regular))
+                .foregroundStyle(ZTransferColors.secondaryText)
+                .modifier(PhotoListEmptyPulse())
             if !filterActive || showNoMatchMessage {
                 Text(AppLocalized.resource(filterActive ? "no_photos_match_filter" : "no_photos_on_camera"))
                     .zTransferText(size: ZTransferMetrics.body)
@@ -2278,7 +2233,7 @@ private struct PhotoListScrollOffsetKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-private enum PhotoGridEntry: Identifiable {
+enum PhotoGridEntry: Identifiable, Equatable {
     case photo(CameraFile)
     case burst(BurstPhotoGroup)
     var id: String {
@@ -2296,7 +2251,7 @@ private enum PhotoGridEntry: Identifiable {
     }
 }
 
-private func photoGridEntries(_ files: [CameraFile], burstIDByFile: [UInt32: String], collapse: Bool = true,
+func photoGridEntries(_ files: [CameraFile], burstIDByFile: [UInt32: String], collapse: Bool = true,
                               expandedIDs: Set<String> = []) -> [PhotoGridEntry] {
     guard collapse else { return files.map(PhotoGridEntry.photo) }
     let visibleGroups = Dictionary(grouping: files.compactMap { file -> (String, CameraFile)? in
@@ -2380,7 +2335,7 @@ private struct QueuePillContentTransition<Content: View>: View {
 
 
 @MainActor
-private final class QueuePillWidthClock: ObservableObject {
+final class QueuePillWidthClock: ObservableObject {
     @Published private(set) var motion = QueueTopPillWidthMotion()
     private var link: CADisplayLink?
 
@@ -2411,17 +2366,37 @@ private final class QueuePillWidthClock: ObservableObject {
     func reset() { stop(); motion = .init() }
 }
 
+/// Only the occupancy layout follows the width spring. The button, material,
+/// retained content transitions and hidden measurement stay outside its body.
+struct QueuePillAnimatedSize<Content: View>: View {
+    @ObservedObject var clock: QueuePillWidthClock
+    @ViewBuilder var content: Content
+    var body: some View {
+        QueuePillSizingLayout(displayedWidth: clock.motion.width, height: photoListTopControlsHeight) { content }
+    }
+}
+
 private struct LiveQueuePill: View {
     let snapshot: TransferQueueSnapshot
     @ObservedObject var progressModel: TransferQueueProgressViewModel
     let heldCount: Int
     let onClick: () -> Void
+    private let taskSummary: QueuePillTaskSummary
+
+    init(snapshot: TransferQueueSnapshot, progressModel: TransferQueueProgressViewModel,
+         heldCount: Int, onClick: @escaping () -> Void) {
+        self.snapshot = snapshot; self.progressModel = progressModel
+        self.heldCount = heldCount; self.onClick = onClick
+        // Structural snapshots change the summary; 200ms speed samples don't.
+        taskSummary = .init(items: snapshot.items)
+    }
 
     var body: some View {
         QueuePill(
             snapshot: snapshot,
             activeProgress: progressModel.activeProgress,
             heldCount: heldCount,
+            taskSummary: taskSummary,
             onClick: onClick
         )
     }
@@ -2436,12 +2411,12 @@ struct QueuePill: View {
     private let taskSummary: QueuePillTaskSummary
 
     init(snapshot: TransferQueueSnapshot, activeProgress: TransferActiveProgress?,
-         heldCount: Int, onClick: @escaping () -> Void = {}) {
+         heldCount: Int, taskSummary: QueuePillTaskSummary? = nil, onClick: @escaping () -> Void = {}) {
         self.onClick = onClick
         self.snapshot = snapshot
         self.activeProgress = activeProgress
         self.heldCount = heldCount
-        taskSummary = .init(items: snapshot.items)
+        self.taskSummary = taskSummary ?? .init(items: snapshot.items)
     }
 
     @State private var showDoneLabel = false
@@ -2452,7 +2427,7 @@ struct QueuePill: View {
     @State private var retainedProgressSeed = "queue"
     @State private var doneTask: Task<Void, Never>?
     @State private var widthMeasurement = QueuePillWidthMeasurement()
-    @StateObject private var widthClock = QueuePillWidthClock()
+    @State private var widthClock = QueuePillWidthClock()
     // Retain ownership without subscribing the whole capsule to display frames.
     // Only TransferProgressContent observes this animator.
     @State private var progressAnimator = SmoothTransferProgressAnimator()
@@ -2555,52 +2530,48 @@ struct QueuePill: View {
     }
 
     var body: some View {
-        QueuePillSizingLayout(displayedWidth: widthClock.motion.width, height: photoListTopControlsHeight) {
-            ZStack {
-                if visualMode == .icon {
-                    Button(action: onClick) {
-                        pillContent(for: presentation)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        QueuePillAnimatedSize(clock: widthClock) {
+            // Keep one button and one transition owner across icon/count/
+            // paused/generating/Done. Branching the whole button discarded
+            // outgoing layers and restarted child clocks on mode changes.
+            Button(action: onClick) {
+                ZStack(alignment: .trailing) {
+                    if usesNativeLiquidGlass {
+                        ZTransferButtonMaterialSurface(
+                            skin: .liquidGlass, cornerRadius: 22,
+                            textureSeed: 0x2A71E001)
+                    } else if visualMode == .icon {
+                        ZTransferButtonMaterialSurface(
+                            skin: .init(storedValue: skinPreset), cornerRadius: 22,
+                            textureSeed: 0x2A71E001)
+                    } else {
+                        ZTransferGlassSurface(cornerRadius: 22, kind: .button)
                     }
-                    .buttonStyle(ZTransferGlassButtonStyle(
-                        cornerRadius: 22, textureSeed: 0x2A71E001))
-                } else {
-                    Button(action: onClick) {
-                        ZStack(alignment: .trailing) {
-                            if usesNativeLiquidGlass {
-                                ZTransferButtonMaterialSurface(
-                                    skin: .liquidGlass, cornerRadius: 22,
-                                    textureSeed: 0x2A71E001)
-                            } else {
-                                ZTransferGlassSurface(cornerRadius: 22, kind: .button)
-                            }
-                            if !allDone || completionFillVisible {
-                                TransferProgressContent(animator: progressAnimator) { value in
-                                    LiquidTransferProgressSurface(
-                                        progress: value,
-                                        seed: progressInput.key,
-                                        isCapsule: true,
-                                        waveEligible: activeItem != nil || completionFillVisible)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                }
-                            }
-                            QueuePillContentTransition(presentation: presentation) { displayed in
-                                pillContent(for: displayed)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        .frame(height: photoListTopControlsHeight, alignment: .trailing)
-                        .compositingGroup()
-                        .clipShape(Capsule())
-                        .overlay {
-                            if !usesNativeLiquidGlass {
-                                Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
-                            }
+                    if visualMode != .icon && (!allDone || completionFillVisible) {
+                        TransferProgressContent(animator: progressAnimator) { value in
+                            LiquidTransferProgressSurface(
+                                progress: value,
+                                seed: progressInput.key,
+                                isCapsule: true,
+                                waveEligible: activeItem != nil || completionFillVisible)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
-                    .buttonStyle(QueuePillButtonStyle())
+                    QueuePillContentTransition(presentation: presentation) { displayed in
+                        pillContent(for: displayed)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(height: photoListTopControlsHeight, alignment: .trailing)
+                .compositingGroup()
+                .clipShape(Capsule())
+                .overlay {
+                    if !usesNativeLiquidGlass && visualMode != .icon {
+                        Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
+                    }
                 }
             }
+            .buttonStyle(QueuePillButtonStyle())
             .frame(height: photoListTopControlsHeight)
 
             measurementContent(for: visualMode)
@@ -2795,19 +2766,21 @@ struct QueuePill: View {
 /// The first child draws the capsule; the hidden second child supplies its
 /// unbounded natural width. First layout therefore needs no guessed width.
 /// Later layouts propose only the animated viewport to the visible surface.
-private struct QueuePillSizingLayout: Layout {
+struct QueuePillSizingLayout: Layout {
     let displayedWidth: CGFloat?
     let height: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard subviews.count == 2 else { return .zero }
         let natural = subviews[1].sizeThatFits(.unspecified)
-        return CGSize(width: displayedWidth ?? natural.width, height: height)
+        let width = displayedWidth ?? natural.width
+        let available = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? width
+        return CGSize(width: min(width, available), height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 2 else { return }
-        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+        subviews[0].place(at: CGPoint(x: bounds.maxX, y: bounds.minY), anchor: .topTrailing,
                           proposal: ProposedViewSize(bounds.size))
         let natural = subviews[1].sizeThatFits(.unspecified)
         subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
@@ -2826,13 +2799,19 @@ private struct QueuePillMeasuredWidthPreferenceKey: PreferenceKey {
 }
 
 @MainActor
-private final class QueuePillCountClock: ObservableObject {
+final class QueuePillCountClock: ObservableObject {
     @Published private(set) var motion: QueuePillCountMotion?
     private var count: Int
     private var heightPixels: Int?
     private var density: CGFloat = 1
     private var link: CADisplayLink?
-    init(count: Int) { self.count = count }
+    init(count: Int) {
+        self.count = count
+        // labelLarge has a fixed 20pt line box. Start with a valid motion
+        // immediately; a missing Button-label preference must not turn every
+        // count update into the static fallback. Mount applies display scale.
+        measure(height: ZTransferTypography.labelLarge.lineHeight, scale: 1)
+    }
 
     @MainActor
     private final class FrameTarget: NSObject {
@@ -2872,15 +2851,9 @@ private final class QueuePillCountClock: ObservableObject {
     func unmount() { stop(); motion = nil; heightPixels = nil }
 }
 
-private struct QueuePillCountHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 private struct QueuePillRollingCount: View {
     let count: Int
     @StateObject private var clock: QueuePillCountClock
-    @State private var measuredHeight: CGFloat = 0
     @Environment(\.displayScale) private var displayScale
 
     init(count: Int) {
@@ -2894,11 +2867,7 @@ private struct QueuePillRollingCount: View {
         countText(count)
             .hidden()
             .accessibilityHidden(true)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(key: QueuePillCountHeightKey.self, value: proxy.size.height)
-                }
-            }
+            .frame(height: ZTransferTypography.labelLarge.lineHeight)
             .overlay {
                 ZStack {
                     if let motion = clock.motion {
@@ -2916,15 +2885,13 @@ private struct QueuePillRollingCount: View {
             .clipped()
             .fixedSize(horizontal: true, vertical: false)
             .transaction { $0.animation = nil }
-            .onPreferenceChange(QueuePillCountHeightKey.self) { height in
-                measuredHeight = height
-                clock.measure(height: height, scale: displayScale)
-            }
             .onChange(of: count) { clock.update($0) }
-            .onChange(of: displayScale) { clock.measure(height: measuredHeight, scale: $0) }
+            .onChange(of: displayScale) {
+                clock.measure(height: ZTransferTypography.labelLarge.lineHeight, scale: $0)
+            }
             .onAppear {
                 clock.update(count)
-                clock.measure(height: measuredHeight, scale: displayScale)
+                clock.measure(height: ZTransferTypography.labelLarge.lineHeight, scale: displayScale)
             }
             .onDisappear { clock.unmount() }
     }
@@ -3344,7 +3311,7 @@ private struct DebugPhotoProtectionPanel: View {
     let session: CameraSession?
     @State private var open = false
     @State private var busy = false
-    @State private var revision = 0
+    @State private var diagnosticLines: [String] = []
     @State private var copyNotice = false
     @State private var copyNoticeID = UUID()
 
@@ -3380,7 +3347,7 @@ private struct DebugPhotoProtectionPanel: View {
                                 }
                                 .accessibilityLabel("复制 Debug 日志")
                                 Button {
-                                    PhotoRatingDiagnostics.clear(); revision += 1
+                                    PhotoRatingDiagnostics.clear(); refreshDiagnosticLines()
                                 } label: {
                                     Image(systemName: "trash")
                                 }
@@ -3402,11 +3369,11 @@ private struct DebugPhotoProtectionPanel: View {
                                 }
                             }
                             ScrollView {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(Array(PhotoRatingDiagnostics.snapshot().split(separator: "\n").enumerated()), id: \.offset) { _, line in
-                                        Text(String(line))
+                                LazyVStack(alignment: .leading, spacing: 0) {
+                                    ForEach(diagnosticLines.indices, id: \.self) { index in
+                                        Text(diagnosticLines[index])
                                             .font(.system(size: 9, design: .monospaced))
-                                            .foregroundStyle(diagnosticColor(for: String(line)))
+                                            .foregroundStyle(diagnosticColor(for: diagnosticLines[index]))
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .textSelection(.enabled)
                                     }
@@ -3416,7 +3383,6 @@ private struct DebugPhotoProtectionPanel: View {
                                 .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
                             }
                             .frame(maxHeight: .infinity)
-                            .id(revision)
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, maxHeight: proxy.size.height * 0.82)
@@ -3437,6 +3403,7 @@ private struct DebugPhotoProtectionPanel: View {
                         }
                     } else {
                         Button {
+                            refreshDiagnosticLines()
                             open = true
                         } label: {
                             Label("诊断日志", systemImage: "timer")
@@ -3448,6 +3415,13 @@ private struct DebugPhotoProtectionPanel: View {
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
             }
+    }
+
+    private func refreshDiagnosticLines() {
+        // Android remembers these rows per open/logVersion. Busy/progress or
+        // copy-notice changes must not rescan the report or reset its scroll.
+        let next = PhotoRatingDiagnostics.snapshot().split(separator: "\n").map(String.init)
+        if diagnosticLines != next { diagnosticLines = next }
     }
 
     private func diagnosticColor(for line: String) -> Color {
@@ -3467,7 +3441,7 @@ private struct DebugPhotoProtectionPanel: View {
         Task {
             await session.probeProtectionHeaders(files: files)
             PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
-            await MainActor.run { busy = false; revision += 1 }
+            await MainActor.run { busy = false; refreshDiagnosticLines() }
         }
     }
 
@@ -3479,7 +3453,7 @@ private struct DebugPhotoProtectionPanel: View {
         Task {
             await session.probeRawRating(file: raw)
             PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
-            await MainActor.run { busy = false; revision += 1 }
+            await MainActor.run { busy = false; refreshDiagnosticLines() }
         }
     }
 
@@ -3490,7 +3464,7 @@ private struct DebugPhotoProtectionPanel: View {
         Task {
             await session.probeProtectionProperties(files: files)
             PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
-            await MainActor.run { busy = false; revision += 1 }
+            await MainActor.run { busy = false; refreshDiagnosticLines() }
         }
     }
 }
@@ -3623,3 +3597,157 @@ struct QueueTopPillPresentationHarness: View {
     }
 }
 #endif
+
+/// Geometry changes every scroll frame, but is consumed only by hit/flight/
+/// dismissal calculations. Keep current snapshots without invalidating the
+/// whole grid, regrouping every day and rebuilding the preview each frame.
+final class PhotoListGeometryCache {
+    var scrollItemIndices: [String: Int] = [:]
+    var scrollItemFrames: [String: CGRect] = [:]
+    var photoListScrollOffset: CGFloat = 0
+    var cellBounds: [PhotoListCellID: CGRect] = [:]
+    var sectionEnqueueBounds: [String: CGRect] = [:]
+}
+
+/// Android QueueFlightGhost/PreviewCropFlightGhost: immutable image layers,
+/// with only compositor properties updated by the frame clock. No SwiftUI
+/// Image construction, layout or image decoding on animation frames.
+struct QueueFlightLayerSpec {
+    let image: UIImage?
+    let size: CGSize
+    var corner: CGFloat = 0
+    var borderAlpha: CGFloat = 0
+    var background: UIColor = .clear
+    var aspectFill = true
+    var showsPlaceholder = false
+}
+
+struct QueueFlightLayerFrame {
+    var center: CGPoint
+    var scale: CGFloat = 1
+    var rotation: CGFloat = 0 // degrees
+    var alpha: CGFloat = 1
+}
+
+struct QueueFlightLayers: UIViewRepresentable {
+    let startedAt: Date
+    let duration: TimeInterval
+    let specs: [QueueFlightLayerSpec]
+    let frames: (TimeInterval) -> [QueueFlightLayerFrame]
+
+    func makeUIView(context: Context) -> QueueFlightLayerSurface { QueueFlightLayerSurface() }
+    func updateUIView(_ view: QueueFlightLayerSurface, context: Context) {
+        view.configure(startedAt: startedAt, duration: duration, specs: specs, frames: frames)
+    }
+    static func dismantleUIView(_ view: QueueFlightLayerSurface, coordinator: ()) { view.stop() }
+}
+
+final class QueueFlightLayerSurface: UIView {
+    private(set) var imageLayers: [CALayer] = []
+    private(set) var displayLink: CADisplayLink?
+    private var epoch = Date.distantPast
+    private var duration: TimeInterval = 0
+    private var frameProvider: ((TimeInterval) -> [QueueFlightLayerFrame])?
+    private var monotonicStart: CFTimeInterval = 0
+    private static let placeholderImage = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { _ in
+        UIImage(systemName: "photo")?.withTintColor(.white, renderingMode: .alwaysOriginal)
+            .draw(in: CGRect(x: 0, y: 0, width: 20, height: 20))
+    }
+    @MainActor
+    private final class Target: NSObject {
+        weak var owner: QueueFlightLayerSurface?
+        init(_ owner: QueueFlightLayerSurface) { self.owner = owner }
+        @objc func tick(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.tick(link)
+        }
+    }
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { stop() } else { startClockIfNeeded() }
+    }
+
+    func configure(startedAt: Date, duration: TimeInterval, specs: [QueueFlightLayerSpec],
+                   frames: @escaping (TimeInterval) -> [QueueFlightLayerFrame]) {
+        let newFlight = epoch != startedAt
+        if newFlight { epoch = startedAt; monotonicStart = CACurrentMediaTime() - Date().timeIntervalSince(startedAt) }
+        self.duration = duration; frameProvider = frames
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        while imageLayers.count > specs.count { imageLayers.removeLast().removeFromSuperlayer() }
+        while imageLayers.count < specs.count {
+            let image = CALayer(); image.opacity = 0
+            layer.addSublayer(image); imageLayers.append(image)
+        }
+        for (image, spec) in zip(imageLayers, specs) {
+            image.bounds = CGRect(origin: .zero, size: spec.size)
+            image.contents = spec.image?.cgImage
+            image.contentsGravity = spec.aspectFill ? .resizeAspectFill : .resize
+            image.contentsScale = window?.screen.scale ?? UIScreen.main.scale
+            image.cornerRadius = spec.corner; image.masksToBounds = spec.corner > 0
+            image.borderColor = UIColor.white.withAlphaComponent(spec.borderAlpha).cgColor
+            image.borderWidth = spec.borderAlpha > 0 ? 1 : 0
+            image.backgroundColor = spec.background.cgColor
+            if spec.showsPlaceholder && spec.image == nil {
+                let icon = image.sublayers?.first ?? CALayer()
+                if icon.superlayer == nil { image.addSublayer(icon) }
+                icon.contents = Self.placeholderImage.cgImage
+                icon.contentsScale = image.contentsScale
+                icon.frame = CGRect(x: (spec.size.width - 20) / 2, y: (spec.size.height - 20) / 2, width: 20, height: 20)
+            } else { image.sublayers?.forEach { $0.removeFromSuperlayer() } }
+        }
+        CATransaction.commit()
+        render(elapsed: CACurrentMediaTime() - monotonicStart)
+        startClockIfNeeded()
+    }
+    private func startClockIfNeeded() {
+        if frameProvider != nil, displayLink == nil, CACurrentMediaTime() - monotonicStart < duration {
+            let link = CADisplayLink(target: Target(self), selector: #selector(Target.tick(_:)))
+            link.add(to: .main, forMode: .common); displayLink = link
+        }
+    }
+    private func tick(_ link: CADisplayLink) {
+        let elapsed = link.timestamp - monotonicStart
+        render(elapsed: elapsed)
+        if elapsed >= duration { stop() }
+    }
+    func render(elapsed: TimeInterval) {
+        guard let frameProvider else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        for (image, frame) in zip(imageLayers, frameProvider(elapsed)) {
+            image.position = frame.center
+            image.opacity = Float(min(max(frame.alpha, 0), 1))
+            image.setAffineTransform(CGAffineTransform(rotationAngle: frame.rotation * .pi / 180)
+                .scaledBy(x: frame.scale, y: frame.scale))
+        }
+        CATransaction.commit()
+    }
+    func stop() { displayLink?.invalidate(); displayLink = nil }
+}
+
+func queueFlightPoint(progress: CGFloat, start: CGPoint, end: CGPoint) -> CGPoint {
+    let t = min(max(progress, 0), 1)
+    let dx = abs(end.x - start.x)
+    let lift = min(90, 36 + 0.35 * dx)
+    let control = CGPoint(x: (start.x + end.x) / 2 - 52 * (1 - min(dx / 160, 1)),
+        y: max(min(start.y, end.y) - lift, (48 - start.y - end.y) / 2))
+    return quadraticBezier(start: start, control: control, end: end, t: t)
+}
+
+/// Android empty-list/filter pulse: 1600ms each direction, FastOutSlowIn.
+/// One animation transaction; no SwiftUI timeline recomputes the icon per frame.
+private struct PhotoListEmptyPulse: ViewModifier {
+    @State private var bright = false
+    func body(content: Content) -> some View {
+        content.opacity(bright ? 0.6 : 0.35)
+            .onAppear {
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 1.6).repeatForever(autoreverses: true)) { bright = true }
+            }
+            .onDisappear { bright = false }
+    }
+}

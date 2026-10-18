@@ -4,6 +4,50 @@ import XCTest
 
 @MainActor
 final class RemoteHorizonRenderingTests: XCTestCase {
+    private final class Inputs: ObservableObject { @Published var roll: Float = 0 }
+    private struct LiveOverlay: View {
+        @ObservedObject var inputs: Inputs
+        var body: some View {
+            RemoteHorizonOverlay(roll: inputs.roll, pitch: nil).equatable()
+                .frame(width: 400, height: 300).background(.black).ignoresSafeArea()
+        }
+    }
+
+    func testEquatableOverlayStillRunsItsOwnAnimationWhenAngleChanges() async throws {
+        let input = Inputs()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let host = UIHostingController(rootView: LiveOverlay(inputs: input))
+        if #available(iOS 16.4, *) { host.safeAreaRegions = [] }
+        window.rootViewController = host; window.makeKeyAndVisible(); host.view.layoutIfNeeded()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
+        func pixels() throws -> [UInt8] {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 400, height: 300), format: format).image { _ in
+                host.view.drawHierarchy(in: CGRect(x: 0, y: 0, width: 400, height: 300), afterScreenUpdates: true)
+            }
+            var bytes = [UInt8](repeating: 0, count: 400 * 300 * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: 400, height: 300, bitsPerComponent: 8,
+                bytesPerRow: 1600, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(try XCTUnwrap(image.cgImage), in: CGRect(x: 0, y: 0, width: 400, height: 300))
+            return bytes
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        let horizontal = try pixels()
+        input.roll = 90
+        try await Task.sleep(for: .milliseconds(300))
+        let vertical = try pixels()
+        func green(_ data: [UInt8], x: Int, y: Int) -> UInt8 {
+            (-1...1).flatMap { dy in (-1...1).map { dx in data[((y + dy) * 400 + x + dx) * 4 + 1] } }.max() ?? 0
+        }
+        XCTAssertGreaterThan(green(horizontal, x: 230, y: 150), 100)
+        XCTAssertLessThan(green(vertical, x: 230, y: 150), 20)
+        XCTAssertGreaterThan(green(vertical, x: 200, y: 180), 100)
+    }
+
     private func raster(roll: Float, pitch: Float?, size: CGSize = CGSize(width: 400, height: 300)) throws -> (Int, Int, [UInt8]) {
         var state = RemoteHorizonAnimation(roll: roll, pitch: pitch)
         state.update(roll: roll, pitch: pitch)

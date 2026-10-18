@@ -17,35 +17,22 @@ func photoEffectsEditorDraft(_ settings: PhotoEffectsSettings) -> PhotoEffectsSe
     return draft
 }
 
-/// A fresh settings draft for this opening, backed by the global camera-effects store.
-/// The current preview supplies pixels/EXIF; no latest-photo fetch is started here.
+/// The same panel, state ownership, pickers and persistence as list settings.
+/// Effects-only back closes this overlay and leaves the current preview intact.
 struct PreviewPhotoEffectsEditor: View {
-    @ObservedObject var store: PhotoEffectsStore
+    @Binding var isPresented: Bool
+    let store: PhotoEffectsStore
     let directory: DirectoryAccessStore
     let source: UIImage?
     let exif: PhotoExif?
     let rotation: Int
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft: PhotoEffectsSettings
-    @StateObject private var photoLUTEditor = PhotoLUTEditorState(role: .camera)
-    @State private var chooser = PhotoFilterChooserState()
-    @State private var hint: PhotoEffectsHint?
-    init(store: PhotoEffectsStore, directory: DirectoryAccessStore, source: UIImage?, exif: PhotoExif?, rotation: Int) {
-        self.store = store; self.directory = directory; self.source = source; self.exif = exif; self.rotation = rotation
-        _draft = State(initialValue: photoEffectsEditorDraft(store.beginDraft()))
-    }
+    let anchor: Anchor<CGRect>
+    let onDismissed: () -> Void
+
     var body: some View {
-        SettingsView(showPhotoEffectsEntry: true, effectsStore: store, directory: directory,
-            effectsDraft: $draft, filterChooser: $chooser, effectsHint: $hint, dismissalRequested: false, photoLUTEditor: photoLUTEditor,
-            effectsOnly: true, effectPreviewInitialRotationQuarterTurns: rotation,
-            effectPreviewSource: source, effectPreviewExif: exif, onClose: { dismiss() })
-            .overlay {
-                if photoLUTEditor.showingChooser { PhotoLUTChooserOverlay(editor: photoLUTEditor, draft: $draft) }
-                if chooser.isPresented { PhotoFilterChooserOverlay(draft: $draft, state: $chooser,
-                        onFilterSelected: { photoLUTEditor.cancelPending() }) }
-            }
-            .photoEffectsHint($hint, duration: 1.8, multilineDuration: 3.6)
-            .background(ZTransferColors.background)
-            .interactiveDismissDisabled()
+        SettingsPopupOverlay(isPresented: $isPresented, showPhotoEffectsEntry: true,
+            effectsStore: store, directory: directory, anchor: anchor,
+            effectPreviewSource: source, effectPreviewExif: exif,
+            effectsOnly: true, effectPreviewInitialRotationQuarterTurns: rotation, onDismissed: onDismissed)
     }
 }

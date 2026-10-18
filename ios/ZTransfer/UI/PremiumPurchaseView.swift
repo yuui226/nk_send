@@ -428,6 +428,7 @@ struct ProBadgeButton: View {
     var motionPaused = false
     let action: () -> Void
     @State private var origin = Date()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         Button(action: action) {
             HStack(spacing: big ? 6 : 4) {
@@ -440,25 +441,13 @@ struct ProBadgeButton: View {
             .padding(.horizontal, 12).frame(maxWidth: big ? .infinity : nil)
             .frame(minHeight: big ? 48 : 28)
             .background {
-                GeometryReader { proxy in
+                GeometryReader { _ in
                     LinearGradient(colors: [Color(red: 1, green: 224 / 255, blue: 130 / 255),
                                             Color(red: 240 / 255, green: 169 / 255, blue: 59 / 255)],
                                    startPoint: .top, endPoint: .bottom)
-                    TimelineView(.animation(paused: motionPaused || !enabled)) { context in
-                        let phase = context.date.timeIntervalSince(origin).truncatingRemainder(dividingBy: 2.6) / 2.6
-                        // Draw the moving band inside fixed bounds. Offsetting
-                        // a SwiftUI gradient view expands the button's reported
-                        // accessibility frame as the sheen travels offscreen.
-                        Canvas { graphics, size in
-                            graphics.clip(to: Path(CGRect(origin: .zero, size: size)))
-                            let x = size.width * (-1 + phase * 3)
-                            let band = CGRect(x: x, y: 0, width: size.width, height: size.height)
-                            graphics.fill(Path(band), with: .linearGradient(
-                                Gradient(colors: [.clear,
-                                    Color(red: 1, green: 229 / 255, blue: 160 / 255).opacity(0.65), .clear]),
-                                startPoint: CGPoint(x: x, y: 0), endPoint: CGPoint(x: x + size.width, y: 0)))
-                        }
-                    }.accessibilityHidden(true)
+                    ProBadgeSheen(origin: origin.timeIntervalSinceReferenceDate,
+                        paused: motionPaused || !enabled || scenePhase != .active)
+                        .allowsHitTesting(false).accessibilityHidden(true)
                 }.clipShape(RoundedRectangle(cornerRadius: big ? 16 : 14))
             }
             .background(RoundedRectangle(cornerRadius: big ? 16 : 14)
@@ -466,5 +455,96 @@ struct ProBadgeButton: View {
             .opacity(enabled ? 1 : 0.5)
         }.buttonStyle(.plain).disabled(!enabled)
             .accessibilityLabel(label)
+    }
+}
+
+/// SettingsScreen.ProBadgeButton moves one full-width band from -1w to +2w
+/// in 2,600 ms. Core Animation translates that retained layer; SwiftUI and the
+/// gradient raster do not run a per-frame update. Pausing keeps the visible band,
+/// while reentry resumes at the same wall-clock phase as the previous Timeline.
+struct ProBadgeSheen: UIViewRepresentable {
+    let origin: TimeInterval
+    let paused: Bool
+    func makeUIView(context: Context) -> ProBadgeSheenView { ProBadgeSheenView() }
+    func updateUIView(_ view: ProBadgeSheenView, context: Context) { view.configure(origin: origin, paused: paused) }
+    static func dismantleUIView(_ view: ProBadgeSheenView, coordinator: ()) { view.stop() }
+}
+
+final class ProBadgeSheenView: UIView {
+    private let band = CAGradientLayer()
+    private let now: () -> TimeInterval
+    private var origin: TimeInterval?
+    private var paused = true
+    private var pausedPhase: Double?
+    private var lastSize = CGSize.zero
+    private var stopped = false
+    private static let animationKey = "pro-sheen"
+    var isAnimating: Bool { band.animation(forKey: Self.animationKey) != nil }
+
+    init(now: @escaping () -> TimeInterval = { Date().timeIntervalSinceReferenceDate }) {
+        self.now = now
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        clipsToBounds = true
+        let gold = UIColor(red: 1, green: 229.0 / 255, blue: 160.0 / 255, alpha: 1)
+        // Canvas interpolates the premultiplied color. CAGradientLayer's
+        // transparent endpoints must retain gold RGB or the sweep turns gray.
+        band.colors = [gold.withAlphaComponent(0).cgColor,
+                       gold.withAlphaComponent(0.65).cgColor,
+                       gold.withAlphaComponent(0).cgColor]
+        band.locations = [0, 0.5, 1]
+        band.startPoint = CGPoint(x: 0, y: 0.5)
+        band.endPoint = CGPoint(x: 1, y: 0.5)
+        layer.addSublayer(band)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    func configure(origin: TimeInterval, paused: Bool) {
+        guard self.origin != origin || self.paused != paused || stopped else { return }
+        self.origin = origin
+        self.paused = paused
+        pausedPhase = paused ? (now() - origin).truncatingRemainder(dividingBy: 2.6) / 2.6 : nil
+        stopped = false
+        updateBand()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.size != lastSize else { return }
+        lastSize = bounds.size
+        updateBand()
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateBand()
+    }
+    func stop() {
+        stopped = true
+        band.removeAnimation(forKey: Self.animationKey)
+    }
+    private func updateBand() {
+        guard let origin, bounds.width > 0, bounds.height > 0 else { return }
+        let duration = 2.6
+        let phase = pausedPhase ?? (now() - origin).truncatingRemainder(dividingBy: duration) / duration
+        let width = bounds.width
+        // Keep both the model position and the animated path in the same fixed
+        // local bounds; the native band never changes the button's hit frame.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        band.removeAnimation(forKey: Self.animationKey)
+        band.bounds = CGRect(origin: .zero, size: bounds.size)
+        band.position = CGPoint(x: width * (-0.5 + phase * 3), y: bounds.height / 2)
+        band.contentsScale = window?.screen.scale ?? traitCollection.displayScale
+        if !paused, !stopped, window != nil {
+            let animation = CABasicAnimation(keyPath: "position.x")
+            animation.fromValue = -0.5 * width
+            animation.toValue = 2.5 * width
+            animation.duration = duration
+            animation.repeatCount = .infinity
+            animation.timingFunction = CAMediaTimingFunction(name: .linear)
+            animation.beginTime = band.convertTime(CACurrentMediaTime(), from: nil) - phase * duration
+            band.add(animation, forKey: Self.animationKey)
+        }
+        CATransaction.commit()
     }
 }

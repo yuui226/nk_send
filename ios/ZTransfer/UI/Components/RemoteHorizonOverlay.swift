@@ -2,14 +2,18 @@ import SwiftUI
 import UIKit
 
 @MainActor
-private final class RemoteHorizonClock: NSObject, ObservableObject {
-    @Published var state: RemoteHorizonAnimation
+final class RemoteHorizonClock: NSObject, ObservableObject {
+    @Published private(set) var state: RemoteHorizonAnimation
     private var link: CADisplayLink?
+    private var lastInput: (roll: Float, pitch: Float?)?
     init(roll: Float, pitch: Float?) { state = .init(roll: roll, pitch: pitch) }
     func update(roll: Float, pitch: Float?) {
-        state.update(roll: roll, pitch: pitch)
+        if lastInput?.roll != roll || lastInput?.pitch != pitch {
+            state.update(roll: roll, pitch: pitch)
+            lastInput = (roll, pitch)
+        }
         guard state.isRunning, link == nil else { return }
-        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let next = ZTransferDisplayLink.make(owner: self) { $0.frame($1) }
         link = next
         next.add(to: .main, forMode: .common)
     }
@@ -20,13 +24,16 @@ private final class RemoteHorizonClock: NSObject, ObservableObject {
     func stop() { link?.invalidate(); link = nil }
 }
 
-struct RemoteHorizonOverlay: View {
+struct RemoteHorizonOverlay: View, Equatable {
     let roll: Float
     let pitch: Float?
     @StateObject private var clock: RemoteHorizonClock
     init(roll: Float, pitch: Float?) {
         self.roll = roll; self.pitch = pitch
         _clock = StateObject(wrappedValue: RemoteHorizonClock(roll: roll, pitch: pitch))
+    }
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.roll == rhs.roll && lhs.pitch == rhs.pitch
     }
     var body: some View {
         RemoteHorizonDrawing(state: clock.state)

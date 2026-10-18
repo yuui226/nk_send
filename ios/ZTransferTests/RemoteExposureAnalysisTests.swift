@@ -1,7 +1,20 @@
 import XCTest
+import CoreGraphics
 @testable import ZTransfer
 
 final class RemoteExposureAnalysisTests: XCTestCase {
+    func testAnalysisBitmapPreservesARGBChannelsAndRejectsInvalidDimensions() throws {
+        let pixels: [UInt32] = [0xFF6B39B8, 0x807FFF00, 0, 0x40DCEBE3]
+        let image = try XCTUnwrap(RemoteExposureAnalysis.image(pixels: pixels, width: 2, height: 2))
+        let data = try XCTUnwrap(image.dataProvider?.data)
+        XCTAssertEqual(Array(data as Data), [UInt8](arrayLiteral:
+            0x6B,0x39,0xB8,0xFF, 0x7F,0xFF,0,0x80, 0,0,0,0, 0xDC,0xEB,0xE3,0x40))
+        XCTAssertEqual(image.alphaInfo, .last)
+        XCTAssertNil(RemoteExposureAnalysis.image(pixels: pixels, width: 0, height: 2))
+        XCTAssertNil(RemoteExposureAnalysis.image(pixels: pixels, width: 3, height: 2))
+        XCTAssertNil(RemoteExposureAnalysis.image(pixels: pixels, width: Int.max, height: Int.max))
+    }
+
     func testSoundMeterSeparatesCurrentBarFromSinglePeak() {
         let silent = RemoteSoundMeterChannel(current: 0, peak: 0)
         XCTAssertEqual(silent.activeCount, 0)

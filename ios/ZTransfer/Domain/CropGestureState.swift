@@ -3,7 +3,7 @@ import CoreGraphics
 
 /// Android CropEditorGeometry: pixel-space frame and image placement, with a
 /// stable reference for ratio changes. Normalization happens only at export.
-struct CropEditorGeometry {
+struct CropEditorGeometry: Equatable {
     enum Ratio: Equatable {
         case free, original
         case fixed(Int, Int)
@@ -16,6 +16,7 @@ struct CropEditorGeometry {
     private(set) var swapped = false
     private var ratioReference: CGRect?
     private var initialBounds: CropBounds?
+    private var initialImage: CGRect?
 
     private var ratioPair: (Int, Int) {
         let pair: (Int, Int)
@@ -43,7 +44,24 @@ struct CropEditorGeometry {
         restoreInitialPlacement()
     }
 
+    /// Android initializes from the actual displayed photo, never a refitted copy.
+    mutating func initialize(_ viewport: CGSize, placement: CGRect) throws {
+        guard size == .zero, viewport.width > 0, viewport.height > 0,
+              !placement.isEmpty, !placement.isInfinite, !placement.isNull,
+              placement.intersects(CGRect(origin: .zero, size: viewport)) else { return }
+        size = viewport
+        initialImage = placement
+        restoreInitialPlacement()
+        _ = try recipe()
+    }
+
     private mutating func restoreInitialPlacement() {
+        if let initialImage {
+            image = initialImage
+            frame = image.intersection(CGRect(origin: .zero, size: size))
+            ratioReference = frame
+            return
+        }
         let bounds = initialBounds ?? CropBounds(left: 0, top: 0, right: 1, bottom: 1)
         let w = bounds.right - bounds.left, h = bounds.bottom - bounds.top
         frame = fit(size, aspect: CGFloat(w * Double(source.displayWidth) / (h * Double(source.displayHeight))))

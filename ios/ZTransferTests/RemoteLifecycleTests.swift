@@ -1,7 +1,240 @@
 import XCTest
+import Combine
+import SwiftUI
 import UIKit
+import ImageIO
 @preconcurrency import AVFoundation
 @testable import ZTransfer
+
+@MainActor
+final class RemoteDiagnosticPerformanceTests: XCTestCase {
+    func testInactiveAndRepeatedReportsDoNotPublishMonitorChanges() async {
+        let model = RemoteViewModel(camera: DisconnectedRemoteCamera(isUSB: false))
+        var pageUpdates = 0, reportUpdates = 0
+        let page = model.objectWillChange.sink { pageUpdates += 1 }
+        let reports = model.focusDiagnosticOutput.objectWillChange.sink { reportUpdates += 1 }
+        defer { page.cancel(); reports.cancel() }
+        for _ in 0..<120 { model.displayFocusDiagnostic("ignored"); model.markFocusDiagnostic("ignored"); model.stopFocusDiagnostic() }
+        XCTAssertEqual(pageUpdates, 0); XCTAssertEqual(reportUpdates, 0)
+        model.startFocusDiagnostic(description: "host")
+        XCTAssertTrue(model.focusDiagnosticRunning)
+        let runningUpdates = pageUpdates
+        model.displayFocusDiagnostic("drawn age=1ms")
+        let first = reportUpdates
+        for _ in 0..<120 { model.displayFocusDiagnostic("drawn age=1ms") }
+        XCTAssertEqual(reportUpdates, first)
+        for index in 0..<120 { model.displayFocusDiagnostic("drawn age=\(index + 2)ms") }
+        XCTAssertEqual(reportUpdates, first + 120, "Every different visible diagnostic state is retained")
+        XCTAssertEqual(pageUpdates, runningUpdates, "Only the diagnostic leaf observes changing reports")
+        model.markFocusDiagnostic("mark")
+        XCTAssertTrue(model.focusDiagnosticReport.contains("UI=drawn age=121ms"))
+        model.stopFocusDiagnostic()
+        let stopped = model.focusDiagnosticReport
+        let finalPage = pageUpdates, finalReports = reportUpdates
+        for _ in 0..<120 { model.displayFocusDiagnostic("ignored"); model.markFocusDiagnostic("ignored"); model.stopFocusDiagnostic() }
+        XCTAssertEqual(model.focusDiagnosticReport, stopped)
+        XCTAssertEqual(pageUpdates, finalPage); XCTAssertEqual(reportUpdates, finalReports)
+        await model.stopAndWait()
+    }
+
+    func testCachedReportInvalidatesOnlyWhenVisibleContentChanges() {
+        let log = RemoteLiveViewFocusDiagnostic()
+        XCTAssertEqual(log.report(), "")
+        for _ in 0..<120 { _ = log.report() }
+        XCTAssertEqual(log.reportBuildCount, 1)
+        log.start(nowMs: 0, description: "Z30")
+        _ = log.report()
+        let bytes = Data(repeating: 0, count: 515)
+        func sample(_ time: Double) {
+            log.sample(packet: RemoteLiveViewPacket(bytes: bytes, jpegOffset: 512,
+                operation: PTPConstants.getLiveViewImageEx, receivedAtUptime: time), metadata: nil, context: "photo")
+        }
+        sample(0)
+        let baseline = log.report(), built = log.reportBuildCount
+        for index in 1...120 { sample(Double(index) * 0.2); XCTAssertEqual(log.report(), baseline) }
+        XCTAssertEqual(log.reportBuildCount, built)
+        log.display("drawn boxPx=20x30")
+        let display = log.report(), displayBuilds = log.reportBuildCount
+        for _ in 0..<120 { log.display("drawn boxPx=20x30"); XCTAssertEqual(log.report(), display) }
+        XCTAssertEqual(log.reportBuildCount, displayBuilds)
+        log.display("drawn boxPx=21x30")
+        XCTAssertNotEqual(log.report(), display)
+        XCTAssertEqual(log.report().components(separatedBy: "\n").filter { $0.hasPrefix("UI ") }.count, 1)
+        log.mark(nowMs: 24_500, text: "step")
+        XCTAssertTrue(log.report().contains("mark +24500 step"))
+        sample(60)
+        XCTAssertFalse(log.running)
+        XCTAssertTrue(log.report().contains("end=60s samples=121 changes=1"))
+        let stopped = log.report(), stoppedBuilds = log.reportBuildCount
+        for _ in 0..<120 { sample(61); log.display("ignored"); log.mark(nowMs: 61_000, text: "ignored"); log.stop(); XCTAssertEqual(log.report(), stopped) }
+        XCTAssertEqual(log.reportBuildCount, stoppedBuilds)
+        log.start(nowMs: 70_000, description: "new")
+        XCTAssertFalse(log.report().contains("Z30"))
+    }
+
+    func testLargeJPEGDoesNotChangeHeaderDiagnosticOrBoundsHandling() {
+        var header = Data(repeating: 0, count: 1024)
+        header[44] = 96; header[45] = 95
+        for (offset, value) in zip([808, 810, 812, 814], [30, 20, 100, 80]) {
+            header[offset] = 0; header[offset + 1] = UInt8(value)
+        }
+        var full = header
+        full.append(Data(repeating: 0xC7, count: 8 * 1024 * 1024))
+        func report(_ bytes: Data, offset: Int) -> String {
+            let log = RemoteLiveViewFocusDiagnostic()
+            log.start(nowMs: 0, description: "bounded")
+            log.sample(packet: RemoteLiveViewPacket(bytes: bytes, jpegOffset: offset,
+                operation: PTPConstants.getLiveViewImageEx, receivedAtUptime: 0), metadata: nil, context: "photo")
+            return log.report()
+        }
+        XCTAssertEqual(report(header, offset: 1024), report(full, offset: 1024))
+        XCTAssertTrue(report(full, offset: 1024).contains("rawWHXY=30,20,100,80"))
+        XCTAssertTrue(report(Data([1]), offset: 0).contains("unsupported-header"))
+        XCTAssertTrue(report(Data(), offset: -1).contains("rawWHXY=none"))
+    }
+
+    func testHostedDiagnosticLeafAndPersistenceUpdateWithoutRefreshingMonitor() async throws {
+        let suite = "DiagnosticLeaf.\(UUID())", counts = Counts()
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = RemoteViewModel(camera: DisconnectedRemoteCamera(isUSB: false))
+        let host = UIHostingController(rootView: Harness(model: model, defaults: defaults, counts: counts))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 480)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(60))
+        model.startFocusDiagnostic(description: "host")
+        try await Task.sleep(for: .milliseconds(50))
+        let initial = counts.parent
+        for index in 0..<30 {
+            model.displayFocusDiagnostic("drawn age=\(index)ms")
+            try await Task.sleep(for: .milliseconds(8))
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(counts.parent, initial)
+        XCTAssertTrue(counts.displayed.contains("UI=drawn age=29ms"))
+        XCTAssertEqual(defaults.string(forKey: "focus_report_v1"), model.focusDiagnosticReport)
+        let writes = counts.writes
+        for _ in 0..<120 { model.displayFocusDiagnostic("drawn age=29ms") }
+        XCTAssertEqual(counts.writes, writes)
+        model.stopFocusDiagnostic()
+        await model.stopAndWait()
+    }
+
+    func testReportProjectionReusesRowsAndPreservesIndependentCopyScopes() {
+        let cache = RemoteDeveloperReportCache()
+        let value = cache.resolve(log: ["video", "", "control"], recording: "record\nfailed",
+            focus: "focus\n", pictureControl: "np3")
+        XCTAssertEqual(value.lines, ["video", "", "control", "record", "failed", "focus", "", "np3"])
+        XCTAssertEqual(value.copyText, "video\ncontrol\nrecord\nfailed\nfocus\n\nnp3")
+        for _ in 0..<120 {
+            XCTAssertTrue(cache.resolve(log: ["video", "", "control"], recording: "record\nfailed",
+                focus: "focus\n", pictureControl: "np3") === value)
+        }
+        let changed = cache.resolve(log: ["video", "", "control"], recording: "record\nfailed",
+            focus: "new", pictureControl: "np3")
+        XCTAssertFalse(changed === value)
+        XCTAssertTrue(changed.copyText.hasSuffix("new\nnp3"))
+        XCTAssertEqual(value.lines[5], "focus", "Previous row snapshot remains immutable")
+    }
+
+    func testRatingDiagnosticBudgetAndSnapshotCachePreserveExactUnicodeOutput() {
+        PhotoRatingDiagnostics.setEnabled(true)
+        PhotoRatingDiagnostics.clear()
+        defer { PhotoRatingDiagnostics.setEnabled(false) }
+        var expected: [String] = []
+        for index in 0..<240 {
+            let raw = "\(index) \t " + String(repeating: index.isMultiple(of: 2) ? "中🙂e\u{301}" : "abc ", count: 110) + "\n end"
+            let normalized = String(raw.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).prefix(260))
+            expected.append(normalized)
+            while expected.count > 48 || expected.reduce(0, { $0 + $1.count + 1 }) > 8_000 { expected.removeFirst() }
+            PhotoRatingDiagnostics.note(raw)
+            XCTAssertEqual(PhotoRatingDiagnostics.snapshot(), "ZTransfer 评级筛选诊断\n" + expected.joined(separator: "\n"))
+        }
+        let report = PhotoRatingDiagnostics.snapshot()
+        for _ in 0..<120 { XCTAssertEqual(PhotoRatingDiagnostics.snapshot(), report) }
+        let previous = PhotoRatingDiagnostics.beginProbe(keepExisting: true)
+        PhotoRatingDiagnostics.detail("probe")
+        PhotoRatingDiagnostics.restore(previous, preserveEntries: true)
+        XCTAssertTrue(PhotoRatingDiagnostics.snapshot().hasSuffix("probe"))
+        PhotoRatingDiagnostics.clear()
+        XCTAssertEqual(PhotoRatingDiagnostics.snapshot(), "评级筛选：暂无诊断记录")
+        PhotoRatingDiagnostics.note("after clear")
+        XCTAssertEqual(PhotoRatingDiagnostics.snapshot(), "ZTransfer 评级筛选诊断\nafter clear")
+    }
+
+    func testLogListPositionsLastRowReusesCellsAndOnlyFollowsNearTail() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let state = LogState(), probe = LogProbe()
+        let host = UIHostingController(rootView: LogHarness(state: state, probe: probe))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 240)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(250))
+        let table = try XCTUnwrap(findTable(host.view))
+        XCTAssertTrue(table.indexPathsForVisibleRows?.contains(IndexPath(row: 2999, section: 0)) == true)
+        XCTAssertLessThan(probe.rows.count, 180)
+        table.scrollToRow(at: IndexPath(row: 1_000, section: 0), at: .top, animated: false)
+        try await Task.sleep(for: .milliseconds(80))
+        let anchor = try XCTUnwrap(table.indexPathsForVisibleRows?.min())
+        let y = table.rectForRow(at: anchor).minY - table.contentOffset.y
+        state.lines.append("new diagnostic")
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(table.indexPathsForVisibleRows?.min(), anchor)
+        XCTAssertEqual(table.rectForRow(at: anchor).minY - table.contentOffset.y, y, accuracy: 1)
+        table.scrollToRow(at: IndexPath(row: 3_000, section: 0), at: .bottom, animated: false)
+        try await Task.sleep(for: .milliseconds(80))
+        state.lines.append("next diagnostic")
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(table.indexPathsForVisibleRows?.contains(IndexPath(row: 3001, section: 0)) == true)
+        XCTAssertLessThan(probe.rows.count, 220, "Distant log positions must not instantiate the full report")
+        print("DIAGNOSTIC_ROWS built=\(probe.rows.count) total=\(state.lines.count)")
+    }
+
+    @MainActor private final class LogState: ObservableObject {
+        @Published var lines = (0..<3_000).map { "diagnostic \($0)" }
+    }
+    @MainActor private final class LogProbe { var rows = Set<Int>() }
+    private struct LogHarness: View {
+        @ObservedObject var state: LogState
+        let probe: LogProbe
+        var body: some View {
+            PhotoEffectChooserList(items: Array(state.lines.indices), id: \.self,
+                initialID: state.lines.indices.last, followTailChange: state.lines.last) { index in
+                let _ = { probe.rows.insert(index) }()
+                Text(state.lines[index]).font(.system(size: 10, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.top, index == 0 ? 6 : 0)
+                    .padding(.bottom, index == state.lines.count - 1 ? 6 : 0)
+            }.frame(height: 170)
+        }
+    }
+    private func findTable(_ view: UIView) -> UITableView? {
+        (view as? UITableView) ?? view.subviews.lazy.compactMap { self.findTable($0) }.first
+    }
+
+    @MainActor private final class Counts { var parent = 0; var writes = 0; var displayed = "" }
+    private struct Harness: View {
+        @ObservedObject var model: RemoteViewModel
+        let defaults: UserDefaults
+        let counts: Counts
+        var body: some View {
+            counts.parent += 1
+            return RemoteDiagnosticReportReader(output: model.focusDiagnosticOutput) { text in
+                let _ = { counts.displayed = text }()
+                Text(text).font(.system(size: 10, design: .monospaced))
+            }.onReceive(model.focusDiagnosticOutput.$text.dropFirst()) { text in
+                guard !text.isEmpty else { return }
+                counts.writes += 1
+                defaults.set(text, forKey: "focus_report_v1")
+            }
+        }
+    }
+}
 
 @MainActor
 final class RemoteLifecycleTests: XCTestCase {
@@ -999,6 +1232,64 @@ final class RemoteLifecycleTests: XCTestCase {
         await model.stopAndWait()
         let calls = await camera.log
         XCTAssertEqual(calls.filter { $0 == "gate:false" }.count, 1)
+    }
+
+    func testRecordingElapsedIsLocalAndProductionPauseResumeResetKeepsCadence() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let model = makeModel(camera: RemoteLifecycleCamera(frameSize: CGSize(width: 64, height: 48)),
+            recordingDirectory: directory,
+            entitlements: PremiumEntitlementStore(access: PremiumAccess(.lifetime)), permission: { false })
+        var pageUpdates = 0, cameraUpdates = 0, localUpdates = 0
+        let page = model.objectWillChange.sink { pageUpdates += 1 }
+        let camera = model.cameraRecordingElapsed.objectWillChange.sink { cameraUpdates += 1 }
+        let local = model.localRecordingElapsed.objectWillChange.sink { localUpdates += 1 }
+        for n in 1...120 {
+            model.cameraRecordingElapsed.set(n)
+            model.localRecordingElapsed.set(n)
+        }
+        XCTAssertEqual(pageUpdates, 0)
+        XCTAssertEqual(cameraUpdates, 120); XCTAssertEqual(localUpdates, 120)
+        XCTAssertEqual(model.recordingSeconds, 120); XCTAssertEqual(model.localRecordingSeconds, 120)
+        page.cancel(); camera.cancel(); local.cancel()
+        model.cameraRecordingElapsed.set(0); model.localRecordingElapsed.set(0)
+        model.start()
+        try await waitFor { model.frameImage != nil }
+        model.startLocalRecording()
+        try await waitFor { model.localRecordingPhase == .recording }
+        try await waitFor { model.localRecordingSeconds >= 1 }
+        model.toggleLocalRecordingPause()
+        let paused = model.localRecordingSeconds
+        try await Task.sleep(for: .milliseconds(1150))
+        XCTAssertEqual(model.localRecordingSeconds, paused)
+        model.toggleLocalRecordingPause()
+        try await waitFor { model.localRecordingSeconds > paused }
+        model.stopLocalRecording()
+        XCTAssertEqual(model.localRecordingSeconds, 0)
+        try await waitFor { model.localRecordingPhase == .saved }
+        await model.stopAndWait()
+        let output = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: nil).first { $0.pathExtension == "mp4" })
+        try await assertDecodableSilentRecording(output)
+        let stopped = model.localRecordingSeconds
+        try await Task.sleep(for: .milliseconds(1050))
+        XCTAssertEqual(model.localRecordingSeconds, stopped)
+    }
+
+    func testCameraRecordingElapsedResetsAfterStopAndIgnoresCancelledTimer() async throws {
+        let model = makeModel(camera: RemoteLifecycleCamera(movie: true))
+        model.start()
+        try await waitFor { model.state.session == .ready }
+        model.toggleRecording()
+        try await waitFor { model.state.capture == .recording && !model.recordingBusy }
+        try await waitFor { model.recordingSeconds >= 1 }
+        XCTAssertEqual(model.cameraRecordingElapsed.seconds, model.recordingSeconds)
+        model.toggleRecording()
+        try await waitFor { model.state.capture == .idle && !model.recordingBusy }
+        XCTAssertEqual(model.recordingSeconds, 0)
+        try await Task.sleep(for: .milliseconds(1050))
+        XCTAssertEqual(model.recordingSeconds, 0)
+        await model.stopAndWait()
     }
 
     func testFreeLocalRecordingIsBlockedBeforeMicrophoneOrRecorder() {
@@ -2702,7 +2993,147 @@ private final class FrameAnalysisTestClock: @unchecked Sendable {
     }
 }
 
+final class RemoteFrameImageDecoderTests: XCTestCase {
+    private func fixture(width: Int, height: Int, orientation: Int = 1,
+                         colorSpace: CFString = CGColorSpace.sRGB) throws -> Data {
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                pixels[i] = UInt8(truncatingIfNeeded: x * 3 + y)
+                pixels[i + 1] = UInt8(truncatingIfNeeded: x + y * 5)
+                pixels[i + 2] = UInt8(truncatingIfNeeded: (x ^ y) * 7)
+            }
+        }
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(pixels) as CFData))
+        let image = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8,
+            bitsPerPixel: 32, bytesPerRow: width * 4, space: try XCTUnwrap(CGColorSpace(name: colorSpace)),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent))
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [
+            kCGImageDestinationLossyCompressionQuality: 0.9,
+            kCGImagePropertyOrientation: orientation,
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    private func pixels(_ image: CGImage) throws -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        try bytes.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width,
+                height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        return bytes
+    }
+
+    func testPreparedJPEGPreservesEveryOrientationColorProfileAndPixel() throws {
+        for color in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
+            for orientation in 1...8 {
+                let data = try fixture(width: 96, height: 64, orientation: orientation, colorSpace: color)
+                let reference = try XCTUnwrap(UIImage(data: data))
+                let prepared = try XCTUnwrap(RemoteFrameImageDecoder.decode(data))
+                let oldPixels = try XCTUnwrap(reference.cgImage), newPixels = try XCTUnwrap(prepared.cgImage)
+                XCTAssertEqual(prepared.imageOrientation, reference.imageOrientation)
+                XCTAssertEqual(prepared.size, reference.size)
+                XCTAssertEqual(newPixels.colorSpace?.name, oldPixels.colorSpace?.name)
+                XCTAssertEqual(try pixels(newPixels), try pixels(oldPixels))
+            }
+        }
+    }
+
+    func testNormalAndHDPreserveFullResolutionAndRejectInvalidPayload() throws {
+        for size in [(640, 424), (1280, 720), (1920, 1080)] {
+            let data = try fixture(width: size.0, height: size.1)
+            let image = try XCTUnwrap(RemoteFrameImageDecoder.decode(data)?.cgImage)
+            XCTAssertEqual(image.width, size.0); XCTAssertEqual(image.height, size.1)
+            XCTAssertEqual(try pixels(image), try pixels(XCTUnwrap(UIImage(data: data)?.cgImage)))
+        }
+        XCTAssertNil(RemoteFrameImageDecoder.decode(Data()))
+        XCTAssertNil(RemoteFrameImageDecoder.decode(Data([0xff, 0xd8, 0xff, 0x00])))
+    }
+
+    /// Diagnostic timings, not a device FPS assertion: include the first draw,
+    /// since constructor timing alone incorrectly makes deferred decode look fast.
+    func testFirstDrawCostBeforeAndAfterPreparingPixels() throws {
+        for size in [(640, 424), (1920, 1080)] {
+            let data = try fixture(width: size.0, height: size.1)
+            let context = try XCTUnwrap(CGContext(data: nil, width: size.0, height: size.1,
+                bitsPerComponent: 8, bytesPerRow: size.0 * 4,
+                space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            for prepared in [false, true] {
+                var decodeSeconds = 0.0, drawSeconds = 0.0
+                for _ in 0..<20 {
+                    try autoreleasepool {
+                        let begin = CACurrentMediaTime()
+                        let image = try XCTUnwrap((prepared ? RemoteFrameImageDecoder.decode(data) : UIImage(data: data))?.cgImage)
+                        let decoded = CACurrentMediaTime()
+                        context.draw(image, in: CGRect(x: 0, y: 0, width: size.0, height: size.1))
+                        decodeSeconds += decoded - begin
+                        drawSeconds += CACurrentMediaTime() - decoded
+                    }
+                }
+                print("MONITOR_DECODE \(size.0)x\(size.1) prepared=\(prepared) prepare_ms=\(decodeSeconds * 50) first_draw_ms=\(drawSeconds * 50)")
+            }
+        }
+    }
+}
+
 final class RemoteFrameDecodePipelineTests: XCTestCase {
+    @MainActor
+    func testWorkerBitmapsReuseWaveformUntil125msAndInvalidateOnModeSizeAndSession() async throws {
+        let clock = FrameAnalysisTestClock(), collector = RemoteDecodedFrameCollector()
+        let pipeline = RemoteFrameDecodePipeline(clock: { clock.now() }) { collector.frames.append($0) }
+        var generation: UInt64 = 1
+        await pipeline.reset(generation: generation)
+        await pipeline.setAnalysis(histogram: false, zebra: false, waveform: true, falseColor: true)
+        func feed(_ time: Int, side: Int = 8) async throws -> RemoteDecodedFrame {
+            clock.set(time)
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
+                UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            }
+            await pipeline.submit(.init(packet: .init(bytes: try XCTUnwrap(image.pngData()), jpegOffset: 0,
+                operation: PTPConstants.getLiveViewImage), fps: 30, generation: generation))
+            await pipeline.waitUntilIdle()
+            return try XCTUnwrap(collector.frames.last)
+        }
+        let initial = try await feed(0)
+        let first = try XCTUnwrap(initial.waveformImage)
+        let firstFalse = try XCTUnwrap(initial.falseColorImage)
+        XCTAssertEqual(first.width, 256); XCTAssertEqual(first.height, 128)
+        XCTAssertEqual(firstFalse.width, 8); XCTAssertEqual(firstFalse.height, 8)
+        let expected = RemoteExposureAnalysis.waveformPixels(channels: try XCTUnwrap(initial.waveform), sampleHeight: 8)
+        let bitmap = try XCTUnwrap(RemoteExposureAnalysis.image(pixels: expected, width: 256, height: 128))
+        XCTAssertEqual(first.dataProvider?.data, bitmap.dataProvider?.data)
+        let early = try await feed(124)
+        XCTAssertTrue(early.waveformImage === first)
+        XCTAssertFalse(early.falseColorImage === firstFalse, "False color still follows each decoded frame")
+        let next = try await feed(125)
+        XCTAssertFalse(next.waveformImage === first)
+        await pipeline.setAnalysis(histogram: false, zebra: false, waveform: true, waveformRGB: true, falseColor: true)
+        let rgb = try await feed(125)
+        XCTAssertEqual(rgb.waveform?.count, 3)
+        XCTAssertFalse(rgb.waveformImage === next.waveformImage)
+        let resized = try await feed(125, side: 12)
+        XCTAssertFalse(resized.waveformImage === rgb.waveformImage)
+        XCTAssertEqual(resized.falseColorImage?.width, 12)
+        generation = 2
+        await pipeline.reset(generation: generation)
+        let reset = try await feed(125, side: 12)
+        XCTAssertFalse(reset.waveformImage === resized.waveformImage)
+        await pipeline.setAnalysis(histogram: false, zebra: false)
+        let disabled = try await feed(125)
+        XCTAssertNil(disabled.falseColorImage); XCTAssertNil(disabled.waveformImage)
+        XCTAssertNil(disabled.falseColorPixels); XCTAssertNil(disabled.waveform)
+    }
+
     @MainActor
     func testPipelinePublicationRejectsMultipleModeChangesAndSessionReset() async throws {
         for resetSession in [false, true] {
@@ -3695,6 +4126,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     func setMonitorAdmissionProbe(_ probe: @escaping @Sendable () async -> Void) { monitorAdmissionProbe = probe }
     func setMonitorResponseProbe(_ probe: @escaping @Sendable () async -> Void) { monitorResponseProbe = probe }
     private var frame: Data
+    func replaceFrame(data: Data) { frame = data; enhancedFrame = nil }
     func replaceFrame(size: CGSize) {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -4596,5 +5028,315 @@ private final class RecorderVideoFaults: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if refusing { refusalCount += 1; return false }
         return adaptor.append(buffer, withPresentationTime: time)
+    }
+}
+
+
+@MainActor
+final class RemoteFramePresentationTests: XCTestCase {
+    func testProductionMonitorKeepsChangingPixelsWithStableLayoutInNormalAndHDScopes() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        for hd in [false, true] {
+            let suite = "monitor-live-pixels-\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            let preferences = RemoteToolPreferences(defaults: defaults)
+            preferences.hd = hd; preferences.disp = .clean; preferences.level = false
+            preferences.histogram = hd ? .rgb : .off
+            preferences.waveform = hd ? .rgb : .off
+            let size = hd ? CGSize(width: 1920, height: 1080) : CGSize(width: 640, height: 424)
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let images = [UIColor.red, UIColor.green].map { color in
+                UIGraphicsImageRenderer(size: size, format: format).image { context in
+                    color.setFill(); context.fill(CGRect(origin: .zero, size: size))
+                }.jpegData(compressionQuality: 0.9)!
+            }
+            let camera = RemoteLifecycleCamera(isUSB: true, frameSize: size)
+            await camera.replaceFrame(data: images[0])
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            let host = UIHostingController(rootView: RemoteView(session: nil, presentationMode: .usb,
+                toolDefaults: defaults, remoteCamera: camera, freeUsage: FreeUsageStore(defaults: defaults)))
+            window.rootViewController = host; window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true; window.rootViewController = nil
+                previousKey?.makeKey(); defaults.removePersistentDomain(forName: suite)
+            }
+            host.view.layoutIfNeeded()
+            let readyDeadline = ContinuousClock.now + .seconds(5)
+            while await camera.successfulFrameCount < 12, ContinuousClock.now < readyDeadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let received = await camera.successfulFrameCount
+            XCTAssertGreaterThanOrEqual(received, 12)
+            // Change only the JPEG, never layout, properties, tools or orientation.
+            // The full production view must display each new color through its
+            // frame observer, both geometry readers and (for HD) cached scopes.
+            for index in [1, 0, 1, 0, 1, 0] {
+                await camera.replaceFrame(data: images[index])
+                try await Task.sleep(for: .milliseconds(150))
+                let snapshot = UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
+                    host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+                }
+                let bitmap = try XCTUnwrap(snapshot.cgImage)
+                var rgba = [UInt8](repeating: 0, count: bitmap.width * bitmap.height * 4)
+                try rgba.withUnsafeMutableBytes { bytes in
+                    let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: bitmap.width,
+                        height: bitmap.height, bitsPerComponent: 8, bytesPerRow: bitmap.width * 4,
+                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                    context.draw(bitmap, in: CGRect(x: 0, y: 0, width: bitmap.width, height: bitmap.height))
+                }
+                let correct = stride(from: 0, to: rgba.count, by: 4).filter {
+                    rgba[$0 + index] > 235 && rgba[$0 + (1 - index)] < 20 && rgba[$0 + 2] < 20
+                }.count
+                XCTAssertGreaterThan(correct, 30_000, "Production monitor stale pixels: hd=\(hd), color=\(index)")
+            }
+            window.isHidden = true; window.rootViewController = nil
+            let stoppedDeadline = ContinuousClock.now + .seconds(2)
+            while !(await camera.log.contains("gate:false")), ContinuousClock.now < stoppedDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let stopped = await camera.log.contains("gate:false")
+            XCTAssertTrue(stopped, "Removing the actual monitor still drains its camera session")
+        }
+    }
+
+    func testLevelSamplesOnlyNotifyViewfinderOncePerChangedPair() async {
+        let model = RemoteViewModel(camera: DisconnectedRemoteCamera(isUSB: false))
+        var pageUpdates = 0, frameUpdates = 0
+        let page = model.objectWillChange.sink { pageUpdates += 1 }
+        let frames = model.frameUpdates.objectWillChange.sink { frameUpdates += 1 }
+        defer { page.cancel(); frames.cancel() }
+        model.updateLevel(roll: 12.5, pitch: -3.2)
+        XCTAssertEqual(frameUpdates, 1)
+        for _ in 0..<120 { model.updateLevel(roll: 12.5, pitch: -3.2) }
+        XCTAssertEqual(frameUpdates, 1)
+        XCTAssertEqual(model.levelRoll, 12.5)
+        XCTAssertEqual(model.levelPitch, -3.2)
+        model.updateLevel(roll: -1.2, pitch: nil)
+        XCTAssertEqual(frameUpdates, 2)
+        XCTAssertNil(model.levelPitch)
+        model.updateLevel(roll: nil, pitch: nil)
+        XCTAssertEqual(frameUpdates, 3)
+        XCTAssertNil(model.levelRoll)
+        XCTAssertEqual(pageUpdates, 0)
+        await model.stopAndWait()
+    }
+
+    private func image(_ size: CGSize = CGSize(width: 64, height: 48)) -> UIImage {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func frame(_ image: UIImage, sequence: Int = 1, generation: UInt64 = 0,
+                       age: TimeInterval = 0) -> RemoteDecodedFrame {
+        let jpeg = image.jpegData(compressionQuality: 0.6)!
+        return .init(image: image, jpeg: jpeg, rawBytes: jpeg, jpegOffset: 0,
+            operation: PTPConstants.getLiveViewImage, metadata: nil,
+            histogram: [sequence], histogramRGB: [[sequence, 2, 3]],
+            waveform: [[sequence]], falseColorPixels: [UInt32(sequence)],
+            falseColorWidth: 1, falseColorHeight: 1, falseColorImage: image.cgImage,
+            waveformImage: image.cgImage, zebraMask: nil,
+            fps: Double(sequence), generation: generation,
+            receivedAtUptime: ProcessInfo.processInfo.systemUptime - age)
+    }
+
+    func testFramesPublishOnceToViewfinderAndDoNotInvalidateControls() async throws {
+        let model = RemoteViewModel(camera: DisconnectedRemoteCamera(isUSB: false))
+        let image = image()
+        var pageUpdates = 0, frameUpdates = 0
+        let page = model.objectWillChange.sink { pageUpdates += 1 }
+        let frames = model.frameUpdates.objectWillChange.sink { frameUpdates += 1 }
+        defer { page.cancel(); frames.cancel() }
+        model.acceptDecodedFrame(frame(image))
+        XCTAssertGreaterThan(pageUpdates, 0, "First image/session readiness must update controls")
+        XCTAssertEqual(frameUpdates, 1)
+        pageUpdates = 0; frameUpdates = 0
+        for step in 2...121 {
+            // New UIImage identity each time, with stable size like decoded camera frames.
+            let next = UIImage(cgImage: try XCTUnwrap(image.cgImage))
+            model.acceptDecodedFrame(frame(next, sequence: step))
+            XCTAssertTrue(model.frameImage === next)
+            XCTAssertEqual(model.frameHistogram, [step])
+            XCTAssertEqual(model.frameHistogramRGB, [[step, 2, 3]])
+            XCTAssertEqual(model.frameWaveform, [[step]])
+            XCTAssertTrue(model.frameWaveformImage === next.cgImage)
+            XCTAssertTrue(model.frameFalseColorImage === next.cgImage)
+            XCTAssertEqual(model.frameFalseColorPixels, [UInt32(step)])
+        }
+        XCTAssertEqual(pageUpdates, 0)
+        XCTAssertEqual(frameUpdates, 120)
+        XCTAssertEqual(model.state.frameSequence, 121)
+        XCTAssertEqual(model.state.fps, 121)
+        model.acceptDecodedFrame(frame(image, generation: 999))
+        XCTAssertEqual(frameUpdates, 120, "Late obsolete generation must remain rejected")
+        XCTAssertEqual(model.state.frameSequence, 121)
+        model.acceptDecodedFrame(frame(self.image(CGSize(width: 80, height: 40))))
+        XCTAssertGreaterThan(pageUpdates, 0, "New image aspect must update outer layout")
+        pageUpdates = 0; frameUpdates = 0
+        model.setFrameAnalysis(histogram: false, zebra: false)
+        XCTAssertEqual(pageUpdates, 0)
+        XCTAssertEqual(frameUpdates, 1)
+        XCTAssertNil(model.frameHistogram)
+        XCTAssertNil(model.frameHistogramRGB)
+        XCTAssertNil(model.frameWaveform)
+        XCTAssertNil(model.frameWaveformImage)
+        XCTAssertNil(model.frameFalseColorImage)
+        XCTAssertNil(model.frameFalseColorPixels)
+        await model.stopAndWait()
+        XCTAssertGreaterThan(pageUpdates, 0, "Clearing frame/ending session must update controls")
+        XCTAssertNil(model.frameImage)
+        XCTAssertNil(model.frameData)
+        let updatesAfterStop = frameUpdates
+        model.acceptDecodedFrame(frame(image))
+        XCTAssertEqual(frameUpdates, updatesAfterStop)
+        XCTAssertEqual(model.state.session, .idle)
+    }
+
+    func testFocusExpiryStillRefreshesViewfinderWithoutAnotherFrameOrWholePage() async throws {
+        let model = RemoteViewModel(camera: DisconnectedRemoteCamera(isUSB: false))
+        model.acceptDecodedFrame(frame(image(), age: 0.4))
+        XCTAssertFalse(model.focusFrameExpired)
+        var pageUpdates = 0, frameUpdates = 0
+        let page = model.objectWillChange.sink { pageUpdates += 1 }
+        let frames = model.frameUpdates.objectWillChange.sink { frameUpdates += 1 }
+        defer { page.cancel(); frames.cancel() }
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(model.focusFrameExpired)
+        XCTAssertEqual(frameUpdates, 1)
+        XCTAssertEqual(pageUpdates, 0)
+        model.acceptDecodedFrame(frame(image()))
+        XCTAssertFalse(model.focusFrameExpired)
+        XCTAssertEqual(frameUpdates, 2)
+        XCTAssertEqual(pageUpdates, 0)
+        await model.stopAndWait()
+    }
+
+    private final class Probe {
+        var parentBodies = 0
+        var frameBodies = 0
+        var displayedImage: UIImage?
+        var displayedSequence: UInt64 = 0
+    }
+    private struct Harness: View {
+        @ObservedObject var model: RemoteViewModel
+        let probe: Probe
+        var body: some View {
+            let _ = { probe.parentBodies += 1 }()
+            VStack {
+                Text("Controls")
+                RemoteFrameScope(updates: model.frameUpdates) {
+                    let _ = {
+                        probe.frameBodies += 1
+                        probe.displayedImage = model.frameImage
+                        probe.displayedSequence = model.state.frameSequence
+                    }()
+                    if let image = model.frameImage { Image(uiImage: image) }
+                }
+            }
+        }
+    }
+
+    private struct GeometryHarness: View {
+        @ObservedObject var model: RemoteViewModel
+        let probe: Probe
+        var body: some View {
+            let _ = { probe.parentBodies += 1 }()
+            RemoteViewfinderFrameScope(updates: model.frameUpdates) { size in
+                let _ = {
+                    probe.frameBodies += 1
+                    probe.displayedImage = model.frameImage
+                    probe.displayedSequence = model.state.frameSequence
+                }()
+                if let image = model.frameImage {
+                    RemoteZoomableViewfinder(aspect: 4.0 / 3, imageSize: image.size,
+                        metadata: model.frameMetadata, onFocus: { _ in }) {
+                        RemoteViewfinderImage(image: image, aspect: 4.0 / 3,
+                                              multiplier: 1, size: size)
+                    }
+                }
+            }
+            .frame(width: 320, height: 240)
+        }
+    }
+
+    func testFixedGeometryViewfinderConsumesNewImagesWithoutControlChanges() async throws {
+        let model = RemoteViewModel(camera: DisconnectedRemoteCamera(isUSB: true))
+        let initialImage = image(), probe = Probe()
+        model.acceptDecodedFrame(frame(initialImage))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let host = UIHostingController(rootView: GeometryHarness(model: model, probe: probe))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let initialParents = probe.parentBodies, initialFrames = probe.frameBodies
+        XCTAssertGreaterThan(initialFrames, 0)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let green = UIGraphicsImageRenderer(size: initialImage.size, format: format).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(origin: .zero, size: initialImage.size))
+        }
+        var latest = initialImage
+        for sequence in 2...16 {
+            latest = UIImage(cgImage: try XCTUnwrap((sequence == 16 ? green : initialImage).cgImage))
+            model.acceptDecodedFrame(frame(latest, sequence: sequence))
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(probe.parentBodies, initialParents)
+        XCTAssertGreaterThan(probe.frameBodies, initialFrames + 5,
+            "Stable GeometryReader must not suppress the frame subscription")
+        XCTAssertTrue(probe.displayedImage === latest)
+        XCTAssertEqual(probe.displayedSequence, 16)
+        // Verify actual rendered pixels through the nested zoom GeometryReader,
+        // not just that the outer observer evaluated a closure.
+        let snapshot = UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        let bitmap = try XCTUnwrap(snapshot.cgImage)
+        var rgba = [UInt8](repeating: 0, count: bitmap.width * bitmap.height * 4)
+        try rgba.withUnsafeMutableBytes { bytes in
+            let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: bitmap.width,
+                height: bitmap.height, bitsPerComponent: 8, bytesPerRow: bitmap.width * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(bitmap, in: CGRect(x: 0, y: 0, width: bitmap.width, height: bitmap.height))
+        }
+        let greenPixels = stride(from: 0, to: rgba.count, by: 4).filter {
+            rgba[$0] < 20 && rgba[$0 + 1] > 235 && rgba[$0 + 2] < 20
+        }.count
+        XCTAssertGreaterThan(greenPixels, 60_000, "The final source must really reach the screen surface")
+        print("MONITOR_GEOMETRY parent=\(probe.parentBodies - initialParents) frames=\(probe.frameBodies - initialFrames) latest=\(probe.displayedSequence)")
+        await model.stopAndWait()
+    }
+
+    func testHostedFrameScopeReadsLatestImageWhileParentStaysStill() async throws {
+        let model = RemoteViewModel(camera: DisconnectedRemoteCamera(isUSB: false))
+        let image = image(), probe = Probe()
+        model.acceptDecodedFrame(frame(image))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        let host = UIHostingController(rootView: Harness(model: model, probe: probe))
+        window.rootViewController = host; window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(30))
+        let initial = probe.parentBodies, initialFrames = probe.frameBodies
+        XCTAssertGreaterThan(initial, 0)
+        var latest = image
+        for step in 2...31 {
+            latest = UIImage(cgImage: try XCTUnwrap(image.cgImage))
+            model.acceptDecodedFrame(frame(latest, sequence: step))
+            try await Task.sleep(for: .milliseconds(8))
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(probe.parentBodies, initial)
+        XCTAssertGreaterThan(probe.frameBodies, initialFrames)
+        XCTAssertTrue(probe.displayedImage === latest, "The closure must not capture an obsolete image")
+        XCTAssertEqual(probe.displayedSequence, 31)
+        await model.stopAndWait()
     }
 }

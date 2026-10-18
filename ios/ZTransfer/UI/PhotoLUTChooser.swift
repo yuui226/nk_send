@@ -10,20 +10,19 @@ struct PhotoLUTChooser: View {
 
     private var store: PhotoLUTStore { editor.store }
     private var accent: Color { ZTransferColors.photoLUTAccent }
-    private var labels: [String: String] {
-        RemoteLUTCatalog.labels(editor.files, uncategorized: AppLocalized.resource("lut_uncategorized"))
-    }
-    private func optionLabel(_ identifier: String?) -> String {
-        guard let identifier else {
-            return AppLocalized.resource(editor.selectionOptions.count == 1 ? editor.emptyLabelKey : "lut_off")
-        }
-        return labels[identifier] ?? store.selectedName ?? AppLocalized.resource("lut_off")
-    }
-
     var body: some View {
+        let options = editor.selectionOptions
+        let labels = editor.catalog.labels(uncategorized: AppLocalized.resource("lut_uncategorized"))
+        let off = AppLocalized.resource("lut_off")
+        let empty = AppLocalized.resource(options.count == 1 ? editor.emptyLabelKey : "lut_off")
+        let selectedName = store.selectedName
+        let optionLabel: (String?) -> String = { identifier in
+            guard let identifier else { return empty }
+            return labels[identifier] ?? selectedName ?? off
+        }
         PhotoEffectsCard(accent: accent) {
             PhotoEffectControlRow(primaryWeight: 3, secondaryWeight: 2) {
-                DetentWheel(label: "LUT", options: editor.selectionOptions,
+                DetentWheel(label: "LUT", options: options,
                     selected: editor.request.pendingIdentifier ?? store.selectedIdentifier,
                     optionLabel: optionLabel,
                     onCommit: choose,
@@ -31,7 +30,7 @@ struct PhotoLUTChooser: View {
                     readOnly: editor.loading, optionMaxLines: 2, optionFontSize: 13,
                     optionFontSizeFor: { optionLabel($0).utf16.count > 24 ? 11 : 13 },
                     accentColor: accent,
-                    onActivated: editor.selectionOptions.count == 1 ? {
+                    onActivated: options.count == 1 ? {
                         ZTransferHaptics.shared.tick(); editor.openFolder()
                     } : nil,
                     onLongClick: { editor.openChooser(onDisable: disable) },
@@ -119,16 +118,29 @@ struct PhotoLUTChooser: View {
 
 /// Hosted beside the entire page/popup, never inside the scrolling card. Both
 /// columns scroll independently; category changes reset only the right list.
+struct PhotoLUTChooserPresentation: View {
+    @ObservedObject var editor: PhotoLUTEditorState
+    @Binding var draft: PhotoEffectsSettings
+    var body: some View {
+        if editor.showingChooser { PhotoLUTChooserOverlay(editor: editor, draft: $draft) }
+    }
+}
+
 struct PhotoLUTChooserOverlay: View {
     @ObservedObject var editor: PhotoLUTEditorState
     @Binding var draft: PhotoEffectsSettings
     private var store: PhotoLUTStore { editor.store }
-    private var categories: [String?] { PhotoLUTCategorySelection.categories(in: editor.files) }
-    private var visible: [RemoteLUTFile] { editor.orderedFiles.filter { $0.category == editor.categorySelection.category } }
     private func categoryLabel(_ category: String?) -> String { category ?? AppLocalized.resource("lut_uncategorized") }
 
     var body: some View {
-        PhotoEffectChooserDialog(categoryLabels: categories.map(categoryLabel), optionLabels: visible.map(\.label),
+        let catalog = editor.catalog
+        let categories = catalog.categories
+        let visible = catalog.filesByCategory[editor.categorySelection.category] ?? []
+        let initialID = store.selectedIdentifier.flatMap { catalog.filesByIdentifier[$0] }.flatMap {
+            $0.category == editor.categorySelection.category ? $0.identifier : nil
+        } ?? visible.first?.identifier
+        PhotoEffectChooserDialog(categoryLabels: categories.map(categoryLabel),
+            optionLabels: catalog.labelsByCategory[editor.categorySelection.category] ?? [],
             onDismiss: { editor.showingChooser = false }) {
             HStack(spacing: 8) {
                 PhotoEffectChooserAction(label: AppLocalized.resource("lut_turn_off"), selected: store.selectedIdentifier == nil) {
@@ -142,45 +154,29 @@ struct PhotoLUTChooserOverlay: View {
             }
         } content: { width in
             HStack(spacing: 6) {
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(spacing: 2) {
-                            ForEach(categories, id: \.self) { category in
-                                PhotoEffectChooserRow(label: categoryLabel(category),
-                                    selected: editor.categorySelection.category == category, category: true) {
-                                    editor.categorySelection.category = category
-                                }.id(category)
-                            }
-                        }
+                PhotoEffectChooserList(items: categories, id: \.self,
+                    initialID: .some(editor.categorySelection.category)) { category in
+                    PhotoEffectChooserRow(label: categoryLabel(category),
+                        selected: editor.categorySelection.category == category, category: true) {
+                        editor.categorySelection.category = category
                     }
-                    .onAppear { scroll.scrollTo(editor.categorySelection.category, anchor: .top) }
                 }.frame(width: max(0, width - 6) * 0.36)
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(spacing: 2) {
-                            ForEach(visible, id: \.identifier) { file in
-                                PhotoEffectChooserRow(label: file.label,
-                                    selected: store.selectedIdentifier == file.identifier,
-                                    favorite: store.favorites.contains(file.identifier),
-                                    accent: ZTransferColors.photoLUTAccent) {
-                                    ZTransferHaptics.shared.tick()
-                                    editor.choose(file.identifier,
-                                        onDisable: { disablePhotoLUTDraft(&draft, lutStore: store) },
-                                        shouldAccept: { PhotoColorEffectEditorVisibility(settings: draft, isPro: PremiumEntitlementStore.shared.access.isPro).lut }) { selection in
-                                            var value = draft
-                                            value.selectedFilter = selection
-                                            value.photoFilterEnabled = true
-                                            draft = value
-                                        }
-                                    editor.showingChooser = false
-                                }.id(file.identifier)
+                PhotoEffectChooserList(items: visible, id: \.identifier,
+                    initialID: initialID) { file in
+                    PhotoEffectChooserRow(label: file.label,
+                        selected: store.selectedIdentifier == file.identifier,
+                        favorite: store.favorites.contains(file.identifier),
+                        accent: ZTransferColors.photoLUTAccent) {
+                        ZTransferHaptics.shared.tick()
+                        editor.choose(file.identifier,
+                            onDisable: { disablePhotoLUTDraft(&draft, lutStore: store) },
+                            shouldAccept: { PhotoColorEffectEditorVisibility(settings: draft, isPro: PremiumEntitlementStore.shared.access.isPro).lut }) { selection in
+                                var value = draft
+                                value.selectedFilter = selection
+                                value.photoFilterEnabled = true
+                                draft = value
                             }
-                        }
-                    }
-                    .onAppear {
-                        if let file = visible.first(where: { $0.identifier == store.selectedIdentifier }) ?? visible.first {
-                            scroll.scrollTo(file.identifier, anchor: .top)
-                        }
+                        editor.showingChooser = false
                     }
                 }.id(editor.categorySelection.category)
             }

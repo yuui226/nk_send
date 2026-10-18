@@ -7,6 +7,21 @@ func gpsBackgroundLocationModeEnabled(_ modes: [String]?) -> Bool {
     modes?.contains("location") == true
 }
 
+/// Page-level connection eligibility depends only on enabled, not on every
+/// location/BLE update. Detailed GPS controls still observe the full coordinator.
+@MainActor
+final class GPSEnabledObservation: ObservableObject {
+    @Published private(set) var enabled: Bool
+    private var observation: AnyCancellable?
+
+    init(_ coordinator: GPSCoordinator) {
+        enabled = coordinator.state.enabled
+        observation = coordinator.$state.map(\.enabled).removeDuplicates().sink { [weak self] value in
+            if self?.enabled != value { self?.enabled = value }
+        }
+    }
+}
+
 /// Coordinates the Android-equivalent GPS lifecycle: location permission/fix,
 /// Nikon BLE connection and throttled GEO writes.  The AP conflict is surfaced
 /// by the caller instead of silently changing the selected connection mode.

@@ -62,7 +62,20 @@ final class RemoteShutterController: NSObject, ObservableObject {
         var recording: Bool
         var diameter: CGFloat
     }
-    @Published private(set) var motion: RemoteShutterMotion
+    struct Display: Equatable {
+        let press: Float
+        let focus: Float
+        let size: Float
+        let corner: Float
+        init(_ motion: RemoteShutterMotion) {
+            press = motion.press.value; focus = motion.focus.value
+            size = motion.size.value; corner = motion.corner.value
+        }
+    }
+    private(set) var motion: RemoteShutterMotion
+    @Published private(set) var display: Display
+    private var active = true
+    var clockRunning: Bool { link != nil }
     private(set) var gesture = RemoteShutterGesture()
     private(set) var configuration: Configuration
     private let haptics: ZTransferHaptics
@@ -73,7 +86,9 @@ final class RemoteShutterController: NSObject, ObservableObject {
     private var link: CADisplayLink?
     init(configuration: Configuration, haptics: ZTransferHaptics = .shared) {
         self.configuration = configuration; self.haptics = haptics
-        motion = .init(diameter: Float(configuration.diameter), focusing: configuration.focusing, recording: configuration.recording)
+        let initial = RemoteShutterMotion(diameter: Float(configuration.diameter), focusing: configuration.focusing, recording: configuration.recording)
+        motion = initial
+        display = Display(initial)
     }
     func configure(_ next: Configuration) {
         configuration = next
@@ -81,6 +96,7 @@ final class RemoteShutterController: NSObject, ObservableObject {
         updateMotion()
     }
     func down() {
+        guard active else { return }
         let actions = gesture.down(at: ProcessInfo.processInfo.systemUptime,
                                    enabled: configuration.enabled && !configuration.capturing)
         guard !actions.isEmpty else { return }
@@ -112,17 +128,34 @@ final class RemoteShutterController: NSObject, ObservableObject {
     private func updateMotion() {
         motion.configure(held: gesture.held, focusing: configuration.focusing,
                          recording: configuration.recording, diameter: Float(configuration.diameter))
-        if motion.needsFrames, link == nil {
-            let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        publish()
+        if active, motion.needsFrames, link == nil {
+            let next = CADisplayLink(target: ClockTarget(self), selector: #selector(ClockTarget.frame(_:)))
             link = next; next.add(to: .main, forMode: .common)
         }
     }
-    @objc private func frame(_ sender: CADisplayLink) {
-        motion.advance(Int64(sender.timestamp * 1_000_000_000))
+    func advance(_ now: Int64) {
+        guard active else { return }
+        motion.advance(now)
+        publish()
         if !motion.needsFrames { stopClock() }
     }
+    private func publish() {
+        let next = Display(motion)
+        if display != next { display = next }
+    }
+    func activate() { active = true; updateMotion() }
     private func stopClock() { link?.invalidate(); link = nil }
-    func stop() { end(inside: false); stopClock() }
+    func stop() { active = false; end(inside: false); stopClock() }
+    @MainActor
+    private final class ClockTarget: NSObject {
+        weak var owner: RemoteShutterController?
+        init(_ owner: RemoteShutterController) { self.owner = owner }
+        @objc func frame(_ sender: CADisplayLink) {
+            guard let owner else { sender.invalidate(); return }
+            owner.advance(Int64(sender.timestamp * 1_000_000_000))
+        }
+    }
 }
 
 struct RemoteShutterButton: View {
@@ -134,14 +167,14 @@ struct RemoteShutterButton: View {
     let onFocusStart: () -> Void
     let onRelease: (Bool) -> Void
     let diameter: CGFloat
-    @StateObject private var controller: RemoteShutterController
+    @State private var controller: RemoteShutterController
     init(capture: RemoteCapturePhase, movieMode: Bool, enabled: Bool, focusing: Bool,
          onQuickTap: @escaping () -> Void, onFocusStart: @escaping () -> Void,
          onRelease: @escaping (Bool) -> Void, diameter: CGFloat = 76) {
         self.capture = capture; self.movieMode = movieMode; self.enabled = enabled
         self.focusing = focusing; self.onQuickTap = onQuickTap
         self.onFocusStart = onFocusStart; self.onRelease = onRelease; self.diameter = diameter
-        _controller = StateObject(wrappedValue: RemoteShutterController(configuration:
+        _controller = State(initialValue: RemoteShutterController(configuration:
             .init(enabled: enabled, capturing: capture == .capturing, focusing: focusing,
                   recording: capture == .recording, diameter: diameter)))
     }
@@ -159,6 +192,7 @@ struct RemoteShutterButton: View {
             .onDisappear { controller.stop() }
     }
     private func update() {
+        controller.activate()
         controller.onQuickTap = onQuickTap; controller.onFocus = onFocusStart; controller.onRelease = onRelease
         controller.configure(configuration)
     }
@@ -169,7 +203,7 @@ private struct RemoteShutterDrawing: View {
     let configuration: RemoteShutterController.Configuration
     let movie: Bool
     var body: some View {
-        let motion = controller.motion
+        let motion = controller.display
         ZStack {
             Circle().strokeBorder(!configuration.enabled ? ZTransferColors.primaryText.opacity(0.3)
                 : (configuration.focusing ? ZTransferColors.accentBlue : ZTransferColors.primaryText.opacity(0.9)), lineWidth: 3)
@@ -177,14 +211,14 @@ private struct RemoteShutterDrawing: View {
                 RemoteCameraToolLoading(diameter: configuration.diameter * 52 / 76,
                     strokeWidth: 3, color: ZTransferColors.primaryText)
             } else {
-                RoundedRectangle(cornerRadius: CGFloat(motion.corner.value), style: .circular)
+                RoundedRectangle(cornerRadius: CGFloat(motion.corner), style: .circular)
                     .fill((movie ? ZTransferColors.statusError : .white).opacity(configuration.enabled ? 1 : 0.3))
-                    .frame(width: CGFloat(motion.size.value), height: CGFloat(motion.size.value))
-                    .scaleEffect(CGFloat(motion.focus.value))
+                    .frame(width: CGFloat(motion.size), height: CGFloat(motion.size))
+                    .scaleEffect(CGFloat(motion.focus))
             }
         }.allowsHitTesting(false).accessibilityHidden(true)
             .overlay { RemoteShutterInput(controller: controller, enabled: configuration.enabled && !configuration.capturing) }
-            .scaleEffect(CGFloat(motion.press.value))
+            .scaleEffect(CGFloat(motion.press))
     }
 }
 

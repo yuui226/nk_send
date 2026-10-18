@@ -136,7 +136,7 @@ struct QueueCardSwipeInput: UIViewRepresentable {
         private func updateClock() {
             if !motion.isAnimating || window == nil { link?.invalidate(); link = nil; return }
             guard link == nil else { return }
-            let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+            let next = ZTransferDisplayLink.make(owner: self) { $0.frame($1) }
             next.add(to: .main, forMode: .common)
             link = next
         }

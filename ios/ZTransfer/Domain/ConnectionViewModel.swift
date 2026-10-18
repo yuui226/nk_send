@@ -268,9 +268,9 @@ final class ConnectionViewModel: ObservableObject {
         let cancelledConnection = wifiConnectTask
         cancelledConnection?.cancel(); wifiConnectTask = nil
         wifiRetryTask?.cancel(); wifiRetryTask = nil
-        state.wifiPhase = .idle
-        state.wifiFailureKind = nil
-        state.staProgressIP = nil
+        if state.wifiPhase != .idle { state.wifiPhase = .idle }
+        if state.wifiFailureKind != nil { state.wifiFailureKind = nil }
+        if state.staProgressIP != nil { state.staProgressIP = nil }
         let service = wifiService
         let previousCleanup = wifiCleanupTask
         wifiCleanupTask = Task {
@@ -293,8 +293,10 @@ final class ConnectionViewModel: ObservableObject {
 
     func refreshSTAProfiles() async {
         let profiles = wifiService.profiles
-        pairedCameraCount = profiles.pairedCameraCount
-        pairedCameraModels = profiles.pairedCameraModels
+        let count = profiles.pairedCameraCount
+        let models = profiles.pairedCameraModels
+        if pairedCameraCount != count { pairedCameraCount = count }
+        if pairedCameraModels != models { pairedCameraModels = models }
     }
 
     private func beginWiFiConnection(reconnect: Bool) async {
@@ -688,6 +690,7 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     func select(mode: CameraConnectionMode) {
+        guard state.selectedMode != mode else { return }
         state.selectedMode = mode
     }
 
@@ -710,7 +713,7 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     private func rememberPresentationMode(_ mode: CameraPresentationMode) {
-        state.rememberedPresentationMode = mode
+        if state.rememberedPresentationMode != mode { state.rememberedPresentationMode = mode }
         wirelessPreferences.set(mode.rawValue, forKey: CameraPresentationMode.preferenceKey)
     }
 
@@ -806,7 +809,9 @@ final class ConnectionViewModel: ObservableObject {
             break
         }
         let previous = state
-        state = state.applying(event)
+        let next = state.applying(event)
+        // Match StateFlow equality without dropping the event's side effects.
+        if state != next { state = next }
         switch event {
         case let .authorization(status):
             guard status == .authorized,

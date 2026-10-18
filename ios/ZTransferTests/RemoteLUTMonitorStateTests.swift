@@ -1,5 +1,8 @@
 import XCTest
 import Metal
+import MetalKit
+import SwiftUI
+import Combine
 @testable import ZTransfer
 
 @MainActor final class RemoteLUTMonitorStateTests: XCTestCase {
@@ -728,4 +731,250 @@ private final class LUTReadTestLog: @unchecked Sendable {
     private var entries: [String] = []
     var values: [String] { lock.lock(); defer { lock.unlock() }; return entries }
     func append(_ value: String) { lock.lock(); entries.append(value); lock.unlock() }
+}
+
+@MainActor
+final class RemoteLUTPanelPerformanceTests: XCTestCase {
+    private func defaults() -> UserDefaults {
+        let name = "lut-performance-\(UUID())"
+        let result = UserDefaults(suiteName: name)!
+        addTeardownBlock { result.removePersistentDomain(forName: name) }
+        return result
+    }
+
+    private func table(_ color: String = "1 0 0") throws -> CubeLUT {
+        try CubeLUTParser.parse(Data(("LUT_3D_SIZE 2\n" + String(repeating: "\(color)\n", count: 8)).utf8))
+    }
+
+    private func waitFor(_ predicate: () -> Bool) async throws {
+        let end = ContinuousClock.now.advanced(by: .seconds(3))
+        while !predicate(), ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(predicate())
+    }
+
+    func testIdleCancellationDoesNotPublishButStillPersistsAndRejectsStaleWork() {
+        let preferences = RemoteLUTPreferences(defaults: defaults())
+        let state = RemoteLUTMonitorState(preferences: preferences)
+        state.environment(movie: false, available: true, visible: true)
+        var updates = 0
+        let observation = state.objectWillChange.sink { updates += 1 }
+        for _ in 0..<120 {
+            preferences.setSelection("stale", movie: false)
+            state.turnOff()
+            state.prepareFolderPicker()
+            state.dismissMenu()
+            XCTAssertNil(preferences.selection(movie: false))
+        }
+        XCTAssertEqual(updates, 0)
+        var notices = 0
+        state.onNotice = { _ in notices += 1 }
+        state.scanFailed(.read)
+        let firstFailure = updates
+        for _ in 0..<120 { state.scanFailed(.read) }
+        XCTAssertEqual(updates, firstFailure)
+        XCTAssertEqual(notices, 121, "Repeated error events still reach the shared hint host")
+        let file = RemoteLUTFile(identifier: "a", name: "a.cube", relativePath: "a.cube", size: 10)
+        let old = state.beginSelection(file)!
+        state.prepareFolderPicker()
+        let afterCancel = updates
+        state.loaded(file, lut: try! table(), generation: old)
+        state.presented(generation: old)
+        XCTAssertEqual(updates, afterCancel)
+        XCTAssertNil(state.active)
+        state.close()
+        observation.cancel()
+    }
+
+    func testUnchangedLargeScanReusesMetadataIndexAndCategorySelection() async throws {
+        let defaults = defaults()
+        let preferences = RemoteLUTPreferences(defaults: defaults)
+        let access = RemoteLUTFolderAccess(defaults: defaults)
+        let files = (0..<10_000).map { n in
+            RemoteLUTFile(identifier: "\(n)", name: String(format: "%05d.cube", n),
+                          relativePath: "C\(n % 10)/\(n).cube", size: 100, modified: Date(timeIntervalSince1970: 1))
+        }
+        let source = LUTPerformanceScanSource(Array(files.reversed()) + [
+            RemoteLUTFile(identifier: "bad", name: "bad.cube", relativePath: "a/b/bad.cube", size: 1)])
+        let state = RemoteLUTMonitorState(preferences: preferences, access: access, queue: LUTIOQueue(),
+            scan: { replacement, _, ticket in
+                XCTAssertFalse(Thread.isMainThread)
+                try ticket.checkCancellation()
+                return (replacement ?? URL(fileURLWithPath: "/lut-fixture"),
+                        .init(bookmark: Data([1, 2, 3]), files: source.read()))
+            })
+        defer { state.close() }
+        state.refreshFolder(replacing: URL(fileURLWithPath: "/lut-fixture"))
+        try await waitFor { !state.scanning }
+        XCTAssertEqual(state.files, files)
+        let catalog = state.catalog
+        let group = try XCTUnwrap(catalog.filesByCategory["C8"])
+        let address = group.withUnsafeBufferPointer { $0.baseAddress }
+        var selection = PhotoLUTCategorySelection()
+        selection.reconcile(catalog: catalog, selected: "9999")
+        XCTAssertEqual(selection.category, "C9")
+        selection.category = "C8"
+        var changes = 0
+        let observer = state.$files.dropFirst().sink { _ in changes += 1 }
+        defer { observer.cancel() }
+        for _ in 0..<4 {
+            state.refreshFolder()
+            try await waitFor { !state.scanning }
+            XCTAssertTrue(state.catalog === catalog)
+        }
+        for _ in 0..<120 {
+            selection.reconcile(catalog: state.catalog, selected: "9999")
+            XCTAssertEqual(selection.category, "C8", "Refresh must preserve the browsed category")
+            XCTAssertEqual(state.catalog.filesByCategory["C8"]?.withUnsafeBufferPointer { $0.baseAddress }, address)
+        }
+        XCTAssertEqual(changes, 0)
+        XCTAssertEqual(access.bookmarkData, Data([1, 2, 3]))
+        var changed = files
+        changed[0].modified = Date(timeIntervalSince1970: 2)
+        source.replace(changed)
+        state.refreshFolder()
+        try await waitFor { !state.scanning }
+        XCTAssertEqual(changes, 1)
+        XCTAssertFalse(state.catalog === catalog)
+        XCTAssertEqual(state.catalog.filesByIdentifier["0"]?.modified, changed[0].modified)
+        selection.reconcile(catalog: state.catalog, selected: "1")
+        XCTAssertEqual(selection.category, "C1")
+        source.replace(files.filter { $0.category != "C1" })
+        state.refreshFolder()
+        try await waitFor { !state.scanning }
+        selection.reconcile(catalog: state.catalog, selected: "1")
+        XCTAssertEqual(selection.category, "C0")
+    }
+
+    func testActualImageLeafCommitsWithoutRootUpdatesForCandidateOrReplacement() async throws {
+        let state = RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: defaults()))
+        let lifetime = RemoteLUTMonitorLifetime(state)
+        state.environment(movie: false, available: true, visible: true)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8), format: format).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }.cgImage)
+        let counts = Counts()
+        let host = UIHostingController(rootView: ImageHarness(lifetime: lifetime, counts: counts, image: image))
+        let window = try makeWindow(host)
+        defer { state.close(); window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(100))
+        let baseline = counts.root
+        let file = RemoteLUTFile(identifier: "a", name: "a.cube", relativePath: "a.cube", size: nil)
+        let first = try XCTUnwrap(state.beginSelection(file))
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(counts.root, baseline, "Pending selection does not rebuild the page")
+        state.loaded(file, lut: try table(), generation: first)
+        try await waitFor { state.active?.file.identifier == "a" }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(lifetime.isActive)
+        XCTAssertGreaterThan(counts.root, baseline)
+        XCTAssertEqual(findAll(MTKView.self, in: host.view).count, 1)
+        let activeCount = counts.root
+        let next = RemoteLUTFile(identifier: "b", name: "b.cube", relativePath: "b.cube", size: nil)
+        let second = try XCTUnwrap(state.beginSelection(next))
+        state.loaded(next, lut: try table("0 0 1"), generation: second)
+        try await waitFor { state.active?.file.identifier == "b" }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(counts.root, activeCount, "New LUT is committed by the real image leaf, not a root rebuild")
+        XCTAssertEqual(findAll(MTKView.self, in: host.view).count, 1)
+        state.turnOff()
+        try await waitFor { findAll(MTKView.self, in: host.view).isEmpty }
+        XCTAssertFalse(lifetime.isActive)
+        XCTAssertGreaterThan(counts.root, activeCount)
+    }
+
+    func testActualLargePanelKeepsScrollPositionDuringLoadingAndUnchangedRefresh() async throws {
+        let defaults = defaults()
+        let files = (0..<3_000).map { n in
+            RemoteLUTFile(identifier: "\(n)", name: String(format: "%05d.cube", n), relativePath: "\(n).cube", size: 100)
+        }
+        let state = RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: defaults),
+            access: RemoteLUTFolderAccess(defaults: defaults), queue: LUTIOQueue(),
+            scan: { _, _, _ in (URL(fileURLWithPath: "/lut-list"), .init(bookmark: Data([1]), files: files)) })
+        state.refreshFolder(replacing: URL(fileURLWithPath: "/lut-list"))
+        try await waitFor { !state.scanning }
+        state.environment(movie: false, available: true, visible: true)
+        let selected = files[2_500]
+        let request = try XCTUnwrap(state.beginSelection(selected))
+        state.loaded(selected, lut: try table(), generation: request); state.presented(generation: request)
+        let lifetime = RemoteLUTMonitorLifetime(state)
+        let counts = Counts()
+        let host = UIHostingController(rootView: PanelHarness(lifetime: lifetime, counts: counts))
+        let window = try makeWindow(host)
+        defer { state.close(); window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(400))
+        let list = try XCTUnwrap(findAll(UICollectionView.self, in: host.view).first)
+        XCTAssertEqual(list.numberOfItems(inSection: 0), 3_000)
+        XCTAssertLessThan(list.visibleCells.count, 30)
+        XCTAssertTrue(list.indexPathsForVisibleItems.contains(IndexPath(item: 2_500, section: 0)))
+        list.setContentOffset(CGPoint(x: 0, y: list.contentOffset.y + 100), animated: false)
+        try await Task.sleep(for: .milliseconds(50))
+        let offset = list.contentOffset.y
+        let visible = Set(list.indexPathsForVisibleItems)
+        let parentBodies = counts.root
+        let pending = try XCTUnwrap(state.beginSelection(files[2_510]))
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(counts.root, parentBodies)
+        XCTAssertEqual(list.contentOffset.y, offset, accuracy: 1)
+        XCTAssertEqual(Set(list.indexPathsForVisibleItems), visible)
+        XCTAssertFalse(findAll(UIActivityIndicatorView.self, in: host.view).isEmpty)
+        state.failed(generation: pending, reason: "read")
+        state.openMenu()
+        try await waitFor { !state.scanning }
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(counts.root, parentBodies)
+        XCTAssertEqual(list.contentOffset.y, offset, accuracy: 1)
+        XCTAssertEqual(Set(list.indexPathsForVisibleItems), visible)
+    }
+
+    func testLifetimeDoesNotFormObservationCycle() {
+        weak var weakState: RemoteLUTMonitorState?
+        weak var weakLifetime: RemoteLUTMonitorLifetime?
+        do {
+            let state = RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: defaults()))
+            let lifetime = RemoteLUTMonitorLifetime(state)
+            weakState = state; weakLifetime = lifetime
+            XCTAssertFalse(lifetime.isActive)
+        }
+        XCTAssertNil(weakLifetime)
+        XCTAssertNil(weakState)
+    }
+
+    private final class Counts { var root = 0 }
+    private struct ImageHarness: View {
+        @ObservedObject var lifetime: RemoteLUTMonitorLifetime
+        let counts: Counts
+        let image: CGImage
+        var body: some View {
+            counts.root += 1
+            return RemoteLUTImage(image: image, monitor: lifetime.monitor, source: Color.green)
+                .frame(width: 180, height: 120)
+        }
+    }
+    private struct PanelHarness: View {
+        @ObservedObject var lifetime: RemoteLUTMonitorLifetime
+        let counts: Counts
+        var body: some View {
+            counts.root += 1
+            return RemoteLUTPanel(monitor: lifetime.monitor) {}
+        }
+    }
+    private func makeWindow(_ controller: UIViewController) throws -> UIWindow {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
+        window.rootViewController = controller; window.makeKeyAndVisible()
+        return window
+    }
+    private func findAll<T: UIView>(_ type: T.Type, in view: UIView) -> [T] {
+        (view as? T).map { [$0] } ?? view.subviews.flatMap { findAll(type, in: $0) }
+    }
+}
+
+private final class LUTPerformanceScanSource: @unchecked Sendable {
+    private let lock = NSLock()
+    private var files: [RemoteLUTFile]
+    init(_ files: [RemoteLUTFile]) { self.files = files }
+    func read() -> [RemoteLUTFile] { lock.lock(); defer { lock.unlock() }; return files }
+    func replace(_ value: [RemoteLUTFile]) { lock.lock(); files = value; lock.unlock() }
 }

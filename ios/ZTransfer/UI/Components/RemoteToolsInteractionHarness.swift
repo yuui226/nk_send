@@ -80,11 +80,12 @@ private struct RemoteRecorderInteractionHarness: View {
     @State private var phase: RemoteLocalRecordingPhase = .idle
     @State private var premium = false
     @State private var compact = false
+    @State private var elapsed = RemoteRecordingElapsed(seconds: 65)
     @State private var starts = 0
     @State private var stops = 0
     var body: some View {
         VStack(spacing: 60) {
-            RemoteRecorderBar(phase: phase, elapsedSeconds: 65, enabled: premium, compactSaved: compact,
+            RemoteRecorderBar(phase: phase, elapsed: elapsed, enabled: premium, compactSaved: compact,
                 onStart: { starts += 1; phase = .recording },
                 onPauseResume: { phase = phase == .paused ? .recording : .paused },
                 onStop: { stops += 1; phase = .finalizing })

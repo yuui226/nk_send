@@ -65,13 +65,16 @@ final class PhotoLUTStore: ObservableObject {
     /// An editor can be reopened after another presenter changed the same role.
     func reloadRole() {
         reloadSharedPreferences()
-        selectedIdentifier = defaults.string(forKey: role.selectionKey)
+        let selected = defaults.string(forKey: role.selectionKey)
+        if selectedIdentifier != selected { selectedIdentifier = selected }
         if let recipe = defaults.dictionary(forKey: recipeKey) {
-            intensityPercent = restoredIntensity(recipe)
-            adjustments = restoredAdjustments(recipe)
+            let intensity = restoredIntensity(recipe), restored = restoredAdjustments(recipe)
+            if intensityPercent != intensity { intensityPercent = intensity }
+            if adjustments != restored { adjustments = restored }
         } else {
-            intensityPercent = Np3FilterEngine.normalizeIntensity(defaults.object(forKey: role.intensityKey) as? Int ?? 80)
-            adjustments = .init()
+            let intensity = Np3FilterEngine.normalizeIntensity(defaults.object(forKey: role.intensityKey) as? Int ?? 80)
+            if intensityPercent != intensity { intensityPercent = intensity }
+            if adjustments != .init() { adjustments = .init() }
         }
     }
 
@@ -81,12 +84,13 @@ final class PhotoLUTStore: ObservableObject {
     }
     func select(_ identifier: String?) {
         if identifier == nil || identifier != selectedIdentifier { defaults.removeObject(forKey: recipeKey) }
-        selectedIdentifier = identifier
+        if selectedIdentifier != identifier { selectedIdentifier = identifier }
         defaults.set(identifier, forKey: role.selectionKey)
     }
 
     func setIntensity(_ value: Int) {
-        intensityPercent = Np3FilterEngine.normalizeIntensity(value)
+        let intensity = Np3FilterEngine.normalizeIntensity(value)
+        if intensityPercent != intensity { intensityPercent = intensity }
         defaults.set(intensityPercent, forKey: role.intensityKey)
         if var recipe = defaults.dictionary(forKey: recipeKey) {
             recipe["intensity"] = intensityPercent
@@ -187,7 +191,8 @@ final class PhotoLUTStore: ObservableObject {
     }
 
     func setAdjustments(_ value: LUTAdjustments) {
-        adjustments = value.normalized
+        let normalized = value.normalized
+        if adjustments != normalized { adjustments = normalized }
         guard var recipe = defaults.dictionary(forKey: recipeKey),
               let digest = recipe["digest"] as? String else { return }
         let fields = Self.encodeAdjustments(adjustments)

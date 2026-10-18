@@ -1,6 +1,16 @@
 import Combine
 import Foundation
 
+/// Owns the lazily created editor without forwarding its control/IO updates
+/// into the entire page. LUT controls and the chooser observe the editor;
+/// notices are delivered separately, while the page retains its lifetime.
+@MainActor
+final class PhotoLUTEditorLifetime: ObservableObject {
+    let editor: PhotoLUTEditorState
+    init(_ editor: PhotoLUTEditorState) { self.editor = editor }
+    convenience init(role: PhotoLUTStore.Role) { self.init(PhotoLUTEditorState(role: role)) }
+}
+
 /// PhotoLutEditorState.kt: one editor lifetime, shared folder/favorites, and a
 /// role-specific recipe. The presenter owns its draft and accepts callbacks.
 @MainActor
@@ -14,7 +24,10 @@ final class PhotoLUTEditorState: ObservableObject {
     let request: LUTRequestController
     private var access: RemoteLUTFolderAccess
     private var observations = Set<AnyCancellable>()
-    @Published private(set) var files: [RemoteLUTFile] = []
+    @Published private(set) var files: [RemoteLUTFile] = [] {
+        didSet { catalogCache = nil }
+    }
+    private var catalogCache: PresetCatalogIndex?
     @Published private(set) var folderFailure: String?
     @Published private(set) var notice: Notice?
     @Published var categorySelection = PhotoLUTCategorySelection()
@@ -29,18 +42,25 @@ final class PhotoLUTEditorState: ObservableObject {
         access = RemoteLUTFolderAccess(defaults: defaults, scope: .photo)
         self.request = request
         store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
+        store.$favorites.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.catalogCache = nil
+        }.store(in: &observations)
         request.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
     }
 
     var loading: Bool { request.loading }
     var loadingSelection: Bool { request.pendingIdentifier != nil }
     var active: Bool { store.selectedIdentifier != nil && !loading }
-    var orderedFiles: [RemoteLUTFile] { store.ordered(files) }
-    var selectionOptions: [String?] {
-        var options: [String?] = [nil] + orderedFiles.map { Optional($0.identifier) }
-        if let current = store.selectedIdentifier, !options.contains(current) { options.append(current) }
-        return options
+    /// Android remembers files/favorites separately from recipe and loading
+    /// state. Keep one index per editor so wheel labels are O(1), not O(N) each.
+    var catalog: PresetCatalogIndex {
+        if let catalogCache { return catalogCache }
+        let result = PresetCatalogIndex(files: files, orderedFiles: store.ordered(files))
+        catalogCache = result
+        return result
     }
+    var orderedFiles: [RemoteLUTFile] { catalog.orderedFiles }
+    var selectionOptions: [String?] { catalog.selectionOptions(current: store.selectedIdentifier) }
     var emptyLabelKey: String {
         RemoteLUTCatalog.photoFolderStatus(hasFolder: store.folderBookmark != nil,
             loading: loading && files.isEmpty, failure: folderFailure)
@@ -87,7 +107,7 @@ final class PhotoLUTEditorState: ObservableObject {
         let bookmark = access.bookmarkData
         guard replacement != nil || bookmark != nil else {
             cancelPending()
-            files = []
+            replaceFiles([])
             folderFailure = nil
             reconcileCategory()
             return
@@ -109,7 +129,7 @@ final class PhotoLUTEditorState: ObservableObject {
             case .success(let (prepared, previous)):
                 self.access.commit(prepared)
                 self.store.setFolderBookmark(self.access.bookmarkData)
-                self.files = prepared.files
+                self.replaceFiles(prepared.files)
                 self.folderFailure = nil
                 if (replacement != nil && previous?.standardizedFileURL != replacement?.standardizedFileURL)
                     || !self.files.contains(where: { $0.identifier == self.store.selectedIdentifier }) { onDisable() }
@@ -120,7 +140,7 @@ final class PhotoLUTEditorState: ObservableObject {
                 if replacement == nil {
                     self.folderFailure = message
                     if let failure = error as? RemoteLUTFolderAccessError, failure == .missing || failure == .denied {
-                        self.files = []
+                        self.replaceFiles([])
                         onDisable()
                         self.reconcileCategory()
                     }
@@ -134,7 +154,7 @@ final class PhotoLUTEditorState: ObservableObject {
                 shouldAccept: @escaping () -> Bool = { true },
                 onSelect: @escaping (PhotoFilterSelection) -> Void) {
         guard let identifier else { off(onDisable: onDisable); return }
-        guard let file = files.first(where: { $0.identifier == identifier }) else { return }
+        guard let file = catalog.filesByIdentifier[identifier] else { return }
         let bookmark = access.bookmarkData
         let directory = store.snapshotDirectory
         loadingOrigin = Date()
@@ -168,6 +188,9 @@ final class PhotoLUTEditorState: ObservableObject {
 
     private func reconcileCategory() {
         categorySelection.reconcile(files: files, selected: store.selectedIdentifier)
+    }
+    private func replaceFiles(_ next: [RemoteLUTFile]) {
+        if files != next { files = next }
     }
     private static func folderMessage(_ error: Error) -> String {
         switch error as? RemoteLUTFolderAccessError {

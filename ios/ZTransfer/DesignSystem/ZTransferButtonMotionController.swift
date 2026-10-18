@@ -1,6 +1,34 @@
 import SwiftUI
 import UIKit
 
+/// A display link retains its target, including while the app is suspended.
+/// Keep the visual owner weak without changing the caller's clock, run-loop,
+/// phase or stop/resume policy (performance ledger P33). The callback must use
+/// its owner argument rather than capture the owner.
+@MainActor
+enum ZTransferDisplayLink {
+    static func make<Owner: AnyObject>(owner: Owner,
+                                      frame: @escaping (Owner, CADisplayLink) -> Void) -> CADisplayLink {
+        let target = Target(owner: owner) { owner, link in
+            if let owner = owner as? Owner { frame(owner, link) }
+        }
+        return CADisplayLink(target: target, selector: #selector(Target.tick(_:)))
+    }
+
+    private final class Target: NSObject {
+        weak var owner: AnyObject?
+        let frame: (AnyObject, CADisplayLink) -> Void
+        init(owner: AnyObject, frame: @escaping (AnyObject, CADisplayLink) -> Void) {
+            self.owner = owner
+            self.frame = frame
+        }
+        @objc func tick(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            frame(owner, link)
+        }
+    }
+}
+
 /// Owns only visual feedback. The native Button still owns recognition, focus,
 /// accessibility and immediate action delivery. A successful activation repairs
 /// a Press/Release that SwiftUI may have coalesced into one isPressed value.

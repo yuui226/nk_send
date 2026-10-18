@@ -16,6 +16,8 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     var usesFunnel = true
     var fitsContentWidth = false
     var fillsProposedSize = false
+    var gentleMotion = false
+    var gentleAnchorY: CGFloat = 0.5
     var onSettled: ((CGFloat) -> Void)? = nil
     var onProgress: ((CGFloat) -> Void)? = nil
 
@@ -31,7 +33,8 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
         view.onSettled = onSettled
         view.onProgress = onProgress
         view.configure(target: targetProgress, anchorX: anchorX,
-                       anchorWidth: anchorWidth, anchorGap: anchorGap, opensAbove: opensAbove, usesFunnel: usesFunnel)
+                       anchorWidth: anchorWidth, anchorGap: anchorGap, opensAbove: opensAbove, usesFunnel: usesFunnel,
+                       gentleMotion: gentleMotion, gentleAnchorY: gentleAnchorY)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: GeniePopupHostView,
@@ -105,6 +108,8 @@ final class GeniePopupHostView: UIView {
     private var settledTarget: CGFloat?
     private var opensAbove = false
     private var usesFunnel = true
+    private var gentleMotion = false
+    private var gentleAnchorY: CGFloat = 0.5
     var onSettled: ((CGFloat) -> Void)?
     var onProgress: ((CGFloat) -> Void)?
     private var lastReportedProgress: CGFloat?
@@ -151,10 +156,14 @@ final class GeniePopupHostView: UIView {
     }
 
     func configure(target next: CGFloat, anchorX: CGFloat,
-                   anchorWidth: CGFloat, anchorGap: CGFloat, opensAbove: Bool = false, usesFunnel: Bool = true) {
+                   anchorWidth: CGFloat, anchorGap: CGFloat, opensAbove: Bool = false, usesFunnel: Bool = true,
+                   gentleMotion: Bool = false, gentleAnchorY: CGFloat = 0.5) {
         if self.anchorX != anchorX || self.anchorWidth != anchorWidth || self.anchorGap != anchorGap || self.opensAbove != opensAbove || self.usesFunnel != usesFunnel {
             lastDrawnProgress = nil
         }
+        if self.gentleMotion != gentleMotion || self.gentleAnchorY != gentleAnchorY { lastDrawnProgress = nil }
+        self.gentleMotion = gentleMotion
+        self.gentleAnchorY = gentleAnchorY
         self.opensAbove = opensAbove
         self.usesFunnel = usesFunnel
         self.anchorX = anchorX
@@ -168,7 +177,9 @@ final class GeniePopupHostView: UIView {
             // can unmount or hide a popup that has already been reopened.
             from = progress
             startedAt = CACurrentMediaTime()
-            duration = GeniePopupMotion.duration(expanding: next > progress) * Double(abs(next - progress))
+            let fullDuration = gentleMotion ? (next > progress ? 0.26 : 0.22)
+                : GeniePopupMotion.duration(expanding: next > progress)
+            duration = fullDuration * Double(abs(next - progress))
         }
         if progress != target {
             host.view.isUserInteractionEnabled = false
@@ -179,14 +190,15 @@ final class GeniePopupHostView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        host.view.frame = bounds
+        host.view.bounds = bounds
+        host.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
         canvas.frame = bounds
         guard !capturing, window != nil, bounds.width > 0, bounds.height > 0 else { return }
         if progress != target {
             // Capture on the next display frame, after the layout transaction,
             // rather than freezing the first, potentially incomplete hierarchy.
             if displayLink == nil {
-                let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+                let link = ZTransferDisplayLink.make(owner: self) { $0.tick($1) }
                 link.add(to: .main, forMode: .common)
                 displayLink = link
             }
@@ -253,7 +265,7 @@ final class GeniePopupHostView: UIView {
 
     @objc private func tick(_ link: CADisplayLink) {
         guard window != nil, bounds.width > 0, bounds.height > 0 else { return }
-        if !hasCapture || capturedSize != bounds.size {
+        if !gentleMotion && (!hasCapture || capturedSize != bounds.size) {
             let firstCapture = !hasCapture
             guard captureContent() else { return }
             // Height changes during a transition refresh the full surface and
@@ -267,7 +279,8 @@ final class GeniePopupHostView: UIView {
             settle()
             return
         }
-        let eased = GeniePopupMotion.timing(fraction, expanding: target > from)
+        let eased = gentleMotion ? CGFloat(ZTransferAndroidMotion.fastOutSlowIn(Float(fraction)))
+            : GeniePopupMotion.timing(fraction, expanding: target > from)
         progress = from + (target - from) * eased
         drawFrame()
     }
@@ -275,10 +288,27 @@ final class GeniePopupHostView: UIView {
     private func drawFrame() {
         // Layout can run again without advancing the animation. Only rewrite
         // the 12-band transforms when progress, capture or attachment changed.
-        guard hasCapture, lastDrawnProgress != progress else { return }
+        guard (gentleMotion || hasCapture), lastDrawnProgress != progress else { return }
         lastDrawnProgress = progress
         reportProgress()
-        renderFrame(at: progress)
+        if gentleMotion { renderGentleFrame(at: progress) }
+        else { renderFrame(at: progress) }
+    }
+
+    /// Android AnchorPopup gentleMotion: opacity p and scale .94 + .06p,
+    /// pivoted at the source action. Update one live layer, no snapshot mesh
+    /// or repeated SwiftUI rendering while the 260/220ms animation is running.
+    func renderGentleFrame(at progress: CGFloat) {
+        let p = min(1, max(0, progress))
+        let scale = 0.94 + 0.06 * p
+        let x = (0.5 - min(1, max(0, anchorX))) * bounds.width * (scale - 1)
+        let y = (0.5 - min(1, max(0, gentleAnchorY))) * bounds.height * (scale - 1)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        canvas.isHidden = true
+        host.view.layer.opacity = Float(p)
+        host.view.layer.setAffineTransform(CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: x, ty: y))
+        CATransaction.commit()
     }
 
     /// Drawing is independent of the display clock so endpoint rendering can
@@ -362,6 +392,7 @@ final class GeniePopupHostView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         canvas.isHidden = true
+        host.view.layer.setAffineTransform(.identity)
         host.view.layer.opacity = target == 0 ? 0 : 1
         host.view.isUserInteractionEnabled = target == 1
         host.view.accessibilityElementsHidden = target == 0

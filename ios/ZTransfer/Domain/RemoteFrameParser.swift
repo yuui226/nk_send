@@ -381,9 +381,12 @@ final class RemoteLiveViewFocusDiagnostic {
     private var displayState = "UI not observed"
     private var markedSamples: [String] = []
     private var baseline: String?
+    private var cachedReport: String?
+    private(set) var reportBuildCount = 0
     var running = false
 
     func start(nowMs: Int64, description: String) {
+        cachedReport = nil
         lines = ["Focus diagnostic v2 \(String(description.prefix(320)))",
                  "60s; changes only; ms; rawWHXY=width,height,centerX,centerY."]
         markedSamples.removeAll()
@@ -409,8 +412,10 @@ final class RemoteLiveViewFocusDiagnostic {
         }
         let previousKind = kind(displayState)
         let next = String(state.prefix(180))
+        guard next != displayState else { return }
         let nextKind = kind(next)
         displayState = next
+        cachedReport = nil
         if previousKind != nextKind { append("UI \(next)") }
     }
 
@@ -422,6 +427,7 @@ final class RemoteLiveViewFocusDiagnostic {
         let value = "mark +\(nowMs - startMs) \(String(text.prefix(48))) UI=\(displayState) state=\(state)"
         if markedSamples.count >= 8 { markedSamples.removeFirst() }
         markedSamples.append(value)
+        cachedReport = nil
     }
 
     func sample(packet: RemoteLiveViewPacket, metadata: RemoteLiveViewMetadata?, context: String) {
@@ -432,7 +438,9 @@ final class RemoteLiveViewFocusDiagnostic {
         if let lastSampleMs, now - lastSampleMs < 200 { return }
         lastSampleMs = now
         count += 1
-        let bytes = [UInt8](packet.bytes)
+        // Only the bounded header is inspected. Copying the JPEG as well can
+        // allocate megabytes for a passive diagnostic sample every 200 ms.
+        let bytes = [UInt8](packet.bytes.prefix(min(1024, max(0, packet.jpegOffset))))
         let header = packet.jpegOffset
         func u8(_ index: Int) -> Int {
             guard index >= 0, index < header, index < bytes.count else { return -1 }
@@ -459,12 +467,21 @@ final class RemoteLiveViewFocusDiagnostic {
             "\(metadata?.focusFrameStatus ?? "unsupported-header") rawWHXY=\(raw)"
         guard state != lastState else { return }
         lastState = state
+        cachedReport = nil
         changes += 1
         let sample = "+\(now - startMs) \(state)"
         if baseline == nil { baseline = sample } else { append(sample) }
     }
 
     func report() -> String {
+        if let cachedReport { return cachedReport }
+        let result = buildReport()
+        cachedReport = result
+        reportBuildCount += 1
+        return result
+    }
+
+    private func buildReport() -> String {
         guard !lines.isEmpty else { return "" }
         let heading = lines.prefix(2).joined(separator: "\n") + "\n" +
             (baseline.map { "baseline \($0)" } ?? "") + "\n" +
@@ -484,6 +501,7 @@ final class RemoteLiveViewFocusDiagnostic {
     }
 
     private func append(_ line: String) {
+        cachedReport = nil
         if lines.count >= 80, lines.count >= 3 {
             lines.remove(at: 2)
         }
@@ -510,6 +528,8 @@ struct RemoteDecodedFrame: @unchecked Sendable {
     let falseColorPixels: [UInt32]?
     let falseColorWidth: Int
     let falseColorHeight: Int
+    let falseColorImage: CGImage?
+    let waveformImage: CGImage?
     let zebraMask: RemoteZebraMask?
     let fps: Double
     let generation: UInt64
@@ -562,6 +582,7 @@ actor RemoteFrameDecodePipeline {
     private var waveformEnabled = false
     private var waveformRGB = false
     private var cachedWaveform: [[Int]]?
+    private var cachedWaveformImage: CGImage?
     private var waveformCalculatedAt: ContinuousClock.Instant?
     private var falseColorEnabled = false
     private var histogramRGB = false
@@ -596,6 +617,7 @@ actor RemoteFrameDecodePipeline {
         cachedHistogramRGB = nil
         cachedZebra = nil
         cachedWaveform = nil
+        cachedWaveformImage = nil
         histogramCalculatedAt = nil
         zebraCalculatedAt = nil
         waveformCalculatedAt = nil
@@ -615,7 +637,9 @@ actor RemoteFrameDecodePipeline {
         self.waveformRGB = waveformRGB
         falseColorEnabled = falseColor
         self.histogramRGB = histogramRGB
-        if !waveform || waveformModeChanged { cachedWaveform = nil; waveformCalculatedAt = nil }
+        if !waveform || waveformModeChanged {
+            cachedWaveform = nil; cachedWaveformImage = nil; waveformCalculatedAt = nil
+        }
         if !histogram { cachedHistogram = nil; cachedHistogramRGB = nil; histogramCalculatedAt = nil }
         if !zebra { cachedZebra = nil; zebraCalculatedAt = nil }
     }
@@ -634,7 +658,10 @@ actor RemoteFrameDecodePipeline {
     private func drain() async {
         while let request = pending {
             pending = nil
-            if let size = Self.imageSize(request), size != analysisSize {
+            // Only cached analyses need size-based invalidation. Plain frames
+            // and per-frame false color do not need a second JPEG source parse.
+            if histogramEnabled || zebraEnabled || waveformEnabled,
+               let size = Self.imageSize(request), size != analysisSize {
                 analysisSize = size
                 clearAnalysisCache()
             }
@@ -657,7 +684,9 @@ actor RemoteFrameDecodePipeline {
             let delay = decodeDelayNanoseconds
             let decoded = await Task.detached(priority: .userInitiated) {
                 if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
-                return Self.decode(request, histogram: calculateHistogram, histogramRGB: calculateHistogram && currentHistogramRGB, zebra: calculateZebra, waveform: calculateWaveform, waveformRGB: currentWaveformRGB, falseColor: currentFalseColor)
+                return autoreleasepool {
+                    Self.decode(request, histogram: calculateHistogram, histogramRGB: calculateHistogram && currentHistogramRGB, zebra: calculateZebra, waveform: calculateWaveform, waveformRGB: currentWaveformRGB, falseColor: currentFalseColor)
+                }
             }.value
             isDecoding = false
             guard request.generation == generation, let decoded else { continue }
@@ -678,6 +707,7 @@ actor RemoteFrameDecodePipeline {
             }
             if calculateWaveform {
                 cachedWaveform = decoded.waveform
+                cachedWaveformImage = decoded.waveformImage
                 waveformCalculatedAt = now
             }
             let result = RemoteDecodedFrame(
@@ -693,6 +723,8 @@ actor RemoteFrameDecodePipeline {
                 falseColorPixels: falseColorEnabled ? decoded.falseColorPixels : nil,
                 falseColorWidth: decoded.falseColorWidth,
                 falseColorHeight: decoded.falseColorHeight,
+                falseColorImage: falseColorEnabled ? decoded.falseColorImage : nil,
+                waveformImage: waveformEnabled ? cachedWaveformImage : nil,
                 zebraMask: zebraEnabled ? (calculateZebra ? decoded.zebraMask : cachedZebra) : nil,
                 fps: request.fps,
                 generation: request.generation,
@@ -729,10 +761,24 @@ actor RemoteFrameDecodePipeline {
         let payload = request.packet.bytes
         guard request.packet.jpegOffset >= 0, request.packet.jpegOffset < payload.count else { return nil }
         let jpeg = Data(payload[request.packet.jpegOffset...])
-        guard let image = UIImage(data: jpeg) else { return nil }
+        guard let image = RemoteFrameImageDecoder.decode(jpeg) else { return nil }
         let cg = image.cgImage
         let histograms = (histogram || histogramRGB) ? cg.flatMap { histogramBins($0, includeRGB: histogramRGB) } : nil
         let monitor = (waveform || falseColor) ? cg.flatMap { monitorPixels($0) } : nil
+        let waveformBins = waveform ? monitor.map {
+            RemoteExposureAnalysis.waveformBins(pixels: $0.packed, width: $0.width, height: $0.height, rgb: waveformRGB)
+        } : nil
+        let falseColorPixels = falseColor ? monitor.flatMap {
+            RemoteExposureAnalysis.falseColorPixels(pixels: $0.packed, width: $0.width, height: $0.height)
+        } : nil
+        let waveformImage = waveformBins.flatMap {
+            RemoteExposureAnalysis.image(
+                pixels: RemoteExposureAnalysis.waveformPixels(channels: $0, sampleHeight: monitor?.height ?? 0),
+                width: RemoteExposureAnalysis.waveformWidth, height: RemoteExposureAnalysis.waveformHeight)
+        }
+        let falseColorImage = falseColorPixels.flatMap {
+            RemoteExposureAnalysis.image(pixels: $0, width: monitor?.width ?? 0, height: monitor?.height ?? 0)
+        }
         return RemoteDecodedFrame(
             image: image,
             jpeg: jpeg,
@@ -744,10 +790,12 @@ actor RemoteFrameDecodePipeline {
                                                  operation: request.packet.operation),
             histogram: histogram ? histograms?.luma : nil,
             histogramRGB: histograms?.rgb,
-            waveform: waveform ? monitor.map { RemoteExposureAnalysis.waveformBins(pixels: $0.packed, width: $0.width, height: $0.height, rgb: waveformRGB) } : nil,
-            falseColorPixels: falseColor ? monitor.flatMap { RemoteExposureAnalysis.falseColorPixels(pixels: $0.packed, width: $0.width, height: $0.height) } : nil,
+            waveform: waveformBins,
+            falseColorPixels: falseColorPixels,
             falseColorWidth: monitor?.width ?? 0,
             falseColorHeight: monitor?.height ?? 0,
+            falseColorImage: falseColorImage,
+            waveformImage: waveformImage,
             zebraMask: zebra ? cg.flatMap(zebraMask) : nil,
             fps: request.fps,
             generation: request.generation,
@@ -833,5 +881,32 @@ actor RemoteFrameDecodePipeline {
             return true
         }
         return rendered ? (bytes, width, height, rowBytes) : nil
+    }
+}
+
+/// Live-view images must leave the worker as decoded pixels. UIImage(data:)
+/// can defer JPEG decompression until SwiftUI/Core Animation displays the image,
+/// moving camera-rate work onto the main/rendering path even with tools off.
+/// Keep the full encoded dimensions, color profile and EXIF orientation; this
+/// also prepares the source used by LUT, analysis and local recording.
+enum RemoteFrameImageDecoder {
+    nonisolated static func decode(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let pixels = CGImageSourceCreateImageAtIndex(source, 0, [
+                kCGImageSourceShouldCache: true,
+                kCGImageSourceShouldCacheImmediately: true,
+              ] as CFDictionary) else { return nil }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let orientation: UIImage.Orientation = switch (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue {
+        case 2: .upMirrored
+        case 3: .down
+        case 4: .downMirrored
+        case 5: .leftMirrored
+        case 6: .right
+        case 7: .rightMirrored
+        case 8: .left
+        default: .up
+        }
+        return UIImage(cgImage: pixels, scale: 1, orientation: orientation)
     }
 }

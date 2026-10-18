@@ -4,7 +4,10 @@ import UIKit
 /// Android's graphicsLayer attention effects, executed by Core Animation rather
 /// than publishing a new SwiftUI layout graph on every display frame.
 struct NativeAttentionConfiguration: Equatable {
-    enum Kind: Equatable { case card(offset: Double) }
+    enum Kind: Equatable {
+        case card(offset: Double)
+        case opacityPulse(minimum: Double, maximum: Double, halfPeriod: Double)
+    }
     var kind: Kind
     var origin: Date
     var enabled: Bool
@@ -16,7 +19,15 @@ struct NativeAttentionConfiguration: Equatable {
         switch kind {
         case let .card(offset):
             return 1 + 0.04 * Self.cardWave(elapsed / 2.4 + offset) * intensity
+        case .opacityPulse:
+            return 1
         }
+    }
+    func opacity(at date: Date) -> Double {
+        guard enabled, case let .opacityPulse(minimum, maximum, halfPeriod) = kind else { return 1 }
+        let phase = max(0, date.timeIntervalSince(origin)) / halfPeriod
+        let position = phase.truncatingRemainder(dividingBy: 2)
+        return minimum + (maximum - minimum) * (position <= 1 ? position : 2 - position)
     }
     static func cardWave(_ phase: Double) -> Double {
         let p = max(0, phase).truncatingRemainder(dividingBy: 1)
@@ -196,9 +207,24 @@ final class NativeAttentionHostView: UIView {
         let scale = c.scale(at: date, intensity: intensity(at: date))
         CATransaction.begin(); CATransaction.setDisableActions(true)
         layer.transform = CATransform3DMakeScale(scale, scale, 1)
+        layer.opacity = Float(c.opacity(at: date))
         CATransaction.commit()
         guard !c.paused, window != nil else { return }
         let time = layer.convertTime(CACurrentMediaTime(), from: nil)
+        if case let .opacityPulse(minimum, maximum, halfPeriod) = c.kind {
+            guard c.enabled else { return }
+            let loop = CABasicAnimation(keyPath: "opacity")
+            loop.fromValue = minimum
+            loop.toValue = maximum
+            loop.duration = halfPeriod
+            loop.autoreverses = true
+            loop.repeatCount = .infinity
+            loop.timingFunction = CAMediaTimingFunction(name: .linear)
+            loop.beginTime = time - max(0, now.timeIntervalSince(c.origin))
+                .truncatingRemainder(dividingBy: halfPeriod * 2)
+            layer.add(loop, forKey: "attention.loop")
+            return
+        }
         let remaining = max(0, 0.32 - now.timeIntervalSince(intensityStart))
         if remaining > 0 {
             let fade = sampled(duration: remaining) { elapsed in

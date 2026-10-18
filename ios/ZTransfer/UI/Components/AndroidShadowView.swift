@@ -11,7 +11,100 @@ struct AndroidShadowView: UIViewRepresentable {
     func updateUIView(_ view: AndroidShadowHost, context: Context) {
         view.cornerRadius = cornerRadius
         view.elevation = elevation
-        view.setNeedsLayout()
+    }
+}
+
+/// Compare the actual displayed ancestor chain once per frame, shared by all
+/// shadows. Stable hosts can skip coordinate conversion; moving hosts still use
+/// CALayer.convert and the existing renderer, at the original display cadence.
+/// Only weak model identities and value snapshots survive the frame boundary.
+@MainActor
+final class AndroidShadowGeometryCache {
+    struct WindowGeometry: Equatable {
+        let density: CGFloat
+        let screenSize: CGSize
+        let origin: CGPoint
+        @MainActor init(_ window: UIWindow) {
+            density = window.screen.scale
+            screenSize = window.screen.bounds.size
+            origin = window.convert(.zero, to: window.screen.coordinateSpace)
+        }
+    }
+    struct WindowFrame {
+        let geometry: WindowGeometry
+        let presentation: CALayer?
+    }
+    private struct Key: Hashable {
+        let model: ObjectIdentifier
+        let presentation: Bool
+    }
+    private struct Signature: Equatable {
+        let parent: ObjectIdentifier?
+        let bounds: CGRect
+        let position, anchor: CGPoint
+        let z, anchorZ: CGFloat
+        let transform, sublayerTransform: CATransform3D
+        let hidden, flipped: Bool
+
+        init(_ layer: CALayer) {
+            parent = layer.superlayer.map { ObjectIdentifier($0.model()) }
+            bounds = layer.bounds; position = layer.position; anchor = layer.anchorPoint
+            z = layer.zPosition; anchorZ = layer.anchorPointZ
+            transform = layer.transform; sublayerTransform = layer.sublayerTransform
+            hidden = layer.isHidden; flipped = layer.isGeometryFlipped
+        }
+        nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.parent == rhs.parent && lhs.bounds == rhs.bounds && lhs.position == rhs.position
+                && lhs.anchor == rhs.anchor && lhs.z == rhs.z && lhs.anchorZ == rhs.anchorZ
+                && lhs.hidden == rhs.hidden && lhs.flipped == rhs.flipped
+                && CATransform3DEqualToTransform(lhs.transform, rhs.transform)
+                && CATransform3DEqualToTransform(lhs.sublayerTransform, rhs.sublayerTransform)
+        }
+    }
+    private struct Entry {
+        weak var model: CALayer?
+        let signature: Signature
+        let changed: Bool
+    }
+    private var previous: [Key: Entry] = [:]
+    private var current: [Key: Entry] = [:]
+    private var windows: [ObjectIdentifier: WindowFrame] = [:]
+    var sampledLayerCount: Int { current.count }
+    var sampledWindowCount: Int { windows.count }
+
+    func beginFrame() {
+        swap(&previous, &current)
+        current.removeAll(keepingCapacity: true)
+        windows.removeAll(keepingCapacity: true)
+    }
+    func endFrame() { windows.removeAll(keepingCapacity: true) }
+    func clear() { previous.removeAll(); current.removeAll(); windows.removeAll() }
+
+    func window(_ window: UIWindow) -> WindowFrame {
+        let key = ObjectIdentifier(window)
+        if let cached = windows[key] { return cached }
+        let result = WindowFrame(geometry: WindowGeometry(window), presentation: window.layer.presentation())
+        windows[key] = result
+        return result
+    }
+
+    func changed(_ source: CALayer, relativeTo target: CALayer, presentation: Bool) -> Bool {
+        let model = source.model()
+        let key = Key(model: ObjectIdentifier(model), presentation: presentation)
+        if let cached = current[key], cached.model === model { return cached.changed }
+        let signature = Signature(source)
+        let old = previous[key]
+        let ownChange = old?.model !== model || old?.signature != signature
+        // Follow the displayed tree, not the model tree: reparenting can leave
+        // the previous parent in the presentation tree until the next commit.
+        let parentChange: Bool
+        if model === target.model() { parentChange = false }
+        else if let parent = source.superlayer {
+            parentChange = changed(parent, relativeTo: target, presentation: presentation)
+        } else { parentChange = false }
+        let result = ownChange || parentChange
+        current[key] = Entry(model: model, signature: signature, changed: result)
+        return result
     }
 }
 
@@ -38,6 +131,7 @@ private final class AndroidShadowFrameClock: NSObject {
     static let shared = AndroidShadowFrameClock()
     private let hosts = NSHashTable<AndroidShadowHost>.weakObjects()
     private var link: CADisplayLink?
+    private let geometry = AndroidShadowGeometryCache()
 
     func add(_ host: AndroidShadowHost) {
         hosts.add(host)
@@ -53,19 +147,21 @@ private final class AndroidShadowFrameClock: NSObject {
     }
 
     private func stopIfEmpty() {
-        if hosts.allObjects.isEmpty { link?.invalidate(); link = nil }
+        if hosts.allObjects.isEmpty { link?.invalidate(); link = nil; geometry.clear() }
     }
 
     @objc private func frame() {
-        for host in hosts.allObjects { host.refreshShadow(usePresentation: true) }
+        geometry.beginFrame()
+        for host in hosts.allObjects { host.refreshShadow(frame: geometry) }
+        geometry.endFrame()
         stopIfEmpty()
     }
 }
 
 @MainActor
 final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
-    var cornerRadius: CGFloat = 0
-    var elevation: CGFloat = 0
+    var cornerRadius: CGFloat = 0 { didSet { if cornerRadius != oldValue { setNeedsLayout() } } }
+    var elevation: CGFloat = 0 { didSet { if elevation != oldValue { setNeedsLayout() } } }
     private var metalView: MTKView?
     private var resources: AndroidShadowResources?
     private enum Scene {
@@ -88,8 +184,17 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
         let radius, elevation: CGFloat
     }
     private var renderedGeometry: Geometry?
+    private struct ValidatedInputs: Equatable {
+        let window: AndroidShadowGeometryCache.WindowGeometry
+        let radius, elevation: CGFloat
+    }
+    private var validatedInputs: ValidatedInputs?
+    private var needsFrameValidation = true
     private var scene: Scene?
     private(set) var renderingError: Error?
+    #if DEBUG
+    private(set) var geometryEvaluationCount = 0
+    #endif
 
     init() {
         super.init(frame: .zero)
@@ -119,6 +224,7 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         renderedGeometry = nil
+        validatedInputs = nil
         if window == nil {
             AndroidShadowFrameClock.shared.remove(self)
             scene = nil
@@ -142,8 +248,30 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
         refreshShadow(usePresentation: false)
     }
 
-    fileprivate func refreshShadow(usePresentation: Bool) {
-        guard let window, let metalView else { return }
+    fileprivate func refreshShadow(frame: AndroidShadowGeometryCache) {
+        guard let window, metalView != nil else { return }
+        let windowFrame = frame.window(window)
+        let displayed = layer.presentation()
+        let presentation = displayed != nil && windowFrame.presentation != nil
+        let source = presentation ? displayed! : layer
+        let target = presentation ? windowFrame.presentation! : window.layer
+        let changed = frame.changed(source, relativeTo: target, presentation: presentation)
+        let metrics = windowFrame.geometry
+        let inputs = ValidatedInputs(window: metrics, radius: cornerRadius, elevation: elevation)
+        // Hidden/empty hosts have no rendered geometry but can still be idle.
+        // Any displayed ancestor/configuration change revalidates them, while
+        // renderer failures retain their existing retry path.
+        if !needsFrameValidation, !changed, renderingError == nil, validatedInputs == inputs { return }
+        refreshShadow(source: source, target: target, metrics: metrics)
+        validatedInputs = inputs
+        needsFrameValidation = false
+    }
+
+    private func refreshShadow(usePresentation: Bool) {
+        guard let window, metalView != nil else { return }
+        // A synchronous layout may have drawn model geometry ahead of the
+        // presentation commit; the next display frame must validate it once.
+        needsFrameValidation = true
         // Always use one tree for conversion. A newly mounted view may not have
         // a presentation counterpart until its first Core Animation commit.
         let displayedLayer = usePresentation ? layer.presentation() : nil
@@ -157,6 +285,15 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
             source = layer
             target = window.layer
         }
+        refreshShadow(source: source, target: target, metrics: .init(window))
+    }
+
+    private func refreshShadow(source: CALayer, target: CALayer,
+                               metrics: AndroidShadowGeometryCache.WindowGeometry) {
+        guard let metalView else { return }
+        #if DEBUG
+        geometryEvaluationCount += 1
+        #endif
         let bounds = source.bounds
         guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
             renderedGeometry = nil
@@ -191,7 +328,7 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
             metalView.isHidden = true
             return
         }
-        let density = window.screen.scale
+        let density = metrics.density
         let origin = source.convert(bounds.origin, to: target)
         // Sampling the complete bounds avoids losing basis precision by
         // subtracting almost equal window coordinates one point apart.
@@ -210,8 +347,8 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
             metalView.isHidden = true
             return
         }
-        let windowOrigin = window.convert(CGPoint.zero, to: window.screen.coordinateSpace)
-        let screenSize = window.screen.bounds.size
+        let windowOrigin = metrics.origin
+        let screenSize = metrics.screenSize
         let geometry = Geometry(bounds: bounds, origin: origin, basisX: basisX, basisY: basisY,
                                 density: density, screenSize: screenSize, windowOrigin: windowOrigin,
                                 radius: cornerRadius, elevation: elevation)

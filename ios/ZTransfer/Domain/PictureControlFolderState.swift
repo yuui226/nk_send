@@ -8,20 +8,31 @@ enum PictureControlImportFailure: Error { case read, invalid, flexibleColor, uns
 @MainActor
 final class PictureControlFolderState: ObservableObject {
     @Published private(set) var folder: URL?
-    @Published private(set) var files: [PresetFile] = []
+    @Published private(set) var files: [PresetFile] = [] { didSet { catalogCache = nil } }
+    private var catalogCache: PresetCatalogIndex?
+    var catalog: PresetCatalogIndex {
+        if let catalogCache { return catalogCache }
+        let next = PresetCatalogIndex(files: files)
+        catalogCache = next
+        return next
+    }
     @Published private(set) var failure: RemoteLUTFolderAccessError?
     @Published private(set) var scanning = false
     @Published private(set) var hasSnapshot = false
+    @Published private(set) var isRestoring = false
     var onNotice: (String) -> Void = { _ in }
     private let access: RemoteLUTFolderAccess
     private let request: LUTRequestController
     private let queue: PresetIOQueue
     private let timeout: Duration
     private var closed = false
+    private var restoration: PresetIOQueue.Ticket?
+    private let resolve: @Sendable (Data?) -> RemoteLUTFolderAccess.ResolvedFolder?
     private let scan: @Sendable (URL?, Data?, PresetIOQueue.Ticket) throws -> RemoteLUTFolderAccess.PreparedFolder
 
     init(defaults: UserDefaults = .standard, queue: PresetIOQueue = .shared,
          timeout: Duration = .seconds(10),
+         resolve: @escaping @Sendable (Data?) -> RemoteLUTFolderAccess.ResolvedFolder? = RemoteLUTFolderAccess.prepareResolution,
          scan: @escaping @Sendable (URL?, Data?, PresetIOQueue.Ticket) throws -> RemoteLUTFolderAccess.PreparedFolder = { replacement, bookmark, ticket in
              if let replacement {
                  return try RemoteLUTFolderAccess.prepareFolder(replacement, fileExtension: "np3", checkCancelled: ticket.checkCancellation)
@@ -29,34 +40,61 @@ final class PictureControlFolderState: ObservableObject {
              return try RemoteLUTFolderAccess.prepareBookmark(bookmark, fileExtension: "np3", checkCancelled: ticket.checkCancellation)
          }) {
         access = RemoteLUTFolderAccess(defaults: defaults, scope: .pictureControl)
-        folder = access.resolve()
+        self.resolve = resolve
         self.queue = queue; self.timeout = timeout; self.scan = scan
         request = LUTRequestController(queue: queue)
+        if let bookmark = access.bookmarkData {
+            isRestoring = true
+            restoration = queue.submit(action: { ticket in
+                try ticket.checkCancellation()
+                let resolved = resolve(bookmark)
+                try ticket.checkCancellation()
+                return resolved
+            }, deliver: { [weak self] result in
+                guard let self, !self.closed else { return }
+                self.restoration = nil
+                if case .success(let resolved?) = result {
+                    self.access.commitResolution(resolved)
+                    if self.folder != resolved.url { self.folder = resolved.url }
+                }
+                self.isRestoring = false
+            })
+        }
     }
     // A provider may be unavailable during launch while its bookmark remains
     // valid. Keep retrying the saved grant instead of silently losing the folder.
     func refresh() { if !scanning, folder != nil || access.bookmarkData != nil { startScan(nil) } }
-    func changeFolder(_ url: URL) { startScan(url) }
+    func changeFolder(_ url: URL) { cancelRestoration(); startScan(url) }
     private func startScan(_ replacement: URL?) {
         guard !closed else { return }
-        scanning = true
-        let bookmark = access.bookmarkData, scan = scan
-        request.submit(timeout: timeout, action: { try scan(replacement, bookmark, $0) }, onTimeout: { [weak self] in
+        if !scanning { scanning = true }
+        let bookmark = access.bookmarkData, scan = scan, resolve = resolve
+        request.submit(timeout: timeout, action: { ticket in
+            let snapshot = try scan(replacement, bookmark, ticket)
+            let root = replacement ?? snapshot.root ?? resolve(snapshot.bookmark)?.url
+            try ticket.checkCancellation()
+            return (snapshot, root)
+        }, onTimeout: { [weak self] in
             guard let self else { return }
             self.scanning = false
-            if replacement == nil { self.failure = .read }
+            if replacement == nil, self.failure != .read { self.failure = .read }
             self.onNotice("picture_control_read_timeout")
         }, deliver: { [weak self] result in
             guard let self, !self.closed else { return }
             self.scanning = false
             switch result {
-            case .success(let snapshot):
+            case .success(let (snapshot, resolvedRoot)):
                 self.access.commit(snapshot)
-                self.folder = replacement ?? RemoteLUTFolderAccess.resolveBookmark(snapshot.bookmark) ?? self.folder
-                self.files = snapshot.files; self.failure = nil; self.hasSnapshot = true
+                let folder = resolvedRoot ?? self.folder
+                if self.folder != folder { self.folder = folder }
+                if self.files != snapshot.files { self.files = snapshot.files }
+                if self.failure != nil { self.failure = nil }
+                if !self.hasSnapshot { self.hasSnapshot = true }
             case .failure(let error):
                 let reason = error as? RemoteLUTFolderAccessError ?? .read
-                if replacement == nil { self.failure = reason }
+                if replacement == nil {
+                    if self.failure != reason { self.failure = reason }
+                }
                 else { self.onNotice(Self.message(reason)) }
             }
         })
@@ -89,7 +127,16 @@ final class PictureControlFolderState: ObservableObject {
             return parsed
         }
     }
-    func close() { closed = true; request.cancel(); scanning = false }
+    func close() {
+        closed = true; cancelRestoration(); request.cancel()
+        if scanning { scanning = false }
+        onNotice = { _ in }
+    }
+    private func cancelRestoration() {
+        restoration?.cancel(); restoration = nil
+        if isRestoring { isRestoring = false }
+    }
+    deinit { restoration?.cancel() }
 }
 
 /// Resumes the caller promptly on cancellation/timeout even if a provider ignores cancellation.

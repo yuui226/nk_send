@@ -115,46 +115,78 @@ struct RemoteToolHeightMotion {
     mutating func advance(_ now: Int64) { animation?.advance(frameNanos: now) }
 }
 
-/// One display clock per toolbar, shared by every slot and suspended when idle.
+/// A clock owns the animation models; only each changed visual leaf publishes.
+/// Android reads these values in graphicsLayer, never recomposing the toolbar
+/// layout for every wiggle frame. See performance ledger P21.
 @MainActor
-final class RemoteToolEditorMotion: NSObject, ObservableObject {
-    @Published private(set) var states: [RemoteTool: RemoteToolSlotMotion] = [:]
-    @Published private(set) var fixedPositions: [String: RemoteToolPositionMotion] = [:]
-    @Published private(set) var contentHeight = RemoteToolHeightMotion()
+final class RemoteToolEditorMotion: NSObject {
+    private(set) var states: [RemoteTool: RemoteToolSlotMotion] = [:]
+    private(set) var fixedPositions: [String: RemoteToolPositionMotion] = [:]
+    private(set) var contentHeight = RemoteToolHeightMotion()
+    let heightPresentation = RemoteToolHeightPresentation()
+    private var presentations: [RemoteTool: RemoteToolSlotPresentation] = [:]
+    private var fixedPresentations: [String: RemoteToolSlotPresentation] = [:]
+    private var toolKeys: [RemoteTool] = []
+    private var fixedKeys: [String] = []
+    private var slots: [RemoteTool: CGRect] = [:]
+    private var fixedSlots: [String: CGRect] = [:]
     private var displayLink: CADisplayLink?
     private var density: CGFloat = 1
+    private var active = false
+    var clockRunning: Bool { displayLink != nil }
 
+    func presentation(_ tool: RemoteTool, visible: Bool) -> RemoteToolSlotPresentation {
+        if let value = presentations[tool] { return value }
+        let value = RemoteToolSlotPresentation(iconOpacity: visible ? 1 : 0.38)
+        presentations[tool] = value
+        return value
+    }
+    func fixedPresentation(_ id: String) -> RemoteToolSlotPresentation {
+        if let value = fixedPresentations[id] { return value }
+        let value = RemoteToolSlotPresentation()
+        fixedPresentations[id] = value
+        return value
+    }
     func configure(slots: [RemoteTool: CGRect], fixedSlots: [String: CGRect] = [:], editing: Bool, visible: Set<RemoteTool>,
                    dragging: RemoteTool?, topLeft: CGPoint, scale: CGFloat) {
+        if self.slots.count != slots.count || self.slots.keys.contains(where: { slots[$0] == nil }) {
+            for tool in toolKeys where slots[tool] == nil { presentations.removeValue(forKey: tool) }
+            toolKeys = Array(slots.keys)
+            states = states.filter { slots[$0.key] != nil }
+        }
+        if self.fixedSlots.count != fixedSlots.count || self.fixedSlots.keys.contains(where: { fixedSlots[$0] == nil }) {
+            for id in fixedKeys where fixedSlots[id] == nil { fixedPresentations.removeValue(forKey: id) }
+            fixedKeys = Array(fixedSlots.keys)
+            fixedPositions = fixedPositions.filter { fixedSlots[$0.key] != nil }
+        }
+        self.slots = slots; self.fixedSlots = fixedSlots
         density = max(1, scale)
         contentHeight.setEditing(editing)
-        var next = states.filter { slots[$0.key] != nil }
         for (tool, slot) in slots {
             let point = tool == dragging ? topLeft : slot.origin
             let pixels = CGPoint(x: point.x * density, y: point.y * density)
-            if next[tool] == nil { next[tool] = RemoteToolSlotMotion(tool: tool, position: pixels, visible: visible.contains(tool)) }
-            next[tool]?.configure(position: pixels, editing: editing, visible: visible.contains(tool), dragging: dragging == tool)
+            if states[tool] == nil { states[tool] = RemoteToolSlotMotion(tool: tool, position: pixels, visible: visible.contains(tool)) }
+            states[tool]?.configure(position: pixels, editing: editing, visible: visible.contains(tool), dragging: dragging == tool)
         }
-        states = next
-        var fixed = fixedPositions.filter { fixedSlots[$0.key] != nil }
         for (id, slot) in fixedSlots {
             let pixels = CGPoint(x: slot.minX * density, y: slot.minY * density)
-            if fixed[id] == nil { fixed[id] = RemoteToolPositionMotion(pixels) }
-            fixed[id]?.setTarget(pixels, snap: false)
+            if fixedPositions[id] == nil { fixedPositions[id] = RemoteToolPositionMotion(pixels) }
+            fixedPositions[id]?.setTarget(pixels, snap: false)
         }
-        fixedPositions = fixed
-        schedule()
+        publish(); schedule()
     }
 
     func measureHeight(_ height: CGFloat, editing: Bool, scale: CGFloat) {
         contentHeight.setEditing(editing)
         contentHeight.measure(height, scale: scale)
+        heightPresentation.update(contentHeight.height)
         schedule()
     }
-
+    func setActive(_ active: Bool) { self.active = active; schedule() }
     private func schedule() {
-        if needsFrames, displayLink == nil {
-            let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        guard active && needsFrames else { invalidate(); return }
+        if displayLink == nil {
+            let link = CADisplayLink(target: ClockTarget(self), selector: #selector(ClockTarget.frame(_:)))
             displayLink = link
             link.add(to: .main, forMode: .common)
         }
@@ -163,31 +195,80 @@ final class RemoteToolEditorMotion: NSObject, ObservableObject {
     func position(_ tool: RemoteTool) -> CGPoint? {
         states[tool].map { CGPoint(x: $0.position.value.x / density, y: $0.position.value.y / density) }
     }
-
     func fixedPosition(_ id: String) -> CGPoint? {
         fixedPositions[id].map { CGPoint(x: $0.value.x / density, y: $0.value.y / density) }
     }
-
     private var needsFrames: Bool {
         contentHeight.isRunning || states.values.contains(where: \.needsFrames)
             || fixedPositions.values.contains(where: \.isRunning)
     }
-
-    @objc private func frame(_ link: CADisplayLink) {
-        var next = states
-        let now = Int64(link.timestamp * 1_000_000_000)
-        for tool in next.keys { next[tool]?.advance(now) }
-        states = next
-        var fixed = fixedPositions
-        for id in fixed.keys { fixed[id]?.advance(now) }
-        fixedPositions = fixed
+    func advance(_ now: Int64) {
+        for tool in toolKeys where states[tool]?.needsFrames == true { states[tool]?.advance(now) }
+        for id in fixedKeys where fixedPositions[id]?.isRunning == true { fixedPositions[id]?.advance(now) }
         contentHeight.advance(now)
-        if !needsFrames { stop() }
+        publish(); schedule()
     }
+    private func publish() {
+        for (tool, state) in states {
+            let base = slots[tool]?.origin ?? .zero
+            let value = RemoteToolSlotPresentation.Display(
+                offset: CGSize(width: state.position.value.x / density - base.x,
+                               height: state.position.value.y / density - base.y),
+                lift: CGFloat(state.lift.value), angle: Double(state.angle), iconOpacity: Double(state.iconOpacity.value))
+            presentation(tool, visible: state.iconOpacity.target == 1).update(value)
+        }
+        for (id, state) in fixedPositions {
+            let base = fixedSlots[id]?.origin ?? .zero
+            fixedPresentation(id).update(.init(offset: CGSize(width: state.value.x / density - base.x,
+                height: state.value.y / density - base.y)))
+        }
+        heightPresentation.update(contentHeight.height)
+    }
+    @MainActor private final class ClockTarget: NSObject {
+        weak var owner: RemoteToolEditorMotion?
+        init(_ owner: RemoteToolEditorMotion) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.advance(Int64(link.timestamp * 1_000_000_000))
+        }
+    }
+    private func invalidate() { displayLink?.invalidate(); displayLink = nil }
+    func stop() { setActive(false) }
+}
 
-    func stop() {
-        displayLink?.invalidate()
-        displayLink = nil
+@MainActor
+final class RemoteToolSlotPresentation: ObservableObject {
+    struct Display: Equatable {
+        var offset = CGSize.zero
+        var lift: CGFloat = 1
+        var angle: Double = 0
+        var iconOpacity: Double = 1
+    }
+    @Published private(set) var display: Display
+    init(iconOpacity: Double = 1) { display = Display(iconOpacity: iconOpacity) }
+    func update(_ next: Display) { if display != next { display = next } }
+}
+
+@MainActor
+final class RemoteToolHeightPresentation: ObservableObject {
+    @Published private(set) var height: CGFloat?
+    func update(_ height: CGFloat?) { if self.height != height { self.height = height } }
+}
+
+struct RemoteToolSlotTransform: ViewModifier {
+    @ObservedObject var presentation: RemoteToolSlotPresentation
+    func body(content: Content) -> some View {
+        content.environment(\.remoteToolIconOpacity, presentation.display.iconOpacity)
+            .scaleEffect(presentation.display.lift)
+            .rotationEffect(.degrees(presentation.display.angle))
+            .offset(presentation.display.offset)
+    }
+}
+struct RemoteToolAnimatedHeight: ViewModifier {
+    @ObservedObject var presentation: RemoteToolHeightPresentation
+    let editing: Bool
+    func body(content: Content) -> some View {
+        content.frame(height: editing ? presentation.height : nil, alignment: .topLeading)
     }
 }
 

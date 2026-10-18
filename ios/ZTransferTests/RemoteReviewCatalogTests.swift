@@ -157,6 +157,40 @@ final class RemoteReviewCatalogTests: XCTestCase {
         XCTAssertEqual(completed.map(\.id), [1])
     }
 
+    func testLargeTimestampGroupKeepsCompletePairsAndRetryablePendingIndex() async throws {
+        let count = 1_000
+        let raws = (1...count).map { file(UInt32($0), "P\($0).NEF") }
+        let jpegs = (1...count).map { file(UInt32($0 + count), "P\($0).JPG") }
+        let last = file(3_000, "LAST.JPG", "20261015T120002")
+        actor Reader {
+            let values: [UInt32: CameraFile]
+            var reads: [UInt32: Int] = [:]
+            init(_ files: [CameraFile]) { values = Dictionary(uniqueKeysWithValues: files.map { ($0.id, $0) }) }
+            func read(_ id: UInt32) throws -> CameraFile? {
+                reads[id, default: 0] += 1
+                if id == 500, reads[id] == 1 { throw CameraRepositoryError.invalidDataset }
+                return values[id]
+            }
+        }
+        let reader = Reader(raws + jpegs + [last])
+        let catalog = RemoteReviewCatalog(handlesByStorage: [raws.map(\.id) + [last.id], jpegs.map(\.id)]) {
+            try await reader.read($0)
+        }
+        do { _ = try await catalog.loadNextPage(pageSize: 1); XCTFail("Expected metadata failure") }
+        catch CameraRepositoryError.invalidDataset {}
+        let group = try await catalog.loadNextPage(pageSize: 1)
+        XCTAssertEqual(group.count, count, "The entire timestamp group precedes publication")
+        XCTAssertEqual(group.map(\.id), raws.map(\.id))
+        XCTAssertEqual(group.map(\.file.id), jpegs.map(\.id))
+        XCTAssertTrue(group.allSatisfy { $0.pairedRawExtension == ".nef" })
+        let next = try await catalog.loadNextPage(pageSize: 1)
+        XCTAssertEqual(next.map(\.id), raws.map(\.id) + [last.id])
+        let reads = await reader.reads
+        XCTAssertEqual(reads.count, 2 * count + 1)
+        XCTAssertEqual(reads[500], 2)
+        XCTAssertTrue(reads.filter { $0.key != 500 }.values.allSatisfy { $0 == 1 })
+    }
+
     func testReadFailureKeepsCursorAndPendingGroupRetryable() async throws {
         actor Reader {
             var failed = false

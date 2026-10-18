@@ -20,10 +20,10 @@ struct DetentWheel<Option: Hashable>: View {
     let selected: Option
     let optionLabel: (Option) -> String
     let onCommit: (Option) -> Void
-    var rowHeight: CGFloat = 18
+    let rowHeight: CGFloat
     var wheelHeight: CGFloat = 50
-    var enabled = true
-    var readOnly = false
+    let enabled: Bool
+    let readOnly: Bool
     var cornerRadius: CGFloat = 13
     var optionMaxLines = 1
     var optionFontSize: CGFloat = 14
@@ -55,6 +55,10 @@ struct DetentWheel<Option: Hashable>: View {
     @GestureState private var pressing = false
     @State private var longPressFeedback = ZTransferLongPressFeedback()
     private let longPressDurationMilliseconds = 450
+    // These inputs are immutable for a view value. A new parent configuration
+    // recomputes them; local drag frames keep the same accepted selection/key.
+    let selectedIndex: Int
+    private let gestureConfiguration: DetentWheelConfiguration<Option>
 
     init(label: String, options: [Option], selected: Option,
          optionLabel: @escaping (Option) -> String,
@@ -99,11 +103,13 @@ struct DetentWheel<Option: Hashable>: View {
         self.contentAnchorSpace = contentAnchorSpace
         self.onContentAnchorChange = onContentAnchorChange
         let initial = options.firstIndex(of: selected) ?? 0
+        selectedIndex = initial
+        let configuration = DetentWheelConfiguration(options: options, rowHeight: resolvedRowHeight, enabled: enabled, readOnly: readOnly)
+        gestureConfiguration = configuration
         _position = State(initialValue: CGFloat(initial))
-        _dragSession = State(initialValue: DetentWheelDragSession(configuration: .init(options: options, rowHeight: resolvedRowHeight, enabled: enabled, readOnly: readOnly)))
+        _dragSession = State(initialValue: DetentWheelDragSession(configuration: configuration))
     }
 
-    private var selectedIndex: Int { options.firstIndex(of: selected) ?? 0 }
     private var canDrag: Bool { options.count > 3 }
     private var accent: Color { accentColor ?? ZTransferColors.accentBlue }
     private var dark: Bool { colorScheme == .dark }
@@ -291,10 +297,6 @@ struct DetentWheel<Option: Hashable>: View {
         }
     }
 
-    private var gestureConfiguration: DetentWheelConfiguration<Option> {
-        DetentWheelConfiguration(options: options, rowHeight: rowHeight, enabled: enabled, readOnly: readOnly)
-    }
-
     private var dragGesture: some Gesture {
         let revision = dragSession.revision
         return DragGesture(minimumDistance: canDrag ? 2 : .infinity)
@@ -416,6 +418,25 @@ struct DetentWheelConfiguration<Option: Hashable>: Hashable {
     let rowHeight: CGFloat
     let enabled: Bool
     let readOnly: Bool
+    private let optionsHash: Int
+
+    init(options: [Option], rowHeight: CGFloat, enabled: Bool, readOnly: Bool) {
+        self.options = options; self.rowHeight = rowHeight
+        self.enabled = enabled; self.readOnly = readOnly
+        optionsHash = options.hashValue
+    }
+
+    // SwiftUI asks for this gesture identity while the wheel is moving. Hash
+    // the option list once with the incoming configuration, not on every drag
+    // frame. Full equality still protects against hash collisions and reorder.
+    nonisolated func hash(into hasher: inout Hasher) {
+        hasher.combine(optionsHash); hasher.combine(rowHeight)
+        hasher.combine(enabled); hasher.combine(readOnly)
+    }
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.optionsHash == rhs.optionsHash && lhs.rowHeight == rhs.rowHeight
+            && lhs.enabled == rhs.enabled && lhs.readOnly == rhs.readOnly && lhs.options == rhs.options
+    }
 
     var canDrag: Bool { enabled && !readOnly && options.count > 3 }
 }

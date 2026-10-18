@@ -14,16 +14,44 @@ struct PhotoPickerTemporaryFile: Transferable, Sendable {
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .image) { received in
-            let fileManager = FileManager.default
-            let directory = fileManager.temporaryDirectory
-                .appendingPathComponent("ZTransferPhotoPicker", isDirectory: true)
-            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            let suffix = received.file.pathExtension
-            let name = suffix.isEmpty ? UUID().uuidString : "\(UUID().uuidString).\(suffix)"
-            let destination = directory.appendingPathComponent(name)
-            try fileManager.copyItem(at: received.file, to: destination)
-            return PhotoPickerTemporaryFile(url: destination)
+            try await stage(received.file)
         }
+    }
+
+    /// Finish the copy before the provider callback returns. Keep copyItem's
+    /// native file-copy/clone path, without loading compressed sources into RAM.
+    /// Failed or cancelled imports own and remove even a partially created file.
+    static func stage(_ source: URL, directory: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ZTransferPhotoPicker", isDirectory: true),
+        copy: @escaping @Sendable (URL, URL) throws -> Void = { try FileManager.default.copyItem(at: $0, to: $1) }) async throws -> Self {
+        try Task.checkCancellation()
+        let worker = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try autoreleasepool {
+                let manager = FileManager.default
+                try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+                let suffix = source.pathExtension
+                let name = suffix.isEmpty ? UUID().uuidString : "\(UUID().uuidString).\(suffix)"
+                let destination = directory.appendingPathComponent(name)
+                do {
+                    try Task.checkCancellation()
+                    try copy(source, destination)
+                    try Task.checkCancellation()
+                    return Self(url: destination)
+                } catch {
+                    try? manager.removeItem(at: destination)
+                    throw error
+                }
+            }
+        }
+        return try await withTaskCancellationHandler {
+            let file = try await worker.value
+            do { try Task.checkCancellation(); return file }
+            catch {
+                try? FileManager.default.removeItem(at: file.url)
+                throw error
+            }
+        } onCancel: { worker.cancel() }
     }
 }
 
@@ -67,11 +95,16 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     }
 
     func select(_ items: [PhotosPickerItem]) {
+        // Android returns before updating StateFlow for cancelled pickers or
+        // while generation/authorization is active. Calling a mutating method
+        // through @Published would notify even when its internal guard fails.
+        guard !state.generating, !items.isEmpty else { return }
         // Android launches an image/* picker and lets each selected image reach
         // the decoder; failures are counted per item instead of being silently
         // removed before the batch begins. PhotosPicker already requests images,
         // while this guard only rejects an unexpected non-image provider item.
         let supportedItems = items.filter { isSupportedLocalPhoto($0.supportedContentTypes) }
+        guard !supportedItems.isEmpty else { return }
         guard state.select(supportedItems) else { return }
         // A terminal result may still have its 2400 ms timer running. A fresh
         // picker selection must never be replaced by that older timer.
@@ -80,6 +113,7 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     }
 
     func generate(settings: PhotoEffectsSettings) {
+        guard state.phase == .ready, !state.photos.isEmpty else { return }
         // Snapshot before Photos authorization suspends this task. Upgrades,
         // refunds and edits only affect batches created after this one.
         let settings = effectivePhotoEffectsSettings(settings, isPro: premiumAccess.isPro)
@@ -108,7 +142,7 @@ final class LocalPhotoBatchViewModel: ObservableObject {
                 restoreIdleTimer(generation: generation)
                 let finished = state
                 try await Task.sleep(for: .milliseconds(2400))
-                state.returnToReady(ifUnchanged: finished)
+                if state == finished { state.returnToReady(ifUnchanged: finished) }
             } catch is CancellationError {
                 if state.generation == generation { state.cancel() }
                 restoreIdleTimer(generation: generation)
@@ -124,6 +158,8 @@ final class LocalPhotoBatchViewModel: ObservableObject {
     }
 
     private func record(_ progress: PhotoEffectsBatchProgress, generation: UInt64) {
+        guard state.generation == generation, state.generating,
+              progress.total == state.photos.count, progress != state.progress else { return }
         state.update(progress, generation: generation)
     }
 

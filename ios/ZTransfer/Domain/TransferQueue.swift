@@ -980,13 +980,25 @@ actor TransferQueue {
     /// matching Android's clear action which never interrupts the current file.
     @discardableResult
     func remove(id: UUID) -> Bool {
-        guard let index = items.firstIndex(where: { $0.id == id }),
-              !items[index].isGeneratingFrame,
-              items[index].status == .completed || items[index].status == .failed || items[index].status == .cancelled else { return false }
-        savedGenerationSources[id] = nil
-        items.remove(at: index)
+        remove(ids: [id]).contains(id)
+    }
+
+    /// The same terminal-only check as Android removeTask, batched for cards
+    /// whose 280ms exits finish together. New/retried/active work is untouched.
+    @discardableResult
+    func remove(ids: Set<UUID>) -> Set<UUID> {
+        guard !ids.isEmpty else { return [] }
+        var removed: Set<UUID> = []
+        items.removeAll { item in
+            guard ids.contains(item.id), !item.isGeneratingFrame,
+                  item.status == .completed || item.status == .failed || item.status == .cancelled else { return false }
+            removed.insert(item.id)
+            return true
+        }
+        guard !removed.isEmpty else { return [] }
+        for id in removed { savedGenerationSources[id] = nil }
         publish()
-        return true
+        return removed
     }
 
     func clearFinished() {

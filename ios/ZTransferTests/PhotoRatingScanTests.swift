@@ -541,3 +541,104 @@ private actor RatingLookupGate {
         waiters.removeValue(forKey: call)?.resume(returning: value)
     }
 }
+
+@MainActor
+final class PhotoListCatalogPerformanceTests: XCTestCase {
+    private func file(_ id: UInt32, date: String? = "20261018T120000", ext: String = "JPG") -> CameraFile {
+        CameraFile(id: id, storageID: id % 2 + 1, format: 0x3801, size: UInt64(id + 1),
+                   fileName: String(format: "DSC_%04d.%@", id, ext), captureDate: date, isProtected: id % 2 == 0)
+    }
+    private func list(_ files: [CameraFile], ratingIO: PhotoRatingScanIO = .noop) -> PhotoListViewModel {
+        PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
+            PhotoScanResult(files: files, removedHandles: [], addedHandles: [],
+                            handleQueriesSucceeded: true, metadataComplete: true, filterStorageIDs: [1, 2])
+        }, setRemoteGate: { _ in }, ratingIO: ratingIO)
+    }
+
+    func testEveryRatingStillArrivesWithoutRebuildingUnfilteredCatalog() async throws {
+        let saved = PhotoFilterPersistence.load()
+        let savedRange = PhotoFilterPersistence.loadPhotoLoadingRange()
+        defer { PhotoFilterPersistence.save(saved); PhotoFilterPersistence.savePhotoLoadingRange(savedRange) }
+        PhotoFilterPersistence.save(PhotoFilterState())
+        let files = (1...120).map { file(UInt32($0)) }
+        let io = PhotoRatingScanIO(generation: { 0 }, invalidate: { 0 }, cached: { _ in nil },
+            beginPhase: {}, endPhase: {}, read: { file, _ in
+                try await Task.sleep(for: .milliseconds(2))
+                return Int(file.id % 6)
+            })
+        let model = list(files, ratingIO: io)
+        defer { model.cancelRatingScan(); model.cancelLoading() }
+        model.setPhotoLoadingRange(.all)
+        await model.reload()
+        let before = model.sections, grouped = model.catalogGroupingCount
+        var sectionUpdates = 0, progressUpdates = 0, rootUpdates = 0
+        let sections = model.$sections.dropFirst().sink { _ in sectionUpdates += 1 }
+        let progress = model.ratingProgress.objectWillChange.sink { progressUpdates += 1 }
+        let root = model.objectWillChange.sink { rootUpdates += 1 }
+        defer { sections.cancel(); progress.cancel(); root.cancel() }
+        model.setFilter(PhotoFilterState(ratingEnabled: true, ratingDays: 0))
+        let baselineRoot = rootUpdates, baselineFilters = model.filteredSectionBuildCount
+        for _ in 0..<500 where !model.ratingScan.complete { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(model.ratingScan.complete)
+        XCTAssertEqual(model.ratingScan.completed, 120)
+        XCTAssertEqual(model.ratingScan.values.count, 120)
+        XCTAssertGreaterThanOrEqual(progressUpdates, 120)
+        XCTAssertEqual(model.ratingProgress.snapshot.completed, 120)
+        XCTAssertEqual(model.sections, before)
+        XCTAssertEqual(sectionUpdates, 0)
+        XCTAssertEqual(rootUpdates, baselineRoot)
+        XCTAssertEqual(model.catalogGroupingCount, grouped)
+        XCTAssertEqual(model.filteredSectionBuildCount, baselineFilters)
+        model.setFilter(PhotoFilterState(ratingEnabled: true, rating: 5, ratingDays: 0))
+        XCTAssertEqual(model.sections.flatMap(\.files).map(\.id), files.filter { $0.id % 6 == 5 }.map(\.id))
+        XCTAssertEqual(sectionUpdates, 1)
+        XCTAssertEqual(model.catalogGroupingCount, grouped)
+        model.setFilter(PhotoFilterState(ratingEnabled: true, ratingDays: 0))
+        XCTAssertEqual(model.sections, before)
+        XCTAssertEqual(sectionUpdates, 2)
+    }
+
+    func testCachedOrderMatchesOriginalFilterThenSortAcrossScopeAndMetadataChanges() async throws {
+        let saved = PhotoFilterPersistence.load()
+        let savedRange = PhotoFilterPersistence.loadPhotoLoadingRange()
+        defer { PhotoFilterPersistence.save(saved); PhotoFilterPersistence.savePhotoLoadingRange(savedRange) }
+        PhotoFilterPersistence.save(PhotoFilterState())
+        var files = (1...90).map { index -> CameraFile in
+            let day = 18 - index / 30
+            let stamp = index % 17 == 0 ? nil : String(format: "202610%02dT1200%02d", day, index % 30)
+            return file(UInt32(index), date: stamp, ext: index % 7 == 0 ? "NEF" : "JPG")
+        }
+        // Equal timestamps must keep camera enumeration order, including JPEG/RAW.
+        files += [file(300, date: nil), file(302), file(301)]
+        let model = list(files)
+        defer { model.cancelRatingScan(); model.cancelLoading() }
+        model.setPhotoLoadingRange(.all)
+        await model.reload()
+        let grouped = model.catalogGroupingCount
+        for i in 0..<120 {
+            let criteria = PhotoFilterState(extensions: i % 3 == 0 ? [".jpg"] : nil,
+                protectedOnly: i % 4 == 0, burstOnly: i % 5 == 0, untransferredOnly: i % 7 == 0,
+                storageSlot: i % 2 == 0 ? 1 : nil,
+                dateRange: i % 6 == 0 ? PhotoDateRange(start: "20261017", end: "20261018") : nil)
+            model.setFilter(criteria)
+            let reference = PhotoCatalogGrouping.byCaptureDay(PhotoFilter.apply(model.displayedFiles, state: model.filter,
+                storageIDsBySlot: [1: [1], 2: [2]]))
+            XCTAssertEqual(model.sections, reference, "Filter case \(i)")
+        }
+        XCTAssertEqual(model.catalogGroupingCount, grouped)
+        model.clearFilter()
+        for _ in 0..<5 { await model.applyCatalogUpdate(files) }
+        XCTAssertEqual(model.catalogGroupingCount, grouped)
+        files[0] = file(files[0].id, date: "20261019T120000", ext: "NEF")
+        files.remove(at: 2)
+        await model.applyCatalogUpdate(files)
+        XCTAssertEqual(model.catalogGroupingCount, grouped + 1)
+        XCTAssertEqual(model.sections, PhotoCatalogGrouping.byCaptureDay(files))
+        model.setPhotoLoadingRange(.one)
+        XCTAssertEqual(model.sections, PhotoCatalogGrouping.byCaptureDay(files.filter {
+            $0.captureDate == nil || $0.captureDate?.hasPrefix("20261019") == true
+        }))
+        model.setPhotoLoadingRange(.all)
+        XCTAssertEqual(model.sections, PhotoCatalogGrouping.byCaptureDay(files))
+    }
+}

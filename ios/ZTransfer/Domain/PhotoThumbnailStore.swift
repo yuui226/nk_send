@@ -1,5 +1,79 @@
 import Foundation
 
+/// Actor-owned, byte-bounded access order, matching Android's LruCache policy.
+/// Value links avoid both linear array moves on a hit and reference cycles on clear.
+struct PhotoThumbnailMemoryCache: Sendable {
+    private struct Entry: Sendable {
+        let data: Data
+        var previous: String?
+        var next: String?
+    }
+    private var entries: [String: Entry] = [:]
+    private var oldest: String?
+    private var newest: String?
+    private let budget: Int
+    private(set) var byteCount = 0
+    var count: Int { entries.count }
+
+    init(budget: Int) {
+        precondition(budget >= 0)
+        self.budget = budget
+    }
+
+    mutating func value(for key: String) -> Data? {
+        guard let entry = entries[key] else { return nil }
+        if newest != key {
+            unlink(entry)
+            append(key, data: entry.data)
+        }
+        return entry.data
+    }
+
+    mutating func insert(_ data: Data, for key: String) {
+        remove(key)
+        append(key, data: data)
+        byteCount += data.count
+        // Preserve the existing rule: an oversized entry evicts older entries
+        // and then itself, rather than changing which thumbnails stay resident.
+        while byteCount > budget, let key = oldest { remove(key) }
+    }
+
+    mutating func remove(_ key: String) {
+        guard let entry = entries.removeValue(forKey: key) else { return }
+        unlink(entry)
+        byteCount -= entry.data.count
+    }
+
+    mutating func retainOnly(_ keys: Set<String>) {
+        var key = oldest
+        while let current = key {
+            key = entries[current]?.next
+            if !keys.contains(current) { remove(current) }
+        }
+    }
+
+    mutating func removeAll(keepingCapacity: Bool = false) {
+        entries.removeAll(keepingCapacity: keepingCapacity)
+        oldest = nil
+        newest = nil
+        byteCount = 0
+    }
+
+    private mutating func unlink(_ entry: Entry) {
+        if let previous = entry.previous { entries[previous]?.next = entry.next }
+        else { oldest = entry.next }
+        if let next = entry.next { entries[next]?.previous = entry.previous }
+        else { newest = entry.previous }
+    }
+
+    private mutating func append(_ key: String, data: Data) {
+        entries[key] = Entry(data: data, previous: newest, next: nil)
+        if let newest { entries[newest]?.next = key }
+        else { oldest = key }
+        newest = key
+    }
+}
+
 /// Session-owned thumbnail lookup pipeline. The order and negative-cache rules
 /// mirror Android `CameraViewModel.loadThumbnail`.
 actor PhotoThumbnailStore {
@@ -10,14 +84,16 @@ actor PhotoThumbnailStore {
     private let disk: PhotoThumbnailDiskCache
     private var cameraStore: PhotoThumbnailDiskCache.CameraStore?
     private var cameraIdentity: String?
-    private var memory: [String: Data] = [:]
-    private var memoryOrder: [String] = []
-    private var memoryBytes = 0
-    private let memoryBudget: Int
+    private var memory: PhotoThumbnailMemoryCache
     private var negative = Set<String>()
     private final class Flight: @unchecked Sendable {
+        enum VisibleResult { case image(Data), unavailable }
         let task: Task<Data, Error>
         var waiters: Int
+        // Only accessed on PhotoThumbnailStore. Prefetch never populates this.
+        // Like Android's InflightThumb, visible waiters share decoding as well
+        // as the remote read, even when the result exceeds the memory budget.
+        var visibleResult: VisibleResult?
         init(task: Task<Data, Error>, waiters: Int = 1) { self.task = task; self.waiters = waiters }
     }
     private final class WaiterToken: @unchecked Sendable {
@@ -38,12 +114,13 @@ actor PhotoThumbnailStore {
     private var observers: [UInt32: [UUID: AsyncStream<Void>.Continuation]] = [:]
     private let remoteGate = ThumbnailRemoteGate()
 
-    init(disk: PhotoThumbnailDiskCache? = nil) {
+    init(disk: PhotoThumbnailDiskCache? = nil, memoryBudget: Int? = nil) {
         self.disk = disk ?? Self.sharedDisk
         // Android reserves about one eighth of the process heap for bitmap LRU.
         // Data is compressed thumbnail bytes on iOS, so retain the same ratio
         // with a small floor and no arbitrary entry-count eviction.
-        self.memoryBudget = max(4 * 1024 * 1024, Int(ProcessInfo.processInfo.physicalMemory / 8))
+        self.memory = PhotoThumbnailMemoryCache(budget: memoryBudget ??
+            max(4 * 1024 * 1024, Int(ProcessInfo.processInfo.physicalMemory / 8)))
     }
 
     /// Cancelling a cell removes only its subscription, never camera work.
@@ -74,8 +151,6 @@ actor PhotoThumbnailStore {
         for flight in inFlight.values { flight.task.cancel() }
         inFlight.removeAll()
         memory.removeAll(keepingCapacity: true)
-        memoryOrder.removeAll(keepingCapacity: true)
-        memoryBytes = 0
         negative.removeAll(keepingCapacity: true)
         cameraIdentity = identity
         diskWritesBlocked = false
@@ -95,8 +170,6 @@ actor PhotoThumbnailStore {
     func resetForScan(identity: String) {
         beginSession(identity: identity)
         memory.removeAll(keepingCapacity: true)
-        memoryOrder.removeAll(keepingCapacity: true)
-        memoryBytes = 0
         negative.removeAll(keepingCapacity: true)
     }
 
@@ -113,14 +186,14 @@ actor PhotoThumbnailStore {
         guard let expectedIdentity = cameraIdentity else { return nil }
         let keys = cacheKeys(for: file, directSTA: directSTA)
         let key = keys.primary
-        if let value = memory[key] { touch(key); return value }
+        if let value = memory.value(for: key) { return value }
         if negative.contains(key) { return nil }
         if let store = cameraStore,
            let url = store.find(key, legacyName: keys.legacy, alternateName: keys.alternate),
            let raw = try? Data(contentsOf: url), !raw.isEmpty {
             let value = transform(raw)
             if validate(value) {
-                insert(value, key: key)
+                memory.insert(value, for: key)
                 return value
             }
             // A malformed disk entry is not an authoritative no-thumbnail
@@ -128,52 +201,47 @@ actor PhotoThumbnailStore {
             cameraStore?.remove(key, url: url)
         }
         guard allowRemote else { return nil }
-        if let flight = inFlight[key] {
-            flight.waiters += 1
-            let raw = try await awaitFlight(WaiterToken(key: key, flight: flight))
-            guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            guard !raw.isEmpty else {
-                // Android keeps a direct-STA RAW/video bounded-probe miss
-                // retryable. It is not the camera's authoritative NoThumbnail
-                // response and may succeed when the cell becomes visible again.
-                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
-                return nil
-            }
-            let processed = transform(raw)
-            guard validate(processed) else {
-                cameraStore?.remove(key)
-                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
-                return nil
-            }
-            insert(processed, key: key)
-            _ = writeCache(raw, key: key)
-            return processed
-        }
         // Flights carry raw camera bytes. Android's background lane writes
         // those bytes directly to disk; decoding/cropping belongs only to the
         // visible lane when it reads the cache.
-        let task = Task<Data, Error> {
-            try await self.remoteGate.withPermit { try await fetch() }
+        let flight: Flight
+        if let existing = inFlight[key] {
+            existing.waiters += 1
+            flight = existing
+        } else {
+            let task = Task<Data, Error> {
+                try await self.remoteGate.withPermit { try await fetch() }
+            }
+            flight = Flight(task: task)
+            inFlight[key] = flight
         }
-        let flight = Flight(task: task)
-        inFlight[key] = flight
-        do {
-            let value = try await awaitFlight(WaiterToken(key: key, flight: flight))
-            guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            guard !value.isEmpty else {
-                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
-                return nil
+        let raw = try await awaitFlight(WaiterToken(key: key, flight: flight))
+        guard cameraIdentity == expectedIdentity else { throw CancellationError() }
+        if let result = flight.visibleResult {
+            switch result {
+            case .image(let data): return data
+            case .unavailable: return nil
             }
-            let processed = transform(value)
-            guard validate(processed) else {
-                cameraStore?.remove(key)
-                if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
-                return nil
-            }
-            insert(processed, key: key)
-            _ = writeCache(value, key: key)
-            return processed
-        } catch { throw error }
+        }
+        // No suspension between decode and publication: other waiters see
+        // the same result, including invalid bytes, without processing again.
+        flight.visibleResult = .unavailable
+        guard !raw.isEmpty else {
+            // Direct-STA RAW/video probe misses stay retryable; ordinary
+            // GetThumb's empty response remains authoritative.
+            if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
+            return nil
+        }
+        let processed = transform(raw)
+        guard validate(processed) else {
+            cameraStore?.remove(key)
+            if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
+            return nil
+        }
+        flight.visibleResult = .image(processed)
+        memory.insert(processed, for: key)
+        _ = writeCache(raw, key: key)
+        return processed
     }
 
     /// Scan-pipeline variant: same lookup order, but a successful fetch is
@@ -282,8 +350,6 @@ actor PhotoThumbnailStore {
         for flight in inFlight.values { flight.task.cancel() }
         inFlight.removeAll()
         memory.removeAll()
-        memoryOrder.removeAll()
-        memoryBytes = 0
         negative.removeAll()
         cameraStore = nil
         cameraIdentity = nil
@@ -305,18 +371,14 @@ actor PhotoThumbnailStore {
         beginSession(identity: identity)
         let keys = Set(files.map { cacheKeys(for: $0, directSTA: directSTA).primary })
         for key in keys {
-            if let value = memory.removeValue(forKey: key) { memoryBytes -= value.count }
-            memoryOrder.removeAll { $0 == key }
+            memory.remove(key)
             negative.remove(key)
             if let flight = inFlight.removeValue(forKey: key) { flight.task.cancel() }
         }
     }
 
     private func pruneSessionState(validKeys: Set<String>) {
-        for key in memory.keys where !validKeys.contains(key) {
-            if let value = memory.removeValue(forKey: key) { memoryBytes -= value.count }
-        }
-        memoryOrder.removeAll { !validKeys.contains($0) }
+        memory.retainOnly(validKeys)
         negative.formIntersection(validKeys)
         for key in Array(inFlight.keys) where !validKeys.contains(key) {
             inFlight.removeValue(forKey: key)?.task.cancel()
@@ -338,17 +400,6 @@ actor PhotoThumbnailStore {
         return (primary, PhotoThumbnailDiskCache.legacyCacheFileName(
             fileName: file.fileName, size: file.size, captureDate: file.captureDate),
             directSTA ? standard : nil)
-    }
-
-    private func insert(_ value: Data, key: String) {
-        if let old = memory.updateValue(value, forKey: key) { memoryBytes -= old.count }
-        memoryBytes += value.count
-        touch(key)
-        while memoryBytes > memoryBudget, let oldest = memoryOrder.first {
-            memoryOrder.removeFirst()
-            guard let removed = memory.removeValue(forKey: oldest) else { continue }
-            memoryBytes -= removed.count
-        }
     }
 
     private func awaitFlight(_ token: WaiterToken) async throws -> Data {
@@ -378,10 +429,6 @@ actor PhotoThumbnailStore {
         }
     }
 
-    private func touch(_ key: String) {
-        memoryOrder.removeAll { $0 == key }
-        memoryOrder.append(key)
-    }
 }
 
 /// Android serializes background thumbnail reads with a one-permit gate so a

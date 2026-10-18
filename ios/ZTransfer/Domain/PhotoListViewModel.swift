@@ -34,6 +34,7 @@ final class PhotoListViewModel: ObservableObject {
     }
     @Published private(set) var loadState: PhotoListLoadState = .idle
     @Published private(set) var sections: [PhotoDaySection] = []
+    private(set) var previewFiles: [CameraFile] = []
     /// The complete session catalog is retained for transfer and event
     /// bookkeeping; this is the range-scoped catalog presented in the grid.
     @Published private(set) var displayedFiles: [CameraFile] = []
@@ -55,7 +56,14 @@ final class PhotoListViewModel: ObservableObject {
     @Published private(set) var hasCompletedFileScan = false
     /// Rating filter consumers observe the lifecycle state separately from
     /// the grid, so toggling the loader never replays list animations.
-    @Published private(set) var ratingScan = PhotoRatingScan()
+    private(set) var ratingScan = PhotoRatingScan()
+    private var catalogSections: [PhotoDaySection] = []
+    private var burstFileIDs: Set<UInt32> = []
+    #if DEBUG
+    private(set) var catalogGroupingCount = 0
+    private(set) var filteredSectionBuildCount = 0
+    #endif
+    let ratingProgress = PhotoRatingProgress()
     /// Newest actual shooting days whose ordered thumbnail batches crossed
     /// the STA rating boundary.
     @Published private(set) var recentThumbnailReadyDays = 0
@@ -203,8 +211,7 @@ final class PhotoListViewModel: ObservableObject {
             }
         }
         ratingScanObservation = ratingScanController.$state.sink { [weak self] value in
-            self?.ratingScan = value
-            self?.publishFilteredSections()
+            self?.receiveRatingScan(value)
         }
     }
 
@@ -244,8 +251,7 @@ final class PhotoListViewModel: ObservableObject {
         self.setRemoteGate = setRemoteGate
         self.onTransportLost = onTransportLost
         ratingScanObservation = ratingScanController.$state.sink { [weak self] value in
-            self?.ratingScan = value
-            self?.publishFilteredSections()
+            self?.receiveRatingScan(value)
         }
     }
     func applyCatalogUpdate(_ files: [CameraFile]) async {
@@ -390,6 +396,7 @@ final class PhotoListViewModel: ObservableObject {
             if !preserveExisting {
                 allFiles.removeAll(keepingCapacity: true)
                 sections.removeAll()
+                previewFiles.removeAll()
             }
             let accumulator = ScanAccumulator()
             accumulator.publishedIDs = Set(allFiles.map(\.id))
@@ -497,59 +504,80 @@ final class PhotoListViewModel: ObservableObject {
             : allFiles.filter { file in
                 file.captureDate == nil || loadingRange?.contains(file.captureDate) == true
             }
-        displayedFiles = scopedFiles
-
-        var extensions = Set<String>()
-        var latestDay: String?
-        for file in scopedFiles {
-            extensions.insert(file.fileExtension.lowercased())
-            if let day = validPhotoCaptureDay(file.captureDate) {
-                if let current = latestDay {
-                    if day > current { latestDay = day }
-                } else {
+        if scopedFiles != displayedFiles {
+            displayedFiles = scopedFiles
+            var extensions = Set<String>()
+            var latestDay: String?
+            for file in scopedFiles {
+                extensions.insert(file.fileExtension.lowercased())
+                if let day = validPhotoCaptureDay(file.captureDate), latestDay == nil || day > latestDay! {
                     latestDay = day
                 }
             }
+            availableFilterExtensions = extensions.sorted()
+            latestKnownCaptureDay = latestDay
+            let dayKeys = Set(scopedFiles.map { file in
+                guard let value = file.captureDate, value.count >= 8 else { return PhotoCatalogGrouping.unknownDay }
+                return String(value.prefix(8))
+            })
+            if availableDayKeys != dayKeys { availableDayKeys = dayKeys }
+            let groups = PhotoCatalogGrouping.bursts(in: scopedFiles)
+            if burstGroups != groups { burstGroups = groups }
+            let ids = groups.reduce(into: [UInt32: String]()) { result, group in
+                for file in group.files { result[file.id] = group.id }
+            }
+            if burstIDByFile != ids { burstIDByFile = ids }
+            burstFileIDs = Set(ids.keys)
+            // Sorting and burst recognition depend on the catalog, not on a
+            // filter toggle or every completed rating read (FileListScreen's
+            // remember(displayedCameraFiles) and activeRatingValues boundary).
+            catalogSections = PhotoCatalogGrouping.byCaptureDay(scopedFiles)
+            #if DEBUG
+            catalogGroupingCount += 1
+            #endif
         }
-        availableFilterExtensions = extensions.sorted()
-        // FileListScreen preserves selections during a scan and retains the
-        // whole selection if even one type still exists in the visible scope.
-        if let selected = filter.extensions,
-           selected.isEmpty || (hasCompletedFileScan && !isLoadingFiles && selected.isDisjoint(with: extensions)) {
-            filter.extensions = nil
-            PhotoFilterPersistence.save(filter)
-        }
-        latestKnownCaptureDay = latestDay
+        normalizeFilterExtensions()
         transferredIDs = indexedTransferredIDs
-        availableDayKeys = Set(scopedFiles.map { file in
-            guard let value = file.captureDate, value.count >= 8 else { return PhotoCatalogGrouping.unknownDay }
-            return String(value.prefix(8))
-        })
-        burstGroups = PhotoCatalogGrouping.bursts(in: scopedFiles)
-        burstIDByFile = burstGroups.reduce(into: [:]) { result, group in
-            for file in group.files { result[file.id] = group.id }
-        }
-        sections = PhotoCatalogGrouping.byCaptureDay(
-            PhotoFilter.apply(scopedFiles, state: filter,
-                              transferredIDs: transferredIDs.subtracting(exitingTransferredFileIDs),
-                              storageIDsBySlot: storageIDsBySlot,
-                              ratingValues: ratingScan.values,
-                              protectionAvailable: protectionFilteringEnabled),
-        )
+        publishFilteredSections()
         updateRatingScanFromCurrentState()
     }
 
-    /// Rating values arrive independently of catalog publication. Refresh only
-    /// the filtered section model so the grid does not replay catalog changes.
+    private func normalizeFilterExtensions() {
+        // Preserve selections throughout scanning and keep the whole selection
+        // if even one type still exists, exactly as FileListScreen does.
+        if let selected = filter.extensions,
+           selected.isEmpty || (hasCompletedFileScan && !isLoadingFiles &&
+                                selected.isDisjoint(with: availableFilterExtensions)) {
+            filter.extensions = nil
+            PhotoFilterPersistence.save(filter)
+        }
+    }
+
+    private func receiveRatingScan(_ value: PhotoRatingScan) {
+        let affectsGrid = filter.rating != nil && ratingScan.values != value.values
+        ratingScan = value
+        ratingProgress.update(value)
+        if affectsGrid { publishFilteredSections() }
+    }
+
+    /// Filtering preserves the already sorted catalog's day/file order. The
+    /// full-scope burst set must be used even when a date/type/star hides peers.
     private func publishFilteredSections() {
-        guard !displayedFiles.isEmpty || !sections.isEmpty else { return }
-        sections = PhotoCatalogGrouping.byCaptureDay(
-            PhotoFilter.apply(displayedFiles, state: filter,
-                              transferredIDs: transferredIDs.subtracting(exitingTransferredFileIDs),
-                              storageIDsBySlot: storageIDsBySlot,
-                              ratingValues: ratingScan.values,
-                              protectionAvailable: protectionFilteringEnabled),
-        )
+        let transferred = transferredIDs.subtracting(exitingTransferredFileIDs)
+        let next = catalogSections.compactMap { section -> PhotoDaySection? in
+            let files = PhotoFilter.apply(section.files, state: filter,
+                transferredIDs: transferred, storageIDsBySlot: storageIDsBySlot,
+                ratingValues: ratingScan.values, protectionAvailable: protectionFilteringEnabled,
+                burstFileIDs: burstFileIDs)
+            return files.isEmpty ? nil : PhotoDaySection(day: section.day, files: files)
+        }
+        #if DEBUG
+        filteredSectionBuildCount += 1
+        #endif
+        if sections != next {
+            previewFiles = next.flatMap(\.files)
+            sections = next
+        }
     }
 
     private func acceptBatch(
@@ -702,10 +730,11 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     func setFilter(_ filter: PhotoFilterState) {
-        self.filter = filter
-        if !filter.untransferredOnly { exitingTransferredFileIDs.removeAll() }
+        if self.filter != filter { self.filter = filter }
+        if !filter.untransferredOnly && !exitingTransferredFileIDs.isEmpty { exitingTransferredFileIDs.removeAll() }
         PhotoFilterPersistence.save(filter)
-        publishSections()
+        normalizeFilterExtensions()
+        publishFilteredSections()
         updateRatingScanFromCurrentState()
         guard !sequentialLoading else { return }
         Task { [weak self] in

@@ -10,6 +10,7 @@ struct PhotoPreviewInteractionHarness: View {
     private let offline = ProcessInfo.processInfo.arguments.contains("--preview-offline-admission")
     @State private var selected: CameraFile?
     @State private var open = false
+    @State private var previewProjection = PhotoPreviewProjectionCache()
     var body: some View {
         ZStack {
             VStack {
@@ -19,7 +20,7 @@ struct PhotoPreviewInteractionHarness: View {
                 }
             }
             if open {
-                PhotoPreviewView(session: session, queueModel: queue, files: files,
+                PhotoPreviewView(session: session, queueModel: queue, files: files, projection: previewProjection,
                                  isSessionConnected: !offline,
                                  selectedFile: $selected, collapseBursts: false,
                                  onEnqueue: { _ in

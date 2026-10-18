@@ -84,7 +84,7 @@ struct QueueRetryInteractionHarness: View {
             loaded = true
             do {
                 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-                directory.setDirectory(root)
+                await directory.setDirectory(root).value
                 originals.refreshTransferredIDs(directory: root, storageMode: .unified)
                 let count = ProcessInfo.processInfo.arguments.contains("--queue-confirmation-scroll-test") ? 12 : 2
                 _ = await queue.enqueue((1...count).map { id in

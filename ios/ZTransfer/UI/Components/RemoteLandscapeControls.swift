@@ -154,13 +154,13 @@ private struct RemoteDockMark: Shape {
     }
 }
 
-@MainActor private final class RemoteDockMotionDriver: NSObject, ObservableObject {
+@MainActor final class RemoteDockMotionDriver: NSObject, ObservableObject {
     @Published private(set) var state = RemoteDockMotion()
     private var link: CADisplayLink?
     func setOpen(_ open: Bool) {
-        state.setOpen(open)
+        if state.open != open { state.setOpen(open) }
         guard state.animation.isRunning, link == nil else { return }
-        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let next = ZTransferDisplayLink.make(owner: self) { $0.frame($1) }
         link = next
         next.add(to: .main, forMode: .common)
     }

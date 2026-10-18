@@ -1,5 +1,49 @@
 import SwiftUI
 
+/// Progress is a leaf observation; scan updates must not remeasure the popup,
+/// recreate date drafts or touch the other filter controls. Retains the existing
+/// iOS linear 900 ms / reverse pulse (Android uses FastOutSlowIn; see P06 ledger).
+@MainActor
+struct PhotoRatingProgressChip: View {
+    @ObservedObject var progress: PhotoRatingProgress
+    let enabled: Bool
+    let visible: Bool
+    let action: () -> Void
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var origin = Date()
+    #if DEBUG
+    var didRender: ((String) -> Void)? = nil
+    #endif
+
+    private var breathing: Bool { enabled && progress.snapshot.loading }
+    var body: some View {
+        let value = progress.snapshot
+        let label = !enabled ? AppLocalized.resource("filter_rating_off")
+            : value.waitingForRange ? "0/\(value.total)"
+            : value.loading ? "\(min(value.completed, value.total))/\(value.total)"
+            : AppLocalized.resource("filter_rating_on")
+        let accent = !enabled ? ZTransferColors.accentBlue
+            : value.waitingForRange ? ZTransferColors.accentYellow
+            : value.loading ? ZTransferColors.accentBlue : ZTransferColors.statusConnected
+        #if DEBUG
+        let _ = didRender?(label)
+        #endif
+        NativeAttentionHost(configuration: NativeAttentionConfiguration(
+            kind: .opacityPulse(minimum: 0.72, maximum: 1, halfPeriod: 0.9),
+            origin: origin, enabled: breathing, paused: !visible || scenePhase != .active
+        )) {
+            FilterChip(label: label, selected: enabled, accentColor: accent, minHeight: 34,
+                       cornerLabel: AppLocalized.resource("filter_rating_enabled"),
+                       onLongPress: enabled ? {
+                           UIPasteboard.general.string = PhotoRatingDiagnostics.snapshot()
+                       } : nil, action: action)
+                .accessibilityLabel(AppLocalized.resource("filter_rating_enabled"))
+        }
+        .frame(width: 81, height: 34)
+        .onChange(of: breathing) { if $0 { origin = Date() } }
+    }
+}
+
 struct FilterChip: View {
     let label: String?
     let selected: Bool

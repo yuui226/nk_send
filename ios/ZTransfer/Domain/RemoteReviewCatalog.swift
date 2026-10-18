@@ -126,6 +126,10 @@ actor RemoteReviewCatalog {
     private var heads: [CameraFile?]
     private var published = ReviewPhotos()
     private var pending: [CameraFile] = []
+    // A long burst can share one timestamp. Cache the pending group's date and
+    // same-name candidates instead of rescanning the entire burst per handle.
+    private var pendingDate: String?
+    private var pendingByStem: [String: [CameraFile]] = [:]
     private(set) var hasMore = true
     private var loading = false
     private var waiters: [(UUID, CheckedContinuation<Void, Error>)] = []
@@ -137,8 +141,8 @@ actor RemoteReviewCatalog {
         self.readFile = readFile
     }
     private func companion(_ file: CameraFile) -> Bool {
-        let date = pending.compactMap(reviewDate).max { $0.count < $1.count }
-        return reviewDatesCompatible(date, reviewDate(file)) && pending.contains { reviewCompanions($0, file) }
+        reviewDatesCompatible(pendingDate, reviewDate(file)) &&
+            (pendingByStem[reviewStem(file)]?.contains { reviewCompanions($0, file) } ?? false)
     }
     private func peek() async throws -> (Int, CameraFile)? {
         for slot in handles.indices {
@@ -183,15 +187,24 @@ actor RemoteReviewCatalog {
         while hasMore && published.photos.count < target {
             while true {
                 let next = try await peek()
-                let date = pending.compactMap(reviewDate).max { $0.count < $1.count }
+                let date = pendingDate
                 let same = next.map { pending.isEmpty || (date != nil && date == reviewDate($0.1)) || companion($0.1) } ?? false
                 if !same {
                     published.add(pending)
                     pending.removeAll(keepingCapacity: true)
+                    pendingDate = nil
+                    pendingByStem.removeAll(keepingCapacity: true)
                     if next == nil { hasMore = false }
                     break
                 }
-                if let (slot, file) = next { pending.append(file); heads[slot] = nil }
+                if let (slot, file) = next {
+                    pending.append(file)
+                    pendingByStem[reviewStem(file), default: []].append(file)
+                    if let date = reviewDate(file), pendingDate == nil || date.count > pendingDate!.count {
+                        pendingDate = date
+                    }
+                    heads[slot] = nil
+                }
             }
         }
         return published.photos

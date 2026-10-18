@@ -106,7 +106,9 @@ struct TransferQueueView: View {
             // Keep the collapse state until the actor publishes the actual
             // removal; clearing it in the same task as `remove` would briefly
             // expand the old row before the snapshot arrives.
-            removingItemIDs = removingItemIDs.filter { ids.contains($0) }
+            if !removingItemIDs.isEmpty {
+                removingItemIDs.formIntersection(Set(ids))
+            }
         }
         .onChange(of: actionVisibility) { visibility in
             if pendingConfirmation == .retry && !visibility.hasRetryable ||
@@ -125,11 +127,21 @@ struct TransferQueueView: View {
 
     private func beginRemoval(_ id: UUID, withdraw: Bool) {
         guard !removingItemIDs.contains(id) else { return }
-        removingItemIDs.insert(id)
         if withdraw { model.withdraw(id: id) }
+        beginRemoval([id])
+    }
+
+    private func beginRemoval(_ requestedIDs: Set<UUID>) {
+        let ids = requestedIDs.subtracting(removingItemIDs)
+        guard !ids.isEmpty else { return }
+        removingItemIDs.formUnion(ids)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 280_000_000)
-            if !(await model.remove(id: id)) { removingItemIDs.remove(id) }
+            // A simultaneous clear uses one actor mutation/publication instead
+            // of N array copies and N latest-task index rebuilds. Eligibility
+            // is still checked after the 280ms collapse, just like a single row.
+            let removed = await model.remove(ids: ids)
+            removingItemIDs.subtract(ids.subtracting(removed))
         }
     }
 
@@ -266,9 +278,8 @@ struct TransferQueueView: View {
         case .clear:
             clearAllInProgress = true
             model.withdrawPending()
-            for item in model.snapshot.items where item.status != .transferring && !item.isGeneratingFrame {
-                beginRemoval(item.id, withdraw: false)
-            }
+            beginRemoval(Set(model.snapshot.items.lazy
+                .filter { $0.status != .transferring && !$0.isGeneratingFrame }.map(\.id)))
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 320_000_000)
                 await model.removeCleared()
@@ -318,14 +329,14 @@ struct QueueFabVisibilityMotion {
 }
 
 @MainActor
-private final class QueueFabVisibilityAnimator: NSObject, ObservableObject {
+final class QueueFabVisibilityAnimator: NSObject, ObservableObject {
     @Published private(set) var motion: QueueFabVisibilityMotion
     private var link: CADisplayLink?
     init(visible: Bool) { motion = .init(visible: visible) }
     func setVisible(_ value: Bool) {
-        motion.setVisible(value)
+        if motion.visible != value { motion.setVisible(value) }
         guard motion.isRunning, link == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let link = ZTransferDisplayLink.make(owner: self) { $0.frame($1) }
         self.link = link
         link.add(to: .main, forMode: .common)
     }
@@ -585,55 +596,122 @@ struct QueueEmptyMarkMotion {
     }
 }
 
-@MainActor
-private final class QueueEmptyMarkClock: ObservableObject {
-    @Published private(set) var motion = QueueEmptyMarkMotion.sample(elapsedNanos: 0)
-    private var link: CADisplayLink?
-    private var origin: Int64?
-
-    @MainActor
-    private final class FrameTarget: NSObject {
-        weak var owner: QueueEmptyMarkClock?
-        init(_ owner: QueueEmptyMarkClock) { self.owner = owner }
-        @objc func frame(_ link: CADisplayLink) {
-            guard let owner else { link.invalidate(); return }
-            owner.frame(link)
-        }
-    }
-
-    func start() {
-        guard link == nil else { return }
-        origin = nil
-        motion = .sample(elapsedNanos: 0)
-        let link = CADisplayLink(target: FrameTarget(self), selector: #selector(FrameTarget.frame(_:)))
-        self.link = link
-        link.add(to: .main, forMode: .common)
-    }
-
-    private func frame(_ link: CADisplayLink) {
-        let now = Int64(link.timestamp * 1_000_000_000)
-        if origin == nil { origin = now }
-        motion = .sample(elapsedNanos: now - origin!)
-    }
-
-    func stop() {
-        link?.invalidate()
-        link = nil
-        origin = nil
+private struct QueueEmptyMark: View {
+    @State private var visible = false
+    var body: some View {
+        QueueEmptyMarkSurface(active: visible)
+            .frame(width: 58 * DoubleZMark.aspectRatio, height: 58)
+            .allowsHitTesting(false)
+            .onAppear { visible = true }
+            .onDisappear { visible = false }
     }
 }
 
-private struct QueueEmptyMark: View {
-    @StateObject private var clock = QueueEmptyMarkClock()
+/// Keep the existing vector mark and environment. Only its transparent UIKit
+/// ancestors animate: the renderer composites the same contents without a
+/// display-link publisher rebuilding Canvas and the SwiftUI graph every frame.
+struct QueueEmptyMarkSurface: UIViewRepresentable {
+    var active = true
+    func makeUIView(context: Context) -> QueueEmptyMarkNativeView { QueueEmptyMarkNativeView() }
+    func updateUIView(_ view: QueueEmptyMarkNativeView, context: Context) {
+        view.host.rootView = AnyView(DoubleZMark(tint: ZTransferColors.secondaryText)
+            .environment(\.self, context.environment))
+        view.configure(active: active)
+    }
+    static func dismantleUIView(_ view: QueueEmptyMarkNativeView, coordinator: ()) {
+        view.stop()
+        view.host.willMove(toParent: nil)
+        view.host.removeFromParent()
+    }
+}
 
-    var body: some View {
-        DoubleZMark(tint: ZTransferColors.secondaryText)
-            .frame(width: 58 * DoubleZMark.aspectRatio, height: 58)
-            .opacity(Double(clock.motion.opacity))
-            .scaleEffect(CGFloat(clock.motion.scale))
-            .transaction { $0.animation = nil }
-            .onAppear { clock.start() }
-            .onDisappear { clock.stop() }
+@MainActor
+final class QueueEmptyMarkNativeView: UIView {
+    let motionView = UIView()
+    let host = UIHostingController(rootView: AnyView(EmptyView()))
+    private var active = false
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        motionView.backgroundColor = .clear
+        motionView.isOpaque = false
+        host.view.backgroundColor = .clear
+        host.view.isOpaque = false
+        host.view.clipsToBounds = false
+        if #available(iOS 16.4, *) { host.safeAreaRegions = [] }
+        addSubview(motionView)
+        motionView.addSubview(host.view)
+        layer.opacity = 0
+    }
+    required init?(coder: NSCoder) { nil }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard let window else { stop(); return }
+        contentScaleFactor = window.screen.scale
+        motionView.contentScaleFactor = window.screen.scale
+        host.view.contentScaleFactor = window.screen.scale
+        if host.parent == nil {
+            var candidate = next
+            while let responder = candidate {
+                if let parent = responder as? UIViewController {
+                    parent.addChild(host); host.didMove(toParent: parent); break
+                }
+                candidate = responder.next
+            }
+        }
+        if active { start() }
+    }
+    func configure(active: Bool) {
+        self.active = active
+        if active && window != nil { start() } else { stop() }
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // A presentation scale must not feed back into layout or bitmap size.
+        motionView.bounds = CGRect(origin: .zero, size: bounds.size)
+        motionView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        host.view.bounds = motionView.bounds
+        host.view.center = CGPoint(x: motionView.bounds.midX, y: motionView.bounds.midY)
+    }
+    private func start() {
+        guard motionView.layer.animation(forKey: "queue.breathe") == nil else { return }
+        let now = CACurrentMediaTime()
+        let forward = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
+        // Compose Reverse reverses play time, including the asymmetric curve.
+        let reverse = CAMediaTimingFunction(controlPoints: 0.8, 0, 0.6, 1)
+        func breathing(_ key: String, _ minimum: Double, _ maximum: Double) -> CAKeyframeAnimation {
+            let animation = CAKeyframeAnimation(keyPath: key)
+            animation.values = [minimum, maximum, minimum]
+            animation.keyTimes = [0, 0.5, 1]
+            animation.timingFunctions = [forward, reverse]
+            animation.duration = 4.8
+            return animation
+        }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        layer.opacity = 1
+        motionView.layer.opacity = 0.42
+        motionView.layer.transform = CATransform3DMakeScale(0.985, 0.985, 1)
+        CATransaction.commit()
+        let loop = CAAnimationGroup()
+        loop.animations = [breathing("opacity", 0.42, 0.54), breathing("transform.scale", 0.985, 1.015)]
+        loop.duration = 4.8
+        loop.repeatCount = .infinity
+        loop.beginTime = motionView.layer.convertTime(now, from: nil)
+        motionView.layer.add(loop, forKey: "queue.breathe")
+        // Multiplication by a separate ancestor retains the 340ms reveal
+        // while breathing starts immediately, matching QueueEmptyMarkMotion.
+        let reveal = CABasicAnimation(keyPath: "opacity")
+        reveal.fromValue = 0; reveal.toValue = 1
+        reveal.duration = 0.34
+        reveal.timingFunction = forward
+        reveal.beginTime = layer.convertTime(now, from: nil)
+        layer.add(reveal, forKey: "queue.reveal")
+    }
+    func stop() {
+        layer.removeAnimation(forKey: "queue.reveal")
+        motionView.layer.removeAnimation(forKey: "queue.breathe")
     }
 }
 
@@ -668,26 +746,26 @@ enum TransferCardVisualState: Hashable {
 /// One local display clock supplies both card surface and state marker.
 /// Android animateColorAsState uses a 300ms FastOutSlowIn Oklab tween.
 @MainActor
-private final class QueueCardAccentAnimator: NSObject, ObservableObject {
+final class QueueCardAccentAnimator: NSObject, ObservableObject {
     @Published private(set) var value: UInt32?
     private var animation: ZTransferColorAnimation?
     private var link: CADisplayLink?
     func mount(_ color: UInt32) {
         stop()
         animation = .init(color, durationMilliseconds: 300)
-        value = color
+        if value != color { value = color }
     }
     func update(_ color: UInt32) {
         guard animation != nil else { mount(color); return }
         animation?.retarget(color)
         guard animation?.isRunning == true, link == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let link = ZTransferDisplayLink.make(owner: self) { $0.frame($1) }
         self.link = link
         link.add(to: .main, forMode: .common)
     }
     @objc private func frame(_ link: CADisplayLink) {
         animation?.advance(Int64(link.timestamp * 1_000_000_000))
-        value = animation?.value
+        if value != animation?.value { value = animation?.value }
         if animation?.isRunning != true { stop() }
     }
     func stop() { link?.invalidate(); link = nil }
@@ -703,6 +781,28 @@ private final class QueueCardAccentAnimator: NSObject, ObservableObject {
         Color(.sRGB, red: Double((value >> 16) & 255) / 255,
               green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255,
               opacity: Double(value >> 24) / 255)
+    }
+}
+
+/// Color frames only invalidate the surface/marker, not filenames, thumbnails,
+/// action buttons, pill layout and progress inputs (performance ledger P10).
+struct QueueCardAccentScope<Content: View>: View {
+    @ObservedObject var animator: QueueCardAccentAnimator
+    let fallback: UInt32
+    @ViewBuilder let content: (Color) -> Content
+    var body: some View { content(QueueCardAccentAnimator.color(animator.value ?? fallback)) }
+}
+
+/// Android TransferScreen runs its 200ms elapsed timer only while generation
+/// is actually running. Keep the TimelineView identity across pause/completion
+/// so the pill's retained content and exit animations aren't remounted.
+struct QueueGenerationTimelineSchedule: TimelineSchedule {
+    let running: Bool
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
+        if running {
+            return AnySequence(PeriodicTimelineSchedule(from: startDate, by: 0.2).entries(from: startDate, mode: mode))
+        }
+        return AnySequence(CollectionOfOne(startDate))
     }
 }
 
@@ -736,7 +836,7 @@ private struct QueueItemView: View {
     let onRemove: () -> Void
     let onWithdraw: () -> Void
     @Environment(\.colorScheme) private var scheme
-    @StateObject private var accent = QueueCardAccentAnimator()
+    @State private var accent = QueueCardAccentAnimator()
     @State private var collapseProgress: CGFloat = 1
 
     private var cardActionsVisible: Bool { !isRemoving && !isClearing }
@@ -744,7 +844,6 @@ private struct QueueItemView: View {
     private var targetAccent: UInt32 {
         QueueCardAccentAnimator.packed(TransferCardVisualState(item: item).color, scheme: scheme)
     }
-    private var stateColor: Color { QueueCardAccentAnimator.color(accent.value ?? targetAccent) }
 
     var body: some View {
         ZStack {
@@ -803,7 +902,8 @@ private struct QueueItemView: View {
                             TransferInfoPill(text: effectText, color: ZTransferColors.accentPurple,
                                 respond: item.isGeneratingFrame && !item.frameGenerationSkipped &&
                                     item.displayedFrameGenerationElapsedMs(now: PhotoGenerationClock.now()) != nil)
-                            TimelineView(.periodic(from: Date(), by: 0.2)) { _ in
+                            TimelineView(QueueGenerationTimelineSchedule(running:
+                                item.isGeneratingFrame && item.frameGenerationStartedAtElapsedMs != nil)) { _ in
                                 let presentation = TransferQueueCardText(item: item)
                                 let elapsed = item.frameGenerationSkipped ? nil :
                                     item.displayedFrameGenerationElapsedMs(now: PhotoGenerationClock.now())
@@ -854,18 +954,22 @@ private struct QueueItemView: View {
                                        startPoint: .top, endPoint: .bottom))
         }
         .background {
-            ZTransferColors.surface.mix(with: stateColor, by: 0.09, scheme: scheme)
-                .transaction { $0.animation = nil }
+            QueueCardAccentScope(animator: accent, fallback: targetAccent) { color in
+                ZTransferColors.surface.mix(with: color, by: 0.09, scheme: scheme)
+                    .transaction { $0.animation = nil }
+            }
         }
         .overlay(alignment: .leading) {
             // Android drawBehind marker: excluded from row measurement.
-            RoundedRectangle(cornerRadius: 2.5, style: .circular)
-                .fill(stateColor.opacity(0.65))
-                .frame(width: 2.5, height: 32)
-                .offset(x: 5)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-                .transaction { $0.animation = nil }
+            QueueCardAccentScope(animator: accent, fallback: targetAccent) { color in
+                RoundedRectangle(cornerRadius: 2.5, style: .circular)
+                    .fill(color.opacity(0.65))
+                    .frame(width: 2.5, height: 32)
+                    .offset(x: 5)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .transaction { $0.animation = nil }
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .circular))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .circular).strokeBorder(
@@ -1226,7 +1330,7 @@ struct SmoothTransferProgress<Content: View>: View {
     let target: Double
     let resetKey: AnyHashable?
     @ViewBuilder let content: (Double) -> Content
-    @StateObject private var animator = SmoothTransferProgressAnimator()
+    @State private var animator = SmoothTransferProgressAnimator()
     private struct Input: Equatable {
         let target: Double
         let key: AnyHashable?
@@ -1551,30 +1655,36 @@ struct TransferPillResponseMotion {
 }
 
 @MainActor
-private final class TransferPillResponseAnimator: NSObject, ObservableObject {
+final class TransferPillResponseAnimator: NSObject, ObservableObject {
     @Published private(set) var motion: TransferPillResponseMotion
     @Published private(set) var widthMotion = QueuePillWidthMotion()
     private var link: CADisplayLink?
+    private var lastWidth: (pixels: CGFloat, scale: CGFloat)?
     init(responding: Bool) { motion = .init(responding: responding) }
     func update(_ responding: Bool) {
-        motion.update(responding)
+        if responding != motion.responding { motion.update(responding) }
         schedule()
     }
     func measureWidth(_ width: CGFloat, scale: CGFloat) {
-        widthMotion.measure(width, scale: scale)
+        guard width.isFinite, width >= 0, scale.isFinite, scale > 0 else { return }
+        let pixels = floor(width * scale + 0.5)
+        if lastWidth?.pixels != pixels || lastWidth?.scale != scale {
+            lastWidth = (pixels, scale)
+            widthMotion.measure(width, scale: scale)
+        }
         schedule()
     }
     private func schedule() {
         if !motion.scale.isRunning && !widthMotion.isRunning { stop(); return }
         guard link == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let link = ZTransferDisplayLink.make(owner: self) { $0.frame($1) }
         self.link = link
         link.add(to: .main, forMode: .common)
     }
     @objc private func frame(_ link: CADisplayLink) {
         let nanos = Int64(link.timestamp * 1_000_000_000)
-        motion.advance(nanos)
-        widthMotion.advance(nanos)
+        if motion.scale.isRunning { motion.advance(nanos) }
+        if widthMotion.isRunning { widthMotion.advance(nanos) }
         if !motion.scale.isRunning && !widthMotion.isRunning { stop() }
     }
     func mount(_ responding: Bool) {
@@ -1582,7 +1692,7 @@ private final class TransferPillResponseAnimator: NSObject, ObservableObject {
         motion = .init(responding: responding)
         schedule()
     }
-    func unmount() { stop(); widthMotion = .init() }
+    func unmount() { stop(); widthMotion = .init(); lastWidth = nil }
     func stop() { link?.invalidate(); link = nil }
 }
 
@@ -1615,13 +1725,13 @@ private struct TransferInfoPill: View {
     let numericValue: Double?
     let waiting: Bool
     let respond: Bool
-    @StateObject private var response: TransferPillResponseAnimator
+    @State private var response: TransferPillResponseAnimator
 
     init(text: String, color: Color, numericValue: Double? = nil,
          waiting: Bool = false, respond: Bool = false) {
         self.text = text; self.color = color; self.waiting = waiting; self.respond = respond
         self.numericValue = numericValue
-        _response = StateObject(wrappedValue: TransferPillResponseAnimator(responding: respond))
+        _response = State(initialValue: TransferPillResponseAnimator(responding: respond))
     }
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var displayScale
@@ -1642,40 +1752,50 @@ private struct TransferInfoPill: View {
     }
 
     var body: some View {
-        QueuePillWidthLayout(displayedWidth: response.widthMotion.width) {
-            Group {
-                if waiting {
-                    QueueWaitingClock().fill(color, style: FillStyle(eoFill: true))
-                        .frame(width: 16, height: 16)
-                        .accessibilityLabel(AppLocalized.resource("status_waiting"))
-                } else if let numericValue {
-                    TransferNumericText(text: text, value: numericValue)
-                        .zTransferTypography(.labelSmall).foregroundStyle(color)
-                } else {
-                    Text(text).zTransferTypography(.labelSmall).foregroundStyle(color)
-                }
+        Group {
+            if waiting {
+                QueueWaitingClock().fill(color, style: FillStyle(eoFill: true))
+                    .frame(width: 16, height: 16)
+                    .accessibilityLabel(AppLocalized.resource("status_waiting"))
+            } else if let numericValue {
+                TransferNumericText(text: text, value: numericValue)
+                    .zTransferTypography(.labelSmall).foregroundStyle(color)
+            } else {
+                Text(text).zTransferTypography(.labelSmall).foregroundStyle(color)
             }
-                .padding(.horizontal, 7)
-                .frame(height: 20)
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear
-                            .onAppear { response.measureWidth(geometry.size.width, scale: displayScale) }
-                            .onChange(of: geometry.size.width) { response.measureWidth($0, scale: displayScale) }
-                            .onChange(of: displayScale) { response.measureWidth(geometry.size.width, scale: $0) }
-                    }
-                }
         }
+        .padding(.horizontal, 7)
+        .frame(height: 20)
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { response.measureWidth(geometry.size.width, scale: displayScale) }
+                    .onChange(of: geometry.size.width) { response.measureWidth($0, scale: displayScale) }
+                    .onChange(of: displayScale) { response.measureWidth(geometry.size.width, scale: $0) }
+            }
+        }
+        .modifier(TransferPillAnimatedLayout(response: response, fill: fill, edge: edge))
+        .lineLimit(1)
+        .transaction { $0.animation = nil }
+        .onAppear { response.mount(respond) }
+        .onChange(of: respond) { response.update($0) }
+        .onDisappear { response.unmount() }
+    }
+}
+
+/// The width/response clock owns only layout and composition. Text, gradients
+/// and intrinsic-size inputs are built once per actual content/theme change.
+struct TransferPillAnimatedLayout: ViewModifier {
+    @ObservedObject var response: TransferPillResponseAnimator
+    let fill: LinearGradient
+    let edge: LinearGradient
+    func body(content: Content) -> some View {
+        QueuePillWidthLayout(displayedWidth: response.widthMotion.width) { content }
             .clipped()
             .background(fill)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .circular))
             .overlay(RoundedRectangle(cornerRadius: 6, style: .circular).strokeBorder(edge, lineWidth: 1))
-            .lineLimit(1)
             .scaleEffect(x: CGFloat(response.motion.scale.value), y: 1, anchor: .leading)
-            .transaction { $0.animation = nil }
-            .onAppear { response.mount(respond) }
-            .onChange(of: respond) { response.update($0) }
-            .onDisappear { response.unmount() }
     }
 }
 

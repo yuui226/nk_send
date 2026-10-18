@@ -5,16 +5,17 @@ import SwiftUI
 struct RemotePhotoReviewView: View {
     @ObservedObject var model: RemotePhotoReviewModel
     let session: CameraSession
-    @ObservedObject var queue: TransferQueueViewModel
+    let queue: TransferQueueViewModel
     let connected: Bool
     @State private var selected: CameraFile?
+    @State private var previewProjection = PhotoPreviewProjectionCache()
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
             if !model.photos.isEmpty {
                 PhotoPreviewView(session: session, queueModel: queue,
-                    files: model.photos.map(\.file), review: model,
+                    files: model.displaySnapshot.files, projection: previewProjection, review: model,
                     isSessionConnected: connected, selectedFile: $selected,
                     collapseBursts: false, onDismiss: { _ in Task { await model.close() } })
             } else {

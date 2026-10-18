@@ -85,6 +85,16 @@ struct PhotoLUTCategorySelection {
         }
     }
 
+    @MainActor
+    mutating func reconcile(catalog: PresetCatalogIndex, selected: String?) {
+        if selected != positionedSelection, let selected, let file = catalog.filesByIdentifier[selected] {
+            category = file.category
+            positionedSelection = selected
+        }
+        if selected == nil { positionedSelection = nil }
+        if !catalog.categories.contains(category) { category = catalog.categories.first ?? nil }
+    }
+
     mutating func reconcile(files: [RemoteLUTFile], selected: String?) {
         if selected != positionedSelection, let file = files.first(where: { $0.identifier == selected }) {
             category = file.category
@@ -93,5 +103,47 @@ struct PhotoLUTCategorySelection {
         if selected == nil { positionedSelection = nil }
         let available = Self.categories(in: files)
         if !available.contains(category) { category = available.first ?? nil }
+    }
+}
+
+/// Bounded to the current scan, with one localized label map and one current
+/// option list. Source order supplies duplicate-name numbering; favorite order
+/// affects the wheel and each category without renumbering those labels.
+/// Shared metadata indexing for photo LUT, monitor LUT and NP3; each owner
+/// retains its own snapshot, requests, preferences and selected category.
+@MainActor
+final class PresetCatalogIndex {
+    let orderedFiles: [RemoteLUTFile]
+    let categories: [String?]
+    let filesByIdentifier: [String: RemoteLUTFile]
+    let filesByCategory: [String?: [RemoteLUTFile]]
+    private(set) lazy var labelsByCategory = filesByCategory.mapValues { $0.map(\.label) }
+    private let files: [RemoteLUTFile]
+    private lazy var baseOptions: [String?] = [nil] + orderedFiles.map { Optional($0.identifier) }
+    private var localizedLabels: (uncategorized: String, values: [String: String])?
+    private var currentOptions: (current: String?, values: [String?])?
+
+    init(files: [RemoteLUTFile], orderedFiles: [RemoteLUTFile]? = nil) {
+        self.files = files
+        self.orderedFiles = orderedFiles ?? files
+        categories = PhotoLUTCategorySelection.categories(in: files)
+        filesByIdentifier = Dictionary(uniqueKeysWithValues: files.map { ($0.identifier, $0) })
+        filesByCategory = Dictionary(grouping: orderedFiles ?? files, by: \.category)
+    }
+
+    func labels(uncategorized: String) -> [String: String] {
+        if let localizedLabels, localizedLabels.uncategorized == uncategorized { return localizedLabels.values }
+        let result = RemoteLUTCatalog.labels(files, uncategorized: uncategorized)
+        localizedLabels = (uncategorized, result)
+        return result
+    }
+
+    func selectionOptions(current: String?) -> [String?] {
+        if let currentOptions, currentOptions.current == current { return currentOptions.values }
+        var result = baseOptions
+        // A restored private snapshot remains selectable during a failed scan.
+        if let current, filesByIdentifier[current] == nil { result.append(current) }
+        currentOptions = (current, result)
+        return result
     }
 }

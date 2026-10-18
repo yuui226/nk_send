@@ -19,12 +19,11 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
     let applyHidden: ([RemoteTool]) -> Void
 
     @StateObject private var drag = RemoteToolDragState()
-    @StateObject private var motion = RemoteToolEditorMotion()
+    @State private var motion = RemoteToolEditorMotion()
     @Environment(\.displayScale) private var displayScale
     @State private var mounted = false
     @State private var fixedSlots: [String: CGRect] = [:]
     @State private var coordinateID = UUID()
-    @State private var previousTranslation = CGSize.zero
     @GestureState private var gestureActive = false
 
     private var sequence: [RemoteTool] {
@@ -39,11 +38,8 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
             ForEach(sequence) { tool in
                 if let control = controls[tool] {
                     ZStack {
-                        control
-                            .environment(\.remoteToolIconOpacity, Double(motion.states[tool]?.iconOpacity.value ?? (layout.visible(tool) ? 1 : 0.38)))
-                            .scaleEffect(CGFloat(motion.states[tool]?.lift.value ?? 1))
-                            .rotationEffect(.degrees(Double(motion.states[tool]?.angle ?? 0)))
-                            .offset(offset(for: tool))
+                        control.modifier(RemoteToolSlotTransform(
+                            presentation: motion.presentation(tool, visible: layout.visible(tool))))
                     }
                     // Android keeps normal and editor slots at 36 dp; only
                     // the active recorder may expand across adjacent tracks.
@@ -61,7 +57,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
                 }
             }
             ForEach(trailing) { control in
-                ZStack { control.view.offset(fixedOffset(for: control.id)) }
+                ZStack { control.view.modifier(RemoteToolSlotTransform(presentation: motion.fixedPresentation(control.id))) }
                     .background {
                         GeometryReader { proxy in
                             Color.clear.preference(key: RemoteFixedToolSlotPreference.self,
@@ -76,7 +72,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
                 Color.clear.preference(key: RemoteToolHeightPreference.self, value: proxy.size.height)
             }
         }
-        .frame(height: editing ? motion.contentHeight.height : nil, alignment: .topLeading)
+        .modifier(RemoteToolAnimatedHeight(presentation: motion.heightPresentation, editing: editing))
         .modifier(RemoteToolEditingClip(enabled: editing))
         .onPreferenceChange(RemoteToolHeightPreference.self) {
             motion.measureHeight($0, editing: editing, scale: displayScale)
@@ -92,6 +88,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
         }
         .coordinateSpace(name: coordinateID)
         .onPreferenceChange(RemoteToolSlotPreference.self) { slots in
+            guard drag.slots != slots else { return }
             drag.slots = slots
             drag.visualPositions = slots.reduce(into: [:]) { positions, entry in
                 let tool = entry.key
@@ -100,11 +97,10 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
             updateMotion()
         }
         .onPreferenceChange(RemoteFixedToolSlotPreference.self) { slots in
+            guard fixedSlots != slots else { return }
             fixedSlots = slots
             updateMotion()
         }
-        .onChange(of: drag.topLeft) { _ in updateMotion() }
-        .onChange(of: drag.dragging) { _ in updateMotion() }
         .highPriorityGesture(DragGesture(minimumDistance: 8, coordinateSpace: .named(coordinateID))
             .updating($gestureActive) { _, active, _ in active = true }
             .onChanged { value in
@@ -112,30 +108,21 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
                 if drag.dragging == nil {
                     _ = drag.begin(at: value.startLocation, delta: value.translation, layout: layout)
                 } else {
-                    drag.moveBy(CGSize(width: value.translation.width - previousTranslation.width,
-                                       height: value.translation.height - previousTranslation.height), layout: layout)
+                    drag.moveBy(CGSize(width: value.translation.width - drag.previousTranslation.width,
+                                       height: value.translation.height - drag.previousTranslation.height), layout: layout)
                 }
-                previousTranslation = value.translation
+                drag.previousTranslation = value.translation
+                updateMotion()
             }
             .onEnded { _ in endDrag() }, including: editing && isActive ? .all : .none)
         .onChange(of: gestureActive) { if !$0 { endDrag() } }
-        .onChange(of: editing) { _ in endDrag(); updateMotion() }
+        .onChange(of: editing) { _ in endDrag() }
         .onChange(of: isActive) { if !$0 { endDrag() } }
         .onDisappear { mounted = false; endDrag(); motion.stop() }
-        .onAppear { mounted = true; applyLayout(); updateMotion() }
+        .onAppear { mounted = true; motion.setActive(true); applyLayout(); updateMotion() }
         .onChange(of: layout.hidden) { _ in applyLayout(); updateMotion() }
         .onChange(of: fixedRecorder) { _ in applyLayout() }
         .onChange(of: isActive) { _ in applyLayout() }
-    }
-
-    private func offset(for tool: RemoteTool) -> CGSize {
-        guard let slot = drag.slots[tool], let point = motion.position(tool) else { return .zero }
-        return CGSize(width: point.x - slot.minX, height: point.y - slot.minY)
-    }
-
-    private func fixedOffset(for id: String) -> CGSize {
-        guard let slot = fixedSlots[id], let point = motion.fixedPosition(id) else { return .zero }
-        return CGSize(width: point.x - slot.minX, height: point.y - slot.minY)
     }
 
     private func updateMotion() {
@@ -147,7 +134,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
 
     private func endDrag() {
         drag.end()
-        previousTranslation = .zero
+        updateMotion()
     }
 
     private func applyLayout() {

@@ -11,9 +11,15 @@ final class RemoteLUTMetalRenderer {
             try $0.makeRenderPipelineState(descriptor: $1)
         }
         var makeTexture: (MTLDevice, MTLTextureDescriptor) -> MTLTexture? = { $0.makeTexture(descriptor: $1) }
+        var makeImageTexture: (MTKTextureLoader, CGImage) throws -> MTLTexture = {
+            try $0.newTexture(cgImage: $1, options: [MTKTextureLoader.Option.SRGB: false])
+        }
     }
     private let resources: Resources
     private let pipeline: MTLRenderPipelineState
+    private let textureLoader: MTKTextureLoader
+    private var sourceImage: CGImage?
+    private var sourceTexture: MTLTexture?
     private var lutTexture: MTLTexture?
     private var current: CubeLUT?
 
@@ -21,6 +27,7 @@ final class RemoteLUTMetalRenderer {
         guard let device else { throw Failure.unavailable }
         self.device = device
         self.resources = resources
+        textureLoader = MTKTextureLoader(device: device)
         guard let library = try? device.makeLibrary(source: Self.shader, options: nil), let vertex = library.makeFunction(name: "remoteLUTVertex"), let fragment = library.makeFunction(name: "remoteLUTFragment") else { throw Failure.pipeline }
         let descriptor = MTLRenderPipelineDescriptor(); descriptor.vertexFunction = vertex; descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
@@ -53,12 +60,21 @@ final class RemoteLUTMetalRenderer {
     }
 
     /// Converts the existing decoded monitor CGImage into the source texture used
-    /// by the LUT pass. The loader is recreated per frame only for the small
-    /// monitor preview; callers can retain it when they have a persistent stream.
+    /// by the LUT pass. Retain one loader and at most the latest source texture:
+    /// control/layout updates may redraw the same immutable CGImage. LUT changes
+    /// still encode normally, and GPU command buffers retain any older texture
+    /// until their work finishes. No growing cache or mutable in-flight texture.
     func encode(image: CGImage, into destination: MTLTexture, commandBuffer: MTLCommandBuffer, fit: SIMD2<Float> = SIMD2(repeating: 1)) throws {
         guard image.colorSpace?.name == CGColorSpace.sRGB else { throw Failure.inputColor }
-        let loader = MTKTextureLoader(device: device)
-        guard let source = try? loader.newTexture(cgImage: image, options: [MTKTextureLoader.Option.SRGB: false]) else { throw Failure.texture }
+        let source: MTLTexture
+        if sourceImage === image, let sourceTexture {
+            source = sourceTexture
+        } else {
+            guard let uploaded = try? resources.makeImageTexture(textureLoader, image) else { throw Failure.texture }
+            sourceImage = image
+            sourceTexture = uploaded
+            source = uploaded
+        }
         try encode(source: source, destination: destination, commandBuffer: commandBuffer, fit: fit)
     }
 

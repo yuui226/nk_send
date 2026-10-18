@@ -4,6 +4,70 @@ import Combine
 
 final class ConnectionStateTests: XCTestCase {
     @MainActor
+    func testRepeatedDiscoveryKeepsCleanupButDoesNotRepublishUnchangedState() async throws {
+        let service = APReplayService()
+        let model = ConnectionViewModel(discoverySource: WorkspaceDiscoverySource(devices: []), wifiService: service)
+        let device = USBDeviceDescriptor(id: "repeated", name: "Nikon", productKind: nil, transportType: "USB")
+        model.apply(.authorization(.denied))
+        model.apply(.deviceAdded(device))
+        await model.refreshSTAProfiles()
+        var updates = 0
+        let token = model.objectWillChange.sink { updates += 1 }
+        defer { token.cancel() }
+        for _ in 0..<120 {
+            model.apply(.authorization(.denied))
+            model.apply(.deviceAdded(device))
+            model.select(mode: model.state.selectedMode)
+            await model.refreshSTAProfiles()
+        }
+        XCTAssertEqual(updates, 0)
+        let deadline = ContinuousClock.now + .seconds(2)
+        while await service.disconnects < 121, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let disconnects = await service.disconnects
+        XCTAssertEqual(disconnects, 121, "Unchanged state must not suppress per-event cancellation/cleanup")
+        XCTAssertEqual(model.state.selectedDeviceID, device.id)
+        service.profiles.remember(guid: "00112233445566778899aabbccddeeff", ip: "192.168.1.2", identity: .pairedComputer, model: "Z30")
+        service.profiles.confirmVerifiedPairing("00112233445566778899aabbccddeeff")
+        await model.refreshSTAProfiles()
+        XCTAssertEqual(model.pairedCameraCount, 1)
+        XCTAssertEqual(model.pairedCameraModels, ["Z30"])
+        let afterPairing = updates
+        await model.refreshSTAProfiles()
+        XCTAssertEqual(updates, afterPairing)
+        service.profiles.resetPairing()
+        await model.refreshSTAProfiles()
+        XCTAssertEqual(model.pairedCameraCount, 0)
+        XCTAssertEqual(model.pairedCameraModels, [])
+        XCTAssertGreaterThan(updates, afterPairing)
+    }
+
+    @MainActor
+    func testRepeatedWirelessSelectionStillPersistsItsPresentationMode() {
+        let preferences = UserDefaults(suiteName: "sta_connection")!
+        let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
+        let previous = keys.map { preferences.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { preferences.set(value, forKey: key) } else { preferences.removeObject(forKey: key) }
+            }
+        }
+        preferences.set("STA", forKey: "wireless_mode")
+        preferences.set(CameraPresentationMode.sta.rawValue, forKey: CameraPresentationMode.preferenceKey)
+        let model = ConnectionViewModel(discoverySource: WorkspaceDiscoverySource(devices: []), wifiService: APReplayService())
+        var updates = 0
+        let token = model.$state.dropFirst().sink { _ in updates += 1 }
+        defer { token.cancel() }
+        for _ in 0..<120 {
+            preferences.removeObject(forKey: CameraPresentationMode.preferenceKey)
+            model.select(wirelessMode: .sta)
+            XCTAssertEqual(preferences.string(forKey: CameraPresentationMode.preferenceKey), CameraPresentationMode.sta.rawValue)
+        }
+        XCTAssertEqual(updates, 0)
+    }
+
+    @MainActor
     func testUSBPermissionRecoveryUsesAuthorizationAcrossLanguageChanges() {
         let saved = UserDefaults.standard.object(forKey: "app_language")
         defer {
@@ -376,6 +440,7 @@ private final class WorkspaceDiscoverySource: ConnectionUSBDiscoverySource {
 private actor APReplayService: WiFiConnectionServicing {
     nonisolated let profiles: STAProfileStore
     private(set) var attempts = 0
+    private(set) var disconnects = 0
     private let succeedsOnAttempt: Int
     init(succeedsOnAttempt: Int = 4) {
         self.succeedsOnAttempt = succeedsOnAttempt
@@ -397,5 +462,5 @@ private actor APReplayService: WiFiConnectionServicing {
         throw STAConnectionError.notFound
     }
     func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) {}
-    func disconnect() {}
+    func disconnect() { disconnects += 1 }
 }

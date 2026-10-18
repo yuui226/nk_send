@@ -4,6 +4,144 @@ import MetalKit
 import UIKit
 @testable import ZTransfer
 
+@MainActor
+final class AndroidShadowPerformanceTests: XCTestCase {
+    func testSharedAncestorSnapshotsAreLinearAndStableFramesDoNotChange() {
+        let root = CALayer()
+        var parent = root
+        for _ in 0..<20 {
+            let child = CALayer(); parent.addSublayer(child); parent = child
+        }
+        let leaves = (0..<100).map { _ in CALayer() }
+        for leaf in leaves { parent.addSublayer(leaf) }
+        let cache = AndroidShadowGeometryCache()
+        cache.beginFrame()
+        for leaf in leaves { XCTAssertTrue(cache.changed(leaf, relativeTo: root, presentation: false)) }
+        XCTAssertEqual(cache.sampledLayerCount, 121)
+        for _ in 0..<120 {
+            cache.beginFrame()
+            for leaf in leaves { XCTAssertFalse(cache.changed(leaf, relativeTo: root, presentation: false)) }
+            XCTAssertEqual(cache.sampledLayerCount, 121, "Shared ancestors are sampled once, not 21 times per shadow")
+        }
+        parent.bounds.origin.y = 30 // UIScrollView-style ancestor movement.
+        cache.beginFrame()
+        for leaf in leaves { XCTAssertTrue(cache.changed(leaf, relativeTo: root, presentation: false)) }
+        cache.beginFrame()
+        for leaf in leaves { XCTAssertFalse(cache.changed(leaf, relativeTo: root, presentation: false)) }
+        leaves[0].position.x = 12
+        cache.beginFrame()
+        XCTAssertTrue(cache.changed(leaves[0], relativeTo: root, presentation: false))
+        for leaf in leaves.dropFirst() { XCTAssertFalse(cache.changed(leaf, relativeTo: root, presentation: false)) }
+    }
+
+    func testSnapshotInvalidatesForReparentTransformsVisibilityAndModelPresentationSwitch() {
+        let root = CALayer(), first = CALayer(), second = CALayer(), leaf = CALayer()
+        root.addSublayer(first); root.addSublayer(second); first.addSublayer(leaf)
+        let cache = AndroidShadowGeometryCache()
+        func frame(_ presentation: Bool = false) -> Bool {
+            cache.beginFrame()
+            return cache.changed(leaf, relativeTo: root, presentation: presentation)
+        }
+        XCTAssertTrue(frame()); XCTAssertFalse(frame())
+        let mutations: [() -> Void] = [
+            { first.isHidden = true }, { first.isHidden = false },
+            { first.transform = CATransform3DMakeScale(0.8, 0.7, 1) },
+            { first.sublayerTransform = CATransform3DMakeTranslation(3, 4, 0) },
+            { leaf.anchorPoint = CGPoint(x: 0.2, y: 0.3) },
+            { leaf.anchorPointZ = 3 }, { leaf.zPosition = 2 },
+            { first.isGeometryFlipped = true },
+            { var matrix = first.transform; matrix.m34 = -0.01; first.transform = matrix },
+            { second.addSublayer(leaf) }, { leaf.bounds.size = CGSize(width: 40, height: 30) }
+        ]
+        for mutate in mutations { mutate(); XCTAssertTrue(frame()); XCTAssertFalse(frame()) }
+        XCTAssertTrue(frame(true)); XCTAssertFalse(frame(true))
+        XCTAssertTrue(frame(false), "Switching away from presentation geometry must validate again")
+    }
+
+    func testCacheDoesNotRetainLayersAndWindowSnapshotIsSharedOnlyWithinFrame() {
+        let cache = AndroidShadowGeometryCache()
+        weak var released: CALayer?
+        autoreleasepool {
+            let layer = CALayer()
+            released = layer
+            cache.beginFrame()
+            XCTAssertTrue(cache.changed(layer, relativeTo: layer, presentation: false))
+        }
+        XCTAssertNil(released)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        cache.beginFrame()
+        let first = cache.window(window).geometry
+        for _ in 0..<120 { XCTAssertEqual(cache.window(window).geometry, first) }
+        XCTAssertEqual(cache.sampledWindowCount, 1)
+        cache.endFrame()
+        XCTAssertEqual(cache.sampledWindowCount, 0)
+        cache.clear()
+        XCTAssertEqual(cache.sampledLayerCount, 0)
+    }
+
+    func testMountedShadowSkipsIdleConversionsButStillFollowsAncestorAnimationAndConfiguration() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        let controller = UIViewController()
+        window.rootViewController = controller; window.isHidden = false
+        defer { window.isHidden = true }
+        let parent = UIView(frame: CGRect(x: 20, y: 80, width: 300, height: 120))
+        controller.view.addSubview(parent)
+        let host = AndroidShadowHost()
+        host.frame = CGRect(x: 10, y: 10, width: 180, height: 48)
+        host.cornerRadius = 18; host.elevation = 6
+        parent.addSubview(host); host.layoutIfNeeded()
+        let metal = try XCTUnwrap(host.subviews.compactMap { $0 as? MTKView }.first)
+        try await Task.sleep(for: .milliseconds(180))
+        let idle = host.geometryEvaluationCount
+        for _ in 0..<120 { host.cornerRadius = 18; host.elevation = 6 }
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(host.geometryEvaluationCount, idle, "Stable frames/configuration must skip coordinate conversions")
+        let motion = CABasicAnimation(keyPath: "position.y")
+        motion.fromValue = parent.layer.position.y; motion.toValue = parent.layer.position.y + 150
+        motion.duration = 0.8; motion.timingFunction = CAMediaTimingFunction(name: .linear)
+        parent.layer.add(motion, forKey: "moving-parent")
+        CATransaction.flush()
+        try await Task.sleep(for: .milliseconds(220))
+        XCTAssertGreaterThan(host.geometryEvaluationCount, idle + 2)
+        XCTAssertNil(host.renderingError)
+        parent.layer.removeAllAnimations(); CATransaction.flush()
+        try await Task.sleep(for: .milliseconds(100))
+        let before = metal.drawableSize
+        host.elevation = 12
+        host.layoutIfNeeded()
+        XCTAssertNotEqual(metal.drawableSize, before)
+        XCTAssertNil(host.renderingError)
+        parent.isHidden = true
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertTrue(metal.isHidden)
+        let hidden = host.geometryEvaluationCount
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(host.geometryEvaluationCount, hidden, "A hidden ancestor must not cause full validation every frame")
+        parent.isHidden = false
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertFalse(metal.isHidden)
+        host.removeFromSuperview()
+        XCTAssertTrue(metal.isHidden)
+        parent.addSubview(host)
+        host.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertFalse(metal.isHidden)
+        host.bounds.size = .zero
+        host.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertTrue(metal.isHidden)
+        let empty = host.geometryEvaluationCount
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(host.geometryEvaluationCount, empty)
+        host.bounds.size = CGSize(width: 180, height: 48)
+        host.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertFalse(metal.isHidden)
+    }
+}
+
 final class AndroidShadowMetricsTests: XCTestCase {
     func testRotatedIdentityRectangleCoverageReflectionAndThinEdges() throws {
         typealias Renderer = ZTransferAndroidShadowRenderer

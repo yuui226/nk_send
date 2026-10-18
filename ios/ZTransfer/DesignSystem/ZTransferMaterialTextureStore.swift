@@ -76,9 +76,9 @@ private actor ZTransferTextureWorker {
 }
 
 @MainActor
-final class ZTransferMaterialTextureStore: ObservableObject {
+final class ZTransferMaterialTextureStore {
     static let shared = ZTransferMaterialTextureStore()
-    @Published private var images: [ZTransferTextureKey: ZTransferTextureBitmap] = [:]
+    private var images: [ZTransferTextureKey: ZTransferTextureBitmap] = [:]
     private var loading: [ZTransferTextureKey: Task<Void, Never>] = [:]
     private let worker: ZTransferTextureWorker
 
@@ -99,5 +99,47 @@ final class ZTransferMaterialTextureStore: ObservableObject {
         // Cancellation of a single view must not discard work shared by other
         // buttons. A completed tile remains cached across theme/page changes.
         await task.value
+    }
+}
+
+/// Like Android rememberButtonTextureBrush, only the consumer of a completed
+/// tile changes. Loading another variant must not redraw every material face,
+/// including liquid/frosted glass which do not use bitmap textures at all.
+struct ZTransferMaterialTextureFill: View {
+    let key: ZTransferTextureKey
+    let cornerRadius: CGFloat
+    var store: ZTransferMaterialTextureStore = .shared
+    #if DEBUG
+    var didRender: (() -> Void)?
+    #endif
+    @Environment(\.displayScale) private var displayScale
+    @State private var loaded: Loaded?
+    private struct Loaded {
+        let key: ZTransferTextureKey
+        let image: CGImage
+    }
+
+    var body: some View {
+        #if DEBUG
+        let _ = didRender?()
+        #endif
+        let image = loaded?.key == key ? loaded?.image : store.image(for: key)
+        Group {
+            if let image {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .circular)
+                    .fill(ImagePaint(image: Image(decorative: image, scale: max(displayScale, 1)), scale: 1))
+            } else {
+                // An empty Group has no mounted node, so SwiftUI would never
+                // start its task. Keep a transparent surface until it loads.
+                Color.clear
+            }
+        }
+        .task(id: key) {
+            // A cached tile was already drawn synchronously by body.
+            guard store.image(for: key) == nil else { return }
+            await store.load(key)
+            guard !Task.isCancelled, let image = store.image(for: key) else { return }
+            loaded = Loaded(key: key, image: image)
+        }
     }
 }

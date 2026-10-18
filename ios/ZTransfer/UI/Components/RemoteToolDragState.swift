@@ -8,7 +8,8 @@ final class RemoteToolDragState: ObservableObject {
     var slots: [RemoteTool: CGRect] = [:]
     var visualPositions: [RemoteTool: () -> CGPoint] = [:]
     @Published private(set) var dragging: RemoteTool?
-    @Published private(set) var topLeft = CGPoint.zero
+    private(set) var topLeft = CGPoint.zero
+    var previousTranslation = CGSize.zero
 
     func visualBounds(_ tool: RemoteTool) -> CGRect? {
         guard let slot = slots[tool] else { return nil }
@@ -41,7 +42,10 @@ final class RemoteToolDragState: ObservableObject {
         layout.move(tool, to: targetIndex)
     }
 
-    func end() { dragging = nil }
+    func end() {
+        if dragging != nil { dragging = nil }
+        previousTranslation = .zero
+    }
 
     func remove(_ tool: RemoteTool) {
         slots.removeValue(forKey: tool)

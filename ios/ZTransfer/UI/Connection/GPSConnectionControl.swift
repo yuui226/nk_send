@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import CoreLocation
 import UIKit
 
@@ -6,7 +7,8 @@ struct GPSConnectionControl: View {
     private let headerHeight: CGFloat = 50
     private let panelGap: CGFloat = 10
     private let preferredPanelWidth: CGFloat = 280
-    @ObservedObject var coordinator: GPSCoordinator
+    let coordinator: GPSCoordinator
+    @StateObject private var entry: GPSEntryPresentation
     @Binding var expanded: Bool
     @Binding var showingResetPairing: Bool
     /// Page space below this control, measured by ConnectionPage's layout.
@@ -15,33 +17,38 @@ struct GPSConnectionControl: View {
     @State private var ambientOrigin = Date()
     @Environment(\.scenePhase) private var scenePhase
     @State private var hintText: String?
+    @State private var panelVisible = false
+    #if DEBUG
+    var didRender: (() -> Void)?
+    #endif
 
-    private var entryError: Bool {
-        coordinator.state.enabled &&
-            (coordinator.state.status == .apUnavailable || coordinator.state.status == .error)
+    init(coordinator: GPSCoordinator, expanded: Binding<Bool>, showingResetPairing: Binding<Bool>,
+         availableHeight: CGFloat) {
+        self.coordinator = coordinator
+        _entry = StateObject(wrappedValue: GPSEntryPresentation(coordinator))
+        _expanded = expanded
+        _showingResetPairing = showingResetPairing
+        self.availableHeight = availableHeight
+        _panelVisible = State(initialValue: expanded.wrappedValue)
     }
 
-    private var entryAccent: Color {
-        entryError ? ZTransferColors.statusError : ZTransferColors.accentBlue
-    }
-
+    private var entryError: Bool { entry.snapshot.accent == .error }
+    private var entryAccent: Color { entryError ? ZTransferColors.statusError : ZTransferColors.accentBlue }
     private var statusAccent: Color {
-        guard coordinator.state.enabled else { return ZTransferColors.statusWaiting }
-        switch coordinator.state.status {
-        case .off:
-            return ZTransferColors.statusWaiting
-        case .pairingSuccess, .connected, .writing, .waitingFix, .ready:
-            return ZTransferColors.statusConnected
-        case .apUnavailable, .error:
-            return ZTransferColors.statusError
-        default:
-            return ZTransferColors.accentBlue
+        switch entry.snapshot.accent {
+        case .waiting: return ZTransferColors.statusWaiting
+        case .connected: return ZTransferColors.statusConnected
+        case .error: return ZTransferColors.statusError
+        case .blue: return ZTransferColors.accentBlue
         }
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = didRender?()
+        #endif
         VStack(alignment: .leading, spacing: 0) {
-            let active = coordinator.state.enabled
+            let active = entry.snapshot.enabled
             let breathing = !expanded && !entryError
             let ambientPulse = NativeAmbientPulse(origin: ambientOrigin,
                 minimum: active ? 0.075 : 0.050, maximum: active ? 0.160 : 0.145,
@@ -80,7 +87,8 @@ struct GPSConnectionControl: View {
                 updateAmbientPulse()
             }
             .onChange(of: active) { _ in updateAmbientPulse() }
-            .onChange(of: expanded) { _ in
+            .onChange(of: expanded) { next in
+                if next { panelVisible = true }
                 updateAmbientPulse()
             }
             .onChange(of: entryError) { _ in updateAmbientPulse() }
@@ -99,6 +107,7 @@ struct GPSConnectionControl: View {
                     GeniePopupPanel(
                         content: GPSInlinePanel(
                             coordinator: coordinator,
+                            countdownActive: expanded || panelVisible,
                             showHelp: $showHelp,
                             showingResetPairing: $showingResetPairing,
                             hintText: $hintText,
@@ -108,7 +117,10 @@ struct GPSConnectionControl: View {
                         targetProgress: expanded ? 1 : 0,
                         anchorX: source.midX / panelWidth,
                         anchorWidth: source.width / panelWidth,
-                        anchorGap: -source.maxY
+                        anchorGap: -source.maxY,
+                        onSettled: { progress in
+                            if progress == 0 && !expanded && panelVisible { panelVisible = false }
+                        }
                     )
                     .frame(width: panelWidth)
                     .fixedSize(horizontal: false, vertical: true)
@@ -125,7 +137,7 @@ struct GPSConnectionControl: View {
                     .transition(.opacity)
             }
         }
-        .zIndex(expanded ? 2 : 0)
+        .zIndex(expanded || panelVisible ? 2 : 0)
         .task(id: hintText) {
             guard hintText != nil else { return }
             try? await Task.sleep(for: .milliseconds(1_800))
@@ -160,6 +172,8 @@ private struct GPSInlinePanel: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("haptics_enabled") private var hapticsEnabled = true
     @ObservedObject var coordinator: GPSCoordinator
+    let countdownActive: Bool
+    @StateObject private var lastSentText = GPSLastSentText()
     @Binding var showHelp: Bool
     @Binding var showingResetPairing: Bool
     @Binding var hintText: String?
@@ -216,15 +230,8 @@ private struct GPSInlinePanel: View {
             }
             .id(showConnectionSteps ? "guide" : (hasCoordinates ? "location" : "empty"))
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
-            if requiresHoldToDisable {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    controlRow(now: context.date)
-                }
+            controlRow()
                 .frame(height: 42)
-            } else {
-                controlRow(now: Date())
-                    .frame(height: 42)
-            }
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
@@ -552,7 +559,7 @@ private struct GPSInlinePanel: View {
         }
     }
 
-    private func controlRow(now: Date) -> some View {
+    private func controlRow() -> some View {
         GeometryReader { geometry in
             // Android uses weights 0.82 / 0.86 / 1.18 with two 8dp gaps.
             let unit = max(0, geometry.size.width - 16) / 2.86
@@ -560,9 +567,9 @@ private struct GPSInlinePanel: View {
             let frequencyWidth = unit * 0.86
             let actionWidth = unit * 1.18
             HStack(spacing: 8) {
-                leadingControl(now: now)
+                leadingControl()
                     .frame(width: leadingWidth)
-                frequencyControl(now: now)
+                frequencyControl()
                     .frame(width: frequencyWidth)
                 statusControl()
                     .frame(width: actionWidth)
@@ -579,12 +586,11 @@ private struct GPSInlinePanel: View {
     }
 
     @ViewBuilder
-    private func leadingControl(now: Date) -> some View {
+    private func leadingControl() -> some View {
         if !coordinator.state.enabled {
             Button { showingResetPairing = true } label: {
-                Image(systemName: "link.slash")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 18, weight: .medium))
+                ConnectionPairingIcon(kind: .unlink)
+                    .frame(width: 18, height: 18)
                     .frame(width: 42, height: 42)
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
@@ -593,13 +599,7 @@ private struct GPSInlinePanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
         } else if requiresHoldToDisable {
-            let value = coordinator.state.lastSentAt.map { date in
-                let formatter = DateFormatter()
-                formatter.dateFormat = "HH:mm:ss"
-                formatter.locale = Locale(identifier: "en_US_POSIX")
-                formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-                return formatter.string(from: date)
-            } ?? "--:--:--"
+            let value = lastSentText.text(for: coordinator.state.lastSentAt)
             DetentWheel(label: "", options: [value], selected: value,
                         optionLabel: { $0 }, onCommit: { _ in }, rowHeight: 16,
                         wheelHeight: 42, readOnly: true, cornerRadius: 14,
@@ -614,19 +614,18 @@ private struct GPSInlinePanel: View {
     }
 
     @ViewBuilder
-    private func frequencyControl(now: Date) -> some View {
+    private func frequencyControl() -> some View {
         if requiresHoldToDisable {
-            let remaining = coordinator.state.lastSentAt.map {
-                max(0, Int(ceil(Double(coordinator.frequency.rawValue) - now.timeIntervalSince($0))))
+            GPSCountdownScope(lastSentAt: coordinator.state.lastSentAt,
+                              frequency: coordinator.frequency, active: countdownActive) { text in
+                DetentWheel(label: "", options: [text], selected: text,
+                            optionLabel: { $0 }, onCommit: { _ in }, rowHeight: 16,
+                            wheelHeight: 42, readOnly: true, cornerRadius: 14,
+                            optionFontSize: 13, accentColor: ZTransferColors.statusConnected,
+                            emphasized: true, showEmphasisBorder: false,
+                            ambientEffectColor: ZTransferColors.statusConnected,
+                            ambientEffectAlpha: 0.18 * updateBurstProgress)
             }
-            let text = remaining.map { "\($0 / 60):\(String(format: "%02d", $0 % 60))" } ?? "--:--"
-            DetentWheel(label: "", options: [text], selected: text,
-                        optionLabel: { $0 }, onCommit: { _ in }, rowHeight: 16,
-                        wheelHeight: 42, readOnly: true, cornerRadius: 14,
-                        optionFontSize: 13, accentColor: ZTransferColors.statusConnected,
-                        emphasized: true, showEmphasisBorder: false,
-                        ambientEffectColor: ZTransferColors.statusConnected,
-                        ambientEffectAlpha: 0.18 * updateBurstProgress)
         } else if !coordinator.state.enabled {
             DetentWheel(label: AppLocalized.resource("gps_update_frequency_label"),
                         options: GPSUpdateFrequency.allCases, selected: coordinator.frequency,
@@ -742,6 +741,103 @@ private struct GPSInlinePanel: View {
         case .needsCamera: return 6
         case .apUnavailable: return 7
         case .error: return 8
+        }
+    }
+}
+
+
+/// The entry uses only enabled and its status color. Coordinates, BLE names,
+/// frequency and place-query results remain owned/observed by the detail panel.
+@MainActor
+final class GPSEntryPresentation: ObservableObject {
+    struct Snapshot: Equatable {
+        enum Accent { case waiting, connected, error, blue }
+        let enabled: Bool
+        let accent: Accent
+        init(_ state: GPSState) {
+            enabled = state.enabled
+            if !enabled { accent = .waiting; return }
+            switch state.status {
+            case .off: accent = .waiting
+            case .pairingSuccess, .connected, .writing, .waitingFix, .ready: accent = .connected
+            case .apUnavailable, .error: accent = .error
+            default: accent = .blue
+            }
+        }
+    }
+    @Published private(set) var snapshot: Snapshot
+    private var observation: AnyCancellable?
+    init(_ coordinator: GPSCoordinator) {
+        snapshot = Snapshot(coordinator.state)
+        observation = coordinator.$state.map(Snapshot.init).removeDuplicates().sink { [weak self] next in
+            if self?.snapshot != next { self?.snapshot = next }
+        }
+    }
+}
+
+/// Android remembers HH:mm:ss by lastSentAt. All callers are main-actor UI;
+/// one formatter and one last value avoid allocation on every location update.
+@MainActor
+final class GPSLastSentText: ObservableObject {
+    private let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        return formatter
+    }()
+    private var previous: Date?
+    private var value = "--:--:--"
+    #if DEBUG
+    private(set) var formatCount = 0
+    #endif
+    func text(for date: Date?) -> String {
+        guard previous != date else { return value }
+        previous = date
+        if let date {
+            #if DEBUG
+            formatCount += 1
+            #endif
+            value = formatter.string(from: date)
+        }
+        else { value = "--:--:--" }
+        return value
+    }
+}
+
+struct GPSCountdownSchedule: TimelineSchedule {
+    let active: Bool
+    let end: Date?
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
+        guard active, let end else { return AnySequence(CollectionOfOne(startDate)) }
+        // Include the first zero frame, then sleep until a new successful
+        // write changes the deadline. Keep the existing one-second cadence.
+        return AnySequence {
+            var next: Date? = startDate
+            return AnyIterator<Date> {
+                guard let current = next else { return nil }
+                next = current < end ? current.addingTimeInterval(1) : nil
+                return current
+            }
+        }
+    }
+}
+
+/// Only countdown digits tick. The last-sent wheel, status/hold button and
+/// location panel keep their identity and do not rebuild once per second.
+struct GPSCountdownScope<Content: View>: View {
+    let lastSentAt: Date?
+    let frequency: GPSUpdateFrequency
+    let active: Bool
+    @ViewBuilder let content: (String) -> Content
+    @Environment(\.scenePhase) private var scenePhase
+    var body: some View {
+        TimelineView(GPSCountdownSchedule(active: active && scenePhase == .active,
+            end: lastSentAt?.addingTimeInterval(Double(frequency.rawValue)))) { context in
+            let remaining = lastSentAt.map {
+                max(0, Int(ceil(Double(frequency.rawValue) - context.date.timeIntervalSince($0))))
+            }
+            content(remaining.map { "\($0 / 60):\(String(format: "%02d", $0 % 60))" } ?? "--:--")
         }
     }
 }

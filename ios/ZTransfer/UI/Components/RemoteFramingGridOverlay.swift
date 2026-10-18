@@ -2,7 +2,7 @@ import SwiftUI
 
 // FramingGridOverlay in RemoteViewfinderFeatures.kt: white 42%, 0.75dp,
 // butt caps. The geometry excludes the displayed image's letterboxing.
-struct RemoteFramingGridOverlay: View {
+struct RemoteFramingGridOverlay: View, Equatable {
     let grid: RemoteGridMode
     let aspect: CGFloat
 

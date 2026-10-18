@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 /// Uses the same system route/fallback already used by the connection page.
 /// iOS may refuse a deep link; that does not change or fake camera state.
@@ -136,23 +137,45 @@ struct PhotoListSignalAttentionMotion {
 }
 
 @MainActor
-final class PhotoListSignalAttentionClock: NSObject, ObservableObject {
-    @Published private(set) var motion = PhotoListSignalAttentionMotion()
+final class PhotoListSignalAttentionClock: NSObject, @preconcurrency ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+    private(set) var motion = PhotoListSignalAttentionMotion()
     private var link: CADisplayLink?
+    @MainActor
+    private final class Target: NSObject {
+        weak var owner: PhotoListSignalAttentionClock?
+        init(_ owner: PhotoListSignalAttentionClock) { self.owner = owner }
+        @objc func frame(_ link: CADisplayLink) {
+            guard let owner else { link.invalidate(); return }
+            owner.frame(link)
+        }
+    }
     func trigger() {
         motion.trigger()
         guard link == nil else { return }
-        let next = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        let next = CADisplayLink(target: Target(self), selector: #selector(Target.frame(_:)))
         link = next
         next.add(to: .main, forMode: .common)
     }
     @objc private func frame(_ sender: CADisplayLink) {
+        let previous = motion.scale.value
         motion.advance(Int64(sender.timestamp * 1_000_000_000))
+        if motion.scale.value != previous { objectWillChange.send() }
         if !motion.scale.isRunning { stop() }
     }
     func stop() {
         link?.invalidate()
         link = nil
+        let changed = motion.scale.value != 1
         motion = PhotoListSignalAttentionMotion()
+        if changed { objectWillChange.send() }
+    }
+}
+
+/// The list owns the trigger; only this visual leaf observes display frames.
+struct PhotoListSignalAttention: ViewModifier {
+    @ObservedObject var clock: PhotoListSignalAttentionClock
+    func body(content: Content) -> some View {
+        content.scaleEffect(CGFloat(clock.motion.scale.value))
     }
 }

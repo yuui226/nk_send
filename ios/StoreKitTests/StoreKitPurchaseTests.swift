@@ -31,12 +31,16 @@ final class StoreKitPurchaseTests: XCTestCase {
     }
 
     private func fixture() async throws -> Fixture {
+        // Select LOCAL StoreKit before draining the host. Otherwise a fresh
+        // simulator can leave the host snapshot waiting for sandbox sign-in,
+        // and stop() remains blocked behind that request. Creating the
+        // session does not reset history or start a second purchase owner.
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "ZTransfer", withExtension: "storekit"))
+        let session = try SKTestSession(contentsOf: url)
         // The host App starts its singleton before XCTest. These tests own a
         // separate store, so stop the host listener instead of having two
         // consumers finish the same simulated transaction concurrently.
         await StoreKitPurchaseStore.shared.stop()
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "ZTransfer", withExtension: "storekit"))
-        let session = try SKTestSession(contentsOf: url)
         session.resetToDefaultState()
         session.clearTransactions()
         session.disableDialogs = true
@@ -211,6 +215,16 @@ final class StoreKitPurchaseTests: XCTestCase {
         try await eventually(diagnostic: { "renewal=\(f.store.renewal), pending=\(f.store.pendingProducts)" }) {
             f.store.renewal.willAutoRenew == true && !f.store.pendingProducts.contains(.annual)
         }
+        // D10 accepts a short StoreKit snapshot delay, but requires the app to
+        // converge without another user action. Do not force refresh/sync here:
+        // pending delivery and ancillary renewal can finish before the current
+        // account snapshot includes the already-purchased lifetime product.
+        let convergenceStart = Date()
+        let firstEntitlement = f.entitlements.entitlement
+        try await eventually(diagnostic: { "entitlement=\(f.entitlements.entitlement), renewal=\(f.store.renewal)" }) {
+            f.entitlements.entitlement == .lifetime
+        }
+        print("TEST_LATE_ANNUAL_CONVERGENCE initial=\(firstEntitlement) seconds=\(Date().timeIntervalSince(convergenceStart))")
         XCTAssertEqual(f.entitlements.entitlement, .lifetime)
         XCTAssertNotNil(f.store.renewal.nextRenewalDate)
         XCTAssertEqual(f.store.purchaseCelebration, 2)

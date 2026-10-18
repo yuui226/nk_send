@@ -173,6 +173,11 @@ func photoEffectsFilterTileRows(sourceWidth: Int) -> Int {
 /// Native renderer following PhotoFrameExporter.kt's ordered pipeline.
 /// Source -> NP3 filter -> frame backdrop/photo -> metadata/watermark.
 enum PhotoEffectsRenderer {
+    // CIContext owns its command queue and compiled kernels. Apple's CIContext
+    // contract permits concurrent renders; reuse one for image conversion and
+    // tiled export without retaining intermediate image buffers.
+    private static let imageContext = CIContext(options: [.cacheIntermediates: false])
+
     static func renderWithResolvedPlace(_ image: UIImage, settings: PhotoEffectsSettings,
                                         metadata: PhotoFrameMetadata?, placeResolver: PhotoFramePlaceResolver,
                                         placeAllowed: @escaping @Sendable () async -> Bool = { false },
@@ -380,8 +385,7 @@ enum PhotoEffectsRenderer {
     private static func processingCGImage(_ image: UIImage) -> CGImage? {
         if let source = image.cgImage { return source }
         guard let source = image.ciImage else { return nil }
-        return CIContext(options: [.cacheIntermediates: false])
-            .createCGImage(source, from: source.extent)
+        return imageContext.createCGImage(source, from: source.extent)
     }
 
     private static func drawDecoration(_ image: UIImage, backdropImage: UIImage,
@@ -749,7 +753,6 @@ enum PhotoEffectsRenderer {
             throw PhotoEffectsRenderError.invalidBitmap
         }
         let rowsPerTile = photoEffectsFilterTileRows(sourceWidth: sourceWidth)
-        let ciContext = image.ciImage.map { _ in CIContext(options: [.cacheIntermediates: false]) }
         context.interpolationQuality = .none
         var top = 0
         while top < sourceHeight {
@@ -761,14 +764,14 @@ enum PhotoEffectsRenderer {
                     region = source.cropping(to: CGRect(
                         x: 0, y: top, width: sourceWidth, height: bottom - top
                     ))
-                } else if let source = image.ciImage, let ciContext {
+                } else if let source = image.ciImage {
                     let crop = CGRect(
                         x: source.extent.minX,
                         y: source.extent.minY + CGFloat(sourceHeight - bottom),
                         width: CGFloat(sourceWidth),
                         height: CGFloat(bottom - top)
                     )
-                    region = ciContext.createCGImage(source, from: crop)
+                    region = imageContext.createCGImage(source, from: crop)
                 } else {
                     region = nil
                 }

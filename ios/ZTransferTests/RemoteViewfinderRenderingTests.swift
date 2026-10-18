@@ -10,6 +10,7 @@ final class RemoteViewfinderRenderingTests: XCTestCase {
             let x = index % width
             return x < 100 ? 0xffff0000 : x < 200 ? 0xffffffff : 0xff00ff00
         }
+        let bitmap = try XCTUnwrap(RemoteExposureAnalysis.image(pixels: colors, width: width, height: height))
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         let source = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
             for (index, color) in [UIColor.red, .white, .green].enumerated() {
@@ -47,8 +48,7 @@ final class RemoteViewfinderRenderingTests: XCTestCase {
                     let aspect = 1.5 * multiplier, pan: CGFloat = zoom == 1 ? 0 : 13
                     let base = try bounds(RemoteViewfinderImage(image: source, aspect: aspect,
                         multiplier: multiplier, size: size), size: size, zoom: zoom, pan: pan)
-                    let overlay = try bounds(RemoteFalseColorOverlay(pixels: colors, width: width,
-                        height: height, aspect: aspect), size: size, zoom: zoom, pan: pan)
+                    let overlay = try bounds(RemoteFalseColorOverlay(image: bitmap, aspect: aspect), size: size, zoom: zoom, pan: pan)
                     for (a, b) in zip(base, overlay) {
                         XCTAssertFalse(a.isNull); XCTAssertFalse(b.isNull)
                         XCTAssertEqual(a.minX, b.minX, accuracy: 2)
@@ -172,14 +172,16 @@ final class RemoteFocusFeedbackRenderingTests: XCTestCase {
 final class RemoteMonitorScopesRenderingTests: XCTestCase {
     func testProductionScopesReserveInformationRowAndKeepSingleAndDoubleSlots() throws {
         let histogram = [Int](repeating: 1, count: 256)
-        let waveform = [[Int](repeating: 1, count: 256 * 128)]
+        let waveform = try XCTUnwrap(RemoteExposureAnalysis.image(
+            pixels: RemoteExposureAnalysis.waveformPixels(channels: [[Int](repeating: 1, count: 256 * 128)], sampleHeight: 192),
+            width: 256, height: 128))
         for size in [CGSize(width: 240, height: 160), CGSize(width: 320, height: 213), CGSize(width: 600, height: 240)] {
             for informationInset: CGFloat in [0, RemoteDispLayout.informationInset] {
                 for startInset: CGFloat in [8, 48] {
                     for enabled in [(true, true), (true, false), (false, true), (false, false)] {
                         let host = RemoteMonitorScopesOverlay(histogram: histogram, histogramRGB: nil,
-                            waveform: waveform, histogramMode: enabled.0 ? .luma : .off,
-                            waveformMode: enabled.1 ? .luma : .off, sampleHeight: 192,
+                            waveformImage: waveform, histogramMode: enabled.0 ? .luma : .off,
+                            waveformMode: enabled.1 ? .luma : .off,
                             startInset: startInset, informationInset: informationInset)
                             .frame(width: size.width, height: size.height)
                             .background(Color(red: 1, green: 0, blue: 1))

@@ -3,10 +3,63 @@ import UIKit
 import PhotosUI
 import Photos
 import SwiftUI
+import Combine
 @testable import ZTransfer
 
 @MainActor
 final class PremiumBusinessTests: XCTestCase {
+    func testCancelledPickerAndRepeatedRequestsDuringPermissionDoNotPublishOrDuplicateWork() async throws {
+        let authorization = PremiumPhotoAuthorizationGate()
+        let saved = expectation(description: "Every selected photo saved once")
+        saved.expectedFulfillmentCount = 3
+        saved.assertForOverFulfill = true
+        let model = LocalPhotoBatchViewModel(premiumAccess: PremiumAccess(.lifetime),
+            requestAuthorization: { await authorization.request() },
+            generatePhoto: { _, _ in saved.fulfill() })
+        var publications = 0
+        let observation = model.objectWillChange.sink { publications += 1 }
+        let settings = watermarkSettings()
+        for _ in 0..<120 { model.select([]); model.generate(settings: settings) }
+        XCTAssertEqual(publications, 0)
+        let selection = (1...3).map { PhotosPickerItem(itemIdentifier: "selected-\($0)") }
+        model.select(selection)
+        XCTAssertEqual(publications, 1)
+        model.generate(settings: settings)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !(await authorization.isWaiting), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let waiting = await authorization.isWaiting
+        XCTAssertTrue(waiting)
+        let before = publications
+        for _ in 0..<120 {
+            model.select([])
+            model.select([PhotosPickerItem(itemIdentifier: "replacement")])
+            model.generate(settings: settings)
+        }
+        XCTAssertEqual(publications, before)
+        XCTAssertEqual(model.state.photos, selection)
+        XCTAssertEqual(model.state.progress.completed, 0)
+        await authorization.finish(.authorized)
+        await fulfillment(of: [saved], timeout: 3)
+        let completedDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while model.state.generating, ContinuousClock.now < completedDeadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(model.state.phase, .complete)
+        XCTAssertEqual(model.state.progress, PhotoEffectsBatchProgress(total: 3, completed: 3, saved: 3))
+        XCTAssertEqual(publications - before, 4, "Three settled items and one terminal phase; initial zero progress is unchanged")
+        let completed = publications
+        for _ in 0..<120 { model.select([]); model.generate(settings: settings) }
+        XCTAssertEqual(publications, completed)
+        // A real new selection still replaces the old terminal result and timer.
+        model.select(selection)
+        XCTAssertEqual(model.state.phase, .ready)
+        XCTAssertEqual(model.state.photos, selection)
+        XCTAssertEqual(publications, completed + 1)
+        withExtendedLifetime(observation) {}
+    }
+
     func testTwelveMegapixelConcurrentExportEntrypointsAcrossFrameModes() async throws {
         let (_, _, directory) = try fixture()
         let source = directory.appendingPathComponent("large-concurrent.png")

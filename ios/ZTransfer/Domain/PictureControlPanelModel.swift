@@ -42,16 +42,19 @@ final class PictureControlPanelModel: ObservableObject {
     }
     func open() {
         guard task == nil, !closed else { return }
-        loading = true
+        if !loading { loading = true }
         task = Task { [self] in
             let result = await Task.detached { Result { try builtInPictureControls() } }.value
             guard !Task.isCancelled, !closed else { return }
-            switch result { case .success(let entries): presets = entries; case .failure: presetsFailed = true }
+            switch result {
+            case .success(let entries): if presets != entries { presets = entries }
+            case .failure: if !presetsFailed { presetsFailed = true }
+            }
             #if DEBUG
             if report.isEmpty {
                 let saved = await Task.detached { (try? PictureControlReportJournal.latest()) ?? "" }.value
                 guard !closed, !Task.isCancelled else { return }
-                report = saved
+                if report != saved { report = saved }
             }
             onReport(report)
             #endif
@@ -61,18 +64,19 @@ final class PictureControlPanelModel: ObservableObject {
         }
     }
     func refresh(notifyFailure: Bool = true) async {
-        loading = true
-        defer { loading = false }
+        if !loading { loading = true }
+        defer { if loading { loading = false } }
         do {
             guard !closed else { throw CancellationError() }
             guard current() else { throw PTPSessionError.invalidResponse }
             let fresh = try await readOverview()
             guard current(), !closed, !Task.isCancelled else { throw CancellationError() }
-            overview = fresh; loadFailed = false
+            if overview != fresh { overview = fresh }
+            if loadFailed { loadFailed = false }
         } catch is CancellationError { return }
         catch {
             guard !closed, !Task.isCancelled, current() else { return }
-            loadFailed = true
+            if !loadFailed { loadFailed = true }
         }
         if loadFailed && notifyFailure { notice(AppLocalized.resource("picture_control_slots_read_failed")) }
     }

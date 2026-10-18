@@ -4,6 +4,8 @@ import Combine
 private final class PhotoRatingDiagnosticsStore: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [String] = []
+    private var characterCount = 0
+    private var cachedSnapshot: String?
     private var enabled = false
     private var verbose = false
     private let maxEntries = 48
@@ -13,7 +15,7 @@ private final class PhotoRatingDiagnosticsStore: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         enabled = value
         verbose = false
-        if !value { entries.removeAll(keepingCapacity: true) }
+        if !value { clearLocked() }
     }
 
     func beginProbe(keepExisting: Bool) -> PhotoRatingDiagnostics.CaptureState {
@@ -21,7 +23,7 @@ private final class PhotoRatingDiagnosticsStore: @unchecked Sendable {
         let previous = PhotoRatingDiagnostics.CaptureState(enabled: enabled, verbose: verbose)
         enabled = true
         verbose = true
-        if !keepExisting { entries.removeAll(keepingCapacity: true) }
+        if !keepExisting { clearLocked() }
         return previous
     }
 
@@ -29,19 +31,13 @@ private final class PhotoRatingDiagnosticsStore: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         enabled = state.enabled
         verbose = state.verbose
-        if !enabled && !preserveEntries { entries.removeAll(keepingCapacity: true) }
+        if !enabled && !preserveEntries { clearLocked() }
     }
 
     func note(_ message: String) {
         lock.lock(); defer { lock.unlock() }
         guard enabled else { return }
-        let normalized = message.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .prefix(260)
-        entries.append(String(normalized))
-        while entries.count > maxEntries || entries.reduce(0, { $0 + $1.count + 1 }) > maxCharacters {
-            guard !entries.isEmpty else { break }
-            entries.removeFirst()
-        }
+        appendLocked(message)
     }
 
     func detail(_ message: String) {
@@ -54,21 +50,31 @@ private final class PhotoRatingDiagnosticsStore: @unchecked Sendable {
         let normalized = message.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .prefix(260)
         entries.append(String(normalized))
-        while entries.count > maxEntries || entries.reduce(0, { $0 + $1.count + 1 }) > maxCharacters {
+        cachedSnapshot = nil
+        characterCount += normalized.count + 1
+        while entries.count > maxEntries || characterCount > maxCharacters {
             guard !entries.isEmpty else { break }
-            entries.removeFirst()
+            characterCount -= entries.removeFirst().count + 1
         }
     }
 
     func snapshot() -> String {
         lock.lock(); defer { lock.unlock() }
-        guard !entries.isEmpty else { return "评级筛选：暂无诊断记录" }
-        return "ZTransfer 评级筛选诊断\n" + entries.joined(separator: "\n")
+        if let cachedSnapshot { return cachedSnapshot }
+        let value = entries.isEmpty ? "评级筛选：暂无诊断记录" : "ZTransfer 评级筛选诊断\n" + entries.joined(separator: "\n")
+        cachedSnapshot = value
+        return value
     }
 
     func clear() {
         lock.lock(); defer { lock.unlock() }
+        clearLocked()
+    }
+
+    private func clearLocked() {
         entries.removeAll(keepingCapacity: true)
+        characterCount = 0
+        cachedSnapshot = nil
     }
 }
 
@@ -107,6 +113,34 @@ struct PhotoRatingScan: Equatable, Sendable {
     var total = 0
     var complete = false
     var waitingForRange = false
+}
+
+/// Only the progress chip observes this projection. The connection-scoped
+/// rating dictionary remains owned by the scanner/list and never enters the
+/// popup's layout input (Android FilterOverlay's ratingProgress boundary).
+@MainActor
+final class PhotoRatingProgress: ObservableObject {
+    struct Snapshot: Equatable {
+        var loading: Bool
+        var completed: Int
+        var total: Int
+        var waitingForRange: Bool
+
+        init(_ scan: PhotoRatingScan) {
+            loading = scan.loading
+            completed = scan.completed
+            total = scan.total
+            waitingForRange = scan.waitingForRange
+        }
+    }
+    @Published private(set) var snapshot: Snapshot
+
+    init(_ scan: PhotoRatingScan = PhotoRatingScan()) { snapshot = Snapshot(scan) }
+
+    func update(_ scan: PhotoRatingScan) {
+        let next = Snapshot(scan)
+        if next != snapshot { snapshot = next }
+    }
 }
 
 struct PhotoRatingCacheEntry: Equatable, Sendable {

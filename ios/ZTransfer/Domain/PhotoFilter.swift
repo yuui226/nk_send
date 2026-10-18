@@ -159,9 +159,10 @@ enum PhotoFilter {
                       transferredIDs: Set<UInt32> = [],
                       storageIDsBySlot: [UInt32: Set<UInt32>] = [:],
                       ratingValues: [UInt32: PhotoRatingValue] = [:],
-                      protectionAvailable: Bool = true) -> [CameraFile] {
+                      protectionAvailable: Bool = true,
+                      burstFileIDs: Set<UInt32>? = nil) -> [CameraFile] {
         let burstIDs: Set<UInt32>? = state.burstOnly
-            ? Set(PhotoCatalogGrouping.bursts(in: files).flatMap { $0.files.map(\.id) })
+            ? (burstFileIDs ?? Set(PhotoCatalogGrouping.bursts(in: files).flatMap { $0.files.map(\.id) }))
             : nil
         return files.filter { file in
             let ext = file.fileExtension.lowercased()

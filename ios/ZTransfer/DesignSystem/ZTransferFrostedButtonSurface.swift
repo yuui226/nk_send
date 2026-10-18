@@ -63,16 +63,24 @@ struct ZTransferFrostedButtonSurface: View, Animatable {
 /// Paths are stable for a given layout and reused during press/active animation.
 /// Bounded storage also avoids retaining every intermediate animated width.
 @MainActor
-private enum FrostedGrainCache {
+enum FrostedGrainCache {
     struct Paths { let light: Path; let dark: Path }
-    private struct SizeKey: Hashable { let width: CGFloat; let height: CGFloat }
+    private struct SizeKey: Hashable { let columns: Int; let rows: Int }
     private static var cache: [SizeKey: Paths] = [:]
+    #if DEBUG
+    private(set) static var generationCount = 0
+    #endif
     static func paths(size: CGSize) -> Paths {
-        let key = SizeKey(width: size.width, height: size.height)
-        if let cached = cache[key] { return cached }
         let step = 5.5
         let columns = max(1, Int(ceil(max(1, size.width) / step)))
         let rows = max(1, Int(ceil(max(1, size.height) / step)))
+        // Android's grain hash depends only on the grid dimensions. Fractional
+        // width animation within one cell changes clipping, not these paths.
+        let key = SizeKey(columns: columns, rows: rows)
+        if let cached = cache[key] { return cached }
+        #if DEBUG
+        generationCount += 1
+        #endif
         var light = Path(), dark = Path()
         for row in 0..<rows {
             for column in 0..<columns {
