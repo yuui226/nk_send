@@ -52,26 +52,53 @@ class RemoteToolLayoutTest {
     }
 
     @Test
-    fun retiredRecorderIsIgnoredWithoutResettingEitherModesLayout() {
+    fun savedRecorderPositionAndVisibilitySurviveReopeningIndependentlyPerMode() {
         val values = mutableMapOf<String, Any>()
         val prefs = preferences(values)
-        for (movie in listOf(false, true)) {
+        val savedOrders = listOf(false, true).associateWith { movie ->
+            RemoteTool.regular.filter { it.availableIn(movie) && it != RemoteTool.RECORD }
+                .reversed().toMutableList().apply { add(if (movie) 2 else 6, RemoteTool.RECORD) }
+        }
+        val savedHidden = mapOf(
+            false to setOf(RemoteTool.RECORD.id, RemoteTool.FPS.id),
+            true to setOf(RemoteTool.PICTURE_CONTROL.id),
+        )
+        for ((movie, saved) in savedOrders) {
             val mode = if (movie) "movie" else "photo"
-            val saved = RemoteTool.regular.filter { it.availableIn(movie) }.reversed()
-            val savedIds = saved.map { it.id }.toMutableList().apply { add(3, "record") }
-            val hidden = setOf(RemoteTool.FPS.id, RemoteTool.PICTURE_CONTROL.id)
-            values["remote_tool_order_$mode"] = savedIds.joinToString(",")
-            values["remote_hidden_tools_$mode"] = hidden + "record"
+            values["remote_tool_order_$mode"] = saved.joinToString(",") { it.id }
+            values["remote_hidden_tools_$mode"] = savedHidden.getValue(movie)
             values["remote_picture_control_placement_v1_$mode"] = true
+        }
 
-            repeat(2) {
+        repeat(2) {
+            for ((movie, saved) in savedOrders) {
+                val hidden = savedHidden.getValue(movie)
                 val layout = RemoteToolLayout(prefs, movie) { fail("Loading must not toggle a tool") }
                 assertEquals(saved, layout.order)
                 assertEquals(hidden, layout.hiddenTools.map { it.id }.toSet())
                 assertEquals(saved.filterNot { it.id in hidden }, layout.shownTools)
+                assertEquals(movie, layout.visible(RemoteTool.RECORD))
                 assertTrue(RemoteTool.pinned.all(layout::visible))
             }
         }
+
+        val photo = RemoteToolLayout(prefs, false) {}
+        photo.setVisible(RemoteTool.RECORD, true)
+        photo.move(RemoteTool.RECORD, 1)
+        val restoredPhoto = RemoteToolLayout(prefs, false) {}
+        assertEquals(photo.order, restoredPhoto.order)
+        assertEquals(RemoteTool.RECORD, restoredPhoto.shownTools[1])
+        assertEquals(setOf(RemoteTool.FPS), restoredPhoto.hiddenTools.toSet())
+        val movie = RemoteToolLayout(prefs, true) {}
+        assertEquals(savedOrders.getValue(true), movie.order)
+        assertEquals(savedHidden.getValue(true), movie.hiddenTools.map { it.id }.toSet())
+
+        movie.setVisible(RemoteTool.RECORD, false)
+        val restoredMovie = RemoteToolLayout(prefs, true) {}
+        assertEquals(movie.order, restoredMovie.order)
+        assertEquals(setOf(RemoteTool.RECORD, RemoteTool.PICTURE_CONTROL), restoredMovie.hiddenTools.toSet())
+        assertEquals(restoredPhoto.order, RemoteToolLayout(prefs, false) {}.order)
+        assertTrue(RemoteToolLayout(prefs, false) {}.visible(RemoteTool.RECORD))
     }
 
     @Test

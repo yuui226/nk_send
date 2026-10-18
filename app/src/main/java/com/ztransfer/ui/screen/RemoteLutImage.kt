@@ -13,7 +13,7 @@ import com.ztransfer.lut.LutMonitorState
 import com.ztransfer.lut.LutRenderWorker
 import com.ztransfer.lut.LutTextureView
 
-/** Inside the existing image transform: overlays, camera geometry and source pixels are unchanged. */
+/** Inside the existing image transform: overlays, camera geometry and recorder input are unchanged. */
 @Composable
 internal fun RemoteLutImage(image: ImageBitmap, state: LutMonitorState, modifier: Modifier) {
     val current = state.active

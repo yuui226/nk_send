@@ -1725,7 +1725,10 @@ fun FileListScreen(
             label = "remoteEntryWidth",
         )
         val openRemote: () -> Unit = {
-            if (transfersBusy) showHint(remoteBlockedHint)
+            // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
+            // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
+            if (transferState.transferDirUri == null) requestTransferDirectory()
+            else if (transfersBusy) showHint(remoteBlockedHint)
             // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
             else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
             else {

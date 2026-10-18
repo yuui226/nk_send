@@ -23,11 +23,16 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
         var outcome = Activity.RESULT_CANCELED
         val disk = targetContext.getSharedPreferences("ztransfer", 0)
         val savedRemotePrefs = disk.all.filterKeys { it.startsWith("remote_") }
+        val savedTransferDir = disk.getString("transfer_dir", null)
         try {
             // Dedicated emulator run: restore toolbar defaults, preserving unrelated app preferences.
             val keys = listOf("remote_tool_order_photo", "remote_hidden_tools_photo", "remote_lock_starts_second_row_photo",
                 "remote_picture_control_placement_v1_photo", "remote_hd", "remote_grid", "remote_layout_locked")
             check(disk.edit().apply { keys.forEach { remove(it) } }.commit())
+            // This UI-only test never records or transfers files. Supply a well-formed tree URI
+            // to satisfy the monitor entry prerequisite, then restore the user's setting.
+            check(disk.edit().putString("transfer_dir",
+                savedTransferDir ?: "content://com.android.externalstorage.documents/tree/primary%3ADownload").commit())
             fun tools() = RemoteToolPreferences(disk)
             fun layout() = tools().layout(false)
             uiAutomation // Activate accessibility before composing the real application.
@@ -132,6 +137,7 @@ class RemoteToolEditorInstrumentation : Instrumentation() {
         } finally {
             activity?.let { runOnMainSync { it.finish() } }
             disk.edit().apply {
+                if (savedTransferDir == null) remove("transfer_dir") else putString("transfer_dir", savedTransferDir)
                 disk.all.keys.filter { it.startsWith("remote_") }.forEach { remove(it) }
                 savedRemotePrefs.forEach { (key, value) ->
                     when (value) {
