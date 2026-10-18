@@ -15,7 +15,7 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     AUDIO("audio", R.string.remote_tool_audio), HISTOGRAM("histogram", R.string.remote_tool_histogram),
     GRID("grid", R.string.remote_tool_grid), EXPOSURE("exposure", R.string.remote_tool_exposure),
     DESQUEEZE("desqueeze", R.string.remote_tool_desqueeze), LEVEL("level", R.string.remote_tool_level),
-    WHITE_BALANCE("white_balance", R.string.remote_tool_wb),
+    RECORD("record", R.string.remote_tool_record), WHITE_BALANCE("white_balance", R.string.remote_tool_wb),
     FOCUS_AREA("focus_area", R.string.remote_tool_focus_area), WAVEFORM("waveform", R.string.remote_tool_waveform),
     FOCUS_MODE("focus_mode", R.string.remote_tool_focus_mode),
     FOCUS_FRAME("focus_frame", R.string.remote_tool_focus_frame),
@@ -31,7 +31,6 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     companion object {
         val pinned = listOf(LOCK, ROTATE)
         val regular = entries.filterNot { it.fixed }
-        // Ignore retired/unknown IDs while preserving the user's remaining order.
         fun ordered(ids: List<String>): List<RemoteTool> =
             (ids.mapNotNull { id -> regular.find { it.id == id } } + regular).distinct()
     }
@@ -134,7 +133,7 @@ internal class RemoteToolLayout(
     val available = RemoteTool.regular.filter { it.availableIn(movie) }
     var order by mutableStateOf(RemoteTool.ordered(prefs.getString(orderKey, "").orEmpty().split(',')).filter { it in available })
         private set
-    // Fixed controls and retired tools ignore saved visibility entries from older versions.
+    // Older versions allowed hiding/reordering LOCK. Fixed controls ignore those saved entries.
     private var hidden by mutableStateOf(prefs.getStringSet(hiddenKey, emptySet()).orEmpty()
         .filter { id -> available.any { it.id == id } }.toSet())
 

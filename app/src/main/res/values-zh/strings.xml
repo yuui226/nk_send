@@ -388,6 +388,8 @@
     <string name="remote_transfer_busy_hint">传输进行中，监看可能卡顿</string>
     <string name="remote_rec_start_failed">无法开始录像</string>
     <string name="remote_rec_stop_failed">无法停止录像，请检查相机后重试</string>
+    <string name="remote_rec_no_audio">无麦克风权限，录制无声音</string>
+    <string name="remote_rec_pro_only">端侧录制是高级版功能</string>
     <string name="remote_tap_focus_manual">请将相机切换到自动对焦后使用点按对焦</string>
     <string name="remote_tracking_area_mode_required">请将相机切换到自动区域 AF 或主体跟踪 AF 后重试</string>
     <string name="dev_panel_title">开发者</string>
@@ -411,6 +413,13 @@
     <string name="cd_remote_zebra">斑马纹</string>
     <string name="cd_remote_level">水平仪</string>
     <string name="cd_remote_audio_levels">音频电平</string>
+    <string name="cd_remote_rec_start">录制</string>
+    <string name="cd_remote_rec_pause">暂停录制</string>
+    <string name="cd_remote_rec_resume">恢复录制</string>
+    <string name="cd_remote_rec_stop">停止录制</string>
+    <string name="cd_remote_rec_saved">录制已保存</string>
+    <string name="remote_rec_saved_label">已保存</string>
+    <string name="cd_remote_rec_toast_failed">录制失败</string>
 
     <!-- 授权/激活 -->
     <string name="license">授权</string>
@@ -444,12 +453,14 @@
     <string name="compare_remote">遥控 · 监看</string>
     <string name="compare_remote_free">%1$d 分钟/天</string>
     <string name="compare_unlimited">无限</string>
+    <string name="compare_on_device_recording">录制监看画面</string>
     <string name="compare_generate_effect_image">生成效果图</string>
     <string name="compare_effect_filters">效果图滤镜</string>
     <string name="compare_effect_frames">效果图边框</string>
     <string name="compare_effect_watermark">效果图水印</string>
     <string name="compare_watermark_free">默认水印</string>
     <string name="compare_watermark_pro">自由定制</string>
+    <string name="compare_unavailable">不可用</string>
     <string name="compare_available">支持</string>
     <string name="compare_duration">时效</string>
     <string name="duration_free">长期免费</string>

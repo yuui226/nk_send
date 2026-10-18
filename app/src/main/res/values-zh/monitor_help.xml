@@ -18,6 +18,7 @@
     <string name="monitor_help_tool_hd">切换监看清晰度，不改变相机照片和录像的画质。</string>
     <string name="monitor_help_tool_fps">显示监看每秒收到的画面数，不是相机录像帧率。</string>
     <string name="monitor_help_tool_audio">显示相机左右声道的音量，仅录像模式可用。</string>
+    <string name="monitor_help_tool_record">将监看画面录成视频存到手机，支持暂停，需高级版。与相机录像独立，优先用手机麦克风；不录入监看缩放、LUT 和辅助标记。</string>
     <string name="monitor_help_tool_histogram">看画面明暗分布：左暗右亮。点按切换 RGB（红绿蓝）、亮度或关闭。</string>
     <string name="monitor_help_tool_grid">选择参考线帮助构图。</string>
     <string name="monitor_help_tool_exposure">斑马纹标出亮部，伪色用颜色区分明暗。点按依次切换两种效果或关闭。</string>

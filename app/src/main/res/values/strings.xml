@@ -388,6 +388,8 @@
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
     <string name="remote_rec_start_failed">Couldn\'t start recording</string>
     <string name="remote_rec_stop_failed">Couldn\'t stop recording — check the camera and try again</string>
+    <string name="remote_rec_no_audio">No microphone permission — recording without sound</string>
+    <string name="remote_rec_pro_only">On-device recording is a Pro feature</string>
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="remote_tracking_area_mode_required">Use Auto-area AF or Subject-tracking AF on the camera, then try again</string>
     <string name="dev_panel_title">Developer</string>
@@ -411,6 +413,13 @@
     <string name="cd_remote_zebra">Zebra stripes</string>
     <string name="cd_remote_level">Level</string>
     <string name="cd_remote_audio_levels">Audio levels</string>
+    <string name="cd_remote_rec_start">Record</string>
+    <string name="cd_remote_rec_pause">Pause recording</string>
+    <string name="cd_remote_rec_resume">Resume recording</string>
+    <string name="cd_remote_rec_stop">Stop recording</string>
+    <string name="cd_remote_rec_saved">Recording saved</string>
+    <string name="remote_rec_saved_label">Saved</string>
+    <string name="cd_remote_rec_toast_failed">Recording failed</string>
 
     <!-- License / activation -->
     <string name="license">License</string>
@@ -444,12 +453,14 @@
     <string name="compare_remote">Remote control</string>
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
+    <string name="compare_on_device_recording">Record live view</string>
     <string name="compare_generate_effect_image">Generate effect images</string>
     <string name="compare_effect_filters">Effect filters</string>
     <string name="compare_effect_frames">Effect frames</string>
     <string name="compare_effect_watermark">Effect watermarks</string>
     <string name="compare_watermark_free">Default</string>
     <string name="compare_watermark_pro">Custom</string>
+    <string name="compare_unavailable">No</string>
     <string name="compare_available">Supported</string>
     <string name="compare_duration">Duration</string>
     <string name="duration_free">Always free</string>

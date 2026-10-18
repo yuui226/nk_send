@@ -7,6 +7,7 @@
     <string name="remote_tool_exposure">曝光辅助</string>
     <string name="remote_tool_desqueeze">反挤压</string>
     <string name="remote_tool_level">水平仪</string>
+    <string name="remote_tool_record">监看录制</string>
     <string name="remote_tool_wb">白平衡</string>
     <string name="remote_tool_focus_area">对焦区域</string>
     <string name="remote_tool_waveform">波形图</string>

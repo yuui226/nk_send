@@ -1,5 +1,7 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -9,7 +11,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +52,7 @@ internal fun RemoteMonitorHelpBubble(
             monitorToolHelpItem(RemoteTool.HD, R.string.monitor_help_tool_hd, tools),
             monitorToolHelpItem(RemoteTool.FPS, R.string.monitor_help_tool_fps, tools),
             monitorToolHelpItem(RemoteTool.AUDIO, R.string.monitor_help_tool_audio, tools),
+            monitorToolHelpItem(RemoteTool.RECORD, R.string.monitor_help_tool_record, tools),
         )),
         TipBubbleSection(stringResource(R.string.monitor_help_section_layout), listOf(
             monitorToolHelpItem(RemoteTool.GRID, R.string.monitor_help_tool_grid, tools),
@@ -95,19 +100,36 @@ private fun monitorToolHelpItem(tool: RemoteTool, textRes: Int, tools: RemoteToo
     text = stringResource(textRes),
     label = stringResource(tool.title),
     leading = {
-        TopIconToggle(
-            active = false,
-            contentDescription = "",
-            onClick = {},
-            modifier = Modifier.size(36.dp),
-            fixedControl = tool.fixed,
-            preserveContentColors = tool == RemoteTool.PICTURE_CONTROL,
-            displayOnly = true,
-        ) {
-            if (tool == RemoteTool.FOCUS_MODE) {
-                Text("AF-S", fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-            } else {
-                RemoteToolMark(tool, tools)
+        if (tool == RemoteTool.RECORD) {
+            Box(Modifier.size(36.dp).clearAndSetSemantics { }) {
+                RecControlBar(
+                    isRecording = false,
+                    isPaused = false,
+                    elapsedSeconds = 0,
+                    onStart = {},
+                    onPauseResume = {},
+                    onStop = {},
+                    modifier = Modifier.matchParentSize(),
+                )
+                // Keep the original recording control untouched. Only its guide sample
+                // intercepts taps; drags can still scroll the surrounding help bubble.
+                Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures { } })
+            }
+        } else {
+            TopIconToggle(
+                active = false,
+                contentDescription = "",
+                onClick = {},
+                modifier = Modifier.size(36.dp),
+                fixedControl = tool.fixed,
+                preserveContentColors = tool == RemoteTool.PICTURE_CONTROL,
+                displayOnly = true,
+            ) {
+                if (tool == RemoteTool.FOCUS_MODE) {
+                    Text("AF-S", fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                } else {
+                    RemoteToolMark(tool, tools)
+                }
             }
         }
     },

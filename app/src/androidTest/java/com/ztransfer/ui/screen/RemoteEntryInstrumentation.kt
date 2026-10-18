@@ -22,7 +22,15 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** JVM tests and assembleDebug cannot detect ART rejection of the generated monitor method. */
 class RemoteEntryInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var reviewOnly = false
+    private var albumOnly = false
+
+    override fun onCreate(arguments: Bundle?) {
+        reviewOnly = arguments?.getString("reviewOnly")?.toBoolean() == true
+        albumOnly = arguments?.getString("albumOnly")?.toBoolean() == true
+        super.onCreate(arguments)
+        start()
+    }
 
     override fun onStart() {
         val result = Bundle()
@@ -38,6 +46,8 @@ class RemoteEntryInstrumentation : Instrumentation() {
             // Exercise the actual production entry, not a small replacement of its viewfinder.
             Class.forName("com.ztransfer.ui.screen.RemoteScreenKt", true, targetContext.classLoader)
                 .declaredMethods
+            Class.forName("com.ztransfer.ui.screen.PhotoPreviewKt", true, targetContext.classLoader)
+                .declaredMethods
             // The animated home page need not become idle before we replace its content.
             val monitor = addMonitor(MainActivity::class.java.name, null, false)
             targetContext.startActivity(Intent(targetContext, MainActivity::class.java)
@@ -47,48 +57,56 @@ class RemoteEntryInstrumentation : Instrumentation() {
             await("Activity window did not resume") {
                 activity.hasWindowFocus() && activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
             }
-            val visible = mutableStateOf(false)
-            val entered = AtomicInteger()
-            val exited = AtomicInteger()
-            runOnMainSync {
-                val owner = ViewModelProvider(activity)
-                val camera = owner[CameraViewModel::class.java]
-                val transfer = owner[TransferViewModel::class.java]
-                activity.setContent {
-                    ZTransferTheme {
-                        if (visible.value) {
-                            RemoteScreen(camera, transfer, onNavigateBack = {})
-                            SideEffect { entered.incrementAndGet() }
-                            DisposableEffect(Unit) { onDispose { exited.incrementAndGet() } }
+            if (!reviewOnly && !albumOnly) {
+                val visible = mutableStateOf(false)
+                val entered = AtomicInteger()
+                val exited = AtomicInteger()
+                runOnMainSync {
+                    val owner = ViewModelProvider(activity)
+                    val camera = owner[CameraViewModel::class.java]
+                    val transfer = owner[TransferViewModel::class.java]
+                    activity.setContent {
+                        ZTransferTheme {
+                            if (visible.value) {
+                                RemoteScreen(camera, transfer, onNavigateBack = {})
+                                SideEffect { entered.incrementAndGet() }
+                                DisposableEffect(Unit) { onDispose { exited.incrementAndGet() } }
+                            }
                         }
                     }
                 }
-            }
-            repeat(3) { index ->
-                val desiredPc = index % 2 == 0
-                check(preferences.edit().putBoolean(pcKey, desiredPc)
-                    .putBoolean("remote_layout_locked", true).putInt("remote_locked_rotation", index).commit())
-                val before = entered.get()
-                runOnMainSync { visible.value = true }
-                await("Monitor entry ${index + 1} was not composed") { entered.get() > before }
-                SystemClock.sleep(1_500)
-                checkNotNull(uiAutomation.takeScreenshot()).let { shot ->
-                    java.io.File(targetContext.filesDir, "review-monitor-$index.png").outputStream().use {
-                        shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                repeat(3) { index ->
+                    val desiredPc = index % 2 == 0
+                    check(preferences.edit().putBoolean(pcKey, desiredPc)
+                        .putBoolean("remote_layout_locked", true).putInt("remote_locked_rotation", index).commit())
+                    val before = entered.get()
+                    runOnMainSync { visible.value = true }
+                    await("Monitor entry ${index + 1} was not composed") { entered.get() > before }
+                    SystemClock.sleep(1_500)
+                    checkNotNull(uiAutomation.takeScreenshot()).let { shot ->
+                        java.io.File(targetContext.filesDir, "review-monitor-$index.png").outputStream().use {
+                            shot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                        shot.recycle()
                     }
-                    shot.recycle()
+                    checkReviewButtonPosition(activity, index)
+                    runOnMainSync { visible.value = false }
+                    await("Monitor exit was not disposed") { exited.get() == index + 1 }
+                    check(RemoteToolPreferences(preferences).computerControl.value == desiredPc) {
+                        "Monitor entry/disconnect/exit erased the saved PC choice"
+                    }
                 }
-                checkReviewButtonPosition(activity, index)
-                runOnMainSync { visible.value = false }
-                await("Monitor exit was not disposed") { exited.get() == index + 1 }
-                check(RemoteToolPreferences(preferences).computerControl.value == desiredPc) {
-                    "Monitor entry/disconnect/exit erased the saved PC choice"
-                }
+                runOnMainSync { albumRefreshWaitsForPreview(ViewModelProvider(activity)[CameraViewModel::class.java]) }
             }
-            runOnMainSync { albumRefreshWaitsForPreview(ViewModelProvider(activity)[CameraViewModel::class.java]) }
-            RemoteReviewChecks.run(this, activity, ViewModelProvider(activity)[CameraViewModel::class.java],
-                ViewModelProvider(activity)[TransferViewModel::class.java])
-            result.putString("result", "PASS: portrait and both landscape review FHD/paging/no-queue/close and button placement, PC preference persistence/off/hide, ART verification, three monitor entry/exit cycles, and deferred album refresh after overlapping FHD preview")
+            val camera = ViewModelProvider(activity)[CameraViewModel::class.java]
+            val transfer = ViewModelProvider(activity)[TransferViewModel::class.java]
+            if (albumOnly) AlbumPreviewChecks.run(this, activity, camera, transfer)
+            else RemoteReviewChecks.run(this, activity, camera, transfer)
+            result.putString("result", when {
+                albumOnly -> "PASS: real album JPG/NEF/video tools, effects master switch, paging in both directions, stable tool positions, no unintended queue/close, and ART verification"
+                reviewOnly -> "PASS: portrait and both landscape review FHD/paging/no-queue/close, PC preference persistence/off/hide, and ART verification"
+                else -> "PASS: portrait and both landscape review FHD/paging/no-queue/close and button placement, PC preference persistence/off/hide, ART verification, three monitor entry/exit cycles, and deferred album refresh after overlapping FHD preview"
+            })
             outcome = Activity.RESULT_OK
         } catch (error: Throwable) {
             result.putString("failure", error.stackTraceToString())

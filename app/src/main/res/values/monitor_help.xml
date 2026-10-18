@@ -18,6 +18,7 @@
     <string name="monitor_help_tool_hd">Change monitor resolution without changing camera photo or video quality.</string>
     <string name="monitor_help_tool_fps">Show how many frames the monitor receives each second, not the camera recording frame rate.</string>
     <string name="monitor_help_tool_audio">Show camera left and right audio levels. Available only in video mode.</string>
+    <string name="monitor_help_tool_record">Save the monitor image as a video on your phone, with pause support. Requires Pro. Independent of camera recording; uses the phone microphone when possible. Monitor zoom, LUTs and viewing aids are not recorded.</string>
     <string name="monitor_help_tool_histogram">See brightness distribution: dark on the left, bright on the right. Tap to cycle through RGB (red, green, blue), luminance and off.</string>
     <string name="monitor_help_tool_grid">Choose guides to help frame your shot.</string>
     <string name="monitor_help_tool_exposure">Zebra marks bright areas; false color uses colors to show brightness. Tap to cycle through both modes and off.</string>

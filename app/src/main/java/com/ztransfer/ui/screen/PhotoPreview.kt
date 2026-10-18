@@ -364,12 +364,6 @@ internal fun PhotoPreviewOverlay(
     val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
     val currentHandle = currentFile?.handle
     var effectsRequest by remember { mutableStateOf<PreviewEffectsRequest?>(null) }
-    var effectsButtonBounds by remember { mutableStateOf<Rect?>(null) }
-    val showEffectsButton = photoEffectsViewModel != null && showPreviewPhotoEffects(
-        enabled = photoEffectsEnabled,
-        isReview = review != null,
-        file = currentFile,
-    )
     var cropFile by remember { mutableStateOf<NikonCamera.FileInfo?>(null) }
     var cropPreview by remember { mutableStateOf<com.ztransfer.crop.CropPreview?>(null) }
     var cropFailed by remember { mutableStateOf(false) }
@@ -1433,14 +1427,13 @@ internal fun PhotoPreviewOverlay(
             }
         }
 
-        // 左上角第二行：连拍/保护标签与列表语义一致，但在大图舞台上适度放大，避免
-        // 像缩略图角标一样小气；与顶部信息带左边缘对齐，并留出 8dp 呼吸间距。
+        // 左上角第二行：连拍/保护标签与列表语义一致，但在大图舞台上适度放大。
         if (currentFile != null &&
             (currentFile.handle in burstHandles || currentFile.isProtected)
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            PreviewPhotoBadges(
+                showBurst = currentFile.handle in burstHandles,
+                isProtected = currentFile.isProtected,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
@@ -1451,68 +1444,8 @@ internal fun PhotoPreviewOverlay(
                                 .coerceIn(0f, 1f)
                         translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
                         alpha = progress.value * swipe * burstPagerAlpha.value * (1f-cropUiAlpha)
-                    }
-            ) {
-                if (currentFile.handle in burstHandles) {
-                    Surface(
-                        shape = RoundedCornerShape(9.dp),
-                        color = BurstBadgeColor.copy(alpha = 0.85f)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.BurstMode,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = stringResource(R.string.burst_label),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 12.sp,
-                                    lineHeight = 14.sp,
-                                ),
-                                fontWeight = FontWeight.Medium,
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
-                if (currentFile.isProtected) {
-                    // 黑底胶囊在黑幕/暗部照片上需要细描边定界(列表页衬在照片上无此问题)。
-                    // 钥匙 + "保护"文字，与旁边的连拍角标（图标+字）一致。
-                    Surface(
-                        shape = RoundedCornerShape(9.dp),
-                        color = Color.Black.copy(alpha = 0.45f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Key,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.9f),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = stringResource(R.string.filter_protected),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 12.sp,
-                                    lineHeight = 14.sp,
-                                ),
-                                fontWeight = FontWeight.Medium,
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
-            }
+                    },
+            )
         }
 
         // 顶部极细进度条：当前页正在取 FHD 高清版时显示（"正在加载高清"的低调提示，
@@ -1603,21 +1536,24 @@ internal fun PhotoPreviewOverlay(
             }
         }
 
-        // 工具行保留到淡出结束；翻到连拍合集也不能直接卸载按钮的显隐动画。
-        val photoActions = (currentItem as? PhotoPreviewItem.Photo)?.let { photo ->
-            PreviewPhotoActions(
-                photo,
-                (previewBurstCollectionPage(previewItems, pagerState.currentPage) ?: -1) in
-                    0 until pagerState.currentPage,
-            )
-        }
-        var retainedPhotoActions by remember { mutableStateOf(photoActions) }
-        SideEffect { if (photoActions != null) retainedPhotoActions = photoActions }
-        AnimatedVisibility(
-            visible = photoActions != null,
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(180)),
-            label = "previewPhotoTools",
+        PreviewPhotoTools(
+            photoActions = (currentItem as? PhotoPreviewItem.Photo)?.let { photo ->
+                PreviewPhotoActions(
+                    photo,
+                    (previewBurstCollectionPage(previewItems, pagerState.currentPage) ?: -1) in
+                        0 until pagerState.currentPage,
+                )
+            },
+            currentHandle = currentHandle,
+            inputsEnabled = previewGesturesEnabled && !closing && !pagerState.isScrollInProgress &&
+                abs(pagerState.currentPageOffsetFraction) < .01f,
+            editEnabled = !burstTransitionBusy && !queueAnimating && !queueGestureActive,
+            collapseEnabled = !queueAnimating && !queueGestureActive && queueMotionJob?.isActive != true,
+            rotationEnabled = !burstTransitionBusy,
+            effectsAvailable = photoEffectsViewModel != null,
+            effectsEnabled = photoEffectsEnabled,
+            isReview = review != null,
+            histogramMode = histogramMode,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
@@ -1627,113 +1563,28 @@ internal fun PhotoPreviewOverlay(
                     translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
                     alpha = progress.value * burstPagerAlpha.value * (1f-cropUiAlpha)
                 },
-        ) {
-            (photoActions ?: retainedPhotoActions)?.let { actions ->
-                val item = actions.photo
-                val current = item.file
-                // 淡出的旧页工具只供显示，不能触发上一张照片的编辑或传输。
-                val actionInputsEnabled = previewGesturesEnabled && !closing &&
-                    currentHandle == current.handle && !pagerState.isScrollInProgress &&
-                    abs(pagerState.currentPageOffsetFraction) < .01f
-                BoxWithConstraints {
-                    // 连拍成员最多多一个收起按钮；窄屏先减间距，再温和缩小按钮。
-                    val actionCount = 3 + (if (photoEffectsViewModel != null && photoEffectsEnabled) 1 else 0) +
-                        (if (actions.canCollapseBurst) 1 else 0)
-                    val actionGap = ((maxWidth - 44.dp * actionCount) / (actionCount - 1))
-                        .coerceIn(4.dp, 12.dp)
-                    val actionSize = ((maxWidth - actionGap * (actionCount - 1)) / actionCount)
-                        .coerceAtMost(44.dp)
-                    Row(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (actions.canCollapseBurst) {
-                            BurstMemberCollapseButton(
-                                buttonSize = actionSize,
-                                // 进入成员页时按钮直接以完整形态出现；连拍过渡的防重由
-                                // collapsePreviewBurstMember 统一拦截，不借禁用态制造透明渐变。
-                                enabled = actionInputsEnabled && !queueAnimating && !queueGestureActive &&
-                                    queueMotionJob?.isActive != true,
-                                onClick = {
-                                    item.burstId?.let(collapsePreviewBurstMember)
-                                },
-                            )
-                            Spacer(Modifier.width(actionGap))
-                        }
-                        PreviewPhotoActionVisibility(
-                            visible = photoEffectsViewModel != null && showPreviewPhotoEffects(
-                                photoEffectsEnabled, review != null, current,
-                            ),
-                            label = "previewEffectsButton",
-                            trailingSpace = actionGap,
-                        ) {
-                            GlassButton(
-                                onClick = {
-                                    if (showEffectsButton && actionInputsEnabled &&
-                                        !burstTransitionBusy && !queueAnimating && !queueGestureActive) {
-                                        haptics.tick()
-                                        effectsRequest = PreviewEffectsRequest(
-                                            current, effectsButtonBounds,
-                                            Math.floorMod((-rotationDegrees / 90f).roundToInt(), 4),
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.size(actionSize)
-                                    .onGloballyPositioned { effectsButtonBounds = it.boundsInRoot() },
-                                shape = CircleShape,
-                                contentPadding = PaddingValues(0.dp),
-                            ) {
-                                Icon(Icons.Default.AutoAwesome, stringResource(R.string.photo_effects_open_editor),
-                                    tint = AppTheme.colors.accentOrange, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                        PreviewPhotoActionVisibility(
-                            visible = review == null && current.extension in setOf(".jpg", ".jpeg"),
-                            label = "previewCropButton",
-                            trailingSpace = actionGap,
-                        ) {
-                            GlassButton(onClick = {
-                                if (current.extension in setOf(".jpg", ".jpeg") && actionInputsEnabled && !burstTransitionBusy && !queueAnimating && !queueGestureActive) {
-                                    haptics.tick()
-                                    cropPlacement=previewPlacement
-                                    cropInitialScale=previewViewport.scale.floatValue
-                                    cropInitialOffset=previewViewport.offset.value
-                                    cropPreview = null; cropFailed = false; cropFile = current
-                                }
-                            }, modifier = Modifier.size(actionSize), shape = CircleShape,
-                                contentPadding = PaddingValues(0.dp)) {
-                                Icon(Icons.Default.Crop, stringResource(R.string.crop_title),
-                                    tint = AppTheme.colors.accentBlue, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                        PreviewPhotoActionVisibility(
-                            visible = current.extension !in VIDEO_EXTENSIONS,
-                            label = "previewImageTools",
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) {
-                                PreviewHistogramButton(
-                                    buttonSize = actionSize,
-                                    mode = histogramMode,
-                                    onClick = {
-                                        if(actionInputsEnabled) onHistogramModeChanged(histogramMode.next())
-                                    },
-                                )
-                                PreviewRotationButton(buttonSize = actionSize, onClick = {
-                                    if (actionInputsEnabled && !burstTransitionBusy) {
-                                        val nextDegrees = rotationDegrees - 90f
-                                        rotationDegrees = nextDegrees
-                                        // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
-                                        val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
-                                        onRotationChanged(nextTurns)
-                                    }
-                                })
-                            }
-                        }
-
-                    }
-                }
-            }
-        }
+            onCollapseBurst = collapsePreviewBurstMember,
+            onOpenEffects = { file, anchor ->
+                haptics.tick()
+                effectsRequest = PreviewEffectsRequest(
+                    file, anchor, Math.floorMod((-rotationDegrees / 90f).roundToInt(), 4),
+                )
+            },
+            onOpenCrop = { file ->
+                haptics.tick()
+                cropPlacement = previewPlacement
+                cropInitialScale = previewViewport.scale.floatValue
+                cropInitialOffset = previewViewport.offset.value
+                cropPreview = null; cropFailed = false; cropFile = file
+            },
+            onHistogramModeChanged = onHistogramModeChanged,
+            onRotate = {
+                val nextDegrees = rotationDegrees - 90f
+                rotationDegrees = nextDegrees
+                // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
+                onRotationChanged(Math.floorMod((-nextDegrees / 90f).toInt(), 4))
+            },
+        )
         (currentItem as? PhotoPreviewItem.BurstCollection)?.let { item ->
             Row(
                 modifier = Modifier
@@ -1850,6 +1701,198 @@ internal fun PhotoPreviewOverlay(
                         anchorBounds = request.anchor,
                         onDismiss = { effectsRequest = null },
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewPhotoBadges(showBurst: Boolean, isProtected: Boolean, modifier: Modifier) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier,
+    ) {
+        if (showBurst) {
+            Surface(
+                shape = RoundedCornerShape(9.dp),
+                color = BurstBadgeColor.copy(alpha = 0.85f)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                ) {
+                    Icon(
+                        Icons.Default.BurstMode,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.burst_label),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            lineHeight = 14.sp,
+                        ),
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+        if (isProtected) {
+            // 黑底胶囊在黑幕/暗部照片上需要细描边定界(列表页衬在照片上无此问题)。
+            // 钥匙 + "保护"文字，与旁边的连拍角标（图标+字）一致。
+            Surface(
+                shape = RoundedCornerShape(9.dp),
+                color = Color.Black.copy(alpha = 0.45f),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Key,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.filter_protected),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            lineHeight = 14.sp,
+                        ),
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Keep tool composition separate from the large preview state/gesture method for ART verification. */
+@Composable
+private fun PreviewPhotoTools(
+    photoActions: PreviewPhotoActions?,
+    currentHandle: Int?,
+    inputsEnabled: Boolean,
+    editEnabled: Boolean,
+    collapseEnabled: Boolean,
+    rotationEnabled: Boolean,
+    effectsAvailable: Boolean,
+    effectsEnabled: Boolean,
+    isReview: Boolean,
+    histogramMode: HistogramMode,
+    modifier: Modifier,
+    onCollapseBurst: (String) -> Unit,
+    onOpenEffects: (NikonCamera.FileInfo, Rect?) -> Unit,
+    onOpenCrop: (NikonCamera.FileInfo) -> Unit,
+    onHistogramModeChanged: (HistogramMode) -> Unit,
+    onRotate: () -> Unit,
+) {
+    // 工具行保留到淡出结束；翻到连拍合集也不能直接卸载按钮的显隐动画。
+    var retainedPhotoActions by remember { mutableStateOf(photoActions) }
+    var effectsButtonBounds by remember { mutableStateOf<Rect?>(null) }
+    SideEffect { if (photoActions != null) retainedPhotoActions = photoActions }
+    AnimatedVisibility(
+        visible = photoActions != null,
+        enter = fadeIn(tween(180)),
+        exit = fadeOut(tween(180)),
+        label = "previewPhotoTools",
+        modifier = modifier,
+    ) {
+        (photoActions ?: retainedPhotoActions)?.let { actions ->
+            val item = actions.photo
+            val current = item.file
+            // 淡出的旧页工具只供显示，不能触发上一张照片的编辑或传输。
+            val actionInputsEnabled = inputsEnabled && currentHandle == current.handle
+            val showEffectsButton = effectsAvailable && showPreviewPhotoEffects(
+                effectsEnabled, isReview, current,
+            )
+            BoxWithConstraints {
+                // 连拍成员最多多一个收起按钮；窄屏先减间距，再温和缩小按钮。
+                val actionCount = 3 + (if (effectsAvailable && effectsEnabled) 1 else 0) +
+                    (if (actions.canCollapseBurst) 1 else 0)
+                val actionGap = ((maxWidth - 44.dp * actionCount) / (actionCount - 1))
+                    .coerceIn(4.dp, 12.dp)
+                val actionSize = ((maxWidth - actionGap * (actionCount - 1)) / actionCount)
+                    .coerceAtMost(44.dp)
+                Row(
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (actions.canCollapseBurst) {
+                        BurstMemberCollapseButton(
+                            buttonSize = actionSize,
+                            // 进入成员页时按钮直接以完整形态出现；连拍过渡的防重由
+                            // collapsePreviewBurstMember 统一拦截，不借禁用态制造透明渐变。
+                            enabled = actionInputsEnabled && collapseEnabled,
+                            onClick = { item.burstId?.let(onCollapseBurst) },
+                        )
+                        Spacer(Modifier.width(actionGap))
+                    }
+                    PreviewPhotoActionVisibility(
+                        visible = showEffectsButton,
+                        label = "previewEffectsButton",
+                        trailingSpace = actionGap,
+                    ) {
+                        GlassButton(
+                            onClick = {
+                                if (showEffectsButton && actionInputsEnabled && editEnabled) {
+                                    onOpenEffects(current, effectsButtonBounds)
+                                }
+                            },
+                            modifier = Modifier.size(actionSize)
+                                .onGloballyPositioned { effectsButtonBounds = it.boundsInRoot() },
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, stringResource(R.string.photo_effects_open_editor),
+                                tint = AppTheme.colors.accentOrange, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    PreviewPhotoActionVisibility(
+                        visible = !isReview && current.extension in setOf(".jpg", ".jpeg"),
+                        label = "previewCropButton",
+                        trailingSpace = actionGap,
+                    ) {
+                        GlassButton(
+                            onClick = {
+                                if (current.extension in setOf(".jpg", ".jpeg") && actionInputsEnabled && editEnabled) {
+                                    onOpenCrop(current)
+                                }
+                            },
+                            modifier = Modifier.size(actionSize),
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Icon(Icons.Default.Crop, stringResource(R.string.crop_title),
+                                tint = AppTheme.colors.accentBlue, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    PreviewPhotoActionVisibility(
+                        visible = current.extension !in VIDEO_EXTENSIONS,
+                        label = "previewImageTools",
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) {
+                            PreviewHistogramButton(
+                                buttonSize = actionSize,
+                                mode = histogramMode,
+                                onClick = {
+                                    if (actionInputsEnabled) onHistogramModeChanged(histogramMode.next())
+                                },
+                            )
+                            PreviewRotationButton(buttonSize = actionSize, onClick = {
+                                if (actionInputsEnabled && rotationEnabled) onRotate()
+                            })
+                        }
+                    }
                 }
             }
         }
