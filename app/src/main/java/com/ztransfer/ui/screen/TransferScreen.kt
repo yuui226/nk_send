@@ -113,7 +113,7 @@ private const val TRANSFER_CARD_WAVE_SPATIAL_SCALE = 0.55f
 private const val TRANSFER_CARD_PROGRESS_ALPHA = 0.14f
 private val TRANSFER_CARD_WAVE_AMPLITUDE = 3.dp
 
-private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION, GENERATION_DURATION }
+private enum class TransferCardPillTone { SIZE, SPEED, SKIPPED, EFFECT, TRANSFER_DURATION, GENERATION_DURATION }
 
 internal enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
@@ -814,6 +814,9 @@ private fun TransferTaskCardContent(
     val colors = AppTheme.colors
     val isFailed = task.status == TransferStatus.FAILED || task.frameGenerationError != null
     val transferred = task.status == TransferStatus.COMPLETED
+    // 本地原片仍可继续生成效果；派生图查重也会置 skipped，不能覆盖真实下载的统计。
+    val transferSkipped = transferred && task.elapsedMs == null &&
+        (task.skipped || task.savedOriginalOutput != null)
     val speedText = when {
         task.status == TransferStatus.TRANSFERING && displayedSpeed > 0L -> formatSpeed(displayedSpeed)
         transferred && task.downloadMBps > 0f -> "%.1f MB/s".format(task.downloadMBps)
@@ -853,11 +856,16 @@ private fun TransferTaskCardContent(
                 respond = animateTransferPills && speedText != null,
             )
             TransferPillVisibility(
-                visible = speedText != null,
+                visible = transferSkipped || speedText != null,
                 delayMillis = 60,
                 modifier = Modifier.weight(1f, fill = false),
             ) {
-                speedText?.let {
+                if (transferSkipped) {
+                    TransferInfoPill(
+                        text = stringResource(R.string.status_skipped),
+                        tone = TransferCardPillTone.SKIPPED,
+                    )
+                } else speedText?.let {
                     TransferInfoPill(
                         text = it,
                         tone = TransferCardPillTone.SPEED,
@@ -1011,7 +1019,7 @@ private fun TransferInfoPill(
         MaterialTheme.typography.labelSmall.lineHeight.toDp().coerceAtLeast(16.dp) + 4.dp
     }
     val accent = when (tone) {
-        TransferCardPillTone.SIZE -> colors.onSurfaceVariant
+        TransferCardPillTone.SIZE, TransferCardPillTone.SKIPPED -> colors.onSurfaceVariant
         TransferCardPillTone.SPEED -> colors.statusConnected
         TransferCardPillTone.EFFECT -> colors.accentPurple
         TransferCardPillTone.TRANSFER_DURATION -> colors.accentBlue
