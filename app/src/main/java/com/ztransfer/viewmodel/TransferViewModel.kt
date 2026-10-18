@@ -472,7 +472,7 @@ private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
 enum class TransferStorageMode { UNIFIED, BY_DAY, BY_TYPE }
 
 /** 缩略图加载范围：按最新的实际拍摄日计数，0 表示全部。 */
-enum class PhotoLoadingRange(val days: Int) { ONE(1), THREE(3), FIVE(5), ALL(0) }
+enum class PhotoLoadingRange(val days: Int) { ONE(1), THREE(3), FIVE(5), TEN(10), ALL(0) }
 
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
@@ -499,6 +499,7 @@ data class TransferState(
     val keepScreenOn: Boolean = true,
     // 每个说明入口分别记录是否真正点击过；仅清除应用数据或卸载后恢复未读引导。
     val mainSettingsHelpViewed: Boolean = false,
+    val monitorHelpViewed: Boolean = false,
     val photoEffectsHelpViewed: Boolean = false,
     val apConnectionHelpViewed: Boolean = false,
     val staConnectionHelpViewed: Boolean = false,
@@ -520,8 +521,8 @@ data class TransferState(
     val filterProtectedOnly: Boolean = false,
     val filterRatingEnabled: Boolean = false,
     val filterRating: Int? = null,
-    // 评级读取范围：1/3/5 个实际拍摄日；0 = 全部。默认保持原来的三日范围。
-    val filterRatingDays: Int = 3,
+    // 评级读取范围：1/3/5 个实际拍摄日；0 = 全部。默认五日。
+    val filterRatingDays: Int = PhotoFilterCriteria.DEFAULT_RATING_DAYS,
     /** 照片列表后台缩略图加载范围；默认全部，保持旧版本行为。 */
     val photoLoadingRange: PhotoLoadingRange = PhotoLoadingRange.ALL,
     // 只看连拍照片（检测算法见 FileListScreen.computeBurstGroups）。持久化。
@@ -602,13 +603,14 @@ data class PhotoFilterCriteria(
     val protectedOnly: Boolean = false,
     val ratingEnabled: Boolean = false,
     val rating: Int? = null,
-    val ratingDays: Int = 3,
+    val ratingDays: Int = DEFAULT_RATING_DAYS,
     val burstOnly: Boolean = false,
     val untransferredOnly: Boolean = false,
     val storageSlot: Int? = null,
     val dateRange: PhotoDateRange? = null,
 ) {
     companion object {
+        const val DEFAULT_RATING_DAYS = 5
         val Default = PhotoFilterCriteria()
     }
 }
@@ -998,6 +1000,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_v2_play_count"
         const val KEY_REMOTE_ENTRY_INTRO_USED = "remote_entry_intro_v2_used"
         const val KEY_MAIN_SETTINGS_HELP_VIEWED = "main_settings_help_viewed"
+        const val KEY_MONITOR_HELP_VIEWED = "monitor_help_viewed"
+        const val KEY_RATING_FIVE_DAY_DEFAULT_MIGRATED = "filter_rating_five_day_default_migrated"
         const val KEY_PHOTO_EFFECTS_HELP_VIEWED = "photo_effects_help_viewed"
         const val KEY_AP_CONNECTION_HELP_VIEWED = "ap_connection_help_viewed"
         const val KEY_STA_CONNECTION_HELP_VIEWED = "sta_connection_help_viewed"
@@ -1200,6 +1204,19 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if ("filter_storage_slot" in storedPreferences) {
             prefs.edit().remove("filter_storage_slot").apply()
         }
+        val migrateRatingRange = !prefs.getBoolean(KEY_RATING_FIVE_DAY_DEFAULT_MIGRATED, false)
+        val restoredRatingDays = prefs.getInt("filter_rating_days", PhotoFilterCriteria.DEFAULT_RATING_DAYS)
+            .let { days ->
+                if (migrateRatingRange && days == 0) PhotoFilterCriteria.DEFAULT_RATING_DAYS
+                else days.takeIf { it in setOf(0, 1, 3, 5) } ?: PhotoFilterCriteria.DEFAULT_RATING_DAYS
+            }
+        // Only migrate the old "all" choice once; a later explicit selection must survive restarts.
+        if (migrateRatingRange) {
+            prefs.edit()
+                .putInt("filter_rating_days", restoredRatingDays)
+                .putBoolean(KEY_RATING_FIVE_DAY_DEFAULT_MIGRATED, true)
+                .apply()
+        }
         val storedWatermarkSize = storedPreferences["photo_frame_watermark_size"]
         val usesLegacyWatermarkSizeScale = prefs.getInt(
             PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY,
@@ -1244,6 +1261,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     KEY_MAIN_SETTINGS_HELP_VIEWED,
                     false,
                 ),
+                monitorHelpViewed = prefs.getBoolean(
+                    KEY_MONITOR_HELP_VIEWED,
+                    false,
+                ),
                 photoEffectsHelpViewed = prefs.getBoolean(
                     KEY_PHOTO_EFFECTS_HELP_VIEWED,
                     false,
@@ -1274,7 +1295,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // prevents stale camera ratings from silently filtering the next session.
                 filterRatingEnabled = false,
                 filterRating = null,
-                filterRatingDays = prefs.getInt("filter_rating_days", 3).let { if (it == 0 || it in setOf(1, 3, 5)) it else 3 },
+                filterRatingDays = restoredRatingDays,
                 photoLoadingRange = prefs.getInt("photo_loading_range_days", 0).let { stored ->
                     PhotoLoadingRange.entries.firstOrNull { it.days == stored } ?: PhotoLoadingRange.ALL
                 },
@@ -1429,6 +1450,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (_state.value.mainSettingsHelpViewed) return
         prefs.edit().putBoolean(KEY_MAIN_SETTINGS_HELP_VIEWED, true).apply()
         _state.update { it.copy(mainSettingsHelpViewed = true) }
+    }
+
+    fun markMonitorHelpViewed() {
+        if (_state.value.monitorHelpViewed) return
+        prefs.edit().putBoolean(KEY_MONITOR_HELP_VIEWED, true).apply()
+        _state.update { it.copy(monitorHelpViewed = true) }
     }
 
     fun markPhotoEffectsHelpViewed() {
@@ -1773,7 +1800,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     /** 应用筛选（类型/保护/评级/连拍/未传输/卡槽/日期）；评级选择仅当前会话生效。 */
     fun setFilters(requested: PhotoFilterCriteria) {
-        val criteria = requested.copy(extensions = requested.extensions?.takeIf { it.isNotEmpty() })
+        val criteria = requested.copy(
+            extensions = requested.extensions?.takeIf { it.isNotEmpty() },
+            ratingDays = requested.ratingDays.takeIf { it in setOf(0, 1, 3, 5) }
+                ?: PhotoFilterCriteria.DEFAULT_RATING_DAYS,
+        )
         prefs.edit().apply {
             if (criteria.extensions == null) remove("filter_exts")
             else putStringSet("filter_exts", criteria.extensions)
@@ -1781,7 +1812,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             // written by older builds so an upgrade cannot restore a stale rating filter.
             remove("filter_rating")
             remove("filter_rating_enabled")
-            putInt("filter_rating_days", criteria.ratingDays.takeIf { it == 0 || it in setOf(1, 3, 5) } ?: 3)
+            putInt("filter_rating_days", criteria.ratingDays)
             if (criteria.protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
             if (criteria.burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
             if (criteria.untransferredOnly) putBoolean("filter_untransferred", true)

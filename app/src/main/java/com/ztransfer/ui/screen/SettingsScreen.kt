@@ -542,6 +542,9 @@ fun SettingsOverlay(
                 MainSettingsInfoBubble(
                     anchorBounds = mainSettingsInfoAnchorBounds,
                     onDismiss = { showMainSettingsInfo = false },
+                    showPhotoEffects = showPhotoEffectsEntry,
+                    isPro = isPro,
+                    showRenewal = isPro && subscriptionExpiresAt > 0L,
                 )
             }
             if (showModuleMenu) {
@@ -1138,13 +1141,17 @@ fun SettingsOverlay(
                         optionMaxLines = 2,
                         modifier = Modifier.weight(1.35f),
                     )
+                    val loadingRangeLabels = PhotoLoadingRange.entries.associateWith { range ->
+                        if (range == PhotoLoadingRange.ALL) stringResource(R.string.filter_rating_range_all)
+                        else stringResource(R.string.filter_rating_range_days, range.days)
+                    }
                     ReleaseCommitWheel(
                         options = PhotoLoadingRange.entries,
                         selected = state.photoLoadingRange,
-                        optionLabel = { range -> if (range == PhotoLoadingRange.ALL) "全部" else "${range.days}日" },
+                        optionLabel = loadingRangeLabels::getValue,
                         onValueCommitted = viewModel::setPhotoLoadingRange,
                         onDetent = haptics::tick,
-                        label = "照片加载范围",
+                        label = stringResource(R.string.photo_loading_range),
                         optionRowHeight = 32.dp,
                         modifier = Modifier.weight(0.65f),
                     )
@@ -1533,78 +1540,88 @@ internal fun PhotoEffectsInfoBubble(
     extraHints: List<String> = emptyList(),
     parentTopInset: Dp = 0.dp,
 ) {
-    val density = LocalDensity.current
-    val panelTop = anchorBounds?.let {
-        with(density) { it.bottom.toDp() } - parentTopInset + 8.dp
-    } ?: 64.dp
-    val wheelHint = stringResource(R.string.photo_effects_wheel_hint)
-    val lutHint = stringResource(R.string.photo_lut_help)
-    val items = listOf(description) + extraHints + listOf(gestureHint, wheelHint, lutHint)
-    val visibleItems = items
-        .filter { it.isNotBlank() }
-        .map { TipBubbleItem(text = it) }
-    AnchorPopup(
+    val sections = listOf(
+        TipBubbleSection(stringResource(R.string.photo_effects_help_use),
+            (listOf(description) + extraHints).filter(String::isNotBlank).map { TipBubbleItem(it) } +
+                TipBubbleItem(gestureHint, label = stringResource(R.string.help_preview_label))),
+        TipBubbleSection(stringResource(R.string.photo_effects_help_color), listOf(
+            settingsHelpItem(R.string.photo_effect_module_filter, R.string.photo_effects_help_filters),
+            settingsHelpItem(R.string.lut_folder, R.string.photo_lut_help),
+            settingsHelpItem(R.string.photo_lut_settings, R.string.photo_effects_help_lut_settings),
+        )),
+        TipBubbleSection(stringResource(R.string.photo_effects_help_decoration), listOf(
+            settingsHelpItem(R.string.photo_frame_style_short, R.string.photo_effects_help_frame),
+            settingsHelpItem(R.string.photo_frame_watermark_short, R.string.photo_effects_help_watermark),
+        )),
+        TipBubbleSection(stringResource(R.string.photo_effects_help_shortcuts), listOf(
+            settingsHelpItem(R.string.photo_effect_modules, R.string.photo_effects_help_modules),
+            settingsHelpItem(R.string.help_favorites_label, R.string.photo_effects_help_favorites),
+            settingsHelpItem(R.string.help_wheels_label, R.string.photo_effects_wheel_hint),
+        )),
+    )
+    TipGuideBubble(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
-        panelModifier = Modifier
-            .padding(start = 18.dp, end = 18.dp, top = panelTop, bottom = 18.dp)
-            .widthIn(min = 260.dp, max = 420.dp),
-        panelAlignment = Alignment.TopEnd,
-        shape = RoundedCornerShape(18.dp),
-        dim = false,
-    ) { _ ->
-        TipBubbleContent(
-            title = stringResource(R.string.photo_effects_info_title),
-            items = visibleItems,
-            bulleted = true,
-            modifier = Modifier.verticalScroll(rememberScrollState()),
-        )
-    }
+        title = stringResource(R.string.photo_effects_info_title),
+        sections = sections,
+        parentTopInset = parentTopInset,
+    )
 }
 
 @Composable
 private fun MainSettingsInfoBubble(
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
+    showPhotoEffects: Boolean,
+    isPro: Boolean,
+    showRenewal: Boolean,
 ) {
-    val density = LocalDensity.current
-    val panelTop = anchorBounds?.let {
-        with(density) { it.bottom.toDp() } + 8.dp
-    } ?: 64.dp
-    val items = listOf(
-        TipBubbleItem(
-            label = stringResource(R.string.storage_mode),
-            text = stringResource(R.string.storage_mode_summary),
-        ),
-        TipBubbleItem(
-            label = stringResource(R.string.auto_transfer_new_media),
-            text = stringResource(R.string.auto_transfer_new_media_summary),
-        ),
-        TipBubbleItem(
-            label = stringResource(R.string.defer_transfer_start),
-            text = stringResource(R.string.defer_transfer_start_summary),
-        ),
-        TipBubbleItem(
-            label = stringResource(R.string.collapse_burst_photos),
-            text = stringResource(R.string.collapse_burst_photos_summary),
-        ),
-    )
-    AnchorPopup(
+    val sections = buildList {
+        add(TipBubbleSection(stringResource(R.string.settings_help_transfer), listOf(
+            settingsHelpItem(R.string.transfer_directory, R.string.settings_help_directory),
+            settingsHelpItem(R.string.storage_mode, R.string.storage_mode_summary),
+            settingsHelpItem(R.string.auto_transfer_new_media, R.string.auto_transfer_new_media_summary),
+            settingsHelpItem(R.string.defer_transfer_start, R.string.defer_transfer_start_summary),
+        )))
+        add(TipBubbleSection(stringResource(R.string.settings_help_photos), listOf(
+            settingsHelpItem(R.string.columns, R.string.settings_help_columns),
+            settingsHelpItem(R.string.collapse_burst_photos, R.string.collapse_burst_photos_summary),
+            settingsHelpItem(R.string.photo_interaction, R.string.settings_help_interaction),
+            settingsHelpItem(R.string.photo_loading_range, R.string.settings_help_loading_range),
+        )))
+        if (showPhotoEffects) add(TipBubbleSection(stringResource(R.string.settings_help_effects), listOf(
+            settingsHelpItem(R.string.settings_help_effects_switch, R.string.settings_help_effects_master),
+            settingsHelpItem(R.string.photo_effects_open_editor, R.string.settings_help_effects_editor),
+        )))
+        add(TipBubbleSection(stringResource(R.string.settings_help_appearance), listOf(
+            settingsHelpItem(R.string.light_dark_mode, R.string.settings_help_theme),
+            settingsHelpItem(R.string.language, R.string.settings_help_language),
+            settingsHelpItem(R.string.button_style, R.string.settings_help_skin),
+            settingsHelpItem(R.string.haptic_feedback, R.string.settings_help_haptics),
+            settingsHelpItem(R.string.keep_screen_on, R.string.settings_help_screen),
+        )))
+        add(TipBubbleSection(stringResource(R.string.settings_help_more), buildList {
+            if (!isPro) add(settingsHelpItem(R.string.unlock_pro, R.string.settings_help_pro))
+            if (showRenewal) add(settingsHelpItem(R.string.renew_action, R.string.settings_help_renew))
+            add(settingsHelpItem(R.string.check_update, R.string.settings_help_update))
+            if (isPro) add(settingsHelpItem(R.string.settings_view_code, R.string.settings_help_switch_device))
+            add(settingsHelpItem(R.string.feedback, R.string.settings_help_feedback))
+        }))
+    }
+    TipGuideBubble(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
-        panelModifier = Modifier
-            .padding(start = 18.dp, end = 18.dp, top = panelTop)
-            .widthIn(min = 280.dp, max = 360.dp),
         panelAlignment = Alignment.TopStart,
-        shape = RoundedCornerShape(18.dp),
-        dim = false,
-    ) { _ ->
-        TipBubbleContent(
-            title = stringResource(R.string.settings_help_title),
-            items = items,
-        )
-    }
+        title = stringResource(R.string.settings_help_title),
+        sections = sections,
+        introduction = stringResource(R.string.settings_help_wheels),
+    )
 }
+
+@Composable
+private fun settingsHelpItem(labelRes: Int, textRes: Int) = TipBubbleItem(
+    text = stringResource(textRes), label = stringResource(labelRes),
+)
 
 @Composable
 private fun PhotoEffectSummaryItem(

@@ -52,6 +52,29 @@ class RemoteToolLayoutTest {
     }
 
     @Test
+    fun retiredRecorderIsIgnoredWithoutResettingEitherModesLayout() {
+        val values = mutableMapOf<String, Any>()
+        val prefs = preferences(values)
+        for (movie in listOf(false, true)) {
+            val mode = if (movie) "movie" else "photo"
+            val saved = RemoteTool.regular.filter { it.availableIn(movie) }.reversed()
+            val savedIds = saved.map { it.id }.toMutableList().apply { add(3, "record") }
+            val hidden = setOf(RemoteTool.FPS.id, RemoteTool.PICTURE_CONTROL.id)
+            values["remote_tool_order_$mode"] = savedIds.joinToString(",")
+            values["remote_hidden_tools_$mode"] = hidden + "record"
+            values["remote_picture_control_placement_v1_$mode"] = true
+
+            repeat(2) {
+                val layout = RemoteToolLayout(prefs, movie) { fail("Loading must not toggle a tool") }
+                assertEquals(saved, layout.order)
+                assertEquals(hidden, layout.hiddenTools.map { it.id }.toSet())
+                assertEquals(saved.filterNot { it.id in hidden }, layout.shownTools)
+                assertTrue(RemoteTool.pinned.all(layout::visible))
+            }
+        }
+    }
+
+    @Test
     fun fewVisibleToolsPlacePresetAtTheEndWithoutDuplicates() {
         val hidden = RemoteTool.regular.filterNot { it == RemoteTool.HD }.map { it.id }.toSet()
         val layout = RemoteToolLayout(preferences(mutableMapOf(

@@ -18,6 +18,8 @@
     <string name="picture_control_file_read_failed">檔案讀取失敗</string>
     <string name="picture_control_file_invalid">NP3 檔案無效</string>
     <string name="picture_control_file_unsupported">暫不支援此預設</string>
+    <string name="picture_control_camera_preset_unsupported">此機型不支援此預設</string>
+    <string name="picture_control_movie_bank_unsupported">此機型暫不支援錄影預設</string>
     <string name="picture_control_flexible_color_unsupported">暫不支援靈活顏色預設</string>
     <string name="picture_control_read_timeout">讀取逾時</string>
     <string name="picture_control_slots_title">機內預設</string>

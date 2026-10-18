@@ -140,15 +140,15 @@
     <string name="transfer_directory_required_hint">請先設定傳輸目錄</string>
     <string name="settings_help_title">設定說明</string>
     <string name="auto_transfer_new_media">即時傳輸</string>
-    <string name="auto_transfer_new_media_summary">依檔位自動加入新增檔案：全部、JPG、RAW（NEF 照片）或影片（MOV/MP4）。不影響既有任務與手動傳輸。</string>
+    <string name="auto_transfer_new_media_summary">依所選類型，將新拍攝的全部、JPG、RAW 或影片自動加入佇列。</string>
     <string name="defer_transfer_start">選完再傳</string>
-    <string name="defer_transfer_start_summary">加入傳輸佇列後不會立即開始傳輸，方便繼續預覽挑選照片。</string>
+    <string name="defer_transfer_start_summary">挑選加入佇列後不會立即傳輸，適合預覽大圖挑選照片時開啟。</string>
     <string name="organize_transfers_by_date">按天儲存</string>
     <string name="storage_mode">儲存方式</string>
     <string name="storage_mode_unified">統一儲存</string>
     <string name="storage_mode_by_day">按天儲存</string>
     <string name="storage_mode_by_type">按類儲存</string>
-    <string name="storage_mode_summary">可選擇統一儲存、按天儲存或按類儲存；照片效果圖仍保存在獨立資料夾中。</string>
+    <string name="storage_mode_summary">統一儲存，或依拍攝日期、檔案類型分資料夾；效果圖單獨儲存。</string>
     <string name="organize_transfers_by_date_summary">依拍攝日期分資料夾儲存；關閉後直接儲存到傳輸目錄。</string>
     <string name="cd_start_transfers">開始傳輸</string>
     <string name="cd_pause_after_current">傳完目前任務後暫停</string>
@@ -158,7 +158,7 @@
     <string name="choose_directory">選擇目錄</string>
     <string name="columns">每行數量</string>
     <string name="collapse_burst_photos">連拍成組</string>
-    <string name="collapse_burst_photos_summary">連拍會以合集狀態顯示，防止洗版。</string>
+    <string name="collapse_burst_photos_summary">將連拍合為一組，展開後逐張查看。</string>
     <string name="photo_interaction">照片操作</string>
     <string name="tap_transfer_hold_preview">點擊：傳輸\n長按：預覽</string>
     <string name="tap_preview_hold_transfer">點擊：預覽\n長按：傳輸</string>
@@ -268,9 +268,9 @@
     <string name="photo_effects_editor_title">效果</string>
     <string name="photo_effects_open_editor">編輯照片效果</string>
     <string name="photo_effects_info_title">照片效果說明</string>
-    <string name="photo_effects_info_description">傳輸原圖後，效果圖另存。</string>
-    <string name="photo_effects_gesture_hint">預覽：點擊放大 · 雙擊旋轉 · 長按對比濾鏡前後</string>
-    <string name="photo_effects_wheel_hint">撥輪：按住上下拖動可快速調整</string>
+    <string name="photo_effects_info_description">僅處理 JPG/JPEG，保留原圖，效果圖另存；RAW 和影片不生效。調整用於後續加入佇列的照片。</string>
+    <string name="photo_effects_gesture_hint">點擊放大，雙擊旋轉；長按對比調色前後。</string>
+    <string name="photo_effects_wheel_hint">上下拖動快速調整，也可點按切換。</string>
     <string name="photo_effects_full_chooser_hint">長按濾鏡撥輪可按分類選擇</string>
     <string name="photo_filter_off_option">無濾鏡</string>
     <string name="photo_filter_intensity_summary">%1$d%%</string>
@@ -384,8 +384,6 @@
     <string name="remote_transfer_busy_hint">傳輸進行中，監看可能卡頓</string>
     <string name="remote_rec_start_failed">無法開始錄影</string>
     <string name="remote_rec_stop_failed">無法停止錄影，請檢查相機後重試</string>
-    <string name="remote_rec_no_audio">無麥克風權限，錄製無聲音</string>
-    <string name="remote_rec_pro_only">端側錄製是高級版功能</string>
     <string name="remote_tap_focus_manual">請將相機切換到自動對焦後使用點按對焦</string>
     <string name="remote_tracking_area_mode_required">請將相機切換到自動區域 AF 或主體追蹤 AF 後重試</string>
     <string name="dev_panel_title">開發者</string>
@@ -409,13 +407,6 @@
     <string name="cd_remote_zebra">斑馬紋</string>
     <string name="cd_remote_level">水平儀</string>
     <string name="cd_remote_audio_levels">音訊電平</string>
-    <string name="cd_remote_rec_start">錄製</string>
-    <string name="cd_remote_rec_pause">暫停錄製</string>
-    <string name="cd_remote_rec_resume">恢復錄製</string>
-    <string name="cd_remote_rec_stop">停止錄製</string>
-    <string name="cd_remote_rec_saved">錄製已儲存</string>
-    <string name="remote_rec_saved_label">已儲存</string>
-    <string name="cd_remote_rec_toast_failed">錄製失敗</string>
 
     <!-- 授權/啟用 -->
     <string name="license">授權</string>
@@ -449,14 +440,12 @@
     <string name="compare_remote">遙控 · 監看</string>
     <string name="compare_remote_free">%1$d 分鐘/天</string>
     <string name="compare_unlimited">無限</string>
-    <string name="compare_on_device_recording">錄製監看畫面</string>
     <string name="compare_generate_effect_image">產生效果圖</string>
     <string name="compare_effect_filters">效果圖濾鏡</string>
     <string name="compare_effect_frames">效果圖邊框</string>
     <string name="compare_effect_watermark">效果圖浮水印</string>
     <string name="compare_watermark_free">預設浮水印</string>
     <string name="compare_watermark_pro">自由自訂</string>
-    <string name="compare_unavailable">不可用</string>
     <string name="compare_available">支援</string>
     <string name="compare_duration">時效</string>
     <string name="duration_free">長期免費</string>
@@ -558,9 +547,9 @@
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">開啟下載頁</string>
     <string name="local_photo_effects_entry">濾鏡·LUT·邊框·浮水印</string>
-    <string name="local_photo_effects_info_description">可多選照片，共用目前濾鏡、邊框和浮水印，效果圖另存。</string>
+    <string name="local_photo_effects_info_description">可多選照片，共用目前效果，效果圖另存。</string>
     <string name="local_photo_effects_exif_hint">邊框：截圖等無 EXIF 的圖片不顯示拍攝參數</string>
-    <string name="local_photo_effects_gesture_hint">預覽：左右滑動切換照片 · 長按對比濾鏡前後</string>
+    <string name="local_photo_effects_gesture_hint">點擊放大，左右滑動換圖；長按對比調色前後。</string>
     <string name="local_photo_multi_select">（可多選）</string>
     <string name="local_photo_reselect">重新選擇（%1$d）</string>
     <string name="local_photo_batch_generating">產生中</string>
@@ -656,7 +645,7 @@
     <string name="remote_parameters">曝光參數</string>
     <string name="remote_tool_dock">工具列</string>
     <string name="photo_lut_set_folder">設定LUT檔案目錄</string>
-    <string name="photo_lut_help">LUT：選擇含 .cube 檔案的資料夾，支援一層子資料夾作為分類。長按撥輪可按分類選擇 LUT 或更換資料夾。</string>
+    <string name="photo_lut_help">選擇含 .cube 檔案的目錄，支援一層子資料夾作為分類；長按 LUT 撥輪選擇或更換目錄。</string>
     <string name="photo_frame_width">邊框寬度</string>
     <string name="lut_uncategorized">未分類</string>
     <string name="lut_turn_off">關閉 LUT</string>

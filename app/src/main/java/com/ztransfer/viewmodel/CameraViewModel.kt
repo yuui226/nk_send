@@ -1138,7 +1138,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** Limits background thumbnail work to the newest actual shooting days. */
     fun setThumbnailLoadingDays(days: Int) {
         val previous = thumbnailLoadingDaysFlow.value
-        val normalized = days.takeIf { it == 1 || it == 3 || it == 5 } ?: 0
+        val normalized = PhotoLoadingRange.entries.firstOrNull { it.days == days }?.days
+            ?: PhotoLoadingRange.ALL.days
         thumbnailLoadingDaysFlow.value = normalized
         thumbnailFillQueue.updateLoadingRange(newestCaptureDaysRange(state.value.files, normalized))
         thumbnailFillWake.trySend(Unit)

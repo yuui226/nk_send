@@ -19,7 +19,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 
-/** Display-only transform. It never changes camera zoom or the frame delivered to the recorder. */
+/** Display-only transform. It never changes camera zoom or the source frame. */
 @Stable
 internal class ViewfinderViewport {
     var scale by mutableFloatStateOf(1f)

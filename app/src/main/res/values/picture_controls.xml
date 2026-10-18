@@ -18,6 +18,8 @@
     <string name="picture_control_file_read_failed">Could not read file</string>
     <string name="picture_control_file_invalid">Invalid NP3 file</string>
     <string name="picture_control_file_unsupported">Unsupported preset</string>
+    <string name="picture_control_camera_preset_unsupported">This camera does not support this preset</string>
+    <string name="picture_control_movie_bank_unsupported">Movie presets are not yet supported on this camera</string>
     <string name="picture_control_flexible_color_unsupported">Flexible Color presets are not supported yet</string>
     <string name="picture_control_read_timeout">Read timed out</string>
     <string name="picture_control_slots_title">Camera presets</string>

@@ -8,14 +8,21 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,18 +30,26 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -42,19 +57,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.ztransfer.ui.theme.AppTheme
+import com.ztransfer.R
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.SkinPreset
+import kotlinx.coroutines.delay
 
 private const val TIP_LIGHTBULB_TEXTURE_SEED = 0x1457A101
 
@@ -176,6 +201,7 @@ internal data class TipBubbleItem(
     val questionExplanation: String? = null,
     val questionSuffix: String? = null,
     val trailingText: String? = null,
+    val leading: (@Composable () -> Unit)? = null,
 )
 
 @Composable
@@ -183,6 +209,7 @@ private fun TipBubbleItemText(
     item: TipBubbleItem,
     textColor: Color,
     fontWeight: FontWeight?,
+    inlineLabel: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val hasQuestion = !item.questionExplanation.isNullOrBlank()
@@ -190,6 +217,12 @@ private fun TipBubbleItemText(
         mutableStateOf(false)
     }
     val textWithQuestion = buildAnnotatedString {
+        if (inlineLabel && !item.label.isNullOrBlank()) {
+            withStyle(SpanStyle(color = colors.onBackground, fontWeight = FontWeight.SemiBold)) {
+                append(item.label)
+            }
+            append("  ")
+        }
         append(item.text)
         if (hasQuestion) {
             // Keep the help button attached to the preceding phrase. A regular space lets the
@@ -267,6 +300,147 @@ private fun TipBubbleItemText(
                 color = textColor,
                 modifier = Modifier.padding(top = 8.dp),
             )
+        }
+    }
+}
+
+internal data class TipBubbleSection(val title: String, val items: List<TipBubbleItem>)
+
+/** Shared anchored shell for settings and monitor guides. */
+@Composable
+internal fun TipGuideBubble(
+    anchorBounds: Rect?,
+    title: String,
+    sections: List<TipBubbleSection>,
+    onDismiss: () -> Unit,
+    introduction: String? = null,
+    parentTopInset: Dp = 0.dp,
+    panelAlignment: Alignment = Alignment.TopEnd,
+) {
+    val density = LocalDensity.current
+    val panelTop = anchorBounds?.let {
+        with(density) { it.bottom.toDp() } - parentTopInset + 8.dp
+    } ?: 64.dp
+    AnchorPopup(
+        anchorBounds = anchorBounds,
+        onDismiss = onDismiss,
+        panelModifier = Modifier
+            .padding(start = 18.dp, end = 18.dp, top = panelTop, bottom = 18.dp)
+            .navigationBarsPadding()
+            .widthIn(min = 260.dp, max = 420.dp)
+            .heightIn(max = 560.dp),
+        panelAlignment = panelAlignment,
+        shape = RoundedCornerShape(18.dp),
+        dim = false,
+    ) { close ->
+        TipBubbleGuide(title, sections, close, introduction = introduction)
+    }
+}
+
+/** Show one guide section at a time; keep the title and close action visible while reading. */
+@Composable
+internal fun TipBubbleGuide(
+    title: String,
+    sections: List<TipBubbleSection>,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    introduction: String? = null,
+) {
+    val colors = AppTheme.colors
+    var expandedSection by rememberSaveable(title) { mutableStateOf(sections.firstOrNull()?.title) }
+    Column(modifier.padding(horizontal = 18.dp).padding(top = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Lightbulb, null, tint = colors.accentOrange, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                color = colors.onBackground, modifier = Modifier.weight(1f).semantics { heading() })
+            IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Close, stringResource(R.string.cd_close),
+                    tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            }
+        }
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+            .padding(top = 6.dp, bottom = 18.dp)) {
+            introduction?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                Spacer(Modifier.height(14.dp))
+            }
+            sections.forEachIndexed { index, section ->
+                if (index > 0) Spacer(Modifier.height(4.dp))
+                key(section.title) {
+                    TipGuideSection(section, expandedSection == section.title) {
+                        expandedSection = section.title.takeUnless { it == expandedSection }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun TipGuideSection(section: TipBubbleSection, expanded: Boolean, onToggle: () -> Unit) {
+    val colors = AppTheme.colors
+    val reveal = remember { BringIntoViewRequester() }
+    var revealRequested by remember { mutableStateOf(false) }
+    val arrowRotation = animateFloatAsState(if (expanded) 180f else 0f,
+        tween(220, easing = FastOutSlowInEasing), label = "guideSectionArrow")
+    val actionLabel = stringResource(if (expanded) R.string.cd_collapse else R.string.cd_expand)
+    // Reveal the selected heading after both height animations settle. Targeting
+    // the heading also works when large text makes the section taller than the viewport.
+    // Initial opening never triggers a scroll.
+    LaunchedEffect(expanded, revealRequested) {
+        if (expanded && revealRequested) {
+            delay(240)
+            reveal.bringIntoView()
+            revealRequested = false
+        }
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .bringIntoViewRequester(reveal)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (expanded) colors.accentBlue.copy(alpha = 0.07f) else Color.Transparent)
+                .clickable(role = Role.Button, onClickLabel = actionLabel) {
+                    revealRequested = !expanded
+                    onToggle()
+                }
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(section.title, style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (expanded) colors.accentBlue else colors.onBackground,
+                modifier = Modifier.weight(1f).semantics { heading() })
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Default.KeyboardArrowDown, null, tint = colors.onSurfaceVariant,
+                modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = arrowRotation.value })
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) +
+                fadeIn(tween(180)),
+            exit = shrinkVertically(tween(240, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) +
+                fadeOut(tween(120)),
+        ) {
+            Column(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 12.dp)) {
+                section.items.forEach { item ->
+                    Spacer(Modifier.height(10.dp))
+                    if (item.leading != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top) {
+                            item.leading.invoke()
+                            Box(Modifier.weight(1f)) {
+                                TipBubbleItemText(item, colors.onSurfaceVariant, null, inlineLabel = true)
+                            }
+                        }
+                    } else {
+                        TipBubbleItemText(item, colors.onSurfaceVariant, null, inlineLabel = true)
+                    }
+                }
+            }
         }
     }
 }

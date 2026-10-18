@@ -58,12 +58,10 @@ private class ToolDragState {
 internal fun ApplyRemoteToolLayout(
     layout: RemoteToolLayout,
     onVisible: (RemoteTool, Boolean) -> Unit,
-    fixedRecorder: Boolean = false,
 ) {
     val currentOnVisible by rememberUpdatedState(onVisible)
-    LaunchedEffect(layout, fixedRecorder) {
-        layout.hiddenTools.filterNot { fixedRecorder && it == RemoteTool.RECORD }
-            .forEach { currentOnVisible(it, false) }
+    LaunchedEffect(layout) {
+        layout.hiddenTools.forEach { currentOnVisible(it, false) }
     }
 }
 
@@ -167,10 +165,6 @@ private fun RemoteToolBarContent(
                                 modifier = Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp)
                                     .size(14.dp).background(colors.surface, CircleShape).padding(1.dp))
                         }
-                    } else if (tool == RemoteTool.RECORD) {
-                        // 录制胶囊需要在录制时扩展到相邻槽位；其他工具始终占用
-                        // 一个固定槽位，管理模式加入隐藏项时不会重新测量整行。
-                        button(tool)
                     } else {
                         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                             button(tool)
@@ -197,8 +191,8 @@ private fun AnimatedToolSlot(
 ) {
     val slot = state.slots[id]
     val dragging = tool != null && state.dragging == tool
-    // 录制胶囊展开、管理模式显示隐藏项都会改变后续槽位的位置。保留
-    // animateOffsetAsState 的上一个目标，即使不在编辑模式也能让受影响按钮
+    // 管理模式显示隐藏项会改变后续槽位的位置。保留 animateOffsetAsState
+    // 的上一个目标，即使不在编辑模式也能让受影响按钮
     // 平滑换位/换行；首帧 slot 为空时不创建动画，避免工具栏入场从左上角飞入。
     val position = if (slot != null) animateOffsetAsState(
         if (dragging) state.topLeft else slot.topLeft,

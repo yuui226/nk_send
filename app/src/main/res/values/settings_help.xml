@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_help_transfer">Transfers</string>
+    <string name="settings_help_photos">Photo list</string>
+    <string name="settings_help_effects">Photo effects</string>
+    <string name="settings_help_appearance">Appearance &amp; controls</string>
+    <string name="settings_help_more">Version &amp; support</string>
+    <string name="settings_help_wheels">Tap to change an option. Wheels with more choices also support dragging; release to apply.</string>
+    <string name="settings_help_directory">Choose where to save photos, RAW files, and videos.</string>
+    <string name="settings_help_columns">Set how many photos appear in each row.</string>
+    <string name="settings_help_interaction">Swap tap and hold actions for previewing and transferring.</string>
+    <string name="photo_loading_range">Photo range</string>
+    <string name="settings_help_loading_range">Count only dates with photos. For example, 5 days loads the five most recent dates with photos, skipping days with no photos.</string>
+    <string name="settings_help_effects_switch">Photo effects switch</string>
+    <string name="settings_help_effects_master">Control photo effect generation. Turning this off keeps your settings.</string>
+    <string name="settings_help_effects_editor">Tap the card to edit. With the photo effects switch on, you can also open the editor from a JPG preview in the photo list.</string>
+    <string name="settings_help_theme">Follow the system, or always use light or dark mode.</string>
+    <string name="settings_help_language">Follow the system, or choose an app language.</string>
+    <string name="settings_help_skin">Change the material and appearance of buttons.</string>
+    <string name="settings_help_haptics">Turn vibration feedback on or off.</string>
+    <string name="settings_help_screen">Keep the screen on while using the app.</string>
+    <string name="settings_help_pro">View Pro features and activate a license.</string>
+    <string name="settings_help_renew">Extend your Pro subscription.</string>
+    <string name="settings_help_update">Check for and download a newer version.</string>
+    <string name="settings_help_switch_device">Copy your activation code. Activating on a new device returns this one to the free edition.</string>
+    <string name="settings_help_feedback">Copy the support QQ number.</string>
+    <string name="photo_effects_help_use">Preview &amp; output</string>
+    <string name="photo_effects_help_color">Color</string>
+    <string name="photo_effects_help_decoration">Frame &amp; watermark</string>
+    <string name="photo_effects_help_shortcuts">Quick controls</string>
+    <string name="help_preview_label">Preview</string>
+    <string name="help_favorites_label">Favorites</string>
+    <string name="help_wheels_label">Wheels</string>
+    <string name="photo_effects_help_filters">Use a filter or a LUT, with adjustable strength. Hold the filter wheel to browse categories.</string>
+    <string name="photo_effects_help_lut_settings">Adjust strength, contrast, saturation, highlights, and shadows.</string>
+    <string name="photo_effects_help_frame">Choose a style. Open frame settings to adjust width, background, and shooting information.</string>
+    <string name="photo_effects_help_watermark">Pro supports custom text or a logo, with adjustable style, position, and opacity.</string>
+    <string name="photo_effects_help_modules">Manage modules at the top right. Hiding a module also turns its effect off.</string>
+    <string name="photo_effects_help_favorites">Tap the star to save a favorite and place it first. Frame favorites also remember the watermark style.</string>
+</resources>

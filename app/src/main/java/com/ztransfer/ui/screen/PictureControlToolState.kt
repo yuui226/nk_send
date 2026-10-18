@@ -24,6 +24,17 @@ internal class PictureControlToolState(val folders: PictureControlFolderState) {
     var closeRequested by mutableStateOf(false)
     var anchor by mutableStateOf<LayoutCoordinates?>(null)
     var report by mutableStateOf("")
+        private set
+    private val reports = PictureControlReports.History()
+    fun beginReport(kind: PictureControlReports.Kind): PictureControlReports.Ticket = reports.begin(kind)
+    fun finishReport(ticket: PictureControlReports.Ticket, text: String) {
+        reports.finish(ticket, text)
+        report = reports.text()
+    }
+    fun restoreReports(saved: Map<PictureControlReports.Kind, String>) {
+        reports.restore(saved)
+        report = reports.text()
+    }
     var loading by mutableStateOf(false)
     var presets by mutableStateOf<Result<List<BuiltInPictureControl>>?>(null)
         internal set
@@ -89,13 +100,15 @@ internal fun rememberPictureControlToolState(
             runCatching { builtInPictureControls(services.context.assets) }
         }
         if (!BuildConfig.DEBUG) return@LaunchedEffect
-        val initialReport = state.report
         val saved = withContext(Dispatchers.IO) {
-            runCatching { PictureControlReports.latest(services.context.filesDir) }.getOrNull()
-                ?: services.context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
+            val reports = runCatching { PictureControlReports.latest(services.context.filesDir) }.getOrDefault(emptyMap())
+            if (reports.isNotEmpty()) reports else {
+                val legacy = services.context.getSharedPreferences("remote_diagnostics", Context.MODE_PRIVATE)
                     .getString("picture_control_report_v1", null)
+                if (legacy.isNullOrBlank()) emptyMap() else mapOf(PictureControlReports.Kind.OPERATION to legacy)
+            }
         }
-        if (!saved.isNullOrBlank() && state.report == initialReport) state.report = saved
+        state.restoreReports(saved)
     }
     return state
 }

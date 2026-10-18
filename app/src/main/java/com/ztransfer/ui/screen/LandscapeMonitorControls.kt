@@ -40,7 +40,6 @@ internal fun LandscapeMonitorControls(
     backButton: @Composable (Boolean) -> Unit,
     dispButton: @Composable () -> Unit,
     shutter: @Composable (Float) -> Unit,
-    localRecorder: @Composable () -> Unit,
     reviewButton: @Composable (Float) -> Unit = {},
     parameter: @Composable (Int, Modifier) -> Unit,
     tool: @Composable (RemoteTool, Int) -> Unit,
@@ -159,13 +158,6 @@ internal fun LandscapeMonitorControls(
                 Modifier.blockMonitorPanelInput { dockOpen }) { shutter(diameter) }
         }
     }
-    // Horizontal expansion stays in the bottom row, beside rotation.
-    val localSlot: @Composable () -> Unit = {
-        Box(Modifier.height(36.dp), contentAlignment = Alignment.CenterStart) {
-            MonitorDockLayer(panelProgress, dock = false,
-                Modifier.blockMonitorPanelInput { dockOpen }) { localRecorder() }
-        }
-    }
     val dispSlot: @Composable () -> Unit = {
         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
             MonitorDockLayer(panelProgress, dock = false,
@@ -201,7 +193,6 @@ internal fun LandscapeMonitorControls(
                 Box(Modifier.align(if (!layout.bottomControls && layout.columns == 2)
                     Alignment.TopCenter else Alignment.TopEnd)) { captureSlot(layout.shutterSize) }
             }
-            Box(Modifier.align(Alignment.BottomStart).padding(start = 44.dp)) { localSlot() }
         }
     }
     if (layout.bottomControls) {
@@ -225,7 +216,7 @@ internal fun LandscapeMonitorControls(
                 Spacer(Modifier.height((layout.footerHeight + layout.captureLift).dp))
             }
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) { captureCluster() }
-            // Dock owns all space below navigation, including the capture/recorder footer.
+            // Dock owns all space below navigation, including the capture footer.
             Box(Modifier.align(Alignment.TopEnd).width(layout.controls.width.dp)
                 .fillMaxHeight().padding(top = 40.dp)) { dockContent() }
             header()

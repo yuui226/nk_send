@@ -6,7 +6,6 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.SystemClock
 import android.content.Intent
@@ -19,12 +18,9 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.MainActivity
 import com.ztransfer.ui.theme.ZTransferTheme
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import com.ztransfer.recorder.RecordingSink
-import com.ztransfer.recorder.ViewfinderRecorder
 import java.io.File
 
-/** Real Android preferences, image sampling and MediaCodec/Muxer verification. */
+/** Real Android preferences and image sampling verification. */
 class RemoteToolsInstrumentation : Instrumentation() {
     private var visual = false
     override fun onCreate(arguments: Bundle?) {
@@ -37,10 +33,8 @@ class RemoteToolsInstrumentation : Instrumentation() {
         try {
             preferences()
             analysis()
-            recording(1f, false)
-            recording(1.5f, true)
             if (visual) renderOverlays()
-            result.putString("result", "PASS: photo/movie layout isolation and restoration, audio availability, hidden effects, stable order, fixed tools, shared throttled analysis, luminance/waveform geometry, real MP4 de-squeeze and paused finalization")
+            result.putString("result", "PASS: photo/movie layout isolation and restoration, audio availability, hidden effects, stable order, fixed tools, shared throttled analysis, luminance/waveform geometry")
             finish(Activity.RESULT_OK, result)
         } catch (error: Throwable) {
             result.putString("failure", error.stackTraceToString())
@@ -199,38 +193,5 @@ class RemoteToolsInstrumentation : Instrumentation() {
         check(WaveformMode.OFF.next() == WaveformMode.LUMA && WaveformMode.LUMA.next() == WaveformMode.RGB && WaveformMode.RGB.next() == WaveformMode.OFF)
         red.recycle()
         source.recycle()
-    }
-    private fun recording(factor: Float, paused: Boolean) {
-        val dir = File(targetContext.cacheDir, "remote-recording-$factor").apply { mkdirs() }
-        val bitmap = Bitmap.createBitmap(320, 240, Bitmap.Config.ARGB_8888)
-        bitmap.eraseColor(Color.rgb(128, 128, 128))
-        // A gray source must remain gray even when false-color analysis is calculated alongside it.
-        val recorder = ViewfinderRecorder(RecordingSink.AppDir(dir), 320, 240, desqueezeMultiplier = factor)
-        check(recorder.start())
-        val base = SystemClock.elapsedRealtimeNanos()
-        repeat(24) { index ->
-            analyzeMonitorFrame(bitmap, true, true)
-            check(recorder.encodeFrame(bitmap.asImageBitmap(), base + index * 33_333_333L, factor))
-        }
-        // A live HD-resolution change must not fail or change the file geometry.
-        val large = Bitmap.createScaledBitmap(bitmap, 640, 480, true)
-        repeat(6) { check(recorder.encodeFrame(large.asImageBitmap(), base + (24 + it) * 33_333_333L, factor)) }
-        if (paused) recorder.pause()
-        val file = File(dir, checkNotNull(recorder.stop()))
-        check(!recorder.isRecording && !recorder.isPaused && file.length() > 1000)
-        MediaMetadataRetriever().use { reader ->
-            reader.setDataSource(file.absolutePath)
-            check(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() == (320 * factor).toInt())
-            check(reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT) == "240")
-            val frame = checkNotNull(reader.getFrameAtTime(0))
-            for (x in listOf(5, frame.width / 2, frame.width - 6)) {
-                val pixel = frame.getPixel(x, frame.height / 2)
-                check(kotlin.math.abs(Color.red(pixel) - Color.green(pixel)) < 8)
-                check(kotlin.math.abs(Color.blue(pixel) - Color.green(pixel)) < 8)
-                check(Color.green(pixel) in 90..165) // no letterbox or false-color tint
-            }
-            frame.recycle()
-        }
-        bitmap.recycle(); large.recycle(); file.delete()
     }
 }

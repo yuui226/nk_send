@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_help_transfer">傳輸</string>
+    <string name="settings_help_photos">照片列表</string>
+    <string name="settings_help_effects">照片效果</string>
+    <string name="settings_help_appearance">外觀與操作</string>
+    <string name="settings_help_more">版本與回饋</string>
+    <string name="settings_help_wheels">點按切換選項；多檔撥輪可上下拖動，放開生效。</string>
+    <string name="settings_help_directory">選擇照片、RAW 和影片的儲存資料夾。</string>
+    <string name="settings_help_columns">調整照片列表每行顯示的數量。</string>
+    <string name="settings_help_interaction">切換點擊與長按的預覽、傳輸操作。</string>
+    <string name="photo_loading_range">照片載入範圍</string>
+    <string name="settings_help_loading_range">依有照片的日期計數。選「5日」會載入最近 5 個有照片的日期，沒拍照的日子不計入。</string>
+    <string name="settings_help_effects_switch">照片效果開關</string>
+    <string name="settings_help_effects_master">控制是否產生效果圖；關閉後會保留參數。</string>
+    <string name="settings_help_effects_editor">點擊卡片編輯；照片效果開關開啟後，也可從照片列表的 JPG 大圖預覽進入。</string>
+    <string name="settings_help_theme">跟隨系統，或固定使用深色、淺色。</string>
+    <string name="settings_help_language">跟隨系統，或選擇應用程式語言。</string>
+    <string name="settings_help_skin">更換按鈕的外觀材質。</string>
+    <string name="settings_help_haptics">開啟或關閉操作時的震動。</string>
+    <string name="settings_help_screen">使用 App 時保持螢幕亮起。</string>
+    <string name="settings_help_pro">查看進階版權益並啟用。</string>
+    <string name="settings_help_renew">延長進階版有效期。</string>
+    <string name="settings_help_update">檢查並下載新版本。</string>
+    <string name="settings_help_switch_device">複製啟用碼，在新裝置啟用後本機恢復免費版。</string>
+    <string name="settings_help_feedback">複製客服 QQ 號碼。</string>
+    <string name="photo_effects_help_use">預覽與儲存</string>
+    <string name="photo_effects_help_color">調色</string>
+    <string name="photo_effects_help_decoration">邊框與浮水印</string>
+    <string name="photo_effects_help_shortcuts">快捷操作</string>
+    <string name="help_preview_label">預覽</string>
+    <string name="help_favorites_label">收藏</string>
+    <string name="help_wheels_label">撥輪</string>
+    <string name="photo_effects_help_filters">濾鏡與 LUT 二選一，可調強度；長按濾鏡撥輪按分類選擇。</string>
+    <string name="photo_effects_help_lut_settings">調整濃度、對比度、飽和度、高光和陰影。</string>
+    <string name="photo_effects_help_frame">選擇樣式；點邊框設定調整寬度、背景和拍攝資訊。</string>
+    <string name="photo_effects_help_watermark">進階版可自訂文字或 Logo，調整樣式、位置和透明度。</string>
+    <string name="photo_effects_help_modules">右上角管理模組；隱藏時同時停用對應效果。</string>
+    <string name="photo_effects_help_favorites">點星號收藏並置前；邊框收藏同時記住浮水印樣式。</string>
+</resources>
