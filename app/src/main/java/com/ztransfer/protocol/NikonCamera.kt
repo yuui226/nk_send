@@ -2100,6 +2100,8 @@ class NikonCamera(private val context: Context) {
         private set
     @Volatile internal var cachedDeviceInfo: LabDeviceInfo? = null
         private set
+    /** Discovered with read-only commands; never persisted across camera connections. */
+    @Volatile internal var pictureControlProtocol: NikonPictureControlProtocol? = null
     @Volatile private var responderGuid: String? = null
     @Volatile private var usbDeviceSerial: String? = null
     /** Stable PTP/IP body identity returned by InitCommandAck; available before DeviceInfo. */
@@ -2138,6 +2140,7 @@ class NikonCamera(private val context: Context) {
 
     private fun cacheDeviceInfo(data: ByteArray): LabDeviceInfo =
         parseDeviceInfo(data).also { info ->
+            pictureControlProtocol = null
             cachedDeviceInfo = info
             deviceManufacturer = info.manufacturer.trim().takeIf(String::isNotEmpty)
             deviceModel = info.model.trim().takeIf(String::isNotEmpty)
@@ -4958,6 +4961,7 @@ class NikonCamera(private val context: Context) {
 
     private fun closeQuietly() {
         sessionOpen = false
+        pictureControlProtocol = null
         try { usbPtp?.close() } catch (_: Exception) {}
         usbPtp = null
         connectedUsbManager = null

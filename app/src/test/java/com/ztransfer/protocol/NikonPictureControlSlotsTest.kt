@@ -47,9 +47,10 @@ class NikonPictureControlSlotsTest {
         var writeStarted: CompletableDeferred<Unit>? = null
         var finishWrite: CompletableDeferred<Unit>? = null
 
-        fun access(slot: Int, mode: Int = 0, body: String = "body", ops: Set<Int> = operations) =
+        fun access(slot: Int, mode: Int = 0, body: String = "body", ops: Set<Int> = operations,
+                   log: ((String) -> Unit)? = null) =
             NikonPictureControlAccess("$body\u0000picture-control-${if (mode == 0) "photo" else "movie"}",
-                slot, mode == 1, ops, { connected }, this, {})
+                slot, mode == 1, ops, { connected }, this, log)
         fun image() = banks.flatMap { bank -> bank.values.flatMap { listOf(it.defaults.copyOf(), it.current.copyOf()) } }
         fun assertOtherSlotsUnchanged(before: List<ByteArray>, mode: Int, slot: Int) {
             val after = image()
@@ -144,6 +145,35 @@ class NikonPictureControlSlotsTest {
         assertTrue(slots.getValue(203).hasOriginal)
         assertEquals(PictureControlSlotAvailability.UNSUPPORTED, slots.getValue(204).availability)
         assertFalse(camera.calls.any { it.op == 0x90CC && it.params[0] == 204 })
+    }
+
+    @Test fun everyUnreadableSlotRetainsRawResponseAndFailureInTheReadReport() = runBlocking {
+        val camera = Camera()
+        camera.banks[0].values.forEach { it.current = byteArrayOf(1, 2, 3) }
+        val lines = mutableListOf<String>()
+        val overview = camera.access(201, log = lines::add).overview(PictureControlBackupStore(temporary.newFolder()))
+        assertTrue(overview.slots.all { it.availability == PictureControlSlotAvailability.UNREADABLE })
+        for (slot in 201..209) {
+            assertTrue(lines.any { it.startsWith("out op=0x90CC params=$slot, 0, 0") })
+            assertTrue(lines.any { it.startsWith("in op=0x90CC params=$slot, 0, 0") && it.contains("data=010203") })
+            assertTrue(lines.any { it.startsWith("C${slot - 200} READ_FAILED:") })
+        }
+        assertFalse(camera.calls.any { it.op in setOf(0x90CD, 0x90CE, 0x1016) })
+    }
+
+    @Test fun readReportIdentifiesTheRequestEvenWhenTransportDisconnects() {
+        val camera = Camera()
+        val lines = mutableListOf<String>()
+        val access = NikonPictureControlAccess("body-photo", 201, false, operations, { true },
+            PictureControlTransport { code, params, data ->
+                if (code == 0x90CC) throw IOException("Connection lost")
+                camera.exchange(code, params, data)
+            }, lines::add)
+        assertThrows(IOException::class.java) {
+            runBlocking { access.overview(PictureControlBackupStore(temporary.newFolder())) }
+        }
+        assertEquals("out op=0x90CC params=201, 0, 0", lines.last())
+        assertFalse(lines.any { it.startsWith("C1 EMPTY") || it.contains("params=202") })
     }
 
     @Test fun everySlotInBothBanksCanBeReplacedTwiceAndRestoredWithoutTouchingTheOtherSeventeen() = runBlocking {

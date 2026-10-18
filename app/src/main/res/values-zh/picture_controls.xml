@@ -18,6 +18,8 @@
     <string name="picture_control_file_read_failed">文件读取失败</string>
     <string name="picture_control_file_invalid">NP3 文件无效</string>
     <string name="picture_control_file_unsupported">暂不支持此预设</string>
+    <string name="picture_control_camera_preset_unsupported">此机型不支持此预设</string>
+    <string name="picture_control_movie_bank_unsupported">此机型暂不支持录像预设</string>
     <string name="picture_control_flexible_color_unsupported">暂不支持灵活颜色预设</string>
     <string name="picture_control_read_timeout">读取超时</string>
     <string name="picture_control_slots_title">机内预设</string>

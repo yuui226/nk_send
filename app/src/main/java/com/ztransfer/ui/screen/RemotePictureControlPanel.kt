@@ -47,7 +47,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 private sealed interface SlotAction {
     val slot: Int
@@ -71,7 +70,9 @@ internal fun RemotePictureControlPanel(
     folders: PictureControlFolderState,
     presets: Result<List<BuiltInPictureControl>>?, onLoadingChanged: (Boolean) -> Unit,
     editingSlot: Int?, onEditingSlot: (Int?) -> Unit, onFolder: (Int) -> Unit,
-    isCurrentCamera: () -> Boolean, onReport: (String) -> Unit,
+    isCurrentCamera: () -> Boolean,
+    onStartReport: (PictureControlReports.Kind) -> PictureControlReports.Ticket,
+    onReport: (PictureControlReports.Ticket, String) -> Unit,
     onDismiss: () -> Unit, onFeedback: () -> Unit, onNotice: (String) -> Unit,
     onWriteBusyChanged: (Boolean) -> Boolean,
 ) {
@@ -81,41 +82,62 @@ internal fun RemotePictureControlPanel(
     var overview by remember { mutableStateOf<PictureControlOverview?>(null) }
     var loading by remember { mutableStateOf(camera != null) }
     var loadFailed by remember { mutableStateOf(false) }
+    var loadFailureResource by remember { mutableIntStateOf(R.string.picture_control_slots_read_failed) }
+    var initialLoadFinished by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<SlotAction?>(null) }
     var confirmation by remember(editingSlot) { mutableStateOf<PictureControlConfirmation?>(null) }
     val currentCamera by rememberUpdatedState(isCurrentCamera)
+    val startReport by rememberUpdatedState(onStartReport)
     val updateReport by rememberUpdatedState(onReport)
     val notice by rememberUpdatedState(onNotice)
     val allowed by rememberUpdatedState(canWrite)
     val busyChange by rememberUpdatedState(onWriteBusyChanged)
     val dismiss by rememberUpdatedState(onDismiss)
-    val opening = overview == null || presets == null
+    val opening = !initialLoadFinished || presets == null
     LaunchedEffect(opening) { onLoadingChanged(opening) }
     LaunchedEffect(closeRequested) { if (closeRequested && opening) dismiss() }
     if (opening) BackHandler { dismiss() }
 
-    suspend fun refresh(notifyFailure: Boolean = true) {
-        if (camera == null || !currentCamera()) {
-            loadFailed = true
-            loading = false
-            if (notifyFailure) notice(context.getString(R.string.picture_control_slots_read_failed))
-            return
-        }
+    suspend fun refresh(notifyFailure: Boolean = true, log: ((String) -> Unit)? = null) {
         loading = true
         try {
             val result = withContext(Dispatchers.IO) {
-                camera.readPictureControlOverview(context.filesDir, movie) { currentCamera() }
+                check(camera != null && currentCamera()) { "Camera session unavailable" }
+                camera.readPictureControlOverview(context.filesDir, movie, log) { currentCamera() }
             }
-            if (currentCamera()) { overview = result; loadFailed = false }
-            else loadFailed = true
+            check(currentCamera()) { "Camera session changed after reading slots" }
+            overview = result
+            loadFailed = false
         } catch (error: CancellationException) { throw error }
-        catch (_: Exception) { loadFailed = true }
+        catch (error: Exception) {
+            loadFailed = true
+            loadFailureResource = if (error is PictureControlMovieBankUnsupportedException)
+                R.string.picture_control_movie_bank_unsupported else R.string.picture_control_slots_read_failed
+            withContext(Dispatchers.IO) {
+                log?.invoke("READ FAILED: ${error.javaClass.simpleName}: ${error.message}; cause=${error.cause?.message}")
+            }
+        }
         finally { loading = false }
-        if (loadFailed && notifyFailure) notice(context.getString(R.string.picture_control_slots_read_failed))
+        if (loadFailed && notifyFailure) notice(context.getString(loadFailureResource))
     }
     LaunchedEffect(camera, movie) {
-        refresh()
-        if (loadFailed) dismiss()
+        val reportId = if (BuildConfig.DEBUG) startReport(PictureControlReports.Kind.OVERVIEW) else null
+        var journal: PictureControlReports.Journal? = null
+        try {
+            if (BuildConfig.DEBUG) withContext(Dispatchers.IO) {
+                journal = PictureControlReports.Journal(context.filesDir, PictureControlReports.Kind.OVERVIEW).also {
+                    it.append("Picture Control overview v1 ${java.time.OffsetDateTime.now()} app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) camera=${camera?.cachedDeviceInfo?.model ?: "unknown"} movie=$movie")
+                }
+            }
+            refresh(notifyFailure = !BuildConfig.DEBUG, log = journal?.let { it::append })
+        } catch (error: CancellationException) {
+            withContext(Dispatchers.IO + NonCancellable) { journal?.append("READ CANCELLED: panel closed or camera changed") }
+            throw error
+        } finally {
+            journal?.let { updateReport(checkNotNull(reportId), it.report()) }
+            initialLoadFinished = true
+        }
+        if (loadFailed && !BuildConfig.DEBUG) dismiss()
     }
 
     val act: (SlotAction) -> Unit = action@ { action ->
@@ -132,23 +154,17 @@ internal fun RemotePictureControlPanel(
         pending = action
         confirmation = null
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            val text = StringBuilder()
-            var journal: File? = null
-            var saveFailed = false
+            val reportId = if (BuildConfig.DEBUG) startReport(PictureControlReports.Kind.OPERATION) else null
+            var journal: PictureControlReports.Journal? = null
             var operationFailed = false
-            fun log(line: String) {
-                if (!BuildConfig.DEBUG) return
-                text.appendLine(line)
-                try { journal?.appendText(line + "\n", Charsets.UTF_8) }
-                catch (_: Exception) { saveFailed = true }
-            }
+            fun log(line: String) { journal?.append(line) }
+            val readLog: ((String) -> Unit)? = if (BuildConfig.DEBUG) ::log else null
             try {
                 withContext(Dispatchers.IO) {
                     if (BuildConfig.DEBUG) {
-                        try { journal = PictureControlReports.create(context.filesDir) }
-                        catch (_: Exception) { saveFailed = true }
+                        journal = PictureControlReports.Journal(context.filesDir, PictureControlReports.Kind.OPERATION)
                     }
-                    log("Picture Control slots v6 ${java.time.OffsetDateTime.now()} app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) movie=$movie target=C${action.slot - 200}")
+                    log("Picture Control slots v6 ${java.time.OffsetDateTime.now()} app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) camera=${camera.cachedDeviceInfo?.model ?: "unknown"} movie=$movie target=C${action.slot - 200}")
                     val change = when (action) {
                         is SlotAction.Write -> {
                             val file = when (val choice = action.choice) {
@@ -161,9 +177,9 @@ internal fun RemotePictureControlPanel(
                         is SlotAction.Activate -> PictureControlChange.Activate.also { log("action=activate") }
                         is SlotAction.Clear -> PictureControlChange.Clear.also { log("action=clear") }
                     }
-                    camera.changePictureControl(context.filesDir, action.slot, change, movie, { currentCamera() }, ::log)
+                    camera.changePictureControl(context.filesDir, action.slot, change, movie, { currentCamera() }, readLog)
                 }
-                refresh() // A failed refresh is separate from a successfully verified mutation.
+                refresh(log = readLog) // Keep this read in the operation's report, including failures.
                 // Return with the final names/width, rather than resizing again after the transition.
                 onEditingSlot(null)
             } catch (error: CancellationException) {
@@ -173,6 +189,8 @@ internal fun RemotePictureControlPanel(
                 operationFailed = true
                 val resource = when (error) {
                     is PictureControlExposureModeException -> R.string.picture_control_exposure_mode_required
+                    is PictureControlPresetUnsupportedException -> R.string.picture_control_camera_preset_unsupported
+                    is PictureControlMovieBankUnsupportedException -> R.string.picture_control_movie_bank_unsupported
                     is PictureControlReplacementException -> if (error.originalRestored)
                         R.string.picture_control_failed_restored else R.string.picture_control_check_slot
                     is PictureControlImportException -> when (error.reason) {
@@ -188,13 +206,13 @@ internal fun RemotePictureControlPanel(
                     log("FAILED: ${error.javaClass.simpleName}: ${error.message}; cause=${error.cause?.message}")
                 }
                 // Report the operation failure once, rather than replacing it with a refresh error.
-                refresh(notifyFailure = false)
+                refresh(notifyFailure = false, log = readLog)
                 notice(context.getString(resource, action.slot - 200))
             } finally {
-                updateReport(text.toString())
+                journal?.let { updateReport(checkNotNull(reportId), it.report()) }
                 pending = null
                 busyChange(false)
-                if (BuildConfig.DEBUG && saveFailed && !operationFailed) {
+                if (BuildConfig.DEBUG && journal?.saveFailed == true && !operationFailed) {
                     notice(context.getString(R.string.picture_control_report_save_failed))
                 }
             }
@@ -206,6 +224,20 @@ internal fun RemotePictureControlPanel(
     }
     val goBack: (() -> Unit)? = if (editingSlot != null) ({ back() }) else null
     // Match camera-tool menus: start the popup animation with real content, never error placeholders.
+    if (opening) return
+    if (BuildConfig.DEBUG && overview == null && loadFailed) {
+        RemoteChoicePopup(anchor, landscape, 220.dp, closeRequested, onDismiss) { _, closing ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(if (loadFailureResource == R.string.picture_control_movie_bank_unsupported)
+                    loadFailureResource else R.string.picture_control_slot_unreadable),
+                    color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.weight(1f))
+                PictureControlTestLogButton(report, !closing, onFeedback, onNotice)
+            }
+        }
+        return
+    }
     val loadedOverview = overview ?: return
     val loadedPresets = presets ?: return
     val density = LocalDensity.current

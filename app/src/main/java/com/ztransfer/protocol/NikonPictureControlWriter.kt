@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 internal class NikonPictureControlSlotState(val defaults: NikonPictureControlData, val current: NikonPictureControlData) {
     init {
         require(!defaults.isEmpty && !current.isEmpty && defaults.baseItem == current.baseItem)
+        require(defaults.format == current.format) { "Picture Control snapshot layouts differ" }
     }
     fun bytes(): ByteArray {
         val d = defaults.bytes(); val c = current.bytes()
@@ -23,18 +24,20 @@ internal class NikonPictureControlSlotState(val defaults: NikonPictureControlDat
             .putInt(0x31534350).putInt(d.size).putInt(c.size).put(d).put(c).array()
     }
     companion object {
-        fun fromDataset(slot: Int, data: ByteArray): NikonPictureControlSlotState {
-            val parsed = NikonPictureControlData.parseResponse(slot, 0x2001, data)
+        fun fromDataset(slot: Int, data: ByteArray,
+                        format: NikonPictureControlFormat = NikonPictureControlFormat.CLASSIC_Z): NikonPictureControlSlotState {
+            val parsed = NikonPictureControlData.parseResponse(slot, 0x2001, data, format)
             return NikonPictureControlSlotState(parsed, parsed)
         }
-        fun parse(slot: Int, bytes: ByteArray): NikonPictureControlSlotState {
+        fun parse(slot: Int, bytes: ByteArray,
+                  format: NikonPictureControlFormat = NikonPictureControlFormat.CLASSIC_Z): NikonPictureControlSlotState {
             require(bytes.size >= 12) { "Truncated slot snapshot" }
             val input = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
             require(input.int == 0x31534350) { "Unknown slot snapshot format" }
             val d = input.int; val c = input.int
-            require(d in setOf(36, 614) && c in setOf(36, 614) && input.remaining() == d + c)
+            require(format.supportsSize(d) && format.supportsSize(c) && input.remaining() == d + c)
             fun read(size: Int) = NikonPictureControlData.parseResponse(slot, 0x2001,
-                ByteArray(size).also(input::get))
+                ByteArray(size).also(input::get), format)
             return NikonPictureControlSlotState(read(d), read(c))
         }
     }
@@ -78,24 +81,19 @@ internal class NikonPictureControlAccess(
     private val sessionCheck: () -> Boolean,
     private val transport: PictureControlTransport,
     private val log: ((String) -> Unit)?,
+    val format: NikonPictureControlFormat = NikonPictureControlFormat.CLASSIC_Z,
 ) : PictureControlSlotAccess {
     init { require(slot in NIKON_PICTURE_CONTROL_SLOTS) { "Only C1–C9 are custom slots" } }
-    private val mode get() = if (movie) 1 else 0
-    private val property get() = if (movie) 0xD237 else 0xD200
+    private val property get() = format.selectionProperty(movie)
     private var selection: NikonPictureControlSelection? = null
     private var writePrepared = false
     private var selectionPrepared = false
-    private val writeOperations = setOf(0x1014, 0x1015, 0x1016, 0x90CC, 0x90CD, 0x90CE, 0x90CF)
+    private val writeOperations = setOf(0x1014, 0x1015, 0x1016, 0x90CC, format.writeOperation, 0x90CE, 0x90CF)
 
     override suspend fun checkSession() { check(sessionCheck()) { "Camera session changed" } }
 
     private suspend fun command(code: Int, params: IntArray, data: ByteArray? = null): ByteArray? {
-        checkSession()
-        if (data != null) log?.invoke("out op=0x%04X params=%s bytes=%d data=%s".format(code,
-            params.joinToString(), data.size, data.joinToString("") { "%02x".format(it) }))
-        val (rc, received) = transport.exchange(code, params, data)
-        log?.invoke("in op=0x%04X params=%s rc=0x%04X bytes=%d data=%s".format(code, params.joinToString(), rc,
-            received?.size ?: 0, received?.joinToString("") { "%02x".format(it) }.orEmpty()))
+        val (rc, received) = pictureControlExchange(transport, sessionCheck, log, code, params, data)
         check(rc == 0x2001) { "Picture Control op=0x%04X failed: 0x%04X".format(code, rc) }
         return received
     }
@@ -137,12 +135,17 @@ internal class NikonPictureControlAccess(
         check(writeOperations.all(operations::contains)) { "Camera does not advertise Picture Control editing" }
         prepareSelection()
         if (dataset != null) {
-            val parsed = NikonPictureControlData.parseResponse(slot, 0x2001, dataset)
+            val parsed = NikonPictureControlData.parseResponse(slot, 0x2001, dataset, format)
             check(parsed.baseItem in checkNotNull(selection).choices) { "Camera does not support this base Picture Control" }
             val base = readData(parsed.baseItem, 1)
             check(!base.isEmpty && base.baseItem == parsed.baseItem) { "Unexpected base Picture Control layout" }
-            validatePictureControlCapabilities(dataset,
-                requireNotNull(command(0x90CF, intArrayOf(parsed.baseItem, mode))))
+            val capabilities = requireNotNull(command(0x90CF, format.params(movie, parsed.baseItem)))
+            if (format == NikonPictureControlFormat.CLASSIC_Z) validatePictureControlCapabilities(dataset, capabilities)
+            else validateV2PictureControlCapabilities(dataset, capabilities)
+        } else if (format == NikonPictureControlFormat.LEGACY_V2) {
+            // Clear/restore also need the verified V2 command family for safe rollback.
+            validateV2PictureControlCapabilityLayout(requireNotNull(
+                command(0x90CF, format.params(movie, NIKON_PICTURE_CONTROL_STANDARD))))
         }
         writePrepared = true
     }
@@ -152,17 +155,26 @@ internal class NikonPictureControlAccess(
         check(setOf(0x1014, 0x1015, 0x90CC).all(operations::contains)) { "Picture Control reading is unavailable" }
         val descriptor = selectionDescriptor()
         val selected = readSelection().toInt()
+        log?.invoke("selection property=0x%04X writable=%s current=%d choices=%s".format(
+            property, descriptor.writable, selected, descriptor.choices.joinToString()))
         val slots = NIKON_PICTURE_CONTROL_SLOTS.map { item ->
             val hasOriginal = runCatching { backup.load(cameraIdentity, item) != null }.getOrDefault(false)
-            if (!descriptor.supportsSlot(item)) PictureControlSlotInfo(item, PictureControlSlotAvailability.UNSUPPORTED)
+            if (!descriptor.supportsSlot(item)) {
+                log?.invoke("C${item - 200} UNSUPPORTED: absent from selection descriptor")
+                PictureControlSlotInfo(item, PictureControlSlotAvailability.UNSUPPORTED)
+            }
             else try {
                 val current = readData(item, 0)
+                log?.invoke("C${item - 200} ${if (current.isEmpty) "EMPTY" else "OCCUPIED name=${current.name}"}")
                 PictureControlSlotInfo(item,
                     if (current.isEmpty) PictureControlSlotAvailability.EMPTY else PictureControlSlotAvailability.OCCUPIED,
                     current.name.takeUnless { current.isEmpty }, hasOriginal)
             } catch (error: CancellationException) { throw error }
             catch (error: IOException) { throw error } // Broken transport: do not issue eight more doomed reads.
-            catch (_: Exception) { PictureControlSlotInfo(item, PictureControlSlotAvailability.UNREADABLE, hasOriginal = hasOriginal) }
+            catch (error: Exception) {
+                log?.invoke("C${item - 200} READ_FAILED: ${error.javaClass.simpleName}: ${error.message}")
+                PictureControlSlotInfo(item, PictureControlSlotAvailability.UNREADABLE, hasOriginal = hasOriginal)
+            }
         }
         return PictureControlOverview(slots, selected,
             descriptor.writable && 0x1016 in operations,
@@ -171,7 +183,7 @@ internal class NikonPictureControlAccess(
 
     private suspend fun readData(item: Int, defaultFlag: Int): NikonPictureControlData =
         NikonPictureControlData.parseResponse(item, 0x2001,
-            command(0x90CC, intArrayOf(item, defaultFlag, mode)))
+            command(0x90CC, format.params(movie, item, defaultFlag)), format)
 
     override suspend fun readSlot(): ByteArray? {
         val current = readData(slot, 0)
@@ -182,8 +194,8 @@ internal class NikonPictureControlAccess(
 
     override fun matchesSlot(expected: ByteArray?, actual: ByteArray?): Boolean {
         if (expected == null || actual == null) return expected == null && actual == null
-        val wanted = NikonPictureControlSlotState.parse(slot, expected)
-        val received = NikonPictureControlSlotState.parse(slot, actual)
+        val wanted = NikonPictureControlSlotState.parse(slot, expected, format)
+        val received = NikonPictureControlSlotState.parse(slot, actual, format)
         // Z30 V1.20 returns all 614 bytes for Current, but only the 36-byte header
         // (CustomCurveFlag=0) for Default after accepting the same 614-byte registration.
         // Allow only that omission: the complete current curve and every scalar in both
@@ -192,25 +204,25 @@ internal class NikonPictureControlAccess(
         val wantedDefaults = wanted.defaults.bytes()
         val receivedDefaults = received.defaults.bytes()
         return wantedDefaults.contentEquals(receivedDefaults) ||
-            (wantedDefaults.size == 614 && receivedDefaults.size == 36 &&
+            (format == NikonPictureControlFormat.CLASSIC_Z && wantedDefaults.size == 614 && receivedDefaults.size == 36 &&
                 wantedDefaults[35] == 1.toByte() && receivedDefaults[35] == 0.toByte() &&
                 wantedDefaults.copyOfRange(0, 35).contentEquals(receivedDefaults.copyOfRange(0, 35)))
     }
 
     override suspend fun writeSlot(data: ByteArray) {
         check(writePrepared) { "Slot write was not prepared" }
-        val state = NikonPictureControlSlotState.parse(slot, data)
+        val state = NikonPictureControlSlotState.parse(slot, data, format)
         // ModifiedFlag=0 registers/replaces the preset, including a different base style.
-        command(0x90CD, intArrayOf(slot, 0, mode), state.defaults.bytes())
+        command(format.writeOperation, format.writeParams(movie, slot, 0), state.defaults.bytes())
         if (!state.current.bytes().contentEquals(state.defaults.bytes())) {
             // ModifiedFlag=1 restores adjustments without losing the registered defaults.
-            command(0x90CD, intArrayOf(slot, 1, mode), state.current.bytes())
+            command(format.writeOperation, format.writeParams(movie, slot, 1), state.current.bytes())
         }
     }
 
     override suspend fun clearSlot() {
         check(writePrepared) { "Slot deletion was not prepared" }
-        command(0x90CE, intArrayOf(slot, mode))
+        command(0x90CE, format.params(movie, slot))
     }
 
     private suspend fun readU16(prop: Int): Int {
@@ -229,28 +241,28 @@ internal class NikonPictureControlAccess(
 /** Keep one camera transaction for preflight, backup, mutation, verification and rollback. */
 internal suspend fun NikonCamera.changePictureControl(
     filesDir: File, slot: Int, change: PictureControlChange, movie: Boolean,
-    isCurrentCamera: () -> Boolean, log: (String) -> Unit,
+    isCurrentCamera: () -> Boolean, log: ((String) -> Unit)?,
 ) {
-    val dataset = (change as? PictureControlChange.Write)?.file?.encodeClassicPictureControl()
     withPictureControlAccess(filesDir, slot, movie, isCurrentCamera, log) { access, backup ->
         val replacement = PictureControlReplacement(backup)
         when (change) {
             is PictureControlChange.Write -> {
-                access.prepare(checkNotNull(dataset))
-                replacement.apply(access, NikonPictureControlSlotState.fromDataset(slot, dataset).bytes())
+                val dataset = change.file.encodePictureControl(access.format)
+                access.prepare(dataset)
+                replacement.apply(access, NikonPictureControlSlotState.fromDataset(slot, dataset, access.format).bytes())
             }
             PictureControlChange.Activate -> { access.prepareSelection(); replacement.activate(access) }
             PictureControlChange.Clear -> { access.prepare(); replacement.clear(access) }
             PictureControlChange.Restore -> { access.prepare(); replacement.restoreOriginal(access) }
         }
-        log("SUCCESS: C${slot - 200} operation and active selection verified")
+        log?.invoke("SUCCESS: C${slot - 200} operation and active selection verified")
     }
 }
 
 internal suspend fun NikonCamera.readPictureControlOverview(
-    filesDir: File, movie: Boolean, isCurrentCamera: () -> Boolean,
+    filesDir: File, movie: Boolean, log: ((String) -> Unit)? = null, isCurrentCamera: () -> Boolean,
 ): PictureControlOverview = withPictureControlAccess(filesDir, NIKON_PICTURE_CONTROL_SLOTS.first, movie,
-    isCurrentCamera, null, atomic = false) { access, backup -> access.overview(backup) }
+    isCurrentCamera, log, atomic = false) { access, backup -> access.overview(backup) }
 
 private suspend fun <T> NikonCamera.withPictureControlAccess(
     filesDir: File,
@@ -266,28 +278,42 @@ private suspend fun <T> NikonCamera.withPictureControlAccess(
     val identity = thumbnailCacheIdentity
     check(identity.substringAfterLast('\u0000') != "unknown-device") { "A stable camera identity is required for slot backups" }
     val backup = PictureControlBackupStore(File(filesDir, "picture_control_backups"))
-    val bankIdentity = "$identity\u0000picture-control-${if (movie) "movie" else "photo"}"
     log?.invoke("camera=${info.model} firmware=${info.deviceVersion} transport=$connectionType movie=$movie target=C${slot - 200}")
+    log?.let { logger ->
+        formatProbeCodeLines("DeviceInfo.operations", info.operations).forEach(logger)
+        formatProbeCodeLines("DeviceInfo.properties", info.props).forEach(logger)
+    }
     suspend fun runAccess(): T = withContext(Dispatchers.IO) {
+        val transport = PictureControlTransport { code, params, data ->
+            currentCoroutineContext().ensureActive()
+            suspend fun exchange() = withContext(NonCancellable) {
+                val oldTimeout = setCommandReadTimeout(5_000)
+                try {
+                    if (data == null) sendCmd(code, *params) else sendCmdWithData(code, data, *params)
+                    recvRespWithPayload()
+                } catch (error: IOException) {
+                    abortProtocolTransport()
+                    throw error
+                } finally { restoreCommandReadTimeout(oldTimeout) }
+            }
+            // Read-only enumeration yields the camera channel between complete PTP
+            // exchanges so monitor frames can proceed. Mutations remain fully atomic.
+            if (atomic) exchange() else withCameraTransaction(
+                CameraRequestKind.INTERACTIVE, "PICTURE_CONTROL_READ",
+            ) { exchange() }
+        }
+        val protocol = pictureControlProtocol ?: discoverPictureControlProtocol(
+            info.operations, info.props, transport, isCurrentCamera, movie, log,
+        ).also {
+            check(isCurrentCamera()) { "Camera session changed during protocol discovery" }
+            if (it.cacheable) pictureControlProtocol = it
+        }
+        log?.invoke("protocol=${protocol.format} movieSupported=${protocol.supportsMovie}")
+        protocol.requireMode(movie)
+        val format = protocol.format
+        val bankIdentity = "$identity\u0000picture-control-${if (format.movieBank(movie)) "movie" else "photo"}"
         val access = NikonPictureControlAccess(bankIdentity, slot, movie, info.operations, isCurrentCamera,
-            PictureControlTransport { code, params, data ->
-                currentCoroutineContext().ensureActive()
-                suspend fun exchange() = withContext(NonCancellable) {
-                    val oldTimeout = setCommandReadTimeout(5_000)
-                    try {
-                        if (data == null) sendCmd(code, *params) else sendCmdWithData(code, data, *params)
-                        recvRespWithPayload()
-                    } catch (error: IOException) {
-                        abortProtocolTransport()
-                        throw error
-                    } finally { restoreCommandReadTimeout(oldTimeout) }
-                }
-                // Read-only enumeration yields the camera channel between complete PTP
-                // exchanges so monitor frames can proceed. Mutations remain fully atomic.
-                if (atomic) exchange() else withCameraTransaction(
-                    CameraRequestKind.INTERACTIVE, "PICTURE_CONTROL_READ",
-                ) { exchange() }
-            }, log)
+            transport, log, format)
         block(access, backup)
     }
     return focusMutex.withLock {
