@@ -32,6 +32,9 @@ final class PhotoListViewModel: ObservableObject {
     static func evict(session: CameraSession) {
         sessionModels.removeValue(forKey: ObjectIdentifier(session))?.retire()
     }
+    static func suspend(session: CameraSession) {
+        sessionModels[ObjectIdentifier(session)]?.transportDidDisconnect()
+    }
     @Published private(set) var loadState: PhotoListLoadState = .idle
     @Published private(set) var sections: [PhotoDaySection] = []
     private(set) var previewFiles: [CameraFile] = []
@@ -93,12 +96,14 @@ final class PhotoListViewModel: ObservableObject {
     private var fillTask: Task<Void, Never>?
     private var fillResumeTask: Task<Void, Never>?
     private var fillWorkerActive = false
+    private var fillWorkerGeneration = 0
     private var previewPausedScan = false
     private var previewActive = false
     private var remoteActive = false
     private var remotePageOwners = 0
     private var remoteRefreshPending = false
     private var transferBusy = false
+    private(set) var transportAvailable = true
     private var newMediaHandler: (([CameraFile]) -> Void)?
     /// Queue retries may refer to files absent from the current photo list;
     /// index changes must publish even when transferredIDs stays unchanged.
@@ -255,7 +260,7 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
     func applyCatalogUpdate(_ files: [CameraFile]) async {
-        guard loadState == .loaded else { return }
+        guard transportAvailable, loadState == .loaded else { return }
         let generation = loadGeneration
         let oldByID = Dictionary(uniqueKeysWithValues: allFiles.map { ($0.id, $0) })
         let oldLogicalIDs = Set(allFiles.map(PublishedPhotoIdentity.init))
@@ -287,6 +292,7 @@ final class PhotoListViewModel: ObservableObject {
     /// outside the scanner so queue policy remains identical to Android's
     /// TransferViewModel and does not affect catalog ordering/backpressure.
     func setNewMediaHandler(_ handler: @escaping ([CameraFile]) -> Void) {
+        guard transportAvailable else { return }
         newMediaHandler = handler
     }
 
@@ -303,6 +309,22 @@ final class PhotoListViewModel: ObservableObject {
         catalogUpdatesTask?.cancel()
     }
 
+    /// A retained offline catalog is presentation/cache only. The replacement
+    /// CameraSession owns a new model; this old protocol owner never restarts.
+    /// Android CameraViewModel.onCameraTransportLost cancels fileLoadJob.
+    func transportDidDisconnect() {
+        guard transportAvailable else { return }
+        transportAvailable = false
+        loadGeneration &+= 1
+        loadTask?.cancel(); loadTask = nil
+        fillTask?.cancel(); fillTask = nil
+        fillResumeTask?.cancel(); fillResumeTask = nil
+        catalogUpdatesTask?.cancel(); catalogUpdatesTask = nil
+        ratingScanController.cancel()
+        newMediaHandler = nil
+        isLoadingFiles = false
+    }
+
     private func retire() {
         loadGeneration &+= 1
         transferIndexGeneration &+= 1
@@ -313,6 +335,7 @@ final class PhotoListViewModel: ObservableObject {
         ratingScanController.cancel()
         fillResumeTask?.cancel()
         fillResumeTask = nil
+        fillWorkerGeneration &+= 1
         fillWorkerActive = false
         catalogUpdatesTask?.cancel()
         catalogUpdatesTask = nil
@@ -322,7 +345,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     func load() {
-        guard scanCatalog != nil else { return }
+        guard transportAvailable, scanCatalog != nil else { return }
         guard case .idle = loadState else {
             // Returning from another workspace must not start a second scan.
             return
@@ -354,7 +377,7 @@ final class PhotoListViewModel: ObservableObject {
     /// Explicit refresh for non-STA owners. The list has no pull-to-refresh;
     /// repeated STA entry requests cannot replace the session's scan.
     func reload() async {
-        guard scanCatalog != nil else { return }
+        guard transportAvailable, scanCatalog != nil else { return }
         // STA has one session-owned scan. UI refreshes cannot replace its cursor.
         guard !sequentialLoading else { load(); return }
         loadGeneration &+= 1
@@ -372,7 +395,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private func reload(generation: Int, resumeSnapshot: PhotoScanSnapshot?, preserve: Bool? = nil) async {
-        guard generation == loadGeneration, let scanCatalog else { return }
+        guard transportAvailable, generation == loadGeneration, let scanCatalog else { return }
         // Android's fill collector is gated by hasCompletedFileScan. Cancel
         // the existing worker for refreshes too, otherwise an old worker can
         // issue GetThumb while this generation is enumerating handles.
@@ -380,6 +403,7 @@ final class PhotoListViewModel: ObservableObject {
         fillTask = nil
         fillResumeTask?.cancel()
         fillResumeTask = nil
+        fillWorkerGeneration &+= 1
         fillWorkerActive = false
         await thumbnailFillQueue.beginScan()
         loadingRangeScanStopped = false
@@ -706,6 +730,7 @@ final class PhotoListViewModel: ObservableObject {
 
     func resumeAfterPreview() {
         previewActive = false
+        guard transportAvailable else { return }
         updateRatingScanFromCurrentState()
         if sequentialLoading { wakeThumbnailFill(); return }
         guard !remoteActive else { return }
@@ -764,7 +789,7 @@ final class PhotoListViewModel: ObservableObject {
             await thumbnailFillQueue.updateLoadingRange(allFiles, range: allowed)
             await thumbnailFillQueue.wake()
             let widened = previous.days > 0 && (range.days == 0 || range.days > previous.days)
-            guard widened, loadingRangeScanStopped, hasCompletedFileScan,
+            guard transportAvailable, widened, loadingRangeScanStopped, hasCompletedFileScan,
                   self.scanCatalog != nil else { return }
             loadTask?.cancel()
             loadGeneration &+= 1
@@ -797,7 +822,7 @@ final class PhotoListViewModel: ObservableObject {
             ratingDays: ratingDays,
             photoLoadingDays: photoLoadingRange.days
         )
-        ratingScanController.update(input, enabled: enabled)
+        ratingScanController.update(input, enabled: enabled && transportAvailable)
     }
 
     private func updateRatingScanFromCurrentState() {
@@ -886,7 +911,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private func refreshAfterRemote() {
-        guard scanCatalog != nil else { return }
+        guard transportAvailable, scanCatalog != nil else { return }
         loadTask?.cancel()
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -1011,25 +1036,30 @@ final class PhotoListViewModel: ObservableObject {
     private func waitForSequentialChannel() async throws {
         while true {
             try Task.checkCancellation()
+            guard transportAvailable else { throw CancellationError() }
             if !transferBusy && !previewActive && !remoteActive, await canFill() { return }
             try await Task.sleep(for: .milliseconds(50))
         }
     }
 
     private func startThumbnailFillWorker() {
-        guard !thumbnailFillDiskBlocked else { return }
+        guard transportAvailable, !thumbnailFillDiskBlocked else { return }
         if fillWorkerActive {
             Task { await thumbnailFillQueue.wake() }
             return
         }
         fillWorkerActive = true
+        fillWorkerGeneration &+= 1
+        let generation = fillWorkerGeneration
         fillTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.fillWorkerActive = false }
+            defer {
+                if self.fillWorkerGeneration == generation { self.fillWorkerActive = false }
+            }
             while !Task.isCancelled {
-                guard !self.thumbnailFillDiskBlocked else { return }
+                guard self.transportAvailable, !self.thumbnailFillDiskBlocked else { return }
                 guard let polled = await thumbnailFillQueue.poll() else {
-                    await thumbnailFillQueue.waitForWake()
+                    guard await thumbnailFillQueue.waitForWake(), !Task.isCancelled else { return }
                     // Android promotes transient failures only after an external
                     // wake-up (network/session/foreground state), never in a
                     // hot loop. Keep the same retry boundary here.

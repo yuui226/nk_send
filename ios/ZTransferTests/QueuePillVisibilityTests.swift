@@ -2,6 +2,39 @@ import XCTest
 @testable import ZTransfer
 
 final class QueuePillVisibilityTests: XCTestCase {
+    func testRetryUsesDefaultSpringsAndRetainsExitWithoutPillScaleOrSlide() throws {
+        var motion = QueuePillVisibilityMotion(visible: false, delay: 0, style: .retry)
+        motion.setVisible(true)
+        motion.measure(CGSize(width: 38, height: 28), density: 3)
+        motion.advance(0)
+        motion.advance(100_000_000)
+        let expected = 1 - (1 + 20 * 0.1) * exp(-20 * 0.1)
+        XCTAssertEqual(Double(motion.alpha.value), expected, accuracy: 0.000001)
+        XCTAssertEqual(try XCTUnwrap(motion.displayedSize).width,
+                       floor(expected * 114 + 0.5) / 3, accuracy: 0.000001)
+        XCTAssertEqual(motion.scale.value, 1)
+        XCTAssertEqual(motion.offset, 0)
+        motion.advance(2_000_000_000)
+        XCTAssertFalse(motion.isRunning)
+        motion.setVisible(false)
+        motion.advance(3_000_000_000)
+        motion.advance(3_060_000_000)
+        XCTAssertTrue(motion.retained)
+        XCTAssertGreaterThan(try XCTUnwrap(motion.displayedSize).width, 0)
+        XCTAssertEqual(motion.displayedSize?.height, 28, "The retry's contents remain during exit")
+        let alpha = motion.alpha.value
+        let size = motion.displayedSize
+        motion.setVisible(true)
+        XCTAssertEqual(motion.alpha.value, alpha)
+        XCTAssertEqual(motion.displayedSize, size)
+        motion.advance(5_000_000_000)
+        motion.setVisible(false)
+        motion.advance(6_000_000_000)
+        motion.advance(8_000_000_000)
+        XCTAssertFalse(motion.retained)
+        XCTAssertFalse(motion.isRunning)
+    }
+
     func testInitialVisibilityIsQuietAndEntryUsesDelayAndPhysicalPixelSlide() {
         var initial = QueuePillVisibilityMotion(visible: true, delay: 60)
         initial.measure(CGSize(width: 100, height: 20), density: 3)

@@ -5,6 +5,16 @@ import Foundation
 /// guidance and setup steps live here so regeneration cannot remove them.
 enum IOSLocalization {
     static let byResource: [String: [String: String]] = [
+        "usb_camera_not_ready": [
+            "zh": "相机尚未就绪，请确认相机已开机并检查连接",
+            "en": "Camera is not ready. Make sure it is powered on and check the connection.",
+            "hant": "相機尚未就緒，請確認相機已開機並檢查連線",
+        ],
+        "usb_storage_unavailable": [
+            "zh": "相机存储卡不可用，请检查存储卡",
+            "en": "Camera storage is unavailable. Please check the memory card.",
+            "hant": "相機記憶卡無法使用，請檢查記憶卡",
+        ],
         "local_photo_ios_save_hint": ["zh": "效果图会作为新照片保存到系统照片图库", "en": "Edited photos are saved as new items in your photo library.", "hant": "效果圖會作為新照片儲存到系統照片圖庫"],
         "local_photo_batch_generate": ["zh": "生成并保存（%1$d）", "en": "Generate and save (%1$d)", "hant": "產生並儲存（%1$d）"],
         "lut_choose_folder": ["en": "Choose folder", "zh": "选择文件夹", "hant": "選擇資料夾"],

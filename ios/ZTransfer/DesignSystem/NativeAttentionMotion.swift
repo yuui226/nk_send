@@ -7,6 +7,7 @@ struct NativeAttentionConfiguration: Equatable {
     enum Kind: Equatable {
         case card(offset: Double)
         case opacityPulse(minimum: Double, maximum: Double, halfPeriod: Double)
+        case scalePulse(minimum: Double, maximum: Double, halfPeriod: Double)
     }
     var kind: Kind
     var origin: Date
@@ -21,6 +22,13 @@ struct NativeAttentionConfiguration: Equatable {
             return 1 + 0.04 * Self.cardWave(elapsed / 2.4 + offset) * intensity
         case .opacityPulse:
             return 1
+        case let .scalePulse(minimum, maximum, halfPeriod):
+            guard enabled else { return 1 }
+            let phase = (elapsed / halfPeriod).truncatingRemainder(dividingBy: 2)
+            let position = phase <= 1 ? phase : 2 - phase
+            return Double(ZTransferAndroidMotion.tween(milliseconds: Int64(halfPeriod * 1000))
+                .sample(at: Int64(position * halfPeriod * 1_000_000_000),
+                        from: Float(minimum), to: Float(maximum), velocity: 0).value)
         }
     }
     func opacity(at date: Date) -> Double {
@@ -211,6 +219,18 @@ final class NativeAttentionHostView: UIView {
         CATransaction.commit()
         guard !c.paused, window != nil else { return }
         let time = layer.convertTime(CACurrentMediaTime(), from: nil)
+        if case let .scalePulse(minimum, maximum, halfPeriod) = c.kind {
+            guard c.enabled else { return }
+            let loop = CABasicAnimation(keyPath: "transform.scale")
+            loop.fromValue = minimum; loop.toValue = maximum
+            loop.duration = halfPeriod; loop.autoreverses = true
+            loop.repeatCount = .infinity
+            loop.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
+            loop.beginTime = time - max(0, now.timeIntervalSince(c.origin))
+                .truncatingRemainder(dividingBy: halfPeriod * 2)
+            layer.add(loop, forKey: "attention.loop")
+            return
+        }
         if case let .opacityPulse(minimum, maximum, halfPeriod) = c.kind {
             guard c.enabled else { return }
             let loop = CABasicAnimation(keyPath: "opacity")

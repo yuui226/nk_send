@@ -107,13 +107,12 @@ struct DisconnectedSignalBreath: ViewModifier {
 
 private struct OfflineSignalBreath<Content: View>: View {
     @ViewBuilder let content: Content
-    @State private var expanded = false
+    @State private var origin = Date()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
-        content.scaleEffect(expanded ? 1.09 : 1)
-            .onAppear {
-                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.55)
-                    .repeatForever(autoreverses: true)) { expanded = true }
-            }
+        NativeAttentionHost(configuration: .init(
+            kind: .scalePulse(minimum: 1, maximum: 1.09, halfPeriod: 0.55),
+            origin: origin, enabled: true, paused: scenePhase != .active)) { content }
     }
 }
 

@@ -234,11 +234,9 @@ private struct PhotoListTopControlsBoundsPreferenceKey: PreferenceKey {
     }
 }
 
-// The floating header is intentionally a little taller than Android's 36dp
-// control. At 40pt it keeps the same compact silhouette on iPhone while the
-// visible material and its hit region no longer feel vertically compressed.
-private let photoListTopControlsHeight: CGFloat = 40
-private let photoListCompactButtonWidth: CGFloat = 40
+// Android FileListScreen: all compact top controls are 40 x 36dp.
+let photoListTopControlsHeight: CGFloat = 36
+let photoListCompactButtonWidth: CGFloat = 40
 
 private func photoGridCellTransition(burstMember: Bool, cameraRemoval: Bool) -> AnyTransition {
     if burstMember {
@@ -361,14 +359,14 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var heldFlightCount = 0
     @State private var queueImpact = 0
 
-    init(session: CameraSession?, listModel suppliedModel: PhotoListViewModel? = nil, presentationMode: CameraPresentationMode = .sta, queue: TransferQueue, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
+    init(session: CameraSession?, listModel suppliedModel: PhotoListViewModel? = nil, presentationMode: CameraPresentationMode = .sta, queue: TransferQueue, queueModel suppliedQueueModel: TransferQueueViewModel? = nil, directory: DirectoryAccessStore = DirectoryAccessStore(), effectsStore: PhotoEffectsStore = PhotoEffectsStore(), isSessionConnected: Bool = true, onRetrySTA: @escaping () -> Void = {}, remotePresentation: Binding<Bool>? = nil, onTransportLost: @escaping (CameraSession) -> Void = { _ in }) {
         let listModel = suppliedModel ?? session.map { live in
             PhotoListViewModel.cached(session: live, onTransportLost: { onTransportLost(live) })
         } ?? PhotoListViewModel(disconnected: presentationMode)
         _model = ObservedObject(wrappedValue: listModel)
         self.presentationMode = session.map { CameraPresentationMode(isUSB: $0.isUSB, wirelessMode: $0.wirelessMode) }
             ?? presentationMode
-        _queueModel = StateObject(wrappedValue: TransferQueueViewModel(queue: queue))
+        _queueModel = StateObject(wrappedValue: suppliedQueueModel ?? TransferQueueViewModel(queue: queue))
         _directoryStore = ObservedObject(wrappedValue: directory)
         self.effectsStore = effectsStore; self.isSessionConnected = isSessionConnected && session != nil
         self.onRetrySTA = onRetrySTA
@@ -518,7 +516,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                         VStack(alignment: .leading, spacing: 0) {
                                             if case let .burst(group) = entry {
                                                 BurstThumbnailView(session: session, group: group,
-                                                                   allowRemoteThumbnails: selectedFile == nil,
+                                                                   allowRemoteThumbnails: isSessionConnected && selectedFile == nil,
                                                                    transferred: group.files.allSatisfy { model.transferredFileIDs.contains($0.id) },
                                                                    expanded: expandedBurstIDs.contains(group.id),
                                                                    onExpand: { toggleBurst(group.id) },
@@ -532,7 +530,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                                                    })
                                             } else {
                                             CameraThumbnailView(session: session, file: file,
-                                                                    allowRemoteThumbnail: selectedFile == nil,
+                                                                    allowRemoteThumbnail: isSessionConnected && selectedFile == nil,
                                                                     transferred: model.transferredFileIDs.contains(file.id),
                                                                     inBurst: model.burstIDByFile[file.id] != nil,
                                                                     queueTask: queueModel.task(for: file.id),
@@ -630,7 +628,6 @@ private struct PhotoListSessionTaskID: Equatable {
                             case .loaded:
                                 PhotoListRatingEmptyState(progress: model.ratingProgress, filter: model.filter,
                                                           protectionAvailable: model.protectionFilteringEnabled,
-                                                          usb: presentationMode == .usb,
                                                           onClearFilter: model.clearFilter)
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 150)
@@ -773,8 +770,12 @@ private struct PhotoListSessionTaskID: Equatable {
                 presentedSections = model.sections
                 presentedCameraFiles = model.displayedFiles
             }
-            await session?.setPreferHighThroughputTransfers(!showingRemote)
             queueModel.attach(session: transferSession, directory: directoryStore.directoryURL)
+            guard isSessionConnected else {
+                model.transportDidDisconnect()
+                return
+            }
+            await session?.setPreferHighThroughputTransfers(!showingRemote)
             model.setNewMediaHandler { files in
                 guard let directory = directoryStore.directoryURL else { return }
                 // Read at the new-file event, not when the page first appeared.
@@ -914,9 +915,10 @@ private struct PhotoListSessionTaskID: Equatable {
                 }
             }
         }
-        .fullScreenCover(isPresented: $internalShowingRemote, onDismiss: RemoteTrialNotice.returnedToList) {
+        .workspaceMonitor(isPresented: $internalShowingRemote, onDismiss: RemoteTrialNotice.returnedToList) {
             RemoteView(session: session, queueModel: queueModel, presentationMode: presentationMode,
                        isSessionConnected: isSessionConnected,
+                       onClose: { internalShowingRemote = false },
                        onRetrySTA: onRetrySTA,
                        onPreparing: { await model.pauseForRemote() },
                        onStopped: { transportLost in
@@ -1087,7 +1089,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     active: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled),
                     color: model.filter.isActive(protectionAvailable: model.protectionFilteringEnabled) ? filterPalette.active : filterPalette.inactive
                 )
-                    .frame(width: 20, height: 20)
+                    .frame(width: 19, height: 19)
                     .frame(width: photoListCompactButtonWidth,
                            height: photoListTopControlsHeight)
             }
@@ -1224,10 +1226,7 @@ private struct PhotoListSessionTaskID: Equatable {
                 } label: {
                     ZStack {
                         Image(systemName: executionMode == .start ? "play.fill" : "pause.fill")
-                            // SF Symbols' filled play triangle has more visual
-                            // mass than Android's 21dp Material PlayArrow. Use
-                            // 17pt so it stays visually restrained after the
-                            // top control grows to 40pt; pause remains 18pt.
+                            // Android execution control: 32dp circular shell.
                             .font(.system(size: executionMode == .start ? 17 : 18, weight: .bold))
                             .foregroundStyle(executionMode == .start
                                              ? ZTransferColors.accentBlue
@@ -1235,8 +1234,7 @@ private struct PhotoListSessionTaskID: Equatable {
                             .id(executionMode)
                             .transition(.opacity.combined(with: .scale(scale: 0.72)))
                     }
-                    .frame(width: photoListCompactButtonWidth,
-                           height: photoListTopControlsHeight)
+                    .frame(width: 32, height: 32)
                     .contentShape(Circle())
                 }
                 // Physical Android themes keep the fixed queue material. The
@@ -1400,7 +1398,7 @@ private struct PhotoListSessionTaskID: Equatable {
         }
         remoteIntro.collapse()
         remoteExpandedAwayFromTop = false
-        withAnimation(ZTransferMotion.standard) { showingRemote = true }
+        showingRemote = true
     }
 
     private func showUsageHint(_ text: String) {
@@ -2177,20 +2175,18 @@ struct PhotoListRatingEmptyState: View {
     @ObservedObject var progress: PhotoRatingProgress
     let filter: PhotoFilterState
     let protectionAvailable: Bool
-    let usb: Bool
     let onClearFilter: () -> Void
 
     var body: some View {
         PhotoListEmptyState(filterActive: filter.isActive(protectionAvailable: protectionAvailable),
                             showNoMatchMessage: filter.showsNoMatchMessage(ratingLoading: progress.snapshot.loading),
-                            usb: usb, onClearFilter: onClearFilter)
+                            onClearFilter: onClearFilter)
     }
 }
 
 private struct PhotoListEmptyState: View {
     let filterActive: Bool
     let showNoMatchMessage: Bool
-    let usb: Bool
     let onClearFilter: () -> Void
 
     var body: some View {
@@ -2204,11 +2200,8 @@ private struct PhotoListEmptyState: View {
                     .zTransferText(size: ZTransferMetrics.body)
                     .foregroundStyle(ZTransferColors.secondaryText)
             }
-            if !filterActive && usb {
-                Text(AppLocalized.resource("usb_turn_on_camera_hint"))
-                    .zTransferText(size: ZTransferMetrics.caption)
-                    .foregroundStyle(ZTransferColors.secondaryText)
-            }
+            // USB readiness is checked before first entry. A successful empty
+            // album must not also suggest that its powered-on camera is off.
             if filterActive {
                 Button(action: onClearFilter) {
                     Text(AppLocalized.resource("clear_filters"))

@@ -311,8 +311,9 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     }
 
     /// Match NikonCamera.connectUsb: require a successful DeviceInfo response,
-    /// but tolerate missing/malformed optional capability data. Storage access
-    /// belongs to the subsequent catalog scan, not connection admission.
+    /// but tolerate missing/malformed optional capability data. This validates
+    /// only the transport; first photo entry separately checks card readiness
+    /// in CameraRepository without asking the system to enumerate its catalog.
     static func validatePTPChannel(
         send: @Sendable (Data) async throws -> (response: Data, payload: Data)
     ) async throws {

@@ -1431,6 +1431,60 @@ actor CameraRepository {
         return ids
     }
 
+    /// First USB photo-list entry only. Read IDs and fixed-size card metadata,
+    /// never object handles, thumbnails, or ImageCaptureCore's system catalog.
+    /// An empty card is readable; an absent/unavailable card is not. One usable
+    /// slot suffices on dual-card bodies. Reuse the IDs in the first real scan.
+    func prepareUSBPhotoList() async throws {
+        try Task.checkCancellation()
+        let raw: [UInt32]
+        do { raw = try await loadStorageIDs() }
+        catch { throw photoReadinessError(error) }
+        let ids = usableStorageIDs(raw)
+        guard !ids.isEmpty else { throw CameraPhotoReadinessError.storageUnavailable }
+        var uncertain = false
+        for id in ids {
+            try Task.checkCancellation()
+            do {
+                let result = try await catalogCommand(PTPConstants.getStorageInfo, [id])
+                // StorageInfo starts with type/filesystem/access, two UInt64
+                // capacities and an image count (26 bytes). Optional labels do
+                // not affect admission; full/read-only cards remain readable.
+                guard result.data.count >= 26 else { throw CameraPhotoReadinessError.notReady }
+                // Do not infer "no card" from unspecified filesystem/type or
+                // unknown capacity fields. Only an explicit unavailable reply
+                // (or a successful empty ID list) supports that diagnosis.
+                try Task.checkCancellation()
+                prefetchedStorageIDs = raw
+                return
+            } catch {
+                switch photoReadinessError(error) {
+                case CameraPhotoReadinessError.storageUnavailable: continue
+                case CameraPhotoReadinessError.notReady: uncertain = true
+                case let other: throw other
+                }
+            }
+        }
+        throw uncertain ? CameraPhotoReadinessError.notReady : .storageUnavailable
+    }
+
+    private func photoReadinessError(_ error: Error) -> Error {
+        switch error {
+        case let readiness as CameraPhotoReadinessError: return readiness
+        case PTPSessionError.responseCode(let code):
+            return [UInt16(0x2008), 0x2013, 0xA802].contains(code)
+                ? CameraPhotoReadinessError.storageUnavailable : CameraPhotoReadinessError.notReady
+        case CameraRepositoryError.invalidDataset: return CameraPhotoReadinessError.notReady
+        default: return error
+        }
+    }
+
+    private func usableStorageIDs(_ raw: [UInt32]) -> [UInt32] {
+        Array(Set(raw.filter { id in
+            staAlbum != nil ? id != 0 && id != .max : (id & 0xFFFF) != 0
+        })).sorted()
+    }
+
     /// Monitor-only storage discovery reuses the catalog's known physical IDs
     /// when available, and otherwise performs one ordinary GetStorageIDs.
     func monitorStorageIDs() async throws -> [UInt32] {
@@ -1438,11 +1492,7 @@ actor CameraRepository {
         // Android's usableStorageIds helper removes placeholders, excludes
         // aggregate stores for AP/USB (low 16 bits == 0), de-duplicates, then
         // sorts before assigning visible slots. STA keeps its wildcard mapping.
-        let usable = ids.filter { id in
-            if staAlbum != nil { return id != 0 && id != .max }
-            return (id & 0xFFFF) != 0
-        }
-        return Array(Set(usable)).sorted()
+        return usableStorageIDs(ids)
     }
 
     /// MonitorStorage uses an ordinary P6 ticket, unlike a skippable heartbeat.
@@ -2348,13 +2398,7 @@ actor CameraRepository {
             // transports, stores whose low 16 bits are zero. STA also drops
             // only the sentinel values because its wildcard mapping is
             // handled by queryStorageID below.
-            storageIDs = Array(Set(raw.filter { id in
-                if staAlbum != nil { return id != 0 && id != .max }
-                // Keep the Android predicate literally: non-STA uses only
-                // the low-16-bit no-card marker, without an extra sentinel
-                // rule that could change a camera's reported store list.
-                return (id & 0xFFFF) != 0
-            })).sorted()
+            storageIDs = usableStorageIDs(raw)
             if storageIDs.isEmpty {
                 // A validated empty response removes only the established
                 // baseline. Failed/malformed responses have already thrown.

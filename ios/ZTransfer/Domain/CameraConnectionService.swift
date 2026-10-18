@@ -4,6 +4,49 @@ enum CameraConnectionServiceError: Error, Equatable, Sendable {
     case noDevice
 }
 
+/// User-approved iOS entry rule (2026-10-18). A working PTP channel alone
+/// does not prove that photos are readable; none of these states diagnoses
+/// the camera's physical power switch.
+enum CameraPhotoReadinessError: Error, Equatable, Sendable {
+    case notReady, storageUnavailable
+
+    var message: String {
+        AppLocalized.resource(self == .notReady ? "usb_camera_not_ready" : "usb_storage_unavailable")
+    }
+}
+
+enum CameraPhotoAdmission {
+    /// Keep the existing connection page until a lightweight read succeeds.
+    /// Only explicit readiness failures are polled. Transport/permission errors
+    /// retain the normal bounded reconnect policy. Never overlap PTP requests.
+    @MainActor
+    static func waitUntilReady(
+        check: () async throws -> Void,
+        isCurrent: () -> Bool,
+        isActive: () -> Bool,
+        onWaiting: (CameraPhotoReadinessError) -> Void,
+        retryDelay: Duration = .seconds(5)
+    ) async throws {
+        while true {
+            try Task.checkCancellation()
+            guard isCurrent() else { throw CancellationError() }
+            if isActive() {
+                do {
+                    try await check()
+                    try Task.checkCancellation()
+                    guard isCurrent() else { throw CancellationError() }
+                    return
+                } catch let error as CameraPhotoReadinessError {
+                    try Task.checkCancellation()
+                    guard isCurrent() else { throw CancellationError() }
+                    onWaiting(error)
+                }
+            }
+            try await Task.sleep(for: retryDelay)
+        }
+    }
+}
+
 /// Owns one selected USB camera from discovery through the first catalog request.
 /// Keeping this lifecycle outside the view model prevents UI state from accidentally
 /// issuing a second session. The app has no proactive wired-disconnect action;

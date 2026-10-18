@@ -1089,6 +1089,20 @@ final class AndroidShadowMetricsTests: XCTestCase {
         XCTAssertNil(Metrics.opacity(lighting: light, nodeAlpha: .nan, outlineAlpha: 1))
     }
 
+    func testQueueCardShadowAppliesColorAlphaAfterMaterialLighting() throws {
+        typealias Metrics = ZTransferAndroidShadowMetrics
+        let light = try XCTUnwrap(Metrics.materialLighting(displayPixels: .init(900, 1800), density: 2,
+            shadowColors: .init(ambientAlpha: 20, spotAlpha: 31)))
+        let opaque = try XCTUnwrap(Metrics.opacity(lighting: light, nodeAlpha: 1, outlineAlpha: 1))
+        // Android15 multiplyAlpha: uint8((9/255)*20), uint8((48/255)*31).
+        XCTAssertEqual(opaque.ambient, 0)
+        XCTAssertEqual(opaque.spot, 5)
+        XCTAssertFalse(opaque.transparentOccluder, "Color alpha does not make the caster transparent")
+        let faded = try XCTUnwrap(Metrics.opacity(lighting: light, nodeAlpha: 0.5, outlineAlpha: 1))
+        XCTAssertEqual(faded.spot, 2)
+        XCTAssertTrue(faded.transparentOccluder)
+    }
+
     func testCroppedSceneMatchesFullWindowRendering() throws {
         typealias Metrics = ZTransferAndroidShadowMetrics
         typealias Renderer = ZTransferAndroidShadowRenderer

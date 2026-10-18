@@ -100,6 +100,8 @@ bash ios/StoreKit/test-recovery-ui.sh SIMULATOR_ID
 
 ## 历史验证：手机端录制（2026-10-18 随安卓删除）
 
+用户于2026-10-18进一步明确：iOS暂不提供监看端侧录制，这是允许的平台差异；后续安卓即使恢复，也不自动补齐录制功能、麦克风权限或专属权益说明。相机自身录像、计时和音频电平监看继续保留。下方历史用例不得作为恢复功能的要求。
+
 以下是旧版本证据，不再是当前测试指引。401f55ff 删除手机端录制、麦克风权限和对应权益，iOS 同步删除；相机自身录像和音量电平监看保留，已有文件不删除。旧录制用例随功能退役，监看权益期限、快门、相机录像和逐帧呈现专项继续保留。
 
 `ZTransferTests/RemoteLifecycleTests` 的 `testExpiryFinalizesPlayableRecordingBeforeExhaustedMonitorExits` 和 `testPausedRecordingFinalizesOnRevocationAndConcurrentPageExit` 使用生产解码、录制、到期回调及退出链路；相机 JPEG 与已验证权益输入受控，不通过 StoreKit 模拟真实退款。为避免采集麦克风或权限弹框，先在**专用测试模拟器**设置：

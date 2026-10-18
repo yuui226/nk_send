@@ -1,6 +1,75 @@
 import SwiftUI
 import UIKit
 
+/// Android PreviewReviewTapGuard is owned by the whole overlay, not a page.
+/// Dragging away and back, or briefly adding a finger, still rejects closing.
+@MainActor
+final class PreviewReviewTapGuard {
+    private var start = CGPoint.zero
+    private(set) var allowed = false
+    func begin(_ point: CGPoint) { start = point; allowed = true }
+    func observe(_ points: [CGPoint], touchSlop: CGFloat = 8) {
+        guard points.count == 1, let point = points.first,
+              hypot(point.x - start.x, point.y - start.y) <= touchSlop else {
+            allowed = false
+            return
+        }
+    }
+}
+
+/// Observe at the window before descendant recognizers without recognizing,
+/// delaying or cancelling their gestures. The stable marker survives paging.
+struct PreviewReviewTouchObserver: UIViewRepresentable {
+    let state: PreviewReviewTapGuard
+    func makeUIView(context: Context) -> Marker { Marker() }
+    func updateUIView(_ view: Marker, context: Context) { view.tracker = state }
+    static func dismantleUIView(_ view: Marker, coordinator: ()) { view.detach() }
+    final class Marker: UIView, UIGestureRecognizerDelegate {
+        var tracker: PreviewReviewTapGuard?
+        lazy var recognizer: Observer = {
+            let value = Observer()
+            value.marker = self; value.delegate = self
+            value.cancelsTouchesInView = false
+            value.delaysTouchesBegan = false; value.delaysTouchesEnded = false
+            return value
+        }()
+        override init(frame: CGRect) { super.init(frame: frame); isUserInteractionEnabled = false }
+        required init?(coder: NSCoder) { nil }
+        override func didMoveToWindow() {
+            super.didMoveToWindow(); detach()
+            window?.addGestureRecognizer(recognizer)
+        }
+        func detach() { recognizer.view?.removeGestureRecognizer(recognizer) }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            window != nil && !isHidden && bounds.contains(touch.location(in: self))
+        }
+    }
+    final class Observer: UIGestureRecognizer {
+        weak var marker: Marker?
+        private var contacts: Set<UITouch> = []
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            if contacts.isEmpty, let first = touches.first {
+                marker?.tracker?.begin(first.location(in: view))
+            }
+            contacts.formUnion(touches)
+            observe()
+        }
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { observe() }
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            observe()
+            contacts.subtract(touches)
+            if contacts.isEmpty { state = .failed }
+        }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+            marker?.tracker?.observe([]); state = .failed
+        }
+        override func reset() { super.reset(); contacts.removeAll() }
+        private func observe() { marker?.tracker?.observe(contacts.map { $0.location(in: view) }) }
+    }
+}
+
 /// A non-hit-testing viewport marker. The recognizer observes its window but
 /// accepts only touches beginning in this page, leaving single-finger paging alone.
 struct PreviewPinchObserver: UIViewRepresentable {

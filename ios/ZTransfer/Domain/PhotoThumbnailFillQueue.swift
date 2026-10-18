@@ -22,16 +22,11 @@ actor PhotoThumbnailFillQueue {
     private var seededRevision = -1
     private var priorityRange: PhotoDateRange?
     private var loadingRange: PhotoDateRange?
-    private let wakeStream: AsyncStream<Void>
-    private let wakeContinuation: AsyncStream<Void>.Continuation
+    private var wakePending = false
+    private var wakeWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
     init(sequential: Bool = false) {
         self.sequential = sequential
-        var continuation: AsyncStream<Void>.Continuation?
-        wakeStream = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { streamContinuation in
-            continuation = streamContinuation
-        }
-        wakeContinuation = continuation!
     }
 
     /// Mirrors Android's conflated `thumbnailFillWake` channel.  A worker
@@ -39,12 +34,31 @@ actor PhotoThumbnailFillQueue {
     /// object event, filter change, or foreground-owner release resumes the
     /// same fill lifecycle.
     func wake() {
-        wakeContinuation.yield(())
+        if let id = wakeWaiters.keys.first, let waiter = wakeWaiters.removeValue(forKey: id) {
+            waiter.resume(returning: true)
+        } else { wakePending = true }
     }
 
-    func waitForWake() async {
-        var iterator = wakeStream.makeAsyncIterator()
-        _ = await iterator.next()
+    /// Cancelling an AsyncStream iterator finishes its shared stream forever.
+    /// The fill worker is intentionally cancelled during transfers, so its
+    /// next generation needs a fresh, cancellable waiter on the same channel.
+    /// A conflated pending event survives gaps between worker generations.
+    @discardableResult
+    func waitForWake() async -> Bool {
+        guard !Task.isCancelled else { return false }
+        if wakePending { wakePending = false; return true }
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume(returning: false) }
+                else { wakeWaiters[id] = continuation }
+            }
+        } onCancel: {
+            Task { await self.cancelWake(id) }
+        }
+    }
+    private func cancelWake(_ id: UUID) {
+        wakeWaiters.removeValue(forKey: id)?.resume(returning: false)
     }
 
     func beginScan() {

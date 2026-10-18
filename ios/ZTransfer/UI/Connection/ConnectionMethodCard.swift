@@ -124,16 +124,27 @@ struct ConnectionMethodCard: View {
                 .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22),
                            value: state.wirelessMode)
             } else {
-                instructions(for: nil)
                 if let feedback = wifiFeedback(for: nil) {
-                    ConnectionFeedback(title: feedback.title, message: feedback.message)
-                        .padding(.top, 12)
+                    // On narrow phones the instructions and a full readiness
+                    // explanation do not fit together. Keep the actionable
+                    // error intact instead of truncating it or growing the card.
+                    ViewThatFits(in: .vertical) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            instructions(for: nil)
+                            ConnectionFeedback(title: feedback.title, message: feedback.message, lineLimit: nil)
+                        }.fixedSize(horizontal: false, vertical: true)
+                        ConnectionFeedback(title: feedback.title, message: feedback.message, lineLimit: nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .transition(.asymmetric(
                             insertion: .opacity.animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.22).delay(0.035)),
                             removal: .opacity.animation(.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.15))
                         ))
+                } else {
+                    instructions(for: nil)
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, 14)
@@ -610,12 +621,13 @@ private struct ConnectionSuccessOverlay: View {
 private struct ConnectionFeedback: View {
     let title: String
     let message: String
+    var lineLimit: Int? = 2
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).zTransferTypography(.labelSmall, weight: .bold)
                 .foregroundStyle(ZTransferColors.statusError)
             Text(message).zTransferTypography(.labelSmall)
-                .foregroundStyle(ZTransferColors.secondaryText).lineLimit(2)
+                .foregroundStyle(ZTransferColors.secondaryText).lineLimit(lineLimit)
         }
         .padding(.horizontal, 9).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)

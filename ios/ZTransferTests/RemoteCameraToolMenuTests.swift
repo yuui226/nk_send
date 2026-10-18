@@ -2,6 +2,26 @@ import XCTest
 @testable import ZTransfer
 
 final class RemoteCameraToolMenuTests: XCTestCase {
+    func testPreviewFHDIndicatorUsesTwoStaggeredSegmentsAndRestartsAt1800ms() {
+        let start = RemoteReviewLoadingMotion.segments(milliseconds: 0)
+        XCTAssertEqual(start, [.init(head: 0, tail: 0), .init(head: 0, tail: 0)])
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 333)[0].tail, 0)
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 375)[0].head, 0.5, accuracy: 0.00001)
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 750)[0].head, 1)
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 1000)[1].head, 0)
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 1183)[0].tail, 1)
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 1267)[1].tail, 0)
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 1567)[1].head, 1)
+        XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: 1800), start)
+        for time in stride(from: 0.0, through: 1800.0, by: 16.0) {
+            XCTAssertEqual(RemoteReviewLoadingMotion.segments(milliseconds: time),
+                           RemoteReviewLoadingMotion.segments(milliseconds: time + 1800))
+        }
+        let arc = RemoteCameraToolIndicatorMotion.arc(milliseconds: 0, strokeWidth: 2)
+        XCTAssertEqual(arc.start, -87.1352110, accuracy: 0.000001)
+        XCTAssertEqual(arc.sweep, 0.1)
+    }
+
     func testLandscapeParameterListUsesFullHeightAndPrefersLeftOfAnchor() {
         let side = RemoteCameraToolMenuPlacement(host: CGSize(width: 800, height: 360),
             anchor: CGRect(x: 660, y: 130, width: 120, height: 46), landscape: true,

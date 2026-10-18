@@ -128,9 +128,9 @@ extension ConnectionState {
         case let .ready(id):
             if next.selectedDeviceID == nil { next.selectedDeviceID = id }
         case let .sessionOpened(id, _):
-            // ImageCaptureCore's session-open callback precedes DeviceInfo and
-            // catalog loading. The user-visible connected state is committed by
-            // ConnectionViewModel only after that handshake succeeds.
+            // A working PTP channel precedes photo-entry readiness. The
+            // user-visible connected state is committed by ConnectionViewModel
+            // only after the first-entry storage check succeeds.
             next.selectedDeviceID = id
             if next.usbAuthorization == .denied || next.usbAuthorization == .restricted {
                 let message = AppLocalized.resource("usb_permission_required")

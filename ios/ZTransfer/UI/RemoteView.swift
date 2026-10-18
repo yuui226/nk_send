@@ -147,14 +147,19 @@ struct RemoteView: View {
         return RemoteExposureParameters.format(descriptor.property, raw: descriptor.current)
     }
 
+    private let onClose: (() -> Void)?
+    private func closeMonitor() { if let onClose { onClose() } else { dismiss() } }
+
     init(session: CameraSession?, queueModel: TransferQueueViewModel? = nil, presentationMode: CameraPresentationMode? = nil,
          isSessionConnected: Bool = true, toolDefaults: UserDefaults = .standard,
          remoteCamera: (any RemoteCameraControlling)? = nil, freeUsage: FreeUsageStore = .shared,
          entitlements: PremiumEntitlementStore = .shared,
+         onClose: (() -> Void)? = nil,
          onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
          onStopped: ((Bool) async -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
         let preferences = RemoteToolPreferences(defaults: toolDefaults)
+        self.onClose = onClose
         self.toolDefaults = toolDefaults
         _monitorHelpViewed = AppStorage(wrappedValue: false, "monitor_help_viewed", store: toolDefaults)
         _entitlements = ObservedObject(wrappedValue: entitlements)
@@ -226,13 +231,10 @@ struct RemoteView: View {
         }
         .overlay {
             if reviewLifetime.active, let reviewSession, let reviewQueue {
-                GeometryReader { proxy in
+                RemoteReviewSurface(rotation: layoutOrientation.rawValue) { landscape, insets in
                     RemotePhotoReviewView(model: review, session: reviewSession, queue: reviewQueue,
-                                          connected: isSessionConnected)
-                        .frame(width: layoutOrientation.isLandscape ? proxy.size.height : proxy.size.width,
-                               height: layoutOrientation.isLandscape ? proxy.size.width : proxy.size.height)
-                        .rotationEffect(.degrees(layoutOrientation.rotationDegrees))
-                        .frame(width: proxy.size.width, height: proxy.size.height)
+                                          connected: isSessionConnected, landscape: landscape,
+                                          contentInsets: insets)
                 }
             }
         }
@@ -269,7 +271,7 @@ struct RemoteView: View {
         .onChange(of: model.trialEnded) { ended in
             guard ended else { return }
             RemoteTrialNotice.pending = true
-            dismiss()
+            closeMonitor()
         }
         .onChange(of: scenePhase) { phase in
             model.usageMeter.setActive(phase == .active)
@@ -468,10 +470,10 @@ struct RemoteView: View {
 
             Spacer(minLength: 18)
 
-            HStack(spacing: 30) {
-                reviewButton
+            HStack(spacing: 0) {
+                ZStack { reviewButton(large: true) }.frame(maxWidth: .infinity).frame(height: 56)
                 shutterButton
-                Color.clear.frame(width: 48, height: 48)
+                Color.clear.frame(maxWidth: .infinity).frame(height: 56)
             }
             .padding(.bottom, 18)
         }
@@ -483,7 +485,7 @@ struct RemoteView: View {
     private var landscapeRemoteLayout: some View {
         GeometryReader { proxy in
             let layout = RemoteLandscapeLayout(width: proxy.size.width, height: proxy.size.height,
-                                                imageAspect: remoteViewfinderAspect)
+                                                imageAspect: remoteViewfinderAspect, photoReview: model.reviewVisible)
             ZStack(alignment: .topLeading) {
                 remoteViewfinder
                     .frame(width: layout.image.width, height: layout.image.height)
@@ -493,8 +495,8 @@ struct RemoteView: View {
                     onTick: { model.detentFeedback() }, applyHidden: { hidden in
                         for tool in hidden { setToolVisible(tool, false) }
                     }, rotate: AnyView(remoteRotateButton), back: AnyView(remoteBackButton),
-                    disp: AnyView(remoteDispButton), shutter: AnyView(remoteShutter(diameter: layout.shutterSize)),
-                    review: AnyView(reviewButton), parameter: { index, height in
+                    disp: AnyView(remoteDispButton), shutter: { AnyView(remoteShutter(diameter: $0)) },
+                    review: { AnyView(reviewButton(large: false, sizeScale: $0)) }, parameter: { index, height in
                         AnyView(exposureTile(exposureFields[index], height: height))
                     })
                     .frame(width: layout.controls.width, height: layout.controls.height)
@@ -611,13 +613,13 @@ struct RemoteView: View {
             } else if editingTools {
                 setEditingTools(false)
             } else {
-                dismiss()
+                closeMonitor()
             }
         } label: {
             Image(systemName: "arrow.right")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(ZTransferColors.primaryText)
-                .frame(width: 36, height: 36)
+                .frame(width: 40, height: 36)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
         .accessibilityLabel(AppLocalized.resource("cd_back"))
@@ -665,7 +667,7 @@ struct RemoteView: View {
     }
 
     private var adaptiveRemoteToolbar: some View {
-        RemoteToolModeCrossfade(movie: model.movieMode) { displayedMovie in
+        AndroidBooleanCrossfade(selected: model.movieMode) { displayedMovie in
             configuredRemoteToolbar(movie: displayedMovie)
         }
     }
@@ -1148,18 +1150,14 @@ struct RemoteView: View {
             label: label, action: action)
     }
 
-    @ViewBuilder private var reviewButton: some View {
-        if model.reviewVisible, reviewQueue != nil, reviewSession != nil {
-            Button {
+    @ViewBuilder private func reviewButton(large: Bool, sizeScale: CGFloat = 1) -> some View {
+        if model.reviewVisible, !editingTools, reviewQueue != nil, reviewSession != nil {
+            RemoteReviewEntryButton(large: large, sizeScale: sizeScale,
+                enabled: model.reviewAllowed && isSessionConnected && !switchingRotation && !review.active) {
                 model.detentFeedback()
                 closeMonitorPanels()
                 review.open()
-            } label: {
-                Image(systemName: "photo").frame(width: 48, height: 48)
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
-            .accessibilityLabel(AppLocalized.resource("remote_review"))
-            .disabled(!model.reviewAllowed || !isSessionConnected || switchingRotation || review.active)
         }
     }
 

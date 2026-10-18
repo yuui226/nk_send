@@ -46,6 +46,9 @@ struct QueuePillSizeSpring {
 /// Only PreEnter -> Visible has a delay/bounce; reversing PostExit uses the
 /// default 400 spring. Content remains live, including nullable content clearing.
 struct QueuePillVisibilityMotion {
+    /// TransferRetryButton shares the retained horizontal layout, but uses
+    /// Compose's default fade/IntSize springs without pill delay/slide/scale.
+    enum Style { case pill, retry }
     private enum Phase { case preEnter, visible, postExit }
     private(set) var visible: Bool
     private(set) var retained: Bool
@@ -59,6 +62,7 @@ struct QueuePillVisibilityMotion {
     private var lastFrame: Int64?
     private var density: CGFloat = 1
     private let delay: Int64
+    let style: Style
     private var sizeSpec = ZTransferAndroidMotion.criticallyDampedSpring(stiffness: 400, threshold: 1)
     var isRunning: Bool { alpha.isRunning || scale.isRunning || slide.isRunning || size.isRunning }
     var displayedSize: CGSize? {
@@ -68,11 +72,11 @@ struct QueuePillVisibilityMotion {
     }
     var offset: CGFloat { CGFloat(floor(slide.value + 0.5)) / density }
 
-    init(visible: Bool, delay: Int64) {
-        self.visible = visible; retained = visible; self.delay = delay
+    init(visible: Bool, delay: Int64, style: Style = .pill) {
+        self.visible = visible; retained = visible; self.delay = delay; self.style = style
         phase = visible ? .visible : .preEnter
         alpha = .init(value: visible ? 1 : 0, retainsEndVelocity: true)
-        scale = .init(value: visible ? 1 : 0.78, retainsEndVelocity: true)
+        scale = .init(value: visible || style == .retry ? 1 : 0.78, retainsEndVelocity: true)
         slide = .init(value: 0, retainsEndVelocity: true)
     }
 
@@ -81,7 +85,7 @@ struct QueuePillVisibilityMotion {
         visible = next
         if next && !retained {
             retained = true; pendingEntry = true; phase = .preEnter
-            alpha.reset(to: 0); scale.reset(to: 0.78); slide.reset(to: 0)
+            alpha.reset(to: 0); scale.reset(to: style == .retry ? 1 : 0.78); slide.reset(to: 0)
             size = .init(.zero)
             if let fullSize { beginEntry(fullSize) }
         } else if retained {
@@ -107,7 +111,7 @@ struct QueuePillVisibilityMotion {
         pendingEntry = false
         size = .init(.init(0, pixels.y))
         // Android's lambda returns eight physical pixels, not eight dp.
-        slide.reset(to: -min(pixels.x, 8))
+        slide.reset(to: style == .retry ? 0 : -min(pixels.x, 8))
         transition(to: .visible)
     }
 
@@ -116,6 +120,14 @@ struct QueuePillVisibilityMotion {
         let exiting = phase == .visible && target == .postExit
         let origin = isRunning ? lastFrame : nil
         if !isRunning { lastFrame = nil }
+        if style == .retry {
+            alpha.retarget(target == .visible ? 1 : 0,
+                using: .criticallyDampedSpring(stiffness: 400), force: true, atFrameNanos: origin)
+            sizeSpec = .criticallyDampedSpring(stiffness: 400, threshold: 1)
+            phase = target
+            retargetSize(force: true, origin: origin)
+            return
+        }
         let alphaSpec: ZTransferAndroidMotion = entering
             ? .tween(milliseconds: 200, delayMilliseconds: delay)
             : exiting ? .tween(milliseconds: 100) : .criticallyDampedSpring(stiffness: 400)
@@ -167,25 +179,29 @@ struct QueuePillVisibilityMotion {
 private final class QueuePillVisibilityClock: NSObject, ObservableObject {
     @Published private(set) var motion: QueuePillVisibilityMotion
     private let delay: Int64
+    private let style: QueuePillVisibilityMotion.Style
     // nil distinguishes first composition (possibly hidden) from a detached
     // lazy row. A hidden Group need not receive onAppear until content enters.
     private var active: Bool?
     private var link: CADisplayLink?
-    init(visible: Bool, delay: Int64) { self.delay = delay; motion = .init(visible: visible, delay: delay) }
+    init(visible: Bool, delay: Int64, style: QueuePillVisibilityMotion.Style) {
+        self.delay = delay; self.style = style
+        motion = .init(visible: visible, delay: delay, style: style)
+    }
     func activate(_ visible: Bool) { active = true; update(visible); schedule() }
     func update(_ visible: Bool) {
         #if DEBUG
         let before = motion
         #endif
         if active != false { motion.setVisible(visible); schedule() }
-        else { motion = .init(visible: visible, delay: delay) }
+        else { motion = .init(visible: visible, delay: delay, style: style) }
         #if DEBUG
         QueuePillVisibilityProbe.shared.transition(from: before, to: motion, delay: delay, owner: ObjectIdentifier(self))
         #endif
     }
     func measure(_ size: CGSize, density: CGFloat) { motion.measure(size, density: density); schedule() }
     func unmount(_ visible: Bool) {
-        active = false; stop(); motion = .init(visible: visible, delay: delay)
+        active = false; stop(); motion = .init(visible: visible, delay: delay, style: style)
     }
     private func schedule() {
         guard active == true, motion.isRunning, link == nil else { return }
@@ -281,9 +297,10 @@ struct QueuePillVisibility<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @Environment(\.displayScale) private var density
     @StateObject private var clock: QueuePillVisibilityClock
-    init(visible: Bool, delay: Int64, @ViewBuilder content: @escaping () -> Content) {
+    init(visible: Bool, delay: Int64, style: QueuePillVisibilityMotion.Style = .pill,
+         @ViewBuilder content: @escaping () -> Content) {
         self.visible = visible; self.content = content
-        _clock = StateObject(wrappedValue: QueuePillVisibilityClock(visible: visible, delay: delay))
+        _clock = StateObject(wrappedValue: QueuePillVisibilityClock(visible: visible, delay: delay, style: style))
     }
     var body: some View {
         Group {
@@ -302,13 +319,21 @@ struct QueuePillVisibility<Content: View>: View {
                         .offset(x: clock.motion.offset)
                         .opacity(Double(clock.motion.alpha.value))
                 }
-                // Android explicitly uses clip=false for expand/shrink.
+                .modifier(QueueVisibilityClip(enabled: clock.motion.style == .retry))
                 .allowsHitTesting(visible)
+                .accessibilityHidden(!visible)
             }
         }
         .transaction { $0.animation = nil }
         .onAppear { clock.activate(visible) }
         .onChange(of: visible) { clock.update($0) }
         .onDisappear { clock.unmount(visible) }
+    }
+}
+
+private struct QueueVisibilityClip: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled { content.clipped() } else { content }
     }
 }

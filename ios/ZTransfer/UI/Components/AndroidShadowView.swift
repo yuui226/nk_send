@@ -6,11 +6,13 @@ import MetalKit
 struct AndroidShadowView: UIViewRepresentable {
     let cornerRadius: CGFloat
     let elevation: CGFloat
+    var shadowColors = ZTransferAndroidShadowMetrics.ShadowColors()
 
     func makeUIView(context: Context) -> AndroidShadowHost { AndroidShadowHost() }
     func updateUIView(_ view: AndroidShadowHost, context: Context) {
         view.cornerRadius = cornerRadius
         view.elevation = elevation
+        view.shadowColors = shadowColors
     }
 }
 
@@ -162,6 +164,9 @@ private final class AndroidShadowFrameClock: NSObject {
 final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
     var cornerRadius: CGFloat = 0 { didSet { if cornerRadius != oldValue { setNeedsLayout() } } }
     var elevation: CGFloat = 0 { didSet { if elevation != oldValue { setNeedsLayout() } } }
+    var shadowColors = ZTransferAndroidShadowMetrics.ShadowColors() {
+        didSet { if shadowColors != oldValue { setNeedsLayout() } }
+    }
     private var metalView: MTKView?
     private var resources: AndroidShadowResources?
     private enum Scene {
@@ -182,11 +187,13 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
         let screenSize: CGSize
         let windowOrigin: CGPoint
         let radius, elevation: CGFloat
+        let shadowColors: ZTransferAndroidShadowMetrics.ShadowColors
     }
     private var renderedGeometry: Geometry?
     private struct ValidatedInputs: Equatable {
         let window: AndroidShadowGeometryCache.WindowGeometry
         let radius, elevation: CGFloat
+        let shadowColors: ZTransferAndroidShadowMetrics.ShadowColors
     }
     private var validatedInputs: ValidatedInputs?
     private var needsFrameValidation = true
@@ -257,7 +264,7 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
         let target = presentation ? windowFrame.presentation! : window.layer
         let changed = frame.changed(source, relativeTo: target, presentation: presentation)
         let metrics = windowFrame.geometry
-        let inputs = ValidatedInputs(window: metrics, radius: cornerRadius, elevation: elevation)
+        let inputs = ValidatedInputs(window: metrics, radius: cornerRadius, elevation: elevation, shadowColors: shadowColors)
         // Hidden/empty hosts have no rendered geometry but can still be idle.
         // Any displayed ancestor/configuration change revalidates them, while
         // renderer failures retain their existing retry path.
@@ -351,7 +358,7 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
         let screenSize = metrics.screenSize
         let geometry = Geometry(bounds: bounds, origin: origin, basisX: basisX, basisY: basisY,
                                 density: density, screenSize: screenSize, windowOrigin: windowOrigin,
-                                radius: cornerRadius, elevation: elevation)
+                                radius: cornerRadius, elevation: elevation, shadowColors: shadowColors)
         guard geometry != renderedGeometry else { return }
         // Texture placement follows the sampled geometry directly, without
         // inheriting a second implicit Core Animation interpolation.
@@ -362,7 +369,8 @@ final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
         guard let lighting = Metrics.materialLighting(
             displayPixels: .init(Float(screenSize.width * density), Float(screenSize.height * density)),
             density: Float(density),
-            windowOriginPixels: .init(Float(windowOrigin.x * density), Float(windowOrigin.y * density))) else { return }
+            windowOriginPixels: .init(Float(windowOrigin.x * density), Float(windowOrigin.y * density)),
+            shadowColors: shadowColors) else { return }
         do {
             let radius = min(cornerRadius, min(bounds.width, bounds.height) * 0.5)
             let caster = Metrics.Caster(minimum: .zero,

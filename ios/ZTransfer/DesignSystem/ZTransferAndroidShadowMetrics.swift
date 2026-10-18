@@ -381,11 +381,17 @@ extension ZTransferAndroidShadowMetrics {
 // Lighting calculations follow AOSP Android 15; attribution in
 // Resources/licenses/AOSP-shadow-NOTICE.txt (Apache-2.0).
 extension ZTransferAndroidShadowMetrics {
+    /// RenderNode shadow colors (sRGB color alpha quantized by Compose toArgb).
+    struct ShadowColors: Equatable {
+        var ambientAlpha: UInt8 = 255
+        var spotAlpha: UInt8 = 255
+    }
     struct Lighting {
         let center: SIMD3<Float>
         let radius: Float
         let ambientAlpha: UInt8
         let spotAlpha: UInt8
+        var shadowColors: ShadowColors = .init()
     }
 
     struct Opacity {
@@ -398,7 +404,8 @@ extension ZTransferAndroidShadowMetrics {
     /// and window origin are physical pixels; density maps Android dp to pixels.
     /// OEM theme/debug light overrides are not inferred from iOS display data.
     static func materialLighting(displayPixels: SIMD2<Float>, density: Float,
-                                 windowOriginPixels: SIMD2<Float> = .zero) -> Lighting? {
+                                 windowOriginPixels: SIMD2<Float> = .zero,
+                                 shadowColors: ShadowColors = .init()) -> Lighting? {
         guard [displayPixels.x, displayPixels.y, density,
                windowOriginPixels.x, windowOriginPixels.y].allSatisfy(\.isFinite),
               displayPixels.x > 0, displayPixels.y > 0, density > 0 else { return nil }
@@ -408,7 +415,7 @@ extension ZTransferAndroidShadowMetrics {
                                       500 * density * ((zRatio + 2) / 3)),
                         radius: 800 * density,
                         ambientAlpha: UInt8(Float(255) * 0.039),
-                        spotAlpha: UInt8(Float(255) * 0.19))
+                        spotAlpha: UInt8(Float(255) * 0.19), shadowColors: shadowColors)
     }
 
     /// Mirrors HWUI's theme-byte -> float -> color-byte sequence. The outline's
@@ -417,8 +424,9 @@ extension ZTransferAndroidShadowMetrics {
         guard nodeAlpha.isFinite, outlineAlpha.isFinite,
               (0...1).contains(nodeAlpha), (0...1).contains(outlineAlpha) else { return nil }
         let casterAlpha = nodeAlpha * outlineAlpha
-        return Opacity(ambient: UInt8((Float(lighting.ambientAlpha) / 255) * casterAlpha * 255),
-                       spot: UInt8((Float(lighting.spotAlpha) / 255) * casterAlpha * 255),
+        // ReorderBarrierDrawables.cpp: multiplyAlpha(shadowColor, theme * caster).
+        return Opacity(ambient: UInt8((Float(lighting.ambientAlpha) / 255) * casterAlpha * Float(lighting.shadowColors.ambientAlpha)),
+                       spot: UInt8((Float(lighting.spotAlpha) / 255) * casterAlpha * Float(lighting.shadowColors.spotAlpha)),
                        transparentOccluder: casterAlpha < 1)
     }
 }

@@ -158,6 +158,38 @@ final class ConnectionStateTests: XCTestCase {
     }
 
     @MainActor
+    func testAcceptedWirelessWorkspaceIgnoresUSBWhenDisconnected() async throws {
+        let preferences = UserDefaults(suiteName: "sta_connection")!
+        let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
+        let saved = keys.map { preferences.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, saved) {
+                if let value { preferences.set(value, forKey: key) }
+                else { preferences.removeObject(forKey: key) }
+            }
+        }
+        for mode in [WirelessMode.ap, .sta] {
+            let service = AcceptedWirelessReplayService()
+            let model = ConnectionViewModel(wifiService: service)
+            model.setGPSConnectionPaused(false); model.select(wirelessMode: mode)
+            await model.connectSelectedWiFi()
+            let session = try XCTUnwrap(model.cameraSession)
+            let list = PhotoListViewModel.cached(session: session)
+            await model.handleTransportLost(session)
+            XCTAssertNil(model.cameraSession)
+            XCTAssertFalse(list.transportAvailable, "Connection loss must stop cached work even without a mounted list")
+            let device = USBDeviceDescriptor(id: "foreign-usb", name: "Nikon", productKind: nil, transportType: "USB")
+            model.apply(.deviceAdded(device)); model.apply(.ready(id: device.id))
+            model.apply(.deviceRemoved(id: device.id))
+            XCTAssertNil(model.state.selectedDeviceID)
+            XCTAssertTrue(model.state.discoveredDevices.isEmpty)
+            XCTAssertEqual(model.establishedWorkspaceMode, mode == .sta ? .sta : .ap)
+            model.setConnectionDiscoveryPaused(true)
+            PhotoListViewModel.evict(session: session)
+        }
+    }
+
+    @MainActor
     func testAPCancellationRestartsBackoffAndReconnectingStaysVisible() async {
         let preferences = UserDefaults(suiteName: "sta_connection")!
         let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
@@ -463,4 +495,20 @@ private actor APReplayService: WiFiConnectionServicing {
     }
     func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) {}
     func disconnect() { disconnects += 1 }
+}
+
+private actor AcceptedWirelessReplayService: WiFiConnectionServicing {
+    nonisolated let profiles: STAProfileStore
+    init() {
+        let name = "AcceptedWirelessReplay-\(UUID())"
+        profiles = STAProfileStore(preferences: UserDefaults(suiteName: name)!,
+            pairing: UserDefaults(suiteName: name + ".pairing")!)
+    }
+    func connectAP(host: String) async throws -> CameraRepository { CameraRepository(debugData: .shared) }
+    func connectSTA(discovery: PTPIPDiscoveryService,
+        onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> CameraRepository {
+        CameraRepository(debugData: .shared)
+    }
+    func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) async {}
+    func disconnect() async {}
 }

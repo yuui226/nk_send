@@ -129,6 +129,18 @@ struct CameraPhotoPreviewContent: Sendable {
     let orientation: Int?
 }
 
+/// Android review.loadPreview returns a decoded bitmap. Empty/invalid FHD
+/// payloads therefore take the same one-time EndLiveView fallback as a read
+/// error; a non-nil Data alone is not proof of a usable preview.
+@MainActor
+func loadRemoteReviewPreview(_ review: RemotePhotoReviewModel,
+                             read: () async throws -> Data) async throws -> CameraPhotoPreviewContent? {
+    try await review.preview {
+        guard let data = try? await read(), !data.isEmpty else { return nil }
+        return try? await loadCameraPhotoPreviewContent(data)
+    }
+}
+
 func loadCameraPhotoPreviewContent(
     _ data: Data,
     decode: @escaping @Sendable (Data) -> CameraPhotoPreviewContent? = decodeCameraPhotoPreviewContent
@@ -363,6 +375,7 @@ struct PhotoPreviewView: View {
     @ObservedObject var queueModel: TransferQueueViewModel
     let session: CameraSession
     let review: RemotePhotoReviewModel?
+    let landscapeReview: Bool
     let effectsStore: PhotoEffectsStore?
     let effectsDirectory: DirectoryAccessStore?
     @State private var effectsFile: CameraFile?
@@ -399,6 +412,7 @@ struct PhotoPreviewView: View {
     }
     @State private var exifLoadedAlpha: CGFloat = 0
     @State private var reviewRetry = 0
+    @State private var reviewTap = PreviewReviewTapGuard()
     @State private var previewEntries: [PhotoPreviewEntry]
     @State private var rotationDegrees: Double = 0
     @State private var cropPresented = false
@@ -475,6 +489,7 @@ struct PhotoPreviewView: View {
     init(session: CameraSession, queueModel: TransferQueueViewModel, files: [CameraFile],
          projection: PhotoPreviewProjectionCache = PhotoPreviewProjectionCache(),
          review: RemotePhotoReviewModel? = nil,
+         landscapeReview: Bool = false,
          effectsStore: PhotoEffectsStore? = nil, effectsDirectory: DirectoryAccessStore? = nil,
          isSessionConnected: Bool = true,
          burstIDByFile: [UInt32: String] = [:], transferredFileIDs: Set<UInt32> = [],
@@ -497,6 +512,7 @@ struct PhotoPreviewView: View {
         self.projection = projection
         self.effectsStore = effectsStore; self.effectsDirectory = effectsDirectory
         self.review = review
+        self.landscapeReview = landscapeReview
         self.isSessionConnected = isSessionConnected
         self.session = session; self.files = files; self.directory = directory
         self.burstIDByFile = burstIDByFile
@@ -526,7 +542,8 @@ struct PhotoPreviewView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity((review == nil ? 0.74 : 1) * presentationProgress).ignoresSafeArea()
+            Color.black.opacity((review == nil ? 0.74 : 1) * presentationProgress)
+                .ignoresSafeArea(edges: review == nil ? .all : [])
             TabView(selection: $pagerSelection) {
                 ForEach(previewPages) { page in
                     let itemIndex = page.index
@@ -537,7 +554,7 @@ struct PhotoPreviewView: View {
                             PreviewImage(session: session, file: file,
                                          highResolutionImage: highResolutionImages[file.id],
                                          rotationDegrees: rotationDegrees,
-                                         infoBottom: previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
+                                         infoBottom: landscapeReview ? nil : previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
                                          interactive: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
                                          cropActive: cropPresented && itemIndex == index,
                                          cropTop: cropTop, cropEditor: cropEditor,
@@ -564,7 +581,7 @@ struct PhotoPreviewView: View {
                                                  histogram.clear()
                                              }
                                          }, onTap: {
-                                             if review == nil || (abs(pageOffsetFraction) < 0.01 && !magnificationActive) {
+                                             if review == nil || (reviewTap.allowed && abs(pageOffsetFraction) < 0.01 && !magnificationActive) {
                                                  startClose()
                                              }
                                          },
@@ -581,7 +598,7 @@ struct PhotoPreviewView: View {
                                              }
                                          },
                                          isCurrent: index == itemIndex, tapWhenZoomed: review != nil)
-                                .padding(.bottom, previewSafeInsets.bottom + 88)
+                                .padding(.bottom, landscapeReview ? 0 : previewSafeInsets.bottom + 88)
                         case .burst(let group):
                             BurstCollectionPreview(
                                 session: session,
@@ -624,7 +641,7 @@ struct PhotoPreviewView: View {
             // Android's HorizontalPager owns the complete edge-to-edge stage;
             // only its controls apply system-bar padding. Center the image in
             // that same full-screen viewport instead of the reduced safe area.
-            .ignoresSafeArea()
+            .ignoresSafeArea(edges: review == nil ? .all : [])
             .modifier(PhotoPreviewAnchorTransform(
                 progress: presentationProgress,
                 anchor: closing ? collapseAnchor : initialAnchor,
@@ -689,16 +706,16 @@ struct PhotoPreviewView: View {
                             .layoutPriority(1)
                             .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: presentationProgress * burstPagerAlpha))
                             .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
-                        if let task = queueModel.task(for: file.id), task.status != .completed {
+                        if review == nil, let task = queueModel.task(for: file.id), task.status != .completed {
                             PhotoPreviewLiveTransferBadge(
                                 task: task,
                                 progressModel: queueModel.progressModel
                             )
-                        } else if transferredOriginal(file) { TransferredPhotoBadge() }
+                        } else if review == nil && transferredOriginal(file) { TransferredPhotoBadge() }
                     }
                     .foregroundStyle(.white.opacity(0.88))
                     .frame(height: 36)
-                    .padding(.trailing, 172)
+                    .padding(.trailing, review == nil ? 172 : 52)
                     Group {
                         if let exif { PreviewExifBar(exif: exif) }
                         else { Color.clear }
@@ -732,83 +749,50 @@ struct PhotoPreviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             if let file = currentPhoto, highResolutionLoading.contains(file.id) {
-                Rectangle()
-                    .fill(ZTransferColors.accentBlue.opacity(0.9))
-                    .frame(height: 2)
+                RemoteReviewFHDLoading()
+                    .opacity(presentationProgress * burstPagerAlpha * (cropPresented ? 0 : 1))
+                    .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .allowsHitTesting(false)
             }
-            ZStack {
-                if let file = currentPhoto {
-                    HStack(spacing: 12) {
-                        Group {
-                        if photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil {
-                            PreviewCircleButton(icon: .collapse, accessibilityKey: "cd_collapse") {
-                                collapseCurrentBurst()
-                            }
-                        }
-                        if !isVideo(file) {
-                            PreviewCircleButton(icon: .histogram, accessibilityKey: "cd_preview_histogram", active: histogramVisible) {
-                                histogramPreferences.mode = histogramMode.next
-                            }
-                            PreviewCircleButton(icon: .rotateLeft, accessibilityKey: "cd_rotate_photo") {
-                                let nextDegrees = rotationDegrees - 90
-                                // Match Android's animateFloatAsState(tween(220)):
-                                // keep accumulating the target angle so repeated
-                                // taps always continue counter-clockwise rather
-                                // than snapping across the 0/360-degree boundary.
-                                withAnimation(photoPreviewRotationAnimation) {
-                                    rotationDegrees = nextDegrees
-                                }
-                                rotationQuarterTurns = ((Int(-nextDegrees / 90) % 4) + 4) % 4
-                            }
-                            if showPreviewPhotoEffects(enabled: effectsStore?.isEnabled == true,
-                                                       isReview: review != nil, file: file), effectsDirectory != nil {
-                                Button {
-                                    guard !queueFlightActive, !burstTransitionBusy, !closing else { return }
-                                    ZTransferHaptics.shared.tick()
-                                    effectsFile = file; effectsRotation = rotationQuarterTurns; effectsPresented = true
-                                } label: {
-                                    QueueBadgeIcon(state: .generating)
-                                        .fill(ZTransferColors.accentOrange)
-                                        .frame(width: 20, height: 20)
-                                        .frame(width: 44, height: 44)
-                                }
-                                .accessibilityLabel(AppLocalized.resource("photo_effects_open_editor"))
-                                .anchorPreference(key: PreviewEffectsButtonAnchorKey.self, value: .bounds) { $0 }
-                                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                            }
-                            if review == nil && isJPEG(file) {
-                                PreviewCircleButton(icon: .crop, accessibilityKey: "cd_crop_photo") {
-                                    ZTransferHaptics.shared.tick()
-                                    cropPreparation.reset()
-                                    cropRetry = 0
-                                    cropLoadingVisible = false
-                                    cropCloseTask?.cancel()
-                                    cropEditor.reset()
-                                    cropEnteredAt = ProcessInfo.processInfo.systemUptime
-                                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { cropPresented = true }
-                                }
-                            }
-                        }
-                        }
-                        .opacity(cropPresented ? 0 : 1)
-                        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
-                        .allowsHitTesting(!cropPresented && !cropRestoring && !queueFlightActive)
-                        // The persistent action is above the transparent crop controls below.
-                        if review == nil { Color.clear.frame(width: 44, height: 44) }
-
-                    }
-                    .transition(.opacity)
-                }
-            }
-            .padding(.trailing, 20).padding(.bottom, 32)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            .animation(.easeInOut(duration: 0.18), value: currentPhoto == nil)
-            .allowsHitTesting(currentPhoto != nil)
+            PhotoPreviewTools(
+                selection: currentPhoto.map { .init(file: $0,
+                    canCollapse: photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil) },
+                isReview: review != nil, effectsAvailable: effectsStore != nil && effectsDirectory != nil,
+                effectsEnabled: effectsStore?.isEnabled == true, histogramMode: histogramMode,
+                feedback: pageFeedback,
+                inputsEnabled: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !magnificationActive,
+                editEnabled: !burstTransitionBusy && !queueFlightActive && queueDragDirection != .upward,
+                collapseEnabled: !queueFlightActive && queueDragDirection != .upward && queueFlightTask == nil,
+                rotationEnabled: !burstTransitionBusy,
+                onCollapse: { collapseCurrentBurst() },
+                onEffects: { file in
+                    ZTransferHaptics.shared.tick()
+                    effectsFile = file; effectsRotation = rotationQuarterTurns; effectsPresented = true
+                },
+                onCrop: { _ in
+                    ZTransferHaptics.shared.tick()
+                    cropPreparation.reset(); cropRetry = 0; cropLoadingVisible = false
+                    cropCloseTask?.cancel(); cropEditor.reset()
+                    cropEnteredAt = ProcessInfo.processInfo.systemUptime
+                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { cropPresented = true }
+                },
+                onHistogram: { histogramPreferences.mode = histogramMode.next },
+                onRotate: {
+                    // Accumulate angles so every press rotates counter-clockwise.
+                    withAnimation(photoPreviewRotationAnimation) { rotationDegrees -= 90 }
+                    rotationQuarterTurns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
+                })
+                .compositingGroup()
+                .opacity(presentationProgress * burstPagerAlpha * (cropPresented ? 0 : 1))
+                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
+                .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
+                .padding(.trailing, landscapeReview ? 12 : review != nil ? 20 : 76)
+                .padding(.bottom, landscapeReview ? 8 : 32)
             PhotoPreviewHistogramLayer(model: histogram, mode: histogramMode,
                 currentPhoto: currentPhoto, cropPresented: cropPresented,
-                alpha: presentationProgress * burstPagerAlpha, feedback: pageFeedback)
+                alpha: presentationProgress * burstPagerAlpha, feedback: pageFeedback,
+                review: review != nil, landscapeReview: landscapeReview)
         }
         .overlayPreferenceValue(PreviewEffectsButtonAnchorKey.self) { anchor in
             if let anchor, let store = effectsStore, let directory = effectsDirectory, let file = effectsFile {
@@ -823,28 +807,27 @@ struct PhotoPreviewView: View {
                 let imageFailed = currentPhoto.map { fhdUnavailable.contains($0.id) } ?? false
                 let pageFailed = index == previewEntries.count - 1 && review.failed
                 if imageFailed || pageFailed || !isSessionConnected {
-                    Button(AppLocalized.resource(isSessionConnected ? "remote_review_retry" : "remote_review_disconnected")) {
+                    RemoteReviewRetryButton(connected: isSessionConnected) {
                         if imageFailed {
                             if let file = currentPhoto { fhdUnavailable.remove(file.id) }
                             reviewRetry += 1
                         }
                         if pageFailed { review.loadMore() }
                     }
-                    .disabled(!isSessionConnected).foregroundStyle(.white)
-                    .padding(.leading, 12).padding(.bottom, 32)
+                    .padding(.leading, 12).padding(.bottom, landscapeReview ? 8 : 32)
                 }
             }
         }
         .overlay(alignment: .trailing) {
             if let review, review.loading, index == previewEntries.count - 1 {
-                ProgressView().tint(.white).padding(12)
+                RemoteCameraToolLoading(diameter: 20, strokeWidth: 2, color: .white).padding(12)
             }
         }
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { previewSafeInsets = proxy.safeAreaInsets }
-                    .onChange(of: proxy.safeAreaInsets) { previewSafeInsets = $0 }
+                    .onAppear { previewSafeInsets = review == nil ? proxy.safeAreaInsets : EdgeInsets() }
+                    .onChange(of: proxy.safeAreaInsets) { previewSafeInsets = review == nil ? $0 : EdgeInsets() }
             }
         }
         #if DEBUG
@@ -894,6 +877,9 @@ struct PhotoPreviewView: View {
         // TabView can therefore be disabled after an upward lock without
         // cancelling the gesture that owns the queue drag.
         .simultaneousGesture(previewQueueSwipeGesture)
+        .background {
+            if review != nil { PreviewReviewTouchObserver(state: reviewTap) }
+        }
         .onAppear {
             rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
             rotationDegrees = -90 * Double(rotationQuarterTurns)
@@ -923,11 +909,10 @@ struct PhotoPreviewView: View {
         .onChange(of: files) { updated in
             guard review != nil else { return }
             previewEntries = updated.map { .photo($0) }
-            index = min(index, max(0, updated.count - 1))
-            pagerSelection = index
+            let bounded = min(index, max(0, updated.count - 1))
+            if index != bounded { index = bounded; pagerSelection = bounded }
         }
         .onChange(of: index) { value in
-            if review != nil && value >= previewEntries.count - 3 { review?.loadMore() }
             closeCrop()
             currentCropViewport = nil
             if previewEntries.indices.contains(value) {
@@ -1027,6 +1012,7 @@ struct PhotoPreviewView: View {
                 )
             }
             .onEnded { value in
+                guard review == nil else { return }
                 guard effectsFile == nil, !cropPresented, !cropRestoring else { return }
                 let resolved = queueDragDirection == .undecided
                     ? photoPreviewQueueDragDirection(translation: value.translation)
@@ -1070,6 +1056,12 @@ struct PhotoPreviewView: View {
         closing = true
         queueFlightTask?.cancel()
         queueFlightTask = nil
+        if review != nil {
+            // Android delegates review dismissal to the full black surface.
+            // Do not fade this inner layer first or resume frame reads early.
+            onDismiss(nil)
+            return
+        }
         let returnFile = currentPhoto
         Task { @MainActor in
             collapseAnchor = if let returnFile {
@@ -1118,8 +1110,8 @@ struct PhotoPreviewView: View {
         let metadata: PhotoExif?
         if let review, needsPreview {
             metadata = try? await session.withInteractivePreviewPriority {
-                let data = try? await review.preview { try? await session.preview(handle: file.id) }
-                await finishRemoteImageLoad(file: file, data: data)
+                let content = try? await loadRemoteReviewPreview(review) { try await session.preview(handle: file.id) }
+                await finishRemoteImageLoad(file: file, content: content)
                 let (_, details) = await session.previewAndExif(file: file, loadPreview: false, loadExif: needsExif)
                 return details
             }
@@ -1135,6 +1127,7 @@ struct PhotoPreviewView: View {
         guard !Task.isCancelled else { return }
         finishRemoteExifLoad(file: file, metadata: metadata, loadedExif: needsExif)
         guard !Task.isCancelled else { return }
+        if review != nil && index >= previewEntries.count - 3 { review?.loadMore() }
         await prefetchNeighbors(around: index, allowCameraRequest: !queueModel.snapshot.isTransferring)
     }
 
@@ -1166,12 +1159,11 @@ struct PhotoPreviewView: View {
         fhdUnavailable.remove(id)
         highResolutionLoading.insert(id)
         defer { highResolutionLoading.remove(id) }
-        let previewData: Data?
-        if let review { previewData = try? await review.preview { try? await session.preview(handle: id) } }
-        else { previewData = try? await session.preview(handle: id) }
-        guard let data = previewData,
-              !Task.isCancelled,
-              let content = try? await loadCameraPhotoPreviewContent(data),
+        let decoded: CameraPhotoPreviewContent?
+        if let review { decoded = try? await loadRemoteReviewPreview(review) { try await session.preview(handle: id) } }
+        else if let data = try? await session.preview(handle: id) { decoded = try? await loadCameraPhotoPreviewContent(data) }
+        else { decoded = nil }
+        guard let content = decoded,
               !Task.isCancelled else {
             if !Task.isCancelled { fhdUnavailable.insert(id) }
             return false
@@ -1192,6 +1184,11 @@ struct PhotoPreviewView: View {
         let content: CameraPhotoPreviewContent?
         if let data { content = try? await loadCameraPhotoPreviewContent(data) }
         else { content = nil }
+        finishRemoteImageLoad(file: file, content: content)
+    }
+
+    @MainActor
+    private func finishRemoteImageLoad(file: CameraFile, content: CameraPhotoPreviewContent?) {
         guard !Task.isCancelled,
               retainedPhotoPreviewIDs(entries: previewEntries, currentIndex: index).contains(file.id) else { return }
         if let content {
@@ -1586,6 +1583,8 @@ struct PhotoPreviewHistogramLayer: View {
     let cropPresented: Bool
     let alpha: CGFloat
     let feedback: PhotoPreviewPageFeedback
+    var review = false
+    var landscapeReview = false
     #if DEBUG
     var didRender: ((Bool) -> Void)? = nil
     #endif
@@ -1597,8 +1596,9 @@ struct PhotoPreviewHistogramLayer: View {
         let _ = didRender?(visible)
         #endif
         if !model.bars.isEmpty {
-            PreviewHistogramOverlay(values: model.bars, rgb: mode == .rgb ? model.result.rgb : nil)
-                .padding(.leading, 20).padding(.bottom, 72)
+            PreviewHistogramOverlay(values: model.bars, rgb: model.result.rgb, mode: mode)
+                .padding(.leading, landscapeReview ? 12 : 20)
+                .padding(.bottom, landscapeReview ? 8 : review ? 72 : 80)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 .modifier(PhotoPreviewInformationFade(feedback: feedback, base: visible && !cropPresented ? alpha : 0))
                 .animation(.easeInOut(duration: 0.18), value: visible)
@@ -1610,26 +1610,86 @@ struct PhotoPreviewHistogramLayer: View {
 
 /// Android's shared 118x62 histogram: 256-bin filled luminance curve, bright
 /// outline and a faint baseline. This is intentionally not a bar chart.
-private struct PreviewHistogramOverlay: View {
+struct PreviewHistogramOverlay: View {
+    let values: [CGFloat]
+    let rgb: [[CGFloat]]?
+    let mode: RemoteHistogramMode
+
+    var body: some View {
+        AndroidBooleanCrossfade(selected: mode == .rgb, durationMilliseconds: 180) { showRGB in
+            if showRGB { PreviewRGBHistogram(values: values, rgb: rgb) }
+            else { PreviewLuminanceHistogram(values: values) }
+        }
+        .frame(width: 118, height: 62)
+        .allowsHitTesting(false)
+    }
+}
+
+/// RemoteMonitorScopes.ScopeCard/MonitorHistogramOverlay: centres of bins,
+/// additive filled channels, separate contour (never stroke the closing edges).
+private struct PreviewRGBHistogram: View {
     let values: [CGFloat]
     let rgb: [[CGFloat]]?
 
     var body: some View {
-        Canvas { context, size in
-            if let rgb, rgb.count == 3 {
-                for channel in 0..<3 {
-                    let values = rgb[channel]
-                    guard values.count > 1 else { continue }
-                    var path = Path()
-                    for (index, value) in values.enumerated() {
-                        let point = CGPoint(x: size.width * CGFloat(index) / CGFloat(values.count - 1),
-                                            y: size.height * (1 - value))
-                        if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
-                    }
-                    context.stroke(path, with: .color([Color.red, .green, .blue][channel]), lineWidth: 1)
-                }
-                return
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Text("RGB").font(.system(size: 8, design: .monospaced)).foregroundStyle(.white.opacity(0.85))
+                Spacer(minLength: 0)
+                Text("0–255").font(.system(size: 7, design: .monospaced)).foregroundStyle(.white.opacity(0.4))
             }
+            .frame(height: 10)
+            Canvas { surface, size in
+                // Grid and channels share one offscreen layer; Plus adds to
+                // the grid as well, while the translucent card stays outside.
+                surface.drawLayer { context in
+                let height = max(1, size.height - 2)
+                for index in 0..<5 {
+                    let x = size.width * CGFloat(index) / 4
+                    var line = Path(); line.move(to: CGPoint(x: x, y: 0))
+                    line.addLine(to: CGPoint(x: x, y: height))
+                    context.stroke(line, with: .color(.white.opacity(0.07)), lineWidth: 0.5)
+                }
+                do {
+                    var channelsContext = context
+                    channelsContext.blendMode = .plusLighter
+                    let channels = rgb?.count == 3 ? rgb! : [values]
+                    let colors = [Color(red: 1, green: 48/255, blue: 48/255),
+                                  Color(red: 48/255, green: 239/255, blue: 48/255),
+                                  Color(red: 64/255, green: 64/255, blue: 1)]
+                    for (channel, bins) in channels.enumerated() where !bins.isEmpty {
+                        var contour = Path()
+                        for (index, value) in bins.enumerated() {
+                            let y = height * (1 - min(1, max(0, value)))
+                            if index == 0 { contour.move(to: CGPoint(x: 0, y: y)) }
+                            contour.addLine(to: CGPoint(x: size.width * (CGFloat(index) + 0.5) / CGFloat(bins.count), y: y))
+                        }
+                        contour.addLine(to: CGPoint(x: size.width, y: height * (1 - min(1, max(0, bins.last ?? 0)))))
+                        var fill = contour
+                        fill.addLine(to: CGPoint(x: size.width, y: height))
+                        fill.addLine(to: CGPoint(x: 0, y: height)); fill.closeSubpath()
+                        let color = channels.count == 3 ? colors[channel] : Color(red: 228/255, green: 235/255, blue: 231/255)
+                        channelsContext.fill(fill, with: .color(color.opacity(0.34)))
+                        channelsContext.stroke(contour, with: .color(color.opacity(0.62)), lineWidth: 0.65)
+                    }
+                }
+                var baseline = Path(); baseline.move(to: CGPoint(x: 0, y: height))
+                baseline.addLine(to: CGPoint(x: size.width, y: height))
+                context.stroke(baseline, with: .color(.white.opacity(0.22)), lineWidth: 0.5)
+                }
+            }
+        }
+        .padding(.horizontal, 5).padding(.vertical, 3)
+        .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+    }
+}
+
+private struct PreviewLuminanceHistogram: View {
+    let values: [CGFloat]
+
+    var body: some View {
+        Canvas { context, size in
             guard values.count > 1 else { return }
             let left: CGFloat = 7
             let top: CGFloat = 6
@@ -1702,6 +1762,111 @@ private struct PhotoPreviewQueueFlightView: View {
     }
 }
 
+struct PhotoPreviewToolSelection: Equatable {
+    let file: CameraFile
+    let canCollapse: Bool
+}
+
+struct PhotoPreviewToolLayout {
+    let size: CGFloat
+    let gap: CGFloat
+    init(width: CGFloat, effects: Bool, collapse: Bool) {
+        let count = CGFloat(3 + (effects ? 1 : 0) + (collapse ? 1 : 0))
+        gap = min(12, max(4, (width - 44 * count) / (count - 1)))
+        size = min(44, max(0, (width - gap * (count - 1)) / count))
+    }
+}
+
+/// PhotoPreview.PreviewPhotoActionVisibility: retain the button AND its trailing
+/// gap through fade-out. A Boolean crossfade with an empty false branch gives
+/// the same fixed-size slot without scale/expand transitions or parent ticks.
+struct PreviewActionVisibility<Content: View>: View {
+    let visible: Bool
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        AndroidBooleanCrossfade(selected: visible, durationMilliseconds: 180) { showing in
+            if showing { content().compositingGroup() }
+        }
+    }
+}
+
+struct PhotoPreviewTools: View {
+    let selection: PhotoPreviewToolSelection?
+    let isReview: Bool
+    let effectsAvailable: Bool
+    let effectsEnabled: Bool
+    let histogramMode: RemoteHistogramMode
+    let feedback: PhotoPreviewPageFeedback
+    let inputsEnabled: Bool
+    let editEnabled: Bool
+    let collapseEnabled: Bool
+    let rotationEnabled: Bool
+    let onCollapse: () -> Void
+    let onEffects: (CameraFile) -> Void
+    let onCrop: (CameraFile) -> Void
+    let onHistogram: () -> Void
+    let onRotate: () -> Void
+    @State private var retained: PhotoPreviewToolSelection?
+
+    private func accepts(_ file: CameraFile) -> Bool {
+        inputsEnabled && selection?.file.id == file.id && abs(feedback.offset) < 0.01
+    }
+    var body: some View {
+        GeometryReader { geometry in
+            PreviewActionVisibility(visible: selection != nil) {
+                if let item = selection ?? retained {
+                    let file = item.file
+                    let metrics = PhotoPreviewToolLayout(width: geometry.size.width,
+                        effects: effectsAvailable && effectsEnabled, collapse: item.canCollapse)
+                    let effects = effectsAvailable && showPreviewPhotoEffects(enabled: effectsEnabled,
+                                                                               isReview: isReview, file: file)
+                    let crop = !isReview && [".jpg", ".jpeg"].contains(file.fileExtension.lowercased())
+                    let image = ![".mov", ".mp4"].contains(file.fileExtension.lowercased())
+                    HStack(spacing: 0) {
+                        if item.canCollapse {
+                            PreviewCircleButton(icon: .collapse, accessibilityKey: "cd_collapse", size: metrics.size) {
+                                if accepts(file) && collapseEnabled { onCollapse() }
+                            }
+                            .disabled(!inputsEnabled || !collapseEnabled)
+                            .padding(.trailing, metrics.gap)
+                        }
+                        PreviewActionVisibility(visible: effects) {
+                            Button { if effects && accepts(file) && editEnabled { onEffects(file) } } label: {
+                                QueueBadgeIcon(state: .generating).fill(ZTransferColors.accentOrange)
+                                    .frame(width: 20, height: 20).frame(width: metrics.size, height: metrics.size)
+                            }
+                            .accessibilityLabel(AppLocalized.resource("photo_effects_open_editor"))
+                            .anchorPreference(key: PreviewEffectsButtonAnchorKey.self, value: .bounds) { $0 }
+                            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: metrics.size / 2))
+                            .padding(.trailing, metrics.gap)
+                        }
+                        PreviewActionVisibility(visible: crop) {
+                            PreviewCircleButton(icon: .crop, accessibilityKey: "crop_title", size: metrics.size) {
+                                if crop && accepts(file) && editEnabled { onCrop(file) }
+                            }
+                            .padding(.trailing, metrics.gap)
+                        }
+                        PreviewActionVisibility(visible: image) {
+                            HStack(spacing: metrics.gap) {
+                                PreviewCircleButton(icon: .histogram, accessibilityKey: "cd_preview_histogram",
+                                    active: histogramMode != .off, histogramRGB: histogramMode == .rgb, size: metrics.size) {
+                                    if image && accepts(file) { onHistogram() }
+                                }
+                                PreviewCircleButton(icon: .rotateLeft, accessibilityKey: "cd_rotate_photo", size: metrics.size) {
+                                    if image && accepts(file) && rotationEnabled { onRotate() }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+        .onAppear { if let selection { retained = selection } }
+        .onChange(of: selection) { if let selection = $0 { retained = selection } }
+    }
+}
+
 enum PreviewControlIcon: Equatable {
     case collapse, expand, histogram, rotateLeft, crop, add, check, close
 }
@@ -1710,13 +1875,14 @@ struct PreviewCircleButton: View {
     let icon: PreviewControlIcon
     let accessibilityKey: String
     var active = false
+    var histogramRGB = false
     var size: CGFloat = 44
     var tint: Color = ZTransferColors.accentBlue
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            PreviewControlMark(icon: icon, tint: tint)
+            PreviewControlMark(icon: icon, tint: tint, histogramRGB: histogramRGB)
                 .frame(width: markSize, height: markSize)
                 .foregroundStyle(tint)
                 .frame(width: size, height: size)
@@ -1734,8 +1900,8 @@ struct PreviewCircleButton: View {
     private var markSize: CGFloat {
         switch icon {
         case .collapse, .expand: return 25
-        case .histogram: return 20
-        case .rotateLeft, .crop, .add, .check, .close: return size * 0.5
+        case .histogram, .crop: return 20
+        case .rotateLeft, .add, .check, .close: return size * 0.5
         }
     }
 }
@@ -1746,6 +1912,7 @@ struct PreviewCircleButton: View {
 struct PreviewControlMark: View {
     let icon: PreviewControlIcon
     var tint: Color = ZTransferColors.accentBlue
+    var histogramRGB = false
 
     var body: some View {
         Canvas { context, size in
@@ -1764,7 +1931,7 @@ struct PreviewControlMark: View {
                     bar.addLine(to: CGPoint(x: x, y: baseY - baseY * heights[index]))
                     context.stroke(
                         bar,
-                        with: tint,
+                        with: histogramRGB ? .color(RemoteToolMark.rgb[min(index * 3 / 5, 2)]) : tint,
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                     )
                 }
@@ -1992,7 +2159,7 @@ private struct PreviewImage: View {
     let file: CameraFile
     let highResolutionImage: UIImage?
     let rotationDegrees: Double
-    let infoBottom: CGFloat
+    let infoBottom: CGFloat?
     let interactive: Bool
     let cropActive: Bool
     let cropTop: CGFloat
@@ -2025,7 +2192,7 @@ private struct PreviewImage: View {
         let cachedThumbnail = thumbnail ?? session.memoryThumbnailImage(file: file)
         GeometryReader { proxy in
             let cropViewport = PhotoPreviewCropViewport(size: proxy.size, scale: scale, offset: offset,
-                rotation: rotationDegrees, infoBottom: infoBottom)
+                rotation: rotationDegrees, infoBottom: infoBottom ?? 0)
             ZStack {
                 if let cachedThumbnail {
                     Image(uiImage: cachedThumbnail)
@@ -2083,7 +2250,6 @@ private struct PreviewImage: View {
             ), including: zoomEnabled && scale > 1.01 ? .all : .none)
             .simultaneousGesture(tapGesture(
                 viewportSize: proxy.size,
-                viewportFrame: proxy.frame(in: .global),
                 imageSize: (highResolutionImage ?? cachedThumbnail)?.size
             ))
             .overlay {
@@ -2102,6 +2268,10 @@ private struct PreviewImage: View {
             .onChange(of: cropViewport) { if isCurrent { onViewportChange($0) } }
             .onChange(of: isCurrent) { if $0 { onViewportChange(cropViewport) } }
         }
+        // Tap positions belong to the untransformed viewport, just like
+        // Android detectTapGestures. Subtracting a global bounding-box origin
+        // fails when RemoteReviewSurface rotates the whole canvas by 90/270°.
+        .coordinateSpace(name: "photo-preview-viewport-\(file.id)")
         .onChange(of: cropActive) { active in
             zoomAnimationTask?.cancel(); zoomAnimationTask = nil
             zoomAnimationActive = false; magnifying = false
@@ -2242,20 +2412,16 @@ private struct PreviewImage: View {
 
     private func tapGesture(
         viewportSize: CGSize,
-        viewportFrame: CGRect,
         imageSize: CGSize?
     ) -> some Gesture {
-        SpatialTapGesture(count: 2, coordinateSpace: CoordinateSpace.global)
-            .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: CoordinateSpace.global))
+        SpatialTapGesture(count: 2, coordinateSpace: .named("photo-preview-viewport-\(file.id)"))
+            .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: .named("photo-preview-viewport-\(file.id)")))
             .onEnded { value in
                 guard isCurrent else { return }
                 switch value {
                 case .first(let doubleTap):
                     handleDoubleTap(
-                        at: CGPoint(
-                            x: doubleTap.location.x - viewportFrame.minX,
-                            y: doubleTap.location.y - viewportFrame.minY
-                        ),
+                        at: doubleTap.location,
                         viewportSize: viewportSize,
                         imageSize: imageSize
                     )

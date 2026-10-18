@@ -110,6 +110,7 @@ final class RootPresentationModel: ObservableObject {
     let gps: GPSCoordinator
     let directory: DirectoryAccessStore
     let queue: TransferQueue
+    let queueModel: TransferQueueViewModel
     @Published private(set) var snapshot: Snapshot
     private var observations = Set<AnyCancellable>()
 
@@ -122,6 +123,7 @@ final class RootPresentationModel: ObservableObject {
         let directory = directory ?? DirectoryAccessStore()
         self.connection = connection; self.effects = effects; self.gps = gps
         self.directory = directory; self.queue = queue
+        self.queueModel = TransferQueueViewModel(queue: queue)
         snapshot = Snapshot(session: connection.cameraSession,
             mode: connection.state.presentationMode(transport: nil, isSTA: false),
             effectsEnabled: effects.isEnabled, gpsEnabled: gps.state.enabled,
@@ -208,7 +210,7 @@ struct RootView: View {
                 // large list out of the per-frame celebration redraw.
                 ZStack {
                     PhotoListView(session: session, presentationMode: restoredPresentationMode,
-                                  queue: transferQueue,
+                                  queue: transferQueue, queueModel: presentation.queueModel,
                                   directory: directoryStore,
                                   effectsStore: effectsStore,
                                   isSessionConnected: workspaceConnected,
@@ -247,7 +249,7 @@ struct RootView: View {
         .accessibilityHidden(presentation.snapshot.directoryRestoring)
         .preferredColorScheme(themeMode == "DARK" ? .dark : themeMode == "LIGHT" ? .light : nil)
         .environment(\.locale, locale)
-        .fullScreenCover(isPresented: $monitorPresented, onDismiss: {
+        .workspaceMonitor(isPresented: $monitorPresented, onDismiss: {
             RemoteTrialNotice.returnedToList()
         }) {
             let session = workspaceSession
@@ -256,8 +258,9 @@ struct RootView: View {
                     Task { await connectionModel.handleTransportLost(live) }
                 })
             }
-            RemoteView(session: session, presentationMode: restoredPresentationMode,
+            RemoteView(session: session, queueModel: presentation.queueModel, presentationMode: restoredPresentationMode,
                        isSessionConnected: workspaceConnected,
+                       onClose: { monitorPresented = false },
                        onRetrySTA: { connectionModel.retrySTAConnection() },
                        onPreparing: { await listModel?.pauseForRemote() },
                        onStopped: { transportLost in

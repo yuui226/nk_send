@@ -3,6 +3,41 @@
 import SwiftUI
 import UIKit
 
+/// Material3 1.1.2 LinearProgressIndicator: two independent head/tail keyframes,
+/// 1800ms restart, transparent track, Butt caps. Used while a preview reads FHD.
+enum RemoteReviewLoadingMotion {
+    struct Segment: Equatable { let head: Float; let tail: Float }
+    static func segments(milliseconds: Double) -> [Segment] {
+        let phase = Float(max(0, milliseconds).truncatingRemainder(dividingBy: 1800))
+        func value(delay: Float, duration: Float, x1: Float, x2: Float) -> Float {
+            ZTransferAndroidMotion.cubicBezier(min(1, max(0, (phase - delay) / duration)), x1: x1, x2: x2)
+        }
+        return [Segment(head: value(delay: 0, duration: 750, x1: 0.2, x2: 0.8),
+                        tail: value(delay: 333, duration: 850, x1: 0.4, x2: 1)),
+                Segment(head: value(delay: 1000, duration: 567, x1: 0, x2: 0.65),
+                        tail: value(delay: 1267, duration: 533, x1: 0.1, x2: 0.45))]
+    }
+}
+
+struct RemoteReviewFHDLoading: View {
+    @StateObject private var clock = RemoteCameraToolLoop()
+    @Environment(\.layoutDirection) private var layoutDirection
+    var body: some View {
+        Canvas { context, size in
+            for segment in RemoteReviewLoadingMotion.segments(milliseconds: clock.milliseconds)
+                where segment.head > segment.tail {
+                let start = layoutDirection == .leftToRight ? segment.tail : 1 - segment.head
+                let end = layoutDirection == .leftToRight ? segment.head : 1 - segment.tail
+                context.fill(Path(CGRect(x: CGFloat(start) * size.width, y: 0,
+                                         width: CGFloat(end - start) * size.width, height: size.height)),
+                    with: .color(Color(red: 79/255, green: 195/255, blue: 247/255).opacity(0.9)))
+            }
+        }
+        .frame(height: 2).allowsHitTesting(false).accessibilityHidden(true)
+        .onAppear { clock.start() }.onDisappear { clock.stop() }
+    }
+}
+
 /// Material3 1.1.2 ProgressIndicator.kt (the Android app's resolved version):
 /// five 1332ms rotations, linear base, and staggered 666ms eased head/tail.
 enum RemoteCameraToolIndicatorMotion {

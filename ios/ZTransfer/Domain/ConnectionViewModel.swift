@@ -32,7 +32,15 @@ final class ConnectionViewModel: ObservableObject {
     private let wifiDiscovery = PTPIPDiscoveryService()
     @Published private(set) var cameraRepository: CameraRepository?
     @Published private(set) var cameraSession: CameraSession? {
-        didSet { updatePlaceAvailability() }
+        didSet {
+            if let previous = oldValue, previous !== cameraSession {
+                PhotoListViewModel.suspend(session: previous)
+            }
+            if let session = cameraSession {
+                establishedWorkspaceMode = CameraPresentationMode(isUSB: session.isUSB, wirelessMode: session.wirelessMode)
+            }
+            updatePlaceAvailability()
+        }
     }
     #if DEBUG
     private weak var premiumAnimationPreviewSession: CameraSession?
@@ -57,6 +65,7 @@ final class ConnectionViewModel: ObservableObject {
     private var wifiRetryAttempt = 0
     private var apFailedAttempts = 0
     private var connectionDiscoveryPaused = false
+    private(set) var establishedWorkspaceMode: CameraPresentationMode?
     private var staWorkspaceEstablished = false
     private var staRecovery: (source: ObjectIdentifier, catalog: STACatalogRecovery)?
     private var usbWorkspaceEstablished = false
@@ -544,6 +553,24 @@ final class ConnectionViewModel: ObservableObject {
         state.errorMessage = nil
         do {
             let repository = try await connectionService.connect(deviceID: id)
+            if !usbWorkspaceEstablished {
+                try await CameraPhotoAdmission.waitUntilReady(
+                    check: { try await repository.prepareUSBPhotoList() },
+                    isCurrent: { [weak self] in
+                        guard let self else { return false }
+                        return generation == connectionGeneration && !connectionDiscoveryPaused &&
+                            state.selectedDeviceID == id && state.usbAuthorization == .authorized &&
+                            state.discoveredDevices.contains { $0.id == id }
+                    },
+                    isActive: { [weak self] in self?.usbForegroundActive == true },
+                    onWaiting: { [weak self] reason in
+                        guard let self else { return }
+                        let message = reason.message
+                        if state.usbPhase != .failed(message) { state.usbPhase = .failed(message) }
+                        if state.errorMessage != message { state.errorMessage = message }
+                    })
+            }
+            try Task.checkCancellation()
             guard generation == connectionGeneration,
                   state.selectedDeviceID == id,
                   state.discoveredDevices.contains(where: { $0.id == id }) else {
@@ -570,6 +597,7 @@ final class ConnectionViewModel: ObservableObject {
                 return
             }
             state.usbPhase = .connected
+            state.errorMessage = nil
         } catch is CancellationError {
             // CameraConnectionService may have completed OpenSession just
             // before cancellation was observed. The open callback is drained
@@ -695,7 +723,7 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     func select(wirelessMode: WirelessMode) {
-        guard cameraSession == nil, !usbWorkspaceEstablished,
+        guard cameraSession == nil, establishedWorkspaceMode == nil,
               state.selectedDeviceID == nil else { return }
         // Android persists an explicit selection even when the wireless choice
         // is unchanged: it supersedes a remembered USB presentation.
@@ -738,7 +766,11 @@ final class ConnectionViewModel: ObservableObject {
                 }
                 // Pausing an in-flight open does not consume a retry; a
                 // three-attempt failure stays paused until a real reattach.
-                if state.usbPhase == .connecting { state.usbPhase = .waitingForCamera }
+                if state.usbPhase == .connecting ||
+                    (cancelledUSB != nil && state.usbAuthorization == .authorized) {
+                    state.usbPhase = .waitingForCamera
+                    state.errorMessage = nil
+                }
             }
             return
         }
@@ -778,7 +810,7 @@ final class ConnectionViewModel: ObservableObject {
         // Android ignores USB attach/detach while an accepted Wi-Fi session
         // owns the workspace. ImageCaptureCore can still enumerate devices,
         // but those callbacks must not select USB or start a second session.
-        if let cameraSession, !cameraSession.isUSB {
+        if establishedWorkspaceMode == .sta || establishedWorkspaceMode == .ap {
             switch event {
             case .deviceAdded, .deviceRemoved, .ready, .sessionOpened, .sessionClosed, .failed:
                 return
@@ -903,14 +935,20 @@ final class ConnectionViewModel: ObservableObject {
 
     private func usbErrorMessage(_ error: Error) -> String {
         switch error {
+        case let readiness as CameraPhotoReadinessError:
+            return readiness.message
         case CameraTransportError.timeout, PTPSessionError.timeout:
-            return "连接超时，请检查相机电源和 USB 数据线"
+            return AppLocalized.resource("usb_camera_not_ready")
         case CameraTransportError.permissionDenied:
             return AppLocalized.resource("usb_permission_required")
         case CameraTransportError.disconnected, CameraTransportError.unavailable:
-            return AppLocalized.resource("usb_connection_lost")
+            return AppLocalized.resource("usb_camera_not_ready")
         case PTPSessionError.invalidated:
-            return AppLocalized.resource("usb_connection_lost")
+            return AppLocalized.resource("usb_camera_not_ready")
+        case PTPSessionError.responseCode, PTPSessionError.invalidResponse,
+             PTPSessionError.unexpectedResponseType, CameraTransportError.protocolError,
+             CameraRepositoryError.invalidDataset:
+            return AppLocalized.resource("usb_camera_not_ready")
         default:
             return error.localizedDescription
         }

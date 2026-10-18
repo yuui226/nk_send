@@ -8091,7 +8091,7 @@ final class RemoteToolInputRoutingTests: XCTestCase {
     private struct Host: View {
         @ObservedObject var mode: Mode
         var body: some View {
-            RemoteToolModeCrossfade(movie: mode.movie) { movie in
+            AndroidBooleanCrossfade(selected: mode.movie) { movie in
                 ButtonSurface(movie: movie).frame(width: 200, height: 60)
             }
         }
@@ -10430,5 +10430,68 @@ final class PhotoCropPresentationPerformanceTests: XCTestCase {
         XCTAssertEqual(controls, 2)
         XCTAssertNil(editor.selection)
         XCTAssertEqual(editor.initialImage, .zero)
+    }
+}
+
+@MainActor
+final class DisconnectedPhotoListTests: XCTestCase {
+    private actor Counter {
+        var count = 0
+        func increment() { count += 1 }
+    }
+    func testDisconnectedCatalogStopsAllRemoteWorkButRetainsRows() async throws {
+        for sequential in [false, true] {
+            let scans = Counter(), fills = Counter()
+            let file = CameraFile(id: 77, storageID: 1, format: 0x3801, size: 100,
+                fileName: "DSC_0077.JPG", captureDate: "20261019T120000", isProtected: false)
+            let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
+                await scans.increment()
+                return PhotoScanResult(files: [file], removedHandles: [], addedHandles: [], handleQueriesSucceeded: true,
+                    metadataComplete: true, filterStorageIDs: [1])
+            }, prefetchBatch: { files in
+                await fills.increment()
+                return ThumbnailBatchResult(settled: Set(files.map(\.id)), cached: [])
+            }, setRemoteGate: { _ in }, sequentialLoading: sequential)
+            model.load()
+            for _ in 0..<100 {
+                if model.hasCompletedFileScan { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            XCTAssertTrue(model.hasCompletedFileScan)
+            model.transportDidDisconnect()
+            try await Task.sleep(for: .milliseconds(30))
+            let before = await fills.count
+            for _ in 0..<10 {
+                model.wakeThumbnailFill(); model.setTransferBusy(true); model.setTransferBusy(false)
+                model.pauseForPreview(); model.resumeAfterPreview()
+                await model.pauseForRemote(); await model.resumeAfterRemote(isConnected: true)
+                model.load(); await model.reload()
+                await model.applyCatalogUpdate([])
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            let scanCount = await scans.count, fillCount = await fills.count
+            XCTAssertEqual(scanCount, 1); XCTAssertEqual(fillCount, before)
+            XCTAssertFalse(model.transportAvailable); XCTAssertFalse(model.isLoadingFiles)
+            XCTAssertEqual(model.availableFiles.map(\.id), [77])
+        }
+    }
+
+    func testCancellingIdleThumbnailWorkerDoesNotTerminateFutureWakeWaits() async throws {
+        let queue = PhotoThumbnailFillQueue(), counter = Counter()
+        let first = Task { await queue.waitForWake() }
+        try await Task.sleep(for: .milliseconds(30))
+        first.cancel(); _ = await first.value
+        let replacement = Task {
+            await queue.waitForWake()
+            await counter.increment()
+        }
+        defer { replacement.cancel() }
+        try await Task.sleep(for: .milliseconds(100))
+        let idleCount = await counter.count
+        XCTAssertEqual(idleCount, 0, "After transfer pauses the worker, the next empty wait must SUSPEND, not spin")
+        await queue.wake()
+        _ = await replacement.value
+        let awakeCount = await counter.count
+        XCTAssertEqual(awakeCount, 1)
     }
 }

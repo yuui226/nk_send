@@ -26,8 +26,7 @@ struct TransferQueueView: View {
     // Keep frame-frequency scrim changes out of the queue/card body.
     @State private var confirmationProgress = QueueConfirmationProgress()
     @State private var pendingConfirmation: QueueConfirmation?
-    @State private var removingItemIDs: Set<UUID> = []
-    @State private var clearAllInProgress = false
+    @StateObject private var removal = QueueRemovalCoordinator()
     @State private var listAtTop = true
     @Environment(\.displayScale) private var displayScale
 
@@ -67,12 +66,12 @@ struct TransferQueueView: View {
                                 QueueItemView(item: item, session: session,
                                               thumbnailRetryNudge: model.snapshot.isTransferring,
                                               activeProgress: progress,
-                                              isRemoving: removingItemIDs.contains(item.id),
-                                              isClearing: clearAllInProgress,
+                                              isRemoving: removal.removingIDs.contains(item.id),
+                                              isClearing: removal.isClearing,
                                               retryEnabled: isSessionConnected || !item.retryNeedsCamera(hasIndexedOriginal: hasIndexedOriginal(item)),
                                               onRetry: { model.retry(id: item.id) },
-                                              onRemove: { beginRemoval(item.id, withdraw: false) },
-                                              onWithdraw: { beginRemoval(item.id, withdraw: true) })
+                                              onWithdraw: { removal.withdraw(item.id, model: model) },
+                                              onRemovalAbandoned: { removal.abandon(item.id) })
                                     // Android first collapses the row's reported height;
                                     // data removal happens after the 280 ms exit.
                                     .modifier(QueueItemPlacement())
@@ -103,12 +102,7 @@ struct TransferQueueView: View {
         }
         .onChange(of: model.snapshot.items.map(\.id)) { ids in
             if ids.isEmpty { listAtTop = true }
-            // Keep the collapse state until the actor publishes the actual
-            // removal; clearing it in the same task as `remove` would briefly
-            // expand the old row before the snapshot arrives.
-            if !removingItemIDs.isEmpty {
-                removingItemIDs.formIntersection(Set(ids))
-            }
+            removal.synchronize(liveIDs: Set(ids))
         }
         .onChange(of: actionVisibility) { visibility in
             if pendingConfirmation == .retry && !visibility.hasRetryable ||
@@ -119,30 +113,11 @@ struct TransferQueueView: View {
         .onChange(of: controlActionNonce) { nonce in
             if nonce > 0 { pendingConfirmation = nil }
         }
+        .onDisappear { removal.leave() }
         #if DEBUG
-        .onChange(of: clearAllInProgress) { QueueClearInteractionTrace.shared.clearingChanged($0) }
+        .onChange(of: removal.isClearing) { QueueClearInteractionTrace.shared.clearingChanged($0) }
         .onChange(of: model.snapshot.items) { QueueClearInteractionTrace.shared.snapshotChanged($0) }
         #endif
-    }
-
-    private func beginRemoval(_ id: UUID, withdraw: Bool) {
-        guard !removingItemIDs.contains(id) else { return }
-        if withdraw { model.withdraw(id: id) }
-        beginRemoval([id])
-    }
-
-    private func beginRemoval(_ requestedIDs: Set<UUID>) {
-        let ids = requestedIDs.subtracting(removingItemIDs)
-        guard !ids.isEmpty else { return }
-        removingItemIDs.formUnion(ids)
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 280_000_000)
-            // A simultaneous clear uses one actor mutation/publication instead
-            // of N array copies and N latest-task index rebuilds. Eligibility
-            // is still checked after the 280ms collapse, just like a single row.
-            let removed = await model.remove(ids: ids)
-            removingItemIDs.subtract(ids.subtracting(removed))
-        }
     }
 
     private var queueTopScrim: some View {
@@ -187,7 +162,9 @@ struct TransferQueueView: View {
         VStack(alignment: .trailing, spacing: 12) {
             QueueFabVisibility(visible: actionVisibility.hasRetryable || mountedConfirmations.contains(.retry)) {
                 confirmationFab(.retry, enabled: confirmationIsEnabled(.retry)) {
-                    Image(systemName: "arrow.clockwise").frame(width: 26, height: 26)
+                    RemoteEditorIcon(kind: .refresh)
+                        .fill(isSessionConnected ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
+                        .frame(width: 26, height: 26)
                 }
             }
             QueueFabVisibility(visible: actionVisibility.hasClearable || mountedConfirmations.contains(.clear)) {
@@ -241,7 +218,7 @@ struct TransferQueueView: View {
     }
 
     private var actionVisibility: TransferQueueSnapshot.ActionVisibility {
-        model.snapshot.actionVisibility(excluding: removingItemIDs, suppressAll: clearAllInProgress)
+        model.snapshot.actionVisibility(excluding: removal.removingIDs, suppressAll: removal.isClearing)
     }
 
     private var listBottomPadding: CGFloat {
@@ -256,7 +233,7 @@ struct TransferQueueView: View {
     }
 
     private var actionItems: [TransferQueueItem] {
-        model.snapshot.items.filter { !removingItemIDs.contains($0.id) }
+        model.snapshot.items.filter { !removal.removingIDs.contains($0.id) }
     }
 
     private var retryNeedsCamera: Bool {
@@ -276,18 +253,89 @@ struct TransferQueueView: View {
         pendingConfirmation = nil
         switch action {
         case .clear:
-            clearAllInProgress = true
-            model.withdrawPending()
-            beginRemoval(Set(model.snapshot.items.lazy
-                .filter { $0.status != .transferring && !$0.isGeneratingFrame }.map(\.id)))
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 320_000_000)
-                await model.removeCleared()
-                clearAllInProgress = false
-            }
+            removal.clear(model: model)
         case .retry:
-            model.retryFailed(excluding: removingItemIDs)
+            model.retryFailed(excluding: removal.removingIDs)
         }
+    }
+}
+
+/// TransferScreen's per-row 280ms removal and clearScope 320ms fallback
+/// share the screen lifetime. Keep operation ownership out of view values so
+/// leaving/reentering cannot let an old cleanup mutate a new removal batch.
+@MainActor
+final class QueueRemovalCoordinator: ObservableObject {
+    @Published private(set) var removingIDs: Set<UUID> = []
+    @Published private(set) var isClearing = false
+    private var removalTasks: [UUID: Task<Void, Never>] = [:]
+    private var cleanupTask: Task<Void, Never>?
+    private var cleanupID: UUID?
+    private var lifetime = UUID()
+
+    func withdraw(_ id: UUID, model: TransferQueueViewModel) {
+        guard !removingIDs.contains(id) else { return }
+        model.withdraw(id: id)
+        beginRemoval([id], model: model)
+    }
+
+    func clear(model: TransferQueueViewModel) {
+        guard !isClearing else { return }
+        isClearing = true
+        model.withdrawPending()
+        beginRemoval(Set(model.snapshot.items.lazy
+            .filter { $0.status != .transferring && !$0.isGeneratingFrame }.map(\.id)), model: model)
+        let operation = UUID()
+        cleanupID = operation
+        cleanupTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 320_000_000) }
+            catch { return }
+            guard let self, cleanupID == operation else { return }
+            await model.removeCleared()
+            guard cleanupID == operation else { return }
+            isClearing = false; cleanupTask = nil; cleanupID = nil
+        }
+    }
+
+    private func beginRemoval(_ requestedIDs: Set<UUID>, model: TransferQueueViewModel) {
+        let ids = requestedIDs.subtracting(removingIDs)
+        guard !ids.isEmpty else { return }
+        removingIDs.formUnion(ids)
+        let operation = UUID(), generation = lifetime
+        removalTasks[operation] = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 280_000_000) }
+            catch { return }
+            guard let self, lifetime == generation else { return }
+            defer { removalTasks.removeValue(forKey: operation) }
+            // A vertically disposed row abandons its individual removal. The
+            // separate clear fallback still cleans terminal offscreen rows.
+            let retained = ids.intersection(removingIDs)
+            guard !retained.isEmpty else { return }
+            let removed = await model.remove(ids: retained)
+            guard lifetime == generation else { return }
+            removingIDs.subtract(retained.subtracting(removed))
+        }
+    }
+
+    func abandon(_ id: UUID) { removingIDs.remove(id) }
+
+    func synchronize(liveIDs: Set<UUID>) {
+        // Keep successful collapses until the actor's snapshot is visible;
+        // clearing before publication would briefly expand the old row.
+        let retained = removingIDs.intersection(liveIDs)
+        if retained != removingIDs { removingIDs = retained }
+    }
+
+    func leave() {
+        lifetime = UUID()
+        for task in removalTasks.values { task.cancel() }
+        removalTasks.removeAll()
+        cleanupTask?.cancel(); cleanupTask = nil; cleanupID = nil
+        removingIDs.removeAll(); isClearing = false
+    }
+
+    deinit {
+        for task in removalTasks.values { task.cancel() }
+        cleanupTask?.cancel()
     }
 }
 
@@ -503,6 +551,7 @@ private struct QueueConfirmationCard: View {
     let action: TransferQueueView.QueueConfirmation
     let onConfirm: () -> Void
     let onDismiss: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     private var title: String {
         switch action {
@@ -544,9 +593,13 @@ private struct QueueConfirmationCard: View {
             }
         }
         .padding(16)
-        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(ZTransferColors.surface.opacity(scheme == .dark ? 0.92 : 0.95),
+                    in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(tint.opacity(0.4), lineWidth: 1))
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        .background { AndroidShadowView(cornerRadius: 16, elevation: 8).allowsHitTesting(false) }
+        .foregroundStyle(ZTransferColors.primaryText)
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture { } // ConfirmCard consumes its blank area instead of dismissing the scrim.
     }
 
     // Material3 1.1.2 ButtonDefaults: 58x40 minimum visual bounds,
@@ -556,7 +609,7 @@ private struct QueueConfirmationCard: View {
         Button(action: action) {
             Text(title)
                 .zTransferTypography(.labelLarge)
-                .foregroundStyle(primary ? Color.white : ZTransferColors.secondaryText)
+                .foregroundStyle(primary ? ZTransferColors.onAccent : ZTransferColors.secondaryText)
                 .padding(.horizontal, primary ? 24 : 12)
                 .padding(.vertical, 8)
                 .frame(minWidth: 58, minHeight: 40)
@@ -824,7 +877,7 @@ private struct ActiveQueueProgressScope<Content: View>: View {
     var body: some View { content(model.activeProgress) }
 }
 
-private struct QueueItemView: View {
+struct QueueItemView: View {
     let item: TransferQueueItem
     let session: CameraSession?
     var thumbnailRetryNudge: Bool = false
@@ -833,8 +886,8 @@ private struct QueueItemView: View {
     let isClearing: Bool
     let retryEnabled: Bool
     let onRetry: () -> Void
-    let onRemove: () -> Void
     let onWithdraw: () -> Void
+    var onRemovalAbandoned: () -> Void = {}
     @Environment(\.colorScheme) private var scheme
     @State private var accent = QueueCardAccentAnimator()
     @State private var collapseProgress: CGFloat = 1
@@ -853,7 +906,7 @@ private struct QueueItemView: View {
                 seed: item.id.uuidString
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .circular))
-            HStack(spacing: 12) {
+            HStack(spacing: 0) {
                 ZStack(alignment: .bottomTrailing) {
                     QueueThumbnail(session: session, item: item, retryNudge: thumbnailRetryNudge)
                         .id(session.map(ObjectIdentifier.init))
@@ -861,6 +914,7 @@ private struct QueueItemView: View {
                     QueueTaskStatusBadge(item: item)
                 }
                 .frame(width: 72, height: 72)
+                .padding(.trailing, 12)
                 // Android TransferTaskCardContent: rowGap and pill spacing are 5dp.
                 VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
@@ -876,8 +930,11 @@ private struct QueueItemView: View {
                 HStack(spacing: 5) {
                     TransferInfoPill(text: fileSizeText, color: ZTransferColors.secondaryText,
                                      respond: item.status == .transferring && speedText != nil)
-                    QueuePillVisibility(visible: speedText != nil, delay: 60) {
-                        if let speedText {
+                    QueuePillVisibility(visible: TransferQueueCardText(item: item).transferSkipped || speedText != nil, delay: 60) {
+                        if TransferQueueCardText(item: item).transferSkipped {
+                            TransferInfoPill(text: AppLocalized.resource("status_skipped"),
+                                             color: ZTransferColors.secondaryText)
+                        } else if let speedText {
                             TransferInfoPill(text: speedText, color: ZTransferColors.statusConnected,
                                              numericValue: item.status == .completed
                                                 ? item.downloadMBps * 1024 * 1024
@@ -916,34 +973,17 @@ private struct QueueItemView: View {
                     }
                 }
             }
-                Spacer(minLength: 4)
-                if cardActionsVisible && item.canRetry && item.status != .cancelled {
-                    QueueActionButton(icon: "arrow.clockwise", action: onRetry)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                QueuePillVisibility(visible: cardActionsVisible && item.canRetry && item.status != .cancelled,
+                                    delay: 0, style: .retry) {
+                    QueueRetryButton(action: onRetry)
+                        .padding(.leading, 10)
                         .disabled(!retryEnabled)
-                        .opacity(retryEnabled ? 1 : 0.45)
                         .accessibilityLabel(AppLocalized.resource("retry"))
                         .accessibilityIdentifier("queue-retry-\(item.file.id)")
                         #if DEBUG
                         .onAppear { QueueClearInteractionTrace.shared.actionAppeared(fileID: item.file.id) }
                         #endif
-                        .transition(.opacity.combined(with: .scale(scale: 0.75, anchor: .topTrailing)))
-                }
-                if item.status == .waiting && !item.isGeneratingFrame && cardActionsVisible {
-                    QueueActionButton(icon: "broom", action: onWithdraw)
-                        .accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
-                        .accessibilityIdentifier("queue-remove-\(item.file.id)")
-                        #if DEBUG
-                        .onAppear { QueueClearInteractionTrace.shared.actionAppeared(fileID: item.file.id) }
-                        #endif
-                        .transition(.opacity.combined(with: .scale(scale: 0.75, anchor: .trailing)))
-                } else if (item.status == .completed || item.status == .cancelled || item.status == .failed) && !item.isGeneratingFrame && cardActionsVisible {
-                    QueueActionButton(icon: "broom", action: onRemove)
-                        .accessibilityLabel(AppLocalized.resource("cd_remove_from_queue"))
-                        .accessibilityIdentifier("queue-remove-\(item.file.id)")
-                        #if DEBUG
-                        .onAppear { QueueClearInteractionTrace.shared.actionAppeared(fileID: item.file.id) }
-                        #endif
-                        .transition(.opacity.combined(with: .scale(scale: 0.75, anchor: .trailing)))
                 }
             }
             .padding(.horizontal, 12)
@@ -977,10 +1017,18 @@ private struct QueueItemView: View {
                                     scheme == .dark ? .clear : Color.black.opacity(0.06),
                                     Color.black.opacity(0.08)], startPoint: .top, endPoint: .bottom),
             lineWidth: 1))
+        .background {
+            // TransferScreen: elevation 6dp, radius16, black .08/.12. Compose
+            // quantizes these to 20/31 before HWUI's material light multiplier.
+            AndroidShadowView(cornerRadius: 16, elevation: 6,
+                              shadowColors: .init(ambientAlpha: 20, spotAlpha: 31))
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
         .modifier(QueueCardSwipeModifier(
             enabled: QueueCardSwipeState.isEnabled(item: item, removing: isRemoving, clearing: isClearing),
             removing: isRemoving,
-            onRemove: onWithdraw
+            onRemove: onWithdraw,
+            onRemovalAbandoned: onRemovalAbandoned
         ))
         // TransferScreen: collapseHeight wraps padding(bottom = 8.dp).
         // Measure the gap with the card so removal collapses both together,
@@ -1032,6 +1080,12 @@ private struct QueueItemView: View {
 /// failure replaces the effect row, and skipped text needs an actual effect.
 struct TransferQueueCardText {
     let item: TransferQueueItem
+    /// Android d973f0f5: a reused original has no download duration. `skipped`
+    /// can also describe a duplicate derived image after a real download, so
+    /// it must never replace that download's speed/duration with this label.
+    var transferSkipped: Bool {
+        item.status == .completed && item.elapsedMs == nil && (item.skipped || item.outputURL != nil)
+    }
     var generationWaiting: Bool {
         item.isGeneratingFrame && item.frameGenerationStartedAtElapsedMs == nil && !item.frameGenerationSkipped
     }
@@ -1135,122 +1189,152 @@ private struct QueueCardCollapseLayout: Layout {
     }
 }
 
-private struct QueueActionButton: View {
-    let icon: String
+private struct QueueRetryButton: View {
     let action: () -> Void
+    @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
+
+    private var size: CGFloat {
+        let skin = ZTransferButtonSkin(storedValue: skinPreset)
+        return skin == .frostedGlass || skin == .liquidGlass ? 28 : 48
+    }
 
     var body: some View {
         Button(action: action) {
-            Group {
-                if icon == "broom" {
-                    QueueBroomMark(color: ZTransferColors.primaryText)
-                } else {
-                    Image(systemName: icon)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-            }
-            .frame(width: 32, height: 32)
+            RemoteEditorIcon(kind: .refresh).fill(ZTransferColors.accentBlue)
+                .frame(width: 16, height: 16).frame(width: size, height: size)
         }
-        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 16))
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: size / 2))
     }
 }
 
-/// The queue uses the same single-color broom mark for both “remove” actions
-/// and the clear FAB. Keeping it as a path avoids substituting a platform trash
-/// glyph whose silhouette and baseline differ from Android.
+/// Android's bulk-clear FAB. Individual cards use horizontal swipe removal.
 private struct QueueBroomMark: View {
     let color: Color
 
     var body: some View {
         Canvas { context, size in
             let s = min(size.width, size.height)
-            var mark = Path()
-            mark.move(to: CGPoint(x: s * 0.60, y: s * 0.08))
-            mark.addLine(to: CGPoint(x: s * 0.43, y: s * 0.47))
-            mark.move(to: CGPoint(x: s * 0.28, y: s * 0.49))
-            mark.addLine(to: CGPoint(x: s * 0.70, y: s * 0.66))
+            var rotated = context
+            rotated.translateBy(x: size.width / 2, y: size.height / 2)
+            rotated.rotate(by: .degrees(45))
+            rotated.translateBy(x: -size.width / 2, y: -size.height / 2)
+            var handle = Path()
+            handle.move(to: CGPoint(x: s * 0.5, y: s * 0.07))
+            handle.addLine(to: CGPoint(x: s * 0.5, y: s * 0.44))
+            rotated.stroke(handle, with: .color(color), style: StrokeStyle(lineWidth: s * 0.09, lineCap: .round))
+            var band = Path()
+            band.move(to: CGPoint(x: s * 0.395, y: s * 0.505))
+            band.addLine(to: CGPoint(x: s * 0.605, y: s * 0.505))
+            rotated.stroke(band, with: .color(color), style: StrokeStyle(lineWidth: s * 0.095, lineCap: .round))
+            let starts: [CGFloat] = [0.425, 0.4625, 0.5, 0.5375, 0.575]
+            let ends: [CGPoint] = [.init(x: 0.305, y: 0.865), .init(x: 0.365, y: 0.895),
+                                  .init(x: 0.43, y: 0.915), .init(x: 0.5, y: 0.925), .init(x: 0.575, y: 0.925)]
             for index in 0..<5 {
-                let x = s * (0.31 + CGFloat(index) * 0.085)
-                mark.move(to: CGPoint(x: x, y: s * 0.61))
-                mark.addQuadCurve(
-                    to: CGPoint(x: x - s * 0.10, y: s * (0.88 + CGFloat(index) * 0.012)),
-                    control: CGPoint(x: x + s * 0.02, y: s * 0.72)
-                )
+                let x = starts[index], end = ends[index]
+                var strand = Path()
+                strand.move(to: CGPoint(x: x * s, y: s * 0.565))
+                strand.addQuadCurve(to: CGPoint(x: end.x * s, y: end.y * s),
+                    control: CGPoint(x: ((x + end.x) / 2 + 0.045) * s, y: ((0.565 + end.y) / 2 + 0.01) * s))
+                rotated.stroke(strand, with: .color(color), style: StrokeStyle(lineWidth: s * 0.05, lineCap: .round))
             }
-            context.stroke(mark, with: .color(color), style: StrokeStyle(lineWidth: max(1.4, s * 0.075), lineCap: .round, lineJoin: .round))
+            if s >= 22 {
+                for (x, y, radius) in [(0.085, 0.775, 0.017), (0.175, 0.925, 0.012)] {
+                    context.fill(Path(ellipseIn: CGRect(x: (x - radius) * s, y: (y - radius) * s,
+                                                       width: radius * 2 * s, height: radius * 2 * s)), with: .color(color))
+                }
+            }
         }
-        .rotationEffect(.degrees(45))
     }
 }
 
-/// Matches Android's AnimatedVisibility exit: successful transfers first fill
-/// to 100%, wait 100 ms, then fade for 220 ms. Failed and cancelled tasks only
-/// fade their real last progress and never imply successful completion.
+/// TransferScreen.AnimatedVisibility: initially active rows are immediately
+/// opaque; completion delays 100ms then fades 220ms, failure fades 180ms.
+/// Interrupted tweens use Compose Transition's default spring, preserving velocity.
+struct QueueCardProgressVisibility {
+    private(set) var visible: Bool
+    private(set) var retained: Bool
+    private(set) var alpha: ZTransferScalarAnimation
+    var isRunning: Bool { alpha.isRunning }
+
+    init(status: TransferStatus) {
+        visible = status == .transferring
+        retained = visible
+        alpha = .init(value: visible ? 1 : 0)
+    }
+    mutating func update(_ status: TransferStatus) {
+        let next = status == .transferring
+        guard next != visible else { return }
+        visible = next
+        retained = true
+        let spec: ZTransferAndroidMotion
+        if alpha.isRunning { spec = .criticallyDampedSpring(stiffness: 1500) }
+        else if !next && status == .completed { spec = .tween(milliseconds: 220, delayMilliseconds: 100) }
+        else { spec = .tween(milliseconds: 180) }
+        alpha.retarget(next ? 1 : 0, using: spec)
+    }
+    mutating func advance(_ nanos: Int64) {
+        alpha.advance(frameNanos: nanos)
+        if !visible && !isRunning { retained = false }
+    }
+}
+
+@MainActor
+final class QueueCardProgressVisibilityClock: ObservableObject {
+    private(set) var motion: QueueCardProgressVisibility
+    @Published private(set) var retained: Bool
+    let opacity = AndroidAnimatedOpacity()
+    private var link: CADisplayLink?
+    var clockRunning: Bool { link != nil }
+
+    init(status: TransferStatus) {
+        motion = .init(status: status); retained = motion.retained
+        opacity.update(motion.alpha.value)
+    }
+    func update(_ status: TransferStatus) {
+        motion.update(status); publish()
+        guard motion.isRunning, link == nil else { return }
+        let next = ZTransferDisplayLink.make(owner: self) { owner, frame in
+            owner.advance(Int64(frame.timestamp * 1_000_000_000))
+        }
+        link = next; next.add(to: .main, forMode: .common)
+    }
+    func advance(_ nanos: Int64) {
+        motion.advance(nanos); publish()
+        if !motion.isRunning { link?.invalidate(); link = nil }
+    }
+    func reset(_ status: TransferStatus) {
+        link?.invalidate(); link = nil
+        motion = .init(status: status); publish()
+    }
+    private func publish() {
+        if retained != motion.retained { retained = motion.retained }
+        opacity.update(motion.alpha.value)
+    }
+}
+
 private struct TransferCardProgressLayer: View {
     let status: TransferStatus
     let progress: Double
     let seed: String
-    @State private var mounted: Bool
-    @State private var opacity: Double
-    @State private var target: Double
-    @State private var hasTransferred: Bool
+    @StateObject private var visibility: QueueCardProgressVisibilityClock
 
     init(status: TransferStatus, progress: Double, seed: String) {
-        self.status = status
-        self.progress = progress
-        self.seed = seed
-        let active = status == .transferring
-        _mounted = State(initialValue: active)
-        _opacity = State(initialValue: 0)
-        _target = State(initialValue: active ? transferCardProgressTarget(status: status, progress: progress) : 0)
-        _hasTransferred = State(initialValue: active)
+        self.status = status; self.progress = progress; self.seed = seed
+        _visibility = StateObject(wrappedValue: QueueCardProgressVisibilityClock(status: status))
     }
-
     var body: some View {
         Group {
-            if mounted {
-                LiquidTransferProgressFill(
-                    progress: target,
-                    seed: seed,
-                    waveEligible: transferCardWaveEligible(status: status)
-                )
-                .opacity(opacity)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if visibility.retained {
+                LiquidTransferProgressFill(progress: transferCardProgressTarget(status: status, progress: progress),
+                    seed: seed, waveEligible: transferCardWaveEligible(status: status))
+                    .modifier(AndroidOpacity(opacity: visibility.opacity))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .allowsHitTesting(false)
-        .onChange(of: progress) { value in
-            guard status == .transferring else { return }
-            target = transferCardProgressTarget(status: status, progress: value)
-        }
-        .task(id: status) {
-            switch status {
-            case .transferring:
-                hasTransferred = true
-                mounted = true
-                target = transferCardProgressTarget(status: status, progress: progress)
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.18)) { opacity = 1 }
-            case .completed where hasTransferred:
-                mounted = true
-                target = transferCardProgressTarget(status: status, progress: progress)
-                try? await Task.sleep(for: .milliseconds(100))
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.22)) { opacity = 0 }
-                try? await Task.sleep(for: .milliseconds(220))
-                guard !Task.isCancelled else { return }
-                mounted = false
-                hasTransferred = false
-            default:
-                guard mounted else { return }
-                withAnimation(.easeOut(duration: 0.18)) { opacity = 0 }
-                try? await Task.sleep(for: .milliseconds(180))
-                guard !Task.isCancelled else { return }
-                mounted = false
-                hasTransferred = false
-            }
-        }
+        .onAppear { visibility.update(status) }
+        .onChange(of: status) { visibility.update($0) }
+        .onDisappear { visibility.reset(status) }
     }
 }
 
@@ -1804,6 +1888,7 @@ private struct QueueThumbnail: View {
     let item: TransferQueueItem
     let retryNudge: Bool
     @State private var image: UIImage?
+    @Environment(\.colorScheme) private var scheme
 
     init(session: CameraSession?, item: TransferQueueItem, retryNudge: Bool) {
         self.session = session
@@ -1815,7 +1900,12 @@ private struct QueueThumbnail: View {
     var body: some View {
         Group {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
-            else { RoundedRectangle(cornerRadius: 10, style: .circular).fill(Color.black.opacity(0.08)).overlay { Image(systemName: "photo") } }
+            else {
+                (scheme == .dark ? ZTransferColors.surface : Color(red: 230/255, green: 230/255, blue: 235/255))
+                    .overlay {
+                        RemoteEditorIcon(kind: .image).fill(ZTransferColors.secondaryText).frame(width: 22, height: 22)
+                    }
+            }
         }
         .frame(width: 68, height: 68)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .circular))
@@ -1926,7 +2016,7 @@ struct QueueCardPresentationHarness: View {
             } else {
                 QueueItemView(item: item, session: nil, activeProgress: activeProgress,
                     isRemoving: false, isClearing: false, retryEnabled: false,
-                    onRetry: {}, onRemove: {}, onWithdraw: {})
+                    onRetry: {}, onWithdraw: {})
             }
             Button("Next state") { phase = (phase + 1) % (badgeMode ? 6 : 3) }
                 .accessibilityIdentifier("queue-card-next-state")

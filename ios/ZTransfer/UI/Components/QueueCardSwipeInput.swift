@@ -34,12 +34,14 @@ struct QueueCardSwipeModifier: ViewModifier {
     let enabled: Bool
     let removing: Bool
     let onRemove: () -> Void
+    var onRemovalAbandoned: () -> Void = {}
     @State private var offset: CGFloat = 0
 
     func body(content: Content) -> some View {
         content
             .background(QueueCardSwipeInput(enabled: enabled, removing: removing,
-                                            onOffset: { offset = $0 }, onRemove: onRemove))
+                                            onOffset: { offset = $0 }, onRemove: onRemove,
+                                            onRemovalAbandoned: onRemovalAbandoned))
             .offset(x: offset)
             .accessibilityActions {
                 if enabled {
@@ -57,6 +59,7 @@ struct QueueCardSwipeInput: UIViewRepresentable {
     let removing: Bool
     let onOffset: (CGFloat) -> Void
     let onRemove: () -> Void
+    var onRemovalAbandoned: () -> Void = {}
 
     func makeUIView(context: Context) -> Marker { Marker() }
     func updateUIView(_ view: Marker, context: Context) { view.configure(self) }
@@ -81,6 +84,23 @@ struct QueueCardSwipeInput: UIViewRepresentable {
         }
         required init?(coder: NSCoder) { nil }
 
+        override func willMove(toWindow newWindow: UIWindow?) {
+            if newWindow == nil { abandonOffscreenRemoval() }
+            super.willMove(toWindow: newWindow)
+        }
+
+        private func abandonOffscreenRemoval() {
+            guard configuration?.removing == true, let scroll, window != nil else { return }
+            let row = convert(bounds, to: scroll)
+            // SwiftUI's onDisappear also fires for a horizontal fly-out or a
+            // collapsing zero-height row. Neither disposes an Android item.
+            // Only a row outside the vertical viewport abandons its collapse;
+            // the page itself separately cancels all work on disappearance.
+            if row.maxY <= scroll.bounds.minY || row.minY >= scroll.bounds.maxY {
+                configuration?.onRemovalAbandoned()
+            }
+        }
+
         func configure(_ next: QueueCardSwipeInput) {
             configuration = next
             motion.configure(enabled: next.enabled, removing: next.removing)
@@ -104,6 +124,7 @@ struct QueueCardSwipeInput: UIViewRepresentable {
             updateClock()
         }
         func detach() {
+            abandonOffscreenRemoval()
             recognizer.view?.removeGestureRecognizer(recognizer)
             // Removing a recognizer can synchronously cancel a drag and start
             // restoration. Invalidate after that callback to avoid a live link

@@ -4,6 +4,283 @@ import SwiftUI
 @testable import ZTransfer
 
 @MainActor
+final class RemoteReviewPresentationTests: XCTestCase {
+    func testRGBHistogramRendersFilledChannelsAndThreeColorMark() throws {
+        let bins: [[CGFloat]] = [0.9, 0.6, 0.3].map { [CGFloat](repeating: $0, count: 256) }
+        let renderer = ImageRenderer(content: VStack(spacing: 8) {
+            HStack(spacing: 24) {
+                PreviewControlMark(icon: .histogram, histogramRGB: true).frame(width: 20, height: 20)
+                PreviewControlMark(icon: .histogram).frame(width: 20, height: 20)
+            }
+            PreviewHistogramOverlay(values: bins[1], rgb: bins, mode: .rgb)
+            PreviewHistogramOverlay(values: bins[1], rgb: bins, mode: .luma)
+        }.padding(8).background(Color.black))
+        renderer.scale = 3
+        let image = try XCTUnwrap(renderer.uiImage)
+        try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-1018-review-histograms.png"))
+        let cg = try XCTUnwrap(image.cgImage)
+        var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        var redArea = 0, greenMark = 0, blueMark = 0, lumaArea = 0
+        for i in stride(from: 0, to: bytes.count, by: 4) {
+            let r = Int(bytes[i]), g = Int(bytes[i+1]), b = Int(bytes[i+2])
+            if r > 45 && r > g * 2 && r > b * 2 { redArea += 1 }
+            if g > 100 && g > r * 13 / 10 && g > b * 13 / 10 { greenMark += 1 }
+            if b > 120 && b > r * 13 / 10 && b > g * 13 / 10 { blueMark += 1 }
+            if r > 35 && abs(r-g) < 5 && abs(g-b) < 5 { lumaArea += 1 }
+        }
+        XCTAssertGreaterThan(redArea, 4_000, "RGB must contain filled areas, not just thin lines")
+        XCTAssertGreaterThan(greenMark, 20)
+        XCTAssertGreaterThan(blueMark, 20)
+        XCTAssertGreaterThan(lumaArea, 10_000, "Luma keeps Android's original filled white curve")
+    }
+
+    func testSafeInsetsRotateWithFullBlackCanvas() {
+        let safe = EdgeInsets(top: 59, leading: 3, bottom: 34, trailing: 5)
+        let values = (0...2).map { RemoteReviewLayout(size: .init(width: 382, height: 751), safe: safe, rotation: $0) }
+        XCTAssertTrue(values.allSatisfy { $0.physicalSize == CGSize(width: 390, height: 844) })
+        XCTAssertEqual(values[0].canvasSize, CGSize(width: 390, height: 844))
+        XCTAssertEqual(values[1].canvasSize, CGSize(width: 844, height: 390))
+        XCTAssertEqual(values[2].canvasSize, values[1].canvasSize)
+        XCTAssertEqual(values[0].contentInsets, safe)
+        XCTAssertEqual(values[1].contentInsets, EdgeInsets(top: 5, leading: 59, bottom: 3, trailing: 34))
+        XCTAssertEqual(values[2].contentInsets, EdgeInsets(top: 3, leading: 34, bottom: 5, trailing: 59))
+    }
+
+    func testReviewTapGuardRejectsPagingReturnAndPinchUntilNextTouch() {
+        let state = PreviewReviewTapGuard()
+        XCTAssertFalse(state.allowed)
+        state.begin(.init(x: 100, y: 100))
+        state.observe([.init(x: 140, y: 100)])
+        state.observe([.init(x: 100, y: 100)])
+        XCTAssertFalse(state.allowed)
+        state.begin(.init(x: 100, y: 100))
+        state.observe([.init(x: 102, y: 101)])
+        XCTAssertTrue(state.allowed)
+        state.observe([.init(x: 100, y: 100), .init(x: 110, y: 100)])
+        state.observe([.init(x: 100, y: 100)])
+        XCTAssertFalse(state.allowed)
+        state.begin(.zero)
+        state.observe([.init(x: 8, y: 0)])
+        XCTAssertTrue(state.allowed)
+        state.observe([])
+        XCTAssertFalse(state.allowed)
+    }
+
+    func testDismissalRetainsGateUntilFadeEndsAndCancellationDoesNotClose() async throws {
+        var closed = 0
+        let dismissal = RemoteReviewDismissal { closed += 1 }
+        dismissal.requestClose()
+        try await Task.sleep(for: .milliseconds(120))
+        dismissal.requestClose()
+        XCTAssertTrue(dismissal.closing)
+        XCTAssertEqual(closed, 0)
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(closed, 1, "Repeated close did not restart the 260ms deadline")
+        dismissal.requestClose()
+        try await Task.sleep(for: .milliseconds(280))
+        XCTAssertEqual(closed, 1)
+        let cancelled = RemoteReviewDismissal { closed += 1 }
+        cancelled.requestClose(); cancelled.cancel()
+        try await Task.sleep(for: .milliseconds(280))
+        XCTAssertEqual(closed, 1)
+    }
+
+    func testEmptyAndUndecodableFHDUseCompatibilityFallbackBeforePublishing() async throws {
+        let jpeg = try XCTUnwrap(UIGraphicsImageRenderer(size: .init(width: 9, height: 6)).image { context in
+            UIColor.green.setFill(); context.fill(.init(x: 0, y: 0, width: 9, height: 6))
+        }.jpegData(compressionQuality: 0.9))
+        for invalid in [Data(), Data([0, 1, 2])] {
+            var stops = 0, restarts = 0, reads = 0
+            let photo = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
+                fileName: "A.JPG", captureDate: nil, isProtected: false)
+            let model = RemotePhotoReviewModel(frames: RemoteReviewFrameGate(), openCatalog: {
+                RemoteReviewCatalog(handlesByStorage: [[1]]) { _ in photo }
+            }, endLiveView: { stops += 1 }, restartLiveView: { restarts += 1 }, isConnected: { true })
+            model.open()
+            while model.loading { try await Task.sleep(for: .milliseconds(10)) }
+            let content = try await loadRemoteReviewPreview(model) {
+                reads += 1
+                return reads == 1 ? invalid : jpeg
+            }
+            XCTAssertNotNil(content)
+            XCTAssertEqual(reads, 2)
+            XCTAssertEqual(stops, 1)
+            _ = try await loadRemoteReviewPreview(model) { Data() }
+            XCTAssertEqual(stops, 1, "Enumeration and both preview paths share one compatibility stop")
+            await model.close()
+            XCTAssertEqual(restarts, 1)
+        }
+    }
+
+    func testActualFHDSurfaceUsesLandscapeHeightAndFadesBackdropWithImage() async throws {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let jpeg = try XCTUnwrap(UIGraphicsImageRenderer(size: .init(width: 900, height: 600), format: format)
+            .image { context in
+                UIColor(red: 0.25, green: 0.47, blue: 0.35, alpha: 1).setFill()
+                context.fill(.init(x: 0, y: 0, width: 900, height: 600))
+            }.jpegData(compressionQuality: 0.95))
+        for rotation in 0...2 {
+            let suite = "review-render-\(UUID())"
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let transfer = await Task.detached { TransferQueue(defaults: UserDefaults(suiteName: suite)!) }.value
+            let queue = TransferQueueViewModel(queue: transfer)
+            let other = try XCTUnwrap(UIGraphicsImageRenderer(size: .init(width: 900, height: 600), format: format)
+                .image { context in
+                    UIColor(red: 0.2, green: 0.3, blue: 0.8, alpha: 1).setFill()
+                    context.fill(.init(x: 0, y: 0, width: 900, height: 600))
+                }.jpegData(compressionQuality: 0.95))
+            let wire = ReviewImageTransport(jpeg: jpeg, images: [2: other, 3: other])
+            let session = CameraSession(repository: CameraRepository(session: PTPSession(transport: wire)))
+            let photo = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
+                fileName: "REVIEW_0001.JPG", captureDate: nil, isProtected: false)
+            let frames = RemoteReviewFrameGate()
+            let model = RemotePhotoReviewModel(frames: frames, openCatalog: {
+                RemoteReviewCatalog(handlesByStorage: [[1, 2, 3]]) { handle in
+                    CameraFile(id: handle, storageID: photo.storageID, format: photo.format, size: photo.size,
+                        fileName: "REVIEW_000\(handle).JPG", captureDate: "20261018T12000\(4 - handle)", isProtected: false)
+                }
+            }, endLiveView: {}, restartLiveView: {}, isConnected: { true })
+            let dismissal = RemoteReviewDismissal { await model.close() }
+            let host = UIHostingController(rootView: ReviewRenderHost(model: model, session: session,
+                queue: queue, rotation: rotation, dismissal: dismissal))
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previous = scene.windows.first(where: \.isKeyWindow)
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = host; window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
+            model.open()
+            let deadline = ContinuousClock.now + .seconds(4)
+            while await wire.commands.isEmpty && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try await Task.sleep(for: .milliseconds(420))
+            let shot = snapshot(window)
+            try shot.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-1018-review-layout-\(rotation).png"))
+            let rendered = try pixels(shot)
+            let green = stride(from: 0, to: rendered.count, by: 4).filter {
+                (55...85).contains(rendered[$0]) && (105...135).contains(rendered[$0 + 1]) && (75...105).contains(rendered[$0 + 2])
+            }
+            XCTAssertGreaterThan(green.count, rotation == 0 ? 60_000 : 170_000,
+                                 "Actual FHD must fill the intended portrait/landscape viewport")
+            for y in [2, 841] {
+                let offset = (y * 390 + 195) * 4
+                XCTAssertEqual(Array(rendered[offset..<(offset + 3)]), [0, 0, 0], "Backdrop must cover system-bar margin")
+            }
+            let operations = await wire.commands
+            XCTAssertEqual(operations.first, PTPConstants.getFHDPicture)
+            XCTAssertTrue(operations.contains(PTPConstants.getPartialObjectEx))
+            XCTAssertTrue(queue.snapshot.items.isEmpty)
+            // Exercise the real page's pinch receiver and pager after its PTP
+            // image has arrived. No synthetic UITouch or UI-test process is used.
+            let pinch = try XCTUnwrap(descendants(host.view, as: PreviewPinchObserver.Marker.self)
+                .first { $0.recognizer.isEnabled })
+            pinch.onActive?(true)
+            pinch.onChange?(2, CGPoint(x: pinch.bounds.midX, y: pinch.bounds.midY), .zero)
+            try await Task.sleep(for: .milliseconds(80))
+            pinch.onActive?(false)
+            try await Task.sleep(for: .milliseconds(80))
+            let zoomed = try pixels(snapshot(window))
+            XCTAssertGreaterThan(greenPixelCount(zoomed), Int(Double(green.count) * 1.2), "Actual review must zoom in in every orientation")
+            XCTAssertTrue(model.active); XCTAssertTrue(queue.snapshot.items.isEmpty)
+            pinch.onActive?(true)
+            pinch.onChange?(0.4, CGPoint(x: pinch.bounds.midX, y: pinch.bounds.midY), .zero)
+            try await Task.sleep(for: .milliseconds(80))
+            pinch.onActive?(false)
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertEqual(Double(greenPixelCount(try pixels(snapshot(window)))), Double(green.count), accuracy: Double(green.count) * 0.03)
+            let pager = try XCTUnwrap(descendants(host.view, as: UIScrollView.self)
+                .first { $0.isPagingEnabled && $0.contentSize.width > $0.bounds.width * 1.5 })
+            XCTAssertTrue(pager.isScrollEnabled, "Reset zoom must release paging")
+            let initialOffset = pager.contentOffset
+            pager.setContentOffset(CGPoint(x: initialOffset.x + pager.bounds.width, y: initialOffset.y), animated: false)
+            pager.delegate?.scrollViewDidEndDecelerating?(pager)
+            try await Task.sleep(for: .milliseconds(350))
+            let paged = try pixels(snapshot(window))
+            try snapshot(window).pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-1018-review-paged-\(rotation).png"))
+            let blue = stride(from: 0, to: paged.count, by: 4).filter {
+                paged[$0+2] > 150 && paged[$0] < 80 && paged[$0+1] < 100
+            }.count
+            XCTAssertGreaterThan(blue, green.count / 2, "Paging must display the next photo; rotation=\(rotation)")
+            pager.setContentOffset(initialOffset, animated: false)
+            pager.delegate?.scrollViewDidEndDecelerating?(pager)
+            try await Task.sleep(for: .milliseconds(350))
+            XCTAssertGreaterThan(greenPixelCount(try pixels(snapshot(window))), green.count / 2,
+                                 "Returning must display the first photo; rotation=\(rotation)")
+            XCTAssertTrue(model.active); XCTAssertTrue(queue.snapshot.items.isEmpty)
+            dismissal.requestClose()
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertTrue(model.active, "Frame gate stays paused during fade")
+            let middle = try pixels(snapshot(window))
+            XCTAssertGreaterThan(middle[(2 * 390 + 195) * 4], 15, "The black backdrop must also fade to the red monitor")
+            try await Task.sleep(for: .milliseconds(250))
+            XCTAssertFalse(model.active)
+            let resumed = try await frames.withFrame { true }
+            XCTAssertTrue(resumed)
+        }
+    }
+
+    private func greenPixelCount(_ pixels: [UInt8]) -> Int {
+        stride(from: 0, to: pixels.count, by: 4).filter {
+            (55...85).contains(pixels[$0]) && (105...135).contains(pixels[$0+1]) && (75...105).contains(pixels[$0+2])
+        }.count
+    }
+    private func descendants<T: UIView>(_ view: UIView, as type: T.Type) -> [T] {
+        ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { descendants($0, as: type) }
+    }
+    private struct ReviewRenderHost: View {
+        @ObservedObject var model: RemotePhotoReviewModel
+        let session: CameraSession
+        let queue: TransferQueueViewModel
+        let rotation: Int
+        let dismissal: RemoteReviewDismissal
+        var body: some View {
+            ZStack {
+                Color.red.ignoresSafeArea()
+                if model.active {
+                    RemoteReviewSurface(rotation: rotation) { landscape, insets in
+                        RemotePhotoReviewView(model: model, session: session, queue: queue, connected: true,
+                            landscape: landscape, contentInsets: insets, dismissal: dismissal)
+                    }
+                }
+            }
+        }
+    }
+    private func snapshot(_ window: UIWindow) -> UIImage {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+    }
+    private func pixels(_ image: UIImage) throws -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: 390 * 844 * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: 390, height: 844,
+            bitsPerComponent: 8, bytesPerRow: 390 * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(try XCTUnwrap(image.cgImage), in: CGRect(x: 0, y: 0, width: 390, height: 844))
+        return bytes
+    }
+}
+
+private actor ReviewImageTransport: PTPCommandTransport {
+    let jpeg: Data
+    private(set) var commands: [UInt16] = []
+    let images: [UInt32: Data]
+    init(jpeg: Data, images: [UInt32: Data] = [:]) { self.jpeg = jpeg; self.images = images }
+    func sendPTP(command: Data, data: Data?) async throws -> (response: Data, payload: Data) {
+        let decoded = try PTPCodec.decode(command)
+        commands.append(decoded.code)
+        let handle: UInt32 = decoded.payload.count >= 4
+            ? decoded.payload.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).littleEndian } : 0
+        return (PTPCodec.encode(type: .response, code: PTPConstants.responseOK, transactionID: decoded.transactionID), images[handle] ?? jpeg)
+    }
+}
+
+@MainActor
 final class RemotePhotoReviewModelTests: XCTestCase {
     private func photo(_ id: UInt32 = 1) -> CameraFile {
         CameraFile(id: id, storageID: 1, format: 0x3801, size: 100,

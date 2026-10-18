@@ -4,6 +4,36 @@ import UIKit
 @testable import ZTransfer
 
 final class NativeAttentionMotionTests: XCTestCase {
+    @MainActor
+    func testOfflineSignalUsesNativeLayerAndStopsWhenRemovedOrBackgrounded() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let controller = UIViewController(); window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let view = NativeAttentionHostView(frame: CGRect(x: 12, y: 60, width: 40, height: 36))
+        controller.view.addSubview(view)
+        let origin = Date()
+        var config = NativeAttentionConfiguration(
+            kind: .scalePulse(minimum: 1, maximum: 1.09, halfPeriod: 0.55),
+            origin: origin, enabled: true, paused: false)
+        view.configure(config)
+        let loop = try XCTUnwrap(view.motionView.layer.animation(forKey: "attention.loop") as? CABasicAnimation)
+        XCTAssertEqual(loop.keyPath, "transform.scale"); XCTAssertEqual(loop.duration, 0.55)
+        XCTAssertTrue(loop.autoreverses); XCTAssertEqual(loop.repeatCount, .infinity)
+        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let forward = config.scale(at: origin.addingTimeInterval(0.55 * fraction))
+            let backward = config.scale(at: origin.addingTimeInterval(1.1 - 0.55 * fraction))
+            XCTAssertEqual(forward, backward, accuracy: 0.00001)
+        }
+        config.paused = true; view.configure(config)
+        XCTAssertNil(view.motionView.layer.animation(forKey: "attention.loop"))
+        config.paused = false; view.configure(config)
+        XCTAssertNotNil(view.motionView.layer.animation(forKey: "attention.loop"))
+        view.removeFromSuperview()
+        XCTAssertNil(view.motionView.layer.animation(forKey: "attention.loop"))
+    }
+
     func testCardWaveKeepsAndroidPeriodAmplitudeAndOppositePhase() {
         let origin = Date(timeIntervalSinceReferenceDate: 100)
         let usb = NativeAttentionConfiguration(kind: .card(offset: 0), origin: origin, enabled: true, paused: false)

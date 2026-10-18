@@ -144,8 +144,14 @@ enum ZTransferAndroidMotion: Equatable {
     /// Compose's analytical cubic solver rather than a platform timing curve.
     /// Preserve Float/Double boundaries, including Float p1-p0 and p1-p2.
     static func fastOutSlowIn(_ fraction: Float) -> Float {
+        cubicBezier(fraction, x1: 0.4, x2: 0.2)
+    }
+
+    /// Unit y control points (0,1), also used by Material3's four independent
+    /// indeterminate linear-indicator segments. Uses Compose's Float root path.
+    static func cubicBezier(_ fraction: Float, x1: Float, x2: Float) -> Float {
         guard fraction > 0 && fraction < 1 else { return fraction }
-        let t = cubicRoot(-fraction, 0.4 - fraction, 0.2 - fraction, 1 - fraction)
+        let t = cubicRoot(-fraction, x1 - fraction, x2 - fraction, 1 - fraction)
         let a: Float = 1 / 3 - 1
         let value = 3 * ((a * t + 1) * t) * t
         return min(max(value, 0), 1)

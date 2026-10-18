@@ -9,8 +9,9 @@ struct RemoteLandscapeLayout: Equatable {
     let columns: Int
     let shutterSize: CGFloat
     let bottomControls: Bool
+    let photoReview: Bool
 
-    var footerHeight: CGFloat { max(36, shutterSize) + 40 }
+    var footerHeight: CGFloat { max(36, shutterSize) + (photoReview ? 52 : 40) }
     var captureLift: CGFloat {
         !bottomControls && columns == 2
             ? min(48, max(0, (controls.height - 36 - 8 - footerHeight - 98) / 3)) : 0
@@ -20,14 +21,15 @@ struct RemoteLandscapeLayout: Equatable {
             : min(46, max(42, (controls.height - 36 - 8 - footerHeight - 6) / 4))
     }
 
-    init(width: CGFloat, height: CGFloat, imageAspect: CGFloat) {
+    init(width: CGFloat, height: CGFloat, imageAspect: CGFloat, photoReview: Bool = false) {
+        self.photoReview = photoReview
         precondition(width.isFinite && height.isFinite && width >= 0 && height >= 0)
         precondition(imageAspect.isFinite && imageAspect > 0)
         let w = Float(width), h = Float(height), aspect = Float(imageAspect)
         let shutter = min(64, max(48, h * 0.18))
         let fullWidth = min(max(0, w - 8), max(0, h - 8) * aspect)
-        let sideWidth = min(fullWidth, max(0, w - 116 - 16))
-        let bottomHeight = 40 + max(46 * 2 + 4, max(36, shutter) + 40)
+        let sideWidth = min(fullWidth, max(0, w - (photoReview ? 128 : 116) - 16))
+        let bottomHeight = 40 + max(46 * 2 + 4, max(36, shutter) + (photoReview ? 52 : 40))
         let bottomWidth = w >= 360 && h >= bottomHeight + 16
             ? min(fullWidth, (h - bottomHeight - 16) * aspect) : -1
         bottomControls = bottomWidth > sideWidth + 0.01
@@ -46,6 +48,22 @@ struct RemoteLandscapeLayout: Equatable {
         }
         columns = bottomControls || cw >= 176 ? 2 : 1
         shutterSize = CGFloat(bottomControls ? shutter : min(74, max(48, cw - 56)))
+    }
+}
+
+/// LandscapeMonitorLayout.landscapePhotoCaptureSizes: the capture pair uses
+/// the full row, independently of the DISP/rotation controls below it.
+struct RemotePhotoCaptureSizes {
+    let shutter: CGFloat
+    let reviewScale: CGFloat
+    let gap: CGFloat
+    var reviewWidth: CGFloat { 40 * reviewScale }
+    var reviewHeight: CGFloat { 48 * reviewScale }
+    var width: CGFloat { reviewWidth + gap + shutter }
+    init(availableWidth: CGFloat, preferredShutter: CGFloat) {
+        let preferred = Float(preferredShutter)
+        let scale = min(1, max(0, Float(availableWidth) / (preferred + 40 + 8)))
+        shutter = CGFloat(preferred * scale); reviewScale = CGFloat(scale); gap = CGFloat(8 * scale)
     }
 }
 

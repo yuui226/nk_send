@@ -13,8 +13,8 @@ struct RemoteLandscapeControls: View {
     let rotate: AnyView
     let back: AnyView
     let disp: AnyView
-    let shutter: AnyView
-    var review: AnyView = AnyView(EmptyView())
+    let shutter: (CGFloat) -> AnyView
+    let review: (CGFloat) -> AnyView
     let parameter: (Int, CGFloat) -> AnyView
     // Only the layer views subscribe to frame changes. Label measurement and
     // the header are not rebuilt on every display-link tick.
@@ -26,7 +26,7 @@ struct RemoteLandscapeControls: View {
             if layout.bottomControls {
                 HStack(spacing: 8) {
                     parameters.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    captureCluster.frame(width: max(116, layout.shutterSize + 52))
+                    captureCluster.frame(width: max(layout.photoReview ? 128 : 116, layout.shutterSize + 52))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.top, 40)
@@ -94,18 +94,30 @@ struct RemoteLandscapeControls: View {
     }
 
     private var captureCluster: some View {
-        ZStack(alignment: .bottomLeading) {
-            VStack(spacing: 4) {
-                layer(dock: false) { disp }.frame(width: 36, height: 36)
-                layer(dock: false) { rotate }.frame(width: 36, height: 36)
-                layer(dock: false) { review }.frame(width: 36, height: 36)
-            }.padding(.leading, 4)
-            layer(dock: false) { shutter }
-                .frame(width: layout.shutterSize, height: layout.shutterSize)
-                .frame(maxWidth: .infinity, maxHeight: .infinity,
-                       alignment: !layout.bottomControls && layout.columns == 2 ? .top : .topTrailing)
+        GeometryReader { proxy in
+            ZStack(alignment: .bottomLeading) {
+                VStack(spacing: 4) {
+                    layer(dock: false) { disp }.frame(width: 36, height: 36)
+                    layer(dock: false) { rotate }.frame(width: 36, height: 36)
+                }.padding(.leading, 4)
+                if layout.photoReview {
+                    let pair = RemotePhotoCaptureSizes(availableWidth: proxy.size.width, preferredShutter: layout.shutterSize)
+                    ZStack(alignment: .leading) {
+                        layer(dock: false) { review(pair.reviewScale) }
+                            .frame(width: pair.reviewWidth, height: pair.reviewHeight)
+                        layer(dock: false) { shutter(pair.shutter) }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                alignment: !layout.bottomControls && layout.columns == 2 ? .top : .topTrailing)
+                    }
+                    .frame(height: max(pair.shutter, pair.reviewHeight))
+                    .frame(maxHeight: .infinity, alignment: .top)
+                } else {
+                    layer(dock: false) { shutter(layout.shutterSize) }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity,
+                            alignment: !layout.bottomControls && layout.columns == 2 ? .top : .topTrailing)
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
         .frame(height: layout.footerHeight + layout.captureLift)
     }
 
