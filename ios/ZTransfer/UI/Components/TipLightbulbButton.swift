@@ -1,21 +1,19 @@
 import SwiftUI
 import UIKit
 
-/// Shared by GPS, STA/AP, both settings pages and the local effects workbench.
+/// Shared by GPS, STA/AP, both settings pages, the local effects workbench
+/// and the rating filter. All seven entries use a static icon/unread dot:
+/// the user explicitly disabled bulb breathing app-wide on 2026-10-18.
 /// Each caller owns its Android-equivalent persisted viewed flag. Rendering
 /// never marks a tip read; only the caller's tap action does so.
 struct TipLightbulbButton: View {
     let attention: Bool
     let size: CGFloat
     let accessibilityLabel: String
-    var motionPaused = false
     var embeddedInPanel = false
     let action: () -> Void
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var attentionOrigin = Date()
-    @State private var frozenDate: Date?
 
     private var iconColor: Color {
         zTransferButtonForeground(
@@ -26,64 +24,39 @@ struct TipLightbulbButton: View {
     }
 
     var body: some View {
-        TimelineView(.animation(paused: !attention || motionPaused || scenePhase != .active)) { context in
-            let sampleDate = motionPaused ? (frozenDate ?? context.date) : context.date
-            let values = attention
-                ? TipAttentionValues(elapsed: sampleDate.timeIntervalSince(attentionOrigin))
-                : .read
-            Button(action: action) {
-                Image(systemName: "lightbulb.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(iconColor)
-                    .frame(width: size * 0.45, height: size * 0.45)
-                    .frame(width: size, height: size)
-                    .overlay(alignment: .topTrailing) {
-                        if attention {
-                            Circle()
-                                .fill(Color(red: 1, green: 77.0 / 255, blue: 61.0 / 255))
-                                .frame(width: 7, height: 7)
-                                .scaleEffect(values.dotScale)
-                                .opacity(values.dotOpacity)
-                                .padding(.top, 5)
-                                .padding(.trailing, 5)
-                                .accessibilityHidden(true)
-                        }
+        Button(action: action) {
+            Image(systemName: "lightbulb.fill")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(iconColor)
+                .frame(width: size * 0.45, height: size * 0.45)
+                .frame(width: size, height: size)
+                .overlay(alignment: .topTrailing) {
+                    if attention {
+                        Circle()
+                            .fill(Color(red: 1, green: 77.0 / 255, blue: 61.0 / 255))
+                            .frame(width: 7, height: 7)
+                            .padding(.top, 5)
+                            .padding(.trailing, 5)
+                            .accessibilityHidden(true)
                     }
-            }
-            .buttonStyle(ZTransferGlassButtonStyle(
-                tint: iconColor,
-                cornerRadius: 12,
-                panel: embeddedInPanel,
-                materialContentColor: iconColor
-            ))
-            // Keep the complete glass tile as the physical touch target. The
-            // icon and unread-dot overlays are purely visual and must not
-            // reduce the tappable region inside transformed popup hosts.
-            .contentShape(Rectangle())
-            .scaleEffect(values.buttonScale)
-            .accessibilityLabel(accessibilityLabel)
-            // Parent popup animations must not animate the read-state reset
-            // or interpolate the frame-by-frame attention clock a second time.
-            .transaction { $0.animation = nil }
+                }
         }
-        .onAppear { attentionOrigin = Date() }
-        .onChange(of: attention) { unread in
-            if unread { attentionOrigin = Date() }
-        }
-        .onChange(of: motionPaused) { paused in
-            let now = Date()
-            if paused {
-                frozenDate = now
-            } else if let frozenDate {
-                // Remove the time spent inside the popup mesh transition from
-                // the attention clock. The live bulb resumes from the exact
-                // snapshot phase instead of flashing to a differently sized
-                // dot at the mesh/live hand-off.
-                attentionOrigin = attentionOrigin.addingTimeInterval(now.timeIntervalSince(frozenDate))
-                self.frozenDate = nil
-            }
-        }
+        .buttonStyle(ZTransferGlassButtonStyle(
+            tint: iconColor,
+            cornerRadius: 12,
+            panel: embeddedInPanel,
+            materialContentColor: iconColor
+        ))
+        // Keep the complete glass tile as the physical touch target. The
+        // icon and unread-dot overlays are purely visual and must not
+        // reduce the tappable region inside transformed popup hosts.
+        .contentShape(Rectangle())
+        .accessibilityLabel(accessibilityLabel)
+        // User-approved 2026-10-18 power tradeoff: a static unread dot
+        // replaces attention breathing. Keep the original glass and icon;
+        // read-state changes still apply immediately inside parent transitions.
+        .transaction { $0.animation = nil }
     }
 }
 

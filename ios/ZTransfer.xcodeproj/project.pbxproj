@@ -356,6 +356,7 @@
 		9BD36C93DE99E708A9E68AF5 /* GPSProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = F669891731A2784158CAB73F /* GPSProtocol.swift */; };
 		9C138419D1790D0D7591271D /* RemoteLUTFolderAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F53F46271ABC60059BF9FB0 /* RemoteLUTFolderAccess.swift */; };
 		9CADBE13F32E8704DCAAF584 /* RemoteCameraToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EC21072BA6F9C8F7609BC66 /* RemoteCameraToolTests.swift */; };
+		9CCE41D9F6C72F5B783C40B2 /* NativeAttentionMotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1EA276EC9A7EA8F8B6F40 /* NativeAttentionMotionTests.swift */; };
 		9D2FA1400CA1F9B6632FFAF8 /* STATipsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D3FD27372D4F017D196970 /* STATipsOverlay.swift */; };
 		9D3DFDDB82CBADF50CC379C5 /* PhotoListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0994973567FB60B02328A65F /* PhotoListView.swift */; };
 		9DABC44FA0227371DD28F3DA /* jpeg_nbits.c in Sources */ = {isa = PBXBuildFile; fileRef = 48BD1D226D3EDFB117AE536B /* jpeg_nbits.c */; };
@@ -433,6 +434,7 @@
 		BE5606FBE5BF562163253204 /* RemoteLandscapeControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B162C26FC2DE71F1E53C79 /* RemoteLandscapeControls.swift */; };
 		BE82AC7AB79F3C99762297E5 /* NikonPictureControlSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4B3BCA5A9BADB279FD8240 /* NikonPictureControlSelection.swift */; };
 		BF53D922770A65F72D876878 /* jdmaster.c in Sources */ = {isa = PBXBuildFile; fileRef = F5A58EAF300227D5FE53C657 /* jdmaster.c */; };
+		BF8F9659A65C0392337FC695 /* NativeAttentionMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BF167C40D7C0D115B35CA5 /* NativeAttentionMotion.swift */; };
 		BF9CB5E4157F2E6259D88432 /* RemoteChoicePopup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B17F2DC53C015416FB4D42 /* RemoteChoicePopup.swift */; };
 		C05F75E05BFD7827D3284C79 /* RemoteCameraToolController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D190C08910E9463FC83134 /* RemoteCameraToolController.swift */; };
 		C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */; };
@@ -804,6 +806,7 @@
 		55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPage.swift; sourceTree = "<group>"; };
 		571D6BA0E01CAEA4CAD53A27 /* jdsample-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jdsample-12.c"; sourceTree = "<group>"; };
 		583525C8870B5E378E678F16 /* jcphuff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jcphuff.c; sourceTree = "<group>"; };
+		58BF167C40D7C0D115B35CA5 /* NativeAttentionMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAttentionMotion.swift; sourceTree = "<group>"; };
 		59406C990E72248071072192 /* RemoteHorizonColorReferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHorizonColorReferenceTests.swift; sourceTree = "<group>"; };
 		59C7B150B97663D472FFC131 /* PhotoFrameBrandLogoCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameBrandLogoCatalogTests.swift; sourceTree = "<group>"; };
 		59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTests.swift; sourceTree = "<group>"; };
@@ -970,6 +973,7 @@
 		A08182CA42C7A1FF4A9550E2 /* RemoteViewfinderViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteViewfinderViewport.swift; sourceTree = "<group>"; };
 		A0955459F6F7ADE8BE7FAC73 /* RemoteExposureAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureAnalysisTests.swift; sourceTree = "<group>"; };
 		A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailDiskCache.swift; sourceTree = "<group>"; };
+		A1A1EA276EC9A7EA8F8B6F40 /* NativeAttentionMotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAttentionMotionTests.swift; sourceTree = "<group>"; };
 		A1D4074E7A43510F34833C8A /* jclossls-16.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jclossls-16.c"; sourceTree = "<group>"; };
 		A1DC8FD007EB06AB0B15D896 /* PremiumPurchaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumPurchaseView.swift; sourceTree = "<group>"; };
 		A1E637D8367B4DCDAE6B3A1E /* AndroidMotionReferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidMotionReferenceTests.swift; sourceTree = "<group>"; };
@@ -1271,6 +1275,7 @@
 				545DCB3052FFC34B79B7F9D7 /* MaterialTextureReferenceTests.swift */,
 				E47418A29FCF2B72E5F11FA6 /* MaterialTextureStoreTests.swift */,
 				C6B51959B0CA4F46B1909760 /* MonitorStorageSchedulingTests.swift */,
+				A1A1EA276EC9A7EA8F8B6F40 /* NativeAttentionMotionTests.swift */,
 				79735AB03A21EBB50D28C3DA /* NikonPictureControlProtocolTests.swift */,
 				1E79F3FA26C3DC0035B69A30 /* NikonPictureControlSelectionTests.swift */,
 				2E54768C27E978B29B7A212C /* NikonPictureControlTests.swift */,
@@ -1762,6 +1767,7 @@
 				D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */,
 				1DF8FBC08956F02D0F24ACFD /* DoubleZMark.swift */,
 				77A5E77B2C0E19B2B1CD5F24 /* HapticPolicy.swift */,
+				58BF167C40D7C0D115B35CA5 /* NativeAttentionMotion.swift */,
 				94872EDA00F4ABDC5BEC055D /* TipAttentionMotion.swift */,
 				A80E9480B37EC28D8C56DE93 /* ZTransferAndroidColor.swift */,
 				EAECF35EED7EB8A962F02A15 /* ZTransferAndroidMath.swift */,
@@ -2328,6 +2334,7 @@
 				A5922DC4DAC7567C4710A561 /* MaterialTextureStoreTests.swift in Sources */,
 				ACBCB31848967F1C7E83F6DC /* MonitorStorageSchedulingTests.swift in Sources */,
 				ADD2ABB3801C54382250156B /* NEFExifParityTests.swift in Sources */,
+				9CCE41D9F6C72F5B783C40B2 /* NativeAttentionMotionTests.swift in Sources */,
 				35FAF746D7A8051166B0D517 /* NikonPictureControlProtocolTests.swift in Sources */,
 				79DEFEAB43C56CB6A324F2F1 /* NikonPictureControlSelectionTests.swift in Sources */,
 				C712C6A461AD9C74C1F6FC7D /* NikonPictureControlTests.swift in Sources */,
@@ -2509,6 +2516,7 @@
 				B6D16C86C91D6A584E8BA61C /* LosslessJpegBridge.c in Sources */,
 				53A0052ADB6D6C16A7F32137 /* LosslessJpegBridge.swift in Sources */,
 				ACE910F4598DDD5D707BC9F0 /* NEFExifThumbnail.swift in Sources */,
+				BF8F9659A65C0392337FC695 /* NativeAttentionMotion.swift in Sources */,
 				B34B2B1ADB3FDE50B2287F76 /* NikonBrandGradients.swift in Sources */,
 				82C2CB5E5068C162593867DB /* NikonGPSBluetoothClient.swift in Sources */,
 				1793BC1FEEB38A9051630D1C /* NikonPictureControl.swift in Sources */,

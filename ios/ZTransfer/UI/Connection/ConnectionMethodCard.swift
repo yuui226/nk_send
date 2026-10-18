@@ -28,6 +28,9 @@ struct ConnectionMethodCard: View {
     var apHelpViewed = false
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var tipRects: [TipPopupTrigger: CGRect] = [:]
+    @State private var cardWindowFrame = CGRect.zero
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
@@ -57,17 +60,28 @@ struct ConnectionMethodCard: View {
     }
 
     var body: some View {
+        NativeAttentionHost(configuration: .init(kind: .card(offset: mode == .usb ? 0 : 0.5),
+            origin: attentionOrigin, enabled: attentionActive, paused: scenePhase != .active),
+            onTipAnchorsChange: { if tipRects != $0 { tipRects = $0 } },
+            onWindowFrameChange: { if cardWindowFrame != $0 { cardWindowFrame = $0 } }) {
         ZStack(alignment: .topLeading) {
             ConnectionCardSurfaceTimeline(start: celebrationStart) {
                 cardSurface
             }
             celebrationLayer
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
         .frame(maxWidth: .infinity)
         .frame(height: height)
-        .modifier(ConnectionBreathingModifier(active: attentionActive,
-                                               origin: attentionOrigin,
-                                               offset: mode == .usb ? 0 : 0.5))
+        // Android keeps popup anchors outside graphicsLayer's breathing scale.
+        // Publish measured local bounds through this static hosting boundary.
+        .anchorPreference(key: TipPopupAnchorPreferenceKey.self, value: .rect(tipRects[.sta] ?? .zero)) {
+            tipRects[.sta] == nil ? [:] : [.sta: $0]
+        }
+        .transformAnchorPreference(key: TipPopupAnchorPreferenceKey.self, value: .rect(tipRects[.ap] ?? .zero)) {
+            if tipRects[.ap] != nil { $0[.ap] = $1 }
+        }
         .zIndex(selected ? 3 : 0)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32), value: dimmed)
     }
@@ -148,9 +162,11 @@ struct ConnectionMethodCard: View {
                     start: celebrationStart, now: context.date
                 )
             )
-            GeometryReader { proxy in
+            GeometryReader { _ in
                 let scene = connectionCelebrationEase(values.hero)
-                let cardFrame = proxy.frame(in: .global)
+                // The card now owns a hosting boundary. Its local SwiftUI
+                // global space is not the screen used by the hero destination.
+                let cardFrame = cardWindowFrame
                 let start = CGPoint(x: 14 + 21, y: 16 + 21)
                 let targetX = UIScreen.main.bounds.midX - cardFrame.minX
                 let targetY = UIScreen.main.bounds.height / 3 - cardFrame.minY
@@ -608,42 +624,5 @@ private struct ConnectionFeedback: View {
         .padding(.horizontal, 9).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ZTransferColors.statusError.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-/// Timeline updates only the transform of the captured content. It no longer
-/// rebuilds the card's text/layout/controls on every frame. HomeScreen.kt uses
-/// this same 2.4 s smootherstep wave, with Wi-Fi offset by half a cycle.
-private struct ConnectionBreathingModifier: ViewModifier {
-    @Environment(\.scenePhase) private var scenePhase
-    let active: Bool
-    let origin: Date
-    let offset: Double
-    @State private var intensity: CGFloat = 0
-
-    func body(content: Content) -> some View {
-        TimelineView(.animation(paused: intensity <= 0.001 || scenePhase != .active)) { context in
-            let elapsed = max(0, context.date.timeIntervalSince(origin))
-            let phase = (elapsed / 2.4 + offset).truncatingRemainder(dividingBy: 1)
-            content.scaleEffect(1 + 0.04 * attention(phase) * intensity)
-        }
-        .onAppear { intensity = active ? 1 : 0 }
-        .onChange(of: active) { enabled in
-            // Match Android's dedicated attentionIntensity tween. Keep the
-            // timeline alive while the current breath settles instead of
-            // snapping both connection cards back to scale 1 when GPS starts.
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32)) {
-                intensity = enabled ? 1 : 0
-            }
-        }
-    }
-    private func attention(_ phase: Double) -> Double {
-        func smoother(_ value: Double) -> Double {
-            let x = min(1, max(0, value))
-            return x * x * x * (x * (x * 6 - 15) + 10)
-        }
-        if phase < 0.38 { return smoother(phase / 0.38) }
-        if phase < 0.82 { return 1 - smoother((phase - 0.38) / 0.44) }
-        return 0
     }
 }

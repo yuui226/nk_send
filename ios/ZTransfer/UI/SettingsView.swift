@@ -372,7 +372,6 @@ struct SettingsView: View {
             TipLightbulbButton(
                 attention: !photoEffectsHelpViewed, size: 28,
                 accessibilityLabel: AppLocalized.resource("photo_effects_info_title"),
-                motionPaused: popupMotionPaused,
                 embeddedInPanel: true
             ) {
                 photoEffectsHelpViewed = true
@@ -431,7 +430,6 @@ struct SettingsView: View {
             TipLightbulbButton(
                 attention: !mainSettingsHelpViewed, size: 30,
                 accessibilityLabel: AppLocalized.resource("settings_help_title"),
-                motionPaused: popupMotionPaused,
                 embeddedInPanel: true
             ) {
                 mainSettingsHelpViewed = true

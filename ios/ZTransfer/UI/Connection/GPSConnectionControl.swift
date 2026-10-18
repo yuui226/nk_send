@@ -12,7 +12,8 @@ struct GPSConnectionControl: View {
     /// Page space below this control, measured by ConnectionPage's layout.
     let availableHeight: CGFloat
     @State private var showHelp = false
-    @State private var ambientHigh = false
+    @State private var ambientOrigin = Date()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var hintText: String?
 
     private var entryError: Bool {
@@ -42,13 +43,11 @@ struct GPSConnectionControl: View {
         VStack(alignment: .leading, spacing: 0) {
             let active = coordinator.state.enabled
             let breathing = !expanded && !entryError
-            let ambientAlpha: CGFloat = entryError ? 0 : (
-                breathing
-                    ? (active
-                        ? (ambientHigh ? 0.160 : 0.075)
-                        : (ambientHigh ? 0.145 : 0.050))
-                    : (active ? 0.105 : 0.070)
-            )
+            let ambientPulse = NativeAmbientPulse(origin: ambientOrigin,
+                minimum: active ? 0.075 : 0.050, maximum: active ? 0.160 : 0.145,
+                halfPeriod: active ? 2.4 : 2.8,
+                restingOpacity: entryError ? 0 : (active ? 0.105 : 0.070),
+                breathing: breathing, paused: scenePhase != .active)
             // Android uses ReleaseCommitWheel for this boolean control. Using
             // the shared wheel preserves tap-to-toggle, long-press diagnostics,
             // detent feedback and the same disabled/active material treatment.
@@ -73,7 +72,7 @@ struct GPSConnectionControl: View {
                     hintText = AppLocalized.resource("code_copied")
                 },
                 ambientEffectColor: entryAccent,
-                ambientEffectAlpha: ambientAlpha,
+                ambientEffectPulse: ambientPulse,
                 followsButtonSkin: true,
                 prominentPressFeedback: true
             )
@@ -144,19 +143,9 @@ struct GPSConnectionControl: View {
     }
 
     private func updateAmbientPulse() {
-        var reset = Transaction()
-        reset.disablesAnimations = true
-        withTransaction(reset) { ambientHigh = false }
-        guard !expanded, !entryError else { return }
-        let active = coordinator.state.enabled
-        DispatchQueue.main.async {
-            guard !expanded, !entryError else { return }
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: active ? 2.4 : 2.8)
-                .repeatForever(autoreverses: true)) {
-                ambientHigh = true
-            }
-        }
+        ambientOrigin = Date()
     }
+
 }
 
 

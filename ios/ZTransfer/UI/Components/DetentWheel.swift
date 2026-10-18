@@ -31,6 +31,7 @@ struct DetentWheel<Option: Hashable>: View {
     var favoriteIconColor: Color? = nil
     var ambientEffectColor: Color? = nil
     var ambientEffectAlpha: Double = 0
+    var ambientEffectPulse: NativeAmbientPulse? = nil
     var followsButtonSkin = false
     var prominentPressFeedback = false
     var contentAnchorSpace: AnyHashable? = nil
@@ -60,6 +61,7 @@ struct DetentWheel<Option: Hashable>: View {
          favoriteOption: @escaping (Option) -> Bool = { _ in false },
          favoriteIconColor: Color? = nil, ambientEffectColor: Color? = nil,
          ambientEffectAlpha: Double = 0,
+         ambientEffectPulse: NativeAmbientPulse? = nil,
          followsButtonSkin: Bool = false,
          prominentPressFeedback: Bool = false,
          contentAnchorSpace: AnyHashable? = nil,
@@ -77,6 +79,7 @@ struct DetentWheel<Option: Hashable>: View {
         self.centerIcon = centerIcon; self.favoriteOption = favoriteOption
         self.favoriteIconColor = favoriteIconColor; self.ambientEffectColor = ambientEffectColor
         self.ambientEffectAlpha = ambientEffectAlpha
+        self.ambientEffectPulse = ambientEffectPulse
         self.followsButtonSkin = followsButtonSkin
         self.prominentPressFeedback = prominentPressFeedback
         self.contentAnchorSpace = contentAnchorSpace
@@ -120,7 +123,10 @@ struct DetentWheel<Option: Hashable>: View {
                         .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .stroke(wheelBorder, lineWidth: dragging ? 1.5 : 1))
                 }
-                if let ambientEffectColor, ambientEffectAlpha > 0 {
+                if let ambientEffectColor, let ambientEffectPulse {
+                    NativeAmbientFill(color: ambientEffectColor, cornerRadius: cornerRadius,
+                                      pulse: ambientEffectPulse).allowsHitTesting(false)
+                } else if let ambientEffectColor, ambientEffectAlpha > 0 {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(ambientEffectColor.opacity(ambientEffectAlpha)).allowsHitTesting(false)
                 }
