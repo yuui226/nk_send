@@ -326,21 +326,13 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private func retire() {
-        loadGeneration &+= 1
+        // Eviction is terminal even if a disconnect callback did not arrive.
+        // Share the same shutdown gate so retained view callbacks cannot wake
+        // a removed session model while its replacement is already active.
+        transportDidDisconnect()
         transferIndexGeneration &+= 1
-        loadTask?.cancel()
-        loadTask = nil
-        fillTask?.cancel()
-        fillTask = nil
-        ratingScanController.cancel()
-        fillResumeTask?.cancel()
-        fillResumeTask = nil
         fillWorkerGeneration &+= 1
         fillWorkerActive = false
-        catalogUpdatesTask?.cancel()
-        catalogUpdatesTask = nil
-        newMediaHandler = nil
-        isLoadingFiles = false
         displayedFiles.removeAll()
     }
 
@@ -406,6 +398,7 @@ final class PhotoListViewModel: ObservableObject {
         fillWorkerGeneration &+= 1
         fillWorkerActive = false
         await thumbnailFillQueue.beginScan()
+        guard !Task.isCancelled, generation == loadGeneration else { return }
         loadingRangeScanStopped = false
         recentThumbnailReadyDays = 0
         loadState = .loading
@@ -455,14 +448,20 @@ final class PhotoListViewModel: ObservableObject {
                 if normalizedSlot != filter.storageSlot { filter.storageSlot = normalizedSlot }
             }
             if !result.removedHandles.isEmpty { await thumbnailFillQueue.remove(result.removedHandles) }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             await thumbnailFillQueue.seed(
                 allFiles,
                 priorityRange: filter.dateRange,
                 loadingRange: newestCaptureDaysRange(allFiles, days: photoLoadingRange.days)
             )
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             // Android returns at a loading-range boundary before pruning:
             // older files are unscanned, not confirmed absent from the camera.
             await reconcileCache(allFiles, result.handleQueriesSucceeded && result.metadataComplete && !result.stoppedAtLoadingRange)
+            // Cache IO can finish after disconnect, preview preemption, or a
+            // replacement scan. Android's fileLoadGeneration/camera guard
+            // also applies after this iOS-specific suspension boundary.
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             loadState = .loaded
             isLoadingFiles = false
             hasCompletedFileScan = true
@@ -795,7 +794,7 @@ final class PhotoListViewModel: ObservableObject {
             loadGeneration &+= 1
             let generation = loadGeneration
             let snapshot = await resumeSnapshotProvider()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             loadState = .loading
             isLoadingFiles = true
             hasCompletedFileScan = false

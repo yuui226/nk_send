@@ -10439,6 +10439,73 @@ final class DisconnectedPhotoListTests: XCTestCase {
         var count = 0
         func increment() { count += 1 }
     }
+    func testEvictionWithoutDisconnectMakesRetainedModelTerminal() async {
+        let session = CameraSession(repository: CameraRepository(debugData: .shared))
+        let retired = PhotoListViewModel.cached(session: session)
+        PhotoListViewModel.evict(session: session)
+        XCTAssertFalse(retired.transportAvailable)
+        retired.load()
+        await retired.reload()
+        retired.wakeThumbnailFill()
+        XCTAssertFalse(retired.isLoadingFiles)
+        XCTAssertEqual(retired.loadState, .idle)
+        let replacement = PhotoListViewModel.cached(session: session)
+        XCTAssertFalse(retired === replacement)
+        XCTAssertTrue(replacement.transportAvailable)
+        PhotoListViewModel.evict(session: session)
+    }
+
+    func testDisconnectRejectsLateCacheReconciliationCompletion() async throws {
+        let entered = expectation(description: "cache reconciliation entered")
+        let release = CropPermitLatch()
+        let file = CameraFile(id: 77, storageID: 1, format: 0x3801, size: 100,
+            fileName: "DSC_0077.JPG", captureDate: "20261019T120000", isProtected: false)
+        let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
+            PhotoScanResult(files: [file], removedHandles: [], addedHandles: [], handleQueriesSucceeded: true,
+                metadataComplete: true, filterStorageIDs: [1])
+        }, reconcileCache: { _, _ in
+            entered.fulfill()
+            await release.wait() // Disk work may finish after protocol cancellation.
+        }, setRemoteGate: { _ in })
+        let loading = Task { await model.reload() }
+        await fulfillment(of: [entered], timeout: 2)
+        model.transportDidDisconnect()
+        await release.open()
+        await loading.value
+        XCTAssertFalse(model.transportAvailable)
+        XCTAssertFalse(model.isLoadingFiles)
+        XCTAssertFalse(model.hasCompletedFileScan, "A disconnected scan cannot publish completion")
+        XCTAssertEqual(model.availableFiles.map(\.id), [77], "Retain the already received catalog")
+    }
+
+    func testDisconnectRejectsLateLoadingRangeSnapshot() async throws {
+        let previous = PhotoFilterPersistence.loadPhotoLoadingRange()
+        PhotoFilterPersistence.savePhotoLoadingRange(.five)
+        defer { PhotoFilterPersistence.savePhotoLoadingRange(previous) }
+        let entered = expectation(description: "resume snapshot entered")
+        let release = CropPermitLatch()
+        let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
+            PhotoScanResult(files: [], removedHandles: [], addedHandles: [], handleQueriesSucceeded: true,
+                metadataComplete: true, filterStorageIDs: [1], stoppedAtLoadingRange: true)
+        }, resumeSnapshotProvider: {
+            entered.fulfill()
+            await release.wait()
+            return nil
+        }, setRemoteGate: { _ in })
+        await model.reload()
+        XCTAssertTrue(model.hasCompletedFileScan)
+        model.setPhotoLoadingRange(.all)
+        await fulfillment(of: [entered], timeout: 2)
+        model.transportDidDisconnect()
+        let restarted = expectation(description: "offline loading must not restart")
+        restarted.isInverted = true
+        let observation = model.$isLoadingFiles.sink { if $0 { restarted.fulfill() } }
+        defer { observation.cancel() }
+        await release.open()
+        await fulfillment(of: [restarted], timeout: 0.1)
+        XCTAssertFalse(model.isLoadingFiles)
+    }
+
     func testDisconnectedCatalogStopsAllRemoteWorkButRetainsRows() async throws {
         for sequential in [false, true] {
             let scans = Counter(), fills = Counter()
