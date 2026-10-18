@@ -142,12 +142,16 @@ dependencies {
 val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
     group = "build"
     description = "Copy the debug APK to dist-debug with a unique build timestamp"
+    // Capture paths during configuration; the action must not access Project when
+    // Gradle restores the task graph from the configuration cache.
+    val sourceApk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
+    val outputDirectory = rootProject.layout.projectDirectory.dir("dist-debug")
     outputs.upToDateWhen { false }
     doLast {
-        val source = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
+        val source = sourceApk.get().asFile
         check(source.isFile) { "Debug APK not found: ${source.absolutePath}" }
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMdd-HHmmss"))
-        val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
+        val destinationDirectory = outputDirectory.asFile.apply { mkdirs() }
         val destination = destinationDirectory.resolve(
             "ZD-$stamp.apk"
         )

@@ -1,12 +1,26 @@
 :; exec bash "$(dirname -- "$0")/build.command" "$@"
 @echo off
 setlocal
+set "SKIP_INSTALL="
+
+:parse_args
+if "%~1"=="" goto :build
+if /i "%~1"=="--no-install" (
+    set "SKIP_INSTALL=1"
+    shift
+    goto :parse_args
+)
+echo Usage: %~nx0 [--no-install]
+exit /b 1
+
+:build
 
 rem This script lives in dist-debug\. Run the Gradle build from the project root.
 cd /d "%~dp0.."
 
 echo Building timestamped Debug APK...
-call "%~dp0..\gradlew.bat" :app:assembleDebug --no-daemon --console=plain
+rem Reuse the JVM, task outputs and configured task graph across local Debug builds.
+call "%~dp0..\gradlew.bat" :app:assembleDebug --daemon --build-cache --configuration-cache --console=plain
 if errorlevel 1 (
     echo.
     echo Debug build FAILED.
@@ -25,6 +39,11 @@ if not defined DEBUG_APK (
     echo Timestamped Debug APK was not found.
     pause
     exit /b 1
+)
+
+if defined SKIP_INSTALL (
+    echo Build only; skipping device installation.
+    goto :finish
 )
 
 where adb >nul 2>nul

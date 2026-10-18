@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 BUILD_LOG=""
+SKIP_INSTALL=0
+for ARG in "$@"; do
+  case "$ARG" in
+    --no-install) SKIP_INSTALL=1 ;;
+    *) echo "Usage: $0 [--no-install]" >&2; exit 1 ;;
+  esac
+done
 
 # Finder-launched .command files should disappear after a successful build, while
 # failures must leave the terminal open so the error can be read and copied.
@@ -63,7 +70,8 @@ fi
 
 printf 'Building timestamped Debug APK with %s...\n' "$JAVA_HOME"
 BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/ztransfer-debug-build.XXXXXX")"
-"$ROOT_DIR/gradlew" :app:assembleDebug --no-daemon --console=plain | tee "$BUILD_LOG"
+# Reuse the JVM, task outputs and configured task graph across local Debug builds.
+"$ROOT_DIR/gradlew" :app:assembleDebug --daemon --build-cache --configuration-cache --console=plain | tee "$BUILD_LOG"
 
 # app/build.gradle.kts finalizes assembleDebug with copyTimestampedDebugApk,
 # which creates the distributable name in this directory.
@@ -115,6 +123,10 @@ fi
 
 # Match dist-debug/build-debug.bat: install and launch every authorized ADB device,
 # while allowing a disconnected-phone build to finish successfully.
+if [[ "$SKIP_INSTALL" == 1 ]]; then
+  echo "Build only; skipping device installation."
+  exit 0
+fi
 ADB="$(command -v adb || true)"
 if [[ -z "$ADB" ]]; then
   echo "ADB not found; skipping device installation."
