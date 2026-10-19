@@ -2288,33 +2288,84 @@ private final class QueuePillContentClock: ObservableObject {
     func stop() { link?.invalidate(); link = nil }
 }
 
-private struct QueuePillContentTransition<Content: View>: View {
+struct QueuePillContentTransition<Surface: View, Content: View>: View {
     let presentation: QueuePillPresentation
     let content: (QueuePillPresentation) -> Content
+    let surface: (QueuePillContentMotion) -> Surface
     @StateObject private var clock: QueuePillContentClock
 
-    init(presentation: QueuePillPresentation, @ViewBuilder content: @escaping (QueuePillPresentation) -> Content) {
+    init(presentation: QueuePillPresentation,
+         @ViewBuilder surface: @escaping (QueuePillContentMotion) -> Surface,
+         @ViewBuilder content: @escaping (QueuePillPresentation) -> Content) {
         self.presentation = presentation
+        self.surface = surface
         self.content = content
         _clock = StateObject(wrappedValue: QueuePillContentClock(presentation))
     }
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            ForEach(clock.motion.layers) { layer in
-                content(layer.id == presentation.mode ? presentation : layer.presentation)
-                    // Android wrapContentWidth(End, unbounded = true): the
-                    // viewport must not squeeze the outgoing text as it shrinks.
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, layer.id == .icon ? 0 : 16)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                    .opacity(Double(layer.fade.alpha.value))
-                    .accessibilityHidden(layer.id != presentation.mode)
+        // The proposed animated width belongs to the surface. Retained,
+        // unbounded text must not impose its old minimum width on that surface
+        // (a ZStack did so until the outgoing label was removed at 160ms).
+        surface(clock.motion).overlay(alignment: .trailing) {
+            ZStack(alignment: .trailing) {
+                ForEach(clock.motion.layers) { layer in
+                    content(layer.id == presentation.mode ? presentation : layer.presentation)
+                        // Android wrapContentWidth(End, unbounded = true): the
+                        // viewport must not squeeze the outgoing text as it shrinks.
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, layer.id == .icon ? 0 : 16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .opacity(Double(layer.fade.alpha.value))
+                        .accessibilityHidden(layer.id != presentation.mode)
+                }
             }
         }
         .onAppear { clock.mount(presentation) }
         .onChange(of: presentation) { clock.update($0) }
         .onDisappear { clock.stop() }
+    }
+}
+
+
+/// The fill/material follows the same retained mode transition as its text.
+/// A boolean switch previously removed the full blue fill on the first
+/// Done→icon frame, before either the width spring or label fade had advanced.
+private struct QueuePillSurface: View {
+    let motion: QueuePillContentMotion
+    let skin: ZTransferButtonSkin
+    let progressAnimator: SmoothTransferProgressAnimator
+    let progressKey: String
+    let allDone: Bool
+    let completionFillVisible: Bool
+    let hasActiveItem: Bool
+
+    var body: some View {
+        let appearance = motion.surface
+        ZStack {
+            if skin == .liquidGlass {
+                // One native glass instance survives all states and width frames.
+                ZTransferButtonMaterialSurface(skin: skin, cornerRadius: 22, textureSeed: 0x2A71E001)
+            } else {
+                ZTransferButtonMaterialSurface(skin: skin, cornerRadius: 22, textureSeed: 0x2A71E001)
+                    .opacity(appearance.iconAlpha)
+                ZTransferGlassSurface(cornerRadius: 22, kind: .button)
+                    .opacity(1 - appearance.iconAlpha)
+            }
+            if appearance.hasContent && (!allDone || completionFillVisible || appearance.finishingExit) {
+                TransferProgressContent(animator: progressAnimator) { value in
+                    LiquidTransferProgressSurface(progress: appearance.finishingExit ? 1 : value,
+                        seed: progressKey, isCapsule: true,
+                        waveEligible: hasActiveItem || completionFillVisible)
+                }
+                .opacity(appearance.fillAlpha)
+            }
+            if skin != .liquidGlass {
+                Capsule().strokeBorder(.white.opacity(0.14 * (1 - appearance.iconAlpha)), lineWidth: 0.6)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
     }
 }
 
@@ -2359,6 +2410,35 @@ struct QueuePillAnimatedSize<Content: View>: View {
     var body: some View {
         QueuePillSizingLayout(displayedWidth: clock.motion.width, height: photoListTopControlsHeight) { content }
     }
+}
+
+/// One delayed publication at most; no timer runs while the label is settled.
+@MainActor
+final class QueuePillSpeedClock: ObservableObject {
+    @Published private(set) var value: Int64?
+    private var cadence = QueuePillSpeedCadence()
+    private var task: Task<Void, Never>?
+    private var scheduledDeadline: TimeInterval?
+
+    func update(_ sample: Int64?) {
+        cadence.update(sample, at: CACurrentMediaTime())
+        synchronize()
+    }
+    private func synchronize() {
+        if value != cadence.value { value = cadence.value }
+        guard scheduledDeadline != cadence.deadline else { return }
+        task?.cancel(); task = nil
+        scheduledDeadline = cadence.deadline
+        guard let deadline = cadence.deadline else { return }
+        let delay = max(0, deadline - CACurrentMediaTime())
+        task = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self else { return }
+            self.cadence.advance(CACurrentMediaTime())
+            self.synchronize()
+        }
+    }
+    func reset() { task?.cancel(); task = nil; scheduledDeadline = nil; cadence = .init(); value = nil }
 }
 
 private struct LiveQueuePill: View {
@@ -2413,16 +2493,13 @@ struct QueuePill: View {
     @State private var doneTask: Task<Void, Never>?
     @State private var widthMeasurement = QueuePillWidthMeasurement()
     @State private var widthClock = QueuePillWidthClock()
+    @StateObject private var speedClock = QueuePillSpeedClock()
     // Retain ownership without subscribing the whole capsule to display frames.
     // Only TransferProgressContent observes this animator.
     @State private var progressAnimator = SmoothTransferProgressAnimator()
     @Environment(\.displayScale) private var displayScale
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
-
-    private var usesNativeLiquidGlass: Bool {
-        ZTransferButtonSkin(storedValue: skinPreset) == .liquidGlass
-    }
 
     private var downloadRemaining: Int { taskSummary.downloadRemaining }
     private var generationCount: Int { taskSummary.generationRemaining }
@@ -2434,9 +2511,9 @@ struct QueuePill: View {
         return activeProgress?.retainedBytesPerSecond ?? activeItem?.bytesPerSecond ?? 0
     }
 
-    private var activeSpeedText: String? {
-        activeSpeed > 0 ? transferSpeedText(activeSpeed) : nil
-    }
+    private var displayedSpeed: Int64? { speedClock.value ?? (activeSpeed > 0 ? activeSpeed : nil) }
+    private var activeSpeedText: String? { displayedSpeed.map(transferSpeedText) }
+    private var speedInput: Int64? { visualMode == .counting ? activeSpeed : nil }
 
     private var displayRemainingCount: Int { taskSummary.displayRemaining(heldCount: heldCount) }
     private var allDone: Bool { taskSummary.allDone }
@@ -2492,7 +2569,7 @@ struct QueuePill: View {
     private var presentation: QueuePillPresentation {
         .init(mode: visualMode,
               count: visualMode == .generating ? generationCount : displayRemainingCount,
-              speed: activeSpeed > 0 ? activeSpeed : nil)
+              speed: visualMode == .counting ? displayedSpeed : nil)
     }
     private struct ProgressInput: Equatable {
         let fraction: Double
@@ -2520,41 +2597,18 @@ struct QueuePill: View {
             // paused/generating/Done. Branching the whole button discarded
             // outgoing layers and restarted child clocks on mode changes.
             Button(action: onClick) {
-                ZStack(alignment: .trailing) {
-                    if usesNativeLiquidGlass {
-                        ZTransferButtonMaterialSurface(
-                            skin: .liquidGlass, cornerRadius: 22,
-                            textureSeed: 0x2A71E001)
-                    } else if visualMode == .icon {
-                        ZTransferButtonMaterialSurface(
-                            skin: .init(storedValue: skinPreset), cornerRadius: 22,
-                            textureSeed: 0x2A71E001)
-                    } else {
-                        ZTransferGlassSurface(cornerRadius: 22, kind: .button)
-                    }
-                    if visualMode != .icon && (!allDone || completionFillVisible) {
-                        TransferProgressContent(animator: progressAnimator) { value in
-                            LiquidTransferProgressSurface(
-                                progress: value,
-                                seed: progressInput.key,
-                                isCapsule: true,
-                                waveEligible: activeItem != nil || completionFillVisible)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    }
-                    QueuePillContentTransition(presentation: presentation) { displayed in
-                        pillContent(for: displayed)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                QueuePillContentTransition(presentation: presentation) { motion in
+                    QueuePillSurface(motion: motion, skin: .init(storedValue: skinPreset),
+                        progressAnimator: progressAnimator, progressKey: progressInput.key,
+                        allDone: allDone, completionFillVisible: completionFillVisible,
+                        hasActiveItem: activeItem != nil)
+                } content: { displayed in
+                    pillContent(for: displayed)
                 }
                 .frame(height: photoListTopControlsHeight, alignment: .trailing)
                 .compositingGroup()
                 .clipShape(Capsule())
-                .overlay {
-                    if !usesNativeLiquidGlass && visualMode != .icon {
-                        Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
-                    }
-                }
+                .contentShape(Capsule())
             }
             .buttonStyle(QueuePillButtonStyle())
             .frame(height: photoListTopControlsHeight)
@@ -2598,6 +2652,7 @@ struct QueuePill: View {
                 countingVisible = false
             }
         }
+        .onChange(of: speedInput) { speedClock.update($0) }
         .onChange(of: progressOwner?.id) { id in
             if let id { retainedProgressSeed = id.uuidString }
         }
@@ -2642,6 +2697,7 @@ struct QueuePill: View {
             self.previousAllDone = done
         }
         .onAppear {
+            speedClock.update(speedInput)
             previousAllDone = allDone
             sawActiveBatch = hasWorkingTask
             widthClock.update(width: targetWidth, scale: displayScale)
@@ -2650,6 +2706,7 @@ struct QueuePill: View {
         }
         .onDisappear {
             doneTask?.cancel()
+            speedClock.reset()
             widthClock.reset()
             progressAnimator.stop()
         }

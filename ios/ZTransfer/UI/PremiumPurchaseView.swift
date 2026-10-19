@@ -97,7 +97,7 @@ struct PremiumPurchaseView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                Color.black.opacity(0.32).ignoresSafeArea().onTapGesture { onClose() }
+                DialogBackdrop(onDismiss: onClose)
                 ScrollView {
                     VStack(spacing: 16) {
                         header
@@ -178,6 +178,7 @@ struct PremiumPurchaseView: View {
                     .shadow(color: .black.opacity(0.18), radius: 6, y: 3))
                 .clipShape(RoundedRectangle(cornerRadius: 22))
                 .padding(.horizontal, 24)
+                .androidDialogSurface()
             }
         }
         .background(PurchaseSceneReader { scene = $0 }.frame(width: 0, height: 0))

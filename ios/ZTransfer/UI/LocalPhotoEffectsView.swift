@@ -81,7 +81,7 @@ struct LocalPhotoEffectsView: View {
         .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
             ZStack(alignment: .topLeading) {
                 PhotoLUTChooserPresentation(editor: photoLUTEditor, draft: effectsBinding)
-                if filterChooser.isPresented {
+                AndroidDialogPresentation(isPresented: filterChooser.isPresented) {
                     PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser,
                         onFilterSelected: { photoLUTEditor.cancelPending() })
                 }

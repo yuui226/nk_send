@@ -1391,53 +1391,73 @@ struct PhotoEffectModuleMenuButton: View {
     }
 }
 
+/// Android PhotoEffectModuleMenu uses non-dimming AnchorPopup, including its
+/// 320/350ms Genie motion and retained close. Both effects entrypoints use this.
 struct PhotoEffectModuleMenuOverlay: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool
     @Binding var draft: PhotoEffectsSettings
     let lutStore: PhotoLUTStore
     let isPro: Bool
+    @State private var mounted = false
 
     func body(content: Content) -> some View {
         content.overlayPreferenceValue(PhotoEffectModuleAnchorKey.self) { anchor in
-            if isPresented, let anchor {
+            if mounted, let anchor {
                 GeometryReader { proxy in
                     let rect = proxy[anchor]
+                    let width = min(156, max(1, proxy.size.width - 36))
+                    let left = max(0, proxy.size.width - width - 18)
+                    let top = rect.maxY + 8
+                    let source = GeniePopupMotion.attachmentAnchor(for: rect, cornerRadius: 20)
                     ZStack(alignment: .topLeading) {
-                        Color.clear.contentShape(Rectangle())
+                        Color.clear.ignoresSafeArea().contentShape(Rectangle())
                             .onTapGesture { isPresented = false }
-                        VStack(spacing: 8) {
-                            ForEach(PhotoEffectModule.allCases, id: \.self) { module in
-                                Button {
-                                    var value = draft
-                                    if togglePhotoEffectModuleDraft(module, draft: &value,
-                                        lutStore: lutStore, isPro: isPro) {
-                                        ZTransferHaptics.shared.tick()
-                                        draft = value
-                                    }
-                                } label: {
-                                    HStack {
-                                        Text(AppLocalized.resource(module.menuLabelKey))
-                                        Spacer()
-                                        if photoEffectModuleIsVisible(effectivePhotoEffectModules(
-                                            draft.photoEffectModules, isPro: isPro), module) {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }.frame(minHeight: 28).contentShape(Rectangle())
-                                }.buttonStyle(.plain)
-                            }
-                        }
-                        .padding(12).frame(width: 156)
-                        .background(ZTransferColors.surface, in: RoundedRectangle(cornerRadius: 18))
-                        .onTapGesture { }
-                        .offset(x: max(0, min(rect.maxX - 156, proxy.size.width - 156)),
-                                y: rect.maxY + 8)
+                            .gesture(DragGesture(minimumDistance: 1).onChanged { _ in })
+                        GeniePopupPanel(content: menu, trigger: .photoEffectModules,
+                            targetProgress: isPresented ? 1 : 0,
+                            anchorX: (source.midX - left) / width,
+                            anchorWidth: source.width / width, anchorGap: top - source.maxY,
+                            onSettled: { progress in
+                                if progress == 0 && !isPresented { mounted = false }
+                            })
+                            .frame(width: width)
+                            .offset(x: left, y: top)
                     }
+                    .background(PopupDragBoundary())
                 }
             }
         }
+        .onAppear { if isPresented { mounted = true } }
+        .onChange(of: isPresented) { if $0 { mounted = true } }
         .onChange(of: colorScheme) { _ in isPresented = false }
-        .onDisappear { isPresented = false }
+        .onDisappear { isPresented = false; mounted = false }
+    }
+
+    private var menu: some View {
+        VStack(spacing: 8) {
+            ForEach(PhotoEffectModule.allCases, id: \.self) { module in
+                Button {
+                    var value = draft
+                    if togglePhotoEffectModuleDraft(module, draft: &value, lutStore: lutStore, isPro: isPro) {
+                        ZTransferHaptics.shared.tick()
+                        draft = value
+                    }
+                } label: {
+                    HStack {
+                        Text(AppLocalized.resource(module.menuLabelKey))
+                        Spacer()
+                        if photoEffectModuleIsVisible(effectivePhotoEffectModules(
+                            draft.photoEffectModules, isPro: isPro), module) {
+                            Image(systemName: "checkmark")
+                        }
+                    }.frame(minHeight: 28).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(ZTransferColors.surface, in: RoundedRectangle(cornerRadius: 18))
+        .onTapGesture { }
     }
 }
 

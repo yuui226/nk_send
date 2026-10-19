@@ -484,6 +484,7 @@ struct HomeWorkspacePagerIOS: View {
         GeometryReader { proxy in
             VerticalWorkspacePager(
                 selection: $page,
+                pageInsets: proxy.safeAreaInsets,
                 // Android blocks entry into the lower workbench for the whole
                 // GPS session, while still allowing a page already below to
                 // return upward to the connection page.
@@ -526,7 +527,12 @@ struct HomeWorkspacePagerIOS: View {
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 }
             )
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            // The pager used to clip every child overlay to the safe-area
+            // viewport. Host complete pages, then inset only their content;
+            // scrims can now ignore the insets and cover both system bars.
+            .frame(width: proxy.size.width + proxy.safeAreaInsets.leading + proxy.safeAreaInsets.trailing,
+                   height: proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom)
+            .offset(x: -proxy.safeAreaInsets.leading, y: -proxy.safeAreaInsets.top)
             .background(ZTransferColors.background)
             .onChange(of: page) { currentPage in
                 if currentPage != 0 { gpsPanelPresented = false }
@@ -588,10 +594,13 @@ private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIView
     let firstPage: FirstPage
     let secondPage: SecondPage
 
-    init(selection: Binding<Int>, isScrollEnabled: Bool,
+    let pageInsets: EdgeInsets
+
+    init(selection: Binding<Int>, pageInsets: EdgeInsets = EdgeInsets(), isScrollEnabled: Bool,
          onTransitionBegan: @escaping (Int) -> Void, onTransitionSettled: @escaping (Int) -> Void,
          @ViewBuilder firstPage: () -> FirstPage, @ViewBuilder secondPage: () -> SecondPage) {
         _selection = selection
+        self.pageInsets = pageInsets
         self.isScrollEnabled = isScrollEnabled
         self.onTransitionBegan = onTransitionBegan
         self.onTransitionSettled = onTransitionSettled
@@ -614,8 +623,8 @@ private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIView
     }
     func updateUIViewController(_ controller: WorkspacePagingController, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.first.rootView = firstPage
-        context.coordinator.second.rootView = secondPage
+        context.coordinator.first.rootView = WorkspaceSafeAreaPage(insets: pageInsets, content: firstPage)
+        context.coordinator.second.rootView = WorkspaceSafeAreaPage(insets: pageInsets, content: secondPage)
         controller.userScrollEnabled = isScrollEnabled
         let coordinator = context.coordinator
         let target = selection
@@ -630,15 +639,38 @@ private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIView
     final class Coordinator {
         var parent: VerticalWorkspacePager
         var requestedPage: Int
-        let first: UIHostingController<FirstPage>
-        let second: UIHostingController<SecondPage>
+        let first: UIHostingController<WorkspaceSafeAreaPage<FirstPage>>
+        let second: UIHostingController<WorkspaceSafeAreaPage<SecondPage>>
         init(parent: VerticalWorkspacePager) {
             self.parent = parent
             requestedPage = parent.selection
-            first = UIHostingController(rootView: parent.firstPage)
-            second = UIHostingController(rootView: parent.secondPage)
+            first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+            second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+            if #available(iOS 16.4, *) {
+                first.safeAreaRegions = []
+                second.safeAreaRegions = []
+            }
             first.view.backgroundColor = .clear
             second.view.backgroundColor = .clear
+        }
+    }
+}
+
+/// Fixed page insets keep controls stationary relative to their page while
+/// UIScrollView moves it. Automatic UIKit insets vary for offscreen children.
+struct WorkspaceSafeAreaPage<Content: View>: View {
+    let insets: EdgeInsets
+    let content: Content
+    var body: some View {
+        if #available(iOS 16.4, *) {
+            content
+                .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: insets.top) }
+                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: insets.bottom) }
+                .safeAreaInset(edge: .leading, spacing: 0) { Color.clear.frame(width: insets.leading) }
+                .safeAreaInset(edge: .trailing, spacing: 0) { Color.clear.frame(width: insets.trailing) }
+        } else {
+            // Older hosts continue to supply UIKit's native safe-area insets.
+            content
         }
     }
 }

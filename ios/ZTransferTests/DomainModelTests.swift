@@ -8419,6 +8419,7 @@ final class RootPresentationPerformanceTests: XCTestCase {
             gpsCoordinator: model.gps, directory: model.directory, celebrationStart: nil)
         home.didRender = { renders += 1 }
         let host = UIHostingController(rootView: home)
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let previous = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows).first(where: \.isKeyWindow)
@@ -8431,6 +8432,8 @@ final class RootPresentationPerformanceTests: XCTestCase {
             return controller.children.lazy.compactMap(findPager).first
         }
         let pager = try XCTUnwrap(findPager(host))
+        XCTAssertEqual(pager.view.convert(pager.view.bounds, to: window), window.bounds,
+                       "The production pager must cover system-bar areas as well as page content")
         XCTAssertFalse(pager.userScrollEnabled)
         let baseline = renders
         for index in 0..<120 {
@@ -10560,5 +10563,238 @@ final class DisconnectedPhotoListTests: XCTestCase {
         _ = await replacement.value
         let awakeCount = await counter.count
         XCTAssertEqual(awakeCount, 1)
+    }
+}
+
+@MainActor
+final class QueuePillCompletionRenderingTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var snapshot: TransferQueueSnapshot
+        var rect = CGRect.zero
+        init() {
+            let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 10_000_000,
+                fileName: "1.JPG", captureDate: nil, isProtected: false)
+            snapshot = .init(items: [.init(id: UUID(), file: file, status: .transferring,
+                progress: 0.7, bytesPerSecond: 21_400_000)], isTransferring: true, pauseAfterCurrent: false)
+        }
+        func complete() {
+            var item = snapshot.items[0]; item.status = .completed; item.progress = 1
+            snapshot = .init(items: [item], isTransferring: false, pauseAfterCurrent: false)
+        }
+    }
+    private struct RectKey: PreferenceKey {
+        static let defaultValue = CGRect.zero
+        static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+            let next = nextValue(); if !next.isEmpty { value = next }
+        }
+    }
+    private struct Page: View {
+        @ObservedObject var state: State
+        var body: some View {
+            Color.gray.opacity(0.15).overlay(alignment: .topTrailing) {
+                QueuePill(snapshot: state.snapshot, activeProgress: nil, heldCount: 0)
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: RectKey.self, value: geometry.frame(in: .global))
+                    })
+                    .padding(.trailing, 16).padding(.top, 20)
+            }.onPreferenceChange(RectKey.self) { state.rect = $0 }
+        }
+    }
+
+    func testActualPillCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges() async throws {
+        try await verifyCompletion(skin: .liquidGlass)
+    }
+
+    func testPhysicalMaterialCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges() async throws {
+        try await verifyCompletion(skin: .titanium)
+    }
+
+    func testRetainedContentCannotForcePaintedSurfaceOutsideProposedWidth() async throws {
+        let content = QueuePillContentTransition(presentation: .init(mode: .counting, count: 1, speed: 20_000_000)) { _ in
+            Color.blue
+        } content: { _ in
+            Text("20.4 MB/s 1").font(.system(size: 14, weight: .bold))
+                .opacity(0) // Retain its layout without glyphs covering the sampled blue edge.
+        }
+        .frame(height: 36).clipShape(Capsule()).frame(width: 60)
+        let host = UIHostingController(rootView: Color.white.overlay(alignment: .topTrailing) {
+            content.padding(.trailing, 16).padding(.top, 20)
+        }.ignoresSafeArea())
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 393, height: 200)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
+        try await Task.sleep(for: .milliseconds(100))
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        }
+        let cg = try XCTUnwrap(image.cgImage)
+        var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let bluePixels = (200..<393).filter { x in
+            let i = (38 * cg.width + x) * 4
+            return Int(bytes[i + 2]) - Int(bytes[i]) > 60
+        }
+        XCTAssertEqual(try XCTUnwrap(bluePixels.first), 317, accuracy: 1)
+        XCTAssertEqual(try XCTUnwrap(bluePixels.last), 376, accuracy: 1)
+    }
+
+    private func verifyCompletion(skin: ZTransferButtonSkin) async throws {
+        let suite = "PillCompletion.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set(skin.rawValue, forKey: "skin_preset")
+        let state = State()
+        let host = UIHostingController(rootView: Page(state: state).ignoresSafeArea().defaultAppStorage(defaults).environment(\.colorScheme, .light))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 393, height: 200)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey(); defaults.removePersistentDomain(forName: suite) }
+        try await Task.sleep(for: .milliseconds(600))
+        let initial = state.rect
+        XCTAssertGreaterThan(initial.width, 80)
+        var frames: [(Double, CGRect)] = []
+        var images: [UIImage] = []
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        func capture(at time: Double) -> UIImage {
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 393, height: 100), format: format).image { _ in
+                XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+                (String(format: "%.3f s", time) as NSString).draw(at: CGPoint(x: 12, y: 28),
+                    withAttributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular),
+                                     .foregroundColor: UIColor.black])
+            }
+            // The outer Layout can report the correct width while retained
+            // text still forces the actual blue surface to its old size.
+            // Check rendered pixels during the outgoing text's lifetime too.
+            if (0.1...0.19).contains(time), let cg = image.cgImage {
+                var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+                let context = CGContext(data: &bytes, width: cg.width, height: cg.height,
+                    bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                let x = max(0, Int(state.rect.minX) - 16)
+                let offset = (38 * cg.width + x) * 4
+                XCTAssertLessThan(Int(bytes[offset + 2]) - Int(bytes[offset]), 12,
+                    "The painted blue surface must follow the width spring, not the outgoing text's minimum width")
+            }
+            return image
+        }
+        images.append(capture(at: 0))
+        let start = CACurrentMediaTime()
+        state.complete()
+        var captureTimes = [0.05, 0.15, 0.25, 0.45, 1.7, 1.8, 1.84, 1.88, 1.92, 1.96, 2.04, 2.2, 2.45].makeIterator()
+        var nextCapture = captureTimes.next()
+        while CACurrentMediaTime() - start < 2.5 {
+            try await Task.sleep(for: .milliseconds(16))
+            host.view.layoutIfNeeded()
+            let time = CACurrentMediaTime() - start
+            frames.append((time, state.rect))
+            if let due = nextCapture, time >= due {
+                images.append(capture(at: time))
+                nextCapture = captureTimes.next()
+            }
+        }
+        let sheet = UIGraphicsImageRenderer(size: CGSize(width: 393, height: images.count * 100), format: format).image { _ in
+            for (index, image) in images.enumerated() { image.draw(at: CGPoint(x: 0, y: index * 100)) }
+        }
+        let output = "/tmp/ztransfer-pill-completion-\(skin.rawValue)"
+        try sheet.pngData()?.write(to: URL(fileURLWithPath: "\(output).png"))
+        try frames.map { "\($0.0),\($0.1.minX),\($0.1.width),\($0.1.maxX)" }.joined(separator: "\n")
+            .write(toFile: "\(output).csv", atomically: true, encoding: .utf8)
+        XCTAssertTrue(frames.allSatisfy { abs($0.1.maxX - initial.maxX) < 0.5 })
+        let settledDone = try XCTUnwrap(frames.last(where: { $0.0 < 1.6 })).1.width
+        XCTAssertGreaterThan(settledDone, 50)
+        XCTAssertLessThan(settledDone, initial.width - 10)
+        XCTAssertGreaterThan(Set(frames.filter { $0.0 < 0.5 }.map { Int($0.1.width * 10) }).count, 8)
+        XCTAssertGreaterThan(Set(frames.filter { $0.0 > 1.8 }.map { Int($0.1.width * 10) }).count, 8)
+        XCTAssertEqual(state.rect.width, 40, accuracy: 0.5)
+    }
+}
+
+@MainActor
+final class QueuePillReadoutTests: XCTestCase {
+    func testSpeedReadoutCoalescesLatestSampleAndPreservesPreparationGap() {
+        var cadence = QueuePillSpeedCadence()
+        cadence.update(1_000_000, at: 0)
+        XCTAssertEqual(cadence.value, 1_000_000)
+        cadence.update(2_000_000, at: 0.1)
+        cadence.update(9_000_000, at: 0.49)
+        XCTAssertEqual(cadence.value, 1_000_000)
+        XCTAssertEqual(cadence.deadline, 0.5)
+        cadence.advance(0.5)
+        XCTAssertEqual(cadence.value, 9_000_000)
+        XCTAssertNil(cadence.deadline)
+        cadence.update(0, at: 0.6)
+        XCTAssertEqual(cadence.value, 9_000_000)
+        XCTAssertNil(cadence.deadline)
+        cadence.update(12_000_000, at: 0.7)
+        cadence.advance(0.99)
+        XCTAssertEqual(cadence.value, 9_000_000)
+        cadence.advance(1)
+        XCTAssertEqual(cadence.value, 12_000_000)
+        cadence.update(nil, at: 1.01)
+        XCTAssertNil(cadence.value)
+        XCTAssertNil(cadence.deadline)
+        cadence.update(3_000_000, at: 1.02)
+        XCTAssertEqual(cadence.value, 3_000_000, "The next batch must show its first speed immediately")
+    }
+    func testReadoutCancelsUnchangedPendingValueAndResumesAfterIdle() {
+        var cadence = QueuePillSpeedCadence()
+        cadence.update(100, at: 0)
+        cadence.update(200, at: 0.1)
+        cadence.update(100, at: 0.2)
+        XCTAssertNil(cadence.deadline)
+        cadence.advance(0.5)
+        XCTAssertEqual(cadence.value, 100)
+        cadence.update(300, at: 4)
+        XCTAssertEqual(cadence.value, 300)
+    }
+    func testRealReadoutClockPublishesTrailingSampleAndResetsPendingWork() async throws {
+        var clock: QueuePillSpeedClock? = QueuePillSpeedClock()
+        weak var weakClock = clock
+        clock?.update(100)
+        clock?.update(200)
+        XCTAssertEqual(clock?.value, 100)
+        try await Task.sleep(for: .milliseconds(200))
+        clock?.update(300)
+        XCTAssertEqual(clock?.value, 100)
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(clock?.value, 300)
+        clock?.update(400)
+        clock?.reset()
+        try await Task.sleep(for: .milliseconds(550))
+        XCTAssertNil(clock?.value)
+        clock?.update(500); clock?.update(600)
+        clock = nil
+        XCTAssertNil(weakClock, "Delayed display work must not retain a closed pill")
+    }
+    func testDoneFillFadesWithContentAndReversesWithoutAVisualJump() {
+        var motion = QueuePillContentMotion(.init(mode: .counting, count: 1, speed: 20_000_000))
+        motion.update(.init(mode: .done, count: 0, speed: nil))
+        motion.advance(0); motion.advance(300_000_000)
+        XCTAssertEqual(motion.surface.fillAlpha, 1)
+        motion.update(.init(mode: .icon, count: 0, speed: nil))
+        motion.advance(400_000_000)
+        XCTAssertEqual(motion.surface.fillAlpha, 1, "The filled Done surface must survive the first exit frame")
+        motion.advance(450_000_000)
+        let alpha = motion.surface.fillAlpha
+        XCTAssertGreaterThan(alpha, 0); XCTAssertLessThan(alpha, 1)
+        XCTAssertTrue(motion.surface.finishingExit)
+        motion.update(.init(mode: .counting, count: 2, speed: 10_000_000))
+        XCTAssertEqual(motion.surface.fillAlpha, alpha, accuracy: 0.000001)
+        XCTAssertFalse(motion.surface.finishingExit)
+        motion.advance(1_500_000_000)
+        XCTAssertEqual(motion.surface.fillAlpha, 1)
+        motion.update(.init(mode: .icon, count: 0, speed: nil))
+        motion.advance(1_600_000_000); motion.advance(2_500_000_000)
+        XCTAssertFalse(motion.surface.hasContent)
+        XCTAssertEqual(motion.surface.fillAlpha, 0)
+        XCTAssertEqual(motion.surface.iconAlpha, 1)
+        XCTAssertFalse(motion.isRunning)
     }
 }

@@ -127,11 +127,11 @@ struct SettingsPopupOverlay: View {
                 .padding(.top, panelTop)
                 .allowsHitTesting(!showingPremium)
                 PhotoLUTChooserPresentation(editor: photoLUTEditor, draft: $effectsDraft)
-                if filterChooser.isPresented {
+                AndroidDialogPresentation(isPresented: filterChooser.isPresented) {
                     PhotoFilterChooserOverlay(draft: $effectsDraft, state: $filterChooser,
                         onFilterSelected: { photoLUTEditor.cancelPending() })
                 }
-                if showingPremium {
+                AndroidDialogPresentation(isPresented: showingPremium) {
                     PremiumPurchaseView(onClose: { showingPremium = false },
                                         onCelebrate: { fireworks.launch() })
                 }

@@ -167,9 +167,9 @@ final class STAMetadataTests: XCTestCase {
         let metadata = STAMediaMetadata.tiffHeader(bytes)
         XCTAssertTrue(metadata.previews.isEmpty)
         XCTAssertEqual(STAMediaMetadata.nefExifThumbnail(bytes), Data([0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9]))
-        XCTAssertEqual(STAMediaMetadata.nefExifThumbnail(Data(bytes.prefix(178))), Data())
+        XCTAssertNil(STAMediaMetadata.nefExifThumbnail(Data(bytes.prefix(178))))
     }
-    func testDirectNefHeaderUsesMarkerScanBeforeExifStripsLikeAndroid() async throws {
+    func testDirectNefHeaderRejectsFalseMarkersAndFallsBackToExifStripsLikeAndroid() async throws {
         let handle: UInt32 = 0x09000071
         let bytes = nefStripThumbnailFixture()
         let wire = STAScriptTransport([
@@ -185,7 +185,7 @@ final class STAMetadataTests: XCTestCase {
         let thumbnail = try await reader.thumbnail(handle: handle)
 
         XCTAssertEqual(file.fileExtension, ".nef")
-        XCTAssertEqual(thumbnail, bytes.subdata(in: 152..<179))
+        XCTAssertEqual(thumbnail, Data([0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9]))
         let commands = await wire.commands
         XCTAssertEqual(commands.map(\.code), [0x9421, 0x9431])
         let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
@@ -206,6 +206,27 @@ final class STAMetadataTests: XCTestCase {
     // NikonCamera.readStaDirectRawThumbnailInternal treats a rejected hint as
     // a miss and continues with this file's TIFF/prefix. Use actual decodable
     // JPEGs here: SOI/EOI marker-only fixtures cannot prove the grid can display it.
+    func testRawFalseJPEGInFirstHeaderDoesNotMaskRealPreviewOrPoisonCache() async throws {
+        let jpeg = try thumbnailJPEG()
+        let handle: UInt32 = 0x09000071
+        var bytes = rawThumbnailPrefix(jpeg: jpeg, jpegOffset: 180_000)
+        let falseJPEG = Data([0xFF, 0xD8, 0x57]) + Data(repeating: 0x6B, count: 8432) + Data([0xFF, 0xD9])
+        bytes.replaceSubrange(79_973..<(79_973 + falseJPEG.count), with: falseJPEG)
+        let wire = STAScriptTransport([
+            .init(0x9421, [handle], payload: staInteger(UInt64(24_000_000))),
+            .init(0x9431, [handle, 0, 0, 128 * 1024, 0], payload: Data(bytes.prefix(128 * 1024))),
+            .init(0x9431, [handle, 128 * 1024, 0, 112 * 1024, 0], payload: Data(bytes.dropFirst(128 * 1024))),
+        ])
+        let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+        _ = try await reader.file(handle: handle, storage: .max)
+        let thumbnail = try await reader.thumbnail(handle: handle)
+        try assertThumbnailJPEG(thumbnail, expected: jpeg)
+        let cached = try await reader.thumbnail(handle: handle)
+        XCTAssertEqual(cached, jpeg)
+        let remaining = await wire.remaining; XCTAssertEqual(remaining, 0)
+        let commands = await wire.commands; XCTAssertEqual(commands.count, 3)
+    }
+
     func testRawRejectedOrEmptyPreviousFileHintStillLoadsCurrentThumbnail() async throws {
         for response: UInt16 in [0x200F, 0x2001] {
             let jpeg = try thumbnailJPEG()
@@ -529,5 +550,61 @@ private actor RawProbeFailureTransport: PTPCommandTransport {
         attempts += 1
         if attempts > 2 { throw URLError(.networkConnectionLost) }
         return try await prefix.sendPTP(command: command, data: data)
+    }
+}
+
+/// Android EmbeddedJpegRangeTest: framing fixtures do not claim pixel decoding.
+final class EmbeddedJPEGRangeTests: XCTestCase {
+    private func segment(_ marker: UInt8, _ payload: Data) -> Data {
+        let length = payload.count + 2
+        return Data([0xFF, marker, UInt8(length >> 8), UInt8(length & 255)]) + payload
+    }
+    private func frame(_ marker: UInt8 = 0xC0) -> Data { segment(marker, Data([8, 0, 8, 0, 8, 1, 1, 0x11, 0])) }
+    private func scan() -> Data { segment(0xDA, Data([1, 1, 0, 0, 63, 0])) }
+    private func jpeg(_ entropy: Data, prefix: Data = Data()) -> Data {
+        Data([0xFF, 0xD8]) + prefix + frame() + scan() + entropy + Data([0xFF, 0xD9])
+    }
+    private func assertWhole(_ bytes: Data, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(STAMediaMetadata.largestEmbeddedJPEG(bytes), .init(offset: 0, length: bytes.count), file: file, line: line)
+    }
+    func testLargestCompleteImageAndValidLength() {
+        let small = jpeg(Data([1])), large = jpeg(Data(repeating: 2, count: 32))
+        let offset = 2 + small.count + 3
+        let raw = Data([9, 9]) + small + Data([8, 8, 8]) + large + Data([7])
+        XCTAssertEqual(STAMediaMetadata.largestEmbeddedJPEG(raw), .init(offset: offset, length: large.count))
+        XCTAssertEqual(STAMediaMetadata.largestEmbeddedJPEG(raw, validLength: offset + large.count - 1), .init(offset: 2, length: small.count))
+        XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(raw, validLength: 2 + small.count - 1))
+        XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(raw, validLength: -1))
+    }
+    func testReportedRAWOffsetsDoNotStopAtFalseCandidate() {
+        var raw = Data(repeating: 0, count: 240 * 1024)
+        let falseImage = Data([0xFF, 0xD8, 0x57]) + Data(repeating: 0x6B, count: 8432) + Data([0xFF, 0xD9])
+        raw.replaceSubrange(79_973..<(79_973 + falseImage.count), with: falseImage)
+        let image = jpeg(Data(repeating: 0x21, count: 109_002 - 27))
+        XCTAssertEqual(image.count, 109_002)
+        raw.replaceSubrange(95_044..<(95_044 + image.count), with: image)
+        XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(raw, validLength: 128 * 1024))
+        XCTAssertEqual(STAMediaMetadata.largestEmbeddedJPEG(raw), .init(offset: 95_044, length: 109_002))
+    }
+    func testOpaqueAppAndCommentPayloadMarkersAreNotImages() {
+        let opaque = jpeg(Data([1, 2, 3])) + Data([0xFF, 0xD9, 0xFF, 0xD8])
+        assertWhole(jpeg(Data([3]), prefix: segment(0xE1, opaque) + segment(0xFE, opaque)))
+        XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(Data([0xFF, 0xD8]) + segment(0xE1, Data([1])) + Data([0xFF, 0xD9])))
+    }
+    func testEntropyStuffingAndRestartMarkers() {
+        let image = jpeg(Data([1, 0xFF, 0, 0xD9, 2, 0xFF, 0, 0xD8, 3, 0xFF, 0xD0, 4, 0xFF, 0xFF, 0xD7, 5]))
+        assertWhole(image)
+        XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(Data(image.dropLast())))
+    }
+    func testProgressiveMultipleScansAndDNL() {
+        assertWhole(Data([0xFF, 0xD8]) + frame(0xC2) + scan() + Data([1, 2]) + segment(0xC4, Data([0])) + scan() + Data([3, 4, 0xFF, 0xD9]))
+        assertWhole(jpeg(Data([1, 2]) + segment(0xDC, Data([0, 8])) + Data([3, 4])))
+    }
+    func testRejectsInvalidSegmentsFramesAndIncompleteImages() {
+        XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(Data([0xFF, 0xD8]) + scan() + Data([0xFF, 0xD9])))
+        for length: [UInt8] in [[0, 1], [0x7F, 0x7F]] {
+            XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(Data([0xFF, 0xD8, 0xFF, 0xE1] + length + [0xFF, 0xD9])))
+        }
+        XCTAssertNil(STAMediaMetadata.largestEmbeddedJPEG(Data(jpeg(Data([1])).prefix(26))))
     }
 }

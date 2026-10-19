@@ -10,7 +10,9 @@ struct STAResetPairingOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                Color.black.opacity(0.32).ignoresSafeArea().onTapGesture(perform: onDismiss)
+                // User-approved (2026-10-19): STA reset has no dimming.
+                // Keep outside dismissal and the modal input boundary.
+                DialogBackdrop(opacity: 0, onDismiss: onDismiss)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(AppLocalized.resource("sta_reset_pairing_title"))
                         .zTransferTypography(.titleMedium, weight: .bold)
@@ -47,6 +49,7 @@ struct STAResetPairingOverlay: View {
                 .background(ZTransferGlassSurface(cornerRadius: 20, kind: .panel))
                 .frame(width: min(360, max(0, proxy.size.width - 48)))
                 .fixedSize(horizontal: false, vertical: true)
+                .androidDialogSurface()
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.zIndex(100)
     }
@@ -61,9 +64,7 @@ struct GPSResetPairingOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                Color.black.opacity(0.32)
-                    .ignoresSafeArea()
-                    .onTapGesture(perform: onDismiss)
+                DialogBackdrop(onDismiss: onDismiss)
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(AppLocalized.resource("gps_clear_pairing_title"))
@@ -121,6 +122,7 @@ struct GPSResetPairingOverlay: View {
                 )
                 .frame(width: min(360, max(0, proxy.size.width - 48)))
                 .fixedSize(horizontal: false, vertical: true)
+                .androidDialogSurface()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

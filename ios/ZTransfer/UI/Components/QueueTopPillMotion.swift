@@ -170,17 +170,36 @@ struct QueuePillContentMotion {
     private(set) var current: QueuePillVisualMode
     private var frame: Int64?
     private var targetPresentation: QueuePillPresentation
-    var isRunning: Bool { layers.contains { $0.fade.alpha.isRunning } }
+    private var surfaceFade: QueuePillFadeMotion
+    private var lastContentMode: QueuePillVisualMode
+    var isRunning: Bool { surfaceFade.alpha.isRunning || layers.contains { $0.fade.alpha.isRunning } }
 
     init(_ initial: QueuePillPresentation) {
         current = initial.mode
         targetPresentation = initial
+        surfaceFade = .init(initiallyVisible: initial.mode != .icon)
+        lastContentMode = initial.mode
         layers = [.init(presentation: initial, fade: .init(initiallyVisible: true))]
+    }
+
+    struct Surface {
+        let iconAlpha: Double
+        let fillAlpha: Double
+        let hasContent: Bool
+        let finishingExit: Bool
+    }
+    var surface: Surface {
+        let fillAlpha = min(1, max(0, Double(surfaceFade.alpha.value)))
+        return Surface(iconAlpha: 1 - fillAlpha, fillAlpha: fillAlpha,
+            hasContent: fillAlpha > 0 || layers.contains { $0.id != .icon },
+            finishingExit: current == .icon && lastContentMode == .done)
     }
 
     mutating func update(_ next: QueuePillPresentation) {
         guard next != targetPresentation else { return }
         targetPresentation = next
+        surfaceFade.setVisible(next.mode != .icon, atFrameNanos: frame)
+        if next.mode != .icon { lastContentMode = next.mode }
         if let index = layers.firstIndex(where: { $0.id == next.mode }) {
             layers[index].presentation = next
         } else {
@@ -200,6 +219,7 @@ struct QueuePillContentMotion {
     }
 
     mutating func advance(_ nanos: Int64) {
+        surfaceFade.advance(nanos)
         for index in layers.indices { layers[index].fade.advance(nanos) }
         layers.removeAll { $0.id != current && $0.fade.exitFinished }
         frame = isRunning ? nanos : nil
@@ -306,5 +326,35 @@ struct QueuePillTaskSummary {
             }
         }
         progressOwner = activeDownload ?? firstGenerating ?? firstWaiting
+    }
+}
+
+/// Display cadence only (user request 2026-10-19). Transfer sampling/progress
+/// remain untouched. Publish the first valid sample immediately, then at most
+/// twice per second; coalesce to the latest value without an averaging lag.
+struct QueuePillSpeedCadence {
+    static let interval: TimeInterval = 0.5
+    private(set) var value: Int64?
+    private(set) var deadline: TimeInterval?
+    private var latest: Int64?
+    private var lastPublication: TimeInterval?
+
+    mutating func update(_ sample: Int64?, at now: TimeInterval) {
+        guard let sample else { self = .init(); return }
+        guard sample > 0 else { return } // preserve speed across a file preparation gap
+        latest = sample
+        if value == nil || now >= (lastPublication ?? now) + Self.interval {
+            publish(at: now)
+        } else {
+            deadline = sample == value ? nil : lastPublication.map { $0 + Self.interval }
+        }
+    }
+    mutating func advance(_ now: TimeInterval) {
+        if let deadline, now >= deadline { publish(at: now) }
+    }
+    private mutating func publish(at now: TimeInterval) {
+        value = latest
+        lastPublication = now
+        deadline = nil
     }
 }

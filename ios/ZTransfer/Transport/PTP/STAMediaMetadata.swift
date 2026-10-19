@@ -171,7 +171,10 @@ enum STAMediaMetadata {
         )
     }
     static func nefExifThumbnail(_ data: Data) -> Data? {
-        NEFExifThumbnail.read(data)
+        // Android 451f50f8: an empty EXIF strip read is a miss, not a cached
+        // thumbnail. It must not prevent the bounded RAW preview fallback.
+        guard let bytes = NEFExifThumbnail.read(data), !bytes.isEmpty else { return nil }
+        return bytes
     }
     static func mpfPreviews(_ data: Data, objectSize: UInt64) -> [Preview] {
         guard let segment = jpegSegment(data, marker: 0xE2, prefix: Data([77, 80, 70, 0])),
@@ -193,31 +196,65 @@ enum STAMediaMetadata {
         func priority(_ item: Preview) -> Int { item.imageType == 0x010002 ? 0 : item.imageType == 0x010003 ? 1 : item.imageType == 0x010001 ? 2 : 3 }
         return previews.sorted { priority($0) == priority($1) ? $0.length < $1.length : priority($0) < priority($1) }
     }
-    static func largestEmbeddedJPEG(_ data: Data) -> Preview? {
-        guard data.count >= 4 else { return nil }
-        // RAW probing repeats this scan while growing the prefix up to 16 MiB.
-        // Android scans its ByteArray in place; materializing [UInt8](data) at
-        // every step made iOS copy the whole accumulated NEF prefix first.
+    /// Android NikonCamera.completeEmbeddedJpegEnd / largestEmbeddedJpegRange
+    /// (451f50f8): marker pairs inside RAW/APP bytes are not complete JPEGs.
+    static func largestEmbeddedJPEG(_ data: Data, validLength: Int? = nil) -> Preview? {
+        let limit = min(data.count, max(0, validLength ?? data.count))
+        guard limit >= 4 else { return nil }
+        // Scan the bounded bytes in place; no repeated 16 MiB prefix copies.
         return data.withUnsafeBytes { raw -> Preview? in
             let bytes = raw.bindMemory(to: UInt8.self)
-            var start: Int?, best: Preview?, index = 0
-            while index + 1 < bytes.count {
-                if bytes[index] == 255 && bytes[index + 1] == 216 {
-                    start = index
+            var best: Preview?, index = 0
+            while index + 1 < limit {
+                if bytes[index] == 0xFF && bytes[index + 1] == 0xD8 {
+                    if let end = completeEmbeddedJPEGEnd(bytes, start: index, limit: limit) {
+                        if end - index > (best?.length ?? 0) { best = Preview(offset: index, length: end - index) }
+                        index = end
+                        continue
+                    }
                     index += 2
-                    continue
-                }
-                if let begin = start, bytes[index] == 255 && bytes[index + 1] == 217 {
-                    let length = index + 2 - begin
-                    if length > (best?.length ?? 0) { best = Preview(offset: begin, length: length) }
-                    start = nil
-                    index += 2
-                    continue
-                }
-                index += 1
+                } else { index += 1 }
             }
             return best
         }
+    }
+
+    private static func completeEmbeddedJPEGEnd(_ bytes: UnsafeBufferPointer<UInt8>, start: Int, limit: Int) -> Int? {
+        var index = start + 2, frameComponents = 0
+        var hasScan = false, inScan = false
+        while index < limit {
+            if inScan {
+                while index < limit && bytes[index] != 0xFF { index += 1 }
+            } else if bytes[index] != 0xFF { return nil }
+            while index < limit && bytes[index] == 0xFF { index += 1 }
+            guard index < limit else { return nil }
+            let marker = Int(bytes[index]); index += 1
+            if inScan && (marker == 0 || (0xD0...0xD7).contains(marker) || marker == 1) { continue }
+            if marker == 0xD9 { return hasScan ? index : nil }
+            if marker == 0xD8 || marker == 0 || (0xD0...0xD7).contains(marker) { return nil }
+            if marker == 1 { continue }
+            guard (0xC0...0xFE).contains(marker), index + 2 <= limit else { return nil }
+            let length = Int(bytes[index]) << 8 | Int(bytes[index + 1])
+            guard length >= 2, length <= limit - index else { return nil }
+            if (0xC0...0xCF).contains(marker) && marker != 0xC4 && marker != 0xC8 && marker != 0xCC {
+                guard length >= 8 else { return nil }
+                let width = Int(bytes[index + 5]) << 8 | Int(bytes[index + 6])
+                frameComponents = Int(bytes[index + 7])
+                guard width > 0, frameComponents > 0, length == 8 + 3 * frameComponents else { return nil }
+            }
+            if marker == 0xDA {
+                guard frameComponents > 0, length >= 6 else { return nil }
+                let scanComponents = Int(bytes[index + 2])
+                guard (1...frameComponents).contains(scanComponents), length == 6 + 2 * scanComponents else { return nil }
+                hasScan = true
+                inScan = true
+            } else if marker != 0xDC {
+                // DNL can supply height within a scan; other segments end it.
+                inScan = false
+            }
+            index += length
+        }
+        return nil
     }
     static func videoDate(_ data: Data) -> String? {
         guard let range = data.range(of: Data("mvhd".utf8)), range.lowerBound + 12 <= data.count else { return nil }

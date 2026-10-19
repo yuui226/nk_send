@@ -122,7 +122,9 @@ struct PhotoLUTChooserPresentation: View {
     @ObservedObject var editor: PhotoLUTEditorState
     @Binding var draft: PhotoEffectsSettings
     var body: some View {
-        if editor.showingChooser { PhotoLUTChooserOverlay(editor: editor, draft: $draft) }
+        AndroidDialogPresentation(isPresented: editor.showingChooser) {
+            PhotoLUTChooserOverlay(editor: editor, draft: $draft)
+        }
     }
 }
 

@@ -19,7 +19,7 @@ struct PhotoEffectChooserDialog<Header: View, Content: View>: View {
                 categoryLabels: categoryLabels, optionLabels: optionLabels,
                 width: innerWidth, viewportHeight: proxy.size.height)
             ZStack {
-                Color.black.opacity(0.32).ignoresSafeArea().contentShape(Rectangle()).onTapGesture(perform: onDismiss)
+                DialogBackdrop(onDismiss: onDismiss)
                 VStack(spacing: 6) {
                     header.frame(height: 32)
                     if listHeight > 0 { content(innerWidth).frame(height: listHeight) }
@@ -29,6 +29,7 @@ struct PhotoEffectChooserDialog<Header: View, Content: View>: View {
                 .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(
                     scheme == .dark ? .white.opacity(0.15) : .black.opacity(0.10), lineWidth: 1))
                 .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
+                .androidDialogSurface()
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea()

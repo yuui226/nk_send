@@ -170,10 +170,9 @@ struct ConnectionPage: View {
                 }
             }
 
-            // Keep the scrim outside the safe-area-constrained page overlay.
-            // This lets it dim the complete application surface while the
-            // page's measured card positions remain unchanged.
-            if showSTAReset {
+            // Keep dialog surfaces outside the safe-area-constrained card overlay.
+            // STA has a transparent input barrier; GPS dims the entire screen.
+            AndroidDialogPresentation(isPresented: showSTAReset) {
                 ConnectionSceneFadeTimeline(start: celebrationStart) {
                     STAResetPairingOverlay(count: model.pairedCameraCount, models: model.pairedCameraModels,
                         onConfirm: { showSTAReset = false; Task { await model.resetSTAPairing() } },
@@ -181,7 +180,7 @@ struct ConnectionPage: View {
                     .ignoresSafeArea()
                 }
             }
-            if showGPSReset {
+            AndroidDialogPresentation(isPresented: showGPSReset) {
                 ConnectionSceneFadeTimeline(start: celebrationStart) {
                     GPSResetPairingOverlay(
                         onConfirm: {

@@ -9,7 +9,7 @@ final class IncrementalLocalizationTests: XCTestCase {
             }
         }
         XCTAssertEqual(String(format: AppLocalized.resource("picture_control_check_slot", language: "en"), 9), "Operation failed. Check C9.")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "1.97")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "1.98")
     }
     func testPlatformSpecificKeysSurviveAndroidRegeneration() {
         for key in ["skin_liquid_glass", "local_photo_ios_save_hint", "cd_remote_fullscreen_exit"] {
