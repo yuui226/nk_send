@@ -2262,7 +2262,7 @@ fun FileListScreen(
             hapticsEnabled = transferState.hapticsEnabled,
         )
 
-        // Debug 构建显示效果图生成耗时入口；Release 为同名空实现，不产生节点。
+        // Debug 构建显示照片诊断入口；Release 为同名空实现，不产生节点。
         DebugPhotoGenerationProbePanel(
             modifier = Modifier.fillMaxSize(),
             onProbeRawRating = if (state.connectionType == CameraConnectionType.USB || !state.isStaConnection) {

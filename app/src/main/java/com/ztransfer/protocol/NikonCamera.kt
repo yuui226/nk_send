@@ -14,6 +14,7 @@ import com.ztransfer.R
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.diagnostics.RatingDiagnostics
+import com.ztransfer.diagnostics.ThumbnailDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -1355,23 +1356,18 @@ internal fun largestEmbeddedJpegRange(
     val limit = validLength.coerceIn(0, bytes.size)
     var bestStart = -1
     var bestEnd = -1
-    var start = -1
     var index = 0
     while (index + 1 < limit) {
-        val first = bytes[index].toInt() and 0xFF
-        val second = bytes[index + 1].toInt() and 0xFF
-        if (first == 0xFF && second == 0xD8) {
-            start = index
-            index += 2
-            continue
-        }
-        if (start >= 0 && first == 0xFF && second == 0xD9) {
-            val end = index + 2
-            if (end - start > bestEnd - bestStart) {
-                bestStart = start
-                bestEnd = end
+        if (bytes[index] == 0xFF.toByte() && bytes[index + 1] == 0xD8.toByte()) {
+            val end = completeEmbeddedJpegEnd(bytes, index, limit)
+            if (end != null) {
+                if (end - index > bestEnd - bestStart) {
+                    bestStart = index
+                    bestEnd = end
+                }
+                index = end
+                continue
             }
-            start = -1
             index += 2
             continue
         }
@@ -1382,6 +1378,55 @@ internal fun largestEmbeddedJpegRange(
     } else {
         null
     }
+}
+
+/** Validate JPEG framing without decoding pixels or mistaking opaque RAW/APP bytes for images. */
+private fun completeEmbeddedJpegEnd(bytes: ByteArray, start: Int, limit: Int): Int? {
+    var index = start + 2
+    var frameComponents = 0
+    var hasScan = false
+    var inScan = false
+    while (index < limit) {
+        if (inScan) {
+            while (index < limit && bytes[index] != 0xFF.toByte()) index++
+        } else if (bytes[index] != 0xFF.toByte()) {
+            return null
+        }
+        while (index < limit && bytes[index] == 0xFF.toByte()) index++
+        if (index >= limit) return null
+        val marker = bytes[index++].toInt() and 0xFF
+        if (inScan && (marker == 0x00 || marker in 0xD0..0xD7 || marker == 0x01)) {
+            continue // Byte stuffing, restart markers and arithmetic-coding TEM carry no length.
+        }
+        if (marker == 0xD9) return index.takeIf { hasScan }
+        if (marker == 0xD8 || marker == 0x00 || marker in 0xD0..0xD7) return null
+        if (marker == 0x01) continue
+        if (marker !in 0xC0..0xFE || index + 2 > limit) return null
+        val length = ((bytes[index].toInt() and 0xFF) shl 8) or
+            (bytes[index + 1].toInt() and 0xFF)
+        if (length < 2 || length > limit - index) return null
+
+        val isFrame = marker in 0xC0..0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC
+        if (isFrame) {
+            if (length < 8) return null
+            val width = ((bytes[index + 5].toInt() and 0xFF) shl 8) or
+                (bytes[index + 6].toInt() and 0xFF)
+            frameComponents = bytes[index + 7].toInt() and 0xFF
+            if (width == 0 || frameComponents == 0 || length != 8 + 3 * frameComponents) return null
+        }
+        if (marker == 0xDA) {
+            if (frameComponents == 0 || length < 6) return null
+            val scanComponents = bytes[index + 2].toInt() and 0xFF
+            if (scanComponents !in 1..frameComponents || length != 6 + 2 * scanComponents) return null
+            hasScan = true
+            inScan = true
+        } else if (marker != 0xDC) {
+            // DNL may supply the image height during a scan; other segments end the current scan.
+            inScan = false
+        }
+        index += length
+    }
+    return null
 }
 
 /** Returns the largest complete JPEG embedded in a bounded RAW prefix. */
@@ -2844,10 +2889,32 @@ class NikonCamera(private val context: Context) {
             withContext(Dispatchers.IO) {
             if (staDirectObjectReadValidated) {
                 if ((staDirectFiles[handle]?.extension ?: staDirectExtensionFromHandle(handle)) == ".jpg") {
-                    return@withContext readStaDirectJpegThumbnailInternal(handle)
+                    val thumbnail = readStaDirectJpegThumbnailInternal(handle)
+                    if (ThumbnailDiagnostics.enabled) {
+                        ThumbnailDiagnostics.note(
+                            "camera handle=0x%08X path=sta-direct-jpg bytes=%d".format(handle, thumbnail?.size ?: 0),
+                            failure = thumbnail == null || thumbnail.isEmpty(),
+                        )
+                    }
+                    return@withContext thumbnail
                 }
-                staDirectThumbnails[handle]?.let { return@withContext it }
-                if (handle in staDirectNoThumbnail) return@withContext null
+                staDirectThumbnails[handle]?.let { bytes ->
+                    if (ThumbnailDiagnostics.enabled) {
+                        ThumbnailDiagnostics.note(
+                            "camera handle=0x%08X path=sta-direct-cache bytes=%d".format(handle, bytes.size),
+                        )
+                    }
+                    return@withContext bytes
+                }
+                if (handle in staDirectNoThumbnail) {
+                    if (ThumbnailDiagnostics.enabled) {
+                        ThumbnailDiagnostics.note(
+                            "camera handle=0x%08X path=sta-direct-negative-cache bytes=0".format(handle),
+                            failure = true,
+                        )
+                    }
+                    return@withContext null
+                }
                 val file = staDirectFiles[handle]
                 val thumbnail = when (file?.extension) {
                     ".nef" -> readStaDirectRawThumbnailInternal(file)
@@ -2863,6 +2930,14 @@ class NikonCamera(private val context: Context) {
                         result.thumbnail
                     }
                 }
+                if (ThumbnailDiagnostics.enabled) {
+                    ThumbnailDiagnostics.note(
+                        "camera handle=0x%08X path=sta-direct type=%s bytes=%d".format(
+                            handle, file?.extension ?: "unknown", thumbnail?.size ?: 0,
+                        ),
+                        failure = thumbnail == null || thumbnail.isEmpty(),
+                    )
+                }
                 thumbnail?.let { bytes ->
                     rememberStaDirectThumbnail(handle, bytes)
                     return@withContext bytes
@@ -2876,6 +2951,15 @@ class NikonCamera(private val context: Context) {
             }
             sendCmd(PtpConstants.GET_THUMB, handle)
             val (respCode, data) = recvRespWithPayload()
+            if (ThumbnailDiagnostics.enabled) {
+                ThumbnailDiagnostics.note(
+                    "camera handle=0x%08X path=ptp op=0x100A response=0x%04X bytes=%d magic=%s".format(
+                        handle, respCode, data?.size ?: 0,
+                        data?.take(12)?.joinToString("") { "%02X".format(it.toInt() and 0xFF) } ?: "none",
+                    ),
+                    failure = respCode != PtpConstants.RESPONSE_OK || data == null || data.isEmpty(),
+                )
+            }
             when (respCode) {
                 PtpConstants.RESPONSE_OK -> data
                 PtpConstants.NO_THUMBNAIL_PRESENT,
@@ -2884,8 +2968,21 @@ class NikonCamera(private val context: Context) {
             }
             }
         }
-        return if (visible) ioGate.withVisibleThumbnail(read)
-        else ioGate.withBackgroundThumbnail(read)
+        return try {
+            if (visible) ioGate.withVisibleThumbnail(read)
+            else ioGate.withBackgroundThumbnail(read)
+        } catch (error: Exception) {
+            if (ThumbnailDiagnostics.enabled) {
+                ThumbnailDiagnostics.note(
+                    "camera handle=0x%08X path=%s error=%s message=%s".format(
+                        handle, if (staDirectObjectReadValidated) "sta-direct" else "ptp",
+                        error.javaClass.simpleName, error.message.orEmpty(),
+                    ),
+                    failure = error !is CancellationException,
+                )
+            }
+            throw error
+        }
     }
 
     /**
@@ -3864,7 +3961,13 @@ class NikonCamera(private val context: Context) {
             )
             StaDirectExifResult(
                 captureDate = captureDate,
-                thumbnail = if (exif.hasThumbnail()) exif.thumbnailBytes else null,
+                // A bounded RAW prefix may advertise a thumbnail outside the available bytes.
+                // An empty EXIF result must not mask the later bounded preview read.
+                thumbnail = if (exif.hasThumbnail()) {
+                    exif.thumbnailBytes?.takeIf { it.isNotEmpty() }
+                } else {
+                    null
+                },
                 error = null,
             )
         } catch (error: Exception) {
@@ -3879,6 +3982,7 @@ class NikonCamera(private val context: Context) {
         handle: Int,
         offset: Long,
         maxSize: Int,
+        thumbnailDiagnostic: Boolean = false,
     ): ByteArray? {
         if (maxSize <= 0) return null
         sendCmd(
@@ -3890,6 +3994,16 @@ class NikonCamera(private val context: Context) {
             0,
         )
         val (response, data) = recvRespWithPayload()
+        if (ThumbnailDiagnostics.enabled && thumbnailDiagnostic &&
+            (response != PtpConstants.RESPONSE_OK || (data?.size ?: 0) != maxSize)
+        ) {
+            ThumbnailDiagnostics.note(
+                "camera handle=0x%08X path=sta-direct-partial range=%d+%d response=0x%04X bytes=%d".format(
+                    handle, offset, maxSize, response, data?.size ?: 0,
+                ),
+                failure = response != PtpConstants.RESPONSE_OK || data == null || data.isEmpty(),
+            )
+        }
         return data?.takeIf { response == PtpConstants.RESPONSE_OK && it.isNotEmpty() }
     }
 
@@ -4007,21 +4121,37 @@ class NikonCamera(private val context: Context) {
 
     /** Must be called inside a camera transaction; used by visible cells and sequential batch loading. */
     private fun readStaDirectRawThumbnailInternal(file: FileInfo): ByteArray? {
-        fun readReference(reference: NefPreviewReference): ByteArray? =
-            readStaDirectPartialInternal(
+        fun readReference(reference: NefPreviewReference, source: String): ByteArray? {
+            val bytes = readStaDirectPartialInternal(
                 handle = file.handle,
                 offset = reference.offset,
                 maxSize = reference.length,
-            )?.takeIf { bytes ->
-                bytes.size >= 2 &&
-                    bytes[0] == 0xFF.toByte() &&
-                    bytes[1] == 0xD8.toByte()
+                thumbnailDiagnostic = true,
+            )
+            val result = bytes?.takeIf { candidate ->
+                candidate.size >= 2 &&
+                    candidate[0] == 0xFF.toByte() &&
+                    candidate[1] == 0xD8.toByte()
             }
+            if (ThumbnailDiagnostics.enabled) {
+                val hasEoi = bytes != null && bytes.size >= 2 &&
+                    bytes[bytes.lastIndex - 1] == 0xFF.toByte() && bytes.last() == 0xD9.toByte()
+                ThumbnailDiagnostics.note(
+                    "camera handle=0x%08X path=sta-direct-raw source=%s range=%d+%d bytes=%d soi=%s eoi=%s".format(
+                        file.handle, source, reference.offset, reference.length, bytes?.size ?: 0,
+                        result != null, hasEoi,
+                    ),
+                    // A padded reference or a short read can still contain a decodable JPEG.
+                    failure = result == null,
+                )
+            }
+            return result
+        }
 
         // Parser order is largest-first for full-screen preview; the grid should transfer the
         // smallest available embedded JPEG to minimize camera IO and decode work.
         staDirectRawPreviews[file.handle]?.lastOrNull()?.let { reference ->
-            val cachedResult = readReference(reference)
+            val cachedResult = readReference(reference, "cached-index")
             if (PhotoGenerationProbe.enabled) {
                 PhotoGenerationProbe.note(
                     "STA-THUMB",
@@ -4053,6 +4183,7 @@ class NikonCamera(private val context: Context) {
                     handle = file.handle,
                     offset = hint.offset,
                     maxSize = plan.initialBytes,
+                    thumbnailDiagnostic = true,
                 )
                 val probeSteps = ArrayList<Int>(2)
                 if (chunk != null) probeSteps += chunk.size
@@ -4064,6 +4195,7 @@ class NikonCamera(private val context: Context) {
                         handle = file.handle,
                         offset = hint.offset + chunk.size,
                         maxSize = plan.maximumBytes - chunk.size,
+                        thumbnailDiagnostic = true,
                     )
                     if (tail != null) {
                         chunk += tail
@@ -4082,6 +4214,14 @@ class NikonCamera(private val context: Context) {
                     )
                     staDirectRawThumbnailHint = absoluteReference
                     staDirectRawPreviews[file.handle] = listOf(absoluteReference)
+                    if (ThumbnailDiagnostics.enabled) {
+                        ThumbnailDiagnostics.note(
+                            "camera handle=0x%08X path=sta-direct-raw source=hint range=%d+%d probeSteps=%s bytes=%d".format(
+                                file.handle, absoluteReference.offset, absoluteReference.length,
+                                probeSteps.joinToString(","), result.size,
+                            ),
+                        )
+                    }
                     if (PhotoGenerationProbe.enabled) {
                         PhotoGenerationProbe.note(
                             "STA-THUMB",
@@ -4097,6 +4237,13 @@ class NikonCamera(private val context: Context) {
                     }
                     return result
                 }
+                if (ThumbnailDiagnostics.enabled) {
+                    ThumbnailDiagnostics.note(
+                        "camera handle=0x%08X path=sta-direct-raw source=hint range=%d+%d probeSteps=%s result=not-found fallback=prefix".format(
+                            file.handle, hint.offset, hint.length, probeSteps.joinToString(","),
+                        ),
+                    )
+                }
             }
         }
 
@@ -4104,7 +4251,17 @@ class NikonCamera(private val context: Context) {
             file.size,
             STA_DIRECT_RAW_PROBE_PREFIX_BYTES.last().toLong(),
         ).toInt()
-        if (maximumProbeBytes <= 0) return null
+        if (maximumProbeBytes <= 0) {
+            if (ThumbnailDiagnostics.enabled) {
+                ThumbnailDiagnostics.note(
+                    "camera handle=0x%08X path=sta-direct-raw source=prefix fileBytes=%d result=empty-file".format(
+                        file.handle, file.size,
+                    ),
+                    failure = true,
+                )
+            }
+            return null
+        }
 
         // Allocate only the current step. Most Z30 NEFs expose the preview index inside 256 KiB;
         // reserving the full 16 MiB cap for every visible cell causes avoidable GC pauses.
@@ -4134,6 +4291,7 @@ class NikonCamera(private val context: Context) {
                     handle = file.handle,
                     offset = loadedBytes.toLong(),
                     maxSize = missing,
+                    thumbnailDiagnostic = true,
                 ) ?: break
                 val accepted = minOf(chunk.size, maximumProbeBytes - loadedBytes)
                 chunk.copyInto(
@@ -4154,7 +4312,7 @@ class NikonCamera(private val context: Context) {
             val indexedReference = indexedReferences.lastOrNull()
             if (indexedReference != null) {
                 previewReferenceFound = true
-                val indexedResult = readReference(indexedReference)
+                val indexedResult = readReference(indexedReference, "ifd")
                 if (indexedResult != null) {
                     discoveredReference = indexedReference
                     discoveredReferences = indexedReferences
@@ -4191,6 +4349,17 @@ class NikonCamera(private val context: Context) {
         // fetch failure remains retryable so transient transport trouble never becomes "no thumb".
         if (result == null && !previewReferenceFound && loadedBytes >= maximumProbeBytes) {
             staDirectNoThumbnail += file.handle
+        }
+        if (ThumbnailDiagnostics.enabled) {
+            ThumbnailDiagnostics.note(
+                "camera handle=0x%08X path=sta-direct-raw source=%s probeSteps=%s limit=%d referenced=%s range=%s bytes=%d negativeCache=%s".format(
+                    file.handle, source, probeSteps.joinToString(","), maximumProbeBytes,
+                    previewReferenceFound,
+                    discoveredReference?.let { "${it.offset}+${it.length}" } ?: "none",
+                    result?.size ?: 0, file.handle in staDirectNoThumbnail,
+                ),
+                failure = result == null,
+            )
         }
         if (PhotoGenerationProbe.enabled) {
             val reference = discoveredReference
