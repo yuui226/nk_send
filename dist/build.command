@@ -40,7 +40,8 @@ if [[ -z "$STORE_FILE" ]]; then
   exit 1
 fi
 if [[ "$STORE_FILE" != /* ]]; then
-  STORE_FILE="$ROOT_DIR/$STORE_FILE"
+  # Match app/build.gradle.kts's file(storeFile) resolution.
+  STORE_FILE="$ROOT_DIR/app/$STORE_FILE"
 fi
 if [[ ! -f "$STORE_FILE" ]]; then
   echo "ERROR: signing keystore not found: $STORE_FILE" >&2
@@ -87,16 +88,20 @@ if [[ ! -x "$ROOT_DIR/gradlew" ]]; then
 fi
 
 KIND="apk"
-TASK=":app:assembleRelease"
-SOURCE="$ROOT_DIR/app/build/outputs/apk/release/app-release.apk"
-if [[ "${1:-}" == "aab" ]]; then
-  KIND="aab"
-  TASK=":app:bundleRelease"
-  SOURCE="$ROOT_DIR/app/build/outputs/bundle/release/app-release.aab"
-elif [[ -n "${1:-}" ]]; then
-  echo "Usage: $0 [aab]" >&2
-  exit 2
-fi
+TASK=":release-apk:optimizeReleaseApk"
+SOURCE="$ROOT_DIR/tools/release-apk/build/outputs/release-optimized.apk"
+INSTALL=1
+for ARG in "$@"; do
+  case "$ARG" in
+    aab)
+      KIND="aab"
+      TASK=":app:bundleRelease"
+      SOURCE="$ROOT_DIR/app/build/outputs/bundle/release/app-release.aab"
+      ;;
+    --no-install) INSTALL=0 ;;
+    *) echo "Usage: $0 [aab] [--no-install]" >&2; exit 2 ;;
+  esac
+done
 
 VERSION_NAME="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' app/build.gradle.kts | head -n 1)"
 if [[ -z "$VERSION_NAME" ]]; then
@@ -128,6 +133,10 @@ fi
 # AAB files are for Play upload and cannot be installed with adb.
 if [[ "$KIND" != "apk" ]]; then
   echo "AAB built; skipping device installation."
+  exit 0
+fi
+if [[ "$INSTALL" == 0 ]]; then
+  echo "APK built; skipping device installation (--no-install)."
   exit 0
 fi
 # This is intentionally best-effort for a build-only Mac workflow: no device means no install.
