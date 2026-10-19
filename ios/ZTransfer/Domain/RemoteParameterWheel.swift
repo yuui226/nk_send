@@ -42,12 +42,10 @@ struct RemoteParameterWheel {
     private(set) var dragging = false
     private(set) var position = ZTransferScalarAnimation(value: 0)
     private(set) var neighbors = ZTransferScalarAnimation(value: 0)
-    private(set) var loadingAlpha: Float = 0.25
-    private var pulseStart: Int64?
     private var raw: Float = 0
     private var lastDetent = 0
     var needsFrames: Bool {
-        position.isRunning || neighbors.isRunning || configuration.descriptor == nil
+        position.isRunning || neighbors.isRunning
     }
     var showsDragHint: Bool { configuration.writable && configuration.values.count > 3 }
 
@@ -56,7 +54,6 @@ struct RemoteParameterWheel {
         let wasDragging = dragging
         configuration = next
         if next.gestureKey != old.gestureKey { dragging = false }
-        if next.descriptor == nil && old.descriptor != nil { pulseStart = nil; loadingAlpha = 0.25 }
         if !dragging && (next.anchor != old.anchor || next.values != old.values || wasDragging) { synchronize() }
         updateNeighbors()
     }
@@ -114,15 +111,6 @@ struct RemoteParameterWheel {
         position.advance(frameNanos: now)
         updateNeighbors()
         neighbors.advance(frameNanos: now)
-        if configuration.descriptor == nil {
-            if pulseStart == nil { pulseStart = now }
-            let elapsed = max(0, now - pulseStart!)
-            let period: Int64 = 900_000_000
-            let phase = elapsed % period
-            let reverse = elapsed / period % 2 == 1
-            let progress = Float(reverse ? period - phase : phase) / Float(period)
-            loadingAlpha = 0.25 + 0.30 * ZTransferAndroidMotion.fastOutSlowIn(progress)
-        }
     }
 
     var rows: [Row] {

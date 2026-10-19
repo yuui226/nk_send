@@ -90,22 +90,38 @@ struct RemoteAdaptiveToolLayout: Layout {
     let pinnedEndCount: Int
     var secondRowFirst: RemoteTool? = nil
 
-    private func geometry(width: CGFloat, subviews: Subviews) -> RemoteToolbarGeometry.Result {
-        RemoteToolbarGeometry.arrange(items: subviews.map {
+    struct Cache {
+        var items: [RemoteToolbarGeometry.Item]
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache(items: subviews.map {
             .init(size: $0.sizeThatFits(.unspecified), tool: $0[RemoteToolLayoutID.self])
-        }, width: width, horizontalGap: horizontalSpacing, verticalGap: verticalSpacing,
+        })
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = makeCache(subviews: subviews)
+    }
+
+    private func geometry(width: CGFloat, cache: Cache) -> RemoteToolbarGeometry.Result {
+        RemoteToolbarGeometry.arrange(items: cache.items, width: width,
+           horizontalGap: horizontalSpacing, verticalGap: verticalSpacing,
            pinnedEndCount: pinnedEndCount, secondRowFirst: secondRowFirst, scale: displayScale)
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = max(1, proposal.width ?? subviews.reduce(0) {
-            $0 + $1.sizeThatFits(.unspecified).width + horizontalSpacing
+    // SwiftUI probes several proposals before placement. Intrinsic child sizes
+    // are independent of those proposals; measure once per subview update,
+    // just as Android's AdaptiveRemoteToolBar measures each child once.
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let width = max(1, proposal.width ?? cache.items.reduce(0) {
+            $0 + $1.size.width + horizontalSpacing
         })
-        return CGSize(width: width, height: geometry(width: width, subviews: subviews).height)
+        return CGSize(width: width, height: geometry(width: width, cache: cache).height)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = geometry(width: bounds.width, subviews: subviews)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let result = geometry(width: bounds.width, cache: cache)
         for index in subviews.indices {
             let frame = result.frames[index]
             subviews[index].place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),

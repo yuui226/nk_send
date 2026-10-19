@@ -84,7 +84,7 @@ final class RemoteShutterController: NSObject, ObservableObject {
     var onRelease: (Bool) -> Void = { _ in }
     private var timer: Task<Void, Never>?
     private var link: CADisplayLink?
-    init(configuration: Configuration, haptics: ZTransferHaptics = .shared) {
+    init(configuration: Configuration, haptics: ZTransferHaptics = ZTransferHaptics()) {
         self.configuration = configuration; self.haptics = haptics
         let initial = RemoteShutterMotion(diameter: Float(configuration.diameter), focusing: configuration.focusing, recording: configuration.recording)
         motion = initial

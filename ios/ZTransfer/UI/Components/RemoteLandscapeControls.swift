@@ -6,7 +6,7 @@ import UIKit
 struct RemoteLandscapeControls: View {
     let layout: RemoteLandscapeLayout
     @ObservedObject var toolLayout: RemoteToolLayout
-    let controls: [RemoteTool: AnyView]
+    let control: (RemoteTool) -> AnyView?
     let onPanelChange: () -> Void
     let onTick: () -> Void
     let applyHidden: ([RemoteTool]) -> Void
@@ -39,7 +39,7 @@ struct RemoteLandscapeControls: View {
                 captureCluster.frame(maxHeight: .infinity, alignment: .bottom)
             }
             layer(dock: true) {
-                RemoteLandscapeDock(tools: toolLayout.shownTools + RemoteTool.pinned, controls: controls, bottom: layout.bottomControls)
+                RemoteLandscapeDock(tools: toolLayout.shownTools + RemoteTool.pinned, control: control, bottom: layout.bottomControls)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.top, 40)
@@ -211,7 +211,7 @@ struct RemoteDockMeasurements: Equatable {
 
 private struct RemoteLandscapeDock: View {
     let tools: [RemoteTool]
-    let controls: [RemoteTool: AnyView]
+    let control: (RemoteTool) -> AnyView?
     let bottom: Bool
     @Environment(\.displayScale) private var scale
     var body: some View {
@@ -227,7 +227,7 @@ private struct RemoteLandscapeDock: View {
                                 let tool = column < rows[row].count ? rows[row][column] : nil
                                 Group {
                                     if let tool {
-                                        controls[tool]
+                                        control(tool)
                                             .environment(\.remoteDockLabelLines, 2)
                                     } else { Color.clear }
                                 }.frame(maxWidth: .infinity, alignment: .top)

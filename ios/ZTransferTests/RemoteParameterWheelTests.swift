@@ -147,18 +147,6 @@ final class RemoteParameterWheelTests: XCTestCase {
         }
     }
 
-    func testLoadingPulseReverses900msAndStopsAfterDescriptorArrives() {
-        var wheel = RemoteParameterWheel()
-        wheel.advance(0); wheel.advance(900_000_000)
-        XCTAssertEqual(wheel.loadingAlpha, 0.55, accuracy: 0.00001)
-        wheel.advance(1_350_000_000)
-        XCTAssertEqual(wheel.loadingAlpha, 0.25 + 0.3 * ZTransferAndroidMotion.fastOutSlowIn(0.5), accuracy: 0.00001)
-        wheel.advance(1_800_000_000)
-        XCTAssertEqual(wheel.loadingAlpha, 0.25, accuracy: 0.00001)
-        wheel.configure(config(100))
-        XCTAssertFalse(wheel.needsFrames)
-    }
-
     func testCompactGeometryAndMonitorFormattingMatchAndroid() {
         let compact = RemoteParameterTileGeometry(width: 88, height: 42)
         XCTAssertEqual(compact.valueFontSize, 14)
@@ -269,9 +257,12 @@ final class RemoteParameterPerformanceTests: XCTestCase {
         var driver: RemoteParameterWheelDriver? = RemoteParameterWheelDriver()
         weak var weakDriver = driver
         driver?.setActive(true)
-        XCTAssertTrue(try XCTUnwrap(driver).clockRunning, "Unloaded dash retains its 900ms pulse")
-        driver?.advance(0); driver?.advance(900_000_000)
-        XCTAssertEqual(try XCTUnwrap(driver).display.loadingAlpha, 0.55, accuracy: 0.00001)
+        XCTAssertFalse(try XCTUnwrap(driver).clockRunning, "Loading pulse belongs to the native glyph, not a SwiftUI frame clock")
+        var notifications = 0
+        let subscription = driver?.objectWillChange.sink { notifications += 1 }
+        for frame in 0..<240 { driver?.advance(Int64(frame) * 16_666_667) }
+        XCTAssertEqual(notifications, 0, "Waiting for the camera must not redraw the tile every frame")
+        subscription?.cancel()
         let descriptor = RemotePropertyDescriptor(property: .iso, writable: true, current: 100, values: [100, 200])
         driver?.configure(.init(descriptor: descriptor))
         XCTAssertFalse(try XCTUnwrap(driver).clockRunning)
@@ -282,9 +273,164 @@ final class RemoteParameterPerformanceTests: XCTestCase {
         driver?.configure(.init()) // late offscreen descriptor updates must not restart a timer
         XCTAssertFalse(try XCTUnwrap(driver).clockRunning)
         driver?.setActive(true)
-        XCTAssertTrue(try XCTUnwrap(driver).clockRunning)
+        // A preceding drag still owns its finite 150ms neighbor fade. Let
+        // that finish; the absent descriptor must not start an infinite clock.
+        driver?.advance(4_000_000_000); driver?.advance(4_330_000_000)
+        XCTAssertFalse(try XCTUnwrap(driver).clockRunning)
         driver = nil
         XCTAssertNil(weakDriver, "CADisplayLink must not own its driver")
+    }
+
+    func testLoadingGlyphKeepsAndroidCurveWithoutFramePublishingAndStopsOffscreen() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let mounted = RemoteParameterLoadingLabel(frame: CGRect(x: 30, y: 80, width: 30, height: 20))
+        mounted.font = .monospacedSystemFont(ofSize: 16, weight: .semibold)
+        window.rootViewController?.view.addSubview(mounted)
+        mounted.setActive(true)
+        let loop = try XCTUnwrap(mounted.layer.animation(forKey: "parameter.loading") as? CABasicAnimation)
+        XCTAssertEqual(loop.fromValue as? Double, 0.25); XCTAssertEqual(loop.toValue as? Double, 0.55)
+        XCTAssertEqual(loop.duration, 0.9); XCTAssertTrue(loop.autoreverses); XCTAssertEqual(loop.repeatCount, .infinity)
+        for (index, expected) in [(1, [Float](arrayLiteral: 0.4, 0)), (2, [Float](arrayLiteral: 0.2, 1))] {
+            var point: [Float] = [0, 0]
+            loop.timingFunction?.getControlPoint(at: index, values: &point)
+            XCTAssertEqual(point, expected)
+        }
+        // The actual render-server presentation must move through both halves
+        // of the original curve; checking animation metadata alone is insufficient.
+        var samples: [Float] = []
+        for _ in 0..<16 {
+            try await Task.sleep(for: .milliseconds(100))
+            let actual = try XCTUnwrap(mounted.layer.presentation()).opacity
+            let elapsed = mounted.layer.convertTime(CACurrentMediaTime(), from: nil) - loop.beginTime
+            let phase = elapsed.truncatingRemainder(dividingBy: 1.8)
+            let progress = Float(phase <= 0.9 ? phase / 0.9 : (1.8 - phase) / 0.9)
+            let expected = 0.25 + 0.30 * ZTransferAndroidMotion.fastOutSlowIn(progress)
+            XCTAssertEqual(actual, expected, accuracy: 0.03)
+            samples.append(actual)
+            mounted.setActive(true)
+            XCTAssertEqual(mounted.layer.animation(forKey: "parameter.loading")?.beginTime, loop.beginTime,
+                           "Unrelated parameter updates must not restart the pulse")
+        }
+        XCTAssertGreaterThan(try XCTUnwrap(samples.max()) - XCTUnwrap(samples.min()), 0.20)
+        mounted.setActive(false)
+        XCTAssertNil(mounted.layer.animation(forKey: "parameter.loading"))
+        mounted.setActive(true)
+        XCTAssertNotNil(mounted.layer.animation(forKey: "parameter.loading"))
+        mounted.removeFromSuperview()
+        XCTAssertNil(mounted.layer.animation(forKey: "parameter.loading"))
+        weak var released: RemoteParameterLoadingLabel?
+        do {
+            let detached = RemoteParameterLoadingLabel()
+            released = detached
+            window.rootViewController?.view.addSubview(detached)
+            detached.setActive(true)
+            detached.removeFromSuperview()
+        }
+        try await Task.sleep(for: .milliseconds(80)) // UIKit commits removal before releasing the view.
+        XCTAssertNil(released)
+    }
+
+    func testProductionLoadingTileKeepsParentStableAndRemovesPulseForReadyAutoAndBackground() async throws {
+        let state = LoadingState()
+        let probe = TileProbe()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: LoadingHarness(state: state, probe: probe))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 240, height: 140)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(100))
+        weak var first = try XCTUnwrap(find(RemoteParameterLoadingLabel.self, in: host.view))
+        XCTAssertNotNil(first?.layer.animation(forKey: "parameter.loading"))
+        let bodies = probe.bodies
+        try await Task.sleep(for: .milliseconds(950))
+        XCTAssertEqual(probe.bodies, bodies, "Loading opacity must not rebuild the tile's parent")
+        state.phase = .background
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertNil(first?.layer.animation(forKey: "parameter.loading"))
+        state.phase = .active
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertNotNil(first?.layer.animation(forKey: "parameter.loading"))
+        state.descriptor = .init(property: .iso, writable: false, current: 400, values: [100, 200, 400])
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(find(RemoteParameterLoadingLabel.self, in: host.view))
+        XCTAssertNil(first)
+        let input = try XCTUnwrap(find(RemoteParameterInput.InputView.self, in: host.view))
+        let value = try XCTUnwrap((input.accessibilityElements as? [UIAccessibilityElement])?.first)
+        XCTAssertEqual(value.accessibilityValue, "400")
+        state.auto = true; state.descriptor = nil
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertNil(find(RemoteParameterLoadingLabel.self, in: host.view), "AUTO's unknown ISO remains static")
+        state.auto = false
+        try await Task.sleep(for: .milliseconds(80))
+        let restarted = try XCTUnwrap(find(RemoteParameterLoadingLabel.self, in: host.view))
+        let loop = try XCTUnwrap(restarted.layer.animation(forKey: "parameter.loading"))
+        XCTAssertLessThan(restarted.layer.convertTime(CACurrentMediaTime(), from: nil) - loop.beginTime, 0.3,
+                          "A newly unloaded parameter starts a new pulse, not the removed glyph's phase")
+    }
+
+    func testNativeLoadingGlyphMatchesOriginalTextAtBothSizesAndThemes() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: AnyView(Color.clear))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 240, height: 240)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func pixels(saveAs name: String) throws -> Data {
+            let image = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in
+                host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            try XCTUnwrap(image.pngData()).write(to: URL(fileURLWithPath: "/tmp/\(name).png"))
+            let cg = try XCTUnwrap(image.cgImage)
+            var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+                bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            return Data(bytes)
+        }
+        for dark in [false, true] {
+            for compact in [false, true] {
+                let size: CGFloat = compact ? 14 : 16
+                let line: CGFloat = compact ? 16 : 20
+                let scheme: ColorScheme = dark ? .dark : .light
+                host.rootView = AnyView(Text("—")
+                    .font(.system(size: size, weight: .semibold, design: .monospaced))
+                    .lineLimit(1).fixedSize().frame(height: line)
+                    .foregroundStyle(ZTransferColors.secondaryText.opacity(0.4))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(ZTransferColors.background).environment(\.colorScheme, scheme))
+                try await Task.sleep(for: .milliseconds(80))
+                let reference = try pixels(saveAs: "ztransfer-loading-reference-\(dark)-\(compact)")
+                let rgba = [UInt8](reference)
+                let glyphPixels = stride(from: 0, to: rgba.count, by: 4).filter { offset in
+                    abs(Int(rgba[offset]) - Int(rgba[0])) > 3 || abs(Int(rgba[offset + 1]) - Int(rgba[1])) > 3
+                }.count
+                XCTAssertGreaterThan(glyphPixels, 12, "Reference must contain visible glyph pixels, not two blank snapshots")
+                host.rootView = AnyView(RemoteParameterInput(configuration: .init(), autoBusy: false,
+                    identifier: "loading-reference", label: "ISO", value: "—", onOpenList: {},
+                    onAutoToggle: nil, onBegin: {}, onDrag: { _ in }, onEnd: {})
+                    .frame(width: 180, height: compact ? 42 : 54)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(ZTransferColors.background)
+                    .environment(\.scenePhase, .background).environment(\.colorScheme, scheme))
+                try await Task.sleep(for: .milliseconds(80))
+                let native = try XCTUnwrap(find(RemoteParameterLoadingLabel.self, in: host.view))
+                native.layer.opacity = 0.4
+                CATransaction.flush()
+                let actual = try pixels(saveAs: "ztransfer-loading-native-\(dark)-\(compact)")
+                XCTAssertEqual(actual.count, reference.count)
+                // Native layer opacity and SwiftUI foreground alpha round a
+                // few antialiased edge samples differently (one 8-bit level).
+                // Geometry, solid glyph and background pixels must still match;
+                // a shifted/blurred/wrong-color glyph exceeds this bound.
+                let largestDelta = zip(actual, reference).map { abs(Int($0) - Int($1)) }.max() ?? 0
+                XCTAssertLessThanOrEqual(largestDelta, 1, "Loading glyph: compact=\(compact), dark=\(dark)")
+            }
+        }
     }
 
     func testMenuCacheRetainsLabelsAndMeasuredWidthAcrossSelectionAndScaleChanges() {
@@ -399,6 +545,22 @@ final class RemoteParameterPerformanceTests: XCTestCase {
         }
     }
     private final class TileProbe { var bodies = 0; var steps: [Int] = [] }
+    private final class LoadingState: ObservableObject {
+        @Published var descriptor: RemotePropertyDescriptor?
+        @Published var auto: Bool? = nil
+        @Published var phase: ScenePhase = .active
+    }
+    private struct LoadingHarness: View {
+        @ObservedObject var state: LoadingState
+        let probe: TileProbe
+        var body: some View {
+            let _ = { probe.bodies += 1 }()
+            RemoteExposureTile(field: .iso, descriptor: state.descriptor,
+                onOpenList: {}, onStep: { probe.steps.append($0) },
+                autoEnabled: state.auto, autoToggle: {})
+                .frame(width: 180, height: 54).environment(\.scenePhase, state.phase)
+        }
+    }
     private struct TileHarness: View {
         let probe: TileProbe
         var body: some View {

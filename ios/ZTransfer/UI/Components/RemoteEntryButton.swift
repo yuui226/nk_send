@@ -110,6 +110,7 @@ struct RemoteEntryButton: View {
             .animation(.interpolatingSpring(mass: 1, stiffness: 360, damping: 2 * 0.58 * sqrt(360)), value: expanded)
             .offset(x: 20)
             .accessibilityLabel(AppLocalized.resource("cd_remote_entry"))
+                .accessibilityIdentifier("workspace-monitor-open")
             .accessibilityHidden(!expanded)
 
             if !expanded {
@@ -118,6 +119,7 @@ struct RemoteEntryButton: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(AppLocalized.resource("cd_remote_entry"))
+                .accessibilityIdentifier("workspace-monitor-open")
             }
         }
         .frame(width: introWidth + 24, height: 56, alignment: .leading)

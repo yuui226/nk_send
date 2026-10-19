@@ -74,6 +74,7 @@ struct GPSConnectionControl: View {
                 emphasized: expanded || active,
                 showEmphasisBorder: false,
                 showDragHint: false,
+                onDetent: { ZTransferHaptics.shared.play(.navigation) },
                 onLongClick: {
                     UIPasteboard.general.string = gpsDiagnosticsSnapshot()
                     hintText = AppLocalized.resource("code_copied")
@@ -169,6 +170,7 @@ private func gpsDiagnosticsSnapshot() -> String {
 }
 
 private struct GPSInlinePanel: View {
+    @State private var haptics = ZTransferHaptics()
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("haptics_enabled") private var hapticsEnabled = true
     @ObservedObject var coordinator: GPSCoordinator
@@ -258,15 +260,15 @@ private struct GPSInlinePanel: View {
         }
         .onAppear { updateSessionEvidence() }
         .onAppear { previousStatusRank = statusRank }
-        .onDisappear { ZTransferHaptics.shared.cancelProgressiveHold() }
+        .onDisappear { haptics.cancelProgressiveHold() }
         .onChange(of: scenePhase) { phase in
-            if phase != .active { ZTransferHaptics.shared.cancelProgressiveHold() }
+            if phase != .active { haptics.cancelProgressiveHold() }
         }
         .onChange(of: hapticsEnabled) { enabled in
-            if !enabled { ZTransferHaptics.shared.cancelProgressiveHold() }
+            if !enabled { haptics.cancelProgressiveHold() }
         }
         .onChange(of: requiresHoldToDisable) { required in
-            if !required { ZTransferHaptics.shared.cancelProgressiveHold() }
+            if !required { haptics.cancelProgressiveHold() }
         }
         .onChange(of: coordinator.state.status) { _ in updateSessionEvidence() }
         .onChange(of: coordinator.state.status) { status in
@@ -644,7 +646,7 @@ private struct GPSInlinePanel: View {
     private func statusControl() -> some View {
         Button {
             guard !requiresHoldToDisable, !holdConsumedTap else { return }
-            ZTransferHaptics.shared.tick()
+            haptics.play(.action)
             if !coordinator.state.enabled { coordinator.setEnabled(true) }
             else if coordinator.state.status == .error {
                 let message = coordinator.state.message ?? ""
@@ -711,7 +713,7 @@ private struct GPSInlinePanel: View {
                     guard completed, requiresHoldToDisable else { return }
                     holdConsumedTap = true
                     holdCompleted = true
-                    ZTransferHaptics.shared.completeProgressiveHold()
+                    haptics.completeProgressiveHold()
                     withAnimation(.easeInOut(duration: 0.17)) { holdPressed = false }
                     coordinator.setEnabled(false)
                 },
@@ -722,9 +724,9 @@ private struct GPSInlinePanel: View {
                 holdConsumedTap = requiresHoldToDisable
                 holdCompleted = false
                 guard requiresHoldToDisable else { return }
-                ZTransferHaptics.shared.startProgressiveHold()
+                haptics.startProgressiveHold()
             } else {
-                if !holdCompleted { ZTransferHaptics.shared.cancelProgressiveHold() }
+                if !holdCompleted { haptics.cancelProgressiveHold() }
                 DispatchQueue.main.async { holdConsumedTap = false }
             }
             withAnimation(.easeInOut(duration: pressing ? 0.09 : 0.17)) { holdPressed = pressing }

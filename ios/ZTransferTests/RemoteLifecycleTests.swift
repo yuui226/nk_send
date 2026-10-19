@@ -1777,7 +1777,9 @@ final class RemoteLifecycleTests: XCTestCase {
 
     func testHalfPressUsesLastFocusAreaAndKeepsLateConfirmedMarkerAfterRelease() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = makeModel(camera: camera)
+        var feedback: [HapticFeedbackEvent] = []
+        let haptics = ZTransferHaptics(defaults: UserDefaults(suiteName: UUID().uuidString)!) { feedback.append($0) }
+        let model = makeModel(camera: camera, haptics: haptics)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -1793,11 +1795,18 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(model.state.focus.phase, .idle)
         try await waitFor { model.confirmedFocusMarker != nil }
         XCTAssertEqual(model.confirmedFocusMarker?.fallbackPoint, .init(x: 0.5, y: 0.5))
+        XCTAssertEqual(feedback, [.feedback(.focusStarted)], "Late AF success after release stays silent")
+        model.beginHalfPress()
+        try await waitFor { model.state.focus.phase == .locked }
+        XCTAssertEqual(feedback, [.feedback(.focusStarted), .feedback(.focusStarted), .feedback(.focusLocked)])
+        model.endHalfPress(fire: false)
     }
 
     func testShutterWaitsForObjectAddedAndCommandFailureDoesNotFailLiveView() async throws {
         let camera = RemoteLifecycleCamera()
-        let model = makeModel(camera: camera)
+        var feedback: [HapticFeedbackEvent] = []
+        let haptics = ZTransferHaptics(defaults: UserDefaults(suiteName: UUID().uuidString)!) { feedback.append($0) }
+        let model = makeModel(camera: camera, haptics: haptics)
         addTeardownBlock { await model.stopAndWait() }
         model.start()
         try await waitFor { model.state.session == .ready }
@@ -1807,10 +1816,12 @@ final class RemoteLifecycleTests: XCTestCase {
         XCTAssertEqual(model.state.capture, .capturing)
         await camera.queueEvents([.init(code: 0xC101, handle: 17)])
         try await waitFor { model.state.capture == .idle }
+        XCTAssertEqual(feedback, [.feedback(.shutter)], "Camera result/polling must not repeat the shutter pulse")
         await camera.failCapture()
         model.capture()
         try await waitFor { model.state.capture == .idle }
         XCTAssertEqual(model.state.session, .ready)
+        XCTAssertEqual(feedback, [.feedback(.shutter), .feedback(.shutter)])
     }
 
     func testMovieEventsSynchronizeCameraStateAndIgnoreLateStartAfterLocalStop() async throws {

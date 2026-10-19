@@ -20,6 +20,7 @@ struct TransferQueueView: View {
     let onRetrySTA: () -> Void
     let onNavigateBack: () -> Void
     let showsTopControls: Bool
+    let scrollPosition: WorkspaceScrollPosition?
     let controlActionNonce: UInt64
     let hasIndexedOriginal: (TransferQueueItem) -> Bool
     @State private var mountedConfirmations: Set<QueueConfirmation> = []
@@ -39,6 +40,7 @@ struct TransferQueueView: View {
          isSessionConnected: Bool = true,
          onRetrySTA: @escaping () -> Void = {},
          showsTopControls: Bool = true,
+         scrollPosition: WorkspaceScrollPosition? = nil,
          controlActionNonce: UInt64 = 0,
          hasIndexedOriginal: @escaping (TransferQueueItem) -> Bool = { _ in false },
          onNavigateBack: @escaping () -> Void) {
@@ -48,6 +50,7 @@ struct TransferQueueView: View {
         self.onRetrySTA = onRetrySTA
         self.hasIndexedOriginal = hasIndexedOriginal
         self.controlActionNonce = controlActionNonce
+        self.scrollPosition = scrollPosition
         self.showsTopControls = showsTopControls
         self.directory = directory
         self.onNavigateBack = onNavigateBack
@@ -79,6 +82,7 @@ struct TransferQueueView: View {
                             }
                         }
                     }
+                    .background(WorkspaceScrollRestoration(position: scrollPosition))
                     .coordinateSpace(name: QueueItemPlacement.coordinateSpace)
                     .padding(.horizontal, 12)
                     .padding(.top, 58)

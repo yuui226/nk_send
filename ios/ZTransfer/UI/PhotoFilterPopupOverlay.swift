@@ -253,7 +253,7 @@ struct PhotoFilterPopupOverlay: View {
                     enabled: !working.ratingEnabled,
                     rating: working.ratingEnabled ? nil : working.rating
                 ))
-                ZTransferHaptics.shared.tick()
+                ZTransferHaptics.shared.play(.toggle)
             }
 
             ZStack(alignment: .leading) {
@@ -275,7 +275,7 @@ struct PhotoFilterPopupOverlay: View {
                             optionFontSize: 12,
                             optionFontWeight: .medium,
                             showDragHint: false,
-                            onDetent: { ZTransferHaptics.shared.tick() }
+                            onDetent: { ZTransferHaptics.shared.play(.selection) }
                         )
                         .frame(width: 81, height: 34)
                         TipLightbulbButton(

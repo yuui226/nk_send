@@ -11,7 +11,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
     @ObservedObject var layout: RemoteToolLayout
     let editing: Bool
     let isActive: Bool
-    let controls: [RemoteTool: AnyView]
+    let control: (RemoteTool) -> AnyView?
     let leading: Leading
     let trailing: [RemoteFixedToolControl]
     let pinnedEndCount: Int
@@ -35,7 +35,7 @@ struct RemoteConfiguredToolbar<Leading: View>: View {
                                  secondRowFirst: nil) {
             leading
             ForEach(sequence) { tool in
-                if let control = controls[tool] {
+                if let control = control(tool) {
                     ZStack {
                         control.modifier(RemoteToolSlotTransform(
                             presentation: motion.presentation(tool, visible: layout.visible(tool))))

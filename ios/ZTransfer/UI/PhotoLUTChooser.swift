@@ -31,7 +31,7 @@ struct PhotoLUTChooser: View {
                     optionFontSizeFor: { optionLabel($0).utf16.count > 24 ? 11 : 13 },
                     accentColor: accent,
                     onActivated: options.count == 1 ? {
-                        ZTransferHaptics.shared.tick(); editor.openFolder()
+                        ZTransferHaptics.shared.play(.navigation); editor.openFolder()
                     } : nil,
                     onLongClick: { editor.openChooser(onDisable: disable) },
                     ambientEffectColor: accent,
@@ -43,7 +43,7 @@ struct PhotoLUTChooser: View {
                     enabled: editor.active, accentColor: accent,
                     emphasized: editor.settingsExpanded, showDragHint: false,
                     onActivated: {
-                        ZTransferHaptics.shared.tick()
+                        ZTransferHaptics.shared.play(.navigation)
                         withAnimation(ZTransferMotion.inlineExpansion) { editor.settingsExpanded.toggle() }
                     })
                 PhotoEffectFavoriteButton(
@@ -146,12 +146,12 @@ struct PhotoLUTChooserOverlay: View {
             onDismiss: { editor.showingChooser = false }) {
             HStack(spacing: 8) {
                 PhotoEffectChooserAction(label: AppLocalized.resource("lut_turn_off"), selected: store.selectedIdentifier == nil) {
-                    ZTransferHaptics.shared.tick()
+                    ZTransferHaptics.shared.play(.selection)
                     editor.off { disablePhotoLUTDraft(&draft, lutStore: store) }
                     editor.showingChooser = false
                 }
                 PhotoEffectChooserAction(label: AppLocalized.resource("lut_folder")) {
-                    ZTransferHaptics.shared.tick(); editor.openFolder()
+                    ZTransferHaptics.shared.play(.navigation); editor.openFolder()
                 }
             }
         } content: { width in
@@ -169,7 +169,7 @@ struct PhotoLUTChooserOverlay: View {
                         selected: store.selectedIdentifier == file.identifier,
                         favorite: store.favorites.contains(file.identifier),
                         accent: ZTransferColors.photoLUTAccent) {
-                        ZTransferHaptics.shared.tick()
+                        ZTransferHaptics.shared.play(.selection)
                         editor.choose(file.identifier,
                             onDisable: { disablePhotoLUTDraft(&draft, lutStore: store) },
                             shouldAccept: { PhotoColorEffectEditorVisibility(settings: draft, isPro: PremiumEntitlementStore.shared.access.isPro).lut }) { selection in

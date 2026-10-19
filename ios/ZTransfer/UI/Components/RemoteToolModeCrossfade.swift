@@ -160,73 +160,164 @@ struct RemoteToolInputShield: UIViewRepresentable {
 
 final class RemoteToolInputShieldView: UIControl {}
 
-/// MainActivity Files↔Remote: Remote is to the LEFT, 24dp travel/300ms;
-/// incoming alpha 200ms after 100ms, outgoing alpha 140ms (Motion.kt).
-/// Keep the source and the monitor owner alive until the exit has settled.
-struct WorkspaceMonitorMotion {
+/// MainActivity FilesQueueWorkspace and Files↔Remote share Motion.kt's short
+/// travel and delayed fade. This owner publishes page membership only at the
+/// edges; frame-frequency values are observed exclusively by compositing leaves.
+struct WorkspacePageMotion {
     private(set) var presented = false
     private(set) var travel = ZTransferScalarAnimation(value: 0)
-    private(set) var filesAlpha = ZTransferScalarAnimation(value: 1)
-    private(set) var monitorAlpha = ZTransferScalarAnimation(value: 0)
-    var running: Bool { travel.isRunning || filesAlpha.isRunning || monitorAlpha.isRunning }
+    private(set) var sourceAlpha = ZTransferScalarAnimation(value: 1)
+    private(set) var destinationAlpha = ZTransferScalarAnimation(value: 0)
+    private(set) var headerAlpha = ZTransferScalarAnimation(value: 0)
+    var running: Bool {
+        travel.isRunning || sourceAlpha.isRunning || destinationAlpha.isRunning || headerAlpha.isRunning
+    }
 
     mutating func setPresented(_ value: Bool) {
         guard presented != value else { return }
         presented = value
-        travel.retarget(value ? 1 : 0, using: travel.isRunning
-            ? .criticallyDampedSpring(stiffness: 1500) : .tween(milliseconds: 300))
-        filesAlpha.retarget(value ? 0 : 1, using: filesAlpha.isRunning
-            ? .criticallyDampedSpring(stiffness: 1500) : value
+        Self.retarget(&travel, to: value ? 1 : 0, spec: .tween(milliseconds: 300))
+        Self.retarget(&sourceAlpha, to: value ? 0 : 1, spec: value
             ? .tween(milliseconds: 140) : .tween(milliseconds: 200, delayMilliseconds: 100))
-        monitorAlpha.retarget(value ? 1 : 0, using: monitorAlpha.isRunning
-            ? .criticallyDampedSpring(stiffness: 1500) : value
+        Self.retarget(&destinationAlpha, to: value ? 1 : 0, spec: value
             ? .tween(milliseconds: 200, delayMilliseconds: 100) : .tween(milliseconds: 140))
+        Self.retarget(&headerAlpha, to: value ? 1 : 0, spec: value
+            ? .tween(milliseconds: 200, delayMilliseconds: 100) : .tween(milliseconds: 80))
     }
+
+    private static func retarget(_ channel: inout ZTransferScalarAnimation, to value: Float,
+                                 spec: ZTransferAndroidMotion) {
+        // Compose Transition uses its critical spring on interruption. Retain
+        // current values/velocities instead of restarting a delayed tween.
+        channel.retarget(value, using: channel.isRunning ? .criticallyDampedSpring(stiffness: 1500) : spec)
+    }
+
     mutating func advance(_ nanos: Int64) {
         travel.advance(frameNanos: nanos)
-        filesAlpha.advance(frameNanos: nanos)
-        monitorAlpha.advance(frameNanos: nanos)
+        sourceAlpha.advance(frameNanos: nanos)
+        destinationAlpha.advance(frameNanos: nanos)
+        headerAlpha.advance(frameNanos: nanos)
+    }
+
+    mutating func settle(presented value: Bool) {
+        presented = value
+        travel.reset(to: value ? 1 : 0)
+        sourceAlpha.reset(to: value ? 0 : 1)
+        destinationAlpha.reset(to: value ? 1 : 0)
+        headerAlpha.reset(to: value ? 1 : 0)
     }
 }
 
 @MainActor
-final class WorkspaceMonitorClock: ObservableObject {
+final class WorkspacePageClock: ObservableObject {
+    enum DestinationSide: CGFloat { case left = -1, right = 1 }
+    struct Sample: Equatable {
+        var travel: CGFloat = 0
+        var alpha: Double = 1
+    }
     final class Frame: ObservableObject {
-        @Published var travel: CGFloat = 0
-        @Published var alpha: Double = 1
+        @Published private(set) var sample = Sample()
+        var travel: CGFloat { sample.travel }
+        var alpha: Double { sample.alpha }
         func update(_ travel: CGFloat, _ alpha: Double) {
-            if self.travel != travel { self.travel = travel }
-            if self.alpha != alpha { self.alpha = alpha }
+            let next = Sample(travel: travel, alpha: min(1, max(0, alpha)))
+            if sample != next { sample = next }
         }
     }
-    @Published private(set) var retained = false
-    let files = Frame()
-    let monitor = Frame()
-    private(set) var motion = WorkspaceMonitorMotion()
+    @Published private(set) var pages: Set<Bool> = [false]
+    @Published private(set) var transitioning = false
+    let source = Frame()
+    let destination = Frame()
+    let header = Frame()
+    private(set) var motion = WorkspacePageMotion()
+    private let side: DestinationSide
+    private let keepsSource: Bool
+    private var mounted = false
+    private var active = true
     private var link: CADisplayLink?
     var running: Bool { link != nil }
-    init() { monitor.update(-24, 0) }
+    var retained: Bool { pages.contains(true) }
+
+    init(side: DestinationSide, keepsSource: Bool = false) {
+        self.side = side
+        self.keepsSource = keepsSource
+        publishFrames()
+    }
+
+    func mount(presented: Bool) {
+        if !mounted {
+            mounted = true
+            // SceneStorage can restore directly into queue: no one-frame flash
+            // of the files page and no replay of a navigation the user did not do.
+            settle(presented: presented)
+        } else { setPresented(presented) }
+    }
+
     func setPresented(_ value: Bool) {
+        #if DEBUG
+        if motion.presented != value {
+            ButtonInteractionTrace.recordNow("workspace-\(side == .right ? "queue" : "monitor")-\(value ? "enter" : "exit")")
+        }
+        #endif
         motion.setPresented(value)
-        if value { retained = true }
-        guard motion.running, link == nil else { return }
+        guard active else { settle(presented: value); return }
+        guard motion.running else { return }
+        if pages != [false, true] { pages = [false, true] }
+        if !transitioning { transitioning = true }
+        guard link == nil else { return }
         let link = CADisplayLink(target: Target(self), selector: #selector(Target.frame(_:)))
         self.link = link
         link.add(to: .main, forMode: .common)
     }
+
     func advance(_ nanos: Int64) {
-        motion.advance(nanos)
-        files.update(CGFloat(motion.travel.value) * 24, Double(motion.filesAlpha.value))
-        monitor.update((CGFloat(motion.travel.value) - 1) * 24, Double(motion.monitorAlpha.value))
-        if !motion.running {
-            stop()
-            if !motion.presented { retained = false }
+        #if DEBUG
+        if transitioning && ButtonInteractionTrace.enabled {
+            ButtonInteractionTrace.recordNow("workspace-\(side == .right ? "queue" : "monitor")-frame")
         }
+        #endif
+        motion.advance(nanos)
+        publishFrames()
+        if !motion.running { finish() }
     }
+
+    func setActive(_ value: Bool) {
+        active = value
+        // Offscreen transitions have no visible frames to preserve. Settle
+        // once, release the exiting monitor and never replay stale timestamps.
+        if !value { settle(presented: motion.presented) }
+    }
+
+    func settle(presented: Bool) {
+        motion.settle(presented: presented)
+        publishFrames()
+        finish()
+    }
+
+    private func publishFrames() {
+        let distance = side.rawValue * 24
+        source.update(-CGFloat(motion.travel.value) * distance, Double(motion.sourceAlpha.value))
+        destination.update((1 - CGFloat(motion.travel.value)) * distance, Double(motion.destinationAlpha.value))
+        header.update(0, Double(motion.headerAlpha.value))
+    }
+
+    private func finish() {
+        stop()
+        if transitioning {
+            #if DEBUG
+            ButtonInteractionTrace.recordNow("workspace-\(side == .right ? "queue" : "monitor")-settled")
+            #endif
+            transitioning = false
+        }
+        let settled: Set<Bool> = keepsSource && motion.presented ? [false, true] : [motion.presented]
+        if pages != settled { pages = settled }
+    }
+
     func stop() { link?.invalidate(); link = nil }
+
     @MainActor private final class Target: NSObject {
-        weak var owner: WorkspaceMonitorClock?
-        init(_ owner: WorkspaceMonitorClock) { self.owner = owner }
+        weak var owner: WorkspacePageClock?
+        init(_ owner: WorkspacePageClock) { self.owner = owner }
         @objc func frame(_ link: CADisplayLink) {
             guard let owner else { link.invalidate(); return }
             owner.advance(Int64(link.timestamp * 1_000_000_000))
@@ -234,10 +325,41 @@ final class WorkspaceMonitorClock: ObservableObject {
     }
 }
 
-private struct WorkspaceMonitorPage: ViewModifier {
-    @ObservedObject var frame: WorkspaceMonitorClock.Frame
+/// Fixed-size, single compositing group at alpha=1 as well as during a fade.
+/// Do not put frame observation in the list/monitor body or animate layout size.
+struct WorkspacePageEffect: ViewModifier {
+    @ObservedObject var frame: WorkspacePageClock.Frame
     func body(content: Content) -> some View {
         content.compositingGroup().opacity(frame.alpha).offset(x: frame.travel)
+    }
+}
+
+/// A retained page must not leak descendant buttons through an outer overlay's
+/// accessibility configuration. Ignoring its children while inactive keeps the
+/// tree boundary explicit without dimming controls during their exit fade.
+struct WorkspacePageInput: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        content
+            .allowsHitTesting(enabled)
+            .accessibilityElement(children: enabled ? .contain : .ignore)
+            .accessibilityHidden(!enabled)
+    }
+}
+
+struct WorkspacePageLifecycle: ViewModifier {
+    let clock: WorkspacePageClock
+    let presented: Bool
+    @Environment(\.scenePhase) private var scenePhase
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                clock.mount(presented: presented)
+                clock.setActive(scenePhase != .background)
+            }
+            .onChange(of: presented) { clock.setPresented($0) }
+            .onChange(of: scenePhase) { clock.setActive($0 != .background) }
+            .onDisappear { clock.settle(presented: presented) }
     }
 }
 
@@ -245,25 +367,21 @@ private struct WorkspaceMonitorPresentation<Monitor: View>: ViewModifier {
     @Binding var isPresented: Bool
     let onDismiss: () -> Void
     @ViewBuilder let monitor: () -> Monitor
-    @StateObject private var clock = WorkspaceMonitorClock()
+    @StateObject private var clock = WorkspacePageClock(side: .left, keepsSource: true)
     func body(content: Content) -> some View {
         ZStack {
-            content.modifier(WorkspaceMonitorPage(frame: clock.files))
-                .allowsHitTesting(!isPresented && !clock.running)
-                .accessibilityHidden(isPresented)
+            content.modifier(WorkspacePageEffect(frame: clock.source))
+                .modifier(WorkspacePageInput(enabled: !isPresented && !clock.transitioning))
             if clock.retained {
-                monitor().modifier(WorkspaceMonitorPage(frame: clock.monitor))
-                    .allowsHitTesting(isPresented)
-                    .accessibilityHidden(!isPresented)
+                monitor().modifier(WorkspacePageEffect(frame: clock.destination))
+                    .modifier(WorkspacePageInput(enabled: isPresented))
                     .transition(.identity)
                     .zIndex(1)
             }
         }
         .background(ZTransferColors.background.ignoresSafeArea())
-        .onAppear { clock.setPresented(isPresented) }
-        .onChange(of: isPresented) { clock.setPresented($0) }
+        .modifier(WorkspacePageLifecycle(clock: clock, presented: isPresented))
         .onChange(of: clock.retained) { if !$0 { onDismiss() } }
-        .onDisappear { clock.stop() }
     }
 }
 

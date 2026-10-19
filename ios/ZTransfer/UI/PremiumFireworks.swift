@@ -22,7 +22,7 @@ final class PremiumFireworks: ObservableObject {
 
 struct PremiumFireworksOverlay: View {
     @ObservedObject var state: PremiumFireworks
-    var onExploded: () -> Void = { ZTransferHaptics.shared.tick() }
+    var onExploded: () -> Void = { ZTransferHaptics.shared.play(.celebration) }
     var body: some View {
         ZStack {
             ForEach(state.active) { launch in

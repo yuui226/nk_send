@@ -280,7 +280,7 @@ final class ZTransferButtonMotionController: ObservableObject {
     }
 }
 
-/// Reads scroll ancestry and observes raw touches only for visual feedback.
+/// Reads scroll ancestry and observes raw touches for visual/hold feedback.
 /// A shared, non-recognizing window observer avoids stacking UIKit's scroll
 /// delivery delay with Android's 100ms indication delay. Native Button remains
 /// the sole owner of activation; no scroll delegate or recognizer is replaced.
@@ -299,6 +299,8 @@ struct ZTransferButtonScrollContext: UIViewRepresentable {
     static func dismantleUIView(_ view: Probe, coordinator: ()) { view.detach() }
     final class Probe: UIView {
         weak var motion: ZTransferButtonMotionController?
+        var onPressChanged: ((Bool) -> Void)?
+        var maximumMovement: CGFloat = 8
         weak var scroll: UIScrollView?
         weak var observer: PressObserver?
         override func didMoveToWindow() { super.didMoveToWindow(); report() }
@@ -330,6 +332,10 @@ struct ZTransferButtonScrollContext: UIViewRepresentable {
             observer?.remove(self)
             observer = nil; scroll = nil
             motion?.observesPhysicalPress = false
+        }
+        func pressChanged(_ pressed: Bool) {
+            motion?.physicalPressChanged(pressed)
+            onPressChanged?(pressed)
         }
         func accepts(_ touch: UITouch) -> Bool {
             guard let window, bounds.width > 0, bounds.height > 0,
@@ -366,14 +372,16 @@ struct ZTransferButtonScrollContext: UIViewRepresentable {
             contact = touch; origin = touch.location(in: view)
             for probe in probes.allObjects where probe.accepts(touch) {
                 held.add(probe)
-                probe.motion?.physicalPressChanged(true)
+                probe.pressChanged(true)
             }
         }
         override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
             guard let contact else { return }
             let point = contact.location(in: view)
-            if hypot(point.x - origin.x, point.y - origin.y) > 8 {
-                cancelHeld()
+            let distance = hypot(point.x - origin.x, point.y - origin.y)
+            for probe in held.allObjects where distance > probe.maximumMovement {
+                probe.pressChanged(false)
+                held.remove(probe)
             }
         }
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -382,16 +390,43 @@ struct ZTransferButtonScrollContext: UIViewRepresentable {
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { cancel() }
         override func reset() { super.reset(); cancelHeld(); contact = nil }
         func remove(_ probe: Probe) {
-            if held.contains(probe) { probe.motion?.physicalPressChanged(false); held.remove(probe) }
+            if held.contains(probe) { probe.pressChanged(false); held.remove(probe) }
             probes.remove(probe)
             if probes.allObjects.isEmpty { view?.removeGestureRecognizer(self) }
         }
         private func cancelHeld() {
-            for probe in held.allObjects { probe.motion?.physicalPressChanged(false) }
+            for probe in held.allObjects { probe.pressChanged(false) }
             held.removeAllObjects()
         }
         private func cancel() {
             cancelHeld(); contact = nil; state = .failed
+        }
+    }
+}
+
+/// Shares the existing non-recognizing window observer. No recognizer is
+/// attached to the photo's exclusive tap/hold gesture, so feedback cannot
+/// change its timing or consume a tap/scroll. Only reverse-transfer cells use it.
+struct ZTransferHoldTouchObservation: UIViewRepresentable {
+    let haptics: ZTransferHaptics
+    let durationMilliseconds: Int
+    let maximumMovement: CGFloat
+    func makeUIView(context: Context) -> ZTransferButtonScrollContext.Probe {
+        let view = ZTransferButtonScrollContext.Probe()
+        view.isUserInteractionEnabled = false
+        configure(view)
+        return view
+    }
+    func updateUIView(_ view: ZTransferButtonScrollContext.Probe, context: Context) {
+        configure(view)
+        view.report()
+    }
+    static func dismantleUIView(_ view: ZTransferButtonScrollContext.Probe, coordinator: ()) { view.detach() }
+    private func configure(_ view: ZTransferButtonScrollContext.Probe) {
+        view.maximumMovement = maximumMovement
+        view.onPressChanged = { pressed in
+            if pressed { haptics.startProgressiveHold(durationMilliseconds: durationMilliseconds) }
+            else { haptics.cancelProgressiveHold() }
         }
     }
 }

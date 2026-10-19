@@ -295,6 +295,26 @@ struct NativeAmbientPulse: Equatable {
         let eased = (TipAttentionValues(elapsed: elapsed).buttonScale - 1) / 0.09
         return minimum + (maximum - minimum) * eased
     }
+
+    /// Shared by ambient fills and the monitor's loading glyph. The render
+    /// server interpolates opacity; no display link or SwiftUI frame publishing.
+    @MainActor
+    func install(on layer: CALayer, key: String, visible: Bool) {
+        layer.removeAnimation(forKey: key)
+        let now = Date()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        layer.opacity = Float(opacity(at: now))
+        CATransaction.commit()
+        guard breathing, !paused, visible else { return }
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = minimum; animation.toValue = maximum
+        animation.duration = halfPeriod
+        animation.autoreverses = true; animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
+        animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil)
+            - max(0, now.timeIntervalSince(origin)).truncatingRemainder(dividingBy: halfPeriod * 2)
+        layer.add(animation, forKey: key)
+    }
 }
 
 struct NativeAmbientFill: UIViewRepresentable {
@@ -327,20 +347,7 @@ final class NativeAmbientFillView: UIView {
     }
     override func didMoveToWindow() { super.didMoveToWindow(); install() }
     private func install() {
-        layer.removeAnimation(forKey: "ambient.opacity")
         guard let pulse else { return }
-        let now = Date()
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        layer.opacity = Float(pulse.opacity(at: now))
-        CATransaction.commit()
-        guard pulse.breathing, !pulse.paused, window != nil else { return }
-        let animation = CABasicAnimation(keyPath: "opacity")
-        animation.fromValue = pulse.minimum; animation.toValue = pulse.maximum
-        animation.duration = pulse.halfPeriod
-        animation.autoreverses = true; animation.repeatCount = .infinity
-        animation.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
-        animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil)
-            - max(0, now.timeIntervalSince(pulse.origin)).truncatingRemainder(dividingBy: pulse.halfPeriod * 2)
-        layer.add(animation, forKey: "ambient.opacity")
+        pulse.install(on: layer, key: "ambient.opacity", visible: window != nil)
     }
 }

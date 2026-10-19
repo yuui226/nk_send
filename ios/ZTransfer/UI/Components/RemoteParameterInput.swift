@@ -56,14 +56,21 @@ struct RemoteParameterInput: UIViewRepresentable {
     let onEnd: () -> Void
 
     func makeUIView(context: Context) -> InputView { InputView() }
-    func updateUIView(_ view: InputView, context: Context) { view.configure(self) }
-    static func dismantleUIView(_ view: InputView, coordinator: ()) { view.recognizer.cancel(notify: false) }
+    func updateUIView(_ view: InputView, context: Context) {
+        view.configure(self, foreground: context.environment.scenePhase == .active,
+                       colorScheme: context.environment.colorScheme)
+    }
+    static func dismantleUIView(_ view: InputView, coordinator: ()) {
+        view.recognizer.cancel(notify: false)
+        view.loadingLabel?.setActive(false)
+    }
 
     final class InputView: UIView {
         var configuration: RemoteParameterInput?
         let recognizer = VerticalGesture()
         private lazy var valueElement = ActionElement(accessibilityContainer: self)
         private lazy var autoElement = ActionElement(accessibilityContainer: self)
+        private(set) var loadingLabel: RemoteParameterLoadingLabel?
         override init(frame: CGRect) {
             super.init(frame: frame)
             isOpaque = false
@@ -72,13 +79,24 @@ struct RemoteParameterInput: UIViewRepresentable {
             addGestureRecognizer(recognizer)
         }
         required init?(coder: NSCoder) { nil }
-        func configure(_ next: RemoteParameterInput) {
+        func configure(_ next: RemoteParameterInput, foreground: Bool = true, colorScheme: ColorScheme = .light) {
             if next.configuration.gestureKey != configuration?.configuration.gestureKey {
                 // The wheel's configure() owns key-change cancellation. Do not
                 // publish a second state mutation from updateUIView.
                 recognizer.cancel(notify: false)
             }
             configuration = next
+            // Reuse the existing native input host. A second representable (or
+            // hosting controller) for this glyph adds needless cold layout work.
+            if next.configuration.descriptor == nil && next.configuration.autoEnabled != true {
+                let label = loadingLabel ?? RemoteParameterLoadingLabel()
+                if loadingLabel == nil { loadingLabel = label; addSubview(label) }
+                label.textColor = UIColor(ZTransferColors.secondaryText).resolvedColor(with:
+                    UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light))
+                label.setActive(foreground)
+            } else {
+                loadingLabel?.removeFromSuperview(); loadingLabel = nil
+            }
             valueElement.accessibilityIdentifier = next.identifier
             valueElement.accessibilityLabel = next.label
             valueElement.accessibilityValue = next.value
@@ -102,6 +120,15 @@ struct RemoteParameterInput: UIViewRepresentable {
             super.layoutSubviews()
             valueElement.accessibilityFrameInContainerSpace = bounds
             autoElement.accessibilityFrameInContainerSpace = CGRect(x: bounds.width - 44, y: 0, width: 44, height: 30)
+            if let loadingLabel {
+                let geometry = RemoteParameterTileGeometry(width: bounds.width, height: bounds.height)
+                if loadingLabel.font.pointSize != geometry.valueFontSize {
+                    loadingLabel.font = .monospacedSystemFont(ofSize: geometry.valueFontSize, weight: .semibold)
+                }
+                loadingLabel.bounds.size = CGSize(width: loadingLabel.intrinsicContentSize.width,
+                                                  height: geometry.valueLineHeight)
+                loadingLabel.center = CGPoint(x: bounds.midX, y: bounds.midY)
+            }
         }
         func deliver(_ events: [RemoteParameterTouch.Event]) {
             guard let c = configuration else { return }
@@ -169,5 +196,30 @@ struct RemoteParameterInput: UIViewRepresentable {
             contacts.removeAll()
             input?.deliver(tracking.cancel())
         }
+    }
+}
+
+/// Android ParamTile: 0.25↔0.55, tween(900), FastOutSlowIn, Reverse.
+/// Only the unloaded glyph changes opacity; the tile/wheel never publishes
+/// loading frames. Ready/read-only/AUTO text keeps its SwiftUI rendering.
+final class RemoteParameterLoadingLabel: UILabel {
+    private var pulse = NativeAmbientPulse(origin: Date(), minimum: 0.25, maximum: 0.55,
+        halfPeriod: 0.9, restingOpacity: 0.25, breathing: true, paused: true)
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        text = "—"; textAlignment = .center
+        isUserInteractionEnabled = false; isAccessibilityElement = false
+        layer.opacity = 0.25
+    }
+    required init?(coder: NSCoder) { nil }
+    func setActive(_ active: Bool) {
+        let paused = !active
+        guard pulse.paused != paused else { return }
+        pulse.paused = paused
+        install()
+    }
+    override func didMoveToWindow() { super.didMoveToWindow(); install() }
+    private func install() {
+        pulse.install(on: layer, key: "parameter.loading", visible: window != nil)
     }
 }

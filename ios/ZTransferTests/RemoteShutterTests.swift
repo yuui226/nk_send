@@ -68,7 +68,7 @@ final class RemoteShutterTests: XCTestCase {
         let focus = expectation(description: "300ms focus callback")
         var releases: [Bool] = []
         var taps = 0
-        controller.onFocus = { focus.fulfill(); haptics.tick() }
+        controller.onFocus = { focus.fulfill(); haptics.play(.selection) }
         controller.onRelease = { releases.append($0) }
         controller.onQuickTap = { taps += 1 }
         controller.down()

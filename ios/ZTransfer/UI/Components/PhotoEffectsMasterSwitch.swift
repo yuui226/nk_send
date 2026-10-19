@@ -74,7 +74,7 @@ struct PhotoEffectsMasterSwitch: View {
         let colors = palette
         let motion = clock.motion ?? .init(checked: checked, accent: colors[0], foreground: colors[1], secondary: colors[2])
         Button {
-            ZTransferHaptics.shared.tick()
+            ZTransferHaptics.shared.play(.toggle)
             onCheckedChange(!checked)
         } label: {
             Canvas { context, _ in
@@ -89,7 +89,7 @@ struct PhotoEffectsMasterSwitch: View {
         .buttonStyle(.plain)
         .accessibilityRepresentation {
             Toggle(AppLocalized.resource("photo_effects"), isOn: Binding(get: { checked }, set: {
-                ZTransferHaptics.shared.tick(); onCheckedChange($0)
+                ZTransferHaptics.shared.play(.toggle); onCheckedChange($0)
             }))
             .accessibilityIdentifier("photo-effects-master-switch")
         }

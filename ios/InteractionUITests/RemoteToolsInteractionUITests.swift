@@ -394,7 +394,25 @@ final class RemoteToolsInteractionUITests: XCTestCase {
         app.buttons["open-monitor"].tap()
         let manage = app.buttons["remote-tools-manage"]
         XCTAssertTrue(manage.waitForExistence(timeout: 10))
-        manage.tap()
+        func tapSettledManager() {
+            // Hiding HD changes three rows to two. The fixed manager springs
+            // across rows; XCTest's idle wait does not observe our
+            // finite display link. Target the settled button, not a coordinate
+            // captured while it is still travelling. This test covers editing
+            // and drop cancellation, not tapping an intentionally moving target.
+            var last = CGRect.null
+            var stableSince = Date.distantPast
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let frame = manage.frame
+                guard !frame.isEmpty, frame == last else {
+                    last = frame; stableSince = Date(); return false
+                }
+                return Date().timeIntervalSince(stableSince) >= 0.35 && manage.isHittable
+            }, object: manage)
+            XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
+            manage.tap()
+        }
+        tapSettledManager()
         let state = app.staticTexts["remote-tool-state"]
         func expect(_ text: String) {
             let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", text), object: state)
@@ -416,19 +434,19 @@ final class RemoteToolsInteractionUITests: XCTestCase {
         expect("hidden=hd")
         hd.press(forDuration: 0.05, thenDragTo: fps)
         expect("hidden=hd")
-        manage.tap()
+        tapSettledManager()
         XCTAssertFalse(hd.exists)
-        manage.tap()
+        tapSettledManager()
         XCTAssertTrue(hd.waitForExistence(timeout: 5))
         // iOS on-device recording is intentionally unavailable (2026-10-18).
         XCTAssertFalse(app.buttons["remote-tool-record"].exists)
         for id in ["fps", "histogram", "grid", "exposure", "desqueeze", "level", "white_balance", "focus_area", "lock"] {
             app.buttons["remote-tool-\(id)"].tap()
         }
-        manage.tap()
+        tapSettledManager()
         XCTAssertTrue(manage.isHittable)
         XCTAssertFalse(fps.exists)
-        manage.tap()
+        tapSettledManager()
         XCTAssertTrue(fps.waitForExistence(timeout: 5))
         app.buttons["remote-monitor-back"].tap()
         XCTAssertTrue(manage.exists)

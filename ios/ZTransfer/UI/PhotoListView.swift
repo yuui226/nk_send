@@ -40,32 +40,6 @@ private struct PhotoListTopControlsTransition: AnimatableModifier {
     }
 }
 
-private struct PhotoListWorkspaceTransition: AnimatableModifier {
-    var progress: CGFloat
-    let horizontalFraction: CGFloat
-    let fadedOpacity: CGFloat
-
-    nonisolated var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        GeometryReader { proxy in
-            content
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .opacity(fadedOpacity + (1 - fadedOpacity) * progress)
-                .offset(x: proxy.size.width * horizontalFraction * (1 - progress))
-        }
-    }
-}
-
-private let photoQueueWorkspaceAnimation =
-    // Android Motion.queuePageSlide: 320 ms FastOutSlowIn. A fixed-duration
-    // curve also reverses cleanly from the current frame without inheriting
-    // stale spring velocity after a rapid back action.
-    Animation.timingCurve(0.4, 0.0, 0.2, 1.0, duration: 0.32)
-
 /// Android's grid uses the system long-press detector. The user requested a
 /// faster iOS preview on 2026-10-19: 250 → 200ms, for both single/burst images.
 /// Keep the 12pt movement cancellation and the separate transfer threshold.
@@ -80,8 +54,11 @@ private let photoTransferLongPressDuration = 0.25
 private struct PhotoCellInput: ViewModifier {
     var enabled: Bool
     var duration: Double
+    var feedbackForTransfer: Bool
     var onTap: () -> Void
     var onHold: () -> Void
+    @State private var haptics = ZTransferHaptics()
+    @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
         if enabled {
@@ -90,12 +67,25 @@ private struct PhotoCellInput: ViewModifier {
                     .exclusively(before: TapGesture())
                     .onEnded { value in
                         switch value {
-                        case .first(true): onHold()
+                        case .first(true):
+                            // The accepted enqueue owns the one confirmation.
+                            // Stop anticipation without changing gesture recognition.
+                            haptics.cancelProgressiveHold()
+                            onHold()
                         case .second: onTap()
                         default: break
                         }
                     }
             )
+            .background {
+                if feedbackForTransfer {
+                    ZTransferHoldTouchObservation(haptics: haptics,
+                        durationMilliseconds: Int(duration * 1_000), maximumMovement: 12)
+                }
+            }
+            .onChange(of: feedbackForTransfer) { _ in haptics.cancelProgressiveHold() }
+            .onChange(of: scenePhase) { if $0 != .active { haptics.cancelProgressiveHold() } }
+            .onDisappear { haptics.cancelProgressiveHold() }
         } else {
             content
         }
@@ -322,8 +312,9 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var previewReturnNonce = 0
     @State private var showingFilter = false
     @SceneStorage("camera_workspace_queue") private var showingQueue = false
-    @State private var queueTopControlsVisible = false
-    @State private var queueWorkspaceTransitionNonce = 0
+    @StateObject private var queueWorkspace = WorkspacePageClock(side: .right)
+    @State private var filesScrollPosition = WorkspaceScrollPosition()
+    @State private var queueScrollPosition = WorkspaceScrollPosition()
     @State private var queueControlActionNonce: UInt64 = 0
     @State private var queuePauseHint = PhotoListHintState()
     @AppStorage("defer_transfer_start") private var deferTransferStart = false
@@ -382,8 +373,6 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var effectPreviewAttemptKey: String?
     @State private var effectPreviewLoadingKey: String?
     @State private var topControlsVisible = true
-    @State private var photoListViewportBounds: CGRect = .zero
-    @State private var photoListTopControlsBounds: CGRect = .zero
     @State private var queueTargetBounds: CGRect = .zero
     @State private var queueFlights: [PhotoListQueueFlight] = []
     @State private var queueFlightTasks: [UUID: Task<Void, Never>] = [:]
@@ -426,36 +415,35 @@ private struct PhotoListSessionTaskID: Equatable {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = ButtonInteractionTrace.recordNow("files-workspace-body")
+        #endif
         let layout = scrollLayout
         let grid = gridCache.snapshot(for: layout)
         return ZStack(alignment: .top) {
             ZTransferColors.background.ignoresSafeArea()
-            if showingQueue {
+            if queueWorkspace.pages.contains(true) {
                 TransferQueueView(model: queueModel, session: session, directory: directoryStore,
                                   isSessionConnected: isSessionConnected,
                                   onRetrySTA: onRetrySTA,
                                   showsTopControls: false,
+                                  scrollPosition: queueScrollPosition,
                                   controlActionNonce: queueControlActionNonce,
                                   hasIndexedOriginal: { item in
                                       model.hasTransferredOriginal(item.file, folderName: item.destinationFolderName,
                                                                    directory: directoryStore.directoryURL)
                                   },
                                   onNavigateBack: dismissQueuePage)
-                .transition(.asymmetric(
-                    insertion: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: 1, fadedOpacity: 0.72),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: 1, fadedOpacity: 0.72)
-                    ),
-                    removal: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: 1, fadedOpacity: 0.72),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: 1, fadedOpacity: 0.72)
-                    )
-                ))
+                .modifier(WorkspacePageEffect(frame: queueWorkspace.destination))
+                .modifier(WorkspacePageInput(enabled: showingQueue))
+                .transition(.identity)
                 .zIndex(1)
-            } else {
+            }
+            if queueWorkspace.pages.contains(false) {
             ScrollViewReader { reader in
                 ScrollView(showsIndicators: false) {
                     Color.clear.frame(height: 1).id("photo-list-top")
+                        .background(WorkspaceScrollRestoration(position: filesScrollPosition))
                         .background(PhotoListScrollActivity(onScroll: { atTop in
                             if !atTop {
                                 #if DEBUG
@@ -610,6 +598,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                         .modifier(PhotoCellInput(
                                             enabled: entry.isPhoto,
                                             duration: tapToPreview ? photoTransferLongPressDuration : photoPreviewLongPressDuration,
+                                            feedbackForTransfer: tapToPreview,
                                             onTap: { handleTap(entry, file: file) },
                                             onHold: {
                                                 guard !burstAnimationBusy, collapsingDay == nil,
@@ -700,7 +689,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     updateBackTopPosition()
                 }
                 .onPreferenceChange(PhotoListViewportPreferenceKey.self) { bounds in
-                    photoListViewportBounds = bounds
+                    scrollGeometry.viewportBounds = bounds
                     updateBackTopPosition()
                 }
                 .onPreferenceChange(PhotoListCellBoundsPreferenceKey.self) { bounds in
@@ -756,21 +745,11 @@ private struct PhotoListSessionTaskID: Equatable {
                         .frame(height: photoListTopControlsHeight)
                         .allowsHitTesting(false)
                 }
-                // The two workspace pages are a horizontal pair. The files
-                // page enters from the left when returning from the queue and
-                // uses Android's one-third parallax plus opacity hand-off.
-                .transition(.asymmetric(
-                    insertion: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: -1 / 3, fadedOpacity: 0.5),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: -1 / 3, fadedOpacity: 0.5)
-                    ),
-                    removal: .modifier(
-                        active: PhotoListWorkspaceTransition(progress: 0, horizontalFraction: -1 / 3, fadedOpacity: 0.5),
-                        identity: PhotoListWorkspaceTransition(progress: 1, horizontalFraction: -1 / 3, fadedOpacity: 0.5)
-                    )
-                ))
-                .zIndex(0)
             }
+            .modifier(WorkspacePageEffect(frame: queueWorkspace.source))
+            .modifier(WorkspacePageInput(enabled: !showingQueue && !queueWorkspace.transitioning))
+            .transition(.identity)
+            .zIndex(0)
             }
             if selectedFile != nil { previewOverlay }
             workspaceTopControls
@@ -784,7 +763,28 @@ private struct PhotoListSessionTaskID: Equatable {
                 session: isSessionConnected ? session : nil
             )
         }
+        .modifier(WorkspacePageLifecycle(clock: queueWorkspace, presented: showingQueue))
         #if DEBUG
+        .task {
+            // Explicit local benchmark: no XCTest/AX snapshot polling while
+            // measuring the real first mount. Never runs in a normal launch.
+            let arguments = ProcessInfo.processInfo.arguments
+            guard arguments.contains("--list-admission-ui-test"),
+                  arguments.contains("--photo-hold-trace"),
+                  arguments.contains("--monitor-cold-benchmark") else { return }
+            do {
+                try await Task.sleep(for: .seconds(3))
+                ButtonInteractionTrace.reset()
+                for _ in 0..<2 {
+                    openRemote()
+                    try await Task.sleep(for: .seconds(2))
+                    showingRemote = false
+                    try await Task.sleep(for: .seconds(1))
+                }
+                let result = URL.documentsDirectory.appendingPathComponent("monitor-cold-benchmark.json")
+                try Data(ButtonInteractionTrace.snapshot().utf8).write(to: result, options: .atomic)
+            } catch { /* Cancellation discards this diagnostic run. */ }
+        }
         .overlay(alignment: .bottomLeading) {
             if ProcessInfo.processInfo.arguments.contains("--list-admission-ui-test") {
                 Text("flights=\(queueFlights.count);held=\(heldFlightCount)")
@@ -1092,7 +1092,7 @@ private struct PhotoListSessionTaskID: Equatable {
     private var photoListTopLeftControls: some View {
         HStack(spacing: 8) {
             Button {
-                ZTransferHaptics.shared.tick()
+                ZTransferHaptics.shared.play(.navigation)
                 transferDirectoryAttention = false
                 showingSettings = true
             } label: {
@@ -1121,7 +1121,7 @@ private struct PhotoListSessionTaskID: Equatable {
                 active: ZTransferColors.accentYellow
             )
             Button {
-                ZTransferHaptics.shared.tick()
+                ZTransferHaptics.shared.play(.navigation)
                 showingFilter.toggle()
             } label: {
                 PhotoListFilterIcon(
@@ -1163,10 +1163,25 @@ private struct PhotoListSessionTaskID: Equatable {
     /// win the gesture arena ahead of a button.
     private var workspaceTopControls: some View {
         HStack(spacing: 8) {
-            if queueTopControlsVisible {
-                queuePageTopControls
-            } else if !showingQueue && topControlsVisible {
-                photoListTopLeftControls
+            ZStack(alignment: .leading) {
+                if queueWorkspace.pages.contains(false) {
+                    ZStack(alignment: .leading) {
+                        if topControlsVisible { photoListTopLeftControls }
+                    }
+                    .modifier(WorkspacePageEffect(frame: queueWorkspace.source))
+                    .modifier(WorkspacePageInput(enabled: !showingQueue && !queueWorkspace.transitioning))
+                    .transition(.identity)
+                }
+                if queueWorkspace.pages.contains(true) {
+                    queuePageTopControls
+                        // Give the fixed composite its 16pt shadow margin,
+                        // without shifting controls or changing hit bounds.
+                        .padding(.bottom, 16)
+                        .modifier(WorkspacePageEffect(frame: queueWorkspace.header))
+                        .padding(.bottom, -16)
+                        .modifier(WorkspacePageInput(enabled: showingQueue))
+                        .transition(.identity)
+                }
             }
 
             Spacer(minLength: 0)
@@ -1192,14 +1207,12 @@ private struct PhotoListSessionTaskID: Equatable {
         }
         .zIndex(3)
         .onPreferenceChange(PhotoListTopControlsBoundsPreferenceKey.self) {
-            photoListTopControlsBounds = $0
+            scrollGeometry.topControlsBounds = $0
         }
     }
 
-    /// Android keeps the queue page's back/signal group outside the moving
-    /// page. It fades in only after the 320 ms page slide has settled, and
-    /// disappears immediately when returning so it never overlaps the list
-    /// header that is still sliding into place.
+    /// FilesQueueWorkspace's fixed header fades with the incoming page
+    /// (100+200ms), and exits in 80ms. The trailing capsule never translates.
     private var queuePageTopControls: some View {
         HStack(spacing: 8) {
             Button(action: dismissQueuePage) {
@@ -1210,6 +1223,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            .accessibilityIdentifier("workspace-queue-back")
 
             CameraSignalControl(isUSB: presentationMode == .usb,
                                 wirelessMode: presentationMode == .sta ? .sta : .ap,
@@ -1222,26 +1236,12 @@ private struct PhotoListSessionTaskID: Equatable {
 
     private func presentQueuePage() {
         guard !showingQueue else { return }
-        queueWorkspaceTransitionNonce &+= 1
-        let nonce = queueWorkspaceTransitionNonce
-        queueTopControlsVisible = false
-        withAnimation(photoQueueWorkspaceAnimation) { showingQueue = true }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 320_000_000)
-            guard showingQueue, queueWorkspaceTransitionNonce == nonce else { return }
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.14)) {
-                queueTopControlsVisible = true
-            }
-        }
+        showingQueue = true
     }
 
     private func dismissQueuePage() {
         guard showingQueue else { return }
-        queueWorkspaceTransitionNonce &+= 1
-        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.08)) {
-            queueTopControlsVisible = false
-        }
-        withAnimation(photoQueueWorkspaceAnimation) { showingQueue = false }
+        showingQueue = false
     }
 
     /// Android keeps queue execution and the queue pill outside the files ↔
@@ -1264,13 +1264,13 @@ private struct PhotoListSessionTaskID: Equatable {
                         guard queueModel.snapshot.isTransferring,
                               !queueModel.snapshot.pauseAfterCurrent else { return }
                         queueControlActionNonce &+= 1
-                        ZTransferHaptics.shared.tick()
+                        ZTransferHaptics.shared.play(.action)
                         queueModel.pause()
                         queuePauseHint.show(AppLocalized.resource("pause_after_current_hint"), duration: .milliseconds(2200))
                     case .start:
                         guard canStart, let directory = directoryStore.directoryURL else { return }
                         queueControlActionNonce &+= 1
-                        ZTransferHaptics.shared.tick()
+                        ZTransferHaptics.shared.play(.action)
                         queueModel.start(session: transferSession, directory: directory)
                     }
                 }
@@ -1280,6 +1280,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     progressModel: queueModel.progressModel, heldCount: heldFlightCount,
                     onClick: presentQueuePage)
                     .accessibilityLabel(AppLocalized.resource("cd_transfer"))
+                    .accessibilityIdentifier("workspace-queue-open")
             }
         }
         .modifier(QueueControlsCatchEffect(trigger: queueImpact))
@@ -1372,7 +1373,7 @@ private struct PhotoListSessionTaskID: Equatable {
                 if remoteExpanded {
                     openRemote()
                 } else {
-                    ZTransferHaptics.shared.tick()
+                    ZTransferHaptics.shared.play(.navigation)
                     remoteExpandedAwayFromTop = true
                 }
             }
@@ -1565,7 +1566,7 @@ private struct PhotoListSessionTaskID: Equatable {
     private func enqueueSection(_ files: [CameraFile], source: CGRect?) {
         guard admitManualTransfer(files) else { return }
         guard let first = files.first else { return }
-        ZTransferHaptics.shared.tick()
+        ZTransferHaptics.shared.play(.enqueue)
         startListQueueFlight(for: first, count: files.count, from: source, packFiles: files)
         if deferTransferStart {
             queueModel.enqueue(files, storageMode: storageMode, effects: effectsStore.settings)
@@ -1578,7 +1579,7 @@ private struct PhotoListSessionTaskID: Equatable {
     private func handleTap(_ entry: PhotoGridEntry, file: CameraFile) {
         if case .burst = entry { return }
         if tapToPreview {
-            ZTransferHaptics.shared.longPress()
+            ZTransferHaptics.shared.play(.preview)
             openPreview(file, anchor: .photo(file.id))
         } else {
             enqueueFileFromList(file)
@@ -1593,12 +1594,12 @@ private struct PhotoListSessionTaskID: Equatable {
         ButtonInteractionTrace.recordNow("photo-long-press")
         #endif
         if case let .burst(group) = entry {
-            ZTransferHaptics.shared.longPress()
+            ZTransferHaptics.shared.play(.preview)
             openPreview(group.files[0], anchor: .burst(group.id), expandingBurst: group.id)
         } else if tapToPreview {
             enqueueFileFromList(file)
         } else {
-            ZTransferHaptics.shared.longPress()
+            ZTransferHaptics.shared.play(.preview)
             openPreview(file, anchor: .photo(file.id))
         }
     }
@@ -1606,13 +1607,13 @@ private struct PhotoListSessionTaskID: Equatable {
     private func enqueueFileFromList(_ file: CameraFile) {
         guard admitManualTransfer([file]) else { return }
         if !deferTransferStart {
-            ZTransferHaptics.shared.tick()
+            ZTransferHaptics.shared.play(.enqueue)
             startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
                 .photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
             queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL,
                                storageMode: storageMode, effects: effectsStore.settings)
         } else {
-            ZTransferHaptics.shared.tick()
+            ZTransferHaptics.shared.play(.enqueue)
             startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
                 .photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
             queueModel.enqueue(file, storageMode: storageMode, effects: effectsStore.settings)
@@ -1667,11 +1668,11 @@ private struct PhotoListSessionTaskID: Equatable {
     /// safe region is reduced; using the measured slot edge avoids subtracting
     /// its 36pt twice on either implementation.
     private var photoListVisibleViewport: CGRect {
-        let measured = photoListViewportBounds
+        let measured = scrollGeometry.viewportBounds
         let base = measured.width > 0 && measured.height > 0
             ? measured
             : UIScreen.main.bounds
-        let measuredControls = photoListTopControlsBounds
+        let measuredControls = scrollGeometry.topControlsBounds
         let top = measuredControls.width > 0 && measuredControls.height > 0
             ? max(base.minY, measuredControls.maxY)
             : base.minY + photoListTopControlsHeight
@@ -2681,7 +2682,7 @@ struct QueuePill: View {
                 if !input.hasCancelled {
                     finishProgressVisible = celebrate
                     showDoneLabel = true
-                    if celebrate { ZTransferHaptics.shared.success() }
+                    if celebrate { ZTransferHaptics.shared.play(.transferComplete) }
                     doneTask?.cancel()
                     doneTask = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 1_800_000_000)
@@ -3609,6 +3610,10 @@ struct QueueTopPillPresentationHarness: View {
 /// dismissal calculations. Keep current snapshots without invalidating the
 /// whole grid, regrouping every day and rebuilding the preview each frame.
 final class PhotoListGeometryCache {
+    // Read at interaction/visibility decisions. Workspace layer translation
+    // changes global coordinates every frame, not the grid layout or catalog.
+    var viewportBounds: CGRect = .zero
+    var topControlsBounds: CGRect = .zero
     var scrollItemIndices: [String: Int] = [:]
     var scrollItemFrames: [String: CGRect] = [:]
     var photoListScrollOffset: CGFloat = 0

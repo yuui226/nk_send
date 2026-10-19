@@ -87,7 +87,11 @@ struct ConnectionPage: View {
                         celebrationStart: celebrationStart,
                         previewPremiumCelebration: model.previewsPremiumConnectionAnimation,
                         onWirelessModeChanged: model.select(wirelessMode:),
-                        onConnect: { Task { await model.connectSelectedWiFi() } },
+                        onConnect: {
+                            guard !model.staBusy else { return }
+                            ZTransferHaptics.shared.play(.action)
+                            Task { await model.connectSelectedWiFi() }
+                        },
                         onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
                         onSTAHelpRequested: {
                             tipsWirelessMode = .sta
@@ -121,7 +125,7 @@ struct ConnectionPage: View {
                     ConnectionSceneFadeTimeline(start: celebrationStart) {
                         HStack(spacing: 8) {
                             Button {
-                                ZTransferHaptics.shared.tick()
+                                ZTransferHaptics.shared.play(.navigation)
                                 showSettings = true
                             } label: {
                                 DoubleZMark(tint: ZTransferColors.primaryText)
@@ -246,10 +250,10 @@ struct ConnectionPage: View {
             let remaining = max(0, 0.62 - Date().timeIntervalSince(celebrationStart))
             try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             guard !Task.isCancelled, model.cameraSession != nil else { return }
-            ZTransferHaptics.shared.success()
+            ZTransferHaptics.shared.play(.connectionReady)
         }
         .onChange(of: model.state.hapticOutcome(connectedViaUSB: model.cameraSession?.isUSB)) { outcome in
-            if outcome.isFailure { ZTransferHaptics.shared.failure() }
+            if outcome.isFailure { ZTransferHaptics.shared.play(.failure) }
         }
     }
 

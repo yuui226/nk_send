@@ -37,7 +37,12 @@ final class RemoteRecordingElapsed: ObservableObject {
 }
 
 @MainActor
-final class RemoteViewModel: ObservableObject {
+final class RemoteViewModel: @preconcurrency ObservableObject {
+    // These controls have no per-property subscribers. Publish the same willSet
+    // edge directly, avoiding Combine's first-observation reflection over this
+    // large camera model and an unused publisher allocation for every property.
+    // Frame-only state continues to use frameUpdates below.
+    let objectWillChange = ObservableObjectPublisher()
     let frameUpdates = RemoteFrameUpdates()
     private(set) var state = RemoteState() {
         willSet {
@@ -72,7 +77,7 @@ final class RemoteViewModel: ObservableObject {
         get { focusDiagnosticOutput.text }
         set { focusDiagnosticOutput.replace(newValue) }
     }
-    @Published private(set) var focusDiagnosticRunning = false
+    private(set) var focusDiagnosticRunning = false { willSet { objectWillChange.send() } }
     private(set) var frameHistogram: [Int]? { willSet { frameUpdates.invalidate() } }
     private(set) var frameHistogramRGB: [[Int]]? { willSet { frameUpdates.invalidate() } }
     private(set) var frameWaveform: [[Int]]? { willSet { frameUpdates.invalidate() } }
@@ -80,16 +85,17 @@ final class RemoteViewModel: ObservableObject {
     private(set) var frameFalseColorImage: CGImage? { willSet { frameUpdates.invalidate() } }
     private(set) var frameWaveformImage: CGImage? { willSet { frameUpdates.invalidate() } }
     private(set) var frameFalseColorSize: CGSize = .zero { willSet { frameUpdates.invalidate() } }
-    @Published private(set) var exposureMeterEV: Float?
+    private(set) var exposureMeterEV: Float? { willSet { objectWillChange.send() } }
     private var exposureMeterTask: Task<Void, Never>?
     private var exposureMeterExpiryTask: Task<Void, Never>?
     private var exposureMeterGeneration: UInt64 = 0
     private var exposureMeterEnabled = false
     private var exposureMeterForeground = true
     private(set) var frameZebraMask: RemoteZebraMask? { willSet { frameUpdates.invalidate() } }
-    @Published private(set) var exposureDescriptors: [RemoteExposureField: RemotePropertyDescriptor] = [:]
+    private(set) var exposureDescriptors: [RemoteExposureField: RemotePropertyDescriptor] = [:] { willSet { objectWillChange.send() } }
     private var exposureDescriptorCache: [Bool: [RemoteExposureField: RemotePropertyDescriptor]] = [:]
-    @Published private(set) var movieMode = false {
+    private(set) var movieMode = false {
+        willSet { objectWillChange.send() }
         didSet {
             if oldValue != movieMode {
                 restartExposureMeter()
@@ -98,50 +104,50 @@ final class RemoteViewModel: ObservableObject {
             }
         }
     }
-    @Published private(set) var movieFormatLabel: String?
-    @Published private(set) var monitorStorageFreeBytes: [UInt32: Int64] = [:]
-    @Published private(set) var monitorStorageSlotCount = 0
-    @Published private(set) var monitorStorageSlotByID: [UInt32: Int] = [:]
-    @Published private(set) var displayWhiteBalanceLabel: String?
-    @Published private(set) var videoDiagnosticLog = ""
-    @Published private(set) var computerControlLog = ""
-    @Published private(set) var videoDiagnosticBusy = false
-    @Published private(set) var cameraToolPanel: RemoteCameraToolController?
-    @Published private(set) var cameraToolWriting = false
+    private(set) var movieFormatLabel: String? { willSet { objectWillChange.send() } }
+    private(set) var monitorStorageFreeBytes: [UInt32: Int64] = [:] { willSet { objectWillChange.send() } }
+    private(set) var monitorStorageSlotCount = 0 { willSet { objectWillChange.send() } }
+    private(set) var monitorStorageSlotByID: [UInt32: Int] = [:] { willSet { objectWillChange.send() } }
+    private(set) var displayWhiteBalanceLabel: String? { willSet { objectWillChange.send() } }
+    private(set) var videoDiagnosticLog = "" { willSet { objectWillChange.send() } }
+    private(set) var computerControlLog = "" { willSet { objectWillChange.send() } }
+    private(set) var videoDiagnosticBusy = false { willSet { objectWillChange.send() } }
+    private(set) var cameraToolPanel: RemoteCameraToolController? { willSet { objectWillChange.send() } }
+    private(set) var cameraToolWriting = false { willSet { objectWillChange.send() } }
     var preferredComputerControl = false
     var onComputerControlPreferenceChanged: ((Bool) -> Void)?
-    @Published private(set) var computerControlEnabled = false
-    @Published private(set) var computerControlBusy = false
+    private(set) var computerControlEnabled = false { willSet { objectWillChange.send() } }
+    private(set) var computerControlBusy = false { willSet { objectWillChange.send() } }
     private var computerControlTask: Task<Void, Never>?
     private var retiringCameraTools: [UUID: Task<Void, Never>] = [:]
     // Android HD changes VGA/XGA size independently of enhanced-frame support.
-    @Published private(set) var hdLiveView = false
-    @Published private(set) var autoISODescriptor: RemotePropertyDescriptor?
-    @Published private(set) var autoISOBusy = false
-    @Published private(set) var effectiveISO: RemotePropertyDescriptor?
+    private(set) var hdLiveView = false { willSet { objectWillChange.send() } }
+    private(set) var autoISODescriptor: RemotePropertyDescriptor? { willSet { objectWillChange.send() } }
+    private(set) var autoISOBusy = false { willSet { objectWillChange.send() } }
+    private(set) var effectiveISO: RemotePropertyDescriptor? { willSet { objectWillChange.send() } }
     private var autoISOMovieMode: Bool?
     private var autoISOCommandTask: Task<Void, Never>?
     private var effectiveISOTask: Task<Void, Never>?
     private var effectiveISOGeneration = 0
     private var pendingSets: [RemoteProperty: Task<Void, Never>] = [:]
     private var pendingSetGenerations: [RemoteProperty: Int] = [:]
-    @Published private(set) var focusModeDescriptor: RemotePropertyDescriptor?
+    private(set) var focusModeDescriptor: RemotePropertyDescriptor? { willSet { objectWillChange.send() } }
     let cameraRecordingElapsed = RemoteRecordingElapsed()
     private(set) var recordingSeconds: Int {
         get { cameraRecordingElapsed.seconds }
         set { cameraRecordingElapsed.set(newValue) }
     }
-    @Published private(set) var monitorHint = RemoteMonitorHint()
-    @Published private(set) var recordingErrorReport = ""
+    private(set) var monitorHint = RemoteMonitorHint() { willSet { objectWillChange.send() } }
+    private(set) var recordingErrorReport = "" { willSet { objectWillChange.send() } }
     var interactionHint: String? { monitorHint.message(for: .interaction) }
-    @Published private(set) var confirmedFocusMarker: RemoteConfirmedFocusMarker?
-    @Published private(set) var halfPressVisualActive = false
+    private(set) var confirmedFocusMarker: RemoteConfirmedFocusMarker? { willSet { objectWillChange.send() } }
+    private(set) var halfPressVisualActive = false { willSet { objectWillChange.send() } }
     private(set) var frameReceivedAtUptime: TimeInterval = 0 { willSet { frameUpdates.invalidate() } }
-    @Published private var recordingOperations = RemoteRecordingOperationGate()
+    private var recordingOperations = RemoteRecordingOperationGate() { willSet { objectWillChange.send() } }
     private(set) var levelPitch: Double?
     private(set) var levelRoll: Double?
-    @Published private(set) var batteryPercent: Int?
-    @Published private(set) var trialEnded = false
+    private(set) var batteryPercent: Int? { willSet { objectWillChange.send() } }
+    private(set) var trialEnded = false { willSet { objectWillChange.send() } }
     let usageMeter: RemoteUsageMeter
 
     var recordingBusy: Bool { recordingOperations.isBusy }
@@ -189,7 +195,7 @@ final class RemoteViewModel: ObservableObject {
     private var displayDetailsTask: Task<Void, Never>?
     private var videoDiagnosticTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
-    @Published private(set) var levelVisible = false
+    private(set) var levelVisible = false { willSet { objectWillChange.send() } }
     private var levelGeneration = 0
     private var clearFrameOnNextSession = true
     private var restartLiveView = false
@@ -197,7 +203,8 @@ final class RemoteViewModel: ObservableObject {
     private var liveViewPaused = false
     private var adoptStartedLiveView = false
     private var disposed = false
-    @Published private(set) var initialLoaded = false {
+    private(set) var initialLoaded = false {
+        willSet { objectWillChange.send() }
         didSet { if oldValue != initialLoaded { restartExposureMeter() } }
     }
     private var batteryDescriptor: RemotePropertyDescriptor?
@@ -208,11 +215,11 @@ final class RemoteViewModel: ObservableObject {
     private var monitorStorageIDsCache: [UInt32]?
     private var displayDetailsMonitoringEnabled = false
     private var displayDetailsGeneration: UInt64 = 0
-    @Published private(set) var exposureProgram: RemotePropertyDescriptor?
+    private(set) var exposureProgram: RemotePropertyDescriptor? { willSet { objectWillChange.send() } }
     private(set) var focusFrameExpired = false {
         willSet { if focusFrameExpired != newValue { frameUpdates.invalidate() } }
     }
-    @Published private(set) var focusValidAfterUptime = 0.0
+    private(set) var focusValidAfterUptime = 0.0 { willSet { objectWillChange.send() } }
     private var focusExpiryTask: Task<Void, Never>?
     private var focusHideTask: Task<Void, Never>?
     private var focusModeRefreshGeneration: UInt64 = 0
@@ -1157,12 +1164,6 @@ final class RemoteViewModel: ObservableObject {
         }
     }
 
-    /// One feedback pulse per camera detent, matching RemoteScreen's
-    /// onValueStep callback. The eventual write is coalesced by the model.
-    func detentFeedback() {
-        haptics.tick()
-    }
-
     private func updateEffectiveISOPolling() {
         effectiveISOGeneration &+= 1
         let generation = effectiveISOGeneration
@@ -1203,7 +1204,7 @@ final class RemoteViewModel: ObservableObject {
         autoISODescriptor = optimistic
         effectiveISO = nil
         updateEffectiveISOPolling()
-        haptics.tick()
+        haptics.play(.toggle)
         autoISOCommandTask = Task { [weak self] in
             guard let self else { return }
             defer { autoISOBusy = false; autoISOCommandTask = nil }
@@ -1392,7 +1393,7 @@ final class RemoteViewModel: ObservableObject {
         var optimistic = descriptor
         optimistic.current = value
         exposureDescriptors[field] = optimistic
-        if feedback { haptics.tick() }
+        if feedback { haptics.play(.selection) }
         pendingSets[property] = Task { [weak self] in
             // Complete the old wire transaction, but discard its stale result.
             // A replacement's 160 ms debounce runs concurrently with that drain.
@@ -1629,7 +1630,7 @@ final class RemoteViewModel: ObservableObject {
         state.focus.tracking = false
         state = state.applying(.focusRequested(focusAreaPoint))
         let requestedPoint = focusAreaPoint
-        haptics.tick()
+        haptics.play(.focusStarted)
         halfPressTask = Task { [weak self] in
             guard let self else { return }
             defer { halfPressTask = nil }
@@ -1639,7 +1640,7 @@ final class RemoteViewModel: ObservableObject {
                 guard !result.timedOut, result.responseCode == PTPConstants.responseOK else { return }
                 setConfirmedFocusMarker(at: requestedPoint, subjectTracking: false)
                 guard halfPressHeld else { return }
-                haptics.tick()
+                haptics.play(.focusLocked)
                 state = state.applying(.focusLocked)
             } catch is CancellationError {
             } catch {
@@ -1680,7 +1681,7 @@ final class RemoteViewModel: ObservableObject {
             guard !stopRequested else { return }
             captureObjectAdded = false
             let deadline = ContinuousClock.now + .seconds(12)
-            haptics.longPress()
+            haptics.play(.shutter)
             do {
                 try await camera.capturePhoto()
                 while !stopRequested && !captureObjectAdded && ContinuousClock.now < deadline {
@@ -1713,7 +1714,7 @@ final class RemoteViewModel: ObservableObject {
             do {
                 await pendingFocus?.value
                 guard !Task.isCancelled, !stopRequested else { return }
-                haptics.longPress()
+                haptics.play(.shutter)
                 switch command {
                 case .start:
                     var result: RemoteMovieStartResult
@@ -1909,7 +1910,7 @@ final class RemoteViewModel: ObservableObject {
         guard state.focus.phase != .focusing else { return }
         confirmedFocusMarker = nil
         state = state.applying(.focusRequested(point))
-        haptics.tick()
+        haptics.play(.focusStarted)
         focusHideTask?.cancel()
         // Android's final implementation uses the full enhanced-frame Live
         // View domain for both StartTracking and ChangeAfArea. The smaller
@@ -1953,7 +1954,7 @@ final class RemoteViewModel: ObservableObject {
                     scheduleFocusHide(after: 1.3)
                 }
                 else {
-                    haptics.tick()
+                    haptics.play(.focusLocked)
                     if result.trackingStarted || result.moveResponseCode == PTPConstants.responseOK {
                         focusAreaPoint = point
                     }
@@ -2032,7 +2033,7 @@ final class RemoteViewModel: ObservableObject {
 
     func cancelTracking() {
         guard state.focus.tracking, !stopRequested, tapFocusTask == nil else { return }
-        haptics.tick()
+        haptics.play(.action)
         state = state.applying(.trackingEnded)
         state.focus.phase = .idle
         state.focus.point = nil

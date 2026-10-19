@@ -16,6 +16,7 @@ struct RemoteExposureTile: View {
     // Only the tile drawing subscribes to display frames, not the monitor.
     @State private var motion = RemoteParameterWheelDriver()
     @State private var presentation = RemoteParameterPresentationCache()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         let configuration = presentation.configuration(descriptor: descriptor, autoEnabled: autoEnabled,
             hasAutoControl: autoEnabled != nil && autoToggle != nil)
@@ -34,8 +35,9 @@ struct RemoteExposureTile: View {
                         if let delta = motion.drag(dy) { onStep(delta) }
                     }, onEnd: { motion.end() })
             }
-            .onAppear { motion.configure(configuration); motion.setActive(true) }
+            .onAppear { motion.configure(configuration); motion.setActive(scenePhase == .active) }
             .onChange(of: configuration) { next in motion.configure(next) }
+            .onChange(of: scenePhase) { motion.setActive($0 == .active) }
             .onDisappear { motion.setActive(false) }
     }
 }
@@ -79,13 +81,10 @@ final class RemoteParameterWheelDriver: NSObject, ObservableObject {
     struct Display: Equatable {
         let dragging: Bool
         let rows: [RemoteParameterWheel.Row]
-        let loadingAlpha: Float
         let showsDragHint: Bool
         init(_ wheel: RemoteParameterWheel) {
             dragging = wheel.dragging
             rows = wheel.configuration.writable ? wheel.rows : []
-            loadingAlpha = wheel.configuration.descriptor == nil && wheel.configuration.autoEnabled != true
-                ? wheel.loadingAlpha : 1
             showsDragHint = wheel.showsDragHint
         }
     }
@@ -94,10 +93,6 @@ final class RemoteParameterWheelDriver: NSObject, ObservableObject {
     private var active = false
     private var link: CADisplayLink?
     var clockRunning: Bool { link != nil }
-    private var needsFrames: Bool {
-        wheel.position.isRunning || wheel.neighbors.isRunning ||
-            (wheel.configuration.descriptor == nil && wheel.configuration.autoEnabled != true)
-    }
     func configure(_ configuration: RemoteParameterWheel.Configuration) {
         guard configuration != wheel.configuration else { return }
         wheel.configure(configuration); publish(); schedule()
@@ -119,7 +114,7 @@ final class RemoteParameterWheelDriver: NSObject, ObservableObject {
         if display != next { display = next }
     }
     private func schedule() {
-        guard active && needsFrames else { stopClock(); return }
+        guard active && wheel.needsFrames else { stopClock(); return }
         if link == nil {
             let next = CADisplayLink(target: ClockTarget(self), selector: #selector(ClockTarget.frame(_:)))
             link = next; next.add(to: .main, forMode: .common)
@@ -199,9 +194,9 @@ private struct RemoteParameterDrawing: View {
                     .foregroundStyle(ZTransferColors.primaryText).opacity(Double(row.alpha))
                     .scaleEffect(CGFloat(row.scale)).offset(y: CGFloat(row.offset))
             }
-        } else {
+        } else if configuration.descriptor != nil {
             valueText(value, geometry)
-                .foregroundStyle(ZTransferColors.secondaryText.opacity(configuration.descriptor == nil ? Double(motion.display.loadingAlpha) : 0.5))
+                .foregroundStyle(ZTransferColors.secondaryText.opacity(0.5))
         }
     }
     private func autoBadge(_ geometry: RemoteParameterTileGeometry) -> some View {

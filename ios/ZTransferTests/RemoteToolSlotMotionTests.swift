@@ -330,7 +330,7 @@ final class RemoteToolbarPerformanceTests: XCTestCase {
             RemoteFixedToolControl(id: $0, view: AnyView(ButtonWitness(id: $0).frame(width: 36, height: 36)))
         }
         let toolbar = RemoteConfiguredToolbar(layout: layout, editing: false, isActive: true,
-            controls: controls, leading: EmptyView(), trailing: trailing, pinnedEndCount: 2,
+            control: { controls[$0] }, leading: EmptyView(), trailing: trailing, pinnedEndCount: 2,
             applyHidden: { _ in }).frame(width: 330)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let host = UIHostingController(rootView: toolbar)
@@ -366,6 +366,58 @@ final class RemoteToolbarPerformanceTests: XCTestCase {
         layout.setVisible(.hd, true)
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertNotNil(find("hd", host.view))
+    }
+
+    func testToolbarBuildsOnlyVisibleToolsAndIncludesHiddenToolsOnlyWhileEditing() async throws {
+        let suite = "toolbar-lazy-renderers-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let layout = RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in })
+        for tool in layout.available where tool != .hd { layout.setVisible(tool, false) }
+        let state = FactoryState()
+        let probe = FactoryProbe()
+        let root = FactoryHarness(layout: layout, state: state, probe: probe)
+        XCTAssertTrue(probe.builds.isEmpty, "Constructing a toolbar value must not construct its button registry")
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: root)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 360, height: 400)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(Set(probe.builds), [.hd])
+        probe.builds.removeAll()
+        layout.setVisible(.fps, true) // Layout-only changes must resolve newly visible controls.
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(Set(probe.builds), [.hd, .fps])
+        probe.builds.removeAll()
+        state.editing = true
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(Set(probe.builds), Set(layout.available), "Hidden tools still render during management")
+        XCTAssertFalse(probe.builds.contains(.audio), "Photo mode must not create movie-only controls")
+        XCTAssertTrue(Set(probe.builds).isDisjoint(with: RemoteTool.pinned), "Pinned controls have their own fixed slots")
+        probe.builds.removeAll()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(probe.builds.isEmpty, "Ongoing edit wiggles must not reconstruct button content")
+        state.editing = false
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(Set(probe.builds), [.hd, .fps])
+    }
+
+    private final class FactoryState: ObservableObject { @Published var editing = false }
+    private final class FactoryProbe { var builds: [RemoteTool] = [] }
+    private struct FactoryHarness: View {
+        let layout: RemoteToolLayout
+        @ObservedObject var state: FactoryState
+        let probe: FactoryProbe
+        var body: some View {
+            RemoteConfiguredToolbar(layout: layout, editing: state.editing, isActive: true,
+                control: { tool in
+                    probe.builds.append(tool)
+                    return AnyView(ButtonWitness(id: tool.id).frame(width: 36, height: 36))
+                }, leading: EmptyView(), trailing: [], pinnedEndCount: 0, applyHidden: { _ in })
+                .frame(width: 330)
+        }
     }
 
     private struct ButtonWitness: UIViewRepresentable {

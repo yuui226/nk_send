@@ -228,7 +228,7 @@ struct PhotoEffectsControls: View {
                         accentColor: ZTransferColors.accentOrange,
                         emphasized: metadataExpanded, showDragHint: false,
                         onActivated: {
-                            ZTransferHaptics.shared.tick()
+                            ZTransferHaptics.shared.play(.navigation)
                             withAnimation(ZTransferMotion.inlineExpansion) { metadataExpanded.toggle() }
                         })
             .frame(maxWidth: .infinity)
@@ -319,7 +319,8 @@ struct PhotoEffectsControls: View {
                                     updated.favoriteFrameEffects[index].watermark = updated.watermark
                                 }
                                 draft = updated
-                            }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: isPro, accentColor: ZTransferColors.accentPurple)
+                            }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: isPro, accentColor: ZTransferColors.accentPurple,
+                            onDetent: { ZTransferHaptics.shared.play(.toggle) })
                 .overlay {
                     if !isPro {
                         Color.clear.contentShape(Rectangle()).onTapGesture { showPremiumHint() }
@@ -330,7 +331,7 @@ struct PhotoEffectsControls: View {
                             enabled: watermarkEnabled, accentColor: ZTransferColors.accentPurple,
                             emphasized: watermarkExpanded, showDragHint: false,
                             onActivated: {
-                                ZTransferHaptics.shared.tick()
+                                ZTransferHaptics.shared.play(.navigation)
                                 withAnimation(ZTransferMotion.inlineExpansion) { watermarkExpanded.toggle() }
                             })
             }
@@ -430,7 +431,7 @@ struct PhotoEffectsControls: View {
 
     private func metadataButton(_ title: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
         FilterChip(label: title, selected: selected, accentColor: ZTransferColors.accentOrange) {
-            ZTransferHaptics.shared.tick()
+            ZTransferHaptics.shared.play(.toggle)
             action()
         }
     }
@@ -1196,7 +1197,7 @@ struct PhotoFilterChooserOverlay: View {
         PhotoEffectChooserDialog(categoryLabels: PhotoEffectFilterCategory.allCases.map(\.title),
             optionLabels: items.map(label), onDismiss: { state.isPresented = false }) {
             PhotoEffectChooserAction(label: AppLocalized.resource("photo_filter_turn_off"), selected: !draft.photoFilterEnabled) {
-                ZTransferHaptics.shared.tick(); state.select(nil, in: &draft)
+                ZTransferHaptics.shared.play(.selection); state.select(nil, in: &draft)
             }
         } content: { width in
             HStack(spacing: 6) {
@@ -1209,7 +1210,7 @@ struct PhotoFilterChooserOverlay: View {
                     PhotoEffectChooserRow(label: label(preset),
                         selected: draft.photoFilterEnabled && draft.selectedFilter?.preset.id == preset.id,
                         favorite: draft.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id))) {
-                        ZTransferHaptics.shared.tick(); onFilterSelected(); state.select(preset.id, in: &draft)
+                        ZTransferHaptics.shared.play(.selection); onFilterSelected(); state.select(preset.id, in: &draft)
                     }
                 }.id(state.category)
             }
@@ -1284,7 +1285,7 @@ struct PhotoEffectFavoriteButton: View {
     var body: some View {
         let size = compact ? compactSize : PhotoEffectControlMetrics.height
         Button {
-            ZTransferHaptics.shared.tick()
+            ZTransferHaptics.shared.play(.favorite)
             action()
         } label: {
             ZStack {
@@ -1438,7 +1439,7 @@ struct PhotoEffectModuleMenuOverlay: ViewModifier {
                 Button {
                     var value = draft
                     if togglePhotoEffectModuleDraft(module, draft: &value, lutStore: lutStore, isPro: isPro) {
-                        ZTransferHaptics.shared.tick()
+                        ZTransferHaptics.shared.play(.toggle)
                         draft = value
                     }
                 } label: {

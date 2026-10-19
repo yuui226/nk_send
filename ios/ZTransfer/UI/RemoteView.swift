@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 
 /// The diagnostic text can change for every displayed focus frame. Observe
@@ -45,6 +46,48 @@ private struct RemoteToolIconAnchor: ViewModifier {
     }
 }
 
+/// One lazy owner for one monitor presentation. The children retain independent
+/// state, preferences and cleanup; forwarding only their existing notifications
+/// preserves the page's observation boundaries without rebuilding throwaway
+/// camera/review models whenever the parent list refreshes.
+@MainActor
+final class RemoteViewLifetime: @preconcurrency ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+    let model: RemoteViewModel
+    let tools: RemoteToolPreferences
+    let folders: PictureControlFolderLifetime
+    let lut: RemoteLUTMonitorLifetime
+    let review: RemotePhotoReviewLifetime
+    private var observations: [AnyCancellable] = []
+
+    init(camera: any RemoteCameraControlling, session: CameraSession?, tools: RemoteToolPreferences,
+         defaults: UserDefaults, entitlements: PremiumEntitlementStore, freeUsage: FreeUsageStore,
+         onTransportLost: (() -> Void)?) {
+        #if DEBUG
+        ButtonInteractionTrace.recordNow("monitor-owner-created")
+        #endif
+        self.tools = tools
+        folders = PictureControlFolderLifetime(defaults: defaults)
+        lut = RemoteLUTMonitorLifetime(RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: defaults),
+                                                           access: RemoteLUTFolderAccess(defaults: defaults)))
+        let model = RemoteViewModel(camera: camera, onTransportLost: onTransportLost,
+                                    entitlements: entitlements, freeUsage: freeUsage)
+        self.model = model
+        review = RemotePhotoReviewLifetime(RemotePhotoReviewModel(frames: model.reviewFrames,
+            openCatalog: {
+                guard let session else { throw CancellationError() }
+                return try await session.openRemoteReviewCatalog()
+            }, endLiveView: { await camera.endLiveView() },
+            restartLiveView: { model.restartAfterPhotoReview() },
+            isConnected: { !model.transportLossWasNotified },
+            onActiveChanged: { model.setPhotoReviewActive($0) }))
+        observations = [model.objectWillChange, tools.objectWillChange, folders.objectWillChange,
+                        lut.objectWillChange, review.objectWillChange].map { changes in
+            changes.sink { [weak self] in self?.objectWillChange.send() }
+        }
+    }
+}
+
 /// Native monitor surface. Transport and frame lifecycle live in
 /// `RemoteViewModel`; this view only renders the camera frame and the controls
 /// that are already present in Android's RemoteScreen.
@@ -62,10 +105,11 @@ struct RemoteView: View {
     private let wirelessMode: WirelessMode?
     private let reviewSession: CameraSession?
     private let reviewQueue: TransferQueueViewModel?
-    @StateObject private var reviewLifetime: RemotePhotoReviewLifetime
+    @StateObject private var lifetime: RemoteViewLifetime
+    private var reviewLifetime: RemotePhotoReviewLifetime { lifetime.review }
     private var review: RemotePhotoReviewModel { reviewLifetime.review }
-    @StateObject private var model: RemoteViewModel
-    @StateObject private var pictureControlFolders: PictureControlFolderLifetime
+    private var model: RemoteViewModel { lifetime.model }
+    private var pictureControlFolders: PictureControlFolderLifetime { lifetime.folders }
     @State private var pictureControlPanel: PictureControlPanelModel?
     @State private var pictureControlReport = ""
     @State private var pictureControlPresented = false
@@ -75,8 +119,8 @@ struct RemoteView: View {
     @State private var editingTools = false
     @State private var selectedField: RemoteExposureField?
     // RemoteToolPreferences persists these values immediately on mutation.
-    @StateObject private var tools: RemoteToolPreferences
-    @StateObject private var lutLifetime: RemoteLUTMonitorLifetime
+    private var tools: RemoteToolPreferences { lifetime.tools }
+    private var lutLifetime: RemoteLUTMonitorLifetime { lifetime.lut }
     private var lutMonitor: RemoteLUTMonitorState { lutLifetime.monitor }
     @State private var lutFolderPickerPresented = false
     @State private var lutListPresented = false
@@ -158,14 +202,15 @@ struct RemoteView: View {
          onRetrySTA: @escaping () -> Void = {}, onPreparing: (() async -> Void)? = nil,
          onStopped: ((Bool) async -> Void)? = nil,
          onTransportLost: (() -> Void)? = nil) {
+        #if DEBUG
+        ButtonInteractionTrace.recordNow("monitor-init-start")
+        defer { ButtonInteractionTrace.recordNow("monitor-init-end") }
+        #endif
         let preferences = RemoteToolPreferences(defaults: toolDefaults)
         self.onClose = onClose
         self.toolDefaults = toolDefaults
         _monitorHelpViewed = AppStorage(wrappedValue: false, "monitor_help_viewed", store: toolDefaults)
         _entitlements = ObservedObject(wrappedValue: entitlements)
-        _tools = StateObject(wrappedValue: preferences)
-        _pictureControlFolders = StateObject(wrappedValue: PictureControlFolderLifetime(defaults: toolDefaults))
-        _lutLifetime = StateObject(wrappedValue: RemoteLUTMonitorLifetime(RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: toolDefaults), access: RemoteLUTFolderAccess(defaults: toolDefaults))))
         _dispMode = State(initialValue: preferences.disp)
         _histogramMode = State(initialValue: preferences.histogram)
         _exposureMode = State(initialValue: preferences.exposure)
@@ -183,24 +228,20 @@ struct RemoteView: View {
         self.wirelessMode = mode == .sta ? .sta : .ap
         let camera: any RemoteCameraControlling = remoteCamera ?? session.map { $0 as any RemoteCameraControlling }
             ?? DisconnectedRemoteCamera(isUSB: mode == .usb)
-        let remoteModel = RemoteViewModel(camera: camera,
-                                                            onTransportLost: onTransportLost,
-                                                            entitlements: entitlements, freeUsage: freeUsage)
-        _model = StateObject(wrappedValue: remoteModel)
+        _lifetime = StateObject(wrappedValue: RemoteViewLifetime(camera: camera, session: session,
+            tools: preferences, defaults: toolDefaults, entitlements: entitlements, freeUsage: freeUsage,
+            onTransportLost: onTransportLost))
         reviewSession = session
         reviewQueue = queueModel
-        _reviewLifetime = StateObject(wrappedValue: RemotePhotoReviewLifetime(RemotePhotoReviewModel(frames: remoteModel.reviewFrames,
-            openCatalog: {
-                guard let session else { throw CancellationError() }
-                return try await session.openRemoteReviewCatalog()
-            }, endLiveView: { await camera.endLiveView() },
-            restartLiveView: { remoteModel.restartAfterPhotoReview() },
-            isConnected: { !remoteModel.transportLossWasNotified },
-            onActiveChanged: { remoteModel.setPhotoReviewActive($0) })))
+
     }
 
     var body: some View {
-        ZStack {
+        #if DEBUG
+        ButtonInteractionTrace.recordNow("monitor-body-start")
+        defer { ButtonInteractionTrace.recordNow("monitor-body-end") }
+        #endif
+        return ZStack {
             ZTransferColors.background.ignoresSafeArea()
             GeometryReader { proxy in
                 if layoutOrientation.isLandscape {
@@ -288,11 +329,17 @@ struct RemoteView: View {
         .animation(ZTransferMotion.standard, value: layoutOrientation)
         .statusBarHidden(false)
         .task {
+            #if DEBUG
+            ButtonInteractionTrace.recordNow("monitor-prepare-start")
+            #endif
             model.preferredComputerControl = tools.computerControl
             model.onComputerControlPreferenceChanged = { [weak tools] enabled in
                 tools?.computerControl = enabled
             }
             await onPreparing?()
+            #if DEBUG
+            ButtonInteractionTrace.recordNow("monitor-prepare-end")
+            #endif
             guard !Task.isCancelled, !stopCleanupStarted, isSessionConnected else { return }
             model.setHDLiveView(tools.hd)
             model.setMovieFormatMonitoring(dispMode.showsCameraInformation)
@@ -324,6 +371,9 @@ struct RemoteView: View {
         // of the app stays portrait; this page rotates its own canvas to match
         // the device instead of changing the application's interface size.
         .onAppear {
+            #if DEBUG
+            ButtonInteractionTrace.recordNow("monitor-appeared")
+            #endif
             monitorHintAnimator.setVisible(model.monitorHint.visible)
             lutMonitor.onNotice = { [weak model] key in
                 model?.showMonitorHint(AppLocalized.resource(key), source: .lut)
@@ -491,8 +541,8 @@ struct RemoteView: View {
                     .frame(width: layout.image.width, height: layout.image.height)
                     .offset(x: layout.image.minX, y: layout.image.minY)
                 RemoteLandscapeControls(layout: layout, toolLayout: tools.layout(movie: model.movieMode),
-                    controls: remoteToolControls(movie: model.movieMode), onPanelChange: closeMonitorPanels,
-                    onTick: { model.detentFeedback() }, applyHidden: { hidden in
+                    control: { remoteToolControl($0, movie: model.movieMode) }, onPanelChange: closeMonitorPanels,
+                    onTick: { ZTransferHaptics.shared.play(.navigation) }, applyHidden: { hidden in
                         for tool in hidden { setToolVisible(tool, false) }
                     }, rotate: AnyView(remoteRotateButton), back: AnyView(remoteBackButton),
                     disp: AnyView(remoteDispButton), shutter: { AnyView(remoteShutter(diameter: $0)) },
@@ -543,7 +593,7 @@ struct RemoteView: View {
         panel.notice = { model.pictureControlNotice($0) }
         panel.movie = movie
         panel.onReport = { pictureControlReport = $0 }
-        panel.feedback = { model.detentFeedback() }
+        panel.feedback = { ZTransferHaptics.shared.play(.action) }
         panel.interactionAllowed = scenePhase == .active
         panel.dismiss = { [weak panel] in
             guard let panel, pictureControlPanel === panel else { return }
@@ -676,7 +726,7 @@ struct RemoteView: View {
         RemoteConfiguredToolbar(layout: tools.layout(movie: displayedMovie),
                                 editing: editingTools,
                                 isActive: displayedMovie == model.movieMode,
-                                controls: remoteToolControls(movie: displayedMovie),
+                                control: { remoteToolControl($0, movie: displayedMovie) },
                                 leading: Group {
             if developerUnlocked && !editingTools {
                 remoteToolButton(active: false,
@@ -706,7 +756,7 @@ struct RemoteView: View {
                 .accessibilityIdentifier("remote-tools-manage")
             )))
         }
-        controls.append(RemoteFixedToolControl(id: "lock", view: remoteToolControls(movie: model.movieMode)[.lock]!))
+        controls.append(RemoteFixedToolControl(id: "lock", view: AnyView(remoteLockButton(movie: model.movieMode))))
         controls.append(RemoteFixedToolControl(id: "rotate", view: AnyView(remoteRotateButton)))
         return controls
     }
@@ -719,6 +769,13 @@ struct RemoteView: View {
         }.accessibilityIdentifier("remote-tool-rotate")
     }
 
+    private func remoteLockButton(movie: Bool) -> some View {
+        configuredRemoteToolButton(.lock, movie: movie, active: tools.locked,
+            accessibilityLabel: AppLocalized.resource("remote_tool_lock"), label: { toolMark(.lock) }) {
+                setRotationLocked(!tools.locked, showHint: true)
+            }
+    }
+
     private var remoteDispButton: some View {
         remoteToolButton(active: false, accessibilityLabel: "DISP",
                          label: { Text("DISP").font(.system(size: 8)) }) {
@@ -727,17 +784,18 @@ struct RemoteView: View {
         }.accessibilityIdentifier("remote-tool-disp")
     }
 
-    // Each entry owns its existing production action; layout order and
-    // visibility are independent of this renderer registry.
-    private func remoteToolControls(movie: Bool) -> [RemoteTool: AnyView] {
-        [
-            .hd: AnyView(configuredRemoteToolButton(.hd, movie: movie, active: model.hdLiveView, accessibilityLabel: AppLocalized.resource("dev_hd_liveview"), label: { toolMark(.hd) }) {
+    // Android RemoteToolBar/LandscapeMonitorControls invoke a renderer only
+    // for displayed tools. Preserve every action, but do not eagerly construct
+    // hidden tools, duplicate pinned tools, or an unopened landscape dock.
+    private func remoteToolControl(_ tool: RemoteTool, movie: Bool) -> AnyView {
+        switch tool {
+        case .hd: return AnyView(configuredRemoteToolButton(.hd, movie: movie, active: model.hdLiveView, accessibilityLabel: AppLocalized.resource("dev_hd_liveview"), label: { toolMark(.hd) }) {
                 withAnimation(ZTransferMotion.standard) { tools.hd.toggle() }
-            }),
-            .fps: AnyView(configuredRemoteToolButton(.fps, movie: movie, active: tools.fps, accessibilityLabel: AppLocalized.resource("dev_fps_overlay"), label: { toolMark(.fps) }) {
+            })
+        case .fps: return AnyView(configuredRemoteToolButton(.fps, movie: movie, active: tools.fps, accessibilityLabel: AppLocalized.resource("dev_fps_overlay"), label: { toolMark(.fps) }) {
                 registerFpsTap()
-            }),
-            .histogram: AnyView(configuredRemoteToolButton(.histogram, movie: movie, active: histogramMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_histogram"), label: { toolMark(.histogram) }) {
+            })
+        case .histogram: return AnyView(configuredRemoteToolButton(.histogram, movie: movie, active: histogramMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_histogram"), label: { toolMark(.histogram) }) {
                 withAnimation(ZTransferMotion.standard) {
                     histogramMode = switch histogramMode {
                     case .off: .rgb
@@ -746,8 +804,8 @@ struct RemoteView: View {
                     }
                     tools.histogram = histogramMode
                 }
-            }),
-            .waveform: AnyView(configuredRemoteToolButton(.waveform, movie: movie, active: tools.waveform != .off, accessibilityLabel: AppLocalized.resource("remote_tool_waveform"), label: {
+            })
+        case .waveform: return AnyView(configuredRemoteToolButton(.waveform, movie: movie, active: tools.waveform != .off, accessibilityLabel: AppLocalized.resource("remote_tool_waveform"), label: {
                 toolMark(.waveform)
             }) {
                 tools.waveform = switch tools.waveform {
@@ -755,15 +813,15 @@ struct RemoteView: View {
                 case .rgb: .luma
                 case .luma: .off
                 }
-            }),
-            .grid: AnyView(configuredRemoteToolButton(.grid, movie: movie, active: tools.grid != .off, accessibilityLabel: AppLocalized.resource("remote_tool_grid"), label: { toolMark(.grid) }) {
+            })
+        case .grid: return AnyView(configuredRemoteToolButton(.grid, movie: movie, active: tools.grid != .off, accessibilityLabel: AppLocalized.resource("remote_tool_grid"), label: { toolMark(.grid) }) {
                 model.dismissCameraTool()
                 selectedField = nil
                 developerPanelPresented = false
                 if gridMenuPresented { gridMenuClosing = true }
                 else { gridMenuClosing = false; gridMenuPresented = true }
-            }),
-            .exposure: AnyView(configuredRemoteToolButton(.exposure, movie: movie, active: exposureMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_zebra"), label: { toolMark(.exposure) }) {
+            })
+        case .exposure: return AnyView(configuredRemoteToolButton(.exposure, movie: movie, active: exposureMode != .off, accessibilityLabel: AppLocalized.resource("cd_remote_zebra"), label: { toolMark(.exposure) }) {
                 withAnimation(ZTransferMotion.standard) {
                     exposureMode = switch exposureMode {
                     case .off: .zebra
@@ -772,26 +830,26 @@ struct RemoteView: View {
                     }
                     tools.exposure = exposureMode
                 }
-            }),
-            .meter: AnyView(configuredRemoteToolButton(.meter, movie: movie, active: tools.meter, accessibilityLabel: AppLocalized.resource("remote_tool_meter"), label: {
+            })
+        case .meter: return AnyView(configuredRemoteToolButton(.meter, movie: movie, active: tools.meter, accessibilityLabel: AppLocalized.resource("remote_tool_meter"), label: {
                 toolMark(.meter)
             }) {
                 tools.meter.toggle()
-            }),
-            .pictureControl: AnyView(configuredRemoteToolButton(.pictureControl, movie: movie,
+            })
+        case .pictureControl: return AnyView(configuredRemoteToolButton(.pictureControl, movie: movie,
                 active: pictureControlPresented,
                 accessibilityLabel: AppLocalized.resource("remote_tool_picture_control"), label: {
                     if let panel = pictureControlPanel, pictureControlPresented {
                         RemotePictureControlToolMark(panel: panel)
                     } else { toolMark(.pictureControl) }
-                }) { openPictureControl() }),
-            .lut: AnyView(configuredRemoteToolButton(.lut, movie: movie, active: lutLifetime.isActive, accessibilityLabel: "LUT", label: {
+                }) { openPictureControl() })
+        case .lut: return AnyView(configuredRemoteToolButton(.lut, movie: movie, active: lutLifetime.isActive, accessibilityLabel: "LUT", label: {
                 toolMark(.lut)
             }) {
                 lutMonitor.openMenu()
                 lutListPresented = true
-            }),
-            .desqueeze: AnyView(configuredRemoteToolButton(.desqueeze, movie: movie, active: effectiveDesqueeze > 1.001,
+            })
+        case .desqueeze: return AnyView(configuredRemoteToolButton(.desqueeze, movie: movie, active: effectiveDesqueeze > 1.001,
                              accessibilityLabel: "\(RemoteDisplayOptions.label(for: effectiveDesqueeze))×",
                              label: {
                 toolMark(.desqueeze)
@@ -799,37 +857,34 @@ struct RemoteView: View {
                 withAnimation(ZTransferMotion.standard) {
                     tools.desqueeze = RemoteDisplayOptions.nextDesqueeze(after: effectiveDesqueeze)
                 }
-            }),
-            .level: AnyView(configuredRemoteToolButton(.level, movie: movie, active: model.levelVisible, accessibilityLabel: AppLocalized.resource("cd_remote_level"), label: { toolMark(.level) }) {
+            })
+        case .level: return AnyView(configuredRemoteToolButton(.level, movie: movie, active: model.levelVisible, accessibilityLabel: AppLocalized.resource("cd_remote_level"), label: { toolMark(.level) }) {
                 withAnimation(ZTransferMotion.standard) {
                     tools.level.toggle()
                 }
-            }),
-            .focusFrame: AnyView(configuredRemoteToolButton(.focusFrame, movie: movie, active: tools.focusFrame, accessibilityLabel: AppLocalized.resource("remote_tool_focus_frame"), label: {
+            })
+        case .focusFrame: return AnyView(configuredRemoteToolButton(.focusFrame, movie: movie, active: tools.focusFrame, accessibilityLabel: AppLocalized.resource("remote_tool_focus_frame"), label: {
                 toolMark(.focusFrame)
             }) {
                 withAnimation(ZTransferMotion.standard) { tools.focusFrame.toggle() }
-            }),
-            .audio: AnyView(configuredRemoteToolButton(.audio, movie: movie, active: tools.audio, accessibilityLabel: AppLocalized.resource("cd_remote_audio_levels"), label: { toolMark(.audio) }) {
+            })
+        case .audio: return AnyView(configuredRemoteToolButton(.audio, movie: movie, active: tools.audio, accessibilityLabel: AppLocalized.resource("cd_remote_audio_levels"), label: { toolMark(.audio) }) {
                 withAnimation(ZTransferMotion.standard) { tools.audio.toggle() }
-            }),
-            .whiteBalance: AnyView(cameraToolButton(.whiteBalance, movie: movie)),
-            .focusArea: AnyView(cameraToolButton(.focusArea, movie: movie)),
-            .focusMode: AnyView(cameraToolButton(.focusMode, movie: movie)),
-            .lock: AnyView(configuredRemoteToolButton(.lock, movie: movie, active: tools.locked,
-                accessibilityLabel: AppLocalized.resource("remote_tool_lock"), label: {
-                    toolMark(.lock)
-                }) { setRotationLocked(!tools.locked, showHint: true) }),
-            .computerControl: AnyView(configuredRemoteToolButton(.computerControl, movie: movie,
+            })
+        case .whiteBalance: return AnyView(cameraToolButton(.whiteBalance, movie: movie))
+        case .focusArea: return AnyView(cameraToolButton(.focusArea, movie: movie))
+        case .focusMode: return AnyView(cameraToolButton(.focusMode, movie: movie))
+        case .lock: return AnyView(remoteLockButton(movie: movie))
+        case .computerControl: return AnyView(configuredRemoteToolButton(.computerControl, movie: movie,
                 active: model.computerControlEnabled,
                 enabled: model.computerControlToggleAllowed,
                 accessibilityLabel: AppLocalized.resource("remote_tool_computer_control"), label: {
                     toolMark(.computerControl)
                 }) {
                     model.toggleComputerControl()
-                }),
-            .rotate: AnyView(remoteRotateButton),
-        ]
+                })
+        case .rotate: return AnyView(remoteRotateButton)
+        }
     }
 
     private func cameraToolOverlay<Content: View>(_ content: Content, landscape: Bool) -> some View {
@@ -1154,7 +1209,7 @@ struct RemoteView: View {
         if model.reviewVisible, !editingTools, reviewQueue != nil, reviewSession != nil {
             RemoteReviewEntryButton(large: large, sizeScale: sizeScale,
                 enabled: model.reviewAllowed && isSessionConnected && !switchingRotation && !review.active) {
-                model.detentFeedback()
+                ZTransferHaptics.shared.play(.navigation)
                 closeMonitorPanels()
                 review.open()
             }

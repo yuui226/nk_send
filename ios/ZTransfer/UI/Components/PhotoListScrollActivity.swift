@@ -1,6 +1,96 @@
 import SwiftUI
 import UIKit
 
+/// SaveableStateHolder's scroll-position counterpart. Each workspace page owns
+/// one value; it does not publish during scrolling or retain a hidden scroll view.
+@MainActor
+final class WorkspaceScrollPosition {
+    var offset: CGPoint?
+}
+
+struct WorkspaceScrollRestoration: UIViewRepresentable {
+    let position: WorkspaceScrollPosition?
+
+    func makeUIView(context: Context) -> Probe {
+        let view = Probe()
+        view.isUserInteractionEnabled = false
+        view.position = position
+        return view
+    }
+
+    func updateUIView(_ view: Probe, context: Context) { view.position = position }
+    static func dismantleUIView(_ view: Probe, coordinator: ()) { view.detach() }
+
+    final class Probe: UIView {
+        var position: WorkspaceScrollPosition?
+        private weak var scroll: UIScrollView?
+        private var observation: NSKeyValueObservation?
+        private var restored = false
+        private var scheduled = false
+        private var generation = 0
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            detach()
+            guard window != nil, position != nil else { return }
+            var ancestor = superview
+            while let view = ancestor {
+                if let scroll = view as? UIScrollView {
+                    self.scroll = scroll
+                    observation = scroll.observe(\.contentOffset, options: [.new]) { [weak self] scroll, _ in
+                        MainActor.assumeIsolated { self?.save(scroll) }
+                    }
+                    scheduleRestore()
+                    break
+                }
+                ancestor = view.superview
+            }
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            scheduleRestore()
+        }
+
+        private func save(_ scroll: UIScrollView) {
+            guard restored, window != nil, scroll.bounds.height > 0 else { return }
+            position?.offset = CGPoint(x: scroll.contentOffset.x + scroll.adjustedContentInset.left,
+                                       y: scroll.contentOffset.y + scroll.adjustedContentInset.top)
+        }
+
+        private func scheduleRestore() {
+            guard !restored, !scheduled, scroll != nil else { return }
+            scheduled = true
+            let generation = generation
+            // Wait only for this layout transaction, never a persistent timer.
+            // Restoration occurs during the incoming page's initial 100ms fade delay.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.generation == generation else { return }
+                self.scheduled = false
+                guard let scroll = self.scroll, self.window != nil,
+                      scroll.bounds.height > 0, scroll.contentSize.height > 0 else { return }
+                if let saved = self.position?.offset {
+                    let inset = scroll.adjustedContentInset
+                    let maxY = max(0, scroll.contentSize.height + inset.top + inset.bottom - scroll.bounds.height)
+                    let maxX = max(0, scroll.contentSize.width + inset.left + inset.right - scroll.bounds.width)
+                    scroll.setContentOffset(CGPoint(x: min(maxX, max(0, saved.x)) - inset.left,
+                                                    y: min(maxY, max(0, saved.y)) - inset.top), animated: false)
+                }
+                self.restored = true
+                self.save(scroll)
+            }
+        }
+
+        func detach() {
+            generation &+= 1
+            observation = nil
+            scroll = nil
+            restored = false
+            scheduled = false
+        }
+    }
+}
+
 /// FileListScreen's back-to-top visibility policy. Offsets are physical pixels,
 /// and indices include date headers and collection entries, not just photos.
 struct PhotoListBackTopState {

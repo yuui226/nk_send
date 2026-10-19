@@ -4,6 +4,40 @@ import UIKit
 
 @MainActor
 final class PhotoListScrollActivityTests: XCTestCase {
+    func testWorkspaceScrollRestoresPositionAndClampsChangedContentWithoutRetainingViews() async throws {
+        let position = WorkspaceScrollPosition()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 700))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        func mount(height: CGFloat) -> (UIScrollView, WorkspaceScrollRestoration.Probe) {
+            let scroll = UIScrollView(frame: window.bounds)
+            scroll.contentInset = UIEdgeInsets(top: 44, left: 0, bottom: 34, right: 0)
+            scroll.contentSize = CGSize(width: 390, height: height)
+            let probe = WorkspaceScrollRestoration.Probe(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+            probe.position = position
+            scroll.addSubview(probe); window.addSubview(scroll)
+            return (scroll, probe)
+        }
+        var first: (UIScrollView, WorkspaceScrollRestoration.Probe)? = mount(height: 4000)
+        try await Task.sleep(for: .milliseconds(30))
+        first!.0.setContentOffset(CGPoint(x: 0, y: 1156), animated: false)
+        XCTAssertEqual(position.offset?.y, 1200)
+        weak var weakScroll = first?.0
+        first!.0.removeFromSuperview(); first = nil
+        // UIKit can retain a removed view until its layout transaction drains.
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertNil(weakScroll)
+        let second = mount(height: 4000)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(second.0.contentOffset.y, 1156)
+        second.0.removeFromSuperview()
+        let shorter = mount(height: 1000)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(shorter.0.contentOffset.y, 334)
+        XCTAssertEqual(position.offset?.y, 378)
+        shorter.0.removeFromSuperview()
+    }
+
     func testFlightAdmissionRejectsDuplicateAndMissingSourcesWithoutHoldingCounts() throws {
         let viewport = CGRect(x: 0, y: 100, width: 300, height: 500)
         let source = CGRect(x: 10, y: 120, width: 80, height: 80)

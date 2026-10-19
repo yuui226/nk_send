@@ -210,11 +210,15 @@ final class RemoteReviewEntryPresentationTests: XCTestCase {
             let height: CGFloat = 400
             let layout = RemoteLandscapeLayout(width: width, height: height, imageAspect: 1.5, photoReview: true)
             var bounds: [String: CGRect] = [:]
+            var builtTools: [RemoteTool] = []
             let content = ZStack(alignment: .topLeading) {
                 ZTransferColors.background
                 Color.blue.opacity(0.15).frame(width: layout.image.width, height: layout.image.height)
                     .offset(x: layout.image.minX, y: layout.image.minY)
-                RemoteLandscapeControls(layout: layout, toolLayout: tools, controls: [:], onPanelChange: {}, onTick: {},
+                RemoteLandscapeControls(layout: layout, toolLayout: tools, control: { tool in
+                    builtTools.append(tool)
+                    return AnyView(Text(tool.id))
+                }, onPanelChange: {}, onTick: {},
                     applyHidden: { _ in }, rotate: AnyView(measured(Text("R").frame(width: 36, height: 36), "rotate")),
                     back: AnyView(Text("Back")), disp: AnyView(measured(Text("DISP").frame(width: 36, height: 36), "disp")),
                     shutter: { size in AnyView(self.measured(Circle().fill(Color.white).frame(width: size, height: size), "shutter")) },
@@ -231,6 +235,7 @@ final class RemoteReviewEntryPresentationTests: XCTestCase {
             window.rootViewController = host; window.makeKeyAndVisible()
             defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
             try await Task.sleep(for: .milliseconds(250))
+            XCTAssertTrue(builtTools.isEmpty, "A closed landscape dock must not construct any tool buttons")
             let review = try XCTUnwrap(bounds["review"]), shutter = try XCTUnwrap(bounds["shutter"])
             XCTAssertEqual(review.width, 40, accuracy: 0.01); XCTAssertEqual(review.height, 48, accuracy: 0.01)
             XCTAssertGreaterThanOrEqual(shutter.minX - review.maxX, 7.99)

@@ -25,7 +25,7 @@ struct RemoteLUTPanel: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Button {
-                        ZTransferHaptics.shared.tick()
+                        ZTransferHaptics.shared.play(.selection)
                         monitor.chooseOff()
                     } label: {
                         HStack {
@@ -35,7 +35,7 @@ struct RemoteLUTPanel: View {
                     }
                     Spacer()
                     Button(AppLocalized.resource(status.folderAction)) {
-                        ZTransferHaptics.shared.tick()
+                        ZTransferHaptics.shared.play(.navigation)
                         monitor.prepareFolderPicker()
                         onChooseFolder()
                     }
@@ -56,7 +56,7 @@ struct RemoteLUTPanel: View {
                     ScrollViewReader { proxy in
                         List(visible, id: \.identifier) { file in
                             Button {
-                                ZTransferHaptics.shared.tick()
+                                ZTransferHaptics.shared.play(.selection)
                                 monitor.select(file)
                             } label: {
                                 HStack {

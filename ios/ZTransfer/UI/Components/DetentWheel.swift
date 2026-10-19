@@ -394,7 +394,7 @@ struct DetentWheel<Option: Hashable>: View {
     private func emitDetent() {
         // A custom callback replaces the default, never adds a second tick.
         if let onDetent { onDetent() }
-        else { ZTransferHaptics.shared.tick() }
+        else { ZTransferHaptics.shared.play(.selection) }
     }
 }
 

@@ -249,7 +249,7 @@ struct PhotoCropEditor: View {
         let selected = controls.snapshot.ratio == ratio
         let enabled = controls.snapshot.ratio != nil && !confirming
         return Button {
-            ZTransferHaptics.shared.tick()
+            ZTransferHaptics.shared.play(.selection)
             editor.update { $0.select(ratio) }
         } label: {
             Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)

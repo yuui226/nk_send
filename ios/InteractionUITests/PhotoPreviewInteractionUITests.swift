@@ -10,7 +10,7 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
     private func launchHoldFixture(_ arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--list-admission-ui-test", "--photo-preview-ui-test", "--photo-hold-trace",
-            "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-app_language", "en"] + arguments
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-app_language", "en", "-haptics_enabled", "YES"] + arguments
         app.launch()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "enqueue-day-")).firstMatch.waitForExistence(timeout: 10))
         return app
@@ -34,6 +34,94 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
         return try JSONDecoder().decode([HoldEvent].self, from: Data(json.utf8))
     }
 
+    func testWorkspaceQueueRoundTripKeepsScrollAndCapsuleAnchorThenMonitorReturns() throws {
+        continueAfterFailure = false
+        let app = launchHoldFixture(["--scroll-hold-fixture", "--defer-admission", "--all-local-admission"])
+        defer { app.terminate() }
+        firstGridCenter(app).tap()
+        let pending = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "count=1;waiting=1"), object: app.staticTexts["admission-state"])
+        XCTAssertEqual(XCTWaiter.wait(for: [pending], timeout: 5), .completed)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.7))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.35)))
+        let cell = try XCTUnwrap(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "photo-cell-")).allElementsBoundByIndex.first {
+            $0.frame.midY > app.frame.height * 0.4 && $0.frame.midY < app.frame.height * 0.6
+        })
+        let identifier = cell.identifier, frame = cell.frame
+        let pill = app.buttons["workspace-queue-open"]
+        let rightEdge = pill.frame.maxX
+        for _ in 0..<2 {
+            pill.tap()
+            XCTAssertTrue(app.buttons["workspace-queue-back"].waitForExistence(timeout: 3))
+            XCTAssertEqual(pill.frame.maxX, rightEdge, accuracy: 1)
+            app.buttons["workspace-queue-back"].tap()
+            XCTAssertTrue(app.buttons["popup-trigger-settings"].waitForExistence(timeout: 3))
+            let returned = app.descendants(matching: .any)[identifier].firstMatch
+            XCTAssertEqual(returned.frame.minY, frame.minY, accuracy: 2)
+            XCTAssertEqual(pill.frame.maxX, rightEdge, accuracy: 1)
+        }
+        // The off-top monitor affordance first expands, then enters monitor.
+        func monitorEntry() throws -> XCUIElement {
+            try XCTUnwrap(app.buttons.matching(identifier: "workspace-monitor-open").allElementsBoundByIndex.first { $0.isHittable })
+        }
+        try monitorEntry().tap()
+        if !app.buttons["remote-monitor-back"].exists { try monitorEntry().tap() }
+        XCTAssertTrue(app.buttons["remote-monitor-back"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["workspace-queue-open"].isHittable)
+        let monitor = XCTAttachment(screenshot: app.screenshot())
+        monitor.name = "workspace-monitor"; monitor.lifetime = .keepAlways; add(monitor)
+        app.buttons["remote-monitor-back"].tap()
+        XCTAssertTrue(app.buttons["popup-trigger-settings"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.descendants(matching: .any)[identifier].firstMatch.frame.minY, frame.minY, accuracy: 2)
+        let returned = XCTAttachment(screenshot: app.screenshot())
+        returned.name = "workspace-files-returned"; returned.lifetime = .keepAlways; add(returned)
+        let trace = try readHoldTrace(app, name: "workspace-page-updates")
+        let starts = trace.enumerated().filter { $0.element.event.hasPrefix("workspace-") &&
+            ($0.element.event.hasSuffix("-enter") || $0.element.event.hasSuffix("-exit")) }
+        XCTAssertEqual(starts.count, 6)
+        for (index, start) in starts {
+            let end = try XCTUnwrap(trace[(index + 1)...].firstIndex { $0.event.hasSuffix("-settled") })
+            let updates = trace[(index + 1)..<end].filter { $0.event == "files-workspace-body" }.count
+            XCTAssertLessThanOrEqual(updates, 6, "\(start.event): global geometry must not rebuild the whole grid every frame (\(updates))")
+        }
+
+    }
+
+    func testColdMonitorEntryFrameTimingAndReturnAcrossFreshProcesses() throws {
+        continueAfterFailure = false
+        for run in 1...3 {
+            let app = launchHoldFixture(["--scroll-hold-fixture", "--defer-admission", "--all-local-admission"])
+            defer { app.terminate() }
+            app.buttons["clear-trace"].tap()
+            let entry = try XCTUnwrap(app.buttons.matching(identifier: "workspace-monitor-open")
+                .allElementsBoundByIndex.first { $0.isHittable })
+            entry.tap()
+            XCTAssertTrue(app.buttons["remote-monitor-back"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["workspace-queue-open"].isHittable)
+            if run == 1 {
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "cold-monitor-controls"; screenshot.lifetime = .keepAlways; add(screenshot)
+            }
+            app.buttons["remote-monitor-back"].tap()
+            XCTAssertTrue(app.buttons["popup-trigger-settings"].waitForExistence(timeout: 5))
+            let warmed = try XCTUnwrap(app.buttons.matching(identifier: "workspace-monitor-open")
+                .allElementsBoundByIndex.first { $0.isHittable })
+            warmed.tap()
+            XCTAssertTrue(app.buttons["remote-monitor-back"].waitForExistence(timeout: 5))
+            app.buttons["remote-monitor-back"].tap()
+            let trace = try readHoldTrace(app, name: "cold-monitor-\(run)")
+            XCTAssertEqual(trace.filter { $0.event == "monitor-owner-created" }.count, 2,
+                "Exactly one owner per presentation, even when parent/list state refreshes")
+            let start = try XCTUnwrap(trace.firstIndex { $0.event == "workspace-monitor-enter" })
+            let end = try XCTUnwrap(trace[(start + 1)...].firstIndex { $0.event == "workspace-monitor-settled" })
+            let frames = trace[start...end].filter { $0.event == "workspace-monitor-frame" }
+            XCTAssertGreaterThan(frames.count, 3, "The real mounted page must render intermediate transition frames")
+            let delays = zip([trace[start].milliseconds] + frames.map(\.milliseconds), frames.map(\.milliseconds))
+                .map { $1 - $0 }
+            let report = XCTAttachment(string: "first=\(try XCTUnwrap(delays.first))ms; gaps=\(delays); total=\(trace[end].milliseconds - trace[start].milliseconds)ms")
+            report.name = "cold-monitor-timing-\(run)"; report.lifetime = .keepAlways; add(report)
+        }
+    }
+
     func testPhotoHoldStartsPreviewBeforeFingerLift() throws {
         continueAfterFailure = false
         for burst in [false, true] {
@@ -53,6 +141,8 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
             XCTAssertLessThan(appeared.milliseconds - down.milliseconds, 500, "Preview must start without waiting for release")
             XCTAssertLessThan(appeared.milliseconds, up.milliseconds)
             XCTAssertEqual(trace.filter { $0.event == "photo-long-press" }.count, 1)
+            XCTAssertEqual(trace.filter { $0.event == "haptic-preview" }.count, 1)
+            XCTAssertFalse(trace.contains { $0.event == "haptic-holdStarted" }, "Normal preview only confirms at recognition")
             XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=0"), "Releasing a preview hold must not also tap to enqueue")
         }
     }
@@ -88,6 +178,12 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
                 XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=1;waiting=1"))
                 XCTAssertFalse(trace.contains { $0.event == "preview-request" })
                 XCTAssertEqual(trace.filter { $0.event == "photo-long-press" }.count, 1)
+                XCTAssertEqual(trace.filter { $0.event == "haptic-enqueue" }.count, 1)
+                let began = try XCTUnwrap(trace.first { $0.event == "haptic-holdStarted" })
+                let confirmed = try XCTUnwrap(trace.first { $0.event == "haptic-enqueue" })
+                XCTAssertGreaterThan(confirmed.milliseconds - began.milliseconds, 100, "Anticipation must precede recognition")
+                XCTAssertTrue(trace.contains { $0.event == "haptic-holdCancelled" })
+                XCTAssertFalse(trace.contains { $0.event == "haptic-holdCompleted" }, "Enqueue is the sole confirmation")
             } else {
                 XCTAssertTrue(app.staticTexts["preview-state"].exists)
                 XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=0"))
@@ -95,6 +191,22 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
                 XCTAssertEqual(trace.filter { $0.event == "preview-request" }.count, 1)
             }
         }
+    }
+
+    func testReversePhotoScrollCancelsHapticHoldWithoutEnqueue() throws {
+        continueAfterFailure = false
+        let app = launchHoldFixture(["--defer-admission", "--preview-admission", "--scroll-hold-fixture"])
+        defer { app.terminate() }
+        let center = firstGridCenter(app)
+        app.buttons["clear-trace"].tap()
+        center.press(forDuration: 0.06, thenDragTo: center.withOffset(CGVector(dx: 0, dy: -150)))
+        let trace = try readHoldTrace(app, name: "reverse-scroll-haptic-cancel")
+        XCTAssertTrue(trace.contains { $0.event == "haptic-holdStarted" })
+        XCTAssertTrue(trace.contains { $0.event == "haptic-holdCancelled" })
+        XCTAssertFalse(trace.contains { $0.event == "haptic-enqueue" || $0.event == "haptic-preview" })
+        XCTAssertFalse(trace.contains { $0.event == "photo-long-press" })
+        XCTAssertTrue(trace.contains { $0.event == "photo-scroll" })
+        XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=0"))
     }
 
     func testEffectsPopupHoldDragAndReturnKeepsPreview() {

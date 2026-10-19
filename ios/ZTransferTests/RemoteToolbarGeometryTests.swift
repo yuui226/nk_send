@@ -1,7 +1,68 @@
 import XCTest
+import SwiftUI
 @testable import ZTransfer
 
 final class RemoteToolbarGeometryTests: XCTestCase {
+    @MainActor
+    func testHostedLayoutInvalidatesIntrinsicCacheForResizeAndChangedChildren() async throws {
+        let state = LayoutState()
+        let host = UIHostingController(rootView: LayoutHarness(state: state))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 170, height: 240))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func check(_ expectedWidth: CGFloat) async throws {
+            host.view.setNeedsLayout(); host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(40))
+            let expected = RemoteToolbarGeometry.arrange(items: state.widths.map {
+                .init(size: CGSize(width: $0, height: 36))
+            }, width: expectedWidth, pinnedEndCount: 1, scale: window.screen.scale)
+            XCTAssertEqual(state.frames.count, expected.frames.count)
+            for index in expected.frames.indices {
+                let actual = try XCTUnwrap(state.frames[index])
+                XCTAssertEqual(actual.minX, expected.frames[index].minX, accuracy: 0.5)
+                XCTAssertEqual(actual.minY, expected.frames[index].minY, accuracy: 0.5)
+                XCTAssertEqual(actual.width, expected.frames[index].width, accuracy: 0.5)
+            }
+        }
+        try await check(170)
+        state.widths = [72, 36, 36, 36, 36] // Dynamic intrinsic size and added items.
+        try await check(170)
+        window.frame.size.width = 330
+        try await check(330) // Reflow must use current bounds, not cached positions.
+        state.widths = [36, 36] // Hidden/removed controls may not leave stale slots.
+        try await check(330)
+    }
+
+    @MainActor private final class LayoutState: ObservableObject {
+        @Published var widths: [CGFloat] = [36, 36, 36]
+        var frames: [Int: CGRect] = [:]
+    }
+    private struct Frames: PreferenceKey {
+        static let defaultValue: [Int: CGRect] = [:]
+        static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+            value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+        }
+    }
+    private struct LayoutHarness: View {
+        @ObservedObject var state: LayoutState
+        @Environment(\.displayScale) private var scale
+        var body: some View {
+            RemoteAdaptiveToolLayout(displayScale: scale, horizontalSpacing: 6,
+                                     verticalSpacing: 4, pinnedEndCount: 1) {
+                ForEach(state.widths.indices, id: \.self) { index in
+                    Color.blue.frame(width: state.widths[index], height: 36)
+                        .background { GeometryReader { proxy in
+                            Color.clear.preference(key: Frames.self,
+                                value: [index: proxy.frame(in: .named("layout-test"))])
+                        } }
+                }
+            }
+            .coordinateSpace(name: "layout-test")
+            .onPreferenceChange(Frames.self) { state.frames = $0 }
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
     private func item(_ tool: RemoteTool, width: CGFloat = 36, height: CGFloat = 36) -> RemoteToolbarGeometry.Item {
         .init(size: CGSize(width: width, height: height), tool: tool)
     }

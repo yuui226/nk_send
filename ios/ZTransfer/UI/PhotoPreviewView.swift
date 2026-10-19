@@ -775,11 +775,11 @@ struct PhotoPreviewView: View {
                 rotationEnabled: !burstTransitionBusy,
                 onCollapse: { collapseCurrentBurst() },
                 onEffects: { file in
-                    ZTransferHaptics.shared.tick()
+                    ZTransferHaptics.shared.play(.navigation)
                     effectsFile = file; effectsRotation = rotationQuarterTurns; effectsPresented = true
                 },
                 onCrop: { _ in
-                    ZTransferHaptics.shared.tick()
+                    ZTransferHaptics.shared.play(.navigation)
                     cropPreparation.reset(); cropRetry = 0; cropLoadingVisible = false
                     cropCloseTask?.cancel(); cropEditor.reset()
                     cropEnteredAt = ProcessInfo.processInfo.systemUptime
@@ -854,8 +854,8 @@ struct PhotoPreviewView: View {
                 PhotoCropEditor(editor: cropEditor, confirming: cropPreparation.confirming,
                     loading: cropLoadingVisible, failure: cropFailure,
                     bottomClearance: previewSafeInsets.bottom + 32,
-                    onRetry: { ZTransferHaptics.shared.tick(); cropRetry += 1 },
-                    onCancel: { ZTransferHaptics.shared.tick(); closeCrop() })
+                    onRetry: { ZTransferHaptics.shared.play(.action); cropRetry += 1 },
+                    onCancel: { ZTransferHaptics.shared.play(.action); closeCrop() })
                 .ignoresSafeArea()
                 .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)))
                 .task(id: "\(file.id)|\(cropRetry)") {
@@ -1221,7 +1221,7 @@ struct PhotoPreviewView: View {
             highResolutionImages[file.id] = content.image
             displayedImages[file.id] = content.image
             fhdUnavailable.remove(file.id)
-            ZTransferHaptics.shared.tick()
+            ZTransferHaptics.shared.play(.contentReady)
         } else if highResolutionImages[file.id] == nil {
             fhdUnavailable.insert(file.id)
         }
@@ -1333,7 +1333,6 @@ struct PhotoPreviewView: View {
               let geometry = cropEditor.geometry else { return }
         Task { @MainActor in
             let accepted = await cropPreparation.confirm(selection: selection) { selection in
-                ZTransferHaptics.shared.tick()
                 return await onCropConfirmed(file, selection)
             }
             guard accepted, cropPresented, currentPhoto?.id == file.id else { return }
@@ -1368,7 +1367,7 @@ struct PhotoPreviewView: View {
               case let .burst(group) = previewEntries[collectionIndex] else { return }
         burstTransitionBusy = true
         animatedBurstID = group.id
-        ZTransferHaptics.shared.tick()
+        ZTransferHaptics.shared.play(.navigation)
         burstTransitionTask?.cancel()
         burstTransitionTask = Task { @MainActor in
             burstStackMotion = 1
@@ -1415,7 +1414,7 @@ struct PhotoPreviewView: View {
         }), index == collectionIndex else { return }
         burstTransitionBusy = true
         animatedBurstID = group.id
-        ZTransferHaptics.shared.tick()
+        ZTransferHaptics.shared.play(.navigation)
         burstTransitionTask?.cancel()
         burstTransitionTask = Task { @MainActor in
             burstStackMotion = 0
@@ -1482,7 +1481,7 @@ struct PhotoPreviewView: View {
         // A rejected enqueue must not publish transient queue state.
         guard acceptedCrop != nil || (burstFiles.map(onEnqueueBurst) ?? onEnqueue(file)) else { return }
         onQueueFlightStarted(flightCount)
-        ZTransferHaptics.shared.tick()
+        ZTransferHaptics.shared.play(.enqueue)
         queueFlightCount = flightCount
         queueFlightActive = true
         queueFlightStartedAt = Date().addingTimeInterval(0.032)

@@ -509,7 +509,7 @@ struct SettingsView: View {
             enabled: directory.directoryURL != nil,
             accentColor: storageMode == .unified ? ZTransferColors.statusWaiting : ZTransferColors.accentBlue,
             emphasized: storageMode != .unified,
-            onDetent: { ZTransferHaptics.shared.tick() }
+            onDetent: { ZTransferHaptics.shared.play(.selection) }
         )
         .frame(maxWidth: .infinity)
     }
@@ -536,7 +536,7 @@ struct SettingsView: View {
             enabled: directory.directoryURL != nil,
             accentColor: mode == .off ? ZTransferColors.statusWaiting : ZTransferColors.accentBlue,
             emphasized: mode != .off,
-            onDetent: { ZTransferHaptics.shared.tick() }
+            onDetent: { ZTransferHaptics.shared.play(.selection) }
         )
         .frame(maxWidth: .infinity)
         .accessibilityIdentifier("settings-auto-transfer-mode")
@@ -559,7 +559,7 @@ struct SettingsView: View {
                                 photoLoadingRangeDays = range.days
                                 onPhotoLoadingRangeChanged(range)
                             }, rowHeight: 32, wheelHeight: 56,
-                            onDetent: { ZTransferHaptics.shared.tick() })
+                            onDetent: { ZTransferHaptics.shared.play(.selection) })
                     .frame(maxWidth: .infinity)
             }
         }
@@ -874,7 +874,7 @@ private struct ToggleWheel: View {
             optionFontSize: compact ? 13 : 14,
             accentColor: isOn ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
             emphasized: isOn,
-            onDetent: { ZTransferHaptics.shared.tick(isPreferenceToggle: isHapticsPreference) },
+            onDetent: { ZTransferHaptics.shared.play(.toggle, isPreferenceToggle: isHapticsPreference) },
         )
         .frame(maxWidth: .infinity)
     }
