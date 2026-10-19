@@ -60,7 +60,7 @@ final class QueueSwipeUITests: XCTestCase {
         image.name = "Busy card restored and protected"; image.lifetime = .keepAlways; add(image)
     }
 
-    func testProductionCardsSwipeBothWaysRestoreShortDragAndKeepScrollingAndButtons() {
+    func testProductionCardsSwipeBothWaysRestoreShortDragAndKeepVerticalScrolling() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--queue-swipe-ui-test", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
@@ -96,12 +96,12 @@ final class QueueSwipeUITests: XCTestCase {
         XCTAssertTrue(next.waitForExistence(timeout: 5))
         drag(app, y: next.frame.midY, delta: 180)
         expect(count, label: "count=10")
-        app.buttons["queue-remove-10"].tap()
-        expect(count, label: "count=9")
+        // Android removed the per-card broom; deletion belongs to the swipe.
+        XCTAssertFalse(app.buttons["queue-remove-10"].exists)
         let last = app.staticTexts["SWIPE_1.JPG"]
         for _ in 0..<4 where !last.isHittable { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(last.isHittable)
-        expect(count, label: "count=9")
+        expect(count, label: "count=10")
         let image = XCTAttachment(screenshot: app.screenshot())
         image.name = "Production queue after swipes and vertical scroll"
         image.lifetime = .keepAlways

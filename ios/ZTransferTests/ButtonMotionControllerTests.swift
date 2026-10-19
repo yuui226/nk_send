@@ -108,6 +108,7 @@ final class ButtonMotionControllerTests: XCTestCase {
         let owner = make(clock)
         owner.successfulActivation()
         clock.milliseconds = 50
+        owner.physicalPressChanged(true)
         owner.nativePressChanged(true)
         XCTAssertNil(owner.motion.press.releaseDeadline)
         clock.milliseconds = 90
@@ -181,12 +182,80 @@ final class ButtonMotionControllerTests: XCTestCase {
 
     func testScrollProbeReadsRealAncestorAndUpdatesAfterDetach() {
         let host = UIView(), scroll = UIScrollView(), probe = ZTransferButtonScrollContext.Probe()
-        var states: [Bool] = []
-        probe.changed = { states.append($0) }
+        let owner = make(Clock())
+        probe.motion = owner
         host.addSubview(scroll)
         scroll.addSubview(probe)
-        XCTAssertEqual(states.last, true)
+        XCTAssertTrue(owner.inScrollableContainer)
         host.addSubview(probe)
-        XCTAssertEqual(states.last, false)
+        XCTAssertFalse(owner.inScrollableContainer)
+    }
+
+    func testPhysicalFeedbackDoesNotRestartWhenDelayedNativePressArrives() {
+        let clock = Clock(), owner = make(Clock())
+        let button = make(clock)
+        button.inScrollableContainer = true; button.observesPhysicalPress = true
+        button.physicalPressChanged(true)
+        clock.milliseconds = 100; button.emitDelayedPress()
+        XCTAssertTrue(button.motion.press.visualPressed)
+        clock.milliseconds = 164; button.nativePressChanged(true)
+        XCTAssertTrue(button.motion.press.visualPressed)
+        button.physicalPressChanged(false)
+        clock.milliseconds = 170; button.successfulActivation()
+        XCTAssertEqual(button.motion.press.releaseDeadline, 190)
+        button.nativePressChanged(false)
+        button.resolveUnsuccessfulRelease()
+        clock.milliseconds = 190; button.advanceHold()
+        XCTAssertFalse(button.motion.press.visualPressed)
+        // The observer never owns non-scrolling buttons' input.
+        owner.physicalPressChanged(true)
+        XCTAssertFalse(owner.motion.press.visualPressed)
+    }
+
+    func testScrollFeedbackUsesOnePassiveObserverPerWindowAndDetaches() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        let scroll = UIScrollView(frame: window.bounds)
+        window.addSubview(scroll); window.isHidden = false
+        defer { window.isHidden = true }
+        let owners = [make(Clock()), make(Clock())]
+        let probes = owners.map { owner in
+            let probe = ZTransferButtonScrollContext.Probe(frame: CGRect(x: 0, y: 0, width: 80, height: 44))
+            probe.motion = owner; scroll.addSubview(probe); return probe
+        }
+        let observer = probes[0].observer
+        XCTAssertNotNil(observer)
+        XCTAssertTrue(observer === probes[1].observer)
+        XCTAssertFalse(observer?.cancelsTouchesInView ?? true)
+        XCTAssertFalse(observer?.delaysTouchesBegan ?? true)
+        XCTAssertFalse(observer?.delaysTouchesEnded ?? true)
+        XCTAssertFalse(observer?.canPrevent(scroll.panGestureRecognizer) ?? true)
+        XCTAssertFalse(observer?.canBePrevented(by: scroll.panGestureRecognizer) ?? true)
+        probes[0].removeFromSuperview()
+        XCTAssertTrue(observer?.view === window)
+        XCTAssertFalse(owners[0].observesPhysicalPress)
+        probes[1].removeFromSuperview()
+        XCTAssertNil(observer?.view)
+        XCTAssertFalse(owners[1].observesPhysicalPress)
+    }
+
+    func testActionBeforeCoalescedNativePressDoesNotRestartFeedbackOrBlockNextTouch() {
+        let clock = Clock(), button = make(Clock())
+        let owner = make(clock)
+        owner.physicalPressChanged(true)
+        owner.successfulActivation()
+        clock.milliseconds = 8
+        owner.nativePressChanged(true)
+        owner.nativePressChanged(false)
+        owner.resolveUnsuccessfulRelease()
+        XCTAssertTrue(owner.motion.press.visualPressed)
+        XCTAssertEqual(owner.motion.press.releaseDeadline, 90)
+        // Some quick taps never deliver either native edge at all.
+        button.successfulActivation()
+        button.physicalPressChanged(true)
+        button.nativePressChanged(true)
+        XCTAssertTrue(button.motion.press.visualPressed)
+        button.nativePressChanged(false)
+        button.resolveUnsuccessfulRelease()
+        XCTAssertFalse(button.motion.press.visualPressed)
     }
 }

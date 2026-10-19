@@ -42,7 +42,6 @@ struct RemoteChoicePopup<Content: View>: View {
         }
         .frame(width: hostSize.width, height: hostSize.height, alignment: .topLeading)
         .background(PopupDragBoundary())
-        .gesture(DragGesture(minimumDistance: 8).onChanged { _ in })
         .accessibilityAction(.escape) { (back ?? close)() }
         .onAppear { if closing && contentHeight == nil { dismiss() } }
         .onChange(of: closing) { if $0 && contentHeight == nil { dismiss() } }

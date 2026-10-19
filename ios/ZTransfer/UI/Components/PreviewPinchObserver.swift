@@ -122,6 +122,7 @@ struct PreviewPinchObserver: UIViewRepresentable {
         private var active = false
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
             guard let marker else { state = .failed; return }
+            updatePoints(in: marker)
             for touch in touches { points[touch] = touch.location(in: marker) }
             if points.count >= 2, !active {
                 active = true
@@ -129,17 +130,21 @@ struct PreviewPinchObserver: UIViewRepresentable {
             }
         }
         override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
-            guard let marker, active, !points.isEmpty else { return }
+            guard let marker, !points.isEmpty else { return }
             let previous = Array(points.values)
             let current = points.keys.map { $0.location(in: marker) }
+            // Track even the first finger while waiting for a pinch. Otherwise
+            // its entire preceding drag is included when the second joins.
+            updatePoints(in: marker)
+            guard active else { return }
             let delta = previewTouchTransform(previous: previous, current: current)
-            for touch in Array(points.keys) { points[touch] = touch.location(in: marker) }
             guard delta.factor != 1 || delta.pan != .zero else { return }
             state = state == .possible ? .began : .changed
             marker.onChange?(delta.factor, delta.centroid, delta.pan)
         }
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
             for touch in touches { points.removeValue(forKey: touch) }
+            if let marker { updatePoints(in: marker) }
             if points.isEmpty { state = state == .possible ? .failed : .ended }
         }
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -154,6 +159,9 @@ struct PreviewPinchObserver: UIViewRepresentable {
             let wasActive = active
             active = false
             if wasActive { marker?.onActive?(false) }
+        }
+        private func updatePoints(in marker: Marker) {
+            for touch in Array(points.keys) { points[touch] = touch.location(in: marker) }
         }
     }
 }

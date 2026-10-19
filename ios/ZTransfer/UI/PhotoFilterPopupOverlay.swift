@@ -106,7 +106,8 @@ struct PhotoFilterPopupOverlay: View {
             .coordinateSpace(name: "filter-root")
             .onPreferenceChange(RatingTipSizePreferenceKey.self) { if ratingTipSize != $0 { ratingTipSize = $0 } }
             .background { if isPresented { PopupDragBoundary() } }
-            .gesture(DragGesture(minimumDistance: 8).onChanged { _ in })
+            // The backdrop owns outside drags; the panel's wheels/ScrollView
+            // must not compete with another recognizer on their ancestor.
             .allowsHitTesting(isPresented)
         }
         .ignoresSafeArea()

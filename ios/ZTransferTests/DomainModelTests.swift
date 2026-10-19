@@ -1987,6 +1987,39 @@ final class DomainModelTests: XCTestCase {
         XCTAssertNil(marker.recognizer.view)
     }
 
+    @MainActor
+    func testPreviewPinchDoesNotReuseSingleFingerTravelOrPointerJoinMovement() {
+        let marker = PreviewPinchObserver.Marker(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        let input = marker.recognizer
+        let first = GestureAuditTouch(), second = GestureAuditTouch()
+        let event = UIEvent()
+        var changes: [(CGFloat, CGPoint, CGSize)] = []
+        var active: [Bool] = []
+        marker.onChange = { changes.append(($0, $1, $2)) }
+        marker.onActive = { active.append($0) }
+        first.point = CGPoint(x: 20, y: 100)
+        input.touchesBegan([first], with: event)
+        first.point.x = 80
+        input.touchesMoved([first], with: event)
+        XCTAssertTrue(changes.isEmpty)
+        // The first finger can also move in the same event as a second down.
+        first.point.x = 100; second.point = CGPoint(x: 200, y: 100)
+        input.touchesBegan([second], with: event)
+        first.point.x = 110; second.point.x = 210
+        input.touchesMoved([first, second], with: event)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(changes.last?.0 ?? 0, 1, accuracy: 0.0001)
+        XCTAssertEqual(changes.last?.2, CGSize(width: 10, height: 0))
+        second.point.x = 215
+        input.touchesEnded([first], with: event)
+        second.point.x = 218
+        input.touchesMoved([second], with: event)
+        XCTAssertEqual(changes.last?.2, CGSize(width: 3, height: 0))
+        input.clearTracking()
+        input.clearTracking()
+        XCTAssertEqual(active, [true, false])
+    }
+
     func testPreviewAnimatedRotationKeepsTargetDirectionInsets() {
         let placement = photoPreviewPlacement(imageSize: CGSize(width: 400, height: 600),
             viewportSize: CGSize(width: 400, height: 800), rotationDegrees: -30,
@@ -7496,12 +7529,10 @@ final class PhotoPreviewCacheSetTests: XCTestCase {
         let initial = probe.bodies
         XCTAssertGreaterThan(initial, 0)
         for step in 1...30 {
-            geometry.scrollOffset = -CGFloat(step)
             geometry.previewAnchor = CGRect(x: 20, y: CGFloat(90 - step), width: 353, height: 264.75)
             try await Task.sleep(for: .milliseconds(5))
         }
         XCTAssertEqual(probe.bodies, initial)
-        XCTAssertEqual(geometry.scrollOffset, -30)
         let opening = PhotoEffectsExpandedPreviewSnapshot(image: UIImage(), initialComparison: nil,
                                                    anchor: geometry.previewAnchor)
         geometry.previewAnchor.origin.y = 99
@@ -8860,11 +8891,17 @@ final class LocalExpandedPreviewSnapshotTests: XCTestCase {
     private let imageSize = CGSize(width: 4_000, height: 6_000)
     private let viewport = CGSize(width: 400, height: 800)
 
-    func testComparisonWaitsForCompletedLongPressAndPinchPhasePublishesOnce() {
-        XCTAssertFalse(photoEffectsComparisonRequested(.first(false)))
-        XCTAssertFalse(photoEffectsComparisonRequested(.first(true)))
-        XCTAssertFalse(photoEffectsComparisonRequested(.second(false, nil)))
-        XCTAssertTrue(photoEffectsComparisonRequested(.second(true, nil)))
+    func testComparisonCancellationAndPinchPhasePublishOnce() {
+        let input = PhotoEffectsImageInput.InputView()
+        var comparison: [Bool] = []
+        input.onComparison = { comparison.append($0) }
+        input.setComparing(true)
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        input.cancel()
+        XCTAssertEqual(comparison, [true, false])
+        input.setComparing(true)
+        PhotoEffectsImageInput.dismantleUIView(input, coordinator: ())
+        XCTAssertEqual(comparison, [true, false, true, false])
         let interaction = PhotoEffectsExpandedInteraction()
         var changes = 0
         let subscription = interaction.objectWillChange.sink { changes += 1 }
@@ -10870,5 +10907,55 @@ final class QueuePillReadoutTests: XCTestCase {
         XCTAssertEqual(motion.surface.fillAlpha, 0)
         XCTAssertEqual(motion.surface.iconAlpha, 1)
         XCTAssertFalse(motion.isRunning)
+    }
+}
+
+/// Synthetic samples exercise the production recognizer, including pointer
+/// join/lift events which cannot be expressed by XCTest's symmetric pinch API.
+@MainActor
+private final class GestureAuditTouch: UITouch {
+    var point = CGPoint.zero
+    override func location(in view: UIView?) -> CGPoint { point }
+}
+
+@MainActor
+final class GestureBoundaryAuditTests: XCTestCase {
+    private final class State: ObservableObject { @Published var presented = false }
+    private struct Harness: View {
+        @ObservedObject var state: State
+        var body: some View {
+            ZStack {
+                Color.white
+                TipPopupLayer(isPresented: state.presented) {
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+    func testHelpBoundaryLivesThroughDismissalAndDetachesWithContent() async throws {
+        let state = State()
+        let host = UIHostingController(rootView: Harness(state: state))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        let point = CGPoint(x: 200, y: 300)
+        XCTAssertFalse(PopupDragBoundaryView.contains(point, in: host.view))
+        state.presented = true
+        try await Task.sleep(for: .milliseconds(400))
+        host.view.layoutIfNeeded()
+        XCTAssertTrue(PopupDragBoundaryView.contains(point, in: host.view))
+        state.presented = false
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(PopupDragBoundaryView.contains(point, in: host.view))
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(PopupDragBoundaryView.contains(point, in: host.view))
+        state.presented = true
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(PopupDragBoundaryView.contains(point, in: host.view))
+        window.rootViewController = nil
+        XCTAssertFalse(PopupDragBoundaryView.contains(point, in: host.view))
     }
 }

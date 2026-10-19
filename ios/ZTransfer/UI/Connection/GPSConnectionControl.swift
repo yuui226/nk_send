@@ -181,6 +181,7 @@ private struct GPSInlinePanel: View {
     @State private var holdPressed = false
     @State private var holdConsumedTap = false
     @State private var holdCompleted = false
+    @GestureState private var statusHoldActive = false
     @State private var sessionEstablished = false
     @State private var placeBubbleCoordinates: (latitude: Double, longitude: Double)?
     @State private var placeBubbleRequestID = 0
@@ -690,6 +691,7 @@ private struct GPSInlinePanel: View {
             panel: true,
             disabledAlpha: 1
         ))
+        .accessibilityIdentifier("gps-status-control")
         // Android's GpsStatusButton gives a held-to-disable press a short
         // foreground glow (90ms in, 170ms out) while the 800ms progressive
         // hold is running. Keep the glow inside the button so it never
@@ -699,34 +701,34 @@ private struct GPSInlinePanel: View {
                 .fill(ZTransferColors.primaryText.opacity(0.055 * (holdPressed ? 1 : 0)))
                 .allowsHitTesting(false)
         }
-        .onLongPressGesture(
-            minimumDuration: 0.8,
-            maximumDistance: 24,
-            pressing: { pressing in
-                if pressing {
-                    holdConsumedTap = requiresHoldToDisable
-                    holdCompleted = false
-                    guard requiresHoldToDisable else { return }
-                    ZTransferHaptics.shared.startProgressiveHold()
-                } else {
-                    if !holdCompleted { ZTransferHaptics.shared.cancelProgressiveHold() }
-                    // Suppress only the synthetic tap emitted by this long
-                    // press. Reset on the next run-loop so a later tap on the
-                    // newly displayed “开启GPS” state remains usable.
-                    DispatchQueue.main.async { holdConsumedTap = false }
-                }
-                withAnimation(.easeInOut(duration: pressing ? 0.09 : 0.17)) {
-                    holdPressed = pressing
-                }
-            },
-            perform: {
-                guard requiresHoldToDisable else { return }
-                holdCompleted = true
-                ZTransferHaptics.shared.completeProgressiveHold()
-                withAnimation(.easeInOut(duration: 0.17)) { holdPressed = false }
-                coordinator.setEnabled(false)
-            }
+        // Android GpsStatusButton puts the hold surface above its button.
+        // A normal-priority long press competes with the native Button and
+        // can lose recognition. Claim only the states that require holding.
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.8, maximumDistance: 24)
+                .updating($statusHoldActive) { _, active, _ in active = true }
+                .onEnded { completed in
+                    guard completed, requiresHoldToDisable else { return }
+                    holdConsumedTap = true
+                    holdCompleted = true
+                    ZTransferHaptics.shared.completeProgressiveHold()
+                    withAnimation(.easeInOut(duration: 0.17)) { holdPressed = false }
+                    coordinator.setEnabled(false)
+                },
+            including: requiresHoldToDisable ? .all : .subviews
         )
+        .onChange(of: statusHoldActive) { pressing in
+            if pressing {
+                holdConsumedTap = requiresHoldToDisable
+                holdCompleted = false
+                guard requiresHoldToDisable else { return }
+                ZTransferHaptics.shared.startProgressiveHold()
+            } else {
+                if !holdCompleted { ZTransferHaptics.shared.cancelProgressiveHold() }
+                DispatchQueue.main.async { holdConsumedTap = false }
+            }
+            withAnimation(.easeInOut(duration: pressing ? 0.09 : 0.17)) { holdPressed = pressing }
+        }
         .animation(.easeInOut(duration: 0.22), value: statusLabel)
     }
 

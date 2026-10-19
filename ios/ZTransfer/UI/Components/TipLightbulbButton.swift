@@ -141,6 +141,7 @@ private struct TipPanelViewport<Content: View>: View {
 struct TipPopupLayer<Content: View>: View {
     let isPresented: Bool
     @ViewBuilder let content: Content
+    @State private var inputRetained = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -148,6 +149,20 @@ struct TipPopupLayer<Content: View>: View {
                 content.transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Keep this OUTSIDE the opacity transition: SwiftUI can leave the
+        // inserted hosting layer's model alpha at zero until its fade ends.
+        // AP/STA tips also need this boundary despite using AdaptiveTipPanel.
+        .background { PopupDragBoundary(enabled: isPresented || inputRetained) }
+        .task(id: isPresented) {
+            if isPresented { inputRetained = true }
+            else if inputRetained {
+                do { try await Task.sleep(for: .milliseconds(260)) } catch { return }
+                guard !Task.isCancelled else { return }
+                inputRetained = false
+            }
+        }
+        .onDisappear { inputRetained = false }
         .animation(.timingCurve(0.4, 0, 0.2, 1,
                                duration: isPresented ? 0.34 : 0.26), value: isPresented)
     }
@@ -345,9 +360,12 @@ struct TipGuideContent: View {
                 .shadow(color: .black.opacity(0.16), radius: 14, y: 7)
         }
         .contentShape(Rectangle())
-        // Children receive scrolling first. Drags on the header/blank areas
-        // are still consumed here, with no capture of short button taps.
-        .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
+        // Absorb blank-area drags behind the content, not on the ancestor of
+        // the scroll view and its expanding section buttons.
+        .background {
+            Color.clear.contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
+        }
         .onDisappear { revealCoordinator.stop() }
         .accessibilityIdentifier("tip-guide-panel")
     }
@@ -485,16 +503,18 @@ private struct TipGuideToolMark: View {
 /// A full modal region also blocks the native Home pager before it recognizes
 /// a drag. It does not intercept help buttons or the guide's own scroll view.
 struct PopupDragBoundary: UIViewRepresentable {
+    var enabled = true
     func makeUIView(context: Context) -> PopupDragBoundaryView { PopupDragBoundaryView() }
-    func updateUIView(_ uiView: PopupDragBoundaryView, context: Context) {}
+    func updateUIView(_ uiView: PopupDragBoundaryView, context: Context) { uiView.blocksGestures = enabled }
 }
 final class PopupDragBoundaryView: UIView {
+    var blocksGestures = true
     private static let regions = NSHashTable<PopupDragBoundaryView>.weakObjects()
     init() { super.init(frame: .zero); isUserInteractionEnabled = false; Self.regions.add(self) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     static func contains(_ point: CGPoint, in source: UIView? = nil) -> Bool {
         regions.allObjects.contains { region in
-            guard let window = region.window, source == nil || (source as? UIWindow ?? source?.window) === window else { return false }
+            guard region.blocksGestures, let window = region.window, source == nil || (source as? UIWindow ?? source?.window) === window else { return false }
             var ancestor: UIView? = region
             while let view = ancestor {
                 if view.isHidden || view.alpha <= 0.01 { return false }

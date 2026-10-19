@@ -174,11 +174,109 @@ final class PhotoEffectsExpandedInteraction: ObservableObject {
     }
 }
 
-/// SequenceGesture.first(true) means the press is still waiting for its 500ms
-/// threshold. Only the second stage has completed the long press.
-func photoEffectsComparisonRequested(_ phase: SequenceGesture<LongPressGesture, DragGesture>.Value) -> Bool {
-    if case .second(true, _) = phase { return true }
-    return false
+/// Android SettingsScreen.detectTapGestures / ZoomablePreviewViewport share
+/// one owner for tap, double tap and 500ms comparison. A completed hold must
+/// consume the release; composing a sequenced SwiftUI drag with exclusive taps
+/// can swallow short taps or fall back to a tap after a 600ms hold.
+struct PhotoEffectsImageInput: UIViewRepresentable {
+    @Binding var comparing: Bool
+    var enabled = true
+    let comparisonEnabled: Bool
+    let onTap: (CGPoint) -> Void
+    var onDoubleTap: ((CGPoint) -> Void)?
+
+    func makeUIView(context: Context) -> InputView { InputView() }
+    func updateUIView(_ view: InputView, context: Context) {
+        view.onComparison = { comparing = $0 }
+        view.onTap = onTap
+        view.onDoubleTap = onDoubleTap
+        view.singleTap.isEnabled = enabled
+        view.doubleTap.isEnabled = enabled && onDoubleTap != nil
+        view.hold.isEnabled = enabled && comparisonEnabled
+        if !view.hold.isEnabled { view.setComparing(false) }
+    }
+    static func dismantleUIView(_ view: InputView, coordinator: ()) { view.cancel() }
+
+    final class SingleFingerHold: UILongPressGestureRecognizer {
+        let feedback = ZTransferLongPressFeedback()
+        private var contacts: Set<UITouch> = []
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            contacts.formUnion(touches)
+            guard contacts.count == 1 else {
+                state = state == .possible ? .failed : .cancelled
+                return
+            }
+            feedback.begin(durationMilliseconds: 500)
+            super.touchesBegan(touches, with: event)
+        }
+        override func reset() { super.reset(); contacts.removeAll(); feedback.end() }
+    }
+
+    final class InputView: UIView, UIGestureRecognizerDelegate {
+        let singleTap = UITapGestureRecognizer()
+        let doubleTap = UITapGestureRecognizer()
+        let hold = SingleFingerHold()
+        var onComparison: ((Bool) -> Void)?
+        var onTap: ((CGPoint) -> Void)?
+        var onDoubleTap: ((CGPoint) -> Void)?
+        private(set) var comparing = false
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            doubleTap.numberOfTapsRequired = 2
+            hold.minimumPressDuration = 0.5
+            hold.allowableMovement = 10
+            singleTap.require(toFail: doubleTap)
+            singleTap.require(toFail: hold)
+            doubleTap.require(toFail: hold)
+            for recognizer in [singleTap, doubleTap, hold] {
+                recognizer.delegate = self
+                recognizer.delaysTouchesBegan = false
+                recognizer.delaysTouchesEnded = false
+                addGestureRecognizer(recognizer)
+            }
+            singleTap.addTarget(self, action: #selector(tapped(_:)))
+            doubleTap.addTarget(self, action: #selector(doubleTapped(_:)))
+            hold.addTarget(self, action: #selector(held(_:)))
+            NotificationCenter.default.addObserver(self, selector: #selector(cancel),
+                name: UIApplication.willResignActiveNotification, object: nil)
+        }
+        required init?(coder: NSCoder) { nil }
+        deinit { NotificationCenter.default.removeObserver(self) }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window == nil { cancel() }
+        }
+        func setComparing(_ active: Bool) {
+            guard comparing != active else { return }
+            comparing = active
+            onComparison?(active)
+        }
+        @objc func cancel() {
+            for recognizer in [singleTap, doubleTap, hold] {
+                let enabled = recognizer.isEnabled
+                recognizer.isEnabled = false
+                recognizer.isEnabled = enabled
+            }
+            setComparing(false)
+        }
+        @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+            if recognizer.state == .ended { onTap?(recognizer.location(in: window)) }
+        }
+        @objc private func doubleTapped(_ recognizer: UITapGestureRecognizer) {
+            if recognizer.state == .ended { onDoubleTap?(recognizer.location(in: window)) }
+        }
+        @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
+            if recognizer.state == .began { hold.feedback.trigger { setComparing(true) } }
+            else if recognizer.state != .changed { setComparing(false) }
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            // Ancestor paging/pan and the window pinch observer keep receiving
+            // touches. Only our three image actions are mutually exclusive.
+            other.view !== self
+        }
+    }
 }
 
 struct PhotoEffectsExpandedImageSurface: View {
@@ -187,7 +285,7 @@ struct PhotoEffectsExpandedImageSurface: View {
     @ObservedObject var interaction: PhotoEffectsExpandedInteraction
     let closing: Bool
     let onClose: () -> Void
-    @GestureState private var comparing = false
+    @State private var comparing = false
     @GestureState private var dragging = false
 
     var body: some View {
@@ -201,31 +299,23 @@ struct PhotoEffectsExpandedImageSurface: View {
                         viewportSize: proxy.size, rotationDegrees: transform.rotationDegrees).scale)
                     .offset(transform.offset)
                     .contentShape(Rectangle())
+                    .overlay { PhotoEffectsImageInput(comparing: $comparing, enabled: !closing,
+                        comparisonEnabled: comparison != nil && !closing && !interaction.magnifying,
+                        onTap: { _ in
+                            guard !closing, !interaction.magnifying else { return }
+                            if interaction.transform.scale <= 1.01 { onClose() }
+                        }, onDoubleTap: { point in
+                            guard !closing, !interaction.magnifying else { return }
+                            let frame = proxy.frame(in: .global)
+                            interaction.doubleTap(at: CGPoint(x: point.x - frame.minX, y: point.y - frame.minY),
+                                imageSize: image.size, viewport: proxy.size)
+                        }) }
                     .simultaneousGesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
                         .updating($dragging) { _, state, _ in state = true }
                         .onChanged { value in
                             guard !closing else { return }
                             interaction.drag(translation: value.translation, imageSize: image.size, viewport: proxy.size)
                         }.onEnded { _ in interaction.endDrag() })
-                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-                        .sequenced(before: DragGesture(minimumDistance: 12))
-                        .updating($comparing) { value, state, _ in
-                            guard comparison != nil, !closing, !interaction.magnifying else { return }
-                            state = photoEffectsComparisonRequested(value)
-                        })
-                    .simultaneousGesture(SpatialTapGesture(count: 2, coordinateSpace: .global)
-                        .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: .global))
-                        .onEnded { gesture in
-                            guard !closing, !interaction.magnifying else { return }
-                            switch gesture {
-                            case .first(let tap):
-                                let frame = proxy.frame(in: .global)
-                                interaction.doubleTap(at: CGPoint(x: tap.location.x - frame.minX, y: tap.location.y - frame.minY),
-                                    imageSize: image.size, viewport: proxy.size)
-                            case .second:
-                                if interaction.transform.scale <= 1.01 { onClose() }
-                            }
-                        })
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
@@ -242,5 +332,14 @@ struct PhotoEffectsExpandedImageSurface: View {
         // SwiftUI does not call onEnded for a cancelled drag; GestureState
         // resets in both cases, so a new touch cannot reuse its old translation.
         .onChange(of: dragging) { if !$0 { interaction.endDrag() } }
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            if ProcessInfo.processInfo.arguments.contains("--gesture-audit-ui-test") {
+                Text("zoom=\(String(format: "%.2f", interaction.transform.scale));offset=\(Int(interaction.transform.offset.width)),\(Int(interaction.transform.offset.height));comparison=\(comparing ? 1 : 0)")
+                    .font(.system(size: 8)).allowsHitTesting(false)
+                    .accessibilityIdentifier("expanded-gesture-state")
+            }
+        }
+        #endif
     }
 }

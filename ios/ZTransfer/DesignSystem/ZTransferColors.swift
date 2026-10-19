@@ -309,7 +309,7 @@ private struct ZTransferAnimatedGlassButton: View {
         .accessibilityAction {
             if enabled { configuration.trigger() }
         }
-        .background { ZTransferButtonScrollContext { motion.inScrollableContainer = $0 } }
+        .background { ZTransferButtonScrollContext(motion: motion) }
         .onAppear(perform: configure)
         .onChange(of: enabled) { _ in configure() }
         .onChange(of: skin) { _ in configure() }

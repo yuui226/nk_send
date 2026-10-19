@@ -1,13 +1,9 @@
 import PhotosUI
 import SwiftUI
 
-/// Event-time geometry, not visual state. Android reads the current scroll
-/// position / preview bounds when admitting a gesture or opening the preview.
-/// Scrolling must keep these coordinates fresh without rebuilding the editor
-/// and its image pipeline on every pixel (performance ledger P12/P13).
+/// Event-time preview bounds, kept without rebuilding the image pipeline.
 @MainActor
 final class PhotoEffectsGeometrySnapshot {
-    var scrollOffset: CGFloat = 0
     var previewAnchor: CGRect = .zero
 }
 
@@ -31,7 +27,6 @@ struct LocalPhotoEffectsView: View {
     @State private var showingWatermarkPicker = false
     @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
-    @State private var geometry = PhotoEffectsGeometrySnapshot()
     @FocusState private var watermarkTextFocused: Bool
 
     var body: some View {
@@ -53,28 +48,14 @@ struct LocalPhotoEffectsView: View {
             }
             .padding(.horizontal, 20).padding(.vertical, 16)
             .frame(maxWidth: 680).frame(maxWidth: .infinity)
-            .background(WorkbenchScrollTracker())
             .photoEffectsBackgroundFocusDismiss {
                 if watermarkTextFocused { watermarkTextFocused = false }
             }
         }
-        .coordinateSpace(name: "workbenchScroll")
         .coordinateSpace(name: "local-effects-page")
-        .onPreferenceChange(WorkbenchScrollOffsetKey.self) { geometry.scrollOffset = $0 }
-        // The Android pager takes over when the workbench is at its top edge.
-        // Keeping this simultaneous avoids stealing vertical scrolling inside
-        // the editor once the user has moved down the page.
-        .simultaneousGesture(DragGesture(minimumDistance: 18, coordinateSpace: .global).onEnded { value in
-            // Use the touch origin, not its release position: dragging beyond
-            // a wheel's bounds must still belong to that wheel.
-            guard !showingHelp, !PopupDragBoundaryView.contains(value.startLocation),
-                  !WheelDragRegionView.contains(value.startLocation),
-                  abs(value.translation.height) > abs(value.translation.width),
-                  !watermarkTextFocused,
-                  geometry.scrollOffset >= -2,
-                  value.translation.height > 70 else { return }
-            onNavigateUp()
-        })
+        // WorkspacePagingController owns the complete nested drag and Android's
+        // 30% / quick-fling settlement. A second 70pt release handler bypassed
+        // that decision and could return even when the native pager cancelled.
         .background(ZTransferColors.background.ignoresSafeArea())
         .modifier(PhotoEffectModuleMenuOverlay(isPresented: $showingModuleMenu,
             draft: effectsBinding, lutStore: photoLUTStore, isPro: entitlements.access.isPro))
@@ -292,21 +273,6 @@ func localPhotoFailureText(_ failure: LocalPhotoFailure) -> String {
     ]) + "\n" + AppLocalized.resource("local_photo_error_\(kind)") + "\n" + failure.detail
 }
 
-private struct WorkbenchScrollOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-
-private struct WorkbenchScrollTracker: View {
-    var body: some View {
-        GeometryReader { proxy in
-            Color.clear.preference(key: WorkbenchScrollOffsetKey.self,
-                                   value: proxy.frame(in: .named("workbenchScroll")).minY)
-        }
-    }
-}
-
 private struct LocalPhotoBatchLabel: View {
     let state: LocalPhotoBatchState<PhotosPickerItem>
     let pageLabel: String?
@@ -393,7 +359,7 @@ private struct LocalEffectPreview: View {
     @State private var failed = false
     @State private var renderedCanvasKey = ""
     @State private var previewRestoreRevision = 0
-    @GestureState private var comparing = false
+    @State private var comparing = false
 
     private static func differsOnlyInWatermarkText(
         _ previous: PhotoEffectsSettings, _ current: PhotoEffectsSettings
@@ -450,13 +416,13 @@ private struct LocalEffectPreview: View {
                 .onAppear { geometry.previewAnchor = proxy.frame(in: .global) }
                 .onChange(of: proxy.frame(in: .global)) { geometry.previewAnchor = $0 }
         })
-        .onTapGesture {
+        .overlay { PhotoEffectsImageInput(comparing: $comparing, comparisonEnabled: images?.unfiltered != nil, onTap: { _ in
             guard let images, !comparing else { return }
             onWillOpen()
             expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: images.filtered,
                 initialComparison: images.unfiltered, anchor: geometry.previewAnchor)
             expanded = true
-        }
+        }) }
         .fullScreenCover(isPresented: $expanded, onDismiss: {
             expandedSnapshot = nil
         }) {
@@ -468,18 +434,6 @@ private struct LocalEffectPreview: View {
                 ) { expanded = false }
             }
         }
-        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-            // A zero-distance drag starts competing with the horizontal
-            // pager on every touch. Require a small movement after the long
-            // press; the first sequence state still keeps comparison active
-            // while the finger is held in place.
-            .sequenced(before: DragGesture(minimumDistance: 12))
-            .updating($comparing) { value, state, _ in
-                switch value {
-                case .first(true), .second(true, _): state = true
-                default: break
-                }
-            })
         .task(id: PreviewRequest(
             item: item, settings: photoEffectsPreviewPixelSettings(settings)
         )) {

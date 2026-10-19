@@ -44,6 +44,7 @@ final class ZTransferButtonMotionController: ObservableObject {
     private var nativePressed = false
     private var releasedByClick = false
     var inScrollableContainer = false
+    var observesPhysicalPress = false
     private var delayTask: Task<Void, Never>?
     private var holdTask: Task<Void, Never>?
     private var scheduledHoldDeadline: Int64?
@@ -78,6 +79,19 @@ final class ZTransferButtonMotionController: ObservableObject {
 
     func nativePressChanged(_ pressed: Bool) {
         trace(pressed ? "native-down" : "native-up")
+        guard !observesPhysicalPress else { return }
+        pressChanged(pressed)
+    }
+
+    func physicalPressChanged(_ pressed: Bool) {
+        // A real new touch distinguishes it from an isPressed callback that
+        // arrived after the previous touch's already-delivered Button action.
+        if pressed { releasedByClick = false }
+        guard observesPhysicalPress else { return }
+        pressChanged(pressed)
+    }
+
+    private func pressChanged(_ pressed: Bool) {
         guard enabled, nativePressed != pressed else { return }
         nativePressed = pressed
         if pressed {
@@ -113,7 +127,12 @@ final class ZTransferButtonMotionController: ObservableObject {
             if automaticallySchedule {
                 cancellationTask?.cancel()
                 cancellationTask = Task { [weak self] in
-                    await Task.yield()
+                    // Task.yield may resume immediately on the same actor,
+                    // before UIKit finishes dispatching this release's action.
+                    // Cross a main-queue turn instead of adding a time delay.
+                    await withCheckedContinuation { continuation in
+                        DispatchQueue.main.async { continuation.resume() }
+                    }
                     guard !Task.isCancelled else { return }
                     self?.resolveUnsuccessfulRelease()
                 }
@@ -152,7 +171,7 @@ final class ZTransferButtonMotionController: ObservableObject {
         trace("release-emitted")
         inputID = nil
         emittedPress = false
-        releasedByClick = nativePressed
+        releasedByClick = true
         publishAndSchedule()
     }
 
@@ -261,33 +280,118 @@ final class ZTransferButtonMotionController: ObservableObject {
     }
 }
 
-/// Reads the real hierarchy; no gesture recognizer or scroll delegate is replaced.
+/// Reads scroll ancestry and observes raw touches only for visual feedback.
+/// A shared, non-recognizing window observer avoids stacking UIKit's scroll
+/// delivery delay with Android's 100ms indication delay. Native Button remains
+/// the sole owner of activation; no scroll delegate or recognizer is replaced.
 struct ZTransferButtonScrollContext: UIViewRepresentable {
-    let changed: (Bool) -> Void
+    let motion: ZTransferButtonMotionController
     func makeUIView(context: Context) -> Probe {
         let view = Probe()
         view.isUserInteractionEnabled = false
-        view.changed = changed
+        view.motion = motion
         return view
     }
     func updateUIView(_ view: Probe, context: Context) {
-        view.changed = changed
+        view.motion = motion
         view.report()
     }
+    static func dismantleUIView(_ view: Probe, coordinator: ()) { view.detach() }
     final class Probe: UIView {
-        var changed: ((Bool) -> Void)?
+        weak var motion: ZTransferButtonMotionController?
+        weak var scroll: UIScrollView?
+        weak var observer: PressObserver?
         override func didMoveToWindow() { super.didMoveToWindow(); report() }
         override func didMoveToSuperview() { super.didMoveToSuperview(); report() }
         func report() {
             var parent = superview
+            var container: UIScrollView?
             while let view = parent {
-                if let scroll = view as? UIScrollView, scroll.isScrollEnabled {
-                    changed?(true)
-                    return
+                if let candidate = view as? UIScrollView, candidate.isScrollEnabled {
+                    container = candidate
+                    break
                 }
                 parent = view.superview
             }
-            changed?(false)
+            motion?.inScrollableContainer = container != nil
+            guard let window else { detach(); return }
+            scroll = container
+            if observer?.view !== window {
+                detach()
+                scroll = container
+                let shared = window.gestureRecognizers?.compactMap { $0 as? PressObserver }.first ?? PressObserver()
+                if shared.view == nil { window.addGestureRecognizer(shared) }
+                shared.probes.add(self)
+                observer = shared
+            }
+            motion?.observesPhysicalPress = container != nil
+        }
+        func detach() {
+            observer?.remove(self)
+            observer = nil; scroll = nil
+            motion?.observesPhysicalPress = false
+        }
+        func accepts(_ touch: UITouch) -> Bool {
+            guard let window, bounds.width > 0, bounds.height > 0,
+                  bounds.contains(touch.location(in: self)) else { return false }
+            // A popup can overlap a button without hiding its backing view.
+            // Only touches actually delivered inside its scroll subtree count.
+            if let scroll {
+                guard scroll.isScrollEnabled, touch.view?.isDescendant(of: scroll) == true else { return false }
+            }
+            var candidate: UIView? = self
+            while let view = candidate, view !== window {
+                if view.isHidden || view.alpha <= 0.01 { return false }
+                candidate = view.superview
+            }
+            return true
+        }
+    }
+
+    final class PressObserver: UIGestureRecognizer {
+        let probes = NSHashTable<Probe>.weakObjects()
+        private var held = NSHashTable<Probe>.weakObjects()
+        private var contact: UITouch?
+        private var origin = CGPoint.zero
+        override init(target: Any?, action: Selector?) {
+            super.init(target: target, action: action)
+            cancelsTouchesInView = false
+            delaysTouchesBegan = false; delaysTouchesEnded = false
+        }
+        convenience init() { self.init(target: nil, action: nil) }
+        override func canPrevent(_ other: UIGestureRecognizer) -> Bool { false }
+        override func canBePrevented(by other: UIGestureRecognizer) -> Bool { false }
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard contact == nil, touches.count == 1, let touch = touches.first else { cancel(); return }
+            contact = touch; origin = touch.location(in: view)
+            for probe in probes.allObjects where probe.accepts(touch) {
+                held.add(probe)
+                probe.motion?.physicalPressChanged(true)
+            }
+        }
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let contact else { return }
+            let point = contact.location(in: view)
+            if hypot(point.x - origin.x, point.y - origin.y) > 8 {
+                cancelHeld()
+            }
+        }
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            if let contact, touches.contains(contact) { cancel() }
+        }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { cancel() }
+        override func reset() { super.reset(); cancelHeld(); contact = nil }
+        func remove(_ probe: Probe) {
+            if held.contains(probe) { probe.motion?.physicalPressChanged(false); held.remove(probe) }
+            probes.remove(probe)
+            if probes.allObjects.isEmpty { view?.removeGestureRecognizer(self) }
+        }
+        private func cancelHeld() {
+            for probe in held.allObjects { probe.motion?.physicalPressChanged(false) }
+            held.removeAllObjects()
+        }
+        private func cancel() {
+            cancelHeld(); contact = nil; state = .failed
         }
     }
 }

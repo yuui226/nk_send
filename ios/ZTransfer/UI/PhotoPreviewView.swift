@@ -464,6 +464,7 @@ struct PhotoPreviewView: View {
         nonmutating set { if queueMotion.offset != newValue { queueMotion.offset = newValue } }
     }
     @State private var queueDragDirection: PhotoPreviewQueueDragDirection = .undecided
+    @GestureState private var queueSwipeActive = false
     @State private var currentZoomed = false
     @State private var magnificationActive = false
     @State private var queueFlightTask: Task<Void, Never>?
@@ -562,6 +563,7 @@ struct PhotoPreviewView: View {
                                          rotationDegrees: rotationDegrees,
                                          infoBottom: landscapeReview ? nil : previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
                                          interactive: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
+                                         pinchEnabled: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy,
                                          cropActive: cropPresented && itemIndex == index,
                                          cropTop: cropTop, cropEditor: cropEditor,
                                          zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
@@ -884,6 +886,11 @@ struct PhotoPreviewView: View {
         // TabView can therefore be disabled after an upward lock without
         // cancelling the gesture that owns the queue drag.
         .simultaneousGesture(previewQueueSwipeGesture)
+        .onChange(of: queueSwipeActive) { active in
+            // Android's awaitEachGesture finally block also runs on cancel.
+            // SwiftUI onEnded does not: release the pager lock in both cases.
+            if !active { finishQueueDrag() }
+        }
         .background {
             if review != nil { PreviewReviewTouchObserver(state: reviewTap) }
         }
@@ -1004,6 +1011,7 @@ struct PhotoPreviewView: View {
 
     private var previewQueueSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 8)
+            .updating($queueSwipeActive) { _, active, _ in active = true }
             .onChanged { value in
                 guard effectsFile == nil, !cropPresented, !cropRestoring else { return }
                 guard review == nil, currentPhoto != nil, !currentZoomed, !magnificationActive,
@@ -1022,6 +1030,7 @@ struct PhotoPreviewView: View {
                 )
             }
             .onEnded { value in
+                defer { finishQueueDrag() }
                 guard review == nil else { return }
                 guard effectsFile == nil, !cropPresented, !cropRestoring else { return }
                 let resolved = queueDragDirection == .undecided
@@ -1040,6 +1049,11 @@ struct PhotoPreviewView: View {
                     settleQueueDrag()
                 }
             }
+    }
+
+    private func finishQueueDrag() {
+        queueDragDirection = .undecided
+        if !queueFlightActive { settleQueueDrag() }
     }
 
     private func settleQueueDrag() {
@@ -2171,6 +2185,9 @@ private struct PreviewImage: View {
     let rotationDegrees: Double
     let infoBottom: CGFloat?
     let interactive: Bool
+    // Keep observing a second finger during an upward queue drag so it can
+    // reject that drag, as Android's pressedCount > 1 guard does.
+    let pinchEnabled: Bool
     let cropActive: Bool
     let cropTop: CGFloat
     let cropEditor: PhotoCropEditingState
@@ -2191,6 +2208,7 @@ private struct PreviewImage: View {
     @State private var offset: CGSize = .zero
     @State private var gestureStartScale: CGFloat = 1
     @State private var gestureStartOffset: CGSize = .zero
+    @GestureState private var panActive = false
     @State private var zoomAnimationTask: Task<Void, Never>?
     @State private var zoomAnimationActive = false
     @State private var magnifying = false
@@ -2263,7 +2281,7 @@ private struct PreviewImage: View {
                 imageSize: (highResolutionImage ?? cachedThumbnail)?.size
             ))
             .overlay {
-                PreviewPinchObserver(enabled: interactive && zoomEnabled && isCurrent && (highResolutionImage ?? cachedThumbnail) != nil,
+                PreviewPinchObserver(enabled: pinchEnabled && zoomEnabled && isCurrent && (highResolutionImage ?? cachedThumbnail) != nil,
                     onActive: { active in
                         magnifying = active
                         if !active { gestureStartOffset = offset; gestureStartScale = scale }
@@ -2282,6 +2300,9 @@ private struct PreviewImage: View {
         // Android detectTapGestures. Subtracting a global bounding-box origin
         // fails when RemoteReviewSurface rotates the whole canvas by 90/270°.
         .coordinateSpace(name: "photo-preview-viewport-\(file.id)")
+        .onChange(of: panActive) { active in
+            if !active { gestureStartOffset = scale > 1.01 ? offset : .zero }
+        }
         .onChange(of: cropActive) { active in
             zoomAnimationTask?.cancel(); zoomAnimationTask = nil
             zoomAnimationActive = false; magnifying = false
@@ -2379,7 +2400,7 @@ private struct PreviewImage: View {
     // only to the pager; a two-finger gesture explicitly rejects queue swiping.
     private func applyPinch(factor: CGFloat, centroid: CGPoint, pan: CGSize,
                             viewportSize: CGSize, imageSize: CGSize?) {
-        guard interactive, zoomEnabled, isCurrent else { return }
+        guard pinchEnabled, zoomEnabled, isCurrent else { return }
         zoomAnimationTask?.cancel()
         zoomAnimationTask = nil
         zoomAnimationActive = false
@@ -2401,6 +2422,7 @@ private struct PreviewImage: View {
 
     private func panGesture(viewportSize: CGSize, imageSize: CGSize?) -> some Gesture {
         DragGesture(minimumDistance: photoPreviewZoomPanMinimumDistance)
+            .updating($panActive) { _, active, _ in active = true }
             .onChanged { value in
                 guard interactive, zoomEnabled, !magnifying, scale > 1.01 else { return }
                 offset = photoPreviewClampedOffset(

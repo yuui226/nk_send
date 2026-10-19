@@ -419,15 +419,17 @@ final class RemoteToolsInteractionUITests: XCTestCase {
         manage.tap()
         XCTAssertFalse(hd.exists)
         manage.tap()
-        XCTAssertTrue(hd.exists)
-        for id in ["fps", "histogram", "grid", "exposure", "desqueeze", "level", "record", "white_balance", "focus_area", "lock"] {
+        XCTAssertTrue(hd.waitForExistence(timeout: 5))
+        // iOS on-device recording is intentionally unavailable (2026-10-18).
+        XCTAssertFalse(app.buttons["remote-tool-record"].exists)
+        for id in ["fps", "histogram", "grid", "exposure", "desqueeze", "level", "white_balance", "focus_area", "lock"] {
             app.buttons["remote-tool-\(id)"].tap()
         }
         manage.tap()
         XCTAssertTrue(manage.isHittable)
         XCTAssertFalse(fps.exists)
         manage.tap()
-        XCTAssertTrue(fps.exists)
+        XCTAssertTrue(fps.waitForExistence(timeout: 5))
         app.buttons["remote-monitor-back"].tap()
         XCTAssertTrue(manage.exists)
         XCTAssertFalse(hd.exists)

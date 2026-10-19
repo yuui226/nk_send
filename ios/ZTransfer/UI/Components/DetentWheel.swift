@@ -185,10 +185,12 @@ struct DetentWheel<Option: Hashable>: View {
             // A normal tap keeps the control clickable without installing a
             // second high-priority recognizer that can delay the enclosing
             // page's vertical drag.
-            .gesture(clickGesture)
-            // Keep drag and tap on the SAME surface: a high-priority gesture
-            // on an inner child cannot outrank the enclosing tap/scroll arena.
-            .highPriorityGesture(dragGesture, including: canDrag ? .all : .subviews)
+            .gesture(clickGesture, including: canDrag ? .subviews : .all)
+            // ReleaseCommitWheel detects hold and vertical drag together. If
+            // drag alone has priority, a stationary hold waits for finger-up
+            // before SwiftUI lets the 450ms recognizer deliver its action.
+            .highPriorityGesture(clickGesture.simultaneously(with: dragGesture),
+                                 including: canDrag ? .all : .subviews)
             .simultaneousGesture(pressGesture,
                 including: prominentPressFeedback || onLongClick != nil ? .all : .subviews)
             .scaleEffect(prominentPressFeedback && pressing ? 0.96 : 1)
@@ -297,7 +299,9 @@ struct DetentWheel<Option: Hashable>: View {
 
     private var dragGesture: some Gesture {
         let revision = dragSession.revision
-        return DragGesture(minimumDistance: canDrag ? 2 : .infinity)
+        // Match the 8pt touch slop used by the other Android gesture ports.
+        // A 2pt drift while holding used to claim the drag and cancel a hold.
+        return DragGesture(minimumDistance: canDrag ? 8 : .infinity)
             .updating($gestureActive) { _, active, _ in active = true }
             .onChanged { value in
                 guard revision == dragSession.revision, enabled, !readOnly, canDrag else { return }
@@ -317,6 +321,7 @@ struct DetentWheel<Option: Hashable>: View {
                     return
                 }
                 guard let target = dragSession.release(revision: revision, translation: value.translation.height) else { return }
+                dragSession.invalidate()
                 dragging = false
                 withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
                 if target != selectedIndex { onCommit(options[target]) }
@@ -336,8 +341,12 @@ struct DetentWheel<Option: Hashable>: View {
     }
 
     private var clickGesture: AnyGesture<Void> {
+        let revision = dragSession.revision
         guard onLongClick != nil else {
-            return AnyGesture(TapGesture().onEnded { activate() })
+            return AnyGesture(TapGesture().onEnded {
+                guard revision == dragSession.revision, !dragging else { return }
+                activate()
+            })
         }
         // One touch sequence chooses exactly one action. A completed long
         // press consumes its own release; the next touch has a fresh choice.
@@ -346,10 +355,13 @@ struct DetentWheel<Option: Hashable>: View {
             LongPressGesture(minimumDuration: Double(longPressDurationMilliseconds) / 1_000)
                 .exclusively(before: TapGesture())
                 .onEnded { result in
-                    guard enabled, !readOnly else { return }
+                    guard enabled, !readOnly, !dragging, revision == dragSession.revision else { return }
                     switch result {
                     case .first(let completed):
-                        if completed { longPressFeedback.trigger { onLongClick?() } }
+                        if completed {
+                            dragSession.invalidate()
+                            longPressFeedback.trigger { onLongClick?() }
+                        }
                     case .second:
                         activate()
                     }

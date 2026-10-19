@@ -887,30 +887,28 @@ struct PhotoEffectsSettingsPreview: View {
             }
         }
         .onPreferenceChange(PhotoEffectsPreviewAnchorPreferenceKey.self) { geometry.previewAnchor = $0 }
-        .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
-            if !pressing { showUnfiltered = false }
-        }, perform: {
-            guard unfiltered != nil else { return }
-            showUnfiltered = true
-        })
-        .simultaneousGesture(
-            TapGesture(count: 2)
-                .exclusively(before: TapGesture(count: 1))
-                .onEnded { gesture in
-                    switch gesture {
-                    case .first:
-                        guard expanded == false else { return }
-                        rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
-                    case .second:
-                        guard let expandedImage else { return }
-                        expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: expandedImage,
-                            initialComparison: unfiltered, anchor: geometry.previewAnchor)
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) { expanded = true }
-                    }
-                }
-        )
+        #if DEBUG
+        .overlay(alignment: .bottom) {
+            if ProcessInfo.processInfo.arguments.contains("--gesture-audit-ui-test") {
+                Text("ready=\(unfiltered != nil ? 1 : 0);comparison=\(showUnfiltered ? 1 : 0);rotation=\(rotationQuarterTurns);expanded=\(expanded ? 1 : 0)")
+                    .font(.system(size: 8)).allowsHitTesting(false).accessibilityIdentifier("effects-gesture-state")
+            }
+        }
+        .onChange(of: showUnfiltered) { ButtonInteractionTrace.recordNow($0 ? "comparison-on" : "comparison-off") }
+        .onChange(of: expanded) { ButtonInteractionTrace.recordNow($0 ? "effects-open" : "effects-close") }
+        #endif
+        .overlay { PhotoEffectsImageInput(comparing: $showUnfiltered, comparisonEnabled: unfiltered != nil,
+            onTap: { _ in
+                guard let expandedImage else { return }
+                expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: expandedImage,
+                    initialComparison: unfiltered, anchor: geometry.previewAnchor)
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { expanded = true }
+            }, onDoubleTap: { _ in
+                guard !expanded else { return }
+                rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
+            }) }
         .fullScreenCover(isPresented: $expanded, onDismiss: { expandedSnapshot = nil }) {
             if let expandedSnapshot {
                 PhotoEffectsExpandedPreview(image: expandedSnapshot.image,

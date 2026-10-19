@@ -28,7 +28,13 @@ struct ZTransferApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--queue-pill-grace-test") {
+            if ProcessInfo.processInfo.arguments.contains("--gps-gesture-ui-test") {
+                GPSGestureAuditHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--filter-gesture-ui-test") {
+                FilterGestureAuditHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--gesture-audit-ui-test") {
+                EffectsGestureAuditHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--queue-pill-grace-test") {
                 QueuePillGraceHarness()
             } else if ProcessInfo.processInfo.arguments.contains("--queue-top-pill-test") {
                 QueueTopPillPresentationHarness()
