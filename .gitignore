@@ -10,6 +10,7 @@
 .cxx
 local.properties
 /app/build
+/tools/release-apk/build
 /app/release
 *.apk
 *.ap_

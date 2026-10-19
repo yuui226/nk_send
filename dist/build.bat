@@ -39,11 +39,11 @@ if not exist "keystore.properties" (
 
 rem Default: release APK (for direct distribution, e.g. QQ group).
 rem "build.bat aab" builds the Android App Bundle required by Google Play.
-set "TASK=assembleRelease"
-set "SRC=app\build\outputs\apk\release\app-release.apk"
+set "TASK=:release-apk:optimizeReleaseApk"
+set "SRC=tools\release-apk\build\outputs\release-optimized.apk"
 set "EXT=apk"
 if /i "%~1"=="aab" (
-    set "TASK=bundleRelease"
+    set "TASK=:app:bundleRelease"
     set "SRC=app\build\outputs\bundle\release\app-release.aab"
     set "EXT=aab"
 )
@@ -91,6 +91,11 @@ if not exist "%SRC%" (
 )
 
 copy /Y "%SRC%" "%DST%" >nul
+if errorlevel 1 (
+    echo ERROR: failed to copy release artifact.
+    pause
+    exit /b 1
+)
 echo.
 echo Artifact copied to: %DST%
 
@@ -99,6 +104,11 @@ rem exact build. Keep it local (do NOT distribute it with the app).
 set "MAPPING=app\build\outputs\mapping\release\mapping.txt"
 if exist "%MAPPING%" (
     copy /Y "%MAPPING%" "%~dp0%BASENAME%.mapping.txt" >nul
+    if errorlevel 1 (
+        echo ERROR: failed to copy release mapping.
+        pause
+        exit /b 1
+    )
     echo Mapping copied to:  %~dp0%BASENAME%.mapping.txt
 )
 pause

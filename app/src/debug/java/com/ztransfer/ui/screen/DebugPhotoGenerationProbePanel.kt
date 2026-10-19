@@ -49,10 +49,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.diagnostics.RatingDiagnostics
+import com.ztransfer.diagnostics.ThumbnailDiagnostics
 import kotlinx.coroutines.launch
 import com.ztransfer.ui.theme.AppTheme
 
-/** Debug 照片页的评级与保护探测窗口；Release 有同名空实现。 */
+/** Debug 照片页的缩略图、评级与保护诊断窗口；Release 有同名空实现。 */
 @Composable
 internal fun DebugPhotoGenerationProbePanel(
     modifier: Modifier = Modifier,
@@ -99,7 +100,7 @@ internal fun DebugPhotoGenerationProbePanel(
             }
         } else {
             val lines = remember(logVersion) {
-                RatingDiagnostics.snapshot().split('\n')
+                photoDiagnosticReport().split('\n')
             }
             BackHandler { open = false }
             Box(
@@ -132,20 +133,20 @@ internal fun DebugPhotoGenerationProbePanel(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "评级与保护诊断",
+                                "照片诊断",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.onBackground,
                             )
                             Text(
-                                "可连续探测两次后复制完整结果",
+                                "遇到问题后复制日志",
                                 fontSize = 11.sp,
                                 color = colors.onSurfaceVariant,
                             )
                         }
                         GlassButton(
                             onClick = {
-                                clipboard.setText(AnnotatedString(RatingDiagnostics.snapshot()))
+                                clipboard.setText(AnnotatedString(photoDiagnosticReport()))
                                 Toast.makeText(context, "诊断日志已复制", Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp),
@@ -160,6 +161,7 @@ internal fun DebugPhotoGenerationProbePanel(
                         GlassButton(
                             onClick = {
                                 RatingDiagnostics.clear()
+                                ThumbnailDiagnostics.clear()
                                 logVersion++
                             },
                             contentPadding = PaddingValues(8.dp),
@@ -287,3 +289,6 @@ internal fun DebugPhotoGenerationProbePanel(
         }
     }
 }
+
+private fun photoDiagnosticReport(): String =
+    ThumbnailDiagnostics.snapshot() + "\n\n" + RatingDiagnostics.snapshot()

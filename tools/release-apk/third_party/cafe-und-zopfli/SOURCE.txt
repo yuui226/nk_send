@@ -1,0 +1,7 @@
+Upstream: https://github.com/eustas/CafeUndZopfli
+Commit: 5cdf283e6768f04b3a5b0f905692b8588a898825
+License: Apache-2.0 (see COPYING)
+Source archive SHA-256: 6f21f4b70448b30dddb92cd13ba01bb95c28db2ff7a41a044ee015394875dd0b
+
+Unmodified Java sources; used only by the Release APK build tool.
+No app dependency, runtime library, or Android/native binary is added.

@@ -21,3 +21,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "ZTransfer"
 include(":app")
+// Build-time tooling only; nothing from this project is packaged in the app.
+include(":release-apk")
+project(":release-apk").projectDir = file("tools/release-apk")

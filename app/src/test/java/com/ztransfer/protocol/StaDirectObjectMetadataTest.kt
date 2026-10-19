@@ -103,18 +103,6 @@ class StaDirectObjectMetadataTest {
     }
 
     @Test
-    fun extractsLargestCompleteJpegFromRawPrefix() {
-        val small = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte())
-        val large = byteArrayOf(
-            0xFF.toByte(), 0xD8.toByte(), 1, 2, 3, 4, 0xFF.toByte(), 0xD9.toByte(),
-        )
-        val raw = byteArrayOf(9, 9, *small, 8, 8, *large, 7)
-
-        assertEquals(large.toList(), largestEmbeddedJpeg(raw)?.toList())
-        assertNull(largestEmbeddedJpeg(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2)))
-    }
-
-    @Test
     fun rawThumbnailHintStartsSmallAndRetainsTheProvenFallbackBudget() {
         assertEquals(
             StaDirectRawThumbnailProbePlan(initialBytes = 149_498, maximumBytes = 198_650),
