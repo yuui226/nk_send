@@ -1,5 +1,42 @@
 import SwiftUI
 
+/// Android PhotoPreview.PreviewEffectsDialog sits above the album's queue
+/// controls. Carry the editor to that same root layer without duplicating its
+/// draft or dismissing the preview underneath it. Retain it through close.
+struct PreviewPhotoEffectsPresentationKey: PreferenceKey {
+    static var defaultValue: PreviewPhotoEffectsEditor? { nil }
+    static func reduce(value: inout PreviewPhotoEffectsEditor?, nextValue: () -> PreviewPhotoEffectsEditor?) {
+        value = nextValue() ?? value
+    }
+}
+
+extension View {
+    func previewPhotoEffectsPresentation() -> some View {
+        modifier(PreviewPhotoEffectsPresentation())
+    }
+}
+
+private struct PreviewPhotoEffectsBlockingKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+private struct PreviewPhotoEffectsPresentation: ViewModifier {
+    @State private var blocksBackground = false
+    func body(content: Content) -> some View {
+        content
+            // Match Dialog's modal input/accessibility boundary, including the
+            // 8pt margin and rounded corners where the page remains visible.
+            .allowsHitTesting(!blocksBackground)
+            .accessibilityHidden(blocksBackground)
+            .overlayPreferenceValue(PreviewPhotoEffectsPresentationKey.self) { editor in
+                ZStack { editor }
+                    .preference(key: PreviewPhotoEffectsBlockingKey.self, value: editor != nil)
+            }
+            .onPreferenceChange(PreviewPhotoEffectsBlockingKey.self) { blocksBackground = $0 }
+    }
+}
+
 func showPreviewPhotoEffects(enabled: Bool, isReview: Bool, file: CameraFile?) -> Bool {
     guard enabled, !isReview, let file else { return false }
     return ["jpg", "jpeg"].contains((file.fileName as NSString).pathExtension.lowercased())

@@ -55,16 +55,31 @@ struct SettingsPopupOverlay: View {
     @State private var fireworks = PremiumFireworks()
 
     var body: some View {
+        GeometryReader { safeViewport in
+            popup(in: safeViewport.frame(in: .global))
+        }
+        .zIndex(100)
+        .photoEffectsHint($effectsHint, duration: 1.8, multilineDuration: 3.6)
+        .onChange(of: effectsDraft) { value in
+            effectsStore.persistEditorPreferences(from: value)
+        }
+    }
+
+    private func popup(in safeViewport: CGRect) -> some View {
         GeometryReader { proxy in
             let measuringPresentation = presentationID
             let localAnchor = proxy[anchor]
             let panelLeft: CGFloat = 12
             let panelWidth = max(1, proxy.size.width - panelLeft * 2)
-            let panelTop = effectsOnly ? proxy.safeAreaInsets.top + 8 : localAnchor.maxY + 8
+            // Read the safe viewport BEFORE expanding the backdrop to the
+            // status bar. The expanded proxy reports a zero top inset.
+            // Android effectsOnly: statusBarsPadding + 8dp, not toolbar bottom.
+            let safeTop = max(0, safeViewport.minY - proxy.frame(in: .global).minY)
+            let panelTop = effectsOnly ? safeTop + 8 : localAnchor.maxY + 8
             // The geometry already excludes the bottom safe area (including
             // the keyboard). Add a gap only when no system inset provides one;
             // subtracting that inset again would collapse the editor twice.
-            let bottomGap: CGFloat = effectsOnly ? proxy.safeAreaInsets.bottom + 8 : (proxy.safeAreaInsets.bottom > 0 ? 0 : 12)
+            let bottomGap: CGFloat = effectsOnly ? 8 : (proxy.safeAreaInsets.bottom > 0 ? 0 : 12)
             let availableHeight = max(1, proxy.size.height - panelTop - bottomGap)
             let sourceAnchor = GeniePopupMotion.attachmentAnchor(
                 for: localAnchor, cornerRadius: 22
@@ -139,7 +154,9 @@ struct SettingsPopupOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background { if isPresented || panelVisible { PopupDragBoundary() } }
-            .gesture(DragGesture(minimumDistance: 8).onChanged { _ in })
+            // The backdrop consumes outside drags; PopupDragBoundary blocks
+            // the page pager. A drag on this whole ancestor competes with the
+            // wheel/scroll recognizers inside the separate Genie hosting view.
             .allowsHitTesting(isPresented || panelVisible)
             .onAppear { if isPresented { beginPresentation() } }
             .onChange(of: isPresented) { presented in
@@ -157,11 +174,6 @@ struct SettingsPopupOverlay: View {
         // Keep the popup anchored below the toolbar, but let its scroll view
         // shrink above the keyboard so the text stays visible while editing.
         .ignoresSafeArea(.container, edges: [.top, .leading, .trailing])
-        .zIndex(100)
-        .photoEffectsHint($effectsHint, duration: 1.8, multilineDuration: 3.6)
-        .onChange(of: effectsDraft) { value in
-            effectsStore.persistEditorPreferences(from: value)
-        }
     }
 
     private func beginPresentation() {

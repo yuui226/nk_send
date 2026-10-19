@@ -24,6 +24,10 @@ enum ButtonInteractionTrace {
         events.append(event)
     }
     static func reset() { events.removeAll(keepingCapacity: true) }
+    static func recordNow(_ event: String) {
+        guard enabled else { return }
+        record(.init(event: event, milliseconds: Int64(ProcessInfo.processInfo.systemUptime * 1000)))
+    }
     static func snapshot() -> String {
         guard let data = try? JSONEncoder().encode(events) else { return "[]" }
         return String(decoding: data, as: UTF8.self)

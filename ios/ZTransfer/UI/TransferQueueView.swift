@@ -1497,9 +1497,17 @@ struct LiquidTransferProgressSurface: View {
         .allowsHitTesting(false)
     }
     private var seedPhase: CGFloat {
-        let hash = seed.utf8.reduce(UInt32(0)) { ($0 &* 31) &+ UInt32($1) }
-        return CGFloat(hash & 0xffff) / 65535
+        liquidProgressStableSeed(seed)
     }
+}
+
+/// Approved UUID mapping: stable UTF-8 fold, then Android's unsigned seed
+/// mixing. Never use Swift Hasher (randomized across launches) or change IDs.
+func liquidProgressStableSeed(_ seed: String) -> CGFloat {
+    var hash = seed.utf8.reduce(UInt32(0)) { ($0 &* 31) &+ UInt32($1) }
+    hash = (hash ^ (hash >> 16)) &* 0x45D9F3B
+    hash ^= hash >> 16
+    return CGFloat(Float(hash & 0xffff) / 65535)
 }
 
 struct LiquidWavePhaseMotion {

@@ -1,5 +1,7 @@
 import XCTest
 import Combine
+import SwiftUI
+import UIKit
 @testable import ZTransfer
 
 final class ConnectionStateTests: XCTestCase {
@@ -386,7 +388,7 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(state.errorMessage, AppLocalized.resource("usb_unknown_error"))
     }
 
-    func testConnectionCelebrationUsesAndroidTiming() {
+    func testConnectionCelebrationUsesEstablishedIOSHandoffTiming() {
         let beforeSuccess = ConnectionCelebrationValues(elapsedMilliseconds: 619)
         XCTAssertEqual(beforeSuccess.success, 0, accuracy: 0.0001)
 
@@ -511,4 +513,86 @@ private actor AcceptedWirelessReplayService: WiFiConnectionServicing {
     }
     func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) async {}
     func disconnect() async {}
+}
+
+@MainActor
+final class PremiumConnectionArtworkTests: XCTestCase {
+    private struct Render {
+        let image: UIImage
+        let bytes: [UInt8]
+        func alpha(_ x: Int, _ y: Int) -> Int { Int(bytes[(y * 220 + x) * 4 + 3]) }
+        var totalAlpha: Int { stride(from: 3, to: bytes.count, by: 4).reduce(0) { $0 + Int(bytes[$1]) } }
+        var coreRadius: Int {
+            (30...45).max { a, b in greenStrength(at: a) < greenStrength(at: b) }!
+        }
+        private func greenStrength(at radius: Int) -> Int {
+            let i = (110 * 220 + 110 + radius) * 4
+            return Int(bytes[i + 1]) - Int(bytes[i])
+        }
+    }
+    private func render(_ progress: CGFloat, premium: Bool = true) throws -> Render {
+        let renderer = ImageRenderer(content: ConnectionSuccessArtwork(progress: progress, goldBurst: premium)
+            .frame(width: 220, height: 220).environment(\.colorScheme, .light))
+        renderer.scale = 1; renderer.isOpaque = false
+        let image = try XCTUnwrap(renderer.uiImage)
+        let cg = try XCTUnwrap(image.cgImage)
+        XCTAssertEqual(cg.width, 220); XCTAssertEqual(cg.height, 220)
+        var bytes = [UInt8](repeating: 0, count: 220 * 220 * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: 220, height: 220,
+            bitsPerComponent: 8, bytesPerRow: 220 * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: 220, height: 220))
+        return Render(image: image, bytes: bytes)
+    }
+
+    func testAndroidPremiumTailEndpointsAndMonotonicFade() {
+        XCTAssertEqual(premiumConnectionEffectFade(-1), 1)
+        XCTAssertEqual(premiumConnectionEffectFade(0.5), 1)
+        XCTAssertEqual(premiumConnectionEffectFade(0.62), 1)
+        XCTAssertEqual(premiumConnectionEffectFade(0.81), 0.5, accuracy: 0.000001)
+        XCTAssertGreaterThan(premiumConnectionEffectFade(0.8), premiumConnectionEffectFade(0.95))
+        XCTAssertEqual(premiumConnectionEffectFade(1), 0)
+        XCTAssertEqual(premiumConnectionEffectFade(2), 0)
+        let samples = (0...100).map { premiumConnectionEffectFade(CGFloat($0) / 100) }
+        XCTAssertTrue(zip(samples, samples.dropFirst()).allSatisfy { $0 >= $1 })
+    }
+
+    func testRealArtworkHasRadialGlowExpandingCoreAndNoResidualFinalPixels() throws {
+        for progress: CGFloat in [-1, 0, 1, 2] {
+            XCTAssertEqual(try render(progress).totalAlpha, 0, "Every premium layer must finish completely")
+        }
+        // At p=.5, all moving dots are outside radius 21. Sample inside that
+        // region so a bright particle cannot be mistaken for the diffuse halo.
+        let glow = try render(0.5)
+        XCTAssertGreaterThan(glow.totalAlpha, 1_000, "A blank Canvas cannot pass the fade assertions")
+        XCTAssertGreaterThan(glow.alpha(110, 110), glow.alpha(118, 110))
+        XCTAssertGreaterThan(glow.alpha(118, 110), glow.alpha(126, 110), "Glow must soften radially, not form solid disks")
+        let first = try render(0.6), later = try render(0.8), tail = try render(0.95)
+        XCTAssertGreaterThan(later.coreRadius, first.coreRadius, "The confirmation ring expands; it must not contract into a badge")
+        XCTAssertGreaterThan(later.totalAlpha, tail.totalAlpha)
+        XCTAssertGreaterThan(tail.totalAlpha, 0)
+    }
+
+    func testFreePulsesRemainSeparateAndSaveActualStages() throws {
+        XCTAssertEqual(try render(0, premium: false).totalAlpha, 0)
+        XCTAssertEqual(try render(1, premium: false).totalAlpha, 0)
+        let free = try render(0.3, premium: false)
+        XCTAssertGreaterThan(free.totalAlpha, 1_000)
+        XCTAssertEqual(free.alpha(110, 110), 0, "Free pulses cannot acquire the premium center glow")
+        let stages: [CGFloat] = [0.05, 0.25, 0.5, 0.7, 0.85, 0.95, 1]
+        let images = try stages.map { (try render($0).image, try render($0, premium: false).image) }
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let sheet = UIGraphicsImageRenderer(size: CGSize(width: 440, height: stages.count * 244), format: format).image { ctx in
+            UIColor(white: 0.08, alpha: 1).setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 440, height: stages.count * 244))
+            for (index, pair) in images.enumerated() {
+                let y = index * 244
+                pair.0.draw(at: CGPoint(x: 0, y: y + 24)); pair.1.draw(at: CGPoint(x: 220, y: y + 24))
+                ("Pro / Free · p=\(stages[index])" as NSString).draw(at: CGPoint(x: 8, y: y + 4),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: UIColor.white])
+            }
+        }
+        try sheet.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-1019-premium-connection.png"))
+        let attachment = XCTAttachment(image: sheet); attachment.name = "Premium connection stages"
+        attachment.lifetime = .keepAlways; add(attachment)
+    }
 }

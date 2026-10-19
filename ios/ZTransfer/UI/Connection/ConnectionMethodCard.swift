@@ -505,11 +505,32 @@ private struct ConnectionSuccessOverlay: View {
     }
 
     var body: some View {
+        ConnectionSuccessArtwork(progress: progress, goldBurst: goldBurst)
+            .zIndex(goldBurst ? 1 : -1)
+    }
+}
+
+/// HomeScreen.kt 73b81a56: all premium light layers settle to transparency.
+/// Keep Float operations for the same smoothstep tail as Android.
+func premiumConnectionEffectFade(_ progress: CGFloat) -> CGFloat {
+    let tail = min(1, max(0, (Float(progress) - 0.62) / 0.38))
+    return CGFloat(1 - tail * tail * (3 - 2 * tail))
+}
+
+/// Drawing-only leaf shared by the real celebration and pixel regressions.
+/// Entitlement capture, the single flying badge and the finite clock stay in
+/// their existing owners; this layer does not create a timer or another badge.
+struct ConnectionSuccessArtwork: View {
+    let progress: CGFloat
+    let goldBurst: Bool
+
+    var body: some View {
         Canvas { context, size in
             let p = min(1, max(0, progress))
             guard p > 0 else { return }
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
             if goldBurst {
+                guard p < 1 else { return }
                 drawPremium(context: &context, size: size, progress: p)
                 return
             }
@@ -553,7 +574,6 @@ private struct ConnectionSuccessOverlay: View {
                 )
             }
         }
-        .zIndex(goldBurst ? 1 : -1)
     }
 
     /// HomeScreen.kt drawPremiumSuccessEffect + the original confirmation
@@ -565,13 +585,19 @@ private struct ConnectionSuccessOverlay: View {
         let gold = Color(red: 1, green: 214 / 255.0, blue: 107 / 255.0)
         let warm = Color(red: 240 / 255.0, green: 169 / 255.0, blue: 59 / 255.0)
         let green = ZTransferColors.statusConnected
-        let visibility = min(1, p / 0.16) * min(1, (1 - p) / 0.30)
+        let fade = premiumConnectionEffectFade(p)
+        let visibility = min(1, p / 0.16) * fade
         let halo = max(0, sin(min(p, 0.72) / 0.72 * .pi))
         func circle(_ at: CGPoint, _ radius: CGFloat) -> Path {
             Path(ellipseIn: CGRect(x: at.x - radius, y: at.y - radius, width: radius * 2, height: radius * 2))
         }
-        context.fill(circle(center, dimension * (0.16 + p * 0.16)), with: .color(gold.opacity(0.12 * halo)))
-        context.fill(circle(center, dimension * (0.24 + p * 0.12)), with: .color(warm.opacity(0.07 * halo)))
+        func glow(_ radius: CGFloat, color: Color, alpha: Double) {
+            context.fill(circle(center, radius), with: .radialGradient(
+                Gradient(colors: [color.opacity(alpha), .clear]),
+                center: center, startRadius: 0, endRadius: radius))
+        }
+        glow(dimension * (0.16 + p * 0.16), color: gold, alpha: 0.12 * halo * fade)
+        glow(dimension * (0.24 + p * 0.12), color: warm, alpha: 0.07 * halo * fade)
         let orbit = dimension * (0.22 + p * 0.10)
         for index in 0..<3 {
             let angle = CGFloat(index * 120 + 8) - 32 + p * 118
@@ -586,14 +612,14 @@ private struct ConnectionSuccessOverlay: View {
             let angle = CGFloat(index) * .pi / 3 + phase * 0.28
             let distance = dimension * (0.19 + phase * 0.25)
             let point = CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
-            let fade = min(1, phase * 5) * (1 - phase)
-            let long = CGFloat(index.isMultiple(of: 2) ? 7 : 5) * (0.7 + fade * 0.6)
+            let sparkleFade = min(1, phase * 5) * (1 - phase)
+            let long = CGFloat(index.isMultiple(of: 2) ? 7 : 5) * (0.7 + sparkleFade * 0.6)
             var star = Path()
             star.move(to: CGPoint(x: point.x, y: point.y - long))
             star.addLine(to: CGPoint(x: point.x, y: point.y + long))
             star.move(to: CGPoint(x: point.x - long * 0.42, y: point.y))
             star.addLine(to: CGPoint(x: point.x + long * 0.42, y: point.y))
-            context.stroke(star, with: .color((index.isMultiple(of: 2) ? gold : .white).opacity(fade * 0.95)),
+            context.stroke(star, with: .color((index.isMultiple(of: 2) ? gold : .white).opacity(sparkleFade * 0.95 * fade)),
                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
         }
         let reveal = min(1, p * 5)
@@ -601,18 +627,18 @@ private struct ConnectionSuccessOverlay: View {
             let phase = min(1, max(0, (p - CGFloat(index) * 0.14) / 0.72))
             let scale = 0.72 + phase * 1.72
             context.stroke(circle(center, (41 - 0.75) * scale),
-                           with: .color(green.opacity((1 - phase) * 0.62 * reveal)), lineWidth: 1.5 * scale)
+                           with: .color(green.opacity((1 - phase) * 0.62 * reveal * fade)), lineWidth: 1.5 * scale)
         }
         for index in 0..<10 {
             let angle = CGFloat(index * 36 + (index.isMultiple(of: 2) ? 7 : -5)) * .pi / 180
             let distance = CGFloat(48 + (index % 3) * 11) * p
             let point = CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
             let color = index.isMultiple(of: 2) ? Color(red: 1, green: 224 / 255.0, blue: 130 / 255.0) : warm
-            context.fill(circle(point, index.isMultiple(of: 3) ? 3 : 2), with: .color(color.opacity(reveal * (1 - p))))
+            context.fill(circle(point, index.isMultiple(of: 3) ? 3 : 2), with: .color(color.opacity(reveal * (1 - p) * fade)))
         }
-        let coreScale = 0.82 + sin(p * .pi) * 0.22
-        let coreAlpha = max(0.16, 1 - p)
-        context.fill(circle(center, 39 * coreScale), with: .color(green.opacity(0.08 * coreAlpha * reveal)))
+        let coreScale = 0.82 + p * 0.28
+        let coreAlpha = (1 - p) * fade
+        glow(39 * coreScale, color: green, alpha: 0.08 * coreAlpha * reveal)
         context.stroke(circle(center, (39 - 0.75) * coreScale),
                        with: .color(green.opacity(0.70 * coreAlpha * reveal)), lineWidth: 1.5 * coreScale)
     }

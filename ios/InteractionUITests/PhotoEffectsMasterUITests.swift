@@ -2,6 +2,34 @@ import XCTest
 
 @MainActor
 final class PhotoEffectsMasterUITests: XCTestCase {
+    func testSharedWheelThresholdKeepsShortListsClickableAndLongListsDraggable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--effects-master-ui-test", "--reset-effects-master",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        let columns = app.buttons["Items per row"]
+        XCTAssertTrue(columns.waitForExistence(timeout: 10))
+        let beforeTap = columns.value as? String
+        columns.tap()
+        let accepted = columns.value as? String
+        XCTAssertNotEqual(accepted, beforeTap)
+        let start = columns.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -54)))
+        XCTAssertEqual(columns.value as? String, accepted, "Three choices use taps; dragging must not change them")
+        let range = app.buttons["Photo range"]
+        XCTAssertTrue(range.isHittable)
+        let beforeDrag = range.value as? String
+        let rangeY = range.frame.midY
+        let rangeStart = range.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        // Fresh preferences start at the last detent (all): drag DOWN away
+        // from that boundary instead of asserting a clamped drag changes it.
+        rangeStart.press(forDuration: 0.6, thenDragTo: rangeStart.withOffset(CGVector(dx: 0, dy: 54)))
+        XCTAssertNotEqual(range.value as? String, beforeDrag)
+        XCTAssertEqual(range.frame.midY, rangeY, accuracy: 1)
+    }
+
     func testMasterSwitchDoesNotOpenEditorAndPersistsWithoutClearingRecipe() {
         continueAfterFailure = false
         let app = XCUIApplication()

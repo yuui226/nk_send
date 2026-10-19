@@ -246,12 +246,12 @@ struct TransferQueueSnapshot: Equatable, Sendable {
 
     enum ExecutionControl: Hashable, Sendable { case start, pause }
 
-    /// Android queueExecutionControl: runtime activity wins even before the
-    /// worker claims a file or after it finishes the last file. Flight holds
-    /// affect the pill count only; deferred-start preferences do not gate this.
+    /// User-requested iOS rule (2026-10-19): pause is useful only while another
+    /// file is waiting. Hiding it never changes the worker or an existing pause
+    /// request. Flight holds and generation jobs do not count as waiting files.
     var executionControl: ExecutionControl? {
-        if isTransferring { return .pause }
-        return items.contains { $0.status == .waiting } ? .start : nil
+        guard items.contains(where: { $0.status == .waiting }) else { return nil }
+        return isTransferring ? .pause : .start
     }
 }
 

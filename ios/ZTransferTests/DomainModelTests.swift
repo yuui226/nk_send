@@ -3225,7 +3225,7 @@ final class DomainModelTests: XCTestCase {
     }
 
     func testPhotoPreviewHoldAndHistogramMatchPresentationContract() throws {
-        XCTAssertEqual(photoPreviewLongPressDuration, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(photoPreviewLongPressDuration, 0.20, accuracy: 0.0001)
         XCTAssertEqual(photoPreviewRotationDuration, 0.22, accuracy: 0.0001)
         XCTAssertEqual(photoPreviewZoomPanMinimumDistance, 8, accuracy: 0.0001)
         XCTAssertEqual(photoPreviewDoubleTapDuration, 0.24, accuracy: 0.0001)
@@ -4542,7 +4542,7 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertEqual(visibility([failed], excluded: [failed.id]), .init(hasRetryable: false, hasClearable: false))
     }
 
-    func testExecutionControlIncludesReservedHandoffAndLastFileStates() {
+    func testExecutionControlRequiresWaitingWorkIncludingReservedHandoff() {
         let waiting = TransferQueueItem(id: UUID(), file: file(1))
         var active = waiting
         active.status = .transferring
@@ -4558,7 +4558,7 @@ final class TransferQueueScenarioTests: XCTestCase {
             for items in [[], [waiting], [active], [completed], [waiting, completed]] {
                 let running = TransferQueueSnapshot(items: items, isTransferring: true,
                                                     pauseAfterCurrent: pauseRequested)
-                XCTAssertEqual(running.executionControl, .pause)
+                XCTAssertEqual(running.executionControl, items.contains { $0.status == .waiting } ? .pause : nil)
             }
             for item in [waiting, active, completed, failed, cancelled, generating] {
                 let idle = TransferQueueSnapshot(items: [item], isTransferring: false,
@@ -4570,24 +4570,34 @@ final class TransferQueueScenarioTests: XCTestCase {
         }
     }
 
-    func testLastFileRetainsPauseControlUntilWorkerStops() async throws {
+    func testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt() async throws {
         let (queue, directory) = try fixture()
         let camera = ControlledTransferCamera()
         _ = await queue.enqueue(file(1))
         let waiting = await queue.snapshot()
         XCTAssertEqual(waiting.executionControl, .start)
-        XCTAssertFalse(waiting.pauseAfterCurrent)
         await queue.start(session: camera, directory: directory)
         let running = try await wait(queue) { $0.items[0].status == .transferring }
-        XCTAssertFalse(running.items.contains { $0.status == .waiting })
-        XCTAssertEqual(running.executionControl, .pause)
+        XCTAssertNil(running.executionControl)
+        XCTAssertTrue(running.isTransferring)
+        XCTAssertFalse(running.pauseAfterCurrent)
+        _ = await queue.enqueue(file(2))
+        let added = await queue.snapshot()
+        XCTAssertEqual(added.executionControl, .pause)
         await queue.pauseAfterCurrentFile()
         let requested = await queue.snapshot()
         XCTAssertTrue(requested.pauseAfterCurrent)
         XCTAssertEqual(requested.executionControl, .pause)
         await camera.finish(1)
+        let paused = try await wait(queue) { !$0.isTransferring }
+        XCTAssertEqual(paused.items.map(\.status), [.completed, .waiting])
+        XCTAssertEqual(paused.executionControl, .start)
+        await queue.startPendingTransfers(session: camera, directory: directory)
+        let last = try await wait(queue) { $0.items[1].status == .transferring }
+        XCTAssertNil(last.executionControl)
+        await camera.finish(2)
         let finished = try await wait(queue) { !$0.isTransferring }
-        XCTAssertEqual(finished.items[0].status, .completed)
+        XCTAssertEqual(finished.items.map(\.status), [.completed, .completed])
         XCTAssertNil(finished.executionControl)
     }
 
@@ -7999,6 +8009,26 @@ final class DetentWheelPerformanceTests: XCTestCase {
 final class DetentWheelDragSessionTests: XCTestCase {
     private let original = DetentWheelConfiguration(options: [0, 1, 2, 3, 4], rowHeight: 18, enabled: true, readOnly: false)
 
+    func testAndroidThreeOptionThresholdAndFilterIntensityRelease() {
+        for count in [1, 2, 3, 4, 50] {
+            for enabled in [false, true] {
+                for readOnly in [false, true] {
+                    let config = DetentWheelConfiguration(options: Array(0..<count), rowHeight: 18,
+                        enabled: enabled, readOnly: readOnly)
+                    XCTAssertEqual(config.canDrag, count > 3 && enabled && !readOnly)
+                }
+            }
+        }
+        let choices = Array(stride(from: 100, through: 2, by: -2))
+        var session = DetentWheelDragSession(configuration: .init(options: choices, rowHeight: 18,
+            enabled: true, readOnly: false))
+        let revision = session.revision
+        XCTAssertTrue(session.begin(revision: revision, selectedIndex: 10)) // 80%
+        XCTAssertEqual(session.preview(revision: revision, translation: -90), 15)
+        XCTAssertEqual(choices[session.release(revision: revision, translation: -90)!], 70)
+        XCTAssertNil(session.release(revision: revision, translation: -90), "One commit per release")
+    }
+
     func testConfigurationChangesRejectOldGestureEvenAfterRestoringOriginal() {
         let changes = [
             DetentWheelConfiguration(options: [4, 3, 2, 1, 0], rowHeight: 18, enabled: true, readOnly: false),
@@ -9678,13 +9708,31 @@ final class SettingsPopupLayoutTests: XCTestCase {
                 Color.clear.frame(width: 44, height: 36)
                     .geniePopupAnchor(.settings)
                     .padding(.leading, 12).padding(.top, 20)
+                if effectsOnly {
+                    Button {} label: { Color.green.frame(width: 40, height: 36) }
+                        .frame(maxWidth: .infinity, alignment: .trailing).padding(.trailing, 12).zIndex(3)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if effectsOnly {
+                    Button {} label: { Color.red.frame(width: 44, height: 44) }
+                        .padding(.trailing, 20).padding(.bottom, 32)
+                }
             }
             .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
                 if let anchor = anchors[.settings] {
-                    SettingsPopupOverlay(isPresented: $state.presented, showPhotoEffectsEntry: showEffects,
-                        effectsStore: effects, directory: directory, anchor: anchor, effectsOnly: effectsOnly)
+                    if effectsOnly {
+                        Color.clear.allowsHitTesting(false).preference(key: PreviewPhotoEffectsPresentationKey.self,
+                            value: PreviewPhotoEffectsEditor(isPresented: $state.presented,
+                                store: effects, directory: directory, source: nil, exif: nil, rotation: 0,
+                                anchor: anchor, onDismissed: {}))
+                    } else {
+                        SettingsPopupOverlay(isPresented: $state.presented, showPhotoEffectsEntry: showEffects,
+                            effectsStore: effects, directory: directory, anchor: anchor)
+                    }
                 }
             }
+            .previewPhotoEffectsPresentation()
         }
     }
 
@@ -9836,6 +9884,32 @@ final class SettingsPopupLayoutTests: XCTestCase {
             state.presented = true
             try await Task.sleep(for: .milliseconds(400))
             XCTAssertEqual(popup.host.view.layer.opacity, 1)
+        }
+    }
+
+    func testPreviewEffectsAvoidsStatusBarAndCoversBothQueueButtons() async throws {
+        for height: CGFloat in [852, 667] {
+            try await withOverlay(size: CGSize(width: 393, height: height), showEffects: true,
+                                  effectsOnly: true, initiallyPresented: true) { root, state, window in
+                try await Task.sleep(for: .milliseconds(600))
+                root.layoutIfNeeded()
+                let popup = try XCTUnwrap(self.descendants(GeniePopupHostView.self, in: root).first)
+                let rect = popup.convert(popup.bounds, to: window)
+                XCTAssertEqual(rect.minY, window.safeAreaInsets.top + 8, accuracy: 0.5)
+                XCTAssertEqual(rect.maxY, window.bounds.height - window.safeAreaInsets.bottom - 8, accuracy: 0.5)
+                for point in [CGPoint(x: 393 - 32, y: window.safeAreaInsets.top + 18),
+                              CGPoint(x: 393 - 42, y: height - window.safeAreaInsets.bottom - 54)] {
+                    let hit = try XCTUnwrap(window.hitTest(point, with: nil))
+                    XCTAssertTrue(hit.isDescendant(of: popup), "Queue controls must be behind the modal: \(hit)")
+                }
+                let format = UIGraphicsImageRendererFormat(); format.scale = 1
+                let image = UIGraphicsImageRenderer(size: root.bounds.size, format: format).image { root.layer.render(in: $0.cgContext) }
+                try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-preview-effects-safe-\(Int(height)).png"))
+                state.presented = false
+                try await Task.sleep(for: .milliseconds(300))
+                XCTAssertFalse(popup.host.view.isUserInteractionEnabled)
+                XCTAssertEqual(popup.host.view.layer.opacity, 0)
+            }
         }
     }
 

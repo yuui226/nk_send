@@ -304,6 +304,10 @@ struct QueuePillTaskSummary {
         downloadRemaining > 0 ? max(0, downloadRemaining - max(0, heldCount)) : generationRemaining
     }
 
+    func allDownloadsAreInFlight(heldCount: Int) -> Bool {
+        downloadRemaining > 0 && heldCount > 0 && displayRemaining(heldCount: heldCount) == 0
+    }
+
     init(items: [TransferQueueItem]) {
         var firstGenerating: TransferQueueItem?
         var firstWaiting: TransferQueueItem?

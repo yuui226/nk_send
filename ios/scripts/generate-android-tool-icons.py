@@ -15,6 +15,7 @@ sources.add_argument('--extended')
 sources.add_argument('--extended-classes', help='Actual classes.jar when Maven publishes an empty source jar')
 parser.add_argument('--version', default='1.5.4')
 parser.add_argument('--output', required=True)
+parser.add_argument('--queue-controls', action='store_true', help='Generate shared queue PlayArrow/Pause/Checklist vectors')
 a = parser.parse_args()
 extended = a.extended or a.extended_classes
 icons = [('settings', a.core, 'filled/Settings.kt'), ('check', a.core, 'filled/Check.kt'),
@@ -25,6 +26,9 @@ icons = [('settings', a.core, 'filled/Settings.kt'), ('check', a.core, 'filled/C
          ('volumeUp', extended, 'filled/VolumeUp.kt'), ('aspectRatio', extended, 'outlined/AspectRatio.kt'),
          ('edit', a.core, 'filled/Edit.kt'), ('arrowBack', a.core, 'filled/ArrowBack.kt'),
          ('refresh', a.core, 'filled/Refresh.kt'), ('image', extended, 'filled/Image.kt')]
+if a.queue_controls:
+    icons = [('play', a.core, 'rounded/PlayArrow.kt'), ('pause', extended, 'filled/Pause.kt'),
+             ('checklist', extended, 'filled/Checklist.kt')]
 
 def read_commands(jar, suffix):
     if jar != a.extended_classes:
@@ -60,7 +64,7 @@ def point(p):
     return 'CGPoint(x: %.9g, y: %.9g)' % p
 out = [f'// Generated from AndroidX Compose Material Icons {a.version}; Copyright AOSP.',
        '// Apache-2.0; see Resources/licenses. Regenerate with generate-android-tool-icons.py.',
-       'import SwiftUI', '', 'struct RemoteEditorIcon: Shape {',
+       'import SwiftUI', '', 'struct '+('QueueTopIcon' if a.queue_controls else 'RemoteEditorIcon')+': Shape {',
        '    enum Kind: CaseIterable { case '+', '.join(key for key, _, _ in icons)+' }',
        '    let kind: Kind', '    func path(in rect: CGRect) -> Path {',
        '        var path = Path()', '        switch kind {']

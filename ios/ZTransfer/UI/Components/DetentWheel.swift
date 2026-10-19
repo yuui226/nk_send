@@ -110,7 +110,7 @@ struct DetentWheel<Option: Hashable>: View {
         _dragSession = State(initialValue: DetentWheelDragSession(configuration: configuration))
     }
 
-    private var canDrag: Bool { options.count > 3 }
+    private var canDrag: Bool { gestureConfiguration.canDrag }
     private var accent: Color { accentColor ?? ZTransferColors.accentBlue }
     private var dark: Bool { colorScheme == .dark }
     private var usesNativeLiquidGlass: Bool {
@@ -176,23 +176,21 @@ struct DetentWheel<Option: Hashable>: View {
             }
             // Only a real, vertically draggable wheel gets first refusal in
             // the surrounding ScrollView. Short option lists are Android
-            // click controls; leaving their surface gesture-free lets a
+            // click controls; disabling their drag recognizer lets a
             // press-and-drag continue into the page pager instead of being
             // trapped by a high-priority tap recognizer.
-            let interactiveSurface = Group {
-                if canDrag {
-                    surface.highPriorityGesture(dragGesture)
-                } else {
-                    surface
-                }
-            }
+            let interactiveSurface = surface
             .id(gestureConfiguration)
             .contentShape(Rectangle())
             // A normal tap keeps the control clickable without installing a
             // second high-priority recognizer that can delay the enclosing
             // page's vertical drag.
             .gesture(clickGesture)
-            .simultaneousGesture(pressGesture)
+            // Keep drag and tap on the SAME surface: a high-priority gesture
+            // on an inner child cannot outrank the enclosing tap/scroll arena.
+            .highPriorityGesture(dragGesture, including: canDrag ? .all : .subviews)
+            .simultaneousGesture(pressGesture,
+                including: prominentPressFeedback || onLongClick != nil ? .all : .subviews)
             .scaleEffect(prominentPressFeedback && pressing ? 0.96 : 1)
             .brightness(prominentPressFeedback && pressing ? -0.035 : 0)
             .animation(.easeOut(duration: pressing ? 0.07 : 0.16), value: pressing)

@@ -528,6 +528,9 @@ struct PhotoPreviewView: View {
         self.prepareDismissTarget = prepareDismissTarget
         self.onDismiss = onDismiss
         self.onCropConfirmed = onCropConfirmed
+        #if DEBUG
+        ButtonInteractionTrace.recordNow("preview-init-begin")
+        #endif
         let opening = projection.opening(
             files: files, burstIDByFile: burstIDByFile, collapseBursts: collapseBursts,
             expandedBurstIDs: initialExpandedBurstIDs, selectedFileID: selectedFile.wrappedValue?.id
@@ -538,6 +541,9 @@ struct PhotoPreviewView: View {
         _index = State(initialValue: opening.index)
         _pagerSelection = State(initialValue: opening.index)
         _collapseAnchor = State(initialValue: initialAnchor)
+        #if DEBUG
+        ButtonInteractionTrace.recordNow("preview-init-end")
+        #endif
     }
 
     var body: some View {
@@ -796,10 +802,11 @@ struct PhotoPreviewView: View {
         }
         .overlayPreferenceValue(PreviewEffectsButtonAnchorKey.self) { anchor in
             if let anchor, let store = effectsStore, let directory = effectsDirectory, let file = effectsFile {
-                PreviewPhotoEffectsEditor(isPresented: $effectsPresented, store: store, directory: directory,
+                Color.clear.allowsHitTesting(false).preference(key: PreviewPhotoEffectsPresentationKey.self,
+                    value: PreviewPhotoEffectsEditor(isPresented: $effectsPresented, store: store, directory: directory,
                     source: highResolutionImages[file.id] ?? displayedImages[file.id],
                     exif: exifByFile[file.id], rotation: effectsRotation, anchor: anchor,
-                    onDismissed: { if !effectsPresented { effectsFile = nil } })
+                    onDismissed: { if !effectsPresented { effectsFile = nil } }))
             }
         }
         .overlay(alignment: .bottomLeading) {
@@ -867,7 +874,7 @@ struct PhotoPreviewView: View {
             if review == nil, let file = currentPhoto {
                 PhotoPreviewQueueAction(editor: cropEditor, editing: cropPresented,
                     confirming: cropPreparation.confirming,
-                    enabled: !closing && !cropRestoring && !queueFlightActive && !burstTransitionBusy) {
+                    enabled: !closing && effectsFile == nil && !cropRestoring && !queueFlightActive && !burstTransitionBusy) {
                     if cropPresented { confirmCrop(file) } else { startQueueFlight(for: file) }
                 }
                 .padding(.trailing, 20).padding(.bottom, 32)
@@ -881,6 +888,9 @@ struct PhotoPreviewView: View {
             if review != nil { PreviewReviewTouchObserver(state: reviewTap) }
         }
         .onAppear {
+            #if DEBUG
+            ButtonInteractionTrace.recordNow("preview-appear")
+            #endif
             rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
             rotationDegrees = -90 * Double(rotationQuarterTurns)
             previousTransfersBusy = queueModel.snapshot.isTransferring
