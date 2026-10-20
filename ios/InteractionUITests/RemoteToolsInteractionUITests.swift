@@ -2,6 +2,40 @@ import XCTest
 
 @MainActor
 final class RemoteToolsInteractionUITests: XCTestCase {
+    func testRotationCyclesBothLandscapesAndLockRetainsLayout() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--remote-tools-ui-test", "--remote-camera-tools-ui-test"]
+        app.launch(); defer { app.terminate() }
+        app.buttons["open-monitor"].tap()
+        let input = app.otherElements["remote-viewfinder-input"]
+        let rotate = app.buttons["remote-tool-rotate"]
+        XCTAssertTrue(rotate.waitForExistence(timeout: 10))
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        let portrait = input.frame
+        let plate = XCTAttachment(screenshot: app.screenshot())
+        plate.name = "Monitor fixed orientation controls"; plate.lifetime = .keepAlways; add(plate)
+        for index in 0..<3 {
+            rotate.tap()
+            if index < 2 {
+                XCTAssertTrue(app.buttons["remote-landscape-dock"].waitForExistence(timeout: 5))
+            } else {
+                XCTAssertTrue(app.buttons["remote-tools-manage"].waitForExistence(timeout: 5))
+            }
+            XCTAssertTrue(input.isHittable)
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "Monitor rotation \(index + 1)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        XCTAssertEqual(input.frame.minX, portrait.minX, accuracy: 1)
+        XCTAssertEqual(input.frame.minY, portrait.minY, accuracy: 1)
+        XCTAssertEqual(input.frame.width, portrait.width, accuracy: 1)
+        let lock = app.buttons["remote-tool-lock"]
+        lock.tap()
+        XCTAssertFalse(rotate.isEnabled)
+        lock.tap()
+        XCTAssertTrue(rotate.isEnabled)
+    }
+
     func testLUTAnchorsToToolAndReturnsFromFolderPickerWithoutSystemSheet() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -21,7 +55,10 @@ final class RemoteToolsInteractionUITests: XCTestCase {
         portrait.name = "LUT anchored empty menu"; portrait.lifetime = .keepAlways; add(portrait)
         app.buttons["remote-lut-folder"].tap()
         let cancel = app.buttons["Cancel"]
-        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        // DocumentManagerUICore runs in a separate system process. Its cold
+        // simulator startup took 7.7s in the recorded control run, before the
+        // remote controller even existed; this is not the popup animation.
+        XCTAssertTrue(cancel.waitForExistence(timeout: 20))
         cancel.tap()
         XCTAssertTrue(off.waitForExistence(timeout: 5))
         XCTAssertTrue(off.isHittable, "Folder cancellation returns to the same menu")

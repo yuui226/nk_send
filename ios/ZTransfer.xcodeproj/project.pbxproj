@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		91C3682D875B418992CA5011 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91C3682D875B418992CA5012 /* ThirdPartyNotices.txt */; };
+		91C3682D875B418992CA5001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 91C3682D875B418992CA5002 /* PrivacyInfo.xcprivacy */; };
 		25EEACED831FB5948D96E186 /* QueueTopControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */; };
 		CFFE89B33DB4BA87C30E539D /* QueueTopIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */; };
 		07D196CBCE1AE019DBA26586 /* QueueTopControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46BABF58F95603C73D247FD /* QueueTopControls.swift */; };
@@ -619,6 +621,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		91C3682D875B418992CA5012 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
+		91C3682D875B418992CA5002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopControlTests.swift; sourceTree = "<group>"; };
 		121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopIcon.swift; sourceTree = "<group>"; };
 		D46BABF58F95603C73D247FD /* QueueTopControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopControls.swift; sourceTree = "<group>"; };
@@ -1863,6 +1867,7 @@
 				1FDAFED6652BDAF104D56E54 /* Fonts */,
 				FBAC3D5E224E943E00BD3937 /* licenses */,
 				F5B0DCD9EF4268A3ACA7C197 /* Localizable.strings */,
+				91C3682D875B418992CA5002 /* PrivacyInfo.xcprivacy */,
 				492C1EF3D28AAC9526188721 /* Assets.xcassets */,
 				F4065A70797FFC0036A880A0 /* debug_sample_01.jpg */,
 				328894309311582E8EECDA44 /* debug_sample_fhd.jpg */,
@@ -2053,6 +2058,7 @@
 				AA8DAB4EE5A76236D0FA5A04 /* AndroidX-color-NOTICE.txt */,
 				2A843DBA46468A9C2C95F0D5 /* AndroidX-motion-NOTICE.txt */,
 				250213A8042128973C9861E5 /* AOSP-shadow-NOTICE.txt */,
+				91C3682D875B418992CA5012 /* ThirdPartyNotices.txt */,
 				D1EB62AADCDF15964FB70883 /* Apache-2.0.txt */,
 				3BD42CB0DB87576C5B3187DD /* Skia-BSD.txt */,
 			);
@@ -2245,9 +2251,11 @@
 				D9A8136268F4B3C1CFEEB6F4 /* AOSP-shadow-NOTICE.txt in Resources */,
 				6387552CE235DC0EF599F7CC /* AndroidX-color-NOTICE.txt in Resources */,
 				309F3C1CE60201091141FE56 /* AndroidX-motion-NOTICE.txt in Resources */,
+				91C3682D875B418992CA5011 /* ThirdPartyNotices.txt in Resources */,
 				DEB58A69C568F36181C8CE98 /* Apache-2.0.txt in Resources */,
 				F461F6F2640D24E1C10CD599 /* Assets.xcassets in Resources */,
 				B104166B4E6A8060016636A2 /* Localizable.strings in Resources */,
+				91C3682D875B418992CA5001 /* PrivacyInfo.xcprivacy in Resources */,
 				B6C12920D54B7DE1E510EAD0 /* PictureControls in Resources */,
 				E6C9523D60D283ECD4C79AF6 /* Skia-BSD.txt in Resources */,
 				C18B40D41FFA727EC247B6C0 /* apple.svg in Resources */,
@@ -2984,6 +2992,7 @@
 		6D98BC54B61B8D4930829071 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				EXCLUDED_SOURCE_FILE_NAMES = "$(inherited) debug_sample_01.jpg debug_sample_fhd.jpg";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ZTransfer/ZTransfer.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";

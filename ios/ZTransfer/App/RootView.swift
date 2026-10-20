@@ -117,10 +117,25 @@ final class RootPresentationModel: ObservableObject {
     init(connection: ConnectionViewModel? = nil, effects: PhotoEffectsStore? = nil,
          gps: GPSCoordinator? = nil, directory: DirectoryAccessStore? = nil,
          queue: TransferQueue = TransferQueue()) {
+        #if DEBUG
+        StoreKitPurchaseStore.shared.traceStartup("root.init.begin")
+        #endif
         let connection = connection ?? ConnectionViewModel()
+        #if DEBUG
+        StoreKitPurchaseStore.shared.traceStartup("root.connection.ready")
+        #endif
         let effects = effects ?? PhotoEffectsStore()
+        #if DEBUG
+        StoreKitPurchaseStore.shared.traceStartup("root.effects.ready")
+        #endif
         let gps = gps ?? GPSCoordinator()
+        #if DEBUG
+        StoreKitPurchaseStore.shared.traceStartup("root.gps.ready")
+        #endif
         let directory = directory ?? DirectoryAccessStore()
+        #if DEBUG
+        StoreKitPurchaseStore.shared.traceStartup("root.directory.ready")
+        #endif
         self.connection = connection; self.effects = effects; self.gps = gps
         self.directory = directory; self.queue = queue
         self.queueModel = TransferQueueViewModel(queue: queue)

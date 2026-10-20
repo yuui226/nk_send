@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-20",
+  "environment": "Xcode local StoreKit, iOS 26.5 simulator, iPhone 13 mini",
+  "scriptExitCode": 0,
+  "resultDirectory": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.vLGKXx",
+  "logs": [
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.vLGKXx/cleanup.log",
+      "sha256": "9ca730d84f733e47458ec2ad972fa6282e5380d3825f24372d81de88277850f4",
+      "testSucceeded": true
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.vLGKXx/prepare-testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "sha256": "37b016eee899e6ce97cc0f5d265d95875667af3d8c5562f53d8dc87b84324732",
+      "testSucceeded": true
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.vLGKXx/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "sha256": "09eb0c75a7a31af76fa405ae6d0392e7c2db48ab1df63dae010084f93ef42169",
+      "testSucceeded": true
+    }
+  ],
+  "screenshotsReviewed": [
+    {
+      "path": "/tmp/ztransfer-camera-first-logo-images/0F070713-2374-4790-9B7F-FBE0D81FF6B4.png",
+      "sha256": "b2f989883a3baaae9fab4337341e7811ad3b7b6048322fef23355d9386cd45e5"
+    },
+    {
+      "path": "/tmp/ztransfer-camera-first-logo-images/16969EF7-2D0B-498F-A243-FE38F690C0FE.png",
+      "sha256": "12d645ce7e9fd2ae60b7ea6d9a11411d8e134a3feedeb60726d40f1ed320d0c0"
+    },
+    {
+      "path": "/tmp/ztransfer-camera-first-logo-images/59FC763C-5CC1-41AC-A358-4502363702F9.png",
+      "sha256": "8eb536689e15c8f4d66323aa66a70fc8005f1126101b94e9e05a67fca808697f"
+    },
+    {
+      "path": "/tmp/ztransfer-camera-first-logo-images/CB98C59E-B84D-4996-9F30-F7345DCB3089.png",
+      "sha256": "3130a8f6faa5af9af2923aa1016cf48b516c029273cc8dde11ed0bf5e8d0a935"
+    },
+    {
+      "path": "/tmp/ztransfer-camera-first-logo-images/CC2628C8-3AEC-4CCA-8B99-90995D8787CF.png",
+      "sha256": "f01c092d8cb33409000f09e8bdf589a1b8b3906244c7890c167a2e76eeab5c2f"
+    }
+  ],
+  "verified": [
+    "First image-picker cancellation keeps Text watermark mode",
+    "Imported Logo survives termination before closing editor",
+    "Replacement cancellation preserves style controls",
+    "Final relaunch restores Logo at bottom right"
+  ],
+  "limitations": [
+    "Intermediate preview after replacement cancellation still shows old centered position; immediate preview update is not verified",
+    "Local StoreKit only; not Apple sandbox or physical camera validation"
+  ]
+}

@@ -143,6 +143,16 @@ struct RemoteToolMark: View {
 /// TopIconToggle's palette applies equally to Canvas and physical-material ink.
 /// Native liquid glass uses the app's already-approved iOS glass palette.
 enum RemoteToolPalette {
+    /// Android TopIconToggle: orientation controls have a distinct idle plate,
+    /// independent of the blue outline that denotes an active toggle.
+    static func fixedSurface(skin: ZTransferButtonSkin, dark: Bool) -> UInt32 {
+        switch skin {
+        case .frostedGlass, .liquidGlass: return dark ? 0xFF344650 : 0xFFDFE9F0
+        case .titanium: return dark ? 0xFF506575 : 0xFFA8BECA
+        case .wood: return dark ? 0xFF57402B : 0xFFDFC195
+        case .cameraControls: return 0xFF273B47
+        }
+    }
     static func mark(skin: ZTransferButtonSkin, dark: Bool, active: Bool, fixed: Bool) -> UInt32 {
         if active {
             switch skin {
@@ -205,6 +215,7 @@ struct RemoteMonitorToolButton<Label: View>: View {
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 18, active: active,
                 activeColor: ZTransferColors.accentBlue, activeOutline: true, materialContentColor: tint,
+                surfaceColor: fixed ? RemoteToolPalette.color(RemoteToolPalette.fixedSurface(skin: skin, dark: scheme == .dark)) : nil,
                 preserveContentColors: preserveContentColors))
             .disabled(!enabled).accessibilityLabel(accessibilityLabel)
         }

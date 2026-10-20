@@ -1,0 +1,28 @@
+{
+  "exitCode": 0,
+  "resultsDirectory": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.z7qB0V",
+  "reviewedImages": [
+    {
+      "path": "/tmp/ztransfer-full-preview-images/D4937DDF-4C4F-4CD6-B817-2839FBCAD711.png",
+      "sha256": "372eb454c06e869e1636c81c626c5969a6c19e9c050c39ec4d8785fa2077a25b"
+    },
+    {
+      "path": "/tmp/ztransfer-full-preview-images/A72F17DF-E898-42CB-A666-B4B456042E1A.png",
+      "sha256": "ab506de83b8240d6961312ae5c30fbc08cab40fa754459effab33fcf252feb16"
+    },
+    {
+      "path": "/tmp/ztransfer-full-preview-images/DD2AD47F-B036-40DB-9FE1-01D5CE1B4F38.png",
+      "sha256": "5c3dea08d75c782f6764197f3abb8ec9b3bf2c662e976c637d118d1276de1900"
+    },
+    {
+      "path": "/tmp/ztransfer-full-preview-images/24630436-89A8-4FB8-BC94-74FAE3599D57.png",
+      "sha256": "8f6a3f4c9a97bce10a7c8dd0269f3405a1a6b6deb6858f9110043192a97a0cc2"
+    },
+    {
+      "path": "/tmp/ztransfer-full-preview-images/9EFC38FB-33B4-4F05-9AFF-9A9D3DC1C826.png",
+      "sha256": "9644c29f604bee1c70bc0d37c4c3c4530866ca300f3e59cfd445464f51d861f1"
+    }
+  ],
+  "finding": "Controls show Photo top center,77%,69%; full preview after cancellation remains top left, including sample 500ms later; after saving and relaunch full preview is top center. Persistent draft-to-preview discrepancy confirmed, not merely cropped screenshot.",
+  "otherAttachmentsReviewed": false
+}

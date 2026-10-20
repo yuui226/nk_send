@@ -1,0 +1,21 @@
+{
+  "exitCode": 0,
+  "testSucceeded": true,
+  "log": "/tmp/ztransfer-prelaunch-visible-frame.log",
+  "sha256": "f8407909361ee14b4f04f10d0b38ba6ba410038e116a222554ba03cad44aeaad",
+  "scope": "Production PhotoEffectsAnimatedImage in UIHostingController; full-screen UIKit cover, new image while covered, dismissal then center-pixel screenshot assertion at 700ms",
+  "screenshotsReviewed": [
+    {
+      "path": "/tmp/ztransfer-visible-frame-images/79F4FC1D-2247-4485-A007-4EDE87BC8BFF.png",
+      "sha256": "807e95e914751e9c99ef3f1b9531ff8fb47ffbf298f6fd8d92444bd474faeb3f"
+    },
+    {
+      "path": "/tmp/ztransfer-visible-frame-images/0D2E0B60-B802-464D-B0AB-E70A339BDDBE.png",
+      "sha256": "404e4d7cd02774d19775e1a6e18af281a655618948af5f24f19025b66af9a160"
+    }
+  ],
+  "limitations": [
+    "Synthetic solid colors and unchanged canvas",
+    "Not system Photos picker or full settings editor"
+  ]
+}

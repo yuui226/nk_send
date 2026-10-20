@@ -10,7 +10,7 @@ targets:
   ZTransferPopupUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources: [PopupAnchorUITests.swift, PremiumPurchaseUITests.swift]
+    sources: [PopupAnchorUITests.swift, PremiumPurchaseUITests.swift, PrelaunchLayoutUITests.swift]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.popupuitests

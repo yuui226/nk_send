@@ -3,6 +3,44 @@ import XCTest
 @MainActor
 final class PhotoEffectsMasterUITests: XCTestCase {
     private struct Event: Decodable { let event: String; let milliseconds: Int64 }
+    func testModuleMenuUsesCompactChipsAndRemainsOpenWhenChangingModules() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--effects-master-ui-test", "--reset-effects-master",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        let entry = app.buttons["photo-effects-open-editor"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let menu = app.buttons["photo-effect-modules"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        let filter = app.buttons["photo-effect-module-1"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
+        let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in filter.isHittable }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [stable], timeout: 5), .completed)
+        let lut = app.buttons["photo-effect-module-2"]
+        let frame = app.buttons["photo-effect-module-4"]
+        let watermark = app.buttons["photo-effect-module-8"]
+        XCTAssertEqual(filter.frame.height, 34, accuracy: 1)
+        XCTAssertEqual(lut.frame.minY - filter.frame.maxY, 8, accuracy: 1)
+        XCTAssertLessThanOrEqual(filter.frame.width, 132.5)
+        XCTAssertGreaterThan(filter.frame.minY, menu.frame.maxY)
+        filter.tap()
+        XCTAssertTrue(lut.isHittable, "Toggling a module leaves the same menu open")
+        filter.tap()
+        XCTAssertTrue(frame.isHittable); XCTAssertTrue(watermark.isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Photo effect module compact chips"; shot.lifetime = .keepAlways; add(shot)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)).tap()
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: filter)
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+        menu.tap()
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
+        filter.tap()
+        XCTAssertTrue(lut.isHittable)
+    }
+
     func testEffectComparisonHoldRestoresOnReleaseWithoutOpening() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

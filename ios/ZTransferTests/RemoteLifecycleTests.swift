@@ -4144,14 +4144,40 @@ final class RemoteFramePresentationTests: XCTestCase {
             }
             let received = await camera.successfulFrameCount
             XCTAssertGreaterThanOrEqual(received, 12)
+            func surface(in view: UIView) -> RemoteViewfinderInput.Surface? {
+                if let value = view as? RemoteViewfinderInput.Surface { return value }
+                return view.subviews.lazy.compactMap { surface(in: $0) }.first
+            }
+            // Receiving packets does not mean the initial image has been
+            // decoded and laid out. Establish the actual viewport before
+            // testing updates with otherwise stable geometry.
+            let visibleDeadline = ContinuousClock.now + .seconds(5)
+            while surface(in: host.view) == nil, ContinuousClock.now < visibleDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let input = try XCTUnwrap(surface(in: host.view))
+            let viewport = input.convert(input.bounds, to: host.view)
+            // Keep >30,000 actual image pixels, outside the scope charts and
+            // rounded corners. Reading/scanning the entire controls hierarchy
+            // between frames needlessly stalls the main actor under test.
+            let sample = CGRect(x: viewport.minX + 24, y: viewport.minY + 30,
+                width: viewport.width - 48, height: min(110, viewport.height - 60)).integral
+            XCTAssertGreaterThan(sample.width * sample.height, 30_000)
+            var samplingMilliseconds: [Int] = []
             // Change only the JPEG, never layout, properties, tools or orientation.
             // The full production view must display each new color through its
             // frame observer, both geometry readers and (for HD) cached scopes.
             for index in [1, 0, 1, 0, 1, 0] {
                 await camera.replaceFrame(data: images[index])
                 try await Task.sleep(for: .milliseconds(150))
-                let snapshot = UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
-                    host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+                let samplingStarted = ContinuousClock.now
+                let snapshot = UIGraphicsImageRenderer(size: sample.size, format: format).image { context in
+                    context.cgContext.translateBy(x: -sample.minX, y: -sample.minY)
+                    // drawHierarchy(afterScreenUpdates:) took 211–991ms per
+                    // sample on this simulator, blocking the publishing actor
+                    // it was meant to verify. Read the committed presentation
+                    // layer at the same 150ms point, without forcing updates.
+                    (host.view.layer.presentation() ?? host.view.layer).render(in: context.cgContext)
                 }
                 let bitmap = try XCTUnwrap(snapshot.cgImage)
                 var rgba = [UInt8](repeating: 0, count: bitmap.width * bitmap.height * 4)
@@ -4164,8 +4190,21 @@ final class RemoteFramePresentationTests: XCTestCase {
                 let correct = stride(from: 0, to: rgba.count, by: 4).filter {
                     rgba[$0 + index] > 235 && rgba[$0 + (1 - index)] < 20 && rgba[$0 + 2] < 20
                 }.count
+                let elapsed = samplingStarted.duration(to: .now).components
+                samplingMilliseconds.append(Int(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000))
+                if correct <= 30_000 {
+                    let attachment = XCTAttachment(image: snapshot)
+                    attachment.name = "monitor-pixel-failure-hd-\(hd)-color-\(index)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                    let opposite = stride(from: 0, to: rgba.count, by: 4).filter {
+                        rgba[$0 + (1 - index)] > 235 && rgba[$0 + index] < 20 && rgba[$0 + 2] < 20
+                    }.count
+                    print("monitor-pixel-evidence expected=\(correct) opposite=\(opposite) received=\(await camera.successfulFrameCount)")
+                }
                 XCTAssertGreaterThan(correct, 30_000, "Production monitor stale pixels: hd=\(hd), color=\(index)")
             }
+            print("monitor-image-sampling hd=\(hd) milliseconds=\(samplingMilliseconds)")
             window.isHidden = true; window.rootViewController = nil
             let stoppedDeadline = ContinuousClock.now + .seconds(2)
             while !(await camera.log.contains("gate:false")), ContinuousClock.now < stoppedDeadline {
@@ -4329,7 +4368,7 @@ final class RemoteFramePresentationTests: XCTestCase {
                     RemoteZoomableViewfinder(aspect: 4.0 / 3, imageSize: image.size,
                         metadata: model.frameMetadata, onFocus: { _ in }) {
                         RemoteViewfinderImage(image: image, aspect: 4.0 / 3,
-                                              multiplier: 1, size: size)
+                                              size: size)
                     }
                 }
             }

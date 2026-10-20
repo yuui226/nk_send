@@ -163,6 +163,7 @@ struct RemotePhotoReviewView: View {
         }
         // Fade the black surface, image and controls as one layer. The input
         // barrier and paused frame gate remain until overlayCollapse finishes.
+        .compositingGroup()
         .opacity(dismissal.closing ? 0 : 1)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26), value: dismissal.closing)
         .onAppear { selected = model.photos.first?.file }

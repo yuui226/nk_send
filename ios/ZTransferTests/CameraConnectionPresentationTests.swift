@@ -6,7 +6,8 @@ final class CameraConnectionPresentationTests: XCTestCase {
     func testEveryDisconnectedTransportKeepsItsHintAndAction() {
         let expected: [(CameraPresentationMode, String, String, String?)] = [
             (.usb, "usb_connection_lost", "reconnect_camera_usb", nil),
-            (.ap, "connection_lost", "connect_camera_wifi", "open_wifi_settings"),
+            // 2026-10-20: user chose to remove iOS wireless-settings buttons.
+            (.ap, "connection_lost", "connect_camera_wifi", nil),
             (.sta, "connection_lost", "reconnect_camera_sta", "reconnect_camera")
         ]
         for (mode, title, hint, action) in expected {

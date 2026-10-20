@@ -147,10 +147,25 @@ final class StoreKitPurchaseStore: ObservableObject {
         self.entitlementStore = entitlementStore
     }
 
+    /// Opt-in local UI-test diagnostics: stages only, never transaction/account
+    /// data. Does not change StoreKit waits, results or entitlement publication.
+    func traceStartup(_ stage: String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("--trace-storekit-startup") else { return }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("storekit-startup.txt")
+        var bytes = (try? Data(contentsOf: file)) ?? Data()
+        if stage == "start", bytes.count >= 16_384 { bytes = Data() }
+        guard bytes.count < 16_384 else { return }
+        bytes.append(Data("\(Date().timeIntervalSince1970) \(stage)\n".utf8))
+        try? bytes.write(to: file, options: .atomic)
+        #endif
+    }
+
     func start() {
         guard !started else { return }
         started = true
         bootstrapComplete = false
+        traceStartup("start")
         listener = Task { [weak self] in
             for await result in Transaction.updates {
                 guard !Task.isCancelled else { return }
@@ -178,6 +193,7 @@ final class StoreKitPurchaseStore: ObservableObject {
             }
         }
         unfinishedTask = Task { [weak self] in
+            self?.traceStartup("unfinished.begin")
             for await result in Transaction.unfinished {
                 guard !Task.isCancelled else { return }
                 await self?.process(result, userPurchase: false)
@@ -186,6 +202,7 @@ final class StoreKitPurchaseStore: ObservableObject {
             // Reconcile once after startup recovery has drained so a partial
             // set of unfinished events cannot be mistaken for the full account.
             self?.bootstrapComplete = true
+            self?.traceStartup("unfinished.end")
             self?.refresh()
         }
         refresh()
@@ -327,18 +344,40 @@ final class StoreKitPurchaseStore: ObservableObject {
     }
 
     private func readEntitlements(generation: UInt64) async {
-        var observed: [PremiumProduct: PremiumGrant] = [:]
-        var unverified = false
-        var group = subscriptionGroupID
-        for await result in Transaction.currentEntitlements {
-            guard !Task.isCancelled else { return }
-            guard case .verified(let transaction) = result else { unverified = true; continue }
-            guard let grant = grant(for: transaction) else { continue }
-            if let previous = observed[grant.product] {
-                if grant.mayReplace(previous) { observed[grant.product] = grant }
-            } else { observed[grant.product] = grant }
-            if grant.product == .annual { group = transaction.subscriptionGroupID ?? group }
+        traceStartup("snapshot.begin")
+        // Apple's local StoreKit cache can briefly omit a just-finished
+        // transaction. Confirm an initial empty / disappearing-product snapshot
+        // once before publishing it. The second verified snapshot remains
+        // authoritative: no persistent ownership cache or automatic sync.
+        func snapshot() async -> (grants: [PremiumProduct: PremiumGrant], unverified: Bool, group: String?) {
+            var observed: [PremiumProduct: PremiumGrant] = [:]
+            var unverified = false
+            var group = subscriptionGroupID
+            for await result in Transaction.currentEntitlements {
+                guard !Task.isCancelled else { break }
+                guard case .verified(let transaction) = result else { unverified = true; continue }
+                guard let grant = grant(for: transaction) else { continue }
+                if let previous = observed[grant.product] {
+                    if grant.mayReplace(previous) { observed[grant.product] = grant }
+                } else { observed[grant.product] = grant }
+                if grant.product == .annual { group = transaction.subscriptionGroupID ?? group }
+            }
+            return (observed, unverified, group)
         }
+        var read = await snapshot()
+        traceStartup("snapshot.end")
+        guard !Task.isCancelled, started, revision == generation else { return }
+        let missingPreviousProduct = grants.keys.contains { read.grants[$0] == nil }
+        if !read.unverified && ((!hasCompleteSnapshot && read.grants.isEmpty) || missingPreviousProduct) {
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            guard !Task.isCancelled, started, revision == generation else { return }
+            read = await snapshot()
+            traceStartup("snapshot.confirmed")
+        }
+        var observed = read.grants
+        let unverified = read.unverified
+        var group = read.group
+        traceStartup("history.begin")
         if group == nil, case .verified(let previous) = await Transaction.latest(for: PremiumProduct.annual.rawValue),
            grant(for: previous) != nil {
             // Billing retry/expired subscriptions can be absent from current
@@ -346,12 +385,14 @@ final class StoreKitPurchaseStore: ObservableObject {
             // the historical transaction itself does NOT grant access here.
             group = previous.subscriptionGroupID
         }
+        traceStartup("history.end")
         guard !Task.isCancelled, revision == generation else { return }
         subscriptionGroupID = group
         let now = Date()
         // Do not revoke still-valid verified access because a new record fails
         // verification. Successful authoritative empty scans still revoke it.
         if unverified {
+            traceStartup("snapshot.unverified")
             messageKey = "iap_confirmation_failed"
             hasCompleteSnapshot = false
             // Deliver verified additions, without interpreting an unverifiable
@@ -390,6 +431,7 @@ final class StoreKitPurchaseStore: ObservableObject {
             if hasUnresolvedGrace, observed[.lifetime] == nil {
                 entitlementStore.publish(.unresolved)
             } else { publishGrants(allowFree: bootstrapComplete) }
+            traceStartup(bootstrapComplete ? "snapshot.published" : "snapshot.bootstrap-pending")
         }
         if let group {
             await readRenewal(group: group, generation: generation)

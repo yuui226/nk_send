@@ -47,9 +47,7 @@ struct ConnectionMethodCard: View {
     var onConnect: (() -> Void)?
     var onResetSTAPairing: (() -> Void)?
     var onSTAHelpRequested: (() -> Void)?
-    var onSTAHotspotSettings: (() -> Void)?
     var onAPHelpRequested: (() -> Void)?
-    var onAPHotspotSettings: (() -> Void)?
     var staHelpViewed = false
     var apHelpViewed = false
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
@@ -63,9 +61,6 @@ struct ConnectionMethodCard: View {
     private var buttonSkin: ZTransferButtonSkin { .init(storedValue: skinPreset) }
     private var materialForeground: Color {
         zTransferButtonForeground(skin: buttonSkin, scheme: colorScheme)
-    }
-    private var wifiSettingsTextColor: Color {
-        buttonSkin == .wood ? materialForeground : ZTransferColors.accentBlue
     }
     private var staResetIconColor: Color {
         buttonSkin == .wood ? ZTransferColors.primaryText : ZTransferColors.accentOrange
@@ -398,13 +393,6 @@ struct ConnectionMethodCard: View {
                     }.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
                      .disabled(state.wifiPhase == .connected)
                      .accessibilityLabel(AppLocalized.resource("sta_reset_pairing"))
-                    Spacer(minLength: 0)
-                    Button { onSTAHotspotSettings?() } label: {
-                        utilityIcon(ZTransferIcon.settings, tint: ZTransferColors.secondaryText)
-                    }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11))
-                    .disabled(state.wifiPhase == .connected)
-                    .accessibilityLabel(AppLocalized.resource("sta_hotspot_settings_short"))
                 }
                 Button(action: { onConnect?() }) {
                     ButtonStateLabel(text: staButtonState.title, rank: staButtonState.rawValue,
@@ -432,14 +420,7 @@ struct ConnectionMethodCard: View {
                     onAPHelpRequested?()
                 }
                 .tipPopupAnchor(.ap)
-                Button { onAPHotspotSettings?() } label: {
-                    Text(AppLocalized.resource("open_wifi_settings"))
-                        .zTransferTypography(.labelSmall, weight: .semibold)
-                        .foregroundStyle(wifiSettingsTextColor)
-                        .frame(maxWidth: .infinity).frame(height: 36)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12))
-                .disabled(dimmed)
+                Spacer(minLength: 0)
             }
         }
     }

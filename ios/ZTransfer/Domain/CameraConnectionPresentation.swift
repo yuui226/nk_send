@@ -30,8 +30,8 @@ enum CameraPresentationMode: String, CaseIterable, Sendable {
     }
     var disconnectedAction: String? {
         switch self {
-        case .usb: return nil
-        case .ap: return "open_wifi_settings"
+        // User-approved iOS difference (2026-10-20): remove settings jumps.
+        case .usb, .ap: return nil
         case .sta: return "reconnect_camera"
         }
     }

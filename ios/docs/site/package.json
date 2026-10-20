@@ -1,0 +1,10 @@
+{
+  "name": "ztransfer-ios-policy-pages",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview-build": "node build.mjs",
+    "release-build": "node build.mjs --release"
+  },
+  "dependencies": { "marked": "17.0.5" }
+}

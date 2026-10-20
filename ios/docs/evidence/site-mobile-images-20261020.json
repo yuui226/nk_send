@@ -1,0 +1,66 @@
+{
+  "viewport": {
+    "width": 375,
+    "height": 812
+  },
+  "browser": "local Chromium headless 1223 via Playwright",
+  "visualReview": "All 14 full-page images inspected; no visible overlap or clipping. Local preview only, not deployment or Safari validation.",
+  "images": [
+    {
+      "file": "ios/docs/site/evidence/mobile/dark-home.png",
+      "sha256": "43e0248bdd4761bc76fd192a2c421898902842bee5bced1be32357d2e5e1497e"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/dark-ios-en-privacy-.png",
+      "sha256": "b58dd9914618ea079a33581770e729c05bae308f5737caa113fa84e533e8b245"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/dark-ios-en-support-.png",
+      "sha256": "9d21319cfff93841ca5f904f9ea74d81cd984e036546a1921d505322de2763d0"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/dark-ios-en-terms-.png",
+      "sha256": "8b1acb74a0351911c286f4fb8f3402b083e392bfd885639df45dcda4c28e160a"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/dark-ios-privacy-.png",
+      "sha256": "512099584f7a97bac79fdb7b7a255bc1ef48437bb68ec44e6ededd4f5a213e07"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/dark-ios-support-.png",
+      "sha256": "dfb0eb22371eed1ceb8c250590b6e16a9ca626e9353c81dc0ba2981899bf3163"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/dark-ios-terms-.png",
+      "sha256": "738f256e8259be2e0106ff602ca828b33a4996689e7980a1e31c21686c99fa5f"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/light-home.png",
+      "sha256": "fa7a45e105805ea701584fe9ed298dd5d12262ae1d854fe678203e6035acb91c"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/light-ios-en-privacy-.png",
+      "sha256": "0b4c4cf97f63725df93a465e9660733265ed38003c64186b043754fb25010315"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/light-ios-en-support-.png",
+      "sha256": "3458624ed7f74a2efc02df1aad0683f5b7d8f7a82368d5fe11d7636a57c517ea"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/light-ios-en-terms-.png",
+      "sha256": "9c9fe09bd527ae6c911de7769339d14dea22068ddff9c7859ece5cdbb66d56f9"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/light-ios-privacy-.png",
+      "sha256": "a4ff9fd7f2fbc0f73db8dd3d69f2c9c75544765efb32a9c2cd28f1ea1a8da6fa"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/light-ios-support-.png",
+      "sha256": "a2f647f93403ca7d955ef29a5dd5a326ee93384da82e480f65b40bcf501ca422"
+    },
+    {
+      "file": "ios/docs/site/evidence/mobile/light-ios-terms-.png",
+      "sha256": "3d700247fbacc65da5c1add3764d2e2c9ec894ed7aeb5a69c533a944ed477b77"
+    }
+  ]
+}

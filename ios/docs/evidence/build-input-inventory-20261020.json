@@ -1,0 +1,1992 @@
+{
+  "date": "2026-10-20",
+  "projectSHA256": "6e5d1eebf4e5bd51e8e49db8a15feaee2db89a7595b37dc9ce2be4d4bca714db",
+  "target": "ZTransfer",
+  "packageProducts": [],
+  "targetDependencies": [],
+  "projectPackageReferences": [],
+  "phases": {
+    "PBXSourcesBuildPhase": [
+      {
+        "path": "ios/ZTransfer/UI/Components/AndroidDialogPresentation.swift",
+        "exists": true,
+        "sha256": "3813f7be1430bb07f735c4e63e0ea59b8914e16889e66510bfe207655fdcef21"
+      },
+      {
+        "path": "ios/ZTransfer/App/AndroidLocalization.swift",
+        "exists": true,
+        "sha256": "0e7216b7ff48925dfc627dfc75806f05af60668ab58f2eba03f6765c3622cd37"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/AndroidShadowView.swift",
+        "exists": true,
+        "sha256": "d065a1efebc1b6fb4119a7f87c2ca7b505d40e79fe6da609eb4016496503f66c"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/AndroidThumbnailProcessor.swift",
+        "exists": true,
+        "sha256": "f166c5976658f2ecd9b792125816d6b8b6490de8a087fea22218feee08236174"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/AsyncDeadline.swift",
+        "exists": true,
+        "sha256": "b2e666552b3b7e0066518213f09ee03e2c6be53f1269bd50a593475701e269ef"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/AutoTransferMode.swift",
+        "exists": true,
+        "sha256": "b34cb82c64406c63826c0abfe03cab0b2d4089c1c620107f1b3eec493a66e558"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/BuiltInPictureControls.swift",
+        "exists": true,
+        "sha256": "768094f94dc708ef43971ad18015115524072017a4a0508789c45da67fa8b4b2"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/ButtonInteractionTestHarness.swift",
+        "exists": true,
+        "sha256": "a9ffe0811135a898314296cfa8a01d2229e6ef1c5e98c4d1a0c21b4b707dc5b2"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/ButtonInteractionTrace.swift",
+        "exists": true,
+        "sha256": "a1cf46ac5e8aa048c1e134ac21a24e3fdd47ec8df361e271499f9f5169d0808b"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/ButtonStateLabel.swift",
+        "exists": true,
+        "sha256": "c296dace063072c34ace3824b21f8f5a057f5d8cd169661aabdb46ade87523ff"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoPreviewPagerObserver.swift",
+        "exists": true,
+        "sha256": "1a10ae0649611ecb8a33b10bb8ad4afa5d0e8974a60dfd72f714361cfebfb910"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CachedThumbnailBatchPolicy.swift",
+        "exists": true,
+        "sha256": "7f3f9405c1f19b97432d07e2f5fd001d51b544df0ee743d1598428249bd63a78"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CameraConnectionPresentation.swift",
+        "exists": true,
+        "sha256": "cacf6e303a94bfc6a242507bc0e3cccb22a6da6ea220ea6795fe783a31ed8a75"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CameraConnectionService.swift",
+        "exists": true,
+        "sha256": "1954ff2f566977e24907d328cdd1eed92e09f7bc94e0251bee96165e55ef9bcc"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/CameraDisconnectedState.swift",
+        "exists": true,
+        "sha256": "54f3a06d4ca52baf1009b72d718611d8a2f62984735c17b188db9fc7c40de8d8"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CameraDownload.swift",
+        "exists": true,
+        "sha256": "db03ec73d216b9bb54f5d0f0352c38c4c4647282e0e5f46b6f94d7d34b630709"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CameraIOGate.swift",
+        "exists": true,
+        "sha256": "a201c4b76a2e1a306acdb6c2a23c1129b7a47072d0f5e4c2e9224c76899698ce"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CameraRepository.swift",
+        "exists": true,
+        "sha256": "b8e6941e71a0b499b014ede089dc42d9cf00d357a95e567576c97e57d1a487b9"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CameraSession.swift",
+        "exists": true,
+        "sha256": "eb2ce47da376adff3e091ae183e2d4c3cb7fa0130aa146e02c987a7dc4f4bd5b"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/USB/CameraTransport.swift",
+        "exists": true,
+        "sha256": "1082384911cebc68d24dfeb3f64ec4455b2536f19d1851d452502721d8bd2ad5"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ClassicUSBIcon.swift",
+        "exists": true,
+        "sha256": "a2c20684d762bc2fa56815fac4b12d20cd25ac3effb4540fe3f91eaea85f576d"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/ConflatedPreviewUpdates.swift",
+        "exists": true,
+        "sha256": "cd7d212bc800330605a4ab3b68e75d58ee1b86183199696b1945584ca6f4e642"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Connection/ConnectionMethodCard.swift",
+        "exists": true,
+        "sha256": "64ec3213e90de569d6612074f299a35df47b10cf38a327a68e756c7133d9ad02"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Connection/ConnectionPage.swift",
+        "exists": true,
+        "sha256": "41340d210fc80803ca0c9b4650949b9af10dcadcc7dce5c5a14a5c4f47d4d3b9"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/ConnectionState.swift",
+        "exists": true,
+        "sha256": "b52337d2850f03674f08a092b62732685e7ad372fcef425de2b69bee6edeb05f"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/ConnectionViewModel.swift",
+        "exists": true,
+        "sha256": "a1054933d7dbcd71c7549c89bbde6a1e8d5560bed0dcd7969d55f61667a6da10"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CropAnimationTiming.swift",
+        "exists": true,
+        "sha256": "9477b33a6286645f643ec3bcdbbf62e3c1e2590430a34a38d7919825fcde40a0"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CropGestureState.swift",
+        "exists": true,
+        "sha256": "8a92373a3478e4726feb9898722187568c292aedbc4c552e10ef348e832cc9ce"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CropPreparation.swift",
+        "exists": true,
+        "sha256": "7cac66309d914983540e749d9064ff78e3d073f916fee3638cbd4c93b5d63b28"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CropPreparationState.swift",
+        "exists": true,
+        "sha256": "ccb0a49a1a05a25b15dcf2e53b9da24098a46ce33b2901d409d2ac39e30f050d"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CropPreview.swift",
+        "exists": true,
+        "sha256": "36a29b0f4a86930b48705d714c89bb26d352d6a79cf7e5f087beea43391ecba7"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CropPreviewBounds.swift",
+        "exists": true,
+        "sha256": "b72d411b035707373808be7f3bcf1d8f6a66431d6e56a77256788056ca50507f"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CropViewport.swift",
+        "exists": true,
+        "sha256": "c90bf32441faf3d0fa17400577153bc6ef957df8d67d9e2a31c32d50304459a3"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/CubeLUT.swift",
+        "exists": true,
+        "sha256": "e323fecb0f7b1906511dbaa86444b96d3590f8b1039eda13dce3857565d79d13"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/DebugCameraData.swift",
+        "exists": true,
+        "sha256": "abdfd1b69355d0909eb47f6f38729ebdcf60c62c434acab0924b120c8dbb40d8"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/DetentWheel.swift",
+        "exists": true,
+        "sha256": "bda74d2e2486da3e61e793569a9c8b9d28c4d9639f9584ce08fcac9d6e3aa070"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/DirectoryAccessStore.swift",
+        "exists": true,
+        "sha256": "49f56d65dca6c1925d4099982cc36bf2aa0d4f615cfb9320b940b4339a975d76"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/DisconnectedRemoteCamera.swift",
+        "exists": true,
+        "sha256": "6d7dab2b1c24e4e30f2f8a25aaada13944216499109bbd14e8e58e970b831aba"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/DoubleZMark.swift",
+        "exists": true,
+        "sha256": "9d9b10b89b0b992529336f6a02f3fc8222905f19fcd222d3a9b0750100481d7e"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/FileScanBatchSize.swift",
+        "exists": true,
+        "sha256": "cac774f7176297fe1f8a62c1329c8776d05d9d8b3ce2d333f5ae747040b8575e"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/FreeUsageStore.swift",
+        "exists": true,
+        "sha256": "292c9718005d0a30fc4cda11e2d5b89c1c2d4804860f409f1ca3a7d224872ebe"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Connection/GPSConnectionControl.swift",
+        "exists": true,
+        "sha256": "f484fa784c7f7b1f341205dfda504492f1b17ce1521a13fdc36c9e5cec441317"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/GPSCoordinator.swift",
+        "exists": true,
+        "sha256": "6d8585dc91685182ac95499e1f3b96053a90b3283f0535eb454782b3edea285d"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/GPSProtocol.swift",
+        "exists": true,
+        "sha256": "8479c3f200100cf24178776d4995ecc74c6ecb593cf4670700e1a223a5ab15c0"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/GPSState.swift",
+        "exists": true,
+        "sha256": "ec771f6145b27f2126f0776c42cb46eee4c1cf2b5fb0e3e0032fa467a8bdc525"
+      },
+      {
+        "path": "ios/ZTransfer/UI/GeniePopupMotion.swift",
+        "exists": true,
+        "sha256": "e2ae28e89b0c48003234d2132a9ba5f895d29b1d148645fb8efd501973975036"
+      },
+      {
+        "path": "ios/ZTransfer/UI/GeniePopupPanel.swift",
+        "exists": true,
+        "sha256": "108b5085959809bb7de03d265eccb6a86b693ed2ce46e931a94924c431673115"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/HapticPolicy.swift",
+        "exists": true,
+        "sha256": "c28a18ab930e246a28c5ecbeb10d9bc192aa40c4d655ae921d3a70bd28948ace"
+      },
+      {
+        "path": "ios/ZTransfer/App/IOSLocalization.swift",
+        "exists": true,
+        "sha256": "7c94c75aa4f5cc5b45ed9484e7528e740197208f20ea8657c18067671be09675"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/USB/ImageCaptureUSBTransport.swift",
+        "exists": true,
+        "sha256": "290791ac5e675bb2ff67ab09c2249f6be5c3c8fea233c4c22d485581f02ade56"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/JpegCrop.swift",
+        "exists": true,
+        "sha256": "d10f8535d0bde8ea2bfbf59658e82266f3abaa5a92b47427d6ae0517a7d7e593"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/JpegCropHeader.swift",
+        "exists": true,
+        "sha256": "b32b90c6932aa28f8490730516f9de16295218b3b8a18b6aa5d4ecbccd3804f5"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/LocalPhotoBatchViewModel.swift",
+        "exists": true,
+        "sha256": "41b4e71387c72a6809c9808d90d245e92be4c939bf00661d49c4a4c539be1724"
+      },
+      {
+        "path": "ios/ZTransfer/UI/LocalPhotoEffectsView.swift",
+        "exists": true,
+        "sha256": "79059923d95f331fa7a81dc28cf7da1e58e0aa2cc30df70b34e240703fb132dc"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/LosslessCropProcessor.swift",
+        "exists": true,
+        "sha256": "3686e4f3fbe667d167df003d98eadceade64797ef9d881ae01271f9063b7dd69"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/LosslessCropTask.swift",
+        "exists": true,
+        "sha256": "91418b6b2fa00d7e3a24f2c4a9b309e839907441bcaba1ad50275c2815d92e34"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/LosslessJpegBridge.c",
+        "exists": true,
+        "sha256": "a9aaf2d6164ae12da9531a15c0bcffa22f64548d6692b8572319fb442cefd0c0"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/LosslessJpegBridge.swift",
+        "exists": true,
+        "sha256": "b04933def79b80f0c7cf69f5a8d9220d528ceb161dd7b9d85f84fd0b64729a7a"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/NEFExifThumbnail.swift",
+        "exists": true,
+        "sha256": "b5d6d977acc575e43457cf9296f9e2463f1f0bf81bc82dfa076a80d09d84144a"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/NativeAttentionMotion.swift",
+        "exists": true,
+        "sha256": "5095c164920dfdcad9bc2f6f05e16f2be501bda2b74a34d8ac4b9f888e419047"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/NikonBrandGradients.swift",
+        "exists": true,
+        "sha256": "181d20fab1e9d16761d5be24ddcd51afa8fcc7d42e54bc660916f8e461678c5c"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift",
+        "exists": true,
+        "sha256": "48b8785ee132edd1128e850c7ba28c4908697ef67be4928a98610bc2e6f473b4"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/NikonPictureControl.swift",
+        "exists": true,
+        "sha256": "4acf4401a06763be48f90984e178e98e09d6ac4f691efbf524036118a95e0621"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/NikonPictureControlAccess.swift",
+        "exists": true,
+        "sha256": "f2f84f46eb5cff72c9ad065606ea6d7db16cea8ea8884b95a6221af2a9887a70"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/NikonPictureControlSelection.swift",
+        "exists": true,
+        "sha256": "bc144670172a4fef3f402ee807848844fab4a24a26abe22bc84451226a5faec8"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/Np3BitmapFilter.swift",
+        "exists": true,
+        "sha256": "fe6513feabcc14464f47096c0e2aa7d645c03d3c720b8b12322fe2f65ddbc0f4"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/Np3FilterCatalog.swift",
+        "exists": true,
+        "sha256": "95ed694fb78e159e52764a61dd3ff4876a0d7ff625421192bf7045e751fb5b07"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/Np3FilterEngine.swift",
+        "exists": true,
+        "sha256": "9a64190402ff40befd3136b999870fde77c44882a167b5a34700faee02552375"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPCodec.swift",
+        "exists": true,
+        "sha256": "4233a0952344cae96c79b683fa19eab85a10d933010684f47d0ac6ae92e7fa6d"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPDataset.swift",
+        "exists": true,
+        "sha256": "ce133a510f918a55dce9a9f831f7439b9ee79e9131c227d2733f65292ed4ad01"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPIPCodec.swift",
+        "exists": true,
+        "sha256": "c14791f86aaad491a7e958b58b2e0d277af000a47a1b5ace7021ff68d76c7aa4"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPIPDiscovery.swift",
+        "exists": true,
+        "sha256": "cc7352a1c7370338034eced98eec76f92470784a025822eb59f19f9467613584"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PTPIPDiscoveryService.swift",
+        "exists": true,
+        "sha256": "1d97a78398ddf1df4ddc442b5735c0c34e200ce6f9217590de1434922044ec19"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPIPPOSIXChannel.swift",
+        "exists": true,
+        "sha256": "f9dd5902a6b984ab24b1fb83b58ba304e1bc75364b10e27bceb9e0968ea9ea5f"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPIPSocketConnection.swift",
+        "exists": true,
+        "sha256": "85ab3860964b8cd00ca9881861ebeec6e68c73b8f30a3029b261b1994e2a4720"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPIPSocketTransport.swift",
+        "exists": true,
+        "sha256": "aae978d4f152925a23ae44123637e6a7c9f3ac51e9976b43b18075978c5627b4"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPSession.swift",
+        "exists": true,
+        "sha256": "41b0a39d3fae169425908cf5363e611c56114f90cba4d0ca16054f6b35ee42ce"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PTPTransferDiagnostics.swift",
+        "exists": true,
+        "sha256": "09af8a2714bca85399f9f848e2c01e1eefc19edac99343a7dccc3152a53a8112"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoCatalog.swift",
+        "exists": true,
+        "sha256": "20378367759ca4e096c13d3f3761c3f8957a08afee584b08832505e13d0d2b44"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoCropEditor.swift",
+        "exists": true,
+        "sha256": "b0b0890d86466d5f56470a8f39074f5c6b64ec4502904eb6877f9ff2cc751874"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoCubeLUTMapper.swift",
+        "exists": true,
+        "sha256": "9df88a1b3d1ac6e5786231d3ff241ada35511d19f588628f14b40ce098ff9a18"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoEffects.swift",
+        "exists": true,
+        "sha256": "97ff6aace70982c46d95e7779585e080de125bfb0681f6f037c2c30d5b5d4973"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoEffectsBatch.swift",
+        "exists": true,
+        "sha256": "e28a7249263c260a19c2856c3cb90ff41e5db61f2a3c62035b6289ac3a61531f"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoEffectsEditorView.swift",
+        "exists": true,
+        "sha256": "a9d9cbc3e40dd0a90f5d6f7f17767b59f3cafe0fa474b94901c684c7e13e946d"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoEffectsMasterSwitch.swift",
+        "exists": true,
+        "sha256": "70bf9c6d4cb26500f3ef19ffcb2ce672a183bbb573ee03c96926706d76e960d8"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoEffectsPreviewCache.swift",
+        "exists": true,
+        "sha256": "450e27900d38b484224e6c618fa8a3f6a84dc72d7623626048d43e01515de480"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoEffectsRenderer.swift",
+        "exists": true,
+        "sha256": "ea91ae9d5e0a272e5628d4aaca2157e9392dc35063a566e74cfc597686ddf8d4"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoEffectsSettingsHarness.swift",
+        "exists": true,
+        "sha256": "c015e63abf62739660f40bd18a244cf747154684902da83a9e3e98f9c7b9ae0b"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoExif.swift",
+        "exists": true,
+        "sha256": "507c2529a5fc6cf580232137693af9c10aebf02fb76e432cc310846d543ef4ba"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoExifStore.swift",
+        "exists": true,
+        "sha256": "9d4cd893bc88f7d2645947a9fbf07ae9885022521a2ef71a6b3889ad0a7e0ea7"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoFilter.swift",
+        "exists": true,
+        "sha256": "99b62f0b92cb0aef340baa9972d3e5a55d11c9ab7418f8a26a5f48868ea91de5"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoFilterComponents.swift",
+        "exists": true,
+        "sha256": "22da267876588f7a372e80bc3033c006e53b0b819c80c884ae9e66738091a81e"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift",
+        "exists": true,
+        "sha256": "0cca86ccfd2c040403d6049ceb8943c09d0a72d51dac4283c7fa290654bde0c3"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoFrameBrand.swift",
+        "exists": true,
+        "sha256": "6ae05e63880de41e60de0aadf80936ea2c88db9ca529ced0e09a58b600db6b5f"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoFrameBrandLogoCatalog.swift",
+        "exists": true,
+        "sha256": "21c2f2c5b76e1a45001417482ff692ef69bda2542b2d7051acf140c30ea1d142"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoFramePlace.swift",
+        "exists": true,
+        "sha256": "a5f43c947d2ed37f16b9e909847de8c05a8290826d0f664528917b623c73bbb4"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoFramePlaceResolver.swift",
+        "exists": true,
+        "sha256": "eac02f835619aa00911bc2b3e42d597d8f55d03ab868d2bb6b01f27b911d3527"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoFrameTextLayout.swift",
+        "exists": true,
+        "sha256": "f053e79b2c1fbf6797d80676edb0d1c0540988b0c2625ee15da5d7c9d10631d0"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoGenerationTiming.swift",
+        "exists": true,
+        "sha256": "34d51d489ee1f7163acb8c757436bcb0d270d2fcb8fd4495f5132d8c1c310fa4"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoLUTChooser.swift",
+        "exists": true,
+        "sha256": "5b9ad67a5db8ab87389fb37576d36dd228ca2fdee3bdb0cb77eab55e270c2e35"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoEffectChooserDialog.swift",
+        "exists": true,
+        "sha256": "2dbdc8822dad4c46d53326a4bf5bf68b1c0957c5de50cf85ee6c16169d3e0878"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoLUTRuntime.swift",
+        "exists": true,
+        "sha256": "e4f5d0bc99db0021cfdb5b750acb38c2510037335595df09c9b319c6be39720d"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoLUTStore.swift",
+        "exists": true,
+        "sha256": "399791e15eabb3f60ab3fdd81269305d58e352a4c92678d0477a68fe4c668330"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoLUTEditorState.swift",
+        "exists": true,
+        "sha256": "6dedf13423e6349642e6423767763b0d4dc827ac48b5634dd990a981601b0ce8"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoListAdmissionHarness.swift",
+        "exists": true,
+        "sha256": "5bb489e989f304326979b01f653331e4076452ddf48d28dc2330f77146b75cd5"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoListHint.swift",
+        "exists": true,
+        "sha256": "aa8de77d5360142ec62c95192f8d19452aaf7c761a455e91df84e34a5e17d13d"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoListScrollActivity.swift",
+        "exists": true,
+        "sha256": "02aa90707dd0b6f178f41b12186b0bc12c0eb33d527564fa2c1775869a7afc17"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoListView.swift",
+        "exists": true,
+        "sha256": "861b217f039c54276b7ec2c23f8a5b75edf427fa3701eb53772f238487e03c3c"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoListViewModel.swift",
+        "exists": true,
+        "sha256": "494706a7699143ae9737e75cd220d7aaa7ccc0497f2f602626eef67f138374f9"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PhotoMetadataIdentity.swift",
+        "exists": true,
+        "sha256": "66314bc610a1f53b6573082f142e94616c4632a0a6e76d6e8d411ac77bc48e37"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoMetadataPreparation.swift",
+        "exists": true,
+        "sha256": "8b29bf9a1521cd21a8dc1f370a8e9bfc4120564c42a9a4e797846653f1b8ee8f"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift",
+        "exists": true,
+        "sha256": "031f3864f28b63a7bb3ffadf652359dc89d72b9471269c63b270f1d90fe3f51a"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PhotoPreviewView.swift",
+        "exists": true,
+        "sha256": "6fbc182bfe3f502ea1bb6c2828cee848e399fa3e073cea4998923c1b3fabb5b9"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PhotoRating.swift",
+        "exists": true,
+        "sha256": "ecfa145f98bc6c86ef97de254526a3c6de30603ac3e95c8960529416d608d393"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/PhotoRatingPairs.swift",
+        "exists": true,
+        "sha256": "7e990733dff97826e7a1ab4462be6e0448dcc3d3e064f25ccc942dde472e02ed"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoRatingScan.swift",
+        "exists": true,
+        "sha256": "0f732147b884ed4bddd0b62a228c4ef21cef9ddd2961a77461ae45efc7d57275"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoThumbnailDiskCache.swift",
+        "exists": true,
+        "sha256": "37f661091594583f2fa1951df565153c2b2853005caa978b9f8248da50ca4b42"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoThumbnailFillQueue.swift",
+        "exists": true,
+        "sha256": "b68c612b71432de1e7cadab797ccc406b91639803f77848c1b09ebe719807823"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PhotoThumbnailStore.swift",
+        "exists": true,
+        "sha256": "ca776b8cccaace8d9d5f0fa191640969a429ddd17c700f4819e95f139c37d18e"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PictureControlBackupStore.swift",
+        "exists": true,
+        "sha256": "ebd25b6abbd1197f273610d520c05e4a7161683daf1fe76c8616a511428633c7"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PictureControlFolderState.swift",
+        "exists": true,
+        "sha256": "e935d33c1a7904a5e07f359dfeaa0187ea8e49c7e42bf1b95480f23cbc8dae02"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PictureControlPanelModel.swift",
+        "exists": true,
+        "sha256": "a9fdc71456f8b82715a08d94ce373041a1783f8e1aee3081405356f8f9778cdd"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PictureControlReplacement.swift",
+        "exists": true,
+        "sha256": "d5cec0aa45d2c62e0aae46c5977b98212858164ff5e65853f64c314c19859813"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/PremiumEntitlement.swift",
+        "exists": true,
+        "sha256": "0acc4f2e10208aee8dafcbbca15f06469f31f5451c782997c56510e5ca13276d"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PremiumFireworks.swift",
+        "exists": true,
+        "sha256": "0e441ee61b7d990adf28a25f62fa4f312d083cece2bdff3da199f9584ff6c968"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PremiumPurchaseView.swift",
+        "exists": true,
+        "sha256": "4b89a35813be31601aed0e988952719e942df9521dea4aaa9ba00f029e390938"
+      },
+      {
+        "path": "ios/ZTransfer/UI/PreviewPhotoEffectsEditor.swift",
+        "exists": true,
+        "sha256": "e42669654829f13cfb1cc157afb919565fad8f8ecfc93ba859ac147503e46ddd"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PreviewPinchObserver.swift",
+        "exists": true,
+        "sha256": "05027deef064be82ee241796175766f5bf0be14d94a7cb956e665f283ebac393"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueBadgeIcon.swift",
+        "exists": true,
+        "sha256": "c210e2cd35a422d5b084cd31702d7e82d7ff80373874bb2ee37e59e6b1924a4f"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueCardContentSize.swift",
+        "exists": true,
+        "sha256": "a15ab5ae0df9c3a420ef347363c87824a53341e6d2cde0b84b88bc7fcc6c73a8"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueCardSwipeInput.swift",
+        "exists": true,
+        "sha256": "a9a4d009254582a2dc299fa3ade9bd0bc102fa80c3fd4d910a75acc9d9a62973"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueCardSwipeState.swift",
+        "exists": true,
+        "sha256": "00586113f675f2df379f1804758ae2b554bc203ccef5af8a6f8f9a21b376b2e1"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueItemPlacement.swift",
+        "exists": true,
+        "sha256": "eca8e3b786b59c14b7616f6556fd1a9ea62372bad2c5b6c8da00e437f87b5424"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueuePillVisibility.swift",
+        "exists": true,
+        "sha256": "ff55fac074adf3143e2b2a21b23e782a3297a2a824e6afb0684e9139da3e8ed6"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueuePillWidthLayout.swift",
+        "exists": true,
+        "sha256": "9f769c14bbb6341c715cd9583645ff4ba21aa187130bfc523b83afff9ee89a67"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueRetryInteractionHarness.swift",
+        "exists": true,
+        "sha256": "24512dd77e9ddca3d64672ec5d73050cbd57b515aa31840e3853e4f017263cd5"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueSwipeInteractionHarness.swift",
+        "exists": true,
+        "sha256": "40976b218e780c2a5e4957a5cdb383bd7ccb9708d9e7962ef68dc9562332c5bf"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueTaskStatusBadge.swift",
+        "exists": true,
+        "sha256": "dde4b0aeb5958c428dce5a220773afff8b8d099ef7b1e2b2ade129a75b4e5d6c"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueTopPillMotion.swift",
+        "exists": true,
+        "sha256": "8dd4429e72f3ca7fdf075820d51407e7731ba27bf981d63a6b611663660c22ab"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueTopIcon.swift",
+        "exists": true,
+        "sha256": "8281e2c86ab695a7f248959b522135a2163c88553d40a027996760521ba5ab7c"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/QueueTopControls.swift",
+        "exists": true,
+        "sha256": "12868f5da94b42d43cacb7c17d968ba8b907e49500cfae7743490ef3dbc96abc"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteAdaptiveToolLayout.swift",
+        "exists": true,
+        "sha256": "c7019a5bdc0fa8f9069d07f9785eb34f053b1864ffe50ebcbb851eba4fddd4c3"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteCameraTool.swift",
+        "exists": true,
+        "sha256": "9fcdb48a8b7b9034dbd0409378bf7c21f47b5c6ac36b71937bb9fd246ece2cdb"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteCameraToolController.swift",
+        "exists": true,
+        "sha256": "f26342f6a737f8e3f15d8f75c5064e0c15178258454c93f79655a644045abacd"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteCameraToolIndicators.swift",
+        "exists": true,
+        "sha256": "12c63fe01f8816ad601340667584c555effb3d5b12fe9bd44a92b8cac78d561a"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteCameraToolMenu.swift",
+        "exists": true,
+        "sha256": "c1242b78ab7b791113f05fe1314c3c9075a3f845e484a74fe29aa83140e55eff"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteChoicePopup.swift",
+        "exists": true,
+        "sha256": "5208f8cfcc7e6583188dd8bd9e5b979ce8a4bdedbf7a1c5da839dbd9aee30149"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteConfiguredToolbar.swift",
+        "exists": true,
+        "sha256": "420d6a5426a90b82d3b83fa4a92ea374dbad0c9a04db2280959ab0ad2d8c659a"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteDisplayOptions.swift",
+        "exists": true,
+        "sha256": "9671627b710b8150fd097b9c8c3349506c330fa0488c4e2fcdbf51b44fb5fa4c"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteToolMark.swift",
+        "exists": true,
+        "sha256": "20b89778f7b91e59cd9b61fdbcf150dd69e94ed581045479c002188cb1294a73"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemotePictureControlGlyph.swift",
+        "exists": true,
+        "sha256": "0ddae9773e557bf0b4a04ce92d39540e4deba97103093c76c3b40a9d0f03be7c"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemotePictureControlMotion.swift",
+        "exists": true,
+        "sha256": "d2a3571bf1a98549ebbc629e144c3c26f41497a4073e0109264c6cac572f1a05"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteEditorIcon.swift",
+        "exists": true,
+        "sha256": "52e81bef44415839fdb8da75c27e4a9ea365ea7b206f421d3f6f8cbe095fa2c4"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteEntryButton.swift",
+        "exists": true,
+        "sha256": "4b1bbb58562da1c6d3a8726f052f2a8b40c37c309b0cedb71c77207901ae4b4e"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteEntryIntroPolicy.swift",
+        "exists": true,
+        "sha256": "83f484d33cc0e0fc0db662dac5c32626b100131300c26bb03278674b237004e3"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteExposureAnalysis.swift",
+        "exists": true,
+        "sha256": "0e05f8a419e629e1008ad5287e7389bc01e9cf87c08929e01240f4e23737a565"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteExposureMeter.swift",
+        "exists": true,
+        "sha256": "2f7398e635afc6d67ddc03e57a0e992669ec27292cee229ac42021ae39eb0669"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteExposureParameters.swift",
+        "exists": true,
+        "sha256": "4b6601aec925e5cbb0c34a3d147ac4880d753909485aa329e410acc84d5a3f0b"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteExposureTile.swift",
+        "exists": true,
+        "sha256": "7c310cd34e69a3158b0a3020c8803c90ad2d0988fe33c6efd65da5866094842f"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteFrameParser.swift",
+        "exists": true,
+        "sha256": "76a2c923b131b493c3a81fb3dffae1fd3ce612443ebadfd769859287478c54a1"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteFramingGrid.swift",
+        "exists": true,
+        "sha256": "784e8485c20d81dadcfa9f2c06841584b201ac027cd80a90113c2c601af3637e"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteFramingGridOverlay.swift",
+        "exists": true,
+        "sha256": "743a01f79a075b0c508616616755e418ef12302b45cb8ff17d8830674987d7f8"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteGridMenu.swift",
+        "exists": true,
+        "sha256": "30dfe168ccfc513065741605e588c6c4328e7cff8d14692538e1cbee27e65b98"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteHorizon.swift",
+        "exists": true,
+        "sha256": "747be9b449b02ece4f11c8d2e082a134fb66b680935d7b71e59af7291bdb5255"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteHorizonAnimation.swift",
+        "exists": true,
+        "sha256": "2be37ef537aae8840c59adcecd85bbcbe16a08fc2fce6cbb014dd26a3077b7dd"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteHorizonOverlay.swift",
+        "exists": true,
+        "sha256": "f2c7a48f981c75a102dadd76d9e26c56a813bd4b3b75fd9bd887908c7a31ed7b"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/PhotoEffectsExpandedImage.swift",
+        "exists": true,
+        "sha256": "ea5ee7be12f808563948e3e0dbe166b34b37d0a1b56da3ae22b50f5690621dc1"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLUTCatalog.swift",
+        "exists": true,
+        "sha256": "015593d48c9add2edf2def2d6c4b51a8337663ad63e7ac017f2e1987c5f18b84"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLUTFolderAccess.swift",
+        "exists": true,
+        "sha256": "c35db7818d41ee7c9180e83990202dfd2f0af9ffb5231b0244960cb8d4f02815"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLUTLoadQueue.swift",
+        "exists": true,
+        "sha256": "f8f8c2b91d4632a1b45514650760df1533ec87ccf7ac85b76c1b57198040ce50"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLUTMetalRenderer.swift",
+        "exists": true,
+        "sha256": "62dba41b316fe4786e1fe6086e4c4fc1ccf5126ee413d177e8d942e90b5bd02a"
+      },
+      {
+        "path": "ios/ZTransfer/UI/RemoteLUTMetalView.swift",
+        "exists": true,
+        "sha256": "b633005eee3fec3fe4e4ae605fa06aeed02fdc81b2c634eebed95bd2e19086e9"
+      },
+      {
+        "path": "ios/ZTransfer/UI/RemoteLUTPanel.swift",
+        "exists": true,
+        "sha256": "5215943b6370f62a06e78e47a031769c6b42e022b1696617d9c785765fadbc38"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLUTMonitorState.swift",
+        "exists": true,
+        "sha256": "772b7e973b2d9f8a035eb92bbf472f6043153c287cfd130832594505065b92e3"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLUTPreferences.swift",
+        "exists": true,
+        "sha256": "f137c93f6c361fa8afc53a455c7b61027fe7aa3553f67438d1785f6bdc508d04"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLUTState.swift",
+        "exists": true,
+        "sha256": "bdc4b259430cfa486d2882d095d2860bddd39355e742a8a9af8c8d9896f0c0e0"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteLandscapeControls.swift",
+        "exists": true,
+        "sha256": "5d42f82c0dd1c6b7f2db499e6ff3f053e774a6a2fa898a3c706bdf4b831e68c6"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteLandscapeLayout.swift",
+        "exists": true,
+        "sha256": "af92fa0812ab10833bbab54ac2e6e1fdf3439ddda4892f6c45e9d5beecc2ec42"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteMonitorHint.swift",
+        "exists": true,
+        "sha256": "dcbf593251ea8db604755ca7a08ef86f967254d0886a15e7614bcf70c2c0eb66"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteMonitorHintBubble.swift",
+        "exists": true,
+        "sha256": "c181cd330eb01caa2e120cf7c48247dda97bc0acffb59cda592ea84a81266acf"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteMovieRecording.swift",
+        "exists": true,
+        "sha256": "06260379dabead22eb3aec33080d621a69a6f877b778b01e635e2fdd3b2c922f"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteParameterInput.swift",
+        "exists": true,
+        "sha256": "b4b21f41dfafdb32ac887a74d7b62d0d9f40d30bc8e6e01652e9fac19bad7337"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteParameterPanel.swift",
+        "exists": true,
+        "sha256": "80ee4369a7cbf29959ba9e4fc4dad3947d3df144f394ad3262f238a7bd48f034"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteParameterWheel.swift",
+        "exists": true,
+        "sha256": "346c0c6aba98776d6fe616af02e4423e8fc2c58ff5304f08277407ad5a39a3ce"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemotePhotoReviewModel.swift",
+        "exists": true,
+        "sha256": "5cbcd3e4d26a545ff1b18e906158f2ac624afe93a451e79994cd0ed1867dafeb"
+      },
+      {
+        "path": "ios/ZTransfer/UI/RemotePhotoReviewView.swift",
+        "exists": true,
+        "sha256": "6e4ae43d256c0a496453f4716f3390852fe92cbb27147f984c65cb1bda97edb5"
+      },
+      {
+        "path": "ios/ZTransfer/UI/RemotePictureControlPanel.swift",
+        "exists": true,
+        "sha256": "373c36133308d7b7e55ac15829b303398a9a89a6443bf2d469a48eba47be574b"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteProperty.swift",
+        "exists": true,
+        "sha256": "2312338d760f2bdf8307727d1fabcce3004457d471fab14135186254b36c34b2"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteReviewCatalog.swift",
+        "exists": true,
+        "sha256": "be1c0724d7be935244f826fee779e4c006a72e6fad39dcf3b3353fdd5b485445"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteShutterButton.swift",
+        "exists": true,
+        "sha256": "b098ca842f2c1385856260d0f617b57616e3040a87dda406f366c5e5f0d469ab"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteState.swift",
+        "exists": true,
+        "sha256": "90c1461a396b64b141a5761ec094be4666cd1baa82fed187210ea05fbf706a00"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteToolDragState.swift",
+        "exists": true,
+        "sha256": "0ea9d88a5397202ffa4f749a12ee89f2be721f756bb1cad295dd6e518ac5fda8"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteToolEditorMotion.swift",
+        "exists": true,
+        "sha256": "87034a8b449c074b1e76216030a0bc5b46f1f83ecc8184d3c9caffc21a050d80"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteToolLayout.swift",
+        "exists": true,
+        "sha256": "f1a95cc78d29f71144eea4bd7f4ba8d1040e23fbccedef9a466e676fe29abd1b"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteToolModeCrossfade.swift",
+        "exists": true,
+        "sha256": "ac1acb48a0c0c88cd68c43ac38c456e960d5c81c7da83450d87c676f49a8568e"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteToolPreferences.swift",
+        "exists": true,
+        "sha256": "940b48c1f28c4d3582c1c1bfaeb79770551742b471facd4667e1796564329262"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteToolsInteractionHarness.swift",
+        "exists": true,
+        "sha256": "3201d947c91fe476c0c649ccb0a290c1531237685f0e182355aa326bd26e9790"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteUsageMeter.swift",
+        "exists": true,
+        "sha256": "28b463898ea47bfee331c9208e95b4b72c86bdd3712dac3d9b1e03c9319dd6a0"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteVideoDiagnostic.swift",
+        "exists": true,
+        "sha256": "991c0e0fee135d4312f79b5af4674d7291e7d1e53081812ab7ccd3d3d9da131e"
+      },
+      {
+        "path": "ios/ZTransfer/UI/RemoteView.swift",
+        "exists": true,
+        "sha256": "547a8e2102ce58ae648e9b134e454d9fdeda4ee27a2ec5e38acaef0354908ecc"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteViewModel.swift",
+        "exists": true,
+        "sha256": "c0ab8bfb9e17a0a3fb2c7fd8c78a7aeafa40350cd4f4d4ed9a0301c3feec6f33"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteViewfinderInput.swift",
+        "exists": true,
+        "sha256": "8a083267a5d9a23ff862a6b3fc4b26f9e8de7b9182334f5239c54967ce2c49cb"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/RemoteViewfinderViewport.swift",
+        "exists": true,
+        "sha256": "879f2ccd2b39acdf4eec8dd5522fba08437df584f55eae0f1994783a43d0f65f"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/RemoteZoomableViewfinder.swift",
+        "exists": true,
+        "sha256": "f39ddfa75c6bb42e994e63c253d6898fed7938774ba6ad8fb7b4752a94a51a5e"
+      },
+      {
+        "path": "ios/ZTransfer/App/RootView.swift",
+        "exists": true,
+        "sha256": "3542e6bd4328f41ee1b5220621189f7400fa223897dd0e3ae94b8ddb91bcad0f"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/STABrowsingSession.swift",
+        "exists": true,
+        "sha256": "5c9cbb10a975a2b862da24696a9f4f58204a1d026f510dd8d0935183c52aabbe"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/STAConnectionCoordinator.swift",
+        "exists": true,
+        "sha256": "50a1328f27591b39ef145f60e5728050373d0275ca831492b35c540050f9bb33"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/STAEvent.swift",
+        "exists": true,
+        "sha256": "fd5c8bef6e1c4c83bc57492e948d1f283de33f8911cf33002555e5c379500ecb"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/STAJpegThumbnail.swift",
+        "exists": true,
+        "sha256": "34e0181ace26ce6c8a71e757cafa505c3f5e2c87e0098149e0861c0eeb3964e1"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/STAMediaMetadata.swift",
+        "exists": true,
+        "sha256": "19d5f24266abae152f91376c2dcef2e48ae53c7a7709e27f3e2bf8e9baab1b3f"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/STAObjectReader.swift",
+        "exists": true,
+        "sha256": "76cfd648cabdeb1ecafb337dac4e3594db90e272169a64592959c1a48e70043f"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/STAProfileStore.swift",
+        "exists": true,
+        "sha256": "bf6415e7f13971b6f3fda63d7e393331694a7ee0f0177a81a19616ffa27e836e"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Connection/STAResetPairingOverlay.swift",
+        "exists": true,
+        "sha256": "c52793696ea98a65e48bd89b2a41b28b518653a2a3708d4eefa0a62cc71a9519"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Connection/STATipsOverlay.swift",
+        "exists": true,
+        "sha256": "7b5c5320923e78ac5ad0c554c4452f459fbd24b91696f9d33d1b12acc946f558"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/USB/SelectedUSBPTPTransport.swift",
+        "exists": true,
+        "sha256": "44fd252f5a281bda328a90bf143de65036b8ff1f8dc5fb2d1f134154990ea0a2"
+      },
+      {
+        "path": "ios/ZTransfer/UI/SettingsPopupOverlay.swift",
+        "exists": true,
+        "sha256": "4dd58466f8f133358dcb9cc4ff80ae6824ed99e2af1427d3b93dce558fb0bd91"
+      },
+      {
+        "path": "ios/ZTransfer/UI/SettingsView.swift",
+        "exists": true,
+        "sha256": "c65c342b32cbc4e137c6b788682ae1e1dec9412f7cbfd41c90af4548da91d26f"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/StoreKitPurchaseStore.swift",
+        "exists": true,
+        "sha256": "fd31276afda73eafff14cd5ccfb0cb2cf328d08483dcff8bbb66cbef2b12ed78"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/ThumbnailCache.swift",
+        "exists": true,
+        "sha256": "43524e3fc5bd0305d31fc037382dec2686a6e8c9e0aab30c2fece1c9ef518e92"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/TipAttentionMotion.swift",
+        "exists": true,
+        "sha256": "057de503745e90a130a08d3141560324f5e0befbd46ba7d37b7fc75b487bbb39"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/TipLightbulbButton.swift",
+        "exists": true,
+        "sha256": "803bfc1701f4b787bf5fc979360341e16b6b167b686369a9bd959292d7caf1ef"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/TransferDirectoryIndex.swift",
+        "exists": true,
+        "sha256": "521e71e912ea41c51794a697cc03ab85ce96a240f103917b23c41aa8dad9ffcf"
+      },
+      {
+        "path": "ios/ZTransfer/UI/Components/TransferFileTitle.swift",
+        "exists": true,
+        "sha256": "a9da5249f63a5884648f3729da53c71459b4e266fa784c9443474d8c2b5b0f38"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/TransferQueue.swift",
+        "exists": true,
+        "sha256": "df3dc0bf6b131b0dfce6c9061ce3f67cb01a4ba03af1e87e8c8129cfe8cf75f5"
+      },
+      {
+        "path": "ios/ZTransfer/UI/TransferQueueView.swift",
+        "exists": true,
+        "sha256": "fb8d553a0af6a632d009768b75bda40c8ee909b9495723e2bbcd9dd75c4203dc"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/TransferQueueViewModel.swift",
+        "exists": true,
+        "sha256": "ec17d8945b1d1c124f3e15b59fcfbd7fb884ebe22d5507fe995c135981f8dca7"
+      },
+      {
+        "path": "ios/ZTransfer/Transport/PTP/VideoRating.swift",
+        "exists": true,
+        "sha256": "4a691bc20de749bb75663700adcc775feba0db2244669f4dd3d000dfca9f0f57"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/WiFiConnectionService.swift",
+        "exists": true,
+        "sha256": "adfce591142e18ab73f90844bfd73470f33b2c82fd6cca6713c0a91190ca9963"
+      },
+      {
+        "path": "ios/ZTransfer/Domain/WiFiKeepaliveLoop.swift",
+        "exists": true,
+        "sha256": "10e1f8e739af49cf24c56e1d26fd662c57e89a4fb51f3392801459bc85fbb82b"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferAndroidColor.swift",
+        "exists": true,
+        "sha256": "73c55ef928d94dcb255b9ba45d9b02ccf7c137afb8c646c286860130489f7040"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferAndroidMath.swift",
+        "exists": true,
+        "sha256": "c4f7843eea31f171b80548ba1709b5112b487343c7e380ec89588d6271ea9f65"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferAndroidMotion.swift",
+        "exists": true,
+        "sha256": "4487d44e8132d41c8be9adf3f3fece0a9697aff6233a1cc1cc0c84d4fccf7d48"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferAndroidShadowMetrics.swift",
+        "exists": true,
+        "sha256": "e61ea843d26ab24ca6ca49915734d9c36b6992c2daff887e8430f2e5b845739b"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferAndroidShadowRenderer.swift",
+        "exists": true,
+        "sha256": "f348990b6f22cc35a1805a3b5f8acb9bf667754dbf30c91b7d5aaeb98648f814"
+      },
+      {
+        "path": "ios/ZTransfer/App/ZTransferApp.swift",
+        "exists": true,
+        "sha256": "6b1ed2569bc2238ea6b6a0e94747a642ac88679b190bd67cfed63dbd734ff781"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferButtonElevation.swift",
+        "exists": true,
+        "sha256": "c9775126e5af0954ab009b390a101da96be5d8bd466b0dd0ffef2fa920bfd5cd"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferButtonMotion.swift",
+        "exists": true,
+        "sha256": "37d7dc09427f03e3d969620bc9338d36798aa829a3aff8bd7147cab56e07a37d"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferButtonMotionController.swift",
+        "exists": true,
+        "sha256": "282aadec3b90236902a1e81f9cdd3e95bd178af38f5f8415ecc273ae17da91bf"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferButtonPressState.swift",
+        "exists": true,
+        "sha256": "a5ac6dd68a169ddf9527514180d8e609d35de7fa0b6c000a1bfdb98cd0279e89"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferColorAnimation.swift",
+        "exists": true,
+        "sha256": "237dc0de001987ad79fc2a028f8b9f78b8f03b4d14ab3dbc561d53b6a33f9212"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferColors.swift",
+        "exists": true,
+        "sha256": "76ffdd2a0097831c1fff904dbaf8338d6869666cd39f053eacf082da95584995"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferDesign.swift",
+        "exists": true,
+        "sha256": "a7f6db4b28ce078a434c8f0fa86ff5a8db7c2d81a210e9b2fec7764384c16fb9"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferFrostedButtonSurface.swift",
+        "exists": true,
+        "sha256": "fb636b638b0388099cdae2d552a896d1fdde6ed2413bfecd692112e89f5683b8"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferGlassSurface.swift",
+        "exists": true,
+        "sha256": "f335b53f7f32587bdae7c5bbd9745041cb2d592bb2b7b9d1b8cac8a30c6edfa9"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferHaptics.swift",
+        "exists": true,
+        "sha256": "d4f47b18693cc358b9ea3f8fc26b2d848e9614eab2ef585c66680f45f12b3209"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferMaterialTexture.swift",
+        "exists": true,
+        "sha256": "67004a5ad48c20a65a449ab141adfe6ad93a1c18240d07d1d6606ec6a99028df"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferMaterialTextureStore.swift",
+        "exists": true,
+        "sha256": "4e85b5ffeb0b8d6537c00eea5c2942c93b4b4ab56fb2fae8658b4ecc3211dc95"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferPhysicalMaterialFinish.swift",
+        "exists": true,
+        "sha256": "8b8281afa218e43bd123c37739ac674048a57271798523a4536cd6d1ebdad329"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferScalarAnimation.swift",
+        "exists": true,
+        "sha256": "e67472d6b26a8443086202579a37a1f53dc539fed5f07c0fe0e6fc58c7e87640"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowBlur.swift",
+        "exists": true,
+        "sha256": "da7f4272b50732ba62a0c616cb4ef16031079ef302b8da92fbe61516d5c4cc6c"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowBlurRenderer.swift",
+        "exists": true,
+        "sha256": "93c9b6181294619532948ae23452ceade852524499da2c4e163c6bda6901d903"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowBoxBlur.swift",
+        "exists": true,
+        "sha256": "0848685172eb8debded2276a59124970348dbcd636aae4dc53f16f6da8260e8d"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowConic.swift",
+        "exists": true,
+        "sha256": "3fbbe28aa75dd06cc308adc2cfc288c40819b83fa0bf98b75a3f5475ae4bba9f"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowConvexMesh.swift",
+        "exists": true,
+        "sha256": "ec9fe50ed4ca478928854fa1e978baa4236b173d4845d1d39f28c16af8e6fba7"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowGeometry.swift",
+        "exists": true,
+        "sha256": "bc7561461325ee4d2b2032d572a0dfcb01ddee23683490bbab1dc5fd2599acde"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowInset.swift",
+        "exists": true,
+        "sha256": "60b7569846c1a8587dad2c63e62c03f7daf4d1879353086ef7479c068b39698e"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowPath.swift",
+        "exists": true,
+        "sha256": "7071b6cd8ac5ed39243764cbf26bcff335c422c2dca4741b81930c3b64c6891d"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowPolygon.swift",
+        "exists": true,
+        "sha256": "0ec931d6684edf7e4facee0d884acde3e2bf725102245ea66eb3628bfa464ddd"
+      },
+      {
+        "path": "ios/ZTransfer/DesignSystem/ZTransferShadowProjection.swift",
+        "exists": true,
+        "sha256": "54001b2031c2110d7a80911ec3e60196a3f4470d4b3b34b8dda674e155132a11"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jaricom.c",
+        "exists": true,
+        "sha256": "fa144de494da46aa685379a8a0f6f59acaef7a2bb282cbf738a0a8070e1d527e"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcapimin.c",
+        "exists": true,
+        "sha256": "d7fe494b592a4b7a582c3824a5fabb3be3efdeb37c1ce989de32e689b1960860"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcapistd-12.c",
+        "exists": true,
+        "sha256": "b8e55367564c0814c71caf56c3de83b6edf07d253680be0e22f91fac561fe213"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcapistd-16.c",
+        "exists": true,
+        "sha256": "f7a0949a2d8f8f3912f03dee7e4fb25689d121e3c5f4a354a846858fb8bcb653"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcapistd-8.c",
+        "exists": true,
+        "sha256": "7b082e45ed545685b6effc70cf9554f531a2cfe2ef7fbfff01ebf6d69c2d96a6"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcarith.c",
+        "exists": true,
+        "sha256": "76b5a23029a6c44f063a35c29c4a5cadd13930e931e83c624d9e2d872e8ce750"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jccoefct-12.c",
+        "exists": true,
+        "sha256": "e7c0840cb5668b746718b40d6d49cd8fdea7e8913d3e6ce7667ff1ae5e87e2d1"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jccoefct-8.c",
+        "exists": true,
+        "sha256": "b850510cf2eaa4e55a6ed7a773277f2a336c33566c119a3bab8646481287eb0b"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jccolor-12.c",
+        "exists": true,
+        "sha256": "c3fe4629f576876bca4a5f343c612c1a0d36a6bde47a6e3bb35f902fed89072a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jccolor-16.c",
+        "exists": true,
+        "sha256": "a505c0ed69e5e1bbc7775abe792cf2551a9f16fa5fe21819ecc67081ccf48d35"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jccolor-8.c",
+        "exists": true,
+        "sha256": "579570ac8591a84378d4c8e27763eb1f9b63ba8fc3d50416a872b87f511389b1"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcdctmgr-12.c",
+        "exists": true,
+        "sha256": "632e737dfb7cb6129ed3e969c7979ba6ef1f82d506eabc510f17b13e59a8c65a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcdctmgr-8.c",
+        "exists": true,
+        "sha256": "f4f4c78ba513f72a0408dd99ae9ee0bee31390ce37ad2df1542e73e4f30e0ed5"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcdiffct-12.c",
+        "exists": true,
+        "sha256": "32c807673b79ca5bc6dcee297ae2d0f2a2271579065267e46f08da8bd02c1ca5"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcdiffct-16.c",
+        "exists": true,
+        "sha256": "fc36f9652b478f8143ee36f6548b3566b2ffb2af44cbb05410aa75e6054b8505"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcdiffct-8.c",
+        "exists": true,
+        "sha256": "c5d91ae3d2c77a368ba2200577cce3275bffb8597b3dcd9b2fd8cad11b373201"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jchuff.c",
+        "exists": true,
+        "sha256": "7e79a144f3eb36f6e53d9a8972a111fd2cdf68e64f52bfbd2dcedd972534b4a4"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcicc.c",
+        "exists": true,
+        "sha256": "021f073e040e474ea73e3b6785c0373cf289fd2faa87895832ae623d9c0e0b39"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcinit.c",
+        "exists": true,
+        "sha256": "8856cb2f7de404012e618e8bb9f82ce2b9ac698afc5aca300e693dd72960b2da"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jclhuff.c",
+        "exists": true,
+        "sha256": "6fc4569ad078429d77349660cf26715e10cb6956488ac6652019f6a3227d0178"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jclossls-12.c",
+        "exists": true,
+        "sha256": "b61f0e7ef0517bc0c989e02cb1177ac52dd57b2a3ef3ea6ab0e5143e87f618a9"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jclossls-16.c",
+        "exists": true,
+        "sha256": "d28228ae48201cff2411fe3cc885fb9adf430001b9af4c08945aa612e7d5264e"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jclossls-8.c",
+        "exists": true,
+        "sha256": "9a6c5fe29a173b1a8791a41360292c7f571f67aa44810032ffd2b5dbacb001b6"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcmainct-12.c",
+        "exists": true,
+        "sha256": "c204ecaedb12c5c5b50f56fa8bed4e8a0c33d6dc08e9413aa775c26a525d86dd"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcmainct-16.c",
+        "exists": true,
+        "sha256": "f0ea34772a4e0c6556a9f3cb418d5bba02a620c965b16b8b94ae355482042e98"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcmainct-8.c",
+        "exists": true,
+        "sha256": "0d038018c5a0b48fcdfc6a122d48a18826458fc79ce3979a33f1d302ff2603db"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcmarker.c",
+        "exists": true,
+        "sha256": "713a3acfa3ae737b83a46ac0d5e176f2fb1bf83bf4d1868e8bd5c5f87b8f187e"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcmaster.c",
+        "exists": true,
+        "sha256": "543f97c76b36356bc8753552bd38be4539686733806cfbd27416991419465d77"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcomapi.c",
+        "exists": true,
+        "sha256": "f7987d316f0aa7ae36273a33199018ee494e111de913e0098734161390207a23"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcparam.c",
+        "exists": true,
+        "sha256": "653c5dff550c3947e32f6702c8f2f650d490c6390867c108efef2042ec547fdd"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jcphuff.c",
+        "exists": true,
+        "sha256": "21a8377ad47d53e165b33eda71f2d3325f2dddfb2b5cd0fa9312cba01a247e7c"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcprepct-12.c",
+        "exists": true,
+        "sha256": "cdbe13664423d4fe44e7f09386e0aca7a68b3709b38543b2b57c441a205ab965"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcprepct-16.c",
+        "exists": true,
+        "sha256": "fbb982b6e7f39723f07faa0aa9c8f4d1b615cc9ffad27c2d20296dee3cf73c3f"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcprepct-8.c",
+        "exists": true,
+        "sha256": "3a340954f90962b9c414b9f69dce0f4a4051f295f636826feb7965f501d6526a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcsample-12.c",
+        "exists": true,
+        "sha256": "419725448d6ac4fa533af032723576b29aa561f5ea2eae5ca4496b188ebe9696"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcsample-16.c",
+        "exists": true,
+        "sha256": "53def0c68e1b6ec23671d5d8d4c2e9dd2139de0da874a0780f2ab0b30b6f274e"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jcsample-8.c",
+        "exists": true,
+        "sha256": "82da87aaa3417e45c53a20c6b17a6e97508afb490f4341daa84df7fdb938c6d6"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jctrans.c",
+        "exists": true,
+        "sha256": "a2abab67d3e603308235bfbc783ddc55bec9d80bc8091b232e2fc35501f3da1f"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdapimin.c",
+        "exists": true,
+        "sha256": "fac63f4ad58a35e6f4e169b40aaafd4757f018abc83cdf6376b616b713d5185f"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdapistd-12.c",
+        "exists": true,
+        "sha256": "275519203dc4d9f5e49941dc92aec80cc66660205b6016e51844ae24e6738db9"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdapistd-16.c",
+        "exists": true,
+        "sha256": "9019dc766e92eb7e968a54c03ad32c5143230a7360d1499c86872a5e6eff7718"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdapistd-8.c",
+        "exists": true,
+        "sha256": "ec3f9e51758784a97fca8736937520736dc80c9c50d066d316c9f31be38d8002"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdarith.c",
+        "exists": true,
+        "sha256": "a0291db89f2a057eefcf234ccf02ad1ea385c00759af13fddec914bab0cfe0d1"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdatadst.c",
+        "exists": true,
+        "sha256": "03a926f43174a58ecb74c6219a51d460699dddec616a8f8b196eb3b3860d805d"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdatasrc.c",
+        "exists": true,
+        "sha256": "25b8689e08ec083106e13a9c5a599b7d79dcf1f182d4565b1600eac014b874d1"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdcoefct-12.c",
+        "exists": true,
+        "sha256": "f198bc02042b61e682282bba855c5b599e6042b509e553ba8d1197dd58dba284"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdcoefct-8.c",
+        "exists": true,
+        "sha256": "db42f048ef044fc7fa623bc6daadfee4a25b3739b6296d6f95f7f448f7c3d958"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdcolor-12.c",
+        "exists": true,
+        "sha256": "a6bdf73a5c6d3cafe460ea248a240d05a37fa5a0edee9b0842fd203dd42eb28b"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdcolor-16.c",
+        "exists": true,
+        "sha256": "1a4bc3b430f7e9f2c7f271665f7088302f686b952006878300340a273f108084"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdcolor-8.c",
+        "exists": true,
+        "sha256": "0c47d50952aad899a6bb8fd48eb2abbfbf89c9d4e658bdfdb937c7673b7e030d"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jddctmgr-12.c",
+        "exists": true,
+        "sha256": "4f8df6bf0e6ad2e44d35fdcd4f8365d2cc461b71a72d9a35c7336f1703a18c18"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jddctmgr-8.c",
+        "exists": true,
+        "sha256": "641a720ad4902df4ac31576a8544f08c957b55e3b63575c62cf57317cc960fa8"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jddiffct-12.c",
+        "exists": true,
+        "sha256": "445d44f9f7d8c04252fb5b1fd324b91547a864309de4696e7f45842accfabbb6"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jddiffct-16.c",
+        "exists": true,
+        "sha256": "2ec770be154c343de004c972c8dc3ca11f6ea68c2eda4bae5ba1f784ed67bbfa"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jddiffct-8.c",
+        "exists": true,
+        "sha256": "95182377bf46c0066f9421a7f64b09bc754133f12c2196acc907e226c20a6775"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdhuff.c",
+        "exists": true,
+        "sha256": "712ecd1b7e2b520ce0648cb742f1dad89f675ab8871dc054227cb28aed84b377"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdicc.c",
+        "exists": true,
+        "sha256": "f605e2337afa011e020eb84f9c2f5a211f30d380621e97206d07216e4f78f661"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdinput.c",
+        "exists": true,
+        "sha256": "b3c155ed22ce4b49431d4900392f09354275daa59602450fafc6b9cd7adfcc13"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdlhuff.c",
+        "exists": true,
+        "sha256": "ed965925b5961236b6fcd3a7870ea159386b93bbefbc97cd4fb465ad72446da8"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdlossls-12.c",
+        "exists": true,
+        "sha256": "24f27614786ed69e379aa0b4d19136a3b4d836ef94a9c7d70eba531c943fda79"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdlossls-16.c",
+        "exists": true,
+        "sha256": "2cd2ca3bcd371b390c53cb102e4f1a163cd1da64d61353e29d34d5622bd75aad"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdlossls-8.c",
+        "exists": true,
+        "sha256": "f7560c613fbd9cdfbfb1c5e62b0a6c9091feef112daaea6859f3e2f14ee2d0f6"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdmainct-12.c",
+        "exists": true,
+        "sha256": "411f6776f749a4f68564831a138805c8829eeaaf9d22c98863e776d84731b79a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdmainct-16.c",
+        "exists": true,
+        "sha256": "ddb64a93d1ad9daece554d95762530950bd0f70800bd97c24bd64e22039fcead"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdmainct-8.c",
+        "exists": true,
+        "sha256": "238f427ab2f4cee299cff2d56406aeb464fc33ee375b1e19796c7767696d7543"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdmarker.c",
+        "exists": true,
+        "sha256": "f1ea7316e9f05c99929bfc70afebecc505b76fa14836c425d60ad33179771033"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdmaster.c",
+        "exists": true,
+        "sha256": "657be679590bfdc5f1d47d345628cba37607cfa1118fa747c9780c8350e3e875"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdmerge-12.c",
+        "exists": true,
+        "sha256": "08278c5b03aff5437b249df4d42d3bc97b1e24cc61ce832a1a1df20add022cd8"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdmerge-8.c",
+        "exists": true,
+        "sha256": "0868fe8b8556243deb057a66bdf72805adb6c7016550a7b1f2b379e50ae125ce"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdphuff.c",
+        "exists": true,
+        "sha256": "fdaf536fed994d433b08a2f0bc39b85bc100d81f465e1164c78caabcfface7d3"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdpostct-12.c",
+        "exists": true,
+        "sha256": "9823617b6978a26e0a03cd22c108ca03caef7cf85c31bc5aa9306ac985970a8c"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdpostct-16.c",
+        "exists": true,
+        "sha256": "2c8545f3fd0a914d296832972c3fbcab44627c59d645de7b27c7e2cc76028fbc"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdpostct-8.c",
+        "exists": true,
+        "sha256": "c4873dd6642613e21a489ecd88c74417351daad6f87dfd1ac19c8cce3b969a83"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdsample-12.c",
+        "exists": true,
+        "sha256": "3b0a1df083ff95304af922ca43c2f508c649a6bfd44ecece6eb7694c17d6d228"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdsample-16.c",
+        "exists": true,
+        "sha256": "89a599b79eb7881c80a92e3032f853bac8f87a5ec6d5a9a55e2638f253ee2355"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jdsample-8.c",
+        "exists": true,
+        "sha256": "731ba0afcfc9ab0b2bf07fa45a110fc548cd9919c0bd4beaaa1327bef206f9fe"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jdtrans.c",
+        "exists": true,
+        "sha256": "b624447657d4f01737efc0b846285a19974f478a21418af1f6c1143c24bcf16c"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jerror.c",
+        "exists": true,
+        "sha256": "1c3661997d30898f587a2765e934b23e706fabb7e4c316490348843f2003d0a0"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jfdctflt.c",
+        "exists": true,
+        "sha256": "30098eb7e20b4ae42bc7ddc16552c6de59cb5cb045059d5a138c4b1b2b8f4739"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jfdctfst-12.c",
+        "exists": true,
+        "sha256": "61e372feda698d817c237a970003e105b9364ddc477a6068c576fdb992ba2840"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jfdctfst-8.c",
+        "exists": true,
+        "sha256": "fbf047bea37753b92ebe1d4a2e7af85609d56590f2e2a39784799a8ae3e02c39"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jfdctint-12.c",
+        "exists": true,
+        "sha256": "a8752dc616049264ba4ddae713da9bed93a1c2d2880c28af171b4e1a61450d35"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jfdctint-8.c",
+        "exists": true,
+        "sha256": "83d7876ff6ec7e40f54fe37d229dc78e141b946835db90056fa649f7a347955a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctflt-12.c",
+        "exists": true,
+        "sha256": "70faba9e4c35f7157440f07fd0fd40a84d2d941744509697094018e645a4e56f"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctflt-8.c",
+        "exists": true,
+        "sha256": "a74e6d8caaaa114bee7074ebd32b8a835e3b3674af9e8f33517c0a7bfef79795"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctfst-12.c",
+        "exists": true,
+        "sha256": "f4a69d725c5a469de383b8ded36649e213ded3299a8e980f75722e937de2dc9d"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctfst-8.c",
+        "exists": true,
+        "sha256": "9a2e6223a4105f7befdf302b8f058e46cd2afd423da9d304fdc35d1c74cf6020"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctint-12.c",
+        "exists": true,
+        "sha256": "032c2d120aca1946c0c1a7daf27c5c03f0dbc004f60bbb89a986239815717f8a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctint-8.c",
+        "exists": true,
+        "sha256": "eb8f9ac5aa6a5ae7f76318e696a498bfb4447793752c96f138bfb769049fe0e3"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctred-12.c",
+        "exists": true,
+        "sha256": "555ae9ff1ad7e6ad8146eddae0da452e3e15c6f40687ef7356b49587f92d1838"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jidctred-8.c",
+        "exists": true,
+        "sha256": "043a0ecaeef92432dc1f7ba8015c17503a7ec6ac466348ff999f068d3516b45a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jmemmgr.c",
+        "exists": true,
+        "sha256": "914a2d583ff3c6702573ed13dbaf79491f9984aa8011920555491b7fcebcf34f"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jmemnobs.c",
+        "exists": true,
+        "sha256": "328ff841f437fa7c2de846c4e295e9145cc628b9041aed718a06eb087c55786c"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/jpeg_nbits.c",
+        "exists": true,
+        "sha256": "38d79f64711f508137b1d7fe13372f07cdfc4985871e251fe06e31db6822af1e"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jquant1-12.c",
+        "exists": true,
+        "sha256": "e03e2332be79aeaa7f72069721d43d922c79d7cf9f924627a2ea43238fbe70f4"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jquant1-8.c",
+        "exists": true,
+        "sha256": "92728f205b6c5b4672605a3ce953cd44b98320fa1c83b742be1668664ed6bfc4"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jquant2-12.c",
+        "exists": true,
+        "sha256": "c0c7e51095cd87d0fc4feed65b85257c6be0c3f4f5fda66f87d3fe55451bd8ee"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jquant2-8.c",
+        "exists": true,
+        "sha256": "f016e46e69dd303922eb41748ae01ba856337aaad2d21fedeb82ffaaee01983c"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jutils-12.c",
+        "exists": true,
+        "sha256": "ee9c47b293fff476e139faddf40c6e07acc93426f9fa5166d266b4b267b9683a"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jutils-16.c",
+        "exists": true,
+        "sha256": "b86afd43619d70b584fd78a2fe0a876ae1aea1613d93181e037d8e7d6a2a5c6f"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/wrapper/jutils-8.c",
+        "exists": true,
+        "sha256": "c455d2f2a626b1ead9bb47b8e5c2199df6125e4f0cf6026cbf369adde20a63cd"
+      },
+      {
+        "path": "ios/ThirdParty/libjpeg-8bit/src/transupp.c",
+        "exists": true,
+        "sha256": "798efe4247b9de01ae6f5579ff2d53e076ef5784cc6bc3177904d996123a8e4d"
+      }
+    ],
+    "PBXResourcesBuildPhase": [
+      {
+        "path": "ios/ZTransfer/Resources/licenses/AOSP-shadow-NOTICE.txt",
+        "exists": true,
+        "sha256": "6a449d413c787946a3ac1d7fd26807bbfb55ceb3ca450d0289035ca1ec3f3276"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/licenses/AndroidX-color-NOTICE.txt",
+        "exists": true,
+        "sha256": "5fb968371ad080452e9605f23c6f4d92d6e7b1960c01792ef57e6e187573f9a9"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/licenses/AndroidX-motion-NOTICE.txt",
+        "exists": true,
+        "sha256": "4c89659e723f80aa169b6e7a9d1f44c47f3618e28774875929b7387044a9971e"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/licenses/ThirdPartyNotices.txt",
+        "exists": true,
+        "sha256": "f8ea0079eedd8f6e3e552d3a98afdcba62363f05d07ac5882b583de799cafc4f"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/licenses/Apache-2.0.txt",
+        "exists": true,
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/Assets.xcassets",
+        "exists": true
+      },
+      {
+        "path": "ios/ZTransfer/Resources/en.lproj/Localizable.strings",
+        "exists": true,
+        "sha256": "8305743d8e43582b3987b26014e2e6e50220c9f593c74f121989f219abbff05b"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/zh-Hans.lproj/Localizable.strings",
+        "exists": true,
+        "sha256": "69a0eaadddce6b359ee66a4426327b2f627dc508040f364d40c1a389ca85349e"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/zh-Hant.lproj/Localizable.strings",
+        "exists": true,
+        "sha256": "c33c27965f7ddf2a4000897a2e214ea85ccc786c2a602ae539256877da77431f"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/PrivacyInfo.xcprivacy",
+        "exists": true,
+        "sha256": "ab519f9d53b9ff3977bd4d58a75e8ae509c038e098c446716284a975c341f86a"
+      },
+      {
+        "path": "ios/PictureControls",
+        "exists": true
+      },
+      {
+        "path": "ios/ZTransfer/Resources/licenses/Skia-BSD.txt",
+        "exists": true,
+        "sha256": "5f787c1dee3c56547f09ccc2906ab5f5293c4d8dd6c8654e573216c38e908dbd"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/apple.svg",
+        "exists": true,
+        "sha256": "a5c0ab1705f3f9ed175996cdfa177765b1aa265949a2d7df9b1d55eb38aeb4ba"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/Fonts/bebas_neue_regular.ttf",
+        "exists": true,
+        "sha256": "939fea723dad24504f40faadc34eeffadfbbee558754f70c3c736e13786b0ab6"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/Fonts/cormorant_garamond_medium_italic.ttf",
+        "exists": true,
+        "sha256": "14efb9443652199ade5bc6ba8637b4084acce40a58368a3808f84f55667e3e90"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/debug_sample_01.jpg",
+        "exists": true,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/debug_sample_fhd.jpg",
+        "exists": true,
+        "sha256": "5a3820f34301f8e7f6dedba7544c22544e5f939cf617b938588d45c89d70b0f5"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/dji.svg",
+        "exists": true,
+        "sha256": "3bd16a0cb92a60e5a5a7c6deb2bf278eb3f0dedb53c7d303c592992b9fe6ef54"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/fujifilm.svg",
+        "exists": true,
+        "sha256": "b6b432bac50df29727fcfd0fa9d1965f0449160037be89387b3844c92bbb944d"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/google.svg",
+        "exists": true,
+        "sha256": "0f82f115f6f5f95bfe48acce7f0e76f8f3d23ba458e1131c179626ce67b24d85"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/Fonts/great_vibes_regular.ttf",
+        "exists": true,
+        "sha256": "9d76b8c67f5289c310114c935c5c3831fc3c25bc2bb888a28210c1659d701b9e"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/honor.svg",
+        "exists": true,
+        "sha256": "dcaf6f85756023aa4d7f5773191624691f94b23ec163849c199739516de54472"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/huawei.svg",
+        "exists": true,
+        "sha256": "91e6fd86914e991a3ab801db258be9bb8e150c95b3424ce327f9a768f8662741"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/leica.svg",
+        "exists": true,
+        "sha256": "b9b7ee14970a3f27353dc66f94ae8daf74c62fbe7364608d98d45c383b361393"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/motorola.svg",
+        "exists": true,
+        "sha256": "acdc0c4d8cba44b720d893d8e3742f207244da05ca5c050df8cb723756a417ed"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/nikon-official.svg",
+        "exists": true,
+        "sha256": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/nikon.svg",
+        "exists": true,
+        "sha256": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/nokia.svg",
+        "exists": true,
+        "sha256": "c41b3fa32537c383216c1c312e294e597de7f2dae1ea00a5adaa5b4c2d950ada"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/oneplus.svg",
+        "exists": true,
+        "sha256": "536f915451c27cda9e1c2d8a5c7ca57f30f778eecafa0acfe01d09d8f66c8a98"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/oppo.svg",
+        "exists": true,
+        "sha256": "c6782d501f63070374d3f23cec501db3b19f87cde1781037581cb7b6a3a9e6dc"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/panasonic.svg",
+        "exists": true,
+        "sha256": "534bf3863fa41f7703fc3ec9a84a964ef29e239a1193d4859573d63a3fc0bc04"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/samsung.svg",
+        "exists": true,
+        "sha256": "e29e10099eecd64d44a5db80b2701c04d9d277bfc328c175eec00de86d08042b"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/sony.svg",
+        "exists": true,
+        "sha256": "1ebe41fd11e744264f345c1d3fa46ff6966c7349f585477bb1d9be0daa7c9e6c"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/vivo.svg",
+        "exists": true,
+        "sha256": "ca64bdb5af025309fdd2d852a8e0071102be714f1191ca4b971d1fd5f569e514"
+      },
+      {
+        "path": "ios/ZTransfer/Resources/BrandLogos/xiaomi.svg",
+        "exists": true,
+        "sha256": "e1a5c7dc62eba325a68936c1b16b7198628f5d69bb809d523b006a9e697ab551"
+      }
+    ]
+  }
+}

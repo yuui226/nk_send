@@ -407,3 +407,222 @@ private actor CacheTestSignal {
     func wait() async { if !opened { await withCheckedContinuation { waiters.append($0) } } }
     func open() { opened = true; let pending = waiters; waiters.removeAll(); for waiter in pending { waiter.resume() } }
 }
+
+@MainActor
+final class PhotoEffectsFallbackLifecycleTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var settings = PhotoEffectsSettings()
+        @Published var source: UIImage?
+        @Published var presented = true
+        var events: [String] = []
+        var renderedImages: [UIImage] = []
+    }
+    private struct Host: View {
+        @ObservedObject var state: State
+        var body: some View {
+            var preview = PhotoEffectsSettingsPreview(source: state.source, metadata: nil,
+                settings: state.settings, onRequest: {})
+            preview.lifecycleObserver = { state.events.append($0) }
+            preview.renderedImageObserver = { state.renderedImages.append($0) }
+            return Group { if state.presented { preview.frame(width: 320, height: 240) } }
+        }
+    }
+
+    func testOfflineSettingsChangesDoNotRestartSourceGrace() async throws {
+        let state = State()
+        state.settings.photoFrameEnabled = true
+        state.settings.photoFrameBorderEnabled = false
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: Host(state: state))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        let beginDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !state.events.contains("fallback.grace.begin"), ContinuousClock.now < beginDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(state.events.filter { $0 == "fallback.grace.begin" }.count, 1)
+        // Change settings while the initial real-photo grace is still pending.
+        for value in [30, 40, 50] {
+            state.settings.watermark.sizePercent = value
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertFalse(state.events.contains("fallback.grace.end"))
+        let initialDeadline = ContinuousClock.now.advanced(by: .seconds(6))
+        while !state.events.contains("fallback.rendered"), ContinuousClock.now < initialDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(state.events.contains("fallback.rendered"))
+        let renderedBefore = state.events.filter { $0 == "fallback.rendered" }.count
+        state.settings.watermark.sizePercent = 60
+        let refreshDeadline = ContinuousClock.now.advanced(by: .seconds(6))
+        while state.events.filter({ $0 == "fallback.rendered" }).count == renderedBefore,
+              ContinuousClock.now < refreshDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertGreaterThan(state.events.filter { $0 == "fallback.rendered" }.count, renderedBefore)
+        XCTAssertEqual(state.events.filter { $0 == "fallback.grace.begin" }.count, 1)
+        XCTAssertEqual(state.events.filter { $0 == "fallback.grace.end" }.count, 1)
+    }
+
+    func testSourceArrivalCancelsFallbackAndReentryStartsNewGrace() async throws {
+        let state = State()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: Host(state: state))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        func waitFor(_ event: String, count: Int = 1) async throws {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(6))
+            while state.events.filter({ $0 == event }).count < count, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertGreaterThanOrEqual(state.events.filter { $0 == event }.count, count)
+        }
+        try await waitFor("fallback.grace.begin")
+        state.source = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        }
+        try await waitFor("source.rendered")
+        // Observe beyond the cancelled 2200 ms timer, not only before it fires.
+        try await Task.sleep(for: .milliseconds(2300))
+        XCTAssertFalse(state.events.contains("fallback.grace.end"))
+        XCTAssertFalse(state.events.contains("fallback.rendered"))
+        state.source = nil
+        try await waitFor("fallback.grace.begin", count: 2)
+        try await waitFor("fallback.rendered")
+        state.presented = false
+        try await Task.sleep(for: .milliseconds(100))
+        let previousRenders = state.events.filter { $0 == "fallback.rendered" }.count
+        state.presented = true
+        try await waitFor("fallback.grace.begin", count: 3)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(state.events.filter { $0 == "fallback.rendered" }.count, previousRenders)
+        try await waitFor("fallback.rendered", count: previousRenders + 1)
+        XCTAssertEqual(state.events.filter { $0 == "fallback.grace.end" }.count, 2)
+    }
+
+
+    func testSourceBackedPreviewPublishesLatestWatermarkPixels() async throws {
+        try await verifySourceBackedWatermarkPixels(logo: false)
+    }
+
+    func testSourceBackedPreviewPublishesLatestLogoPixels() async throws {
+        try await verifySourceBackedWatermarkPixels(logo: true)
+    }
+
+    private func verifySourceBackedWatermarkPixels(logo: Bool) async throws {
+        let state = State()
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240)).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
+        }
+        state.source = source
+        state.settings.photoFrameEnabled = true
+        state.settings.photoFrameBorderEnabled = false
+        state.settings.watermark.position = .photoBottomRight
+        state.settings.watermark.text = "PREVIEW"
+        if logo {
+            let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ZTransfer/Watermarks")
+            let existing = Set((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30)).image { context in
+                UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+            }
+            let hash = try XCTUnwrap(PhotoEffectsStore.importWatermarkImageData(XCTUnwrap(image.pngData())))
+            state.settings.watermark.content = .image
+            state.settings.watermark.imageHash = hash
+            if !existing.contains("\(hash).png") {
+                addTeardownBlock { try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(hash).png")) }
+            }
+        }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: Host(state: state))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        let initialDeadline = ContinuousClock.now.advanced(by: .seconds(6))
+        while state.renderedImages.isEmpty, ContinuousClock.now < initialDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let initial = try XCTUnwrap(state.renderedImages.last?.pngData())
+        let count = state.renderedImages.count
+        state.settings.watermark.position = .photoCenter
+        state.settings.watermark.sizePercent = 90
+        state.settings.watermark.position = .photoTopLeft
+        let expected = try await LocalPhotoOutput.preview(image: source,
+            settings: state.settings, metadata: nil, filteredSource: nil).filtered.pngData()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(6))
+        while state.renderedImages.last?.pngData() != expected, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertGreaterThan(state.renderedImages.count, count)
+        XCTAssertNotEqual(initial, expected)
+        XCTAssertEqual(state.renderedImages.last?.pngData(), expected,
+                       "The published bitmap must match the latest settings, not the cached old position")
+        XCTAssertFalse(state.events.contains("fallback.grace.begin"))
+    }
+
+}
+
+@MainActor
+final class PhotoEffectsVisibleFrameTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var image: UIImage
+        init(_ image: UIImage) { self.image = image }
+    }
+    private struct Host: View {
+        @ObservedObject var state: State
+        var body: some View {
+            PhotoEffectsAnimatedImage(frame: .init(image: state.image, comparison: nil, canvasKey: "same"),
+                requestedCanvasKey: "same", showComparison: false)
+                .frame(width: 200, height: 200)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+    func testNewFrameBecomesVisibleAfterFullScreenCoverDismissal() async throws {
+        func bitmap(_ color: UIColor) -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 200, height: 200)).image { context in
+                color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+            }
+        }
+        let state = State(bitmap(.red))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKey = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: Host(state: state))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previousKey?.makeKey() }
+        try await Task.sleep(for: .milliseconds(500))
+        func centerPixel(_ name: String) throws -> [UInt8] {
+            let snapshot = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: snapshot)
+            attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            let image = try XCTUnwrap(snapshot.cgImage)
+            let center = try XCTUnwrap(image.cropping(to: CGRect(x: image.width / 2, y: image.height / 2, width: 1, height: 1)))
+            var rgba = [UInt8](repeating: 0, count: 4)
+            let context = try XCTUnwrap(CGContext(data: &rgba, width: 1, height: 1, bitsPerComponent: 8,
+                bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(center, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return rgba
+        }
+        let initial = try centerPixel("visible-before-cover")
+        XCTAssertGreaterThan(initial[0], 240); XCTAssertLessThan(initial[2], 15)
+        let cover = UIViewController()
+        cover.view.backgroundColor = .green
+        cover.modalPresentationStyle = .fullScreen
+        await withCheckedContinuation { continuation in host.present(cover, animated: false) { continuation.resume() } }
+        state.image = bitmap(.blue)
+        try await Task.sleep(for: .milliseconds(100))
+        await withCheckedContinuation { continuation in cover.dismiss(animated: false) { continuation.resume() } }
+        try await Task.sleep(for: .milliseconds(700))
+        let final = try centerPixel("visible-after-cover")
+        XCTAssertGreaterThan(final[2], 240, "New blue frame must replace old red frame after returning")
+        XCTAssertLessThan(final[0], 15)
+    }
+}

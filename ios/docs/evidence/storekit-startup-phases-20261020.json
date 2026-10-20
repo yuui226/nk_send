@@ -1,0 +1,348 @@
+{
+  "date": "2026-10-20",
+  "resultsDirectory": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.AJopSY",
+  "exitCode": 0,
+  "baselinePrefixMatched": true,
+  "launches": [
+    [
+      {
+        "seconds": 0.0,
+        "stage": "start"
+      },
+      {
+        "seconds": 0.003,
+        "stage": "app.services.ready"
+      },
+      {
+        "seconds": 0.469,
+        "stage": "root.init.begin"
+      },
+      {
+        "seconds": 0.477,
+        "stage": "root.connection.ready"
+      },
+      {
+        "seconds": 0.488,
+        "stage": "root.effects.ready"
+      },
+      {
+        "seconds": 0.492,
+        "stage": "root.gps.ready"
+      },
+      {
+        "seconds": 0.494,
+        "stage": "root.directory.ready"
+      },
+      {
+        "seconds": 1.436,
+        "stage": "unfinished.begin"
+      },
+      {
+        "seconds": 1.437,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.649,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 1.65,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.651,
+        "stage": "unfinished.end"
+      },
+      {
+        "seconds": 1.786,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 1.786,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.798,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 2.89,
+        "stage": "snapshot.confirmed"
+      },
+      {
+        "seconds": 2.891,
+        "stage": "history.begin"
+      },
+      {
+        "seconds": 2.898,
+        "stage": "history.end"
+      },
+      {
+        "seconds": 2.903,
+        "stage": "snapshot.published"
+      },
+      {
+        "seconds": 8.612,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 8.666,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 8.666,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 8.674,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 8.675,
+        "stage": "history.begin"
+      },
+      {
+        "seconds": 8.675,
+        "stage": "history.end"
+      },
+      {
+        "seconds": 8.676,
+        "stage": "snapshot.published"
+      }
+    ],
+    [
+      {
+        "seconds": 0.0,
+        "stage": "start"
+      },
+      {
+        "seconds": 0.004,
+        "stage": "app.services.ready"
+      },
+      {
+        "seconds": 0.498,
+        "stage": "root.init.begin"
+      },
+      {
+        "seconds": 0.504,
+        "stage": "root.connection.ready"
+      },
+      {
+        "seconds": 0.515,
+        "stage": "root.effects.ready"
+      },
+      {
+        "seconds": 0.518,
+        "stage": "root.gps.ready"
+      },
+      {
+        "seconds": 0.52,
+        "stage": "root.directory.ready"
+      },
+      {
+        "seconds": 1.751,
+        "stage": "unfinished.begin"
+      },
+      {
+        "seconds": 1.752,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.945,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 1.946,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.947,
+        "stage": "unfinished.end"
+      },
+      {
+        "seconds": 2.034,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 2.034,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 2.048,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 3.094,
+        "stage": "snapshot.confirmed"
+      },
+      {
+        "seconds": 3.095,
+        "stage": "history.begin"
+      },
+      {
+        "seconds": 3.103,
+        "stage": "history.end"
+      },
+      {
+        "seconds": 3.108,
+        "stage": "snapshot.published"
+      },
+      {
+        "seconds": 8.683,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 8.754,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 8.754,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 8.763,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 8.763,
+        "stage": "history.begin"
+      },
+      {
+        "seconds": 8.764,
+        "stage": "history.end"
+      },
+      {
+        "seconds": 8.764,
+        "stage": "snapshot.published"
+      }
+    ],
+    [
+      {
+        "seconds": 0.0,
+        "stage": "start"
+      },
+      {
+        "seconds": 0.002,
+        "stage": "app.services.ready"
+      },
+      {
+        "seconds": 0.502,
+        "stage": "root.init.begin"
+      },
+      {
+        "seconds": 0.508,
+        "stage": "root.connection.ready"
+      },
+      {
+        "seconds": 0.517,
+        "stage": "root.effects.ready"
+      },
+      {
+        "seconds": 0.52,
+        "stage": "root.gps.ready"
+      },
+      {
+        "seconds": 0.522,
+        "stage": "root.directory.ready"
+      },
+      {
+        "seconds": 1.466,
+        "stage": "unfinished.begin"
+      },
+      {
+        "seconds": 1.466,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.686,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 1.687,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.687,
+        "stage": "unfinished.end"
+      },
+      {
+        "seconds": 1.782,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 1.783,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 1.803,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 2.861,
+        "stage": "snapshot.confirmed"
+      },
+      {
+        "seconds": 2.862,
+        "stage": "history.begin"
+      },
+      {
+        "seconds": 2.869,
+        "stage": "history.end"
+      },
+      {
+        "seconds": 2.873,
+        "stage": "snapshot.published"
+      },
+      {
+        "seconds": 8.513,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 8.608,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 8.609,
+        "stage": "snapshot.begin"
+      },
+      {
+        "seconds": 8.618,
+        "stage": "snapshot.end"
+      },
+      {
+        "seconds": 8.619,
+        "stage": "history.begin"
+      },
+      {
+        "seconds": 8.62,
+        "stage": "history.end"
+      },
+      {
+        "seconds": 8.621,
+        "stage": "snapshot.published"
+      }
+    ]
+  ],
+  "logs": [
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.AJopSY/testPurchasePageLayoutInAllLanguages.log",
+      "sha256": "679bb38db0d805e127b7da50f89fbf1a9882a59a514dc7e76c9a10b5c913a1dc",
+      "testSucceeded": true
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.AJopSY/cleanup.log",
+      "sha256": "74a40c9eeedc9b3c29be7ca848bfa8716b672341aeed951958ba31ac248aba65",
+      "testSucceeded": true
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.AJopSY/prepare-testPurchasePageLayoutInAllLanguages.log",
+      "sha256": "b1955ecd70f099671b4e4cf7e95c16bd28d219926503da7ca18f38285fb88d34",
+      "testSucceeded": true
+    }
+  ],
+  "limitations": [
+    "Three successful local StoreKit launches do not reproduce or resolve the historical initialization timeout",
+    "UI assertions passed; screenshots from this run have not been independently visually reviewed",
+    "Opt-in Debug timing, not Release performance"
+  ]
+}

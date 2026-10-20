@@ -264,6 +264,24 @@ final class StoreKitPurchaseTests: XCTestCase {
         XCTAssertEqual(recovered.messageKey, "iap_restored")
     }
 
+    /// The confirmation scan must never turn into a permanent local grant.
+    /// Clearing local test-account history represents an authoritative absent
+    /// product; this is not a real App Store account-switch acceptance test.
+    func testConfirmedEmptyAccountSnapshotRemovesLifetimeAccess() async throws {
+        let f = try await fixture()
+        await f.store.purchase(.lifetime)
+        try await eventually { f.entitlements.entitlement == .lifetime }
+        f.session.clearTransactions()
+        try await AppStore.sync()
+        XCTAssertTrue(f.session.allTransactions().isEmpty)
+        f.store.refresh()
+        try await eventually(diagnostic: { "entitlement=\(f.entitlements.entitlement)" }) {
+            f.entitlements.entitlement == .free
+        }
+        XCTAssertFalse(f.entitlements.access.isPro)
+        XCTAssertEqual(f.store.purchaseCelebration, 1)
+    }
+
     func testCancelRenewalKeepsPaidTermAndProductFailureKeepsEntitlement() async throws {
         let f = try await fixture()
         await f.store.purchase(.annual)
@@ -528,15 +546,46 @@ final class StoreKitPurchaseTests: XCTestCase {
         XCTAssertEqual(f.store.purchaseCelebration, 1)
     }
 
-    private func resolveBillingIssue(_ f: Fixture) async throws {
-        try await eventually(diagnostic: { f.billingDiagnostic() }) {
-            f.session.allTransactions().contains {
-                $0.productIdentifier == PremiumProduct.annual.rawValue && $0.hasPurchaseIssue
-            }
+    /// Diagnose the simulator's hasPurchaseIssue flag separately from signed
+    /// subscription status. Never grants access directly or disables retry.
+    func testNativeBillingResolutionAfterForcedRetry() async throws {
+        let f = try await fixture()
+        await f.store.purchase(.annual)
+        try await eventually { f.entitlements.access.isPro }
+        f.session.shouldEnterBillingRetryOnRenewal = true
+        f.session.billingGracePeriodIsEnabled = false
+        try f.session.forceRenewalOfSubscription(productIdentifier: PremiumProduct.annual.rawValue)
+        f.store.refresh()
+        try await eventually {
+            f.store.renewal.state == .retrying && f.entitlements.entitlement == .free
         }
         let transaction = try XCTUnwrap(f.session.allTransactions().last {
-            $0.productIdentifier == PremiumProduct.annual.rawValue && $0.hasPurchaseIssue
+            $0.productIdentifier == PremiumProduct.annual.rawValue && $0.cancelDate == nil
         })
+        print("TEST_NATIVE_BILLING_RESOLVE id=\(transaction.identifier) issue=\(transaction.hasPurchaseIssue)")
+        // Apple's API accepts the affected subscription transaction identifier;
+        // this probe deliberately does not use the suspect test-only flag.
+        try f.session.resolveIssueForTransaction(identifier: transaction.identifier)
+        f.store.refresh()
+        try await eventually(diagnostic: { f.billingDiagnostic() }) {
+            f.store.renewal.state == .subscribed && f.entitlements.access.isPro
+        }
+        XCTAssertNil(f.store.renewal.graceDeadline)
+        XCTAssertEqual(f.store.renewal.willAutoRenew, true)
+        XCTAssertEqual(f.store.purchaseCelebration, 1)
+    }
+
+    private func resolveBillingIssue(_ f: Fixture) async throws {
+        try await eventually(diagnostic: { f.billingDiagnostic() }) {
+            f.store.renewal.state == .grace || f.store.renewal.state == .retrying
+        }
+        let transaction = try XCTUnwrap(f.session.allTransactions().last {
+            $0.productIdentifier == PremiumProduct.annual.rawValue && $0.cancelDate == nil
+        })
+        // iOS 26.5 reports hasPurchaseIssue=false even after signed renewal
+        // status enters grace/retry. The native-resolution regression proves
+        // Apple's API still resolves that transaction. Gate on signed status,
+        // retain all access/deadline/recovery assertions, and never grant Pro.
         // Resolve the existing issue while it is still in billing retry.
         // Turning off the simulator's retry mode first can remove the issue;
         // StoreKitTest documents that resolve then has no effect. Fixture

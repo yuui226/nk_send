@@ -1,0 +1,44 @@
+[
+  {
+    "name": "ZTransfer-Pro-Compact",
+    "model": "iPhone SE (3rd generation)",
+    "udid": "13EB3240-0CC7-4910-8724-1A527489099B",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+  },
+  {
+    "name": "ZTransfer-Prelaunch-MiniPhone",
+    "model": "iPhone 13 mini",
+    "udid": "DBB83F31-3D6D-4FA1-BF0C-571BAE05F2BF",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+  },
+  {
+    "name": "ZTransfer-Prelaunch-StandardPhone",
+    "model": "iPhone 17",
+    "udid": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+  },
+  {
+    "name": "ZTransfer-Prelaunch-15Plus",
+    "model": "iPhone 15 Plus",
+    "udid": "FB86603E-3366-461E-A2A8-0F2CB15FE262",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+  },
+  {
+    "name": "ZTransfer-Prelaunch-MiniPad",
+    "model": "iPad mini (A17 Pro)",
+    "udid": "1785E4E2-C810-4AD5-98EA-880218A2FA02",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+  },
+  {
+    "name": "ZTransfer-Prelaunch-11Pad",
+    "model": "iPad Pro 11-inch (M5)",
+    "udid": "6C8198D6-BC26-4F71-B484-D4307F096BA5",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+  },
+  {
+    "name": "ZTransfer-Prelaunch-13Pad",
+    "model": "iPad Pro 13-inch (M5)",
+    "udid": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+  }
+]

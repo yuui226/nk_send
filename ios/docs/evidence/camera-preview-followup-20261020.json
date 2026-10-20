@@ -1,0 +1,45 @@
+{
+  "resultsDirectory": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Qu3lFT",
+  "exitCode": 0,
+  "logs": [
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Qu3lFT/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "sha256": "0a7c70e2e482e467b9d55c58a41cf621d15f0e96e47a5b1b568c17080d921630",
+      "passed": true
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Qu3lFT/cleanup.log",
+      "sha256": "89f1acae5765a88400e4a99fa315bc4383ee0de11c885960e1f2032b89e0731f",
+      "passed": true
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Qu3lFT/prepare-testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "sha256": "6787431a085a366d6bbba6d55a8e8d7a03009aa861596e2176cec766c9dd3850",
+      "passed": true
+    }
+  ],
+  "reviewedImages": [
+    {
+      "path": "/tmp/ztransfer-camera-grace-fixed-images/135D0429-C45F-4233-B4B8-7BD4F2DAFD65.png",
+      "sha256": "07b82c04e7ecb044aa85c9b3b6c38a177d77dd11ce8fd2902adbc87b94cbceda"
+    },
+    {
+      "path": "/tmp/ztransfer-camera-grace-fixed-images/4B2189FD-F880-4219-AC7A-79066C03ED95.png",
+      "sha256": "615f41f15fa7be141f724a5456765e91bf665df6e936729dc34b53052a063252"
+    },
+    {
+      "path": "/tmp/ztransfer-camera-grace-fixed-images/4B6CB224-D58D-4415-A302-2878AE1C5F99.png",
+      "sha256": "f3b635d06becc1ebebb249895a81912682c16eba6bd04326c28661ecaf463fb7"
+    },
+    {
+      "path": "/tmp/ztransfer-camera-grace-fixed-images/ADE30398-E677-44FA-8CB4-1AA087618256.png",
+      "sha256": "a1e2d6a0cc4f09bbc81ae9590557a0a404db50799eb02292669cd119024c9805"
+    }
+  ],
+  "findings": [
+    "All purchase/import/cancel/relaunch control assertions passed",
+    "Cancel screenshot shows 78%, 70%, Photo top left but old bottom-right logo is still visible",
+    "Relaunch keeps 78%,70%,Photo top left; top of preview is outside scroll viewport, so cannot visually verify top-left logo from this capture",
+    "Preview uses debug photo source rather than fallback; 2200ms fallback correction does not resolve this source-backed intermediate rendering observation"
+  ]
+}

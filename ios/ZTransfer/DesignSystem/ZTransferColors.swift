@@ -166,6 +166,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
     var activeOutline: Bool
     var liquidGlassBoundary: Bool
     var materialContentColor: Color?
+    var surfaceColor: Color?
     var preserveContentColors: Bool
     var disabledAlpha: CGFloat
     var prominentPressFeedback: Bool
@@ -188,6 +189,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
         activeOutline: Bool = false,
         liquidGlassBoundary: Bool = false,
         materialContentColor: Color? = nil,
+        surfaceColor: Color? = nil,
         preserveContentColors: Bool = false,
         disabledAlpha: CGFloat = 0.45,
         prominentPressFeedback: Bool = false,
@@ -207,6 +209,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
         self.activeOutline = activeOutline
         self.liquidGlassBoundary = liquidGlassBoundary
         self.materialContentColor = materialContentColor
+        self.surfaceColor = surfaceColor
         self.preserveContentColors = preserveContentColors
         self.disabledAlpha = disabledAlpha
         self.prominentPressFeedback = prominentPressFeedback
@@ -245,6 +248,7 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
             .background {
                 ZTransferButtonMaterialSurface(
                     skin: skin, cornerRadius: cornerRadius, panel: panel,
+                    surfaceColor: surfaceColor,
                     active: active, activeColor: activeColor, activeOutline: activeOutline,
                     liquidGlassBoundary: liquidGlassBoundary,
                     pressed: nativePressed && isEnabled,
@@ -367,6 +371,7 @@ struct ZTransferButtonMaterialSurface: View, Animatable {
     let skin: ZTransferButtonSkin
     let cornerRadius: CGFloat
     var panel = false
+    var surfaceColor: Color? = nil
     var active = false
     var activeColor: Color = ZTransferColors.accentBlue
     var activeOutline = false
@@ -450,7 +455,7 @@ struct ZTransferButtonMaterialSurface: View, Animatable {
                     .overlay(shape.fill(panelSheen))
             } else { frostedMaterial }
         } else {
-            shape.fill(panel ? ZTransferColors.primaryText.opacity(0.05) : physicalBase)
+            shape.fill(panel ? ZTransferColors.primaryText.opacity(0.05) : surfaceColor ?? physicalBase)
                 .overlay(materialTexture)
                 .overlay(shape.fill(physicalHighlight))
                 .overlay {
@@ -480,13 +485,14 @@ struct ZTransferButtonMaterialSurface: View, Animatable {
         ZTransferFrostedButtonSurface(cornerRadius: cornerRadius, dark: dark, panel: panel,
                                      showSheen: showSheen, opacityBoost: frostedOpacityBoost,
                                      activeColor: activeColor, active: active && !panel, pressed: pressed,
+                                     surfaceColor: surfaceColor,
                                      pressProgress: pressAmount, activeProgress: activeAmount)
     }
 
     @ViewBuilder private var nativeLiquidGlassMaterial: some View {
         if #available(iOS 26.0, *) {
             let glass = Glass.regular
-                .tint(active ? activeColor.opacity(0.22) : nil)
+                .tint(active ? activeColor.opacity(0.22) : surfaceColor?.opacity(0.65))
                 .interactive()
             ZStack {
                 // Never derive the replacement shadow from `glassEffect`:

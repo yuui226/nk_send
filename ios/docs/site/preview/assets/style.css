@@ -1,0 +1,21 @@
+:root{color-scheme:light dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;font-size:17px;line-height:1.8;color:#202c36;background:#f7f9fa}
+*{box-sizing:border-box}body{margin:0}a{color:#006b70;text-underline-offset:.2em;overflow-wrap:anywhere}
+a:focus-visible{outline:3px solid #008b94;outline-offset:5px;border-radius:3px}
+header{max-width:1120px;margin:auto;padding:24px 32px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;border-bottom:1px solid #dce4e8}
+header .brand{font-weight:750;font-size:22px;text-decoration:none;color:inherit;margin-right:auto}
+.brand span{font-size:13px;font-weight:500;color:#637984;margin-left:6px}
+nav{display:flex;gap:22px;flex-wrap:wrap}nav a{text-decoration:none}nav [aria-current=page]{font-weight:700;text-decoration:underline}
+main{max-width:880px;margin:auto;padding:56px 32px 72px}h1{font-size:clamp(2rem,6vw,3rem);line-height:1.25;letter-spacing:-.025em;margin:8px 0 32px}
+h2{font-size:1.4rem;margin:42px 0 14px;line-height:1.45}h3{font-size:1.15rem;margin:30px 0 12px}
+p,li,td{overflow-wrap:anywhere}p{margin:16px 0}li{margin:8px 0}ul,ol{padding-left:1.5em}
+.eyebrow{font-size:12px;font-weight:750;letter-spacing:.18em;color:#53727a;margin:0}
+.draft{padding:14px 18px;margin:0 0 32px;border-left:4px solid #b77b1d;background:#fff3d9;color:#694712;font-size:.9rem}
+article strong{font-weight:700}table{border-collapse:collapse;width:100%;font-size:.88rem;table-layout:fixed;margin:22px 0}
+mark{background:#fff0ca;color:#694712;border-radius:3px;padding:0 .15em}
+th,td{border:1px solid #dce4e8;text-align:left;vertical-align:top;padding:12px}th{background:#edf2f4}
+footer{border-top:1px solid #dce4e8;max-width:1120px;margin:auto;padding:28px 32px;color:#637984;font-size:.85rem}
+.skip{position:absolute;left:12px;top:-100px;background:#fff;padding:8px;z-index:10}.skip:focus{top:12px}
+.index-links{margin:28px 0}
+@media(max-width:540px){header{padding:18px 20px;gap:14px}header nav{order:3;width:100%;gap:24px}main{padding:36px 20px 48px}footer{padding:24px 20px}th,td{padding:8px}table{font-size:.78rem}}
+@media(prefers-color-scheme:dark){:root{color:#e5edf0;background:#101a21}a{color:#83d6d5}.eyebrow,.brand span,footer{color:#a1bbc3}header,footer,th,td{border-color:#344650}th{background:#1d2b34}.draft{background:#352b18;color:#f2d6a1}.skip{background:#172b34}}
+@media print{header,.draft,.skip{display:none}main{padding:0;max-width:none}:root{color:#000;background:#fff}a{color:inherit}footer{padding:12px 0}h2,h3{break-after:avoid}}

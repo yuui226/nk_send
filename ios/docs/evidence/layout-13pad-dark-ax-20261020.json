@@ -1,0 +1,144 @@
+{
+  "appearance": "dark",
+  "contentSize": "accessibility-extra-extra-extra-large",
+  "restoredAppearance": "light",
+  "restoredContentSize": "large",
+  "build": "layout-frozen-v4-20261020",
+  "exitCode": 0,
+  "screenshots": [
+    {
+      "attachments": [
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "FF6AB2FA-DF5E-4C8A-8140-DB3509BAE1B8.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L06-monitor-rotation-3_0_01B62533-8301-4D57-A8C9-282BF62230DB.png",
+          "timestamp": 1792506238.236,
+          "sha256": "134fbe7f1f0072fa3806a42d4cfb9efccec03beb4bab08c21b9775ff7f719cbe",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "A9DB0832-3BED-4683-B260-519956D43314.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L06-monitor-rotation-2_0_20EC6A36-7294-4382-B2FF-4374E0D0AD11.png",
+          "timestamp": 1792506232.62,
+          "sha256": "2edccd2968d53d58eb6b170b3f54af247955ab35f595dcac1c8703ab7c0e9ffa",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "EE7F1244-4B98-4A3B-94BF-E9D73237D166.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L06-monitor-rotation-1_0_EB8158C9-CC53-4EC7-B458-A9A36D6BF2BD.png",
+          "timestamp": 1792506226.245,
+          "sha256": "e3c771f022ca9d086f3cc08de267405dc7128cb15ed8e268e557a02d5f14a726",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "89183A91-DEA4-4ECC-A9A2-AFD56CFCB22D.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L06-monitor-portrait_0_2B2FC89F-C262-4DCD-824A-4F4251680EB9.png",
+          "timestamp": 1792506222.023,
+          "sha256": "23211610c8cc04d4d01032f2e6fbad9c8ab5d8935986af0c63d151800ad02244",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "421B0A3D-184B-4894-A5B4-A3BBDA62FF18.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L05-effects-modules_0_F4F4D863-E869-401C-947A-F5D30C92D04F.png",
+          "timestamp": 1792506209.315,
+          "sha256": "6238d5e6422ce7525370fe682a36d02a73ecaa46e698d60ab253a01fec9afaea",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "CD77DCA4-A0DF-4CFC-8C6E-C1246FB446A7.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L05-effects-editor_0_786D8504-BBE5-4353-A734-5382948896B6.png",
+          "timestamp": 1792506206.223,
+          "sha256": "8895d60b7dab7f642a80930ec1e553644df7e5c0d1672922aee2f73a288b21a8",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "26193354-BBBF-4CD9-9C18-CEE90DF4538B.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L05-effects-entry_0_16C4FF35-335C-4DD1-95FF-1511F7807DF8.png",
+          "timestamp": 1792506202.299,
+          "sha256": "c8e5f0f7bba3b77cd9ff6a6041959903dab65a93eb5b2dcdb5ccb039dd9fabbe",
+          "visuallyReviewed": true
+        }
+      ],
+      "testIdentifier": "PrelaunchLayoutUITests/testEffectsEditorAndMonitorOrientationBaselines()",
+      "testIdentifierURL": "test://com.apple.xcode/ZTransferPopupUITests/ZTransferPopupUITests/PrelaunchLayoutUITests/testEffectsEditorAndMonitorOrientationBaselines"
+    },
+    {
+      "attachments": [
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "3995D9DB-D15F-497E-AC82-FC96B201298F.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L05-preview-effects_0_712B3546-B1A6-43ED-B677-05742BC36FA9.png",
+          "timestamp": 1792506268.28,
+          "sha256": "267b697c4354963c10c37f042738566f20415bacd76edc7c9d7c90476d975a87",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "636C9463-B12F-4CF9-AE2D-B60CB5597D96.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L04-preview-zoom_0_C84E04D2-5B32-4634-8993-0E268D84094A.png",
+          "timestamp": 1792506262.989,
+          "sha256": "b93b9efc1525aee12b9136b021070fccaf57e2a4a5c2584c4ea99e9d035deac3",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "4FE57872-15C8-4FF3-A266-3463857714AA.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L04-preview-next_0_2C810024-4FD9-4C4B-B49B-34794270F464.png",
+          "timestamp": 1792506256.897,
+          "sha256": "47d92795dc2a9a32c8d9e9468685f3a85dda632d9bba50722bf589a6791b801a",
+          "visuallyReviewed": true
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "exportedFileName": "781C4531-22E6-44A9-85AB-993A939ACBFF.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "L04-preview-first_0_F2039F32-D63A-4752-8028-7F48AE7E6A35.png",
+          "timestamp": 1792506251.487,
+          "sha256": "500e10ba4384e8120f6c3961b9b2f547cdc21d0d8c76e5a5d34ff93e6060b10f",
+          "visuallyReviewed": true
+        }
+      ],
+      "testIdentifier": "PrelaunchLayoutUITests/testPhotoPreviewPagingZoomAndEffectsBaselines()",
+      "testIdentifierURL": "test://com.apple.xcode/ZTransferPopupUITests/ZTransferPopupUITests/PrelaunchLayoutUITests/testPhotoPreviewPagingZoomAndEffectsBaselines"
+    }
+  ],
+  "scope": "Two fixture methods; not full Dynamic Type, hardware or animation acceptance."
+}

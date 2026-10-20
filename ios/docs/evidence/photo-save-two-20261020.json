@@ -1,0 +1,20 @@
+{
+  "unchangedOriginals": 33,
+  "newOriginals": [
+    {
+      "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.qLEDSR/testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization-photos/IMG_0034.JPG",
+      "bytes": 212910,
+      "sha256": "e68832cacac40b3112dc455b0f4c359fa9659dff978254130df68203af93026e",
+      "dimensions": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.qLEDSR/testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization-photos/IMG_0034.JPG\n  pixelWidth: 632\n  pixelHeight: 947"
+    },
+    {
+      "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.qLEDSR/testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization-photos/IMG_0035.JPG",
+      "bytes": 248282,
+      "sha256": "c9cbdd0940fe5b390160fa178f7eb8854610b527cb1b39cdead074f3bf827296",
+      "dimensions": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.qLEDSR/testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization-photos/IMG_0035.JPG\n  pixelWidth: 736\n  pixelHeight: 1104"
+    }
+  ],
+  "test": "testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization",
+  "result": "TEST SUCCEEDED; script exit 0",
+  "scope": "iPhone SE 3 / iOS 26.5; existing simulator Photos selection; not controlled fresh original fixtures"
+}

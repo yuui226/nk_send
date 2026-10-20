@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-20",
+  "test": "PhotoEffectsFallbackLifecycleTests/testSourceBackedPreviewPublishesLatestLogoPixels",
+  "exitCode": 0,
+  "testSucceeded": true,
+  "log": "/tmp/ztransfer-prelaunch-source-logo-pixels.log",
+  "sha256": "ede406429828c65988ae700359eff16e478f3db15f86ace46ba972c1249c6057",
+  "scope": "Imported red PNG Logo on same synthetic white source in UIHostingController; rapid position/size edits; preview output equals direct final render and differs from initial image",
+  "limitations": [
+    "No system Photos picker cancellation",
+    "No screenshot proof of animated visible layer completion"
+  ]
+}

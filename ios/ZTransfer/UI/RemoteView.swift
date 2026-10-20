@@ -147,9 +147,7 @@ struct RemoteView: View {
     @State private var layoutOrientation: RemoteLayoutOrientation = .portrait
     @State private var orientationSession = RemoteOrientationSession<RemoteLayoutOrientation>()
     @State private var orientationStabilityTask: Task<Void, Never>?
-    @State private var rotationTransitionTask: Task<Void, Never>?
     @State private var switchingRotation = false
-    @State private var rotationOpacity = 1.0
     @State private var orientationNotificationsActive = false
     @State private var stopCleanupStarted = false
 
@@ -244,31 +242,8 @@ struct RemoteView: View {
         #endif
         return ZStack {
             ZTransferColors.background.ignoresSafeArea()
-            GeometryReader { proxy in
-                if layoutOrientation.isLandscape {
-                    cameraToolOverlay(landscapeRemoteLayout, landscape: true)
-                        // Android keeps the host portrait and rotates a measured
-                        // landscape canvas inside it, so system bars stay put.
-                        .frame(width: proxy.size.height, height: proxy.size.width)
-                        .rotationEffect(.degrees(layoutOrientation.rotationDegrees))
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .transition(.opacity)
-                } else {
-                    cameraToolOverlay(portraitRemoteLayout, landscape: false)
-                        .transition(.opacity)
-                }
-            }
-            .opacity(rotationOpacity)
-
-        }
-        .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
-            TipPopupLayer(isPresented: monitorHelpPresented && !layoutOrientation.isLandscape && !reviewLifetime.active) {
-                if let anchor = anchors[.monitor] {
-                    Color.clear.contentShape(Rectangle()).onTapGesture { monitorHelpPresented = false }
-                        .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
-                    TipGuideBubble(anchor: anchor, titleKey: "monitor_help_title", sections: TipGuides.monitor,
-                        alignLeading: true, tools: tools, close: { monitorHelpPresented = false })
-                }
+            RemoteRotationSurface(rotation: layoutOrientation.rotationDegrees, onSettled: finishLayoutRotation) {
+                monitorCanvas
             }
         }
         .overlay {
@@ -407,7 +382,6 @@ struct RemoteView: View {
                 orientationNotificationsActive = false
             }
             orientationStabilityTask?.cancel()
-            rotationTransitionTask?.cancel()
             Task { @MainActor in
                 await review.close()
                 await model.stopAndWait()
@@ -473,6 +447,31 @@ struct RemoteView: View {
         }
         .onChange(of: tools.waveform) { _ in
             configureFrameAnalysis()
+        }
+    }
+
+    private var monitorCanvas: some View {
+        GeometryReader { proxy in
+            if layoutOrientation.isLandscape {
+                cameraToolOverlay(landscapeRemoteLayout, landscape: true)
+                    // Keep the host portrait and rotate its local canvas;
+                    // system bars and the full-screen review stay physical.
+                    .frame(width: proxy.size.height, height: proxy.size.width)
+                    .rotationEffect(.degrees(layoutOrientation.rotationDegrees))
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            } else {
+                cameraToolOverlay(portraitRemoteLayout, landscape: false)
+            }
+        }
+        .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
+            TipPopupLayer(isPresented: monitorHelpPresented && !layoutOrientation.isLandscape && !reviewLifetime.active) {
+                if let anchor = anchors[.monitor] {
+                    Color.clear.contentShape(Rectangle()).onTapGesture { monitorHelpPresented = false }
+                        .gesture(DragGesture(minimumDistance: 10).onChanged { _ in })
+                    TipGuideBubble(anchor: anchor, titleKey: "monitor_help_title", sections: TipGuides.monitor,
+                        alignLeading: true, tools: tools, close: { monitorHelpPresented = false })
+                }
+            }
         }
     }
 
@@ -1256,18 +1255,18 @@ struct RemoteView: View {
     }
 
     private var remoteViewfinder: some View {
-        RemoteViewfinderFrameScope(updates: model.frameUpdates) { size in
-            viewfinderContent(size: size)
+        RemoteViewfinderAspect(aspect: remoteViewfinderAspect) { aspect in
+            RemoteViewfinderFrameScope(updates: model.frameUpdates) { size in
+                viewfinderContent(size: size, aspect: aspect)
+            }
         }
-        .aspectRatio(remoteViewfinderAspect, contentMode: .fit)
     }
 
-    private func viewfinderContent(size: CGSize) -> some View {
+    private func viewfinderContent(size: CGSize, aspect: CGFloat) -> some View {
         let image = model.frameImage
         let meters = RemoteMonitorMeterLayout(size: size,
             landscape: layoutOrientation.isLandscape, movie: model.movieMode,
             showExposure: tools.meter, audioEnabled: isSessionConnected && model.movieMode && tools.audio)
-        let aspect = (image.map { $0.size.width / max($0.size.height, 1) } ?? 1.5) * CGFloat(effectiveDesqueeze)
         return ZStack {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(RadialGradient(
@@ -1287,12 +1286,12 @@ struct RemoteView: View {
                         if let cgImage = image.cgImage {
                             RemoteLUTImage(image: cgImage, monitor: lutMonitor,
                                 source: RemoteViewfinderImage(image: image, aspect: aspect,
-                                    multiplier: CGFloat(effectiveDesqueeze), size: size))
+                                    size: size))
                                 .aspectRatio(aspect, contentMode: .fit)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
                             RemoteViewfinderImage(image: image, aspect: aspect,
-                                multiplier: CGFloat(effectiveDesqueeze), size: size)
+                                size: size)
                         }
                         if exposureMode == .falseColor, let bitmap = model.frameFalseColorImage {
                             RemoteFalseColorOverlay(image: bitmap, aspect: aspect).equatable()
@@ -1616,19 +1615,19 @@ struct RemoteView: View {
         if switchingRotation { orientationSession.enqueue(target); return }
         guard target != layoutOrientation else { return }
         switchingRotation = true
-        rotationTransitionTask?.cancel()
-        rotationTransitionTask = Task { @MainActor in
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.08)) { rotationOpacity = 0 }
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled else { switchingRotation = false; return }
-            if !tools.locked && !editingTools { layoutOrientation = target }
-            await Task.yield()
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.14)) { rotationOpacity = 1 }
-            try? await Task.sleep(for: .milliseconds(140))
-            switchingRotation = false
-            guard !Task.isCancelled else { orientationSession.discardPending(); return }
-            if let pending = orientationSession.takePending() { requestLayoutOrientation(pending) }
+        // The native compositor reports actual completion; do not unlock
+        // input using a timer that can precede the first rendered frame.
+        layoutOrientation = target
+    }
+
+    private func finishLayoutRotation() {
+        guard switchingRotation else { return }
+        switchingRotation = false
+        guard !stopCleanupStarted, scenePhase == .active else {
+            orientationSession.discardPending()
+            return
         }
+        if let pending = orientationSession.takePending() { requestLayoutOrientation(pending) }
     }
 
     private func fitImageRect(in size: CGSize, aspect: CGFloat) -> CGRect {
@@ -1728,7 +1727,8 @@ private struct RemoteFocusReticle: View {
     let point: RemoteFocusPoint
     let nonce: UInt64
     let aspect: CGFloat
-    @State private var appearScale: CGFloat = 1.45
+    @Environment(\.remoteViewfinderZoom) private var zoom
+    @State private var appearScale: CGFloat = 1
 
     var body: some View {
         GeometryReader { proxy in
@@ -1736,63 +1736,74 @@ private struct RemoteFocusReticle: View {
             let rect = CGRect(x: (proxy.size.width - fitted * aspect) / 2,
                               y: (proxy.size.height - fitted) / 2,
                               width: fitted * aspect, height: fitted)
-            let resultScale: CGFloat = phase == .focusing ? 1 : 0.9
-            let scale = appearScale * resultScale
-            let half = 32 * scale
+            let scale = max(1, zoom)
+            let half = min(22 / scale * appearScale, rect.width / 2, rect.height / 2)
+            let inset = min(22 / scale * 1.12, rect.width / 2, rect.height / 2)
             let requestedCenter = CGPoint(x: rect.minX + rect.width * CGFloat(point.x),
                                           y: rect.minY + rect.height * CGFloat(point.y))
             let center = CGPoint(
                 x: rect.width >= half * 2
-                    ? min(max(requestedCenter.x, rect.minX + half), rect.maxX - half)
+                    ? min(max(requestedCenter.x, rect.minX + inset), rect.maxX - inset)
                     : rect.midX,
                 y: rect.height >= half * 2
-                    ? min(max(requestedCenter.y, rect.minY + half), rect.maxY - half)
+                    ? min(max(requestedCenter.y, rect.minY + inset), rect.maxY - inset)
                     : rect.midY
             )
             let color: Color = switch phase {
-            case .locked: ZTransferColors.statusConnected
-            case .failed: ZTransferColors.statusError
-            default: ZTransferColors.accentBlue
+            case .locked: Color(red: 103.0 / 255, green: 229.0 / 255, blue: 139.0 / 255)
+            case .failed: Color(red: 1, green: 119.0 / 255, blue: 119.0 / 255)
+            default: .white
             }
-            focusCornerPath(center: center, halfWidth: half, halfHeight: half,
-                            cornerLength: 12 * scale)
-                .stroke(color.opacity(0.95),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                .animation(.spring(response: 0.42, dampingFraction: 0.72), value: phase)
-                .onAppear {
-                    appearScale = 1.45
-                    withAnimation(.easeOut(duration: 0.18)) { appearScale = 1 }
-                }
-                .onChange(of: nonce) { _ in
-                    appearScale = 1.45
-                    withAnimation(.easeOut(duration: 0.18)) { appearScale = 1 }
-                }
+            let path = RemoteFocusReticleCorners(center: center, halfSide: half, zoom: scale)
+            ZStack {
+                path.stroke(.black.opacity(0.24), style: StrokeStyle(lineWidth: 2.1 / scale, lineCap: .round))
+                path.stroke(color.opacity(0.94), style: StrokeStyle(lineWidth: 1.15 / scale, lineCap: .round))
+            }
+                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15), value: phase)
+                .onAppear(perform: animateEntry)
+                .onChange(of: nonce) { _ in animateEntry() }
         }
         .allowsHitTesting(false)
     }
+
+    private func animateEntry() {
+        appearScale = phase == .focusing ? 1.12 : 1
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { appearScale = 1 }
+    }
 }
 
-private func focusCornerPath(center: CGPoint, halfWidth: CGFloat, halfHeight: CGFloat,
-                             cornerLength: CGFloat) -> Path {
-    let left = center.x - halfWidth
-    let right = center.x + halfWidth
-    let top = center.y - halfHeight
-    let bottom = center.y + halfHeight
-    let horizontal = min(cornerLength, halfWidth)
-    let vertical = min(cornerLength, halfHeight)
+/// Path itself has no interpolatable coordinates. Keep the square extent in
+/// a Shape so the 1.12→1 entry actually animates without scaling its stroke.
+private struct RemoteFocusReticleCorners: Shape {
+    let center: CGPoint
+    var halfSide: CGFloat
+    let zoom: CGFloat
+    var animatableData: CGFloat {
+        get { halfSide }
+        set { halfSide = newValue }
+    }
+    func path(in rect: CGRect) -> Path {
+        focusCornerPath(center: center, halfWidth: halfSide, halfHeight: halfSide, zoom: zoom)
+    }
+}
+
+func focusCornerPath(center: CGPoint, halfWidth: CGFloat, halfHeight: CGFloat,
+                     zoom: CGFloat = 1) -> Path {
+    let scale = max(1, zoom)
+    let arm = min(5 / scale, halfWidth * 0.65, halfHeight * 0.65)
+    let radius = min(1.4 / scale, arm * 0.45)
     return Path { path in
-        path.move(to: CGPoint(x: left, y: top + vertical))
-        path.addLine(to: CGPoint(x: left, y: top))
-        path.addLine(to: CGPoint(x: left + horizontal, y: top))
-        path.move(to: CGPoint(x: right - horizontal, y: top))
-        path.addLine(to: CGPoint(x: right, y: top))
-        path.addLine(to: CGPoint(x: right, y: top + vertical))
-        path.move(to: CGPoint(x: left, y: bottom - vertical))
-        path.addLine(to: CGPoint(x: left, y: bottom))
-        path.addLine(to: CGPoint(x: left + horizontal, y: bottom))
-        path.move(to: CGPoint(x: right - horizontal, y: bottom))
-        path.addLine(to: CGPoint(x: right, y: bottom))
-        path.addLine(to: CGPoint(x: right, y: bottom - vertical))
+        for xSign: CGFloat in [-1, 1] {
+            for ySign: CGFloat in [-1, 1] {
+                let x = center.x + xSign * halfWidth
+                let y = center.y + ySign * halfHeight
+                path.move(to: CGPoint(x: x - xSign * arm, y: y))
+                path.addLine(to: CGPoint(x: x - xSign * radius, y: y))
+                path.addQuadCurve(to: CGPoint(x: x, y: y - ySign * radius),
+                                  control: CGPoint(x: x, y: y))
+                path.addLine(to: CGPoint(x: x, y: y - ySign * arm))
+            }
+        }
     }
 }
 
@@ -1804,6 +1815,7 @@ struct IOSLiveViewFocusFramesOverlay: View {
     let focused: Bool
     let visible: Bool
     let aspect: CGFloat
+    @Environment(\.remoteViewfinderZoom) private var zoom
     private struct Snapshot: Equatable {
         var frames: [RemoteLiveViewFocusFrame] = []
         var focused = false
@@ -1831,12 +1843,11 @@ struct IOSLiveViewFocusFramesOverlay: View {
                     let halfWidth = min(imageRect.width * CGFloat(frame.width) / 2, imageRect.width / 2)
                     let halfHeight = min(imageRect.height * CGFloat(frame.height) / 2, imageRect.height / 2)
                     let path = focusCornerPath(center: center, halfWidth: halfWidth,
-                                               halfHeight: halfHeight,
-                                               cornerLength: min(10, min(halfWidth, halfHeight)))
+                                               halfHeight: halfHeight, zoom: zoom)
                     context.stroke(path, with: .color(.black.opacity(0.24)),
-                                   style: StrokeStyle(lineWidth: 2.1, lineCap: .round, lineJoin: .round))
+                                   style: StrokeStyle(lineWidth: 2.1 / max(1, zoom), lineCap: .round, lineJoin: .round))
                     context.stroke(path, with: .color(color.opacity(0.94)),
-                                   style: StrokeStyle(lineWidth: 1.15, lineCap: .round, lineJoin: .round))
+                                   style: StrokeStyle(lineWidth: 1.15 / max(1, zoom), lineCap: .round, lineJoin: .round))
                 }
             }
             .opacity(visible ? 1 : 0)
@@ -2259,5 +2270,175 @@ struct RemoteViewfinderFrameScope<Content: View>: View {
         GeometryReader { proxy in
             RemoteFrameScope(updates: updates) { content(proxy.size) }
         }
+    }
+}
+
+/// User-approved iOS rotation (2026-10-20). Only layout changes are captured;
+/// live frames keep their existing leaf observer and camera lifetime. UIKit
+/// composites the outgoing image over the new live surface for 220ms, avoiding
+/// the old full-monitor alpha=0 interval and any per-frame SwiftUI layout loop.
+struct RemoteRotationSurface<Content: View>: UIViewRepresentable {
+    let rotation: Double
+    var onSettled: () -> Void = {}
+    @ViewBuilder let content: () -> Content
+
+    func makeUIView(context: Context) -> RemoteRotationHost { RemoteRotationHost() }
+    func updateUIView(_ view: RemoteRotationHost, context: Context) {
+        view.onSettled = onSettled
+        var transaction = context.transaction
+        if let previous = view.rotation, previous != rotation {
+            // Resolve the destination once; UIKit owns only the rotation.
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
+        // Other changes (notably desqueeze) retain their SwiftUI transaction
+        // across this hosting boundary instead of jumping to the target size.
+        view.scheduleUpdate(content: AnyView(content().environment(\.self, context.environment)),
+                            rotation: rotation, transaction: transaction)
+    }
+    static func dismantleUIView(_ view: RemoteRotationHost, coordinator: ()) {
+        view.stop()
+        view.host.willMove(toParent: nil)
+        view.host.removeFromParent()
+    }
+}
+
+@MainActor
+private final class RemoteRotationContent: ObservableObject {
+    @Published var value = AnyView(EmptyView())
+}
+
+private struct RemoteRotationContentView: View {
+    @ObservedObject var content: RemoteRotationContent
+    var body: some View { content.value }
+}
+
+@MainActor
+final class RemoteRotationHost: UIView {
+    private let content: RemoteRotationContent
+    let host: UIHostingController<AnyView>
+    private(set) var rotation: Double?
+    private(set) var animator: UIViewPropertyAnimator?
+    private var outgoing: UIView?
+    private var generation = 0
+    private var pendingContent: (view: AnyView, rotation: Double, transaction: Transaction)?
+    private var updateScheduled = false
+    var onSettled: () -> Void = {}
+
+    init() {
+        let content = RemoteRotationContent()
+        self.content = content
+        host = UIHostingController(rootView: AnyView(RemoteRotationContentView(content: content)))
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        clipsToBounds = true
+        host.view.backgroundColor = .clear
+        if #available(iOS 16.4, *) { host.safeAreaRegions = [] }
+        addSubview(host.view)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func scheduleUpdate(content: AnyView, rotation: Double, transaction: Transaction) {
+        pendingContent = (content, rotation, transaction)
+        guard !updateScheduled else { return }
+        updateScheduled = true
+        // updateUIView runs inside the outer SwiftUI update. Publishing into
+        // another graph there is reentrant; hand off once, coalescing updates.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateScheduled = false
+            guard let pending = self.pendingContent else { return }
+            self.pendingContent = nil
+            withTransaction(pending.transaction) {
+                self.update(content: pending.view, rotation: pending.rotation)
+            }
+        }
+    }
+
+    func update(content: AnyView, rotation next: Double) {
+        let old = rotation
+        let changed = old != nil && old != next && window != nil && bounds.width > 0 && bounds.height > 0
+        if changed { stop() }
+        let captured = changed ? host.view.snapshotView(afterScreenUpdates: false) : nil
+        rotation = next
+        // A stable SwiftUI root receives the original transaction. Replacing
+        // UIHostingController.rootView discards it and snaps non-rotation changes.
+        self.content.value = content
+        guard let captured, let old else {
+            setNeedsLayout()
+            if old != nil && old != next { DispatchQueue.main.async { [weak self] in self?.onSettled() } }
+            return
+        }
+        captured.frame = bounds
+        captured.isUserInteractionEnabled = false
+        captured.accessibilityElementsHidden = true
+        addSubview(captured)
+        outgoing = captured
+        // Resolve the new layout once, under a retained outgoing surface.
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        var delta = (next - old).truncatingRemainder(dividingBy: 360)
+        if delta < -180 { delta += 360 }
+        if delta > 180 { delta -= 360 }
+        let radians = CGFloat(delta * .pi / 180)
+        host.view.transform = CGAffineTransform(rotationAngle: -radians)
+        host.view.alpha = 1
+        host.view.isUserInteractionEnabled = false
+        let ticket = generation
+        // Wait for the hosted hierarchy's final layout before starting. The
+        // snapshot covers this handoff; no view is ever faded to blank first.
+        DispatchQueue.main.async { [weak self, weak captured] in
+            guard let self, let captured, self.generation == ticket, self.window != nil else { return }
+            self.host.view.layoutIfNeeded()
+            let animation = UIViewPropertyAnimator(duration: 0.22,
+                controlPoint1: CGPoint(x: 0.4, y: 0), controlPoint2: CGPoint(x: 0.2, y: 1))
+            self.animator = animation
+            animation.addAnimations {
+                self.host.view.transform = .identity
+                captured.transform = CGAffineTransform(rotationAngle: radians)
+                captured.alpha = 0
+            }
+            animation.addCompletion { [weak self] _ in
+                guard let self, self.generation == ticket else { return }
+                self.stop()
+                self.onSettled()
+            }
+            animation.startAnimation()
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Bounds/center are safe while the compositor owns the transform.
+        host.view.bounds = CGRect(origin: .zero, size: bounds.size)
+        host.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { stop(); return }
+        // Preserve presentation/responder routing (Files picker, accessibility
+        // and scene lifecycle) across the native animation boundary.
+        if host.parent == nil {
+            var responder: UIResponder? = next
+            while let current = responder {
+                if let parent = current as? UIViewController {
+                    parent.addChild(host)
+                    host.didMove(toParent: parent)
+                    break
+                }
+                responder = current.next
+            }
+        }
+    }
+    func stop() {
+        generation += 1
+        pendingContent = nil
+        animator?.stopAnimation(true)
+        animator = nil
+        outgoing?.removeFromSuperview()
+        outgoing = nil
+        host.view.transform = .identity
+        host.view.alpha = 1
+        host.view.isUserInteractionEnabled = true
     }
 }

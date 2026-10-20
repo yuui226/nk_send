@@ -2024,7 +2024,8 @@ struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
     }
 }
 
-/// 2026-10-17 user override: USB/STA indicate status only, including offline.
+/// 2026-10-20 user override: every transport indicates status only, including
+/// offline AP; wireless settings jumps were removed for App Store preparation.
 /// Keep the selected skin without pressed feedback, haptics or a button action.
 struct CameraSignalControl: View {
     let isUSB: Bool
@@ -2032,27 +2033,23 @@ struct CameraSignalControl: View {
     let connected: Bool
     var height: CGFloat = 36
 
-    private var acceptsTap: Bool { !isUSB && wirelessMode != .sta }
     private var labelKey: String {
         if !connected { return "camera_not_connected" }
         return isUSB ? "connection_usb" : "camera_session_notification_title"
     }
 
     var body: some View {
-        Button {
-            guard acceptsTap, !connected else { return }
-            CameraWirelessSettings.open(.ap)
-        } label: {
+        Button {} label: {
             PhotoListSignalIcon(isUSB: isUSB, wirelessMode: wirelessMode, connected: connected)
                 .frame(width: photoListCompactButtonWidth, height: height)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22, disabledAlpha: 1))
-        .disabled(!acceptsTap)
-        .allowsHitTesting(acceptsTap)
+        .disabled(true)
+        .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AppLocalized.resource(labelKey))
         .accessibilityIdentifier("photo-list-signal")
-        .accessibilityRemoveTraits(acceptsTap ? [] : .isButton)
+        .accessibilityRemoveTraits(.isButton)
         .modifier(DisconnectedSignalBreath(connected: connected))
         // Android scales inside the signal pill's layout slot. Constrain the
         // outer animation host too: its UIView otherwise accepts the HStack's

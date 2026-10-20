@@ -569,8 +569,11 @@ struct PhotoPreviewView: View {
         let _ = ButtonInteractionTrace.recordNow("preview-body")
         #endif
         ZStack {
-            Color.black.opacity((review == nil ? 0.74 : 1) * presentationProgress)
-                .ignoresSafeArea(edges: review == nil ? .all : [])
+            // Monitor review owns one edge-to-edge black surface. A second
+            // inset backdrop makes its middle fade differently from safe areas.
+            if review == nil {
+                Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
+            }
             GeometryReader { pagerViewport in
                 TabView(selection: $pagerSelection) {
                     ForEach(previewPages) { page in

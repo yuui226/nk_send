@@ -39,6 +39,7 @@ fi
 ios_dir="$(cd "$(dirname "$0")/.." && pwd)"
 results_dir="$(mktemp -d "${TMPDIR:-/tmp}/ztransfer-storekit-ui.XXXXXX")"
 derived_dir="${ZTRANSFER_TEST_DERIVED_DATA:-$results_dir/DerivedData}"
+simulator_id="$1"
 common=(-project "$ios_dir/ZTransfer.xcodeproj" -configuration Debug
     -destination "platform=iOS Simulator,id=$1" -derivedDataPath "$derived_dir"
     -collect-test-diagnostics never)
@@ -47,6 +48,22 @@ fixture_test='ZTransferStoreKitTests/StoreKitPurchaseTests/testConfiguredPricesT
 run_fixture() {
     xcodebuild "${common[@]}" -scheme ZTransfer-StoreKit -only-testing:"$fixture_test" \
         -resultBundlePath "$results_dir/$1.xcresult" test CODE_SIGN_IDENTITY=- > "$results_dir/$1.log" 2>&1
+}
+
+# Save opt-in, stage-only diagnostics before cleanup can relaunch the host or
+# replace its container. A baseline distinguishes older launches in the same
+# bounded file; never clear application data just to simplify diagnostics.
+capture_startup_trace() {
+    local label="$1" container
+    if container="$(xcrun simctl get_app_container "$simulator_id" com.ztransfer.ios data 2>/dev/null)" &&
+       [[ -f "$container/tmp/storekit-startup.txt" ]]; then
+        cp "$container/tmp/storekit-startup.txt" "$results_dir/$label-startup.txt" ||
+            echo "Could not copy startup diagnostics for $label" >&2
+    else
+        echo "Startup trace unavailable for $label (trace may not be enabled)." \
+            > "$results_dir/$label-startup-unavailable.txt"
+    fi
+    return 0
 }
 
 cleanup() {
@@ -80,7 +97,11 @@ for test_method in "${test_methods[@]}"; do
     if [[ $photo_export == true ]]; then
         python3 "$ios_dir/StoreKit/verify-photo-export.py" check "$1"
     fi
+    # Hosted fixture cleanup may leave the dedicated device restarting.
+    # Wait for its boot services before simctl imports Photos assets; the
+    # subsequent xcodebuild launch is too late to protect this first import.
     if [[ $test_method == testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch || $test_method == testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch || $photo_export == true ]]; then
+        xcrun simctl bootstatus "$1" -b
         xcrun simctl addmedia "$1" "$ios_dir/ZTransfer/Resources/debug_sample_01.jpg"
     fi
     if [[ $test_method == testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization ]]; then
@@ -92,9 +113,15 @@ for test_method in "${test_methods[@]}"; do
         xcrun simctl privacy "$1" reset photos com.ztransfer.ios
         xcrun simctl privacy "$1" reset photos-add com.ztransfer.ios
     fi
+    capture_startup_trace "$test_method-before"
+    ui_result=0
     xcodebuild "${common[@]}" -scheme ZTransfer-StoreKitUI \
         -only-testing:"ZTransferStoreKitUITests/PremiumRecoveryUITests/$test_method" \
-        -resultBundlePath "$results_dir/$test_method.xcresult" test CODE_SIGN_IDENTITY=- > "$results_dir/$test_method.log" 2>&1
+        -resultBundlePath "$results_dir/$test_method.xcresult" test CODE_SIGN_IDENTITY=- > "$results_dir/$test_method.log" 2>&1 ||
+        ui_result=$?
+    capture_startup_trace "$test_method-after"
+    # Diagnostics must neither hide UI failures nor prevent the EXIT cleanup.
+    [[ $ui_result -eq 0 ]] || exit "$ui_result"
     if [[ $photo_export == true ]]; then
         python3 "$ios_dir/StoreKit/verify-photo-export.py" verify "$results_dir/$test_method-photos.json" "$expected_exports"
     fi

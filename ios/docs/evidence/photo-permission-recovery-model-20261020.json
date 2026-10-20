@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-20",
+  "test": "PremiumBusinessTests/testLocalBatchRecoversAfterPhotoPermissionIsGrantedWithoutReselection",
+  "exitCode": 0,
+  "testSucceeded": true,
+  "durationSeconds": 4.864,
+  "log": "/tmp/ztransfer-prelaunch-permission-recovery.log",
+  "logSHA256": "2e6c973ba05a1616d73b034ae1df74a81a85b2f247715c776d9c00b54d6f2f9f",
+  "resultBundle": "/tmp/ztransfer-prelaunch-derived/Logs/Test/Test-ZTransfer-2026.10.20_22-42-48-+0800.xcresult",
+  "scope": "Production LocalPhotoBatchViewModel with injected authorization and output boundaries; same model and same two selected items across denied then authorized batches",
+  "limitations": [
+    "Does not operate iOS Settings or change real Photos permission",
+    "Does not write actual photo library assets",
+    "Host app logs camera connection refused at 192.168.1.1:15740; no physical camera verified"
+  ]
+}

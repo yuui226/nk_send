@@ -1,0 +1,248 @@
+{
+  "resultsDirectory": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.SyC2Fe",
+  "exitCode": 0,
+  "baselinePrefixMatched": true,
+  "newLaunches": [
+    {
+      "start": 1792505337.6683068,
+      "events": [
+        {
+          "seconds": 0.0,
+          "stage": "start"
+        },
+        {
+          "seconds": 5.278,
+          "stage": "unfinished.begin"
+        },
+        {
+          "seconds": 5.286,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 6.059,
+          "stage": "unfinished.end"
+        },
+        {
+          "seconds": 6.061,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 6.063,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 6.129,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 7.297,
+          "stage": "snapshot.confirmed"
+        },
+        {
+          "seconds": 7.299,
+          "stage": "history.begin"
+        },
+        {
+          "seconds": 7.332,
+          "stage": "history.end"
+        },
+        {
+          "seconds": 7.342,
+          "stage": "snapshot.published"
+        },
+        {
+          "seconds": 16.257,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 17.051,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 17.052,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 17.078,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 17.08,
+          "stage": "history.begin"
+        },
+        {
+          "seconds": 17.081,
+          "stage": "history.end"
+        },
+        {
+          "seconds": 17.083,
+          "stage": "snapshot.published"
+        }
+      ],
+      "firstPublicationSeconds": 7.342
+    },
+    {
+      "start": 1792505417.6256309,
+      "events": [
+        {
+          "seconds": 0.0,
+          "stage": "start"
+        },
+        {
+          "seconds": 4.534,
+          "stage": "unfinished.begin"
+        },
+        {
+          "seconds": 4.536,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 5.196,
+          "stage": "unfinished.end"
+        },
+        {
+          "seconds": 5.199,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 5.201,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 5.451,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 7.154,
+          "stage": "snapshot.confirmed"
+        },
+        {
+          "seconds": 7.156,
+          "stage": "history.begin"
+        },
+        {
+          "seconds": 7.179,
+          "stage": "history.end"
+        },
+        {
+          "seconds": 7.188,
+          "stage": "snapshot.published"
+        },
+        {
+          "seconds": 17.277,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 18.26,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 18.262,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 18.292,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 18.294,
+          "stage": "history.begin"
+        },
+        {
+          "seconds": 18.296,
+          "stage": "history.end"
+        },
+        {
+          "seconds": 18.297,
+          "stage": "snapshot.published"
+        }
+      ],
+      "firstPublicationSeconds": 7.188
+    },
+    {
+      "start": 1792505487.131549,
+      "events": [
+        {
+          "seconds": 0.0,
+          "stage": "start"
+        },
+        {
+          "seconds": 3.174,
+          "stage": "unfinished.begin"
+        },
+        {
+          "seconds": 3.176,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 3.657,
+          "stage": "unfinished.end"
+        },
+        {
+          "seconds": 3.659,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 3.66,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 3.876,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 4.999,
+          "stage": "snapshot.confirmed"
+        },
+        {
+          "seconds": 5.001,
+          "stage": "history.begin"
+        },
+        {
+          "seconds": 5.026,
+          "stage": "history.end"
+        },
+        {
+          "seconds": 5.036,
+          "stage": "snapshot.published"
+        },
+        {
+          "seconds": 15.032,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 15.288,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 15.289,
+          "stage": "snapshot.begin"
+        },
+        {
+          "seconds": 15.385,
+          "stage": "snapshot.end"
+        },
+        {
+          "seconds": 15.387,
+          "stage": "history.begin"
+        },
+        {
+          "seconds": 15.388,
+          "stage": "history.end"
+        },
+        {
+          "seconds": 15.389,
+          "stage": "snapshot.published"
+        }
+      ],
+      "firstPublicationSeconds": 5.036
+    }
+  ],
+  "logs": {
+    "testPurchasePageLayoutInAllLanguages.log": "f4617abf5f852da8521df16bf1772bbb32ea9dce9a80527094c689e4f4aa7597",
+    "cleanup.log": "d1497c48c246d269453ab1e0bd388700314ac08b733660319c1da95d019507c3",
+    "prepare-testPurchasePageLayoutInAllLanguages.log": "ef24d5100facd00907f434903dc00823e4937de1f179f31fdd9ef111d7c76198"
+  },
+  "visualReview": "All nine screenshots viewed. English comparison values are tightly spaced but distinguishable; no overlap observed at default font. Debug-only banner is not Release evidence.",
+  "scope": "SE3, iOS 26.5, default font, light, three languages; no purchase execution in this layout method; not proof historic initialization failure fixed."
+}

@@ -1,0 +1,10 @@
+{
+  "copiedAt": "2026-10-20T18:10:58.859203+08:00",
+  "sourceBundle": "/tmp/ztransfer-prelaunch-derived/Build/Products/Debug-iphonesimulator/ZTransfer.app",
+  "frozenBundle": "/tmp/ztransfer-prelaunch-layout-frozen-v4-20261020/ZTransfer.app",
+  "sha256": {
+    "ZTransfer": "2971463a87f6ddf4e0d440e409048c1132a6299f6ff92efb1dfb67e955712cb0",
+    "ZTransfer.debug.dylib": "b677955ad6e97f37fba3592ec400523adf3f53543faa911bd97f6b7b95b431ff"
+  },
+  "scope": "Fixed Debug simulator artifact copied after current UI build. Not a signed release or proof of exact latest source correspondence."
+}

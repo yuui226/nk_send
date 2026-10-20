@@ -660,6 +660,11 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var unfiltered: UIImage?
     @State private var previewRestoreRevision = 0
     @State private var previewFailed = false
+    @State private var fallbackReady = false
+    #if DEBUG
+    var lifecycleObserver: ((String) -> Void)?
+    var renderedImageObserver: ((UIImage) -> Void)?
+    #endif
     @State private var showUnfiltered = false
     @State private var lastPreviewSettings: PhotoEffectsSettings?
     @State private var rotationQuarterTurns = 0
@@ -727,7 +732,7 @@ struct PhotoEffectsSettingsPreview: View {
     }
 
     private var renderKeyWithRotation: String {
-        "\(renderKey)|rotation:\(rotationQuarterTurns)|\(placeContextKey)"
+        "\(renderKey)|rotation:\(rotationQuarterTurns)|\(placeContextKey)|fallback:\(fallbackReady)"
     }
 
     private static func resolvedPreviewMetadata(
@@ -926,6 +931,22 @@ struct PhotoEffectsSettingsPreview: View {
                 completeCache.close(); intermediateCache.close(); comparisonCache.close(); rotatedSourceCache.close()
             }
         }
+
+        // Android keys the 2200 ms camera-source grace to the page/source,
+        // not to pixel settings. Wheel edits must not restart this timer.
+        .task(id: source == nil) {
+            fallbackReady = false
+            guard source == nil else { return }
+            #if DEBUG
+            lifecycleObserver?("fallback.grace.begin")
+            #endif
+            do { try await Task.sleep(for: .milliseconds(2200)) } catch { return }
+            guard !Task.isCancelled else { return }
+            fallbackReady = true
+            #if DEBUG
+            lifecycleObserver?("fallback.grace.end")
+            #endif
+        }
         .task(id: renderKeyWithRotation) {
             var demanded = [Self.makeRenderKey(settings: settings, source: source, metadata: metadata)]
             for selection in nextPhotoFilterSelections(for: settings) {
@@ -950,10 +971,7 @@ struct PhotoEffectsSettingsPreview: View {
             previewFailed = false
             guard let source else {
                 onRequest()
-                // Android gives the real thumbnail/FHD request a 2200 ms
-                // grace period before showing its deterministic demo source.
-                try? await Task.sleep(nanoseconds: 2_200_000_000)
-                guard !Task.isCancelled else { return }
+                guard fallbackReady, !Task.isCancelled else { return }
                 let rotation = rotationQuarterTurns
                 let fallbackSettings = settings
                 let fallbackResult = try? await PhotoEffectsPreviewRenderGate.render {
@@ -972,6 +990,9 @@ struct PhotoEffectsSettingsPreview: View {
                 }
                 renderedCanvasKey = requestedCanvasKey
                 rendered = fallbackResult
+                #if DEBUG
+                lifecycleObserver?("fallback.rendered")
+                #endif
                 renderedRequestKey = renderKeyWithRotation
                 previewFailed = false
                 return
@@ -996,6 +1017,10 @@ struct PhotoEffectsSettingsPreview: View {
             }
             renderedCanvasKey = requestedCanvasKey
             rendered = result
+            #if DEBUG
+            lifecycleObserver?("source.rendered")
+            renderedImageObserver?(result)
+            #endif
             renderedRequestKey = renderKeyWithRotation
             previewFailed = false
             guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
@@ -1379,12 +1404,15 @@ struct PhotoEffectModuleMenuButton: View {
     var size: CGFloat = 38
     var body: some View {
         Button { isPresented.toggle() } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: size == 28 ? 18 : 23))
+            RemoteEditorIcon(kind: .tune)
+                .fill(ZTransferColors.primaryText)
+                .frame(width: 19, height: 19)
                 .frame(width: size, height: size)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 20))
+        .frame(width: size, height: size)
         .accessibilityLabel(AppLocalized.resource("photo_effect_modules"))
+        .accessibilityIdentifier("photo-effect-modules")
         .anchorPreference(key: PhotoEffectModuleAnchorKey.self, value: .bounds) { $0 }
         .onDisappear { isPresented = false }
     }
@@ -1436,26 +1464,20 @@ struct PhotoEffectModuleMenuOverlay: ViewModifier {
     private var menu: some View {
         VStack(spacing: 8) {
             ForEach(PhotoEffectModule.allCases, id: \.self) { module in
-                Button {
+                FilterChip(label: AppLocalized.resource(module.menuLabelKey),
+                    selected: photoEffectModuleIsVisible(effectivePhotoEffectModules(
+                        draft.photoEffectModules, isPro: isPro), module)) {
                     var value = draft
                     if togglePhotoEffectModuleDraft(module, draft: &value, lutStore: lutStore, isPro: isPro) {
                         ZTransferHaptics.shared.play(.toggle)
                         draft = value
                     }
-                } label: {
-                    HStack {
-                        Text(AppLocalized.resource(module.menuLabelKey))
-                        Spacer()
-                        if photoEffectModuleIsVisible(effectivePhotoEffectModules(
-                            draft.photoEffectModules, isPro: isPro), module) {
-                            Image(systemName: "checkmark")
-                        }
-                    }.frame(minHeight: 28).contentShape(Rectangle())
-                }.buttonStyle(.plain)
+                }
+                .accessibilityIdentifier("photo-effect-module-\(module.rawValue)")
             }
         }
         .padding(12)
-        .background(ZTransferColors.surface, in: RoundedRectangle(cornerRadius: 18))
+        .background { ZTransferGlassSurface(cornerRadius: 18, kind: .panel) }
         .onTapGesture { }
     }
 }

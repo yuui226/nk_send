@@ -82,7 +82,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         let purchased = try XCTUnwrap(session.allTransactions().last {
             $0.productIdentifier == "com.ztransfer.ios.pro.lifetime" && $0.cancelDate == nil
         }, "The UI runner must control the real local purchase before testing a refund")
-        let workbench = app.buttons["Filter · Frame · Watermark"].firstMatch
+        let workbench = app.buttons["Filter · LUT · Frame · Watermark"].firstMatch
         XCTAssertTrue(workbench.waitForExistence(timeout: 10))
         tapWhenStable(workbench)
         let frame = app.buttons["Frame"]
@@ -94,7 +94,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         let settings = app.buttons.matching(NSPredicate(format: "value == %@", "Watermark settings")).firstMatch
         revealEffectsControl(settings, in: app)
         tapWhenStable(settings)
-        let type = app.buttons["Watermark type"]
+        let type = app.buttons["Type"]
         revealEffectsControl(type, in: app)
         if type.value as? String == "Logo" { tapWhenStable(type) }
         let text = app.textFields.firstMatch
@@ -135,7 +135,7 @@ final class PremiumRecoveryUITests: XCTestCase {
 
     private func verifyLifetimeRecovery(acknowledgeSuccess: Bool) throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-app_language", "zh-Hans"]
+        app.launchArguments = ["-app_language", "zh-Hans", "--trace-storekit-startup"]
         addTeardownBlock {
             app.terminate()
         }
@@ -182,7 +182,7 @@ final class PremiumRecoveryUITests: XCTestCase {
 
     func testAnnualToLifetimeKeepsRenewalManagementAfterRelaunch() {
         let app = XCUIApplication()
-        app.launchArguments = ["-app_language", "zh-Hans"]
+        app.launchArguments = ["-app_language", "zh-Hans", "--trace-storekit-startup"]
         addTeardownBlock { app.terminate() }
         app.launch()
         openSettings(app)
@@ -408,7 +408,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         app.terminate()
         app.launch()
 
-        let workspace = app.buttons["Filter · Frame · Watermark"].firstMatch
+        let workspace = app.buttons["Filter · LUT · Frame · Watermark"].firstMatch
         XCTAssertTrue(workspace.waitForExistence(timeout: 10), app.debugDescription)
         tapWhenStable(workspace)
         let filter = app.buttons["Photo filter"]
@@ -447,7 +447,7 @@ final class PremiumRecoveryUITests: XCTestCase {
     func testPurchasedWorkbenchEditsAndPersistsTextWatermark() {
         let app = purchaseLifetimeAndRelaunch()
 
-        let workspace = app.buttons["Filter · Frame · Watermark"].firstMatch
+        let workspace = app.buttons["Filter · LUT · Frame · Watermark"].firstMatch
         XCTAssertTrue(workspace.waitForExistence(timeout: 10))
         tapWhenStable(workspace)
         let frame = app.buttons["Frame"]
@@ -464,7 +464,7 @@ final class PremiumRecoveryUITests: XCTestCase {
 
         let settings = app.buttons.matching(NSPredicate(format: "value == %@", "Watermark settings")).firstMatch
         tapWhenStable(settings)
-        let type = app.buttons["Watermark type"]
+        let type = app.buttons["Type"]
         revealEffectsControl(type, in: app)
         if type.value as? String == "Logo" { tapWhenStable(type) }
         XCTAssertEqual(type.value as? String, "Text")
@@ -536,7 +536,7 @@ final class PremiumRecoveryUITests: XCTestCase {
 
     private func purchaseLifetimeAndRelaunch() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-app_language", "en"]
+        app.launchArguments = ["-app_language", "en", "--trace-storekit-startup"]
         addTeardownBlock { app.terminate() }
         app.launch()
         openSettings(app)
@@ -545,13 +545,32 @@ final class PremiumRecoveryUITests: XCTestCase {
         tapWhenStable(unlock)
         let lifetime = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Lifetime Pro")).firstMatch
         XCTAssertTrue(lifetime.waitForExistence(timeout: 10))
+        let purchasePanel = app.scrollViews["premium-purchase-panel"]
+        XCTAssertTrue(purchasePanel.waitForExistence(timeout: 10))
+        revealFully(lifetime, in: purchasePanel, app: app)
         tapWhenStable(lifetime)
+        XCTAssertTrue(lifetime.isSelected, "The lifetime plan must actually be selected before purchase")
         let buy = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Buy Lifetime Pro")).firstMatch
-        reveal(buy, in: app)
+        revealFully(buy, in: purchasePanel, app: app)
         tapWhenStable(buy)
         confirmLocalPurchase()
-        XCTAssertTrue(app.buttons["Pro"].waitForExistence(timeout: 10), app.debugDescription)
-        dismissPurchaseCompletion()
+        // Effect tests need a completed user purchase, not delivery before
+        // Apple's success acknowledgement. The immediate-exit test separately
+        // exercises that earlier boundary.
+        let success = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts["You’re all set."]
+        XCTAssertTrue(success.waitForExistence(timeout: 10))
+        XCTAssertTrue(success.staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@", "[Environment: Xcode]")).firstMatch.exists)
+        success.buttons["OK"].tap()
+        let delivered = app.buttons["Pro"].waitForExistence(timeout: 10)
+        if !delivered {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "shared-purchase-not-delivered"
+            shot.lifetime = .keepAlways
+            add(shot)
+            print("PURCHASE_SYSTEM_UI \(XCUIApplication(bundleIdentifier: "com.apple.springboard").debugDescription)")
+        }
+        XCTAssertTrue(delivered, app.debugDescription)
         app.terminate()
         app.launch()
         return app
@@ -567,7 +586,7 @@ final class PremiumRecoveryUITests: XCTestCase {
 
     private func verifyImageWatermarkImport(inCameraSettings: Bool) {
         let app = purchaseLifetimeAndRelaunch()
-        let workspace = app.buttons["Filter · Frame · Watermark"].firstMatch
+        let workspace = app.buttons["Filter · LUT · Frame · Watermark"].firstMatch
         func openEditor() -> XCUIElement? {
             if inCameraSettings { return openCameraEffects(app, expectPro: true) }
             XCTAssertTrue(workspace.waitForExistence(timeout: 10))
@@ -585,18 +604,19 @@ final class PremiumRecoveryUITests: XCTestCase {
         let settings = app.buttons.matching(NSPredicate(format: "value == %@", "Watermark settings")).firstMatch
         revealEffectsControl(settings, in: app, scrollView: panel)
         tapWhenStable(settings)
-        let type = app.buttons["Watermark type"]
+        let type = app.buttons["Type"]
         revealEffectsControl(type, in: app, scrollView: panel)
-        let replace = app.buttons["Replace logo"]
+        // The unlabeled Android-style wheel exposes its option as AX value.
+        let replace = app.buttons.matching(NSPredicate(format: "value == %@", "Replace logo")).firstMatch
         if type.value as? String != "Logo" { tapWhenStable(type) }
         // Without a stored logo the type wheel opens the picker directly.
         // With one, explicitly replace it so every run exercises real import.
         if replace.waitForExistence(timeout: 2), replace.isHittable {
             tapWhenStable(replace)
         } else {
-            let cancel = app.buttons["Cancel"].firstMatch
+            let cancel = app.buttons.matching(NSPredicate(format: "identifier == %@ OR label IN %@", "Cancel", ["Cancel", "取消"])).firstMatch
             XCTAssertTrue(cancel.waitForExistence(timeout: 5), app.debugDescription)
-            tapWhenStable(cancel)
+            cancel.tap()
             XCTAssertEqual(type.value as? String, "Text")
             XCTAssertTrue(type.staticTexts["Text"].exists,
                           "Cancelling the first logo picker must restore the visible wheel to Text")
@@ -640,15 +660,24 @@ final class PremiumRecoveryUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Available in Pro only"].exists)
         revealEffectsControl(replace, in: app, scrollView: panel)
         tapWhenStable(replace)
-        let cancel = app.buttons["Cancel"].firstMatch
+        let cancel = app.buttons.matching(NSPredicate(format: "identifier == %@ OR label IN %@", "Cancel", ["Cancel", "取消"])).firstMatch
         XCTAssertTrue(cancel.waitForExistence(timeout: 5), app.debugDescription)
-        tapWhenStable(cancel)
+        // Apple's remote picker owns this button and its animation. XCTest
+        // tap performs its own hit testing; repeated full picker snapshots in
+        // our app-animation helper can consume the deadline before two samples.
+        cancel.tap()
         XCTAssertEqual(type.value as? String, "Logo")
         for name in names { XCTAssertEqual(app.buttons[name].value as? String, savedValues[name]) }
         attachScreenshot(app, name: inCameraSettings ? "camera-image-watermark-after-cancel" : "purchased-workbench-image-watermark-after-cancel")
         if inCameraSettings {
             // Later style edits remain an editor draft until leaving it.
-            tapWhenStable(app.buttons["chevron.left"])
+            revealEffectsControl(app.buttons["photo-effects-editor-back"], in: app, scrollView: panel, scrollToTop: true)
+            attachScreenshot(app, name: "camera-logo-full-preview-after-cancel")
+            // Sample the same viewport after the 220 ms transition. This is
+            // visual evidence, not a substitute for a pixel-ready assertion.
+            Thread.sleep(forTimeInterval: 0.5)
+            attachScreenshot(app, name: "camera-logo-full-preview-after-cancel-plus-500ms")
+            tapWhenStable(app.buttons["photo-effects-editor-back"])
             XCTAssertTrue(app.buttons["Pro"].waitForExistence(timeout: 5))
         }
 
@@ -667,6 +696,11 @@ final class PremiumRecoveryUITests: XCTestCase {
             XCTAssertEqual(control.value as? String, savedValues[name])
         }
         attachScreenshot(app, name: inCameraSettings ? "camera-image-watermark-after-relaunch" : "purchased-workbench-image-watermark-after-relaunch")
+        if inCameraSettings {
+            revealEffectsControl(app.buttons["photo-effects-editor-back"], in: app, scrollView: panel, scrollToTop: true)
+            Thread.sleep(forTimeInterval: 0.5)
+            attachScreenshot(app, name: "camera-logo-full-preview-after-relaunch")
+        }
     }
 
     private func selectFirstSystemPhoto(_ app: XCUIApplication) {
@@ -726,7 +760,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Unlock Pro"].waitForExistence(timeout: 10))
         app.terminate()
         app.launch()
-        let workbench = app.buttons["Filter · Frame · Watermark"].firstMatch
+        let workbench = app.buttons["Filter · LUT · Frame · Watermark"].firstMatch
         XCTAssertTrue(workbench.waitForExistence(timeout: 10))
         tapWhenStable(workbench)
         if count > 1 {
@@ -749,7 +783,11 @@ final class PremiumRecoveryUITests: XCTestCase {
         revealEffectsControl(choose, in: app)
         tapWhenStable(choose)
         selectSystemPhotos(app, count: count)
-        let generate = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Generate and save (\(count))")).firstMatch
+        // Android LocalPhotoBatchButton now separates the selection count
+        // (reselect action) from the short Generate label.
+        let reselect = app.buttons["Choose again (\(count))"]
+        XCTAssertTrue(reselect.waitForExistence(timeout: 10), app.debugDescription)
+        let generate = app.buttons["Generate"].firstMatch
         XCTAssertTrue(generate.waitForExistence(timeout: 10), app.debugDescription)
         revealEffectsControl(generate, in: app)
         tapWhenStable(generate)
@@ -778,7 +816,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         XCTAssertTrue(generate.waitForExistence(timeout: 10))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in generate.isEnabled }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
-        XCTAssertTrue(app.buttons["Replace photo"].exists, app.debugDescription)
+        XCTAssertTrue(reselect.exists, app.debugDescription)
         if !allow {
             tapWhenStable(generate)
             XCTAssertTrue(app.buttons["Generation failed"].waitForExistence(timeout: 10))
@@ -810,7 +848,8 @@ final class PremiumRecoveryUITests: XCTestCase {
         attachScreenshot(app, name: "free-camera-effects-locked")
         // Android saves the draft on returning to main settings; this is not
         // a discard/cancel action. Exercise that actual route before relaunch.
-        tapWhenStable(app.buttons["chevron.left"])
+        revealEffectsControl(app.buttons["photo-effects-editor-back"], in: app, scrollView: panel, scrollToTop: true)
+        tapWhenStable(app.buttons["photo-effects-editor-back"])
         XCTAssertTrue(app.buttons["Unlock Pro"].waitForExistence(timeout: 5))
         app.terminate()
         app.launch()
@@ -836,7 +875,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         let settings = app.buttons.matching(NSPredicate(format: "value == %@", "Watermark settings")).firstMatch
         revealEffectsControl(settings, in: app, scrollView: panel)
         tapWhenStable(settings)
-        let type = app.buttons["Watermark type"]
+        let type = app.buttons["Type"]
         revealEffectsControl(type, in: app, scrollView: panel)
         if type.value as? String == "Logo" { tapWhenStable(type) }
         XCTAssertEqual(type.value as? String, "Text")
@@ -907,9 +946,9 @@ final class PremiumRecoveryUITests: XCTestCase {
     private func openCameraEffectsFromPhotoList(_ app: XCUIApplication, expectPro: Bool) -> XCUIElement {
         openSettings(app)
         XCTAssertTrue(app.buttons[expectPro ? "Pro" : "Unlock Pro"].waitForExistence(timeout: 10))
-        let title = "Filter · Frame · Watermark"
-        let entry = app.staticTexts[title].firstMatch
-        let mainPanel = app.scrollViews.containing(.staticText, identifier: title).firstMatch
+        // The production entry is a Button; its label is combined for AX.
+        let entry = app.buttons["photo-effects-open-editor"]
+        let mainPanel = app.scrollViews.containing(.button, identifier: "photo-effects-open-editor").firstMatch
         XCTAssertTrue(mainPanel.waitForExistence(timeout: 5), app.debugDescription)
         revealEffectsControl(entry, in: app, scrollView: mainPanel)
         tapWhenStable(entry)
@@ -937,7 +976,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         XCTAssertEqual(text.value as? String, "ZTransfer")
 
-        let type = app.buttons["Watermark type"]
+        let type = app.buttons["Type"]
         XCTAssertEqual(type.value as? String, "Text")
         tapLockedEffectsControl(type, in: app, scrollView: scrollView)
         XCTAssertEqual(type.value as? String, "Text", "Free users cannot switch to an image watermark")
@@ -956,7 +995,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         }
     }
 
-    private func revealEffectsControl(_ element: XCUIElement, in app: XCUIApplication, scrollView: XCUIElement? = nil) {
+    private func revealEffectsControl(_ element: XCUIElement, in app: XCUIApplication, scrollView: XCUIElement? = nil, scrollToTop: Bool = false) {
         let surface = scrollView ?? app
         var visibleFrame = surface.frame.intersection(app.frame)
         let popup = app.otherElements["popup-panel-settings"]
@@ -968,7 +1007,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         let viewport = visibleFrame.insetBy(dx: scrollView == nil ? 10 : 1, dy: scrollView == nil ? 24 : 1)
         for _ in 0..<6 {
             if element.exists, viewport.contains(element.frame), element.isHittable { return }
-            let down = element.exists && element.frame.minY < viewport.minY
+            let down = scrollToTop || (element.exists && element.frame.minY < viewport.minY)
             // The editor contains vertical wheels across its center. Scroll
             // the page gutter so this gesture cannot modify another setting.
             let gutterX = scrollView == nil ? 0.98 : (visibleFrame.maxX - 8 - surface.frame.minX) / surface.frame.width
@@ -1002,7 +1041,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         let app = XCUIApplication()
         addTeardownBlock { app.terminate() }
         for copy in copies {
-            app.launchArguments = ["-app_language", copy.language]
+            app.launchArguments = ["-app_language", copy.language, "--trace-storekit-startup"]
             app.launch()
             openSettings(app)
             let unlock = app.buttons[copy.unlock]

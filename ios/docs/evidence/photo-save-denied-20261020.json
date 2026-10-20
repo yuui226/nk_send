@@ -1,0 +1,7 @@
+{
+  "unchangedOriginals": 36,
+  "newOriginals": [],
+  "test": "testWorkbenchDeniedPhotoSaveReportsFailureAndCanRetry",
+  "result": "TEST SUCCEEDED; script exit 0",
+  "scope": "iPhone SE 3 / iOS 26.5; deny add-photos authorization then retry; no repeated permission prompt"
+}

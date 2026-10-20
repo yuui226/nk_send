@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-20",
+  "test": "PhotoEffectsFallbackLifecycleTests/testSourceBackedPreviewPublishesLatestWatermarkPixels",
+  "exitCode": 0,
+  "testSucceeded": true,
+  "log": "/tmp/ztransfer-prelaunch-source-watermark-pixels.log",
+  "sha256": "ba5355ddb6b3cf6c43a50ba1887feeac9d260d43c413ca2dc62edd9b9500cdde",
+  "scope": "UIHostingController production preview, same synthetic source, rapid position and size edits, published bitmap PNG compared to final recipe rendered independently of preview cache",
+  "limitations": [
+    "Text watermark fixture, not imported Logo",
+    "Does not prove animated on-screen layer has completed transition",
+    "Does not include system Photos picker dismissal"
+  ]
+}

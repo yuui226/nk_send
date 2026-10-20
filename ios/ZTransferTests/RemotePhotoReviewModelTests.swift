@@ -217,6 +217,15 @@ final class RemoteReviewPresentationTests: XCTestCase {
             XCTAssertTrue(model.active, "Frame gate stays paused during fade")
             let middle = try pixels(snapshot(window))
             XCTAssertGreaterThan(middle[(2 * 390 + 195) * 4], 15, "The black backdrop must also fade to the red monitor")
+            // The inset preview used to add a second black layer. During a
+            // fade this left the safe-area strips brighter than the middle.
+            let topRed = Int(middle[(2 * 390 + 195) * 4])
+            // In landscape the photo reaches the physical side edges, so that
+            // location is image content, not an uncovered black margin.
+            for point in rotation == 0 ? [(2, 422), (195, 841)] : [(195, 841)] {
+                let red = Int(middle[(point.1 * 390 + point.0) * 4])
+                XCTAssertEqual(red, topRed, accuracy: 10, "One fullscreen backdrop must fade uniformly; rotation=\(rotation)")
+            }
             try await Task.sleep(for: .milliseconds(250))
             XCTAssertFalse(model.active)
             let resumed = try await frames.withFrame { true }

@@ -22,6 +22,9 @@ struct ZTransferApp: App {
         #endif
         StoreKitPurchaseStore.shared.start()
         PhotoFramePlaceAvailability.shared.start()
+        #if DEBUG
+        StoreKitPurchaseStore.shared.traceStartup("app.services.ready")
+        #endif
         Task { await PhotoLUTStore().pruneSnapshots() }
     }
 

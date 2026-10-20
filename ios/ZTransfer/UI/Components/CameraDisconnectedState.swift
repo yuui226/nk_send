@@ -2,20 +2,6 @@ import SwiftUI
 import UIKit
 import Combine
 
-/// Uses the same system route/fallback already used by the connection page.
-/// iOS may refuse a deep link; that does not change or fake camera state.
-@MainActor
-enum CameraWirelessSettings {
-    static func open(_ mode: WirelessMode) {
-        let route = mode == .sta ? "App-Prefs:root=INTERNET_TETHERING" : "App-Prefs:root=WIFI"
-        guard let url = URL(string: route) else { return }
-        UIApplication.shared.open(url, options: [:]) { opened in
-            guard !opened, let fallback = URL(string: UIApplication.openSettingsURLString) else { return }
-            DispatchQueue.main.async { UIApplication.shared.open(fallback) }
-        }
-    }
-}
-
 /// Same bar geometry and disconnected strike as Android StaSignalIcon.
 struct STASignalIcon: View {
     let connected: Bool
@@ -67,11 +53,9 @@ struct CameraDisconnectedState: View {
             if let action = mode.disconnectedAction {
                 Spacer().frame(height: 20)
                 Button {
-                    if mode == .sta { onRetrySTA() }
-                    else { CameraWirelessSettings.open(.ap) }
+                    onRetrySTA()
                 } label: {
                     HStack(spacing: 6) {
-                        if mode == .ap { icon.frame(width: 20, height: 20) }
                         Text(AppLocalized.resource(action))
                             .zTransferTypography(.labelLarge, weight: .medium)
                             .foregroundStyle(ZTransferColors.primaryText)

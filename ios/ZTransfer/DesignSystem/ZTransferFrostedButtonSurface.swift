@@ -11,6 +11,7 @@ struct ZTransferFrostedButtonSurface: View, Animatable {
     let activeColor: Color
     let active: Bool
     let pressed: Bool
+    var surfaceColor: Color? = nil
     var pressProgress: CGFloat? = nil
     var activeProgress: CGFloat? = nil
 
@@ -32,7 +33,7 @@ struct ZTransferFrostedButtonSurface: View, Animatable {
         let active = Double(min(max(activeProgress ?? (self.active ? 1 : 0), 0), 1))
         let volume = 1 - 0.48 * press
         let base = panel ? ZTransferColors.primaryText.opacity(0.05)
-            : (dark ? Color(red: 137 / 255, green: 153 / 255, blue: 164 / 255) : .white)
+            : (surfaceColor ?? (dark ? Color(red: 137 / 255, green: 153 / 255, blue: 164 / 255) : .white))
                 .opacity(Self.baseAlpha(dark: dark, boost: opacityBoost))
         shape.fill(base)
             .overlay(shape.fill((dark ? Color(red: 214 / 255, green: 226 / 255, blue: 232 / 255) : .white)

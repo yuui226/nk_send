@@ -4,6 +4,163 @@ import XCTest
 
 @MainActor
 final class RemoteViewfinderRenderingTests: XCTestCase {
+    private final class Desqueeze: ObservableObject {
+        @Published var multiplier: CGFloat = 1
+    }
+    private struct DesqueezeHost: View {
+        @ObservedObject var state: Desqueeze
+        let image: UIImage
+        var body: some View {
+            RemoteRotationSurface(rotation: 0) {
+                VStack {
+                    RemoteViewfinderAspect(aspect: 1.5 * state.multiplier) { aspect in
+                        GeometryReader { proxy in
+                            RemoteZoomableViewfinder(aspect: aspect,
+                                imageSize: image.size, metadata: nil, onFocus: { _ in }) {
+                                RemoteViewfinderImage(image: image, aspect: aspect, size: proxy.size)
+                            }
+                            .background(Color.blue)
+                        }
+                    }
+                    Spacer()
+                }.frame(width: 300).background(.white)
+            }
+        }
+    }
+
+    func testDesqueezeTransitionKeepsImageAndMaskTogetherWithoutExposedBand() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 300, height: 200))
+        }
+        let state = Desqueeze()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = UIHostingController(rootView: DesqueezeHost(state: state, image: image))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; previous?.makeKey() }
+        try await Task.sleep(for: .milliseconds(160))
+        var previousHeight: CGFloat = 200
+        for target: CGFloat in [1.33, 2, 1] {
+            let targetHeight = 200 / target
+            var intermediateHeights: [Int] = []
+            withAnimation(ZTransferMotion.standard) { state.multiplier = target }
+            for _ in 0..<7 {
+                try await Task.sleep(for: .milliseconds(20))
+                // A one-pixel column catches the full-height band and image
+                // extent without blocking the main actor with a full-frame
+                // readback/scan during this 240ms animation.
+                let strip = CGSize(width: 1, height: window.bounds.height)
+                let shot = UIGraphicsImageRenderer(size: strip, format: format).image { context in
+                    context.cgContext.translateBy(x: -window.bounds.midX, y: 0)
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+                }
+                let cg = try XCTUnwrap(shot.cgImage)
+                var rgba = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+                let context = try XCTUnwrap(CGContext(data: &rgba, width: cg.width, height: cg.height,
+                    bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(origin: .zero, size: strip))
+                let uncovered = stride(from: 0, to: rgba.count, by: 4).filter {
+                    rgba[$0] < 20 && rgba[$0 + 1] < 20 && rgba[$0 + 2] > 220
+                }.count
+                XCTAssertLessThan(uncovered, 2, "Viewport background exposed during desqueeze, target=\(target)")
+                let redHeight = (0..<cg.height).filter { y in
+                    let offset = (y * cg.width + cg.width / 2) * 4
+                    return rgba[offset] > 220 && rgba[offset + 1] < 20 && rgba[offset + 2] < 20
+                }.count
+                intermediateHeights.append(redHeight)
+            }
+            XCTAssertTrue(intermediateHeights.contains {
+                CGFloat($0) > min(previousHeight, targetHeight) + 2 &&
+                CGFloat($0) < max(previousHeight, targetHeight) - 2
+            }, "Native rotation host must preserve desqueeze interpolation, not jump: \(intermediateHeights)")
+            try await Task.sleep(for: .milliseconds(160))
+            previousHeight = targetHeight
+        }
+    }
+
+    func testRoundedFocusCornersStayShortAndKeepScreenSizeWhenZoomed() {
+        for zoom: CGFloat in [1, 2, 8] {
+            let path = focusCornerPath(center: .zero, halfWidth: 40 / zoom, halfHeight: 30 / zoom, zoom: zoom)
+            var curves = 0
+            var lengths: [CGFloat] = []
+            var previous = CGPoint.zero
+            path.cgPath.applyWithBlock { element in
+                let value = element.pointee
+                switch value.type {
+                case .moveToPoint: previous = value.points[0]
+                case .addLineToPoint:
+                    let point = value.points[0]
+                    lengths.append(hypot(point.x - previous.x, point.y - previous.y) * zoom)
+                    previous = point
+                case .addQuadCurveToPoint: curves += 1; previous = value.points[1]
+                default: break
+                }
+            }
+            XCTAssertEqual(curves, 4)
+            XCTAssertEqual(lengths.count, 8)
+            XCTAssertTrue(lengths.allSatisfy { abs($0 - 3.6) < 0.001 })
+            XCTAssertEqual(path.boundingRect.width * zoom, 80, accuracy: 0.001)
+        }
+    }
+
+    func testNativeRotationKeepsLiveSurfaceOpaqueAndCleansUpAfterEveryDirection() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let controller = UIViewController()
+        controller.view.backgroundColor = .white
+        let surface = RemoteRotationHost()
+        surface.frame = CGRect(x: 0, y: 59, width: 390, height: 751)
+        controller.view.addSubview(surface)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { surface.stop(); window.isHidden = true; previous?.makeKey() }
+        var settled = 0
+        surface.onSettled = { settled += 1 }
+        surface.update(content: AnyView(Color(uiColor: .red)), rotation: 0)
+        try await Task.sleep(for: .milliseconds(100))
+        for (index, rotation) in [90.0, -90, 0].enumerated() {
+            surface.update(content: AnyView(Color(uiColor: .green)), rotation: rotation)
+            try await Task.sleep(for: .milliseconds(20))
+            XCTAssertNotNil(surface.animator)
+            for _ in 0..<4 {
+                XCTAssertEqual(surface.host.view.alpha, 1)
+                XCTAssertFalse(surface.host.view.isUserInteractionEnabled)
+                // Sample actual composited pixels, not just the opacity target.
+                let format = UIGraphicsImageRendererFormat(); format.scale = 1
+                let shot = UIGraphicsImageRenderer(size: .init(width: 1, height: 1), format: format).image { context in
+                    context.cgContext.translateBy(x: -195, y: -422)
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+                }
+                // Renderer output can be extended-range/P3 and is not a
+                // guaranteed byte layout. Normalize before sampling channels.
+                var bytes = [UInt8](repeating: 0, count: 4)
+                let pixel = try XCTUnwrap(CGContext(data: &bytes, width: 1, height: 1,
+                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                pixel.draw(try XCTUnwrap(shot.cgImage), in: CGRect(x: 0, y: 0, width: 1, height: 1))
+                XCTAssertLessThan(Int(bytes[2]), 30, "No white blank frame at the monitor center")
+                XCTAssertGreaterThan(Int(bytes[0]) + Int(bytes[1]), 100, "No black blank frame")
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            try await Task.sleep(for: .milliseconds(180))
+            XCTAssertNil(surface.animator)
+            XCTAssertEqual(surface.subviews.count, 1)
+            XCTAssertEqual(settled, index + 1)
+            XCTAssertEqual(surface.host.view.transform, .identity)
+            XCTAssertTrue(surface.host.view.isUserInteractionEnabled)
+        }
+        surface.update(content: AnyView(Color.red), rotation: 90)
+        surface.removeFromSuperview()
+        XCTAssertNil(surface.animator)
+        XCTAssertEqual(surface.subviews.count, 1)
+    }
+
     func testFalseColorMatchesSourceGeometryWithDesqueezeAndSharedZoom() throws {
         let width = 300, height = 200
         let colors: [UInt32] = (0..<(width * height)).map { index in
@@ -47,7 +204,7 @@ final class RemoteViewfinderRenderingTests: XCTestCase {
                 for zoom: CGFloat in [1, 1.5] {
                     let aspect = 1.5 * multiplier, pan: CGFloat = zoom == 1 ? 0 : 13
                     let base = try bounds(RemoteViewfinderImage(image: source, aspect: aspect,
-                        multiplier: multiplier, size: size), size: size, zoom: zoom, pan: pan)
+                        size: size), size: size, zoom: zoom, pan: pan)
                     let overlay = try bounds(RemoteFalseColorOverlay(image: bitmap, aspect: aspect), size: size, zoom: zoom, pan: pan)
                     for (a, b) in zip(base, overlay) {
                         XCTAssertFalse(a.isNull); XCTAssertFalse(b.isNull)
@@ -73,7 +230,7 @@ final class RemoteViewfinderRenderingTests: XCTestCase {
         for multiplier in [CGFloat(1), 1.33, 1.5, 1.8, 2] {
             for size in [CGSize(width: 400, height: 400), CGSize(width: 800, height: 200)] {
                 let aspect = 1.5 * multiplier
-                let view = RemoteViewfinderImage(image: image, aspect: aspect, multiplier: multiplier, size: size)
+                let view = RemoteViewfinderImage(image: image, aspect: aspect, size: size)
                     .background(.black)
                 let renderer = ImageRenderer(content: view)
                 renderer.scale = 1

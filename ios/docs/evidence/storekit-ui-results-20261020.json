@@ -1,0 +1,174 @@
+{
+  "recordedAt": "2026-10-20",
+  "environment": "Local Xcode StoreKit, iOS 26.5 simulator",
+  "distinctPassedMethods": 16,
+  "scriptDefaultMethods": 16,
+  "scopeNotes": [
+    "Historical individual runs, not a single final-source full regression.",
+    "Does not prove real Apple sandbox, physical camera, release signing or App Review.",
+    "Some import tests reuse existing configuration; first-import cancellation is not established by a method name.",
+    "Original logs and xcresult bundles are temporary; hashes identify those historical files, not current source."
+  ],
+  "records": [
+    {
+      "method": "testDebugPremiumAnimationPreviewKeepsFreeWatermarkLocked",
+      "result": "passed",
+      "durationSeconds": 99.082,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.40lSZh/testDebugPremiumAnimationPreviewKeepsFreeWatermarkLocked.log",
+      "logSHA256": "e4263d264e2d744e623254e25c70b856fd7d9d65105545b92939a7d2334b83fd",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.40lSZh/testDebugPremiumAnimationPreviewKeepsFreeWatermarkLocked.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testDebugPremiumAnimationPreviewKeepsFreeWatermarkLocked]' passed (99.082 seconds)"
+    },
+    {
+      "method": "testLifetimePurchaseSurvivesImmediateAppRelaunch",
+      "result": "passed",
+      "durationSeconds": 67.612,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.HWYfp0/testLifetimePurchaseSurvivesImmediateAppRelaunch.log",
+      "logSHA256": "e5ccb94a8e37154e69ac69a6965ef956ae023468887aa0d14e8bd192cddfc753",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.HWYfp0/testLifetimePurchaseSurvivesImmediateAppRelaunch.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testLifetimePurchaseSurvivesImmediateAppRelaunch]' passed (67.612 seconds)"
+    },
+    {
+      "method": "testLifetimePurchaseClosesAfterSystemAcknowledgement",
+      "result": "passed",
+      "durationSeconds": 59.786,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.h3hYDA/testLifetimePurchaseClosesAfterSystemAcknowledgement.log",
+      "logSHA256": "0489a95b1c8a598aa1042bb01b6e18daa643cb99b29dba540b96b9afc20d9da7",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.h3hYDA/testLifetimePurchaseClosesAfterSystemAcknowledgement.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testLifetimePurchaseClosesAfterSystemAcknowledgement]' passed (59.786 seconds)"
+    },
+    {
+      "method": "testPurchasedBadgeCelebratesWithoutReopeningPurchaseInBothSettings",
+      "result": "passed",
+      "durationSeconds": 94.341,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ytNnzR/testPurchasedBadgeCelebratesWithoutReopeningPurchaseInBothSettings.log",
+      "logSHA256": "fde720513c4f4a326835bafb0e748c560401f37d5a820cb2f92bf49ae39a7289",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ytNnzR/testPurchasedBadgeCelebratesWithoutReopeningPurchaseInBothSettings.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testPurchasedBadgeCelebratesWithoutReopeningPurchaseInBothSettings]' passed (94.341 seconds)"
+    },
+    {
+      "method": "testAnnualToLifetimeKeepsRenewalManagementAfterRelaunch",
+      "result": "passed",
+      "durationSeconds": 163.93,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.FgaouB/testAnnualToLifetimeKeepsRenewalManagementAfterRelaunch.log",
+      "logSHA256": "c65e86052813a4926e108faa9c21a0c35e12226d62133761d91db28d3a2f5f8e",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.FgaouB/testAnnualToLifetimeKeepsRenewalManagementAfterRelaunch.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testAnnualToLifetimeKeepsRenewalManagementAfterRelaunch]' passed (163.930 seconds)"
+    },
+    {
+      "method": "testAppleSubscriptionManagementCancelsRenewalAndKeepsPaidTerm",
+      "result": "passed",
+      "durationSeconds": 190.101,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.OFWThl/testAppleSubscriptionManagementCancelsRenewalAndKeepsPaidTerm.log",
+      "logSHA256": "f8c70306185a4f4e3dbf4d9795efac0bd16164eaf76b455fca3ca71f4e8b88ac",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.OFWThl/testAppleSubscriptionManagementCancelsRenewalAndKeepsPaidTerm.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testAppleSubscriptionManagementCancelsRenewalAndKeepsPaidTerm]' passed (190.101 seconds)"
+    },
+    {
+      "method": "testPurchasePageLayoutInAllLanguages",
+      "result": "passed",
+      "durationSeconds": 191.105,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.FbzGGr/testPurchasePageLayoutInAllLanguages.log",
+      "logSHA256": "04e001ff2e71d8b713ad7e5dbfa0831387231de7e47ada01812eba2da437055a",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.FbzGGr/testPurchasePageLayoutInAllLanguages.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testPurchasePageLayoutInAllLanguages]' passed (191.105 seconds)"
+    },
+    {
+      "method": "testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames",
+      "result": "passed",
+      "durationSeconds": 135.293,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ocLalu/testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.log",
+      "logSHA256": "2308e4947ecfa49ebb8df098d48b7a9229155ee3e70bd776ca7fe2879fa55a63",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ocLalu/testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames]' passed (135.293 seconds)"
+    },
+    {
+      "method": "testPurchasedWorkbenchEditsAndPersistsTextWatermark",
+      "result": "passed",
+      "durationSeconds": 130.038,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dVmvBY/testPurchasedWorkbenchEditsAndPersistsTextWatermark.log",
+      "logSHA256": "4dd64047cfa74054ac1c384dd7791b6aa37a4e8311fdcfbc94c7a60f988b8483",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dVmvBY/testPurchasedWorkbenchEditsAndPersistsTextWatermark.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testPurchasedWorkbenchEditsAndPersistsTextWatermark]' passed (130.038 seconds)"
+    },
+    {
+      "method": "testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch",
+      "result": "passed",
+      "durationSeconds": 104.958,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.0vkhT8/testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "logSHA256": "7116c4ef507721874579cae20b7df6cf6f3715508aac6f7be9788b1b53cf0c06",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.0vkhT8/testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch]' passed (104.958 seconds)"
+    },
+    {
+      "method": "testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization",
+      "result": "passed",
+      "durationSeconds": 63.581,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.qLEDSR/testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization.log",
+      "logSHA256": "eb0624abe5a746bd507510b23dbf60d63998dfc843a1572a75899c07a8a76dd4",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.qLEDSR/testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization]' passed (63.581 seconds)"
+    },
+    {
+      "method": "testWorkbenchDeniedPhotoSaveReportsFailureAndCanRetry",
+      "result": "passed",
+      "durationSeconds": 64.362,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.SUo7mu/testWorkbenchDeniedPhotoSaveReportsFailureAndCanRetry.log",
+      "logSHA256": "558891b0e95f05453985af6caf063f692c7958bc0ae08ef386bbf73dfbc935c0",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.SUo7mu/testWorkbenchDeniedPhotoSaveReportsFailureAndCanRetry.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testWorkbenchDeniedPhotoSaveReportsFailureAndCanRetry]' passed (64.362 seconds)"
+    },
+    {
+      "method": "testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices",
+      "result": "passed",
+      "durationSeconds": 244.304,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.hTt3r9/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.log",
+      "logSHA256": "dc90633f859619e5c889fbfa5d4fb4504702d66f15e7b8f20f43a04d4a30ef62",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.hTt3r9/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices]' passed (244.304 seconds)"
+    },
+    {
+      "method": "testPurchasedCameraEffectsSaveTextWatermarkWhenPopupCloses",
+      "result": "passed",
+      "durationSeconds": 279.255,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.CxOKuF/testPurchasedCameraEffectsSaveTextWatermarkWhenPopupCloses.log",
+      "logSHA256": "d06d339a9eb78cbd07e9131e9b8be57688ada677e9e85daca9436b486e79ba1a",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.CxOKuF/testPurchasedCameraEffectsSaveTextWatermarkWhenPopupCloses.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testPurchasedCameraEffectsSaveTextWatermarkWhenPopupCloses]' passed (279.255 seconds)"
+    },
+    {
+      "method": "testFreeWorkbenchSavesPhotoThroughSystemAuthorization",
+      "result": "passed",
+      "durationSeconds": 75.842,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.n1ZcQq/testFreeWorkbenchSavesPhotoThroughSystemAuthorization.log",
+      "logSHA256": "bc32203758d6525a7949f2693ce0ce0fbafbe78baf130a136c388c52e5bafaae",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.n1ZcQq/testFreeWorkbenchSavesPhotoThroughSystemAuthorization.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testFreeWorkbenchSavesPhotoThroughSystemAuthorization]' passed (75.842 seconds)"
+    },
+    {
+      "method": "testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch",
+      "result": "passed",
+      "durationSeconds": 270.826,
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Xvbcz2/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "logSHA256": "cc076e7ca4f9e26c9bec28c752f90a4a2218dbfb44dde4efcf472ee5cf04da7d",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Xvbcz2/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+      "cleanupPassed": true,
+      "successEvidence": "Test Case '-[ZTransferStoreKitUITests.PremiumRecoveryUITests testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch]' passed (270.826 seconds)"
+    }
+  ]
+}

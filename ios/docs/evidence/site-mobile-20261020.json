@@ -1,0 +1,100 @@
+[
+  {
+    "scheme": "light",
+    "route": "",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "light",
+    "route": "ios/privacy/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "light",
+    "route": "ios/terms/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "light",
+    "route": "ios/support/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "light",
+    "route": "ios/en/privacy/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "light",
+    "route": "ios/en/terms/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "light",
+    "route": "ios/en/support/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "dark",
+    "route": "",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "dark",
+    "route": "ios/privacy/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "dark",
+    "route": "ios/terms/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "dark",
+    "route": "ios/support/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "dark",
+    "route": "ios/en/privacy/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "dark",
+    "route": "ios/en/terms/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  },
+  {
+    "scheme": "dark",
+    "route": "ios/en/support/",
+    "width": 375,
+    "scrollWidth": 375,
+    "background": "rgba(0, 0, 0, 0)"
+  }
+]

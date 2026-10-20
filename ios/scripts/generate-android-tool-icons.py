@@ -25,7 +25,7 @@ icons = [('settings', a.core, 'filled/Settings.kt'), ('check', a.core, 'filled/C
          ('focusArea', extended, 'filled/CenterFocusStrong.kt'), ('touch', extended, 'filled/TouchApp.kt'),
          ('volumeUp', extended, 'filled/VolumeUp.kt'), ('aspectRatio', extended, 'outlined/AspectRatio.kt'),
          ('edit', a.core, 'filled/Edit.kt'), ('arrowBack', a.core, 'filled/ArrowBack.kt'),
-         ('refresh', a.core, 'filled/Refresh.kt'), ('image', extended, 'filled/Image.kt')]
+         ('refresh', a.core, 'filled/Refresh.kt'), ('image', extended, 'filled/Image.kt'), ('tune', extended, 'outlined/Tune.kt')]
 if a.queue_controls:
     icons = [('play', a.core, 'rounded/PlayArrow.kt'), ('pause', extended, 'filled/Pause.kt'),
              ('checklist', extended, 'filled/Checklist.kt')]

@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-20",
+  "scope": "Offline PhotoEffectsSettingsPreview mounted in UIHostingController; edits during initial grace and after first rendered output; detached render cancellation regression",
+  "runs": [
+    {
+      "log": "/tmp/ztransfer-prelaunch-fallback-grace.log",
+      "sha256": "2bfa85187e110c9676ac6c2211766eb4100ae43678da634751ba8e887173b5e4",
+      "exitCode": 65,
+      "testSucceeded": false
+    },
+    {
+      "log": "/tmp/ztransfer-prelaunch-fallback-grace-enabled.log",
+      "sha256": "f12258b4927107514577450431d90ce0d1717afc843b53d2683f22fadafeefac",
+      "exitCode": 0,
+      "testSucceeded": true
+    }
+  ],
+  "finalTests": 2,
+  "finalFailures": 0,
+  "lifecycleSeconds": 2.323,
+  "remaining": [
+    "Complete image-picker UI visual recheck",
+    "Updated Release verification"
+  ],
+  "sourceLifecycleRun": {
+    "log": "/tmp/ztransfer-prelaunch-fallback-source.log",
+    "sha256": "dc92a5e52b593dfbd62b130aab440351debb1090cded48a214a42c2c6bd55127",
+    "exitCode": 0,
+    "tests": 2,
+    "failures": 0,
+    "durationSeconds": 9.23,
+    "scope": "Synthetic real-source UIImage arrives during pending grace; wait beyond cancelled deadline; source removed; host removed and reinserted; new grace verified"
+  }
+}

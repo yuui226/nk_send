@@ -101,7 +101,8 @@ final class ModalPresentationTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(400))
         XCTAssertTrue(menu.host.view.isUserInteractionEnabled)
         XCTAssertEqual(menu.bounds.width, 156, accuracy: 0.5)
-        XCTAssertEqual(menu.bounds.height, 160, accuracy: 0.5)
+        // Android: four 34pt chips, three 8pt gaps and 12pt padding on both sides.
+        XCTAssertEqual(menu.bounds.height, 4 * 34 + 3 * 8 + 2 * 12, accuracy: 0.5)
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
             XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))

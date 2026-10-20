@@ -303,6 +303,41 @@ final class PremiumBusinessTests: XCTestCase {
         }
     }
 
+    // Android LocalPhotoBatchViewModel keeps the selection after failure and
+    // permits a new batch after 2400 ms. Exercise the iOS permission boundary
+    // changing between those batches without recreating the model or selection.
+    func testLocalBatchRecoversAfterPhotoPermissionIsGrantedWithoutReselection() async throws {
+        let authorization = PremiumPhotoAuthorizationGate()
+        let saved = expectation(description: "Recovered batch saves each selected photo once")
+        saved.expectedFulfillmentCount = 2
+        saved.assertForOverFulfill = true
+        let model = LocalPhotoBatchViewModel(premiumAccess: PremiumAccess(.lifetime),
+            requestAuthorization: { await authorization.request() },
+            generatePhoto: { _, _ in saved.fulfill() })
+        let selection = (1...2).map { PhotosPickerItem(itemIdentifier: "permission-recovery-\($0)") }
+        model.select(selection)
+        for status in [PHAuthorizationStatus.denied, .authorized] {
+            model.generate(settings: watermarkSettings())
+            let permissionDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while !(await authorization.isWaiting), ContinuousClock.now < permissionDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let waiting = await authorization.isWaiting
+            XCTAssertTrue(waiting, "Every new batch must recheck the current permission")
+            await authorization.finish(status)
+            let readyDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while model.state.phase != .ready, ContinuousClock.now < readyDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertEqual(model.state.phase, .ready)
+            XCTAssertEqual(model.state.photos, selection)
+            XCTAssertEqual(model.state.progress.failed, status == .denied ? 2 : 0)
+            XCTAssertEqual(model.state.progress.saved, status == .denied ? 0 : 2)
+            if status == .authorized { XCTAssertTrue(model.state.progress.failures.isEmpty) }
+        }
+        await fulfillment(of: [saved], timeout: 1)
+    }
+
     func testLocalBatchPermissionDetailsSurviveReadyAndUseAndroidText() async throws {
         let model = LocalPhotoBatchViewModel(premiumAccess: PremiumAccess(.lifetime),
             requestAuthorization: { .denied }, generatePhoto: { _, _ in

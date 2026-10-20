@@ -98,18 +98,10 @@ struct ConnectionPage: View {
                             staHelpViewed = true
                             showSTATips = true
                         },
-                        onSTAHotspotSettings: {
-                            model.cancelWiFiConnection()
-                            openWirelessSettings(.sta)
-                        },
                         onAPHelpRequested: {
                             tipsWirelessMode = .ap
                             apHelpViewed = true
                             showSTATips = true
-                        },
-                        onAPHotspotSettings: {
-                            model.cancelWiFiConnection()
-                            openWirelessSettings(.ap)
                         },
                         staHelpViewed: staHelpViewed,
                         apHelpViewed: apHelpViewed)
@@ -261,13 +253,6 @@ struct ConnectionPage: View {
         connectionHint = PhotoEffectsHint(resource: "gps_close_before_connect")
     }
 
-    /// Android opens the phone's hotspot settings for STA and Wi‑Fi settings
-    /// for AP. iOS has no public deep-link API for either page, so try the
-    /// corresponding system route and fall back to the app settings page if
-    /// the installed iOS version rejects that route.
-    private func openWirelessSettings(_ mode: WirelessMode) {
-        CameraWirelessSettings.open(mode)
-    }
 }
 
 private struct GPSBlockedConnectionCard: ViewModifier {

@@ -1,5 +1,31 @@
 import SwiftUI
 
+private struct RemoteViewfinderZoomKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    var remoteViewfinderZoom: CGFloat {
+        get { self[RemoteViewfinderZoomKey.self] }
+        set { self[RemoteViewfinderZoomKey.self] = newValue }
+    }
+}
+
+/// One interpolated aspect drives the viewport, its mask and all image layers.
+/// AspectRatioLayout alone changes its proposal immediately; animating only an
+/// inner image then leaves a band while the surrounding layout catches up.
+struct RemoteViewfinderAspect<Content: View>: View, Animatable {
+    var aspect: CGFloat
+    @ViewBuilder let content: (CGFloat) -> Content
+    nonisolated var animatableData: CGFloat {
+        get { aspect }
+        set { aspect = newValue }
+    }
+    var body: some View {
+        content(aspect).aspectRatio(aspect, contentMode: .fit)
+    }
+}
+
 struct RemoteZoomableViewfinder<Content: View>: View {
     let aspect: CGFloat
     let imageSize: CGSize
@@ -15,6 +41,7 @@ struct RemoteZoomableViewfinder<Content: View>: View {
                                    width: CGFloat(fitted.width), height: CGFloat(fitted.height))
             ZStack(alignment: .topTrailing) {
                 content()
+                    .environment(\.remoteViewfinderZoom, CGFloat(viewport.scale))
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .scaleEffect(CGFloat(viewport.scale))
                     .offset(x: CGFloat(viewport.offset.x), y: CGFloat(viewport.offset.y))
@@ -65,21 +92,19 @@ struct RemoteZoomableViewfinder<Content: View>: View {
     }
 }
 
-/// RemoteLutImage's ContentScale.Fit followed by its horizontal graphics scale.
-/// Keep the encoded image's intrinsic aspect until after it has been fitted.
+/// The outer viewport already fits the desqueezed aspect. Draw directly in that
+/// rectangle so its pixels and frame interpolate together: an inner intrinsic
+/// aspect fit followed by horizontal scaling letterboxes intermediate heights.
 struct RemoteViewfinderImage: View {
     let image: UIImage
     let aspect: CGFloat
-    let multiplier: CGFloat
     let size: CGSize
 
     var body: some View {
         let fitted = RemoteFramingGrid.fit(width: Float(size.width), height: Float(size.height), aspect: Float(aspect))
         Image(uiImage: image)
             .resizable()
-            .aspectRatio(contentMode: .fit)
             .frame(width: CGFloat(fitted.width), height: CGFloat(fitted.height))
-            .scaleEffect(x: multiplier, y: 1, anchor: .center)
             .frame(width: size.width, height: size.height)
     }
 }

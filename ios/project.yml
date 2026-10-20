@@ -221,6 +221,8 @@ targets:
       configs:
         Debug:
           "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": StoreKit/SimulatorDebug.entitlements
+        Release:
+          EXCLUDED_SOURCE_FILE_NAMES: "$(inherited) debug_sample_01.jpg debug_sample_fhd.jpg"
     scheme:
       testTargets:
         - ZTransferTests
