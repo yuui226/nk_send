@@ -184,8 +184,12 @@ enum GeniePopupMotion {
         let row = Self.row(progress: progress, fraction: 1 - fraction,
                            anchor: mirrored(anchor), panel: mirrored(panel),
                            mouthWidth: mouthWidth)
+        // Android genieRow returns panel-local coordinates; our row() returns
+        // coordinates in the supplied panel's space. Reflect that absolute y
+        // directly, otherwise adding panel.maxY shifts every band down by a
+        // full panel height and the live-view handoff visibly jumps.
         return Row(left: row.left, right: row.right,
-                   y: panel.maxY - row.y, tilt: -row.tilt)
+                   y: -row.y, tilt: -row.tilt)
     }
 
     static func opacity(_ progress: CGFloat) -> CGFloat {

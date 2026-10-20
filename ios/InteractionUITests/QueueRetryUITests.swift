@@ -197,6 +197,7 @@ final class QueueRetryUITests: XCTestCase {
         let clear = app.buttons["queue-clear-all"]
         let confirm = app.buttons["queue-confirm-action"]
         let idleRetryY = retry.frame.minY
+        let idleClear = clear.frame
         retry.tap()
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         XCTAssertLessThan(confirm.frame.maxY, retry.frame.minY)
@@ -210,6 +211,8 @@ final class QueueRetryUITests: XCTestCase {
         clear.tap()
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         XCTAssertLessThan(confirm.frame.maxY, clear.frame.minY)
+        XCTAssertEqual(clear.frame.minX, idleClear.minX, accuracy: 1)
+        XCTAssertEqual(clear.frame.minY, idleClear.minY, accuracy: 1)
         let clearPanel = app.otherElements["popup-panel-queueClear"]
         XCTAssertTrue(clearPanel.exists)
         XCTAssertGreaterThan(clearPanel.frame.width, retryWidth)
@@ -218,15 +221,39 @@ final class QueueRetryUITests: XCTestCase {
         // Accessibility bounds need not equal the button layout bounds.
         // Check the specified 20pt content inset instead.
         XCTAssertEqual(clearPanel.frame.maxX, app.frame.maxX - 20, accuracy: 1)
-        // The lower inline card takes space; the upper FAB moves with layout.
-        XCTAssertLessThan(retry.frame.minY, idleRetryY - 50)
+        // Approved iOS rule: confirmations overlay the queue without moving
+        // either FAB, including the retry button behind the clear panel.
+        XCTAssertEqual(retry.frame.minY, idleRetryY, accuracy: 2)
         let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "Clear confirmation above its own FAB"
+        attachment.name = "Clear confirmation overlays fixed FABs"
         attachment.lifetime = .keepAlways
         add(attachment)
-        clear.tap()
+        app.buttons["queue-cancel-action"].tap()
         expectAbsent(confirm)
         XCTAssertEqual(retry.frame.minY, idleRetryY, accuracy: 2)
+    }
+
+    func testConfirmedRetryReturnsUsableWhenTheAttemptFailsAgain() {
+        let app = launch(noSession: false)
+        defer { app.terminate() }
+        app.buttons["retry-connection"].tap()
+        let retry = app.buttons["queue-retry-all"]
+        let original = retry.frame
+        retry.tap()
+        let confirm = app.buttons["queue-confirm-action"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        expectAbsent(confirm)
+        // The fixture's camera fails immediately. A new eligible retry must
+        // enter after the joint fade, without retaining an invisible trigger.
+        expectLabel(app.staticTexts["retry-fixture-state"], "failed=2;done=0")
+        expectEnabled(retry, true)
+        XCTAssertEqual(retry.frame.minY, original.minY, accuracy: 1)
+        retry.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        app.buttons["queue-cancel-action"].tap()
+        expectAbsent(confirm)
+        XCTAssertTrue(retry.isHittable)
     }
 
     func testConfirmationScrimBlocksScrollAndDismissalRestoresIt() {

@@ -18,6 +18,9 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     var fillsProposedSize = false
     var gentleMotion = false
     var gentleAnchorY: CGFloat = 0.5
+    /// Inline overlay panels attach to a fixed-width button at their trailing
+    /// edge. Resolve against the actual host width in the same layout pass.
+    var trailingAnchorWidth: CGFloat? = nil
     var onSettled: ((CGFloat) -> Void)? = nil
     var onProgress: ((CGFloat) -> Void)? = nil
 
@@ -34,7 +37,8 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
         view.onProgress = onProgress
         view.configure(target: targetProgress, anchorX: anchorX,
                        anchorWidth: anchorWidth, anchorGap: anchorGap, opensAbove: opensAbove, usesFunnel: usesFunnel,
-                       gentleMotion: gentleMotion, gentleAnchorY: gentleAnchorY)
+                       gentleMotion: gentleMotion, gentleAnchorY: gentleAnchorY,
+                       trailingAnchorWidth: trailingAnchorWidth)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: GeniePopupHostView,
@@ -104,6 +108,7 @@ final class GeniePopupHostView: UIView {
     private var anchorX: CGFloat = 0.5
     private var anchorWidth: CGFloat = 0.1
     private var anchorGap: CGFloat = 8
+    private var trailingAnchorWidth: CGFloat?
     private var lastDrawnProgress: CGFloat?
     private var settledTarget: CGFloat?
     private var opensAbove = false
@@ -157,7 +162,11 @@ final class GeniePopupHostView: UIView {
 
     func configure(target next: CGFloat, anchorX: CGFloat,
                    anchorWidth: CGFloat, anchorGap: CGFloat, opensAbove: Bool = false, usesFunnel: Bool = true,
-                   gentleMotion: Bool = false, gentleAnchorY: CGFloat = 0.5) {
+                   gentleMotion: Bool = false, gentleAnchorY: CGFloat = 0.5,
+                   trailingAnchorWidth: CGFloat? = nil) {
+        self.trailingAnchorWidth = trailingAnchorWidth
+        let anchorX = trailingAnchorWidth.map { 1 - $0 / (2 * max(1, bounds.width)) } ?? anchorX
+        let anchorWidth = trailingAnchorWidth.map { $0 / max(1, bounds.width) } ?? anchorWidth
         if self.anchorX != anchorX || self.anchorWidth != anchorWidth || self.anchorGap != anchorGap || self.opensAbove != opensAbove || self.usesFunnel != usesFunnel {
             lastDrawnProgress = nil
         }
@@ -190,6 +199,13 @@ final class GeniePopupHostView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if let width = trailingAnchorWidth, bounds.width > 0 {
+            let x = 1 - width / (2 * bounds.width)
+            let fraction = width / bounds.width
+            if x != anchorX || fraction != anchorWidth { lastDrawnProgress = nil }
+            anchorX = x
+            anchorWidth = fraction
+        }
         host.view.bounds = bounds
         host.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
         canvas.frame = bounds

@@ -27,11 +27,12 @@ struct TransferQueueView: View {
     // Keep frame-frequency scrim changes out of the queue/card body.
     @State private var confirmationProgress = QueueConfirmationProgress()
     @State private var pendingConfirmation: QueueConfirmation?
+    @State private var confirmedActions: [QueueConfirmation: Bool] = [:]
     @StateObject private var removal = QueueRemovalCoordinator()
     @State private var listAtTop = true
     @Environment(\.displayScale) private var displayScale
 
-    fileprivate enum QueueConfirmation: Identifiable, Hashable {
+    enum QueueConfirmation: Identifiable, Hashable {
         case clear, retry
         var id: Self { self }
     }
@@ -164,17 +165,13 @@ struct TransferQueueView: View {
 
     private var queueBottomControls: some View {
         VStack(alignment: .trailing, spacing: 12) {
-            QueueFabVisibility(visible: actionVisibility.hasRetryable || mountedConfirmations.contains(.retry)) {
-                confirmationFab(.retry, enabled: confirmationIsEnabled(.retry)) {
-                    RemoteEditorIcon(kind: .refresh)
-                        .fill(isSessionConnected ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
-                        .frame(width: 26, height: 26)
-                }
+            confirmationFab(.retry, visible: actionVisibility.hasRetryable, enabled: confirmationIsEnabled(.retry)) {
+                RemoteEditorIcon(kind: .refresh)
+                    .fill(isSessionConnected ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
+                    .frame(width: 26, height: 26)
             }
-            QueueFabVisibility(visible: actionVisibility.hasClearable || mountedConfirmations.contains(.clear)) {
-                confirmationFab(.clear, enabled: confirmationIsEnabled(.clear)) {
-                    QueueBroomMark(color: ZTransferColors.primaryText).frame(width: 26, height: 26)
-                }
+            confirmationFab(.clear, visible: actionVisibility.hasClearable, enabled: confirmationIsEnabled(.clear)) {
+                QueueBroomMark(color: ZTransferColors.primaryText).frame(width: 26, height: 26)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -182,10 +179,12 @@ struct TransferQueueView: View {
         .padding(.bottom, 24)
     }
 
-    private func confirmationFab<Label: View>(_ action: QueueConfirmation, enabled: Bool,
+    private func confirmationFab<Label: View>(_ action: QueueConfirmation, visible: Bool, enabled: Bool,
                                                @ViewBuilder label: () -> Label) -> some View {
         QueueConfirmationFab(action: action, expanded: pendingConfirmation == action,
-            mounted: mountedConfirmations.contains(action), enabled: enabled, label: label(),
+            mounted: mountedConfirmations.contains(action), visible: visible,
+            enabled: confirmedActions[action] ?? enabled,
+            confirmed: confirmedActions[action] != nil, label: label(),
             onToggle: { toggleConfirmation(action) }, onConfirm: { confirm(action) }, onDismiss: {
                 // Android dismisses this action's flag, not the other panel.
                 if pendingConfirmation == action { pendingConfirmation = nil }
@@ -193,6 +192,7 @@ struct TransferQueueView: View {
             onProgress: { confirmationProgress.values[action] = $0 }, onClosed: {
                 guard pendingConfirmation != action else { return }
                 mountedConfirmations.remove(action)
+                confirmedActions[action] = nil
                 confirmationProgress.values[action] = nil
             })
     }
@@ -205,7 +205,7 @@ struct TransferQueueView: View {
     }
 
     private func toggleConfirmation(_ action: QueueConfirmation) {
-        guard confirmationIsEnabled(action) else { return }
+        guard confirmedActions[action] == nil, confirmationIsEnabled(action) else { return }
         #if DEBUG
         QueueConfirmationAnimationTrace.shared.toggle(
             closing: pendingConfirmation == action, reopen: { toggleConfirmation(action) })
@@ -254,6 +254,9 @@ struct TransferQueueView: View {
         // confirmation remains available until its task eligibility disappears.
         let eligible = action == .clear ? actionVisibility.hasClearable : actionVisibility.hasRetryable
         guard eligible else { pendingConfirmation = nil; return }
+        // Preserve the current visual enabled state throughout the fade,
+        // even though dispatch immediately changes task eligibility.
+        confirmedActions[action] = confirmationIsEnabled(action)
         pendingConfirmation = nil
         switch action {
         case .clear:
@@ -400,16 +403,23 @@ final class QueueFabVisibilityAnimator: NSObject, ObservableObject {
         link?.invalidate(); link = nil
         motion = .init(visible: motion.visible)
     }
+    func finishConfirmation(visible: Bool) {
+        // The confirmation already faded the button to zero. Do not start a
+        // second exit from opacity=1; a newly eligible action may enter afresh.
+        stop()
+        motion = .init(visible: false)
+        setVisible(visible)
+    }
 }
 
 private struct QueueFabVisibility<Content: View>: View {
     let visible: Bool
     let content: Content
-    @StateObject private var animator: QueueFabVisibilityAnimator
-    init(visible: Bool, @ViewBuilder content: () -> Content) {
+    @ObservedObject var animator: QueueFabVisibilityAnimator
+    init(visible: Bool, animator: QueueFabVisibilityAnimator, @ViewBuilder content: () -> Content) {
         self.visible = visible
+        self.animator = animator
         self.content = content()
-        _animator = StateObject(wrappedValue: QueueFabVisibilityAnimator(visible: visible))
     }
     var body: some View {
         Group {
@@ -447,78 +457,139 @@ private struct QueueConfirmationScrim: View {
     }
 }
 
-/// Like Android ConfirmFab, the outgoing card retains its layout slot and
-/// trigger until the shared Genie clock reaches zero. Each FAB owns geometry.
-private struct QueueConfirmationFab<Label: View>: View {
+@MainActor
+private final class QueueConfirmationButtonFade: ObservableObject {
+    @Published var progress: CGFloat = 1
+}
+
+private struct QueueConfirmationButtonFadeEffect: ViewModifier {
+    @ObservedObject var fade: QueueConfirmationButtonFade
+    let confirmed: Bool
+    func body(content: Content) -> some View {
+        content.opacity(confirmed ? fade.progress : 1)
+    }
+}
+
+/// User-approved iOS rule (2026-10-20): both FAB slots stay fixed. The panel
+/// overlays above its own button; cancel reverses Genie, confirm fades both.
+struct QueueConfirmationFab<Label: View>: View {
     let action: TransferQueueView.QueueConfirmation
     let expanded: Bool
     let mounted: Bool
+    let visible: Bool
     let enabled: Bool
+    let confirmed: Bool
     let label: Label
     let onToggle: () -> Void
     let onConfirm: () -> Void
     let onDismiss: () -> Void
     let onProgress: (CGFloat) -> Void
     let onClosed: () -> Void
-    @State private var geometry: [String: CGRect] = [:]
+    @StateObject private var presence: QueueFabVisibilityAnimator
+    @StateObject private var fade = QueueConfirmationButtonFade()
+
+    init(action: TransferQueueView.QueueConfirmation, expanded: Bool, mounted: Bool,
+         visible: Bool, enabled: Bool, confirmed: Bool, label: Label,
+         onToggle: @escaping () -> Void, onConfirm: @escaping () -> Void,
+         onDismiss: @escaping () -> Void, onProgress: @escaping (CGFloat) -> Void,
+         onClosed: @escaping () -> Void) {
+        self.action = action
+        self.expanded = expanded
+        self.mounted = mounted
+        self.visible = visible
+        self.enabled = enabled
+        self.confirmed = confirmed
+        self.label = label
+        self.onToggle = onToggle
+        self.onConfirm = onConfirm
+        self.onDismiss = onDismiss
+        self.onProgress = onProgress
+        self.onClosed = onClosed
+        _presence = StateObject(wrappedValue: QueueFabVisibilityAnimator(visible: visible || mounted))
+    }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            if mounted {
-                let panel = geometry["panel"] ?? .zero
-                let button = geometry["button"] ?? .zero
-                let ready = panel.width > 0 && button.width > 0
-                // Android ConfirmFab supplies the full trigger bounds; the mesh
-                // itself limits the mouth to GENIE_Z_MARK_WIDTH_DP.
-                let anchor = button
-                GeniePopupPanel(
-                    content: QueueConfirmationCard(action: action, onConfirm: onConfirm, onDismiss: onDismiss),
-                    trigger: action == .retry ? .queueRetry : .queueClear,
-                    targetProgress: ready && expanded ? 1 : 0,
-                    anchorX: ready ? (anchor.midX - panel.minX) / panel.width : 0,
-                    anchorWidth: ready ? anchor.width / panel.width : 0,
-                    anchorGap: ready ? button.minY - panel.maxY : 0,
-                    opensAbove: true,
-                    fitsContentWidth: true,
-                    onSettled: { value in if value == 0 && !expanded { onClosed() } },
-                    onProgress: reportProgress
-                )
-                #if DEBUG
-                .onAppear { QueueConfirmationAnimationTrace.shared.panelAppeared() }
-                #endif
-                .background(bounds("panel"))
-                .frame(maxWidth: 260, alignment: .trailing)
+        ZStack(alignment: .bottomTrailing) {
+            // An empty Group drops its frame modifiers from stack layout. Keep
+            // a real transparent slot even after the visible content is removed.
+            Color.clear.frame(width: 58, height: 70).allowsHitTesting(false)
+            QueueFabVisibility(visible: visible || mounted, animator: presence) {
+                VStack(alignment: .trailing, spacing: 0) {
+                    Color.clear.frame(height: 12)
+                    Button(action: onToggle) { label.padding(16) }
+                        .accessibilityIdentifier(action == .retry ? "queue-retry-all" : "queue-clear-all")
+                        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 29))
+                        .disabled(!enabled)
+                        .allowsHitTesting(!confirmed)
+                        .accessibilityHidden(confirmed)
+                        .accessibilityLabel(AppLocalized.resource(action == .retry ? "cd_retry_failed" : "cd_clear_queue"))
+                        .modifier(QueueConfirmationButtonFadeEffect(fade: fade, confirmed: confirmed))
+                }
+                .frame(width: 58, height: 70)
+                .overlay(alignment: .topTrailing) {
+                    if mounted {
+                        confirmationPanel
+                    }
+                }
             }
-            Spacer().frame(height: 12)
-            Button(action: onToggle) { label.padding(16) }
-                .accessibilityIdentifier(action == .retry ? "queue-retry-all" : "queue-clear-all")
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 29))
-                .disabled(!enabled)
-                .accessibilityLabel(AppLocalized.resource(action == .retry ? "cd_retry_failed" : "cd_clear_queue"))
-                .background(bounds("button"))
         }
-        .onPreferenceChange(QueueConfirmationBounds.self) { geometry = $0 }
+        .frame(width: 58, height: 70)
+        .zIndex(mounted ? 1 : 0)
+        .onChange(of: expanded) { if $0 { fade.progress = 1 } }
+    }
+
+    private var confirmationPanel: some View {
+        QueueConfirmationOverlayLayout {
+            GeniePopupPanel(
+                content: QueueConfirmationCard(action: action, onConfirm: onConfirm, onDismiss: onDismiss),
+                trigger: action == .retry ? .queueRetry : .queueClear,
+                targetProgress: expanded ? 1 : 0,
+                // Local dimensions cannot drift with a pressed button's
+                // transform, a page transition, or another FAB's popup.
+                anchorX: 1,
+                anchorWidth: 0,
+                anchorGap: 12,
+                opensAbove: true,
+                usesFunnel: !confirmed,
+                fitsContentWidth: true,
+                trailingAnchorWidth: 58,
+                onSettled: { value in
+                    if value == 0 && !expanded {
+                        if confirmed { presence.finishConfirmation(visible: visible) }
+                        onClosed()
+                    }
+                },
+                onProgress: reportProgress
+            )
+            #if DEBUG
+            .onAppear { QueueConfirmationAnimationTrace.shared.panelAppeared() }
+            #endif
+            .allowsHitTesting(expanded && !confirmed)
+        }
     }
 
     private func reportProgress(_ value: CGFloat) {
+        if confirmed && fade.progress != value { fade.progress = value }
         onProgress(value)
         #if DEBUG
         QueueConfirmationAnimationTrace.shared.record(value, expanded: expanded)
         #endif
     }
 
-    private func bounds(_ key: String) -> some View {
-        GeometryReader { proxy in
-            Color.clear.preference(key: QueueConfirmationBounds.self,
-                                   value: [key: proxy.frame(in: .global)])
-        }
-    }
 }
 
-private struct QueueConfirmationBounds: PreferenceKey {
-    static var defaultValue: [String: CGRect] { [:] }
-    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+/// Zero-height overlay, measured at the Android card's maximum width. Explicit
+/// placement keeps conditional content/alignment guides out of the anchor path.
+private struct QueueConfirmationOverlayLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: 260, height: 0)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            let size = subview.sizeThatFits(.init(width: 260, height: nil))
+            subview.place(at: CGPoint(x: bounds.maxX - size.width, y: bounds.minY - size.height),
+                          proposal: .init(width: size.width, height: size.height))
+        }
     }
 }
 
@@ -592,6 +663,7 @@ private struct QueueConfirmationCard: View {
             }
             HStack(spacing: 8) {
                 actionButton(AppLocalized.resource("cancel"), primary: false, action: onDismiss)
+                    .accessibilityIdentifier("queue-cancel-action")
                 actionButton(confirmLabel, primary: true, action: onConfirm)
                     .accessibilityIdentifier("queue-confirm-action")
             }

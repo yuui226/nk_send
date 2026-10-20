@@ -2044,15 +2044,20 @@ struct CameraSignalControl: View {
             CameraWirelessSettings.open(.ap)
         } label: {
             PhotoListSignalIcon(isUSB: isUSB, wirelessMode: wirelessMode, connected: connected)
-                .frame(width: 40, height: height)
+                .frame(width: photoListCompactButtonWidth, height: height)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22, disabledAlpha: 1))
         .disabled(!acceptsTap)
         .allowsHitTesting(acceptsTap)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AppLocalized.resource(labelKey))
+        .accessibilityIdentifier("photo-list-signal")
         .accessibilityRemoveTraits(acceptsTap ? [] : .isButton)
         .modifier(DisconnectedSignalBreath(connected: connected))
+        // Android scales inside the signal pill's layout slot. Constrain the
+        // outer animation host too: its UIView otherwise accepts the HStack's
+        // remaining width when disconnected and pushes the filter outwards.
+        .frame(width: photoListCompactButtonWidth, height: height)
     }
 }
 

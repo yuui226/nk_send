@@ -2,6 +2,58 @@ import XCTest
 
 @MainActor
 final class PhotoPreviewInteractionUITests: XCTestCase {
+    func testHeaderButtonsKeepTheirSlotsAcrossDisconnectQueueAndReconnect() throws {
+        continueAfterFailure = false
+        let app = launchHoldFixture()
+        defer { app.terminate(); XCUIDevice.shared.orientation = .portrait }
+        let signal = app.descendants(matching: .any).matching(identifier: "photo-list-signal").firstMatch
+        let settings = app.buttons["popup-trigger-settings"]
+        let filter = app.buttons["popup-trigger-filter"]
+        let queue = app.buttons["workspace-queue-open"]
+        XCTAssertTrue(signal.waitForExistence(timeout: 5))
+        let initialSettings = settings.frame
+        let initialFilter = filter.frame
+        let initialQueueRight = queue.frame.maxX
+        func capture(_ name: String) {
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        }
+        func verifyList() {
+            XCTAssertEqual(settings.frame.minX, initialSettings.minX, accuracy: 1)
+            XCTAssertEqual(filter.frame.minX, initialFilter.minX, accuracy: 1)
+            XCTAssertEqual(signal.frame.midX, settings.frame.maxX + 28, accuracy: 2)
+            XCTAssertEqual(signal.frame.midY, settings.frame.midY, accuracy: 1)
+            XCTAssertLessThan(filter.frame.maxX + 8, queue.frame.minX)
+            XCTAssertEqual(queue.frame.maxX, initialQueueRight, accuracy: 1)
+        }
+        verifyList()
+        app.buttons["admission-connection"].tap()
+        let offline = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Reconnect"),
+                                                object: app.buttons["admission-connection"])
+        XCTAssertEqual(XCTWaiter.wait(for: [offline], timeout: 5), .completed)
+        capture("signal-offline-list")
+        verifyList()
+        for _ in 0..<2 {
+            queue.tap()
+            let back = app.buttons["workspace-queue-back"]
+            XCTAssertTrue(back.waitForExistence(timeout: 3))
+            // Wait for the fixed header's existing 100+200ms entrance.
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                abs(signal.frame.midX - back.frame.maxX - 28) < 2
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 3), .completed)
+            XCTAssertFalse(queue.exists, "The empty queue page intentionally hides its queue capsule")
+            capture("signal-offline-queue")
+            back.tap()
+            XCTAssertTrue(settings.waitForExistence(timeout: 3))
+            verifyList()
+        }
+        app.buttons["admission-connection"].tap()
+        XCTAssertTrue(app.buttons["admission-connection"].waitForExistence(timeout: 3))
+        verifyList()
+        capture("signal-reconnected-list")
+    }
+
     private struct HoldEvent: Decodable {
         let event: String
         let milliseconds: Int64

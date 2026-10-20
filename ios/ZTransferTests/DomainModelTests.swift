@@ -1587,10 +1587,18 @@ final class DomainModelTests: XCTestCase {
                                           anchor: mirroredAnchor, panel: mirroredPanel)
                 XCTAssertEqual(actual.left, raw.left, accuracy: 1e-9)
                 XCTAssertEqual(actual.right, raw.right, accuracy: 1e-9)
-                XCTAssertEqual(actual.y, panel.maxY - raw.y, accuracy: 1e-9)
+                // The helper returns absolute coordinates. Android's local
+                // height-row.y reflection is therefore -raw.y in this space.
+                XCTAssertEqual(actual.y, -raw.y, accuracy: 1e-9)
                 XCTAssertEqual(actual.tilt, -raw.tilt, accuracy: 1e-9)
+                if progress == 1 {
+                    XCTAssertEqual(actual.y, panel.minY + panel.height * fraction, accuracy: 1e-9)
+                }
             }
         }
+        let inlet = GeniePopupMotion.rowAbove(progress: 0, fraction: 1, anchor: anchor, panel: panel)
+        XCTAssertEqual((inlet.left + inlet.right) / 2, anchor.midX, accuracy: 1e-9)
+        XCTAssertEqual(max(inlet.leftY, inlet.rightY), anchor.minY, accuracy: 1e-9)
     }
 
     @MainActor

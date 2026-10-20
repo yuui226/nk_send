@@ -4,6 +4,179 @@ import UIKit
 @testable import ZTransfer
 
 @MainActor
+final class QueueConfirmationLayoutTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var expanded = false
+        @Published var mounted = false
+        @Published var confirmed = false
+        @Published var visible = true
+        var probes: [String: UIView] = [:]
+        var bounds: [String: CGRect] { probes.mapValues { $0.convert($0.bounds, to: nil) } }
+        var progress: [CGFloat] = []
+    }
+    private struct Probe: UIViewRepresentable {
+        let state: State
+        let key: String
+        func makeUIView(context: Context) -> UIView {
+            let view = UIView(); view.isUserInteractionEnabled = false
+            state.probes[key] = view
+            return view
+        }
+        func updateUIView(_ uiView: UIView, context: Context) {}
+    }
+    private struct Harness: View {
+        @ObservedObject var state: State
+        var body: some View {
+            ZStack {
+                Color.white.ignoresSafeArea()
+                VStack(alignment: .trailing, spacing: 12) {
+                    fab(.retry)
+                    fab(.clear)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, 20).padding(.bottom, 24)
+            }
+        }
+        private func fab(_ action: TransferQueueView.QueueConfirmation) -> some View {
+            let clear = action == .clear
+            return QueueConfirmationFab(action: action, expanded: clear && state.expanded,
+                mounted: clear && state.mounted, visible: !clear || state.visible,
+                enabled: true, confirmed: clear && state.confirmed,
+                label: Color(red: 1, green: 0, blue: 1).frame(width: 26, height: 26),
+                onToggle: {}, onConfirm: {}, onDismiss: {},
+                onProgress: { if clear { state.progress.append($0) } },
+                onClosed: {
+                    if clear { state.mounted = false; state.confirmed = false }
+                })
+                .background(Probe(state: state, key: clear ? "clear" : "retry"))
+        }
+    }
+    private func panel(_ root: UIView) -> GeniePopupHostView? {
+        (root as? GeniePopupHostView) ?? root.subviews.lazy.compactMap(panel).first
+    }
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<150 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Presentation did not settle")
+    }
+    private func image(_ window: UIWindow) -> UIImage {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { context in
+            // Read the current committed layers without waiting for another
+            // screen update (which can consume several animation frames).
+            window.layer.render(in: context.cgContext)
+        }
+    }
+    private func green(_ window: UIWindow, at point: CGPoint) throws -> CGFloat {
+        // Clip the current layer tree to the one sampled pixel. Full-window
+        // CPU readbacks are too expensive to use as an animation frame clock.
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1), format: format).image { context in
+            context.cgContext.translateBy(x: -floor(point.x), y: -floor(point.y))
+            window.layer.render(in: context.cgContext)
+        }
+        let cg = try XCTUnwrap(image.cgImage)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8,
+            bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        XCTAssertGreaterThan(pixel[0], 240, "The sample must contain the magenta trigger or white background")
+        return CGFloat(pixel[1]) / 255
+    }
+
+    func testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let state = State()
+        let suite = "queue-confirmation-layout-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set("FROSTED_GLASS", forKey: "skin_preset")
+        defaults.set("en", forKey: "app_language")
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: Harness(state: state).defaultAppStorage(defaults))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        defer {
+            window.isHidden = true; window.rootViewController = nil; previous?.makeKey()
+            defaults.removePersistentDomain(forName: suite)
+        }
+        try await Task.sleep(for: .milliseconds(600))
+        let clear = try XCTUnwrap(state.bounds["clear"])
+        let retry = try XCTUnwrap(state.bounds["retry"])
+        let center = CGPoint(x: clear.midX, y: clear.maxY - 29)
+        XCTAssertEqual(try green(window, at: center), 0, accuracy: 0.05)
+        for confirming in [false, true] {
+            state.mounted = true; state.expanded = true
+            try await waitUntil { state.progress.last == 1 }
+            let popup = try XCTUnwrap(panel(window))
+            let target = popup.convert(popup.bounds, to: window)
+            XCTAssertEqual(target.maxX, clear.midX + 29, accuracy: 0.5)
+            XCTAssertEqual(target.maxY, clear.maxY - 58 - 12, accuracy: 0.5)
+            XCTAssertEqual(state.bounds["clear"], clear)
+            XCTAssertEqual(state.bounds["retry"], retry)
+            let capture = image(window)
+            let attachment = XCTAttachment(image: capture)
+            attachment.name = "fixed-queue-confirmation"; attachment.lifetime = .keepAlways; add(attachment)
+            state.progress.removeAll()
+            state.confirmed = confirming
+            state.visible = !confirming
+            state.expanded = false
+            var alphas: [CGFloat] = []
+            var transforms: [CATransform3D] = []
+            for _ in 0..<60 {
+                if !state.mounted { break }
+                try await Task.sleep(for: .milliseconds(20))
+                guard state.mounted, let p = state.progress.last, p > 0, p < 1 else { continue }
+                XCTAssertEqual(state.bounds["clear"], clear)
+                XCTAssertEqual(state.bounds["retry"], retry)
+                XCTAssertEqual(popup.convert(popup.bounds, to: window), target)
+                let canvas = try XCTUnwrap(popup.subviews.last)
+                if confirming {
+                    let buttonAlpha = 1 - (try green(window, at: center))
+                    XCTAssertEqual(buttonAlpha, canvas.alpha, accuracy: 0.13,
+                                   "The trigger and panel fade together without disabled-state dimming")
+                    transforms.append(try XCTUnwrap(canvas.layer.sublayers?.first?.sublayers?.first?.transform))
+                } else {
+                    XCTAssertEqual(try green(window, at: center), 0, accuracy: 0.05,
+                                   "Cancel keeps the trigger visible")
+                }
+                alphas.append(canvas.alpha)
+            }
+            XCTAssertFalse(state.mounted, "Dismissal must release the confirmation")
+            try await waitUntil { panel(window) == nil }
+            XCTAssertGreaterThan(alphas.count, 2, "Verify intermediate rendered frames")
+            if confirming {
+                for pair in zip(alphas, alphas.dropFirst()) { XCTAssertLessThanOrEqual(pair.1, pair.0 + 0.01) }
+                let first = try XCTUnwrap(transforms.first)
+                for transform in transforms {
+                    XCTAssertEqual(transform.m41, first.m41, accuracy: 0.01)
+                    XCTAssertEqual(transform.m42, first.m42, accuracy: 0.01)
+                }
+                for _ in 0..<8 {
+                    try await Task.sleep(for: .milliseconds(20))
+                    XCTAssertEqual(state.bounds["retry"], retry,
+                                   "Removing the lower FAB must not reposition the remaining one")
+                    XCTAssertEqual(try green(window, at: center), 1, accuracy: 0.05,
+                                   "No second exit may flash the trigger back on")
+                }
+            }
+            XCTAssertNil(panel(window))
+        }
+        state.visible = true
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(try green(window, at: center), 0, accuracy: 0.05)
+        state.expanded = true; state.mounted = true
+        try await waitUntil { state.progress.last == 1 }
+        XCTAssertEqual(state.bounds["clear"], clear)
+        XCTAssertEqual(state.bounds["retry"], retry)
+    }
+}
+
+@MainActor
 final class PhotoPreviewPagerObservationTests: XCTestCase {
     func testUpwardPagingLockSurvivesUpdatesAndRestoresOnlyItsOwnPanOnReleaseOrRemoval() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -822,6 +995,69 @@ final class PhotoFilterPresentationPerformanceTests: XCTestCase {
 
 @MainActor
 final class PhotoListSignalPerformanceTests: XCTestCase {
+    private struct BoundsKey: PreferenceKey {
+        static let defaultValue: [String: CGRect] = [:]
+        static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+            value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+        }
+    }
+    private final class GeometryState: ObservableObject {
+        @Published var connected = true
+        @Published var mode = 0
+        @Published var width: CGFloat = 320
+        var bounds: [String: CGRect] = [:]
+    }
+    private struct GeometryHarness: View {
+        @ObservedObject var state: GeometryState
+        var body: some View {
+            HStack(spacing: 8) {
+                Color.clear.frame(width: 52, height: 36)
+                CameraSignalControl(isUSB: state.mode == 0, wirelessMode: state.mode == 1 ? .sta : .ap,
+                    connected: state.connected)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: BoundsKey.self, value: ["signal": proxy.frame(in: .named("header"))])
+                    })
+                Color.clear.frame(width: 40, height: 36)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: BoundsKey.self, value: ["filter": proxy.frame(in: .named("header"))])
+                    })
+                Spacer(minLength: 0)
+            }
+            .frame(width: state.width, height: 36)
+            .coordinateSpace(name: "header")
+            .onPreferenceChange(BoundsKey.self) { state.bounds = $0 }
+        }
+    }
+    func testActualSignalKeepsFixedLayoutAcrossModesWidthsAndOfflineTransitions() async throws {
+        let state = GeometryState()
+        let suite = "signal-header-geometry-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: GeometryHarness(state: state).defaultAppStorage(defaults))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        for skin in ["LIQUID_GLASS", "FROSTED_GLASS", "WOOD", "CAMERA_CONTROLS", "TITANIUM"] {
+            defaults.set(skin, forKey: "skin_preset")
+            for mode in 0...2 {
+                state.mode = mode
+                for width: CGFloat in [320, 430, 800] {
+                    state.width = width
+                    for connected in [true, false, true] {
+                        state.connected = connected
+                        try await Task.sleep(for: .milliseconds(40))
+                        let signal = try XCTUnwrap(state.bounds["signal"])
+                        let filter = try XCTUnwrap(state.bounds["filter"])
+                        XCTAssertEqual(signal, CGRect(x: 60, y: 0, width: 40, height: 36),
+                                       "\(skin) mode=\(mode) connected=\(connected) width=\(width)")
+                        XCTAssertEqual(filter.minX, 108, accuracy: 0.5)
+                    }
+                }
+            }
+        }
+    }
+
     private final class Frames { var parent = 0; var content = 0 }
     private struct Content: View {
         let frames: Frames
