@@ -215,6 +215,8 @@ final class PhotoEffectsMasterUITests: XCTestCase {
         XCTAssertLessThan(off.milliseconds - down.milliseconds, 950)
         XCTAssertFalse(trace.contains { $0.event == "gps-on" })
         XCTAssertEqual(app.staticTexts["gps-enabled"].label, "0")
+        let material = XCTAttachment(screenshot: app.screenshot())
+        material.name = "gps-enable-button-material"; material.lifetime = .keepAlways; add(material)
         button.tap()
         XCTAssertEqual(app.staticTexts["gps-enabled"].label, "1")
     }

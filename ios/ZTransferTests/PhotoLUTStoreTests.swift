@@ -3,6 +3,80 @@ import UIKit
 @testable import ZTransfer
 
 @MainActor final class PhotoLUTStoreTests: XCTestCase {
+    func testTransferDraftCommitDiscardAndSnapshotCleanupKeepSavedRecipeIndependent() async throws {
+        let suite = "lut-draft-lifetime-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        func table(_ name: String, _ value: Int) throws -> CubeLUT {
+            try CubeLUTParser.parse(Data(("TITLE \(name)\nLUT_3D_SIZE 2\n"
+                + String(repeating: "\(value) \(value) \(value)\n", count: 8)).utf8))
+        }
+        let old = try table("saved", 0), next = try table("draft", 1)
+        let saved = PhotoLUTStore(defaults: defaults, directory: directory)
+        _ = try saved.selectLUT(old, name: "Saved", sourceIdentifier: "saved.cube")
+        saved.setIntensity(42)
+        let original = try XCTUnwrap(saved.restoreSelection())
+        let draft = PhotoLUTStore(defaults: defaults, directory: directory, savesOnCommit: true)
+        _ = try draft.selectLUT(next, name: "Draft", sourceIdentifier: "draft.cube")
+        draft.setIntensity(64)
+        draft.setAdjustments(.init(contrast: 20, saturation: -30))
+        XCTAssertEqual(saved.restoreSelection(), original)
+        XCTAssertEqual(defaults.integer(forKey: "lut_adjustments_v1:\(next.digest):intensity"), 64,
+                       "Per-LUT parameter memory is shared immediately, independent of role commit")
+        await draft.pruneSnapshots()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(old.digest).bin").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(next.digest).bin").path),
+                      "Uncommitted draft snapshot must survive pruning without a retained return value")
+
+        draft.reloadRole()
+        XCTAssertEqual(draft.restoreSelection(), original, "Discard restores saved recipe, not parameter memory")
+        await draft.pruneSnapshots()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(next.digest).bin").path))
+        let remembered = try draft.selectLUT(next, name: "Draft", sourceIdentifier: "draft.cube")
+        XCTAssertEqual(remembered.intensityPercent, 64)
+        XCTAssertEqual(remembered.lutAdjustments, .init(contrast: 20, saturation: -30))
+        draft.commitDraft()
+        let cold = PhotoLUTStore(defaults: defaults, directory: directory)
+        XCTAssertEqual(cold.restoreSelection(), remembered)
+        draft.select(nil)
+        XCTAssertEqual(cold.restoreSelection(), remembered, "Off is also a transfer draft until commit")
+        draft.commitDraft()
+        XCTAssertNil(cold.restoreSelection())
+    }
+
+    func testLUTKeepsRememberedBuiltinFilterAcrossBothScopesAndRestart() throws {
+        let np3 = try XCTUnwrap(PhotoFilterCatalog.presets.dropFirst(3).first)
+        let lut = try CubeLUTParser.parse(Data(("TITLE independent-np3\nLUT_3D_SIZE 2\n"
+            + String(repeating: "0 0 0\n", count: 8)).utf8))
+        for scope: PhotoEffectsStore.Scope in [.cameraTransfer, .localPhotos] {
+            let suite = "lut-np3-memory-\(UUID())"
+            let defaults = UserDefaults(suiteName: suite)!
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+            defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+            let role: PhotoLUTStore.Role = scope == .cameraTransfer ? .camera : .local
+            let store = PhotoLUTStore(role: role, defaults: defaults, directory: directory)
+            let effects = PhotoEffectsStore(defaults: defaults, scope: scope, lutStore: store)
+            var draft = effects.beginDraft()
+            draft.selectFilter(np3.id)
+            draft.filterIntensities[PhotoEffectsSettings.filterKey(np3.id)] = 62
+            draft.selectedFilter?.intensityPercent = 62
+            let remembered = draft.selectedFilter
+            draft.selectFilter(nil)
+            draft.selectedFilter = try store.selectLUT(lut, name: "Cube", sourceIdentifier: "cube.cube")
+            draft.photoFilterEnabled = true
+            effects.updateFromEditor(draft)
+            let key = scope == .cameraTransfer ? "photo_filter_selected_id" : "filter_id"
+            XCTAssertEqual(defaults.string(forKey: key), np3.id, "LUT must not overwrite NP3 identity")
+            let reopened = PhotoEffectsStore(defaults: defaults, scope: scope, lutStore: store)
+            var restored = reopened.beginDraft()
+            XCTAssertTrue(restored.selectedFilter?.preset.id.hasPrefix("cube:") == true)
+            disablePhotoLUTDraft(&restored, lutStore: store)
+            XCTAssertEqual(restored.selectedFilter, remembered)
+            XCTAssertFalse(restored.photoFilterEnabled, "Remembering NP3 must not enable it")
+        }
+    }
+
     func testSnapshotWriteFailurePreservesSavedRoleAndDoesNotPublishNewLUT() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "lut-write-failure-\(UUID().uuidString)"
@@ -921,6 +995,8 @@ import UIKit
             other.select("other-recipe")
             var draft = PhotoEffectsSettings()
             draft.photoEffectModules = PhotoEffectModule.lut.rawValue
+            draft.selectFilter(try XCTUnwrap(PhotoFilterCatalog.presets.first).id)
+            let rememberedNP3 = draft.selectedFilter
             draft.selectedFilter = .init(preset: .init(id: "cube:\(lut.digest)", name: "Keep name"), intensityPercent: 64)
             draft.photoFilterEnabled = true
             let original = draft
@@ -936,7 +1012,9 @@ import UIKit
             XCTAssertEqual(current.intensityPercent, 64)
             XCTAssertTrue(togglePhotoEffectModuleDraft(.lut, draft: &draft, lutStore: current, isPro: true))
             XCTAssertFalse(draft.photoFilterEnabled)
-            XCTAssertEqual(draft.selectedFilter, original.selectedFilter)
+            // Android calls photoLutDraft.off() when hiding the module. Only
+            // NP3 memory survives; the disabled Cube is not an editor recipe.
+            XCTAssertEqual(draft.selectedFilter, rememberedNP3)
             XCTAssertNil(current.selectedIdentifier)
             let scope: PhotoEffectsStore.Scope = role == .camera ? .cameraTransfer : .localPhotos
             let effects = PhotoEffectsStore(defaults: defaults, scope: scope, premiumAccess: PremiumAccess(.lifetime))

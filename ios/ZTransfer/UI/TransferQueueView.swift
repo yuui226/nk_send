@@ -944,6 +944,8 @@ struct QueueItemView: View {
                                                 ? item.downloadMBps * 1024 * 1024
                                                 : Double(displayedBytesPerSecond),
                                              respond: item.elapsedMs != nil)
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("queue-card-speed-\(item.file.id)")
                         }
                     }
                     QueuePillVisibility(visible: item.elapsedMs != nil, delay: 150) {
@@ -1856,6 +1858,10 @@ private struct TransferInfoPill: View {
             } else if let numericValue {
                 TransferNumericText(text: text, value: numericValue)
                     .zTransferTypography(.labelSmall).foregroundStyle(color)
+                    // The animated shell must measure the complete speed, not
+                    // a label compressed to the row's previous width. Preserve
+                    // Android's leading anchor / 140 ms right-edge resize.
+                    .fixedSize(horizontal: true, vertical: false)
             } else {
                 Text(text).zTransferTypography(.labelSmall).foregroundStyle(color)
             }
@@ -1949,6 +1955,7 @@ struct QueueCardPresentationHarness: View {
     private let downloadMode = ProcessInfo.processInfo.arguments.contains("--queue-card-download-test")
     private let badgeMode = ProcessInfo.processInfo.arguments.contains("--queue-card-badge-test")
     private let widthMode = ProcessInfo.processInfo.arguments.contains("--queue-pill-width-test")
+    private let speedWidthMode = ProcessInfo.processInfo.arguments.contains("--queue-speed-width-test")
     private let visibilityMode = ProcessInfo.processInfo.arguments.contains("--queue-pill-visibility-test")
     @ObservedObject private var visibilityProbe = QueuePillVisibilityProbe.shared
     private var item: TransferQueueItem {
@@ -1958,6 +1965,11 @@ struct QueueCardPresentationHarness: View {
                 captureDate: nil, isProtected: false))
         item.status = .completed
         item.downloadedBytes = 2048
+        if speedWidthMode {
+            item.downloadMBps = [9.9, 999.9, 1.0][phase]
+            item.elapsedMs = 71_000
+            return item
+        }
         if badgeMode {
             item.status = [.waiting, .transferring, .completed, .completed, .failed, .cancelled][phase]
             item.isGeneratingFrame = phase == 2

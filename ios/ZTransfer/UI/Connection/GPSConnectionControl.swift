@@ -690,7 +690,9 @@ private struct GPSInlinePanel: View {
         .frame(maxWidth: .infinity)
         .buttonStyle(ZTransferGlassButtonStyle(
             cornerRadius: 14,
-            panel: true,
+            // Android GpsStatusButton is a regular themed GlassButton.
+            // `panel` selects a flat gray inset, bypassing native liquid glass.
+            preserveContentColors: true,
             disabledAlpha: 1
         ))
         .accessibilityIdentifier("gps-status-control")

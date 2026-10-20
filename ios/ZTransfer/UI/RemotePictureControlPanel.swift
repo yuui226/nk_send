@@ -336,17 +336,18 @@ struct RemotePresetChoiceRow: View {
     var verticalPadding: CGFloat = 8
     var selectionBackground = true
     var centered = false
+    var category = false
     let action: () -> Void
     var body: some View {
         Button(action: action) {
             Text(text).font(.system(size: 14, weight: .medium))
-                .foregroundStyle(selected || pending ? ZTransferColors.accentBlue : ZTransferColors.primaryText)
+                .foregroundStyle(selected || pending ? ZTransferColors.accentBlue : (category ? ZTransferColors.secondaryText : ZTransferColors.primaryText))
                 .lineSpacing(RemotePictureControlLayout.labelLineSpacing).lineLimit(2)
                                     .padding(.vertical, RemotePictureControlLayout.labelLineSpacing / 2)
                 .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12).padding(.vertical, verticalPadding)
-                .background(selected && selectionBackground ? ZTransferColors.accentBlue.opacity(0.08) : .clear,
+                .padding(.horizontal, category ? 8 : 12).padding(.vertical, verticalPadding)
+                .background(selected && selectionBackground ? ZTransferColors.accentBlue.opacity(category ? 0.14 : 0.08) : .clear,
                             in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())
                 .modifier(RemoteCameraToolPending(pending: pending))

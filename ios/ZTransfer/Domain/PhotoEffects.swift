@@ -39,7 +39,7 @@ func togglePhotoEffectModuleDraft(_ module: PhotoEffectModule,
     let next = togglePhotoEffectModule(current, module: module, isPro: isPro)
     guard next != current else { return false }
     draft.applyModuleVisibility(next, isPro: isPro)
-    if !photoEffectModuleIsVisible(next, .lut) { lutStore.select(nil) }
+    if !photoEffectModuleIsVisible(next, .lut) { disablePhotoLUTDraft(&draft, lutStore: lutStore) }
     return true
 }
 
@@ -49,7 +49,7 @@ func togglePhotoEffectModuleDraft(_ module: PhotoEffectModule,
 func disablePhotoLUTDraft(_ draft: inout PhotoEffectsSettings, lutStore: PhotoLUTStore) {
     if draft.colorEffectModule == .lut {
         draft.photoFilterEnabled = false
-        draft.selectedFilter = nil
+        draft.selectedFilter = draft.rememberedBuiltinFilter
     }
     lutStore.select(nil)
 }
@@ -535,7 +535,21 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     /// value remains as the migration/default value for older iOS preferences.
     var metadataByPreset: [String: PhotoFrameMetadataSettings] = [:]
     var photoFilterEnabled = false
-    var selectedFilter: PhotoFilterSelection?
+    var selectedFilter: PhotoFilterSelection? {
+        willSet {
+            // Android keeps NP3 choice/strength separate from the LUT recipe.
+            // Activating a Cube disables NP3 without discarding its memory.
+            if newValue?.preset.id.hasPrefix("cube:") == true,
+               let previous = selectedFilter, PhotoFilterCatalog.resolve(previous.preset.id) != nil {
+                rememberedBuiltinFilter = previous
+            }
+        }
+    }
+    var rememberedBuiltinFilter: PhotoFilterSelection?
+    var builtinFilterSelection: PhotoFilterSelection? {
+        if let selectedFilter, PhotoFilterCatalog.resolve(selectedFilter.preset.id) != nil { return selectedFilter }
+        return rememberedBuiltinFilter
+    }
     var filterIntensities: [String: Int] = [:]
     /// Android orderWithFavorites preserves the order in which favorites were
     /// added. A Set silently changes the wheel and category chooser ordering.
@@ -624,7 +638,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case photoFrameEnabled, photoFrameBorderEnabled, photoEffectModules, photoFramePreset, watermark,
-             metadata, metadataByPreset, photoFilterEnabled, selectedFilter, filterIntensities, favoriteFilterIDs,
+             metadata, metadataByPreset, photoFilterEnabled, selectedFilter, rememberedBuiltinFilter, filterIntensities, favoriteFilterIDs,
              favoriteFramePresets, favoriteFrameEffects
     }
 
@@ -639,6 +653,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         metadataByPreset = try c.decodeIfPresent([String: PhotoFrameMetadataSettings].self, forKey: .metadataByPreset) ?? [:]
         photoFilterEnabled = try c.decodeIfPresent(Bool.self, forKey: .photoFilterEnabled) ?? false
         selectedFilter = try c.decodeIfPresent(PhotoFilterSelection.self, forKey: .selectedFilter)
+        rememberedBuiltinFilter = try c.decodeIfPresent(PhotoFilterSelection.self, forKey: .rememberedBuiltinFilter)
         filterIntensities = try c.decodeIfPresent([String: Int].self, forKey: .filterIntensities) ?? [:]
         favoriteFilterIDs = try c.decodeIfPresent([String].self, forKey: .favoriteFilterIDs) ?? []
         favoriteFramePresets = try c.decodeIfPresent(Set<PhotoFramePreset>.self, forKey: .favoriteFramePresets) ?? []
@@ -666,6 +681,7 @@ func nextPhotoFilterSelections(for settings: PhotoEffectsSettings) -> [PhotoFilt
 
 func photoEffectsPreviewPixelSettings(_ settings: PhotoEffectsSettings) -> PhotoEffectsSettings {
     var result = settings
+    result.rememberedBuiltinFilter = nil
     result.filterIntensities = [:]
     result.favoriteFilterIDs = []
     result.favoriteFramePresets = []
@@ -1277,6 +1293,11 @@ final class PhotoEffectsStore: ObservableObject {
 
     private static func normalized(_ value: PhotoEffectsSettings, scope: Scope) -> PhotoEffectsSettings {
         var result = value
+        if let remembered = value.rememberedBuiltinFilter {
+            result.rememberedBuiltinFilter = PhotoFilterCatalog.resolve(remembered.preset.id).map {
+                PhotoFilterSelection(preset: $0, intensityPercent: remembered.normalizedIntensityPercent)
+            }
+        }
         result.applyModuleVisibility(value.photoEffectModules)
         var watermark = result.watermark
         let candidateHash = watermark.imageHash?.lowercased()
@@ -1467,8 +1488,8 @@ final class PhotoEffectsStore: ObservableObject {
         defaults.set(value.photoFrameEnabled, forKey: "photo_frame_enabled")
         defaults.set(value.photoFrameBorderEnabled, forKey: "photo_frame_border_enabled")
         defaults.set(value.photoFramePreset.rawValue, forKey: "photo_frame_preset")
-        defaults.set(value.photoFilterEnabled && value.selectedFilter != nil, forKey: "photo_filter_enabled")
-        if let selected = value.selectedFilter { defaults.set(selected.preset.id, forKey: "photo_filter_selected_id") }
+        defaults.set(value.photoFilterEnabled && value.colorEffectModule == .filter && value.builtinFilterSelection != nil, forKey: "photo_filter_enabled")
+        if let selected = value.builtinFilterSelection { defaults.set(selected.preset.id, forKey: "photo_filter_selected_id") }
         else { defaults.removeObject(forKey: "photo_filter_selected_id") }
         defaults.set(encodeAndroidIntensities(value.filterIntensities), forKey: "photo_filter_intensities_v1")
         defaults.removeObject(forKey: "photo_filter_intensity")
@@ -1538,8 +1559,8 @@ final class PhotoEffectsStore: ObservableObject {
         defaults.set(value.watermark.color.rawValue, forKey: "watermark_color")
         defaults.set(value.watermark.opacityPercent, forKey: "watermark_opacity")
         defaults.set(value.watermark.effect.rawValue, forKey: "watermark_effect")
-        if let selected = value.selectedFilter { defaults.set(selected.preset.id, forKey: "filter_id") } else { defaults.removeObject(forKey: "filter_id") }
-        defaults.set(value.photoFilterEnabled && value.selectedFilter != nil, forKey: "filter_enabled")
+        if let selected = value.builtinFilterSelection { defaults.set(selected.preset.id, forKey: "filter_id") } else { defaults.removeObject(forKey: "filter_id") }
+        defaults.set(value.photoFilterEnabled && value.colorEffectModule == .filter && value.builtinFilterSelection != nil, forKey: "filter_enabled")
         defaults.set(encodeAndroidIntensities(value.filterIntensities), forKey: "filter_intensities_v1")
         defaults.removeObject(forKey: "filter_intensity")
         defaults.set(encodeAndroidFavorites(value.favoriteFilterIDs), forKey: "favorite_photo_filters_v1")

@@ -66,10 +66,5 @@ enum IOSLocalization {
             "en": "Set the camera USB mode to MTP/PTP",
             "hant": "相機 USB 設定選擇 MTP/PTP",
         ],
-        "usb_step_cable": [
-            "zh": "使用 USB 数据线连接；Lightning iPhone 需相机转接器",
-            "en": "Connect with a USB data cable; Lightning iPhones require a camera adapter",
-            "hant": "使用 USB 資料線連接；Lightning iPhone 需相機轉接器",
-        ],
     ]
 }

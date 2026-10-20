@@ -80,8 +80,10 @@ enum CubeLUTParser {
             try checkCancelled()
             guard raw.count <= maxLine else { throw CubeLUTFailure.tooLarge }
             var line = String(decoding: raw, as: UTF8.self)
-            if lineNumber == 0 { line = line.replacingOccurrences(of: "\u{FEFF}", with: "") }
-            line = String(line.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: true).first ?? "").trimmingCharacters(in: .whitespaces)
+            if lineNumber == 0, line.hasPrefix("\u{FEFF}") { line.removeFirst() }
+            // Android substringBefore('#'): a full-line comment has an empty
+            // prefix, which must not be discarded in favor of the comment text.
+            line = String(line.prefix { $0 != "#" }).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
             let tokens = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
             if let first = tokens.first, first.first?.isLetter == false {
@@ -101,7 +103,12 @@ enum CubeLUTParser {
                 guard !dataStarted, !titleSeen, tokens.count >= 2 else { throw CubeLUTFailure.invalid }
                 titleSeen = true
             case "LUT_3D_SIZE":
-                guard !dataStarted, size == nil, tokens.count == 2, let parsed = Int(tokens[1]), (2...maxSize).contains(parsed) else { throw CubeLUTFailure.unsupported }
+                // Match Android's Int32 declaration and error classification:
+                // malformed declarations are invalid; valid out-of-range grids unsupported.
+                guard !dataStarted, size == nil, tokens.count == 2,
+                      let declared = Int32(tokens[1]) else { throw CubeLUTFailure.invalid }
+                let parsed = Int(declared)
+                guard (2...maxSize).contains(parsed) else { throw CubeLUTFailure.unsupported }
                 size = parsed; values.reserveCapacity(parsed * parsed * parsed * 3)
             case "DOMAIN_MIN", "DOMAIN_MAX":
                 guard !dataStarted, tokens.count == 4,

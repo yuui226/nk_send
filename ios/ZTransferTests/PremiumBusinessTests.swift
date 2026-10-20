@@ -751,6 +751,71 @@ final class PremiumBusinessTests: XCTestCase {
         try await verifyLocalBatchSnapshot(startingPro: false)
     }
 
+    func testLocalLUTBatchKeepsCapturedSnapshotAndAdjustmentsThroughEditorReplacementAndPruning() async throws {
+        let (_, _, directory) = try fixture()
+        let suite = "local-lut-batch-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PhotoLUTStore(role: .local, defaults: defaults, directory: directory.appendingPathComponent("lut"))
+        let old = try CubeLUTParser.parse(Data(("TITLE local-old\nLUT_3D_SIZE 2\n"
+            + String(repeating: "0.1 0.2 0.3\n", count: 8)).utf8))
+        let new = try CubeLUTParser.parse(Data(("TITLE local-new\nLUT_3D_SIZE 2\n"
+            + String(repeating: "1 0 0\n", count: 8)).utf8))
+        let authorization = PremiumPhotoAuthorizationGate()
+        let source = directory.appendingPathComponent("lut-source.png")
+        try samplePNG().write(to: source)
+        let model = LocalPhotoBatchViewModel(premiumAccess: PremiumAccess(.lifetime),
+            requestAuthorization: { await authorization.request() },
+            generatePhoto: { item, settings in
+                let bytes = try await LocalPhotoOutput.render(sourceURL: source, settings: settings)
+                guard let id = item.itemIdentifier else { throw CocoaError(.fileReadUnknown) }
+                try bytes.write(to: directory.appendingPathComponent("\(id).jpg"), options: .atomic)
+            })
+        let photos = (0..<3).map { PhotosPickerItem(itemIdentifier: "lut-batch-\($0)") }
+        model.select(photos)
+        var preference = PhotoEffectsSettings()
+        preference.selectedFilter = try store.selectLUT(old, name: "Old", sourceIdentifier: "old.cube")
+        preference.selectedFilter?.intensityPercent = 64
+        preference.selectedFilter?.lutAdjustments = .init(contrast: 20, saturation: -30, highlights: 25, shadows: -15)
+        preference.photoFilterEnabled = true
+        let expected = try await LocalPhotoOutput.render(sourceURL: source, settings: preference)
+        weak var oldOwner = preference.selectedFilter?.snapshotOwner
+        model.generate(settings: preference)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !(await authorization.isWaiting), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let waiting = await authorization.isWaiting
+        XCTAssertTrue(waiting)
+        preference.selectedFilter = try store.selectLUT(new, name: "New", sourceIdentifier: "new.cube")
+        preference.selectedFilter?.intensityPercent = 100
+        await store.pruneSnapshots()
+        PhotoLUTRuntime.purgeMemoryCache()
+        XCTAssertNotNil(oldOwner, "The running batch must own its captured LUT after the editor replaces it")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("lut/\(old.digest).bin").path))
+        let changed = try await LocalPhotoOutput.render(sourceURL: source, settings: preference)
+        XCTAssertNotEqual(expected, changed)
+        await authorization.finish(.authorized)
+        let finishDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while model.state.generating, ContinuousClock.now < finishDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.state.phase, .complete)
+        XCTAssertEqual(model.state.progress, PhotoEffectsBatchProgress(total: 3, completed: 3, saved: 3))
+        for photo in photos {
+            let output = directory.appendingPathComponent("\(try XCTUnwrap(photo.itemIdentifier)).jpg")
+            XCTAssertEqual(try Data(contentsOf: output), expected)
+        }
+        model.select(photos) // End the terminal-result lifetime and release the captured recipe.
+        for _ in 0..<100 {
+            if oldOwner == nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(oldOwner)
+        await store.pruneSnapshots()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("lut/\(old.digest).bin").path))
+    }
+
     private func verifyLocalBatchSnapshot(startingPro: Bool) async throws {
         let (_, _, directory) = try fixture()
         let access = PremiumAccess(startingPro ? .lifetime : .free)

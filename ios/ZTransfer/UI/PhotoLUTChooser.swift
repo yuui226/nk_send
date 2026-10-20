@@ -23,7 +23,7 @@ struct PhotoLUTChooser: View {
         PhotoEffectsCard(accent: accent) {
             PhotoEffectControlRow(primaryWeight: 3, secondaryWeight: 2) {
                 DetentWheel(label: "LUT", options: options,
-                    selected: editor.request.pendingIdentifier ?? store.selectedIdentifier,
+                    selected: editor.request.pendingIdentifier ?? editor.currentIdentifier,
                     optionLabel: optionLabel,
                     onCommit: choose,
                     rowHeight: 30, wheelHeight: PhotoEffectControlMetrics.height,
@@ -47,13 +47,13 @@ struct PhotoLUTChooser: View {
                         withAnimation(ZTransferMotion.inlineExpansion) { editor.settingsExpanded.toggle() }
                     })
                 PhotoEffectFavoriteButton(
-                    favorite: store.selectedIdentifier.map { store.favorites.contains($0) } == true,
+                    favorite: editor.currentIdentifier.map { store.favorites.contains($0) } == true,
                     enabled: editor.active
                 ) {
                     if let identifier = store.selectedIdentifier { store.toggleFavorite(identifier) }
                 }
             }
-            if editor.settingsExpanded && store.selectedIdentifier != nil {
+            if editor.settingsExpanded && store.hasSelection {
                 VStack(spacing: 8) {
                     DetentWheel(label: AppLocalized.resource("photo_lut_concentration"),
                         options: Array(stride(from: 100, through: 2, by: -2)), selected: store.intensityPercent,
@@ -74,10 +74,7 @@ struct PhotoLUTChooser: View {
             }
         }
         .fileImporter(isPresented: $editor.showingFolder, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
-            guard case .success(let urls) = result, let url = urls.first else {
-                editor.refresh(onDisable: disable); return
-            }
-            editor.scanFolder(url, onDisable: disable)
+            editor.folderPickerCompleted(result, onDisable: disable)
         }
         .onAppear { editor.refresh(onDisable: disable) }
         .onDisappear { editor.close() }
@@ -138,14 +135,14 @@ struct PhotoLUTChooserOverlay: View {
         let catalog = editor.catalog
         let categories = catalog.categories
         let visible = catalog.filesByCategory[editor.categorySelection.category] ?? []
-        let initialID = store.selectedIdentifier.flatMap { catalog.filesByIdentifier[$0] }.flatMap {
+        let initialID = editor.currentIdentifier.flatMap { catalog.filesByIdentifier[$0] }.flatMap {
             $0.category == editor.categorySelection.category ? $0.identifier : nil
         } ?? visible.first?.identifier
         PhotoEffectChooserDialog(categoryLabels: categories.map(categoryLabel),
             optionLabels: catalog.labelsByCategory[editor.categorySelection.category] ?? [],
             onDismiss: { editor.showingChooser = false }) {
             HStack(spacing: 8) {
-                PhotoEffectChooserAction(label: AppLocalized.resource("lut_turn_off"), selected: store.selectedIdentifier == nil) {
+                PhotoEffectChooserAction(label: AppLocalized.resource("lut_turn_off"), selected: editor.currentIdentifier == nil) {
                     ZTransferHaptics.shared.play(.selection)
                     editor.off { disablePhotoLUTDraft(&draft, lutStore: store) }
                     editor.showingChooser = false
@@ -166,7 +163,7 @@ struct PhotoLUTChooserOverlay: View {
                 PhotoEffectChooserList(items: visible, id: \.identifier,
                     initialID: initialID) { file in
                     PhotoEffectChooserRow(label: file.label,
-                        selected: store.selectedIdentifier == file.identifier,
+                        selected: editor.currentIdentifier == file.identifier,
                         favorite: store.favorites.contains(file.identifier),
                         accent: ZTransferColors.photoLUTAccent) {
                         ZTransferHaptics.shared.play(.selection)

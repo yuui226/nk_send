@@ -5,7 +5,11 @@ import UIKit
 struct RemoteToolsInteractionHarness: View {
     @StateObject private var store = Store()
     @State private var open = false
-    var body: some View { monitorEntry }
+    var body: some View {
+        if ProcessInfo.processInfo.arguments.contains("--remote-lut-list-ui-test") {
+            RemoteLUTInteractionHarness()
+        } else { monitorEntry }
+    }
     private var monitorEntry: some View {
         Button("Open monitor") { open = true }
             .accessibilityIdentifier("open-monitor")
@@ -64,6 +68,61 @@ struct RemoteToolsInteractionHarness: View {
                     levelTest: ProcessInfo.processInfo.arguments.contains("--remote-level-ui-test"))
             } else { camera = nil }
         }
+    }
+}
+
+/// Catalog IO is deterministic; menu gestures, independent lists, Metal commit
+/// and the shared popup renderer are the production implementations.
+private struct RemoteLUTInteractionHarness: View {
+    @StateObject private var monitor = makeMonitor()
+    @State private var open = false
+    @State private var closing = false
+    private static func makeMonitor() -> RemoteLUTMonitorState {
+        let name = "RemoteLUTInteractionHarness"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        let files = ["A", "B"].flatMap { category in
+            (0..<(category == "A" ? 100 : 4)).map { index in
+                let name = String(format: "%@-%02d.cube", category, index)
+                return RemoteLUTFile(identifier: String(name.dropLast(5)), name: name,
+                                     relativePath: "\(category)/\(name)", size: 100)
+            }
+        }
+        return RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: defaults),
+            access: RemoteLUTFolderAccess(defaults: defaults), queue: LUTIOQueue(),
+            scan: { _, _, _ in (URL(fileURLWithPath: "/lut-ui"), .init(bookmark: Data([1]), files: files)) },
+            read: { _, _, ticket in
+                try ticket.checkCancellation()
+                return try CubeLUTParser.parse(Data(("LUT_3D_SIZE 2\n" + String(repeating: "1 0 0\n", count: 8)).utf8))
+            })
+    }
+    private let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16)).image { context in
+        UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+    }.cgImage!
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                RemoteLUTImage(image: image, monitor: monitor, source: Color.green)
+                    .frame(width: 160, height: 100).position(x: proxy.size.width / 2, y: proxy.size.height - 90)
+                VStack(alignment: .leading) {
+                    Button("LUT") { monitor.openMenu(); closing = false; open = true }
+                        .accessibilityIdentifier("test-lut-open").frame(width: 40, height: 40)
+                    Text(monitor.active?.file.identifier ?? "off").accessibilityIdentifier("test-lut-active")
+                }.offset(x: 30, y: 20)
+                if open {
+                    RemoteLUTPanel(monitor: monitor, anchor: CGRect(x: 30, y: 20, width: 40, height: 40),
+                        hostSize: proxy.size, landscape: false, closing: closing, pickerActive: false,
+                        close: { closing = true }, dismiss: { monitor.dismissMenu(); open = false; closing = false },
+                        onChooseFolder: {})
+                }
+            }
+        }
+        .task {
+            monitor.onCloseMenu = { closing = true }
+            monitor.environment(movie: false, available: true, visible: true)
+            monitor.refreshFolder(replacing: URL(fileURLWithPath: "/lut-ui"))
+        }
+        .onDisappear { monitor.close() }
     }
 }
 

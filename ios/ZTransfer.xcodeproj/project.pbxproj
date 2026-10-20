@@ -351,6 +351,8 @@
 		96AC4C18ECDDC6793559C2AE /* MaterialTextureReferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 545DCB3052FFC34B79B7F9D7 /* MaterialTextureReferenceTests.swift */; };
 		96DEA04E945E6D36C01F49F5 /* ButtonInteractionTestHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = A89C3FABC5C66C28E87AEB39 /* ButtonInteractionTestHarness.swift */; };
 		976E4A7ED23DE481DD29FCF2 /* PhotoListScrollActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1859B44045B28A43D42E2E71 /* PhotoListScrollActivity.swift */; };
+		9780BAFD64887582C32F1A8E /* ButtonStateLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09617D59E8633E234BFDB9A1 /* ButtonStateLabel.swift */; };
+		C4CE9D4845A2496B9AA1FA10 /* PhotoPreviewPagerObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4CE9D4845A2496B9AA1FA11 /* PhotoPreviewPagerObserver.swift */; };
 		9786E89F5F30322D450707BB /* jquant2-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 3986666F059D579B295071CB /* jquant2-8.c */; };
 		97AD66B183EB8C54C77F62D9 /* PhotoEffectsMasterSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD17C4052EC0FE1B1F1CEB11 /* PhotoEffectsMasterSwitch.swift */; };
 		9890E821584122B7EA506522 /* RemoteFramingGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63405BC0AB340F106E7B71B5 /* RemoteFramingGrid.swift */; };
@@ -470,6 +472,7 @@
 		CC4E8C8F30760908D6F48F5B /* RemoteCameraToolMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00237C891B57D9975209D6E /* RemoteCameraToolMenuTests.swift */; };
 		CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */; };
 		CCEDB5B097DBB25C773B6465 /* jclossls-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 792B946134C85A2249E485F3 /* jclossls-12.c */; };
+		CD9B4902094D0CC7771F443E /* ButtonStateLabelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E86031753282E0D240CE8D41 /* ButtonStateLabelTests.swift */; };
 		CDA839B3BA3291E7FA00F976 /* Np3FilterCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B121CC0D58A97AD69EEF11 /* Np3FilterCatalog.swift */; };
 		CDADC4E5ED00753D9C4F2966 /* jdcolor-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 02FA4635ABE0F5B79D477678 /* jdcolor-12.c */; };
 		CDAE10D36A90B5FDC96D27B2 /* jidctfst-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E1A9E1366568AB2208544BD /* jidctfst-8.c */; };
@@ -639,6 +642,8 @@
 		07554A74ECBA7DBB3E41C62D /* IncrementalLocalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncrementalLocalizationTests.swift; sourceTree = "<group>"; };
 		08A63488ED8A93E07B72E112 /* NEFExifParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NEFExifParityTests.swift; sourceTree = "<group>"; };
 		08F760D1D1890D58F122FDA6 /* HapticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticsTests.swift; sourceTree = "<group>"; };
+		09617D59E8633E234BFDB9A1 /* ButtonStateLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStateLabel.swift; sourceTree = "<group>"; };
+		C4CE9D4845A2496B9AA1FA11 /* PhotoPreviewPagerObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewPagerObserver.swift; sourceTree = "<group>"; };
 		09784A016E60C7D2BB629605 /* honor.svg */ = {isa = PBXFileReference; path = honor.svg; sourceTree = "<group>"; };
 		0994973567FB60B02328A65F /* PhotoListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListView.swift; sourceTree = "<group>"; };
 		0A8963248A55F8AEA3DEE263 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
@@ -1156,6 +1161,7 @@
 		E78C544F6798D078D1F0B707 /* STAJpegThumbnailTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAJpegThumbnailTests.swift; sourceTree = "<group>"; };
 		E7EAFCD5ED8077DDBAFBA128 /* jutils-16.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jutils-16.c"; sourceTree = "<group>"; };
 		E85463B2BAE75685B39B4959 /* firework-4-200.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "firework-4-200.png"; sourceTree = "<group>"; };
+		E86031753282E0D240CE8D41 /* ButtonStateLabelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStateLabelTests.swift; sourceTree = "<group>"; };
 		E9883FB2EED7B4AEA280DCB9 /* ZTransferShadowConic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferShadowConic.swift; sourceTree = "<group>"; };
 		E9993810218A19C2326AF3A3 /* motorola.svg */ = {isa = PBXFileReference; path = motorola.svg; sourceTree = "<group>"; };
 		E999FE16B4B6B70CA9DA4F87 /* jdarith.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdarith.c; sourceTree = "<group>"; };
@@ -1274,6 +1280,7 @@
 				2E69B17EE4738190BB1C2672 /* ButtonMaterialElevationTests.swift */,
 				D0281874E6565671EFB1BD4C /* ButtonMotionControllerTests.swift */,
 				FE4B8301EA73B6C49D96971D /* ButtonPressStateTests.swift */,
+				E86031753282E0D240CE8D41 /* ButtonStateLabelTests.swift */,
 				EA76D93CA2E56F7B9B789751 /* CameraConnectionPresentationTests.swift */,
 				3A3C750EEC9F2C3167D6CEFE /* CameraDownloadTests.swift */,
 				0217CE88D9C38A7150F3C00E /* CameraIOGateTests.swift */,
@@ -1522,6 +1529,8 @@
 				D2FB548A10098CF1F2E3D691 /* AndroidShadowView.swift */,
 				A89C3FABC5C66C28E87AEB39 /* ButtonInteractionTestHarness.swift */,
 				5B21ACE28B9FBC8D9AFB57B1 /* ButtonInteractionTrace.swift */,
+				09617D59E8633E234BFDB9A1 /* ButtonStateLabel.swift */,
+				C4CE9D4845A2496B9AA1FA11 /* PhotoPreviewPagerObserver.swift */,
 				2918BDFED6B200519B27259A /* CameraDisconnectedState.swift */,
 				FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */,
 				AD17C4052EC0FE1B1F1CEB11 /* PhotoEffectsMasterSwitch.swift */,
@@ -2343,6 +2352,7 @@
 				60254533E562715333754FDA /* ButtonMaterialElevationTests.swift in Sources */,
 				DC150D71EA8DD2558BBE1895 /* ButtonMotionControllerTests.swift in Sources */,
 				E54FCF7F3D7D92E92123B9D1 /* ButtonPressStateTests.swift in Sources */,
+				CD9B4902094D0CC7771F443E /* ButtonStateLabelTests.swift in Sources */,
 				8DB920E849C85D7C786C3437 /* CameraConnectionPresentationTests.swift in Sources */,
 				919CFB2260E67C65B27370D8 /* CameraDownloadTests.swift in Sources */,
 				493A04F66D4FC115A856ACB8 /* CameraIOGateTests.swift in Sources */,
@@ -2509,6 +2519,8 @@
 				8B4C510CB16D5AF3C724CEFE /* BuiltInPictureControls.swift in Sources */,
 				96DEA04E945E6D36C01F49F5 /* ButtonInteractionTestHarness.swift in Sources */,
 				76612E81B2E7FC81FAF512B1 /* ButtonInteractionTrace.swift in Sources */,
+				9780BAFD64887582C32F1A8E /* ButtonStateLabel.swift in Sources */,
+				C4CE9D4845A2496B9AA1FA10 /* PhotoPreviewPagerObserver.swift in Sources */,
 				67B055857353A3B48D76838B /* CachedThumbnailBatchPolicy.swift in Sources */,
 				24E74AA743868EC96490AE8E /* CameraConnectionPresentation.swift in Sources */,
 				171B3B7D9317366D04867322 /* CameraConnectionService.swift in Sources */,

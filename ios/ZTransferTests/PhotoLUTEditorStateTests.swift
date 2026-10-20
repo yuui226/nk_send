@@ -38,6 +38,136 @@ final class PhotoEffectCompactWheelLayoutTests: XCTestCase {
 
 @MainActor
 final class PhotoLUTEditorStateTests: XCTestCase {
+    func testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal() async throws {
+        let fixture = try Fixture(role: .camera)
+        defer { fixture.clean() }
+        let editor = fixture.editor
+        let effects = PhotoEffectsStore(defaults: fixture.defaults, lutStore: editor.store)
+        let state = SettingsState()
+        state.draft = effects.beginDraft()
+        state.draft.selectFilter(try XCTUnwrap(PhotoFilterCatalog.presets.dropFirst(3).first).id)
+        let np3 = state.draft.selectedFilter
+        let directory = DirectoryAccessStore(defaults: fixture.defaults)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: SettingsHarness(state: state, editor: editor,
+            effects: effects, directory: directory))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+        editor.scanFolder(fixture.folder) {}
+        try await settle(editor)
+        let file = try XCTUnwrap(editor.files.first { $0.name == "A.cube" })
+        editor.choose(file.identifier, onDisable: {}) {
+            state.draft.selectedFilter = $0
+            state.draft.photoFilterEnabled = true
+        }
+        try await settle(editor)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertNil(fixture.defaults.dictionary(forKey: "photo_lut_selected_recipe"))
+        let chosen = state.draft.selectedFilter
+        state.closing = true
+        for _ in 0..<100 {
+            if fixture.defaults.string(forKey: "photo_lut_selected") == file.identifier { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(effects.settings.selectedFilter, chosen)
+        XCTAssertEqual(effects.settings.rememberedBuiltinFilter, np3)
+        let coldLUT = PhotoLUTStore(defaults: fixture.defaults, directory: editor.store.snapshotDirectory)
+        XCTAssertEqual(coldLUT.restoreSelection(), chosen)
+        let coldEffects = PhotoEffectsStore(defaults: fixture.defaults, lutStore: coldLUT)
+        XCTAssertEqual(coldEffects.settings.selectedFilter, chosen)
+        XCTAssertEqual(coldEffects.settings.rememberedBuiltinFilter, np3)
+    }
+
+    func testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied() async throws {
+        for role: PhotoLUTStore.Role in [.camera, .local] {
+            let fixture = try Fixture(role: role)
+            defer { fixture.clean() }
+            let editor = fixture.editor
+            editor.scanFolder(fixture.folder) {}
+            try await settle(editor)
+            let file = try XCTUnwrap(editor.files.first { $0.name == "A.cube" })
+            editor.choose(file.identifier, onDisable: {}) { _ in }
+            try await settle(editor)
+            let selection = editor.store.restoreSelection()
+            editor.openFolder()
+            editor.folderPickerCompleted(.failure(CocoaError(.userCancelled))) { XCTFail("Cancel disabled LUT") }
+            try await settle(editor)
+            XCTAssertFalse(editor.showingFolder)
+            XCTAssertNil(editor.notice)
+            XCTAssertEqual(editor.store.restoreSelection(), selection)
+            editor.openFolder()
+            editor.folderPickerCompleted(.failure(CocoaError(.fileReadNoPermission))) { XCTFail("Picker failure disabled LUT") }
+            XCTAssertFalse(editor.showingFolder)
+            XCTAssertEqual(editor.notice?.resource, "lut_folder_denied")
+            XCTAssertFalse(editor.loading)
+            XCTAssertEqual(editor.store.restoreSelection(), selection)
+            XCTAssertEqual(editor.currentIdentifier, file.identifier)
+        }
+    }
+
+    func testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected() async throws {
+        for role: PhotoLUTStore.Role in [.camera, .local] {
+            let fixture = try Fixture(role: role)
+            defer { fixture.clean() }
+            let editor = fixture.editor
+            editor.scanFolder(fixture.folder) {}
+            try await settle(editor)
+            let file = try XCTUnwrap(editor.files.first { $0.name == "A.cube" })
+            editor.choose(file.identifier, onDisable: {}) { _ in }
+            try await settle(editor)
+            editor.store.commitDraft()
+            let selection = try XCTUnwrap(editor.store.restoreSelection())
+            try FileManager.default.removeItem(at: try XCTUnwrap(selection.snapshotOwner?.url))
+            editor.resetForPresentation()
+            XCTAssertNil(editor.store.restoreSelection())
+            XCTAssertFalse(editor.active, "Source URI alone is not an active LUT recipe")
+            XCTAssertEqual(editor.selectionOptions, [nil])
+            editor.refresh(onDisable: {})
+            try await settle(editor)
+            editor.choose(file.identifier, onDisable: {}) { _ in }
+            try await settle(editor)
+            XCTAssertTrue(editor.active)
+            XCTAssertNotNil(editor.store.restoreSelection())
+        }
+    }
+
+    func testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately() async throws {
+        for role: PhotoLUTStore.Role in [.camera, .local] {
+            let fixture = try Fixture(role: role)
+            defer { fixture.clean() }
+            let editor = fixture.editor
+            editor.scanFolder(fixture.folder) {}
+            try await settle(editor)
+            let file = try XCTUnwrap(editor.files.first { $0.name == "A.cube" })
+            editor.choose(file.identifier, onDisable: {}) { _ in }
+            try await settle(editor)
+            XCTAssertNotNil(editor.store.restoreSelection())
+            let saved = PhotoLUTStore(role: role, defaults: fixture.defaults,
+                directory: fixture.root.appendingPathComponent("snapshots"))
+            XCTAssertEqual(saved.selectedIdentifier, role == .camera ? nil : file.identifier)
+            XCTAssertEqual(saved.restoreSelection() == nil, role == .camera)
+            editor.store.commitDraft()
+            XCTAssertEqual(saved.restoreSelection(), editor.store.restoreSelection())
+            editor.store.setIntensity(58)
+            editor.store.setAdjustments(.init(highlights: -25, shadows: 35))
+            if role == .camera {
+                XCTAssertNotEqual(saved.restoreSelection(), editor.store.restoreSelection())
+            } else {
+                XCTAssertEqual(saved.restoreSelection(), editor.store.restoreSelection())
+            }
+            editor.store.commitDraft()
+            XCTAssertEqual(saved.restoreSelection(), editor.store.restoreSelection())
+            editor.resetForPresentation()
+            XCTAssertEqual(editor.store.intensityPercent, 58)
+            XCTAssertEqual(editor.store.adjustments, .init(highlights: -25, shadows: 35))
+        }
+    }
+
     func testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails() async throws {
         for role: PhotoLUTStore.Role in [.camera, .local] {
             let fixture = try Fixture(role: role)
@@ -229,9 +359,28 @@ final class PhotoLUTEditorStateTests: XCTestCase {
         editor.refresh(onDisable: {})
         try await settle(editor)
         XCTAssertEqual(editor.catalog.filesByIdentifier.count, 3)
+        editor.store.commitDraft()
         editor.resetForPresentation()
         XCTAssertTrue(editor.catalog.orderedFiles.isEmpty)
         XCTAssertEqual(editor.selectionOptions, [nil, a.identifier])
+    }
+
+    private final class SettingsState: ObservableObject {
+        @Published var draft = PhotoEffectsSettings()
+        @Published var closing = false
+        @Published var chooser = PhotoFilterChooserState()
+        @Published var hint: PhotoEffectsHint?
+    }
+    private struct SettingsHarness: View {
+        @ObservedObject var state: SettingsState
+        let editor: PhotoLUTEditorState
+        let effects: PhotoEffectsStore
+        let directory: DirectoryAccessStore
+        var body: some View {
+            SettingsView(showPhotoEffectsEntry: true, effectsStore: effects, directory: directory,
+                effectsDraft: $state.draft, filterChooser: $state.chooser, effectsHint: $state.hint,
+                dismissalRequested: state.closing, photoLUTEditor: editor, effectsOnly: true)
+        }
     }
 
     private func settle(_ editor: PhotoLUTEditorState) async throws {
@@ -508,9 +657,12 @@ final class PhotoEffectsParameterInvalidationTests: XCTestCase {
         XCTAssertEqual(notifications, 1)
         editor.store.select("private-snapshot")
         XCTAssertEqual(notifications, 2)
+        XCTAssertNil(defaults.string(forKey: "photo_lut_selected"))
+        editor.store.commitDraft()
         XCTAssertEqual(defaults.string(forKey: "photo_lut_selected"), "private-snapshot")
         editor.store.select(nil)
         XCTAssertEqual(notifications, 3)
+        editor.store.commitDraft()
         XCTAssertNil(defaults.string(forKey: "photo_lut_selected"))
     }
 

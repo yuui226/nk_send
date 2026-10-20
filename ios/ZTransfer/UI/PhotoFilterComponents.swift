@@ -38,6 +38,7 @@ struct PhotoRatingProgressChip: View {
                            UIPasteboard.general.string = PhotoRatingDiagnostics.snapshot()
                        } : nil, action: action)
                 .accessibilityLabel(AppLocalized.resource("filter_rating_enabled"))
+                .accessibilityIdentifier("photo-rating-toggle")
         }
         .frame(width: 81, height: 34)
         .onChange(of: breathing) { if $0 { origin = Date() } }
@@ -68,9 +69,12 @@ struct FilterChip: View {
         }()
         return DetentWheel(
             label: cornerLabel ?? "",
-            options: [label ?? ""],
-            selected: label ?? "",
-            optionLabel: { $0 },
+            // FilterChip is one action, not a changing set of wheel choices.
+            // Progress text must not replace DetentWheel's gesture identity
+            // between touch-down and touch-up (Android FilterChip onClick).
+            options: [0],
+            selected: 0,
+            optionLabel: { _ in label ?? "" },
             onCommit: { _ in },
             wheelHeight: minHeight,
             enabled: true,

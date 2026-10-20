@@ -38,7 +38,8 @@ final class PhotoLUTEditorState: ObservableObject {
 
     init(role: PhotoLUTStore.Role, defaults: UserDefaults = .standard,
          directory: URL? = nil, request: LUTRequestController = LUTRequestController()) {
-        store = PhotoLUTStore(role: role, defaults: defaults, directory: directory)
+        store = PhotoLUTStore(role: role, defaults: defaults, directory: directory,
+                             savesOnCommit: role == .camera)
         access = RemoteLUTFolderAccess(defaults: defaults, scope: .photo)
         self.request = request
         store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
@@ -50,7 +51,8 @@ final class PhotoLUTEditorState: ObservableObject {
 
     var loading: Bool { request.loading }
     var loadingSelection: Bool { request.pendingIdentifier != nil }
-    var active: Bool { store.selectedIdentifier != nil && !loading }
+    var currentIdentifier: String? { store.hasSelection ? store.selectedIdentifier : nil }
+    var active: Bool { store.hasSelection && !loading }
     /// Android remembers files/favorites separately from recipe and loading
     /// state. Keep one index per editor so wheel labels are O(1), not O(N) each.
     var catalog: PresetCatalogIndex {
@@ -60,7 +62,7 @@ final class PhotoLUTEditorState: ObservableObject {
         return result
     }
     var orderedFiles: [RemoteLUTFile] { catalog.orderedFiles }
-    var selectionOptions: [String?] { catalog.selectionOptions(current: store.selectedIdentifier) }
+    var selectionOptions: [String?] { catalog.selectionOptions(current: currentIdentifier) }
     var emptyLabelKey: String {
         RemoteLUTCatalog.photoFolderStatus(hasFolder: store.folderBookmark != nil,
             loading: loading && files.isEmpty, failure: folderFailure)
@@ -77,6 +79,23 @@ final class PhotoLUTEditorState: ObservableObject {
         cancelPending()
         showingChooser = false
         showingFolder = true
+    }
+
+    func folderPickerCompleted(_ result: Result<[URL], Error>, onDisable: @escaping () -> Void) {
+        showingFolder = false
+        switch result {
+        case .success(let urls):
+            scanFolder(urls.first, onDisable: onDisable)
+        case .failure(let error):
+            let failure = error as NSError
+            if failure.domain == NSCocoaErrorDomain && failure.code == NSUserCancelledError {
+                refresh(onDisable: onDisable)
+            } else {
+                // PhotoLutEditor.openFolder reports launch/access failure;
+                // preserve the existing folder and selected recipe.
+                notice = Notice(resource: "lut_folder_denied")
+            }
+        }
     }
 
     func resetForPresentation() {
@@ -187,7 +206,7 @@ final class PhotoLUTEditorState: ObservableObject {
     }
 
     private func reconcileCategory() {
-        categorySelection.reconcile(files: files, selected: store.selectedIdentifier)
+        categorySelection.reconcile(files: files, selected: currentIdentifier)
     }
     private func replaceFiles(_ next: [RemoteLUTFile]) {
         if files != next { files = next }

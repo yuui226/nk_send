@@ -1,6 +1,32 @@
 import SwiftUI
 import UIKit
 
+/// Android HomeScreen.StaConnectButtonState. Error detail changes keep the same
+/// idle action instead of restarting its transition; cancellation rolls back.
+enum STAConnectButtonState: Int {
+    case idle, searching, pairing, connecting, connected
+
+    init(_ phase: WiFiConnectionPhase) {
+        switch phase {
+        case .discovering: self = .searching
+        case .pairing: self = .pairing
+        case .connecting: self = .connecting
+        case .connected: self = .connected
+        case .idle, .unavailable, .reconnecting, .failed: self = .idle
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .idle: AppLocalized.resource("sta_connect_action")
+        case .searching: AppLocalized.resource("sta_status_searching")
+        case .pairing: AppLocalized.resource("sta_status_pairing")
+        case .connecting: AppLocalized.resource("sta_status_connecting")
+        case .connected: AppLocalized.resource("sta_status_connected")
+        }
+    }
+}
+
 struct ConnectionMethodCard: View {
     let mode: CameraConnectionMode
     let state: ConnectionState
@@ -381,15 +407,20 @@ struct ConnectionMethodCard: View {
                     .accessibilityLabel(AppLocalized.resource("sta_hotspot_settings_short"))
                 }
                 Button(action: { onConnect?() }) {
-                    Text(staButtonTitle)
-                        .zTransferTypography(.labelLarge, weight: .semibold)
-                        .foregroundStyle(materialForeground)
+                    ButtonStateLabel(text: staButtonState.title, rank: staButtonState.rawValue,
+                                     color: materialForeground, active: isSTA && !dimmed)
+                        .frame(height: ZTransferTypography.labelLarge.lineHeight)
                         .frame(maxWidth: .infinity).frame(height: 42)
                 }
                 .buttonStyle(ZTransferGlassButtonStyle(
                     cornerRadius: 14,
-                    liquidGlassBoundary: true
+                    liquidGlassBoundary: true,
+                    // Android keeps CONNECTED at full opacity while disabling
+                    // repeat taps; don't dim the whole label mid-transition.
+                    disabledAlpha: 1
                 ))
+                .accessibilityLabel(staButtonState.title)
+                .accessibilityIdentifier("sta-connect-control")
                 .disabled(state.wifiPhase == .connected)
             }
         } else {
@@ -418,15 +449,7 @@ struct ConnectionMethodCard: View {
             .foregroundStyle(tint).frame(width: size, height: size)
     }
 
-    private var staButtonTitle: String {
-        switch state.wifiPhase {
-        case .discovering: return AppLocalized.resource("sta_status_searching")
-        case .pairing: return AppLocalized.resource("sta_status_pairing")
-        case .connecting: return AppLocalized.resource("sta_status_connecting")
-        case .connected: return AppLocalized.resource("sta_status_connected")
-        case .idle, .unavailable, .reconnecting, .failed: return AppLocalized.resource("sta_connect_action")
-        }
-    }
+    private var staButtonState: STAConnectButtonState { .init(state.wifiPhase) }
     private func wifiFeedback(for wirelessMode: WirelessMode?) -> (title: String, message: String)? {
         guard mode == .wifi, wirelessMode != .sta else {
             if mode == .usb, case let .failed(message) = state.usbPhase {

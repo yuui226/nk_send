@@ -6,6 +6,144 @@ import Combine
 @testable import ZTransfer
 
 @MainActor final class RemoteLUTMonitorStateTests: XCTestCase {
+    func testSavedSelectionRestoresWithoutScanningUnrelatedDirectoryEntries() async throws {
+        func waitFor(_ predicate: () -> Bool) async throws {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while !predicate(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(predicate())
+        }
+        let suite = "lut-direct-restore-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = RemoteLUTPreferences(defaults: defaults)
+        let access = RemoteLUTFolderAccess(defaults: defaults)
+        let root = URL(fileURLWithPath: "/saved-lut")
+        preferences.setFolder(root.absoluteString)
+        preferences.setSelection("/saved-lut/photo.cube", movie: false)
+        preferences.setSelection("/saved-lut/Movie/movie.cube", movie: true)
+        access.commit(.init(bookmark: Data([1]), files: []))
+        let operations = LUTReadTestLog()
+        let table = lut()
+        let state = RemoteLUTMonitorState(preferences: preferences, access: access, queue: LUTIOQueue(),
+            scan: { _, _, _ in
+                operations.append("scan")
+                throw RemoteLUTFolderAccessError.read // An unrelated child/provider cannot be enumerated.
+            }, read: { _, file, _ in
+                XCTAssertFalse(Thread.isMainThread)
+                operations.append(file.relativePath)
+                return table
+            })
+        defer { state.close() }
+        state.environment(movie: false, available: false, visible: true)
+        XCTAssertTrue(operations.values.isEmpty)
+        state.environment(movie: false, available: true, visible: true)
+        try await waitFor { state.candidate != nil || state.folderFailure != nil }
+        XCTAssertEqual(operations.values, ["photo.cube"])
+        state.presented(try XCTUnwrap(state.candidate))
+        state.suspendRendering()
+        state.environment(movie: true, available: true, visible: true)
+        try await waitFor { state.candidate != nil }
+        state.presented(try XCTUnwrap(state.candidate))
+        XCTAssertEqual(operations.values, ["photo.cube", "Movie/movie.cube"])
+        // Opening the menu still refreshes the catalog; a transient scan failure
+        // preserves the presented LUT and does not create a separate notice.
+        state.openMenu()
+        try await waitFor { !state.scanning }
+        XCTAssertEqual(state.folderFailure, .read)
+        XCTAssertNotNil(state.active)
+        XCTAssertNil(state.noticeResource)
+        state.chooseOff()
+        state.suspendRendering()
+        state.environment(movie: true, available: true, visible: true)
+        XCTAssertFalse(state.scanning)
+        XCTAssertNil(state.loadingIdentifier)
+        XCTAssertEqual(operations.values, ["photo.cube", "Movie/movie.cube", "scan"])
+        XCTAssertEqual(preferences.selection(movie: false), "/saved-lut/photo.cube")
+        XCTAssertNil(preferences.selection(movie: true))
+    }
+
+    func testReselectingSavedFolderBeforeInitialScanPreservesBothModeSelections() async throws {
+        let name = "lut-cold-folder-\(UUID())"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let preferences = RemoteLUTPreferences(defaults: defaults)
+        let access = RemoteLUTFolderAccess(defaults: defaults)
+        let root = URL(fileURLWithPath: "/saved-lut")
+        let photo = RemoteLUTFile(identifier: "photo", name: "photo.cube", relativePath: "photo.cube", size: 100)
+        let movie = RemoteLUTFile(identifier: "movie", name: "movie.cube", relativePath: "movie.cube", size: 100)
+        let table = lut()
+        preferences.setFolder(root.absoluteString)
+        preferences.setSelection(photo.identifier, movie: false)
+        preferences.setSelection(movie.identifier, movie: true)
+        access.commit(.init(bookmark: Data([1]), files: [photo, movie]))
+        let state = RemoteLUTMonitorState(preferences: preferences, access: access, queue: LUTIOQueue(),
+            scan: { _, _, _ in (root, .init(bookmark: Data([2]), files: [photo, movie])) },
+            read: { _, _, _ in table })
+        defer { state.close() }
+        XCTAssertEqual(state.folder, root, "Folder identity must exist before IO or a first camera frame")
+        state.environment(movie: false, available: false, visible: true)
+        state.refreshFolder(replacing: root)
+        for _ in 0..<100 where state.scanning { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(state.scanning)
+        XCTAssertEqual(preferences.selection(movie: false), photo.identifier)
+        XCTAssertEqual(preferences.selection(movie: true), movie.identifier)
+        XCTAssertEqual(access.bookmarkData, Data([2]))
+        state.environment(movie: false, available: true, visible: true)
+        for _ in 0..<100 where state.candidate == nil { try await Task.sleep(for: .milliseconds(10)) }
+        state.presented(try XCTUnwrap(state.candidate))
+        XCTAssertEqual(state.active?.file.identifier, photo.identifier)
+        state.environment(movie: true, available: true, visible: true)
+        for _ in 0..<100 where state.candidate == nil { try await Task.sleep(for: .milliseconds(10)) }
+        state.presented(try XCTUnwrap(state.candidate))
+        XCTAssertEqual(state.active?.file.identifier, movie.identifier)
+    }
+
+    func testColdRestoreCannotReadOutsideSavedFolderOrBeyondCatalogDepth() {
+        let suite = "lut-restore-boundary-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = RemoteLUTPreferences(defaults: defaults)
+        preferences.setFolder(URL(fileURLWithPath: "/saved").absoluteString)
+        for id in ["/saved-other/a.cube", "/saved/../other/a.cube",
+                   "/saved/a/b/c.cube", "/saved/a.txt", "relative.cube"] {
+            preferences.setSelection(id, movie: false)
+            let state = RemoteLUTMonitorState(preferences: preferences, queue: LUTIOQueue(),
+                scan: { _, _, _ in XCTFail("Invalid saved path triggered a scan"); throw CancellationError() },
+                read: { _, _, _ in XCTFail("Invalid saved path was read"); throw CancellationError() })
+            state.environment(movie: false, available: true, visible: true)
+            XCTAssertNil(state.loadingIdentifier, id)
+            XCTAssertFalse(state.scanning)
+            state.close()
+        }
+    }
+
+    func testChooserFitsAnchorSpaceWithCompactEmptyAndIndependentColumns() {
+        let host = CGSize(width: 390, height: 700)
+        let anchor = CGRect(x: 200, y: 60, width: 32, height: 32)
+        let empty = RemoteLUTPanelLayout(hostSize: host, anchor: anchor, landscape: false,
+            hasFiles: false, guidance: "Choose a folder", monitorOnly: "Monitor only", categories: [], options: [])
+        XCTAssertEqual(empty.width, 260)
+        XCTAssertEqual(empty.listHeight, 0)
+        XCTAssertEqual(empty.height, 114)
+        let one = RemoteLUTFile(identifier: "one", name: "one.cube", relativePath: "A/one.cube", size: nil)
+        let compact = RemoteLUTPanelLayout(hostSize: host, anchor: anchor, landscape: false,
+            hasFiles: true, guidance: nil, monitorOnly: nil, categories: ["A"], options: [one])
+        XCTAssertEqual(compact.width, 320)
+        XCTAssertEqual(compact.listHeight, 40)
+        XCTAssertEqual(compact.height, 98)
+        let landscapeHost = CGSize(width: 700, height: 320)
+        let lowAnchor = CGRect(x: 600, y: 270, width: 32, height: 32)
+        let long = RemoteLUTPanelLayout(hostSize: landscapeHost, anchor: lowAnchor, landscape: true,
+            hasFiles: true, guidance: nil, monitorOnly: nil, categories: ["A"], options: Array(repeating: one, count: 10_000))
+        let placement = RemoteCameraToolMenuPlacement(host: landscapeHost, anchor: lowAnchor,
+            landscape: true, width: long.width, contentHeight: long.height)
+        XCTAssertTrue(placement.opensAbove)
+        XCTAssertEqual(long.height, placement.availableHeight)
+        XCTAssertEqual(placement.frame.maxY, lowAnchor.minY - 6)
+        XCTAssertLessThanOrEqual(placement.frame.maxX, landscapeHost.width - 8)
+        XCTAssertEqual(long.listHeight + 58, long.height)
+    }
+
     private func lut() -> CubeLUT {
         try! CubeLUTParser.parse(Data(("LUT_3D_SIZE 2\n" + String(repeating: "0 0 0\n", count: 8)).utf8))
     }
@@ -425,6 +563,8 @@ import Combine
                     guard replacement != nil else { throw reason }
                     return (root, .init(bookmark: Data([1]), files: [file]))
                 }, read: { _, _, _ in table })
+            var notices: [String] = []
+            state.onNotice = { notices.append($0) }
             state.environment(movie: false, available: true, visible: true)
             state.refreshFolder(replacing: root)
             for _ in 0..<100 {
@@ -444,6 +584,7 @@ import Combine
                 try await Task.sleep(for: .milliseconds(10))
             }
             XCTAssertNotNil(state.folderFailure)
+            XCTAssertTrue(notices.isEmpty, "Existing-folder failures are shown inside the menu, not repeated as a monitor hint")
             if reason == .read {
                 XCTAssertEqual(state.active?.file.identifier, "a")
                 XCTAssertEqual(preferences.selection(movie: false), "a")
@@ -465,7 +606,7 @@ import Combine
         let access = RemoteLUTFolderAccess(defaults: defaults)
         let old = URL(fileURLWithPath: "/old")
         let newest = URL(fileURLWithPath: "/new")
-        let file = RemoteLUTFile(identifier: "a", name: "a.cube", relativePath: "a.cube", size: nil)
+        let file = RemoteLUTFile(identifier: "/new/a.cube", name: "a.cube", relativePath: "a.cube", size: nil)
         let latch = LUTScanTestLatch()
         let table = lut()
         let state = RemoteLUTMonitorState(preferences: preferences, access: access, queue: LUTIOQueue(),
@@ -489,25 +630,26 @@ import Combine
         }
         XCTAssertEqual(state.folder, newest)
         XCTAssertEqual(access.bookmarkData, Data(newest.path.utf8))
-        preferences.setSelection("a", movie: true)
+        preferences.setSelection(file.identifier, movie: true)
         state.close()
         let restored = RemoteLUTMonitorState(preferences: RemoteLUTPreferences(defaults: defaults),
             access: RemoteLUTFolderAccess(defaults: defaults), queue: LUTIOQueue(),
-            scan: { replacement, bookmark, _ in
-                XCTAssertNil(replacement)
+            scan: { _, _, _ in XCTFail("Restoration must not scan"); throw CancellationError() },
+            read: { bookmark, selected, _ in
                 XCTAssertEqual(bookmark, Data(newest.path.utf8))
-                return (newest, .init(bookmark: bookmark!, files: [file]))
-            }, read: { _, _, _ in table })
+                XCTAssertEqual(selected.relativePath, file.relativePath)
+                return table
+            })
         restored.environment(movie: true, available: true, visible: true)
         for _ in 0..<100 {
             if restored.candidate != nil { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(restored.folder, newest)
-        XCTAssertEqual(restored.candidate?.file.identifier, "a")
+        XCTAssertEqual(restored.candidate?.file.identifier, file.identifier)
         XCTAssertNil(restored.active)
         restored.presented(try XCTUnwrap(restored.candidate))
-        XCTAssertEqual(restored.active?.file.identifier, "a")
+        XCTAssertEqual(restored.active?.file.identifier, file.identifier)
         restored.close()
     }
 
@@ -772,8 +914,13 @@ final class RemoteLUTPanelPerformanceTests: XCTestCase {
         let firstFailure = updates
         for _ in 0..<120 { state.scanFailed(.read) }
         XCTAssertEqual(updates, firstFailure)
-        XCTAssertEqual(notices, 121, "Repeated error events still reach the shared hint host")
+        XCTAssertEqual(notices, 0, "Existing-folder status must not generate monitor hints")
         let file = RemoteLUTFile(identifier: "a", name: "a.cube", relativePath: "a.cube", size: 10)
+        for _ in 0..<2 {
+            let request = state.beginSelection(file)!
+            state.failed(generation: request, reason: "read")
+        }
+        XCTAssertEqual(notices, 2, "Repeated explicit load failures still reach the shared hint host")
         let old = state.beginSelection(file)!
         state.prepareFolderPicker()
         let afterCancel = updates
@@ -903,28 +1050,37 @@ final class RemoteLUTPanelPerformanceTests: XCTestCase {
         let window = try makeWindow(host)
         defer { state.close(); window.isHidden = true; window.rootViewController = nil }
         try await Task.sleep(for: .milliseconds(400))
-        let list = try XCTUnwrap(findAll(UICollectionView.self, in: host.view).first)
-        XCTAssertEqual(list.numberOfItems(inSection: 0), 3_000)
+        let tables = findAll(UITableView.self, in: host.view)
+        XCTAssertEqual(tables.count, 2, "Category and file columns scroll independently")
+        let list = try XCTUnwrap(tables.first { $0.numberOfRows(inSection: 0) == 3_000 })
+        XCTAssertEqual(list.numberOfRows(inSection: 0), 3_000)
         XCTAssertLessThan(list.visibleCells.count, 30)
-        XCTAssertTrue(list.indexPathsForVisibleItems.contains(IndexPath(item: 2_500, section: 0)))
+        XCTAssertTrue(list.indexPathsForVisibleRows?.contains(IndexPath(row: 2_500, section: 0)) == true)
         list.setContentOffset(CGPoint(x: 0, y: list.contentOffset.y + 100), animated: false)
         try await Task.sleep(for: .milliseconds(50))
-        let offset = list.contentOffset.y
-        let visible = Set(list.indexPathsForVisibleItems)
+        // UITableView revises estimated heights above a distant selection.
+        // Assert the visible row's screen position, not its absolute content offset.
+        let anchorPath = try XCTUnwrap(list.indexPathsForVisibleRows?.min())
+        func anchorY() throws -> CGFloat {
+            let cell = try XCTUnwrap(list.cellForRow(at: anchorPath))
+            return cell.convert(cell.bounds, to: host.view).minY
+        }
+        let offset = try anchorY()
+        let visible = Set(list.indexPathsForVisibleRows ?? [])
         let parentBodies = counts.root
         let pending = try XCTUnwrap(state.beginSelection(files[2_510]))
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(counts.root, parentBodies)
-        XCTAssertEqual(list.contentOffset.y, offset, accuracy: 1)
-        XCTAssertEqual(Set(list.indexPathsForVisibleItems), visible)
-        XCTAssertFalse(findAll(UIActivityIndicatorView.self, in: host.view).isEmpty)
+        XCTAssertEqual(try anchorY(), offset, accuracy: 1)
+        XCTAssertEqual(Set(list.indexPathsForVisibleRows ?? []), visible)
+        XCTAssertEqual(state.loadingIdentifier, files[2_510].identifier)
         state.failed(generation: pending, reason: "read")
         state.openMenu()
         try await waitFor { !state.scanning }
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(counts.root, parentBodies)
-        XCTAssertEqual(list.contentOffset.y, offset, accuracy: 1)
-        XCTAssertEqual(Set(list.indexPathsForVisibleItems), visible)
+        XCTAssertEqual(try anchorY(), offset, accuracy: 1)
+        XCTAssertEqual(Set(list.indexPathsForVisibleRows ?? []), visible)
     }
 
     func testLifetimeDoesNotFormObservationCycle() {
@@ -956,7 +1112,10 @@ final class RemoteLUTPanelPerformanceTests: XCTestCase {
         let counts: Counts
         var body: some View {
             counts.root += 1
-            return RemoteLUTPanel(monitor: lifetime.monitor) {}
+            return RemoteLUTPanel(monitor: lifetime.monitor,
+                anchor: CGRect(x: 40, y: 20, width: 32, height: 32),
+                hostSize: CGSize(width: 390, height: 700), landscape: false,
+                closing: false, pickerActive: false, close: {}, dismiss: {}, onChooseFolder: {})
         }
     }
     private func makeWindow(_ controller: UIViewController) throws -> UIWindow {

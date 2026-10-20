@@ -406,6 +406,7 @@ struct SettingsView: View {
 
     private func commitEffectsDraft() {
         watermarkTextFocused = false
+        photoLUTStore.commitDraft()
         effectsStore.updateFromEditor(effectsDraft)
     }
 

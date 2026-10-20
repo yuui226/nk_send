@@ -201,7 +201,7 @@ struct RootView: View {
         #if DEBUG
         let _ = didRender?()
         #endif
-        Group {
+        ZStack {
             if workspaceSession != nil || workspaceEntered {
                 let session = workspaceSession
                 // Start the photo scan as soon as the session is ready, but
@@ -224,22 +224,19 @@ struct RootView: View {
                     .id(workspaceViewID)
                     .opacity(connectionCelebrationActive ? (connectionPhotoListVisible ? 1 : 0) : 1)
                     .allowsHitTesting(!connectionCelebrationActive || connectionPhotoListVisible)
-                    if connectionCelebrationActive {
-                        HomeWorkspacePagerIOS(connection: connectionModel,
-                                               effectsStore: effectsStore,
-                                               gpsCoordinator: gpsCoordinator,
-                                               directory: directoryStore,
-                                               celebrationStart: connectionCelebrationStart)
-                            .opacity(connectionPhotoListVisible ? 0 : 1)
-                            .allowsHitTesting(!connectionPhotoListVisible)
-                    }
                 }
-            } else {
+            }
+            // Keep one measured Home at a stable sibling position throughout
+            // the hand-off. Replacing it loses the badge's window origin and
+            // restarts native card/layer initialization during the flight.
+            if (!workspaceEntered && !connectionCelebrationConsumed) || connectionCelebrationActive {
                 HomeWorkspacePagerIOS(connection: connectionModel,
                                        effectsStore: effectsStore,
                                        gpsCoordinator: gpsCoordinator,
                                        directory: directoryStore,
                                        celebrationStart: connectionCelebrationStart)
+                    .opacity(connectionPhotoListVisible ? 0 : 1)
+                    .allowsHitTesting(!connectionPhotoListVisible)
             }
         }
         // Restoring used to block RootView's initialization. Keep the same
@@ -363,10 +360,14 @@ struct RootView: View {
                 StoreKitPurchaseStore.shared.refresh()
             }
         }
-        .task(id: presentation.snapshot.session != nil) {
-            guard connectionModel.cameraSession != nil, connectionCelebrationActive else { return }
+        .task(id: connectionCelebrationStart) {
+            guard let startedAt = connectionCelebrationStart,
+                  connectionModel.cameraSession != nil, connectionCelebrationActive else { return }
             do {
-                try await Task.sleep(nanoseconds: UInt64(CONNECTION_HANDOFF_FADE_START_MS) * 1_000_000)
+                // Start is published by onChange. A task keyed only by the
+                // session can run before that publication and never hand off.
+                let delay = max(0, CONNECTION_HANDOFF_FADE_START_MS / 1_000 - Date().timeIntervalSince(startedAt))
+                try await Task.sleep(for: .seconds(delay))
                 guard !Task.isCancelled, connectionModel.cameraSession != nil,
                       connectionCelebrationActive else { return }
                 withAnimation(.easeInOut(duration: CONNECTION_HANDOFF_FADE_DURATION_MS / 1_000)) {

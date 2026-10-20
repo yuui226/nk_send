@@ -2,6 +2,29 @@ import SwiftUI
 import UIKit
 import ImageIO
 
+#if DEBUG
+/// Finite UI-test trace of the actual image rectangle, including its rendered
+/// transforms. No probe is mounted in ordinary launches.
+private struct PreviewImageGeometryTrace: ViewModifier {
+    let source: String
+    let id: UInt32
+    private static let enabled = ProcessInfo.processInfo.arguments.contains("--preview-motion-fixture")
+    func body(content: Content) -> some View {
+        content.background {
+            if Self.enabled {
+                GeometryReader { proxy in
+                    let rect = proxy.frame(in: .named("photoPreviewStage"))
+                    Color.clear.onAppear { record(rect) }.onChange(of: rect) { record($0) }
+                }
+            }
+        }
+    }
+    private func record(_ rect: CGRect) {
+        ButtonInteractionTrace.recordNow("preview-image:\(source):\(id):\(rect.minX):\(rect.minY):\(rect.width):\(rect.height)")
+    }
+}
+#endif
+
 /// Match Android's previewItems/page/connection/deferred-load effect keys.
 /// Transfer activity is intentionally excluded so it cannot cancel an active read.
 struct PhotoPreviewLoadIdentity: Equatable {
@@ -275,13 +298,6 @@ func allowPreviewRemoteThumbnailFallback(
     isCurrent && fhdUnavailable && exifFinished
 }
 
-private struct PreviewPageOffsets: PreferenceKey {
-    static let defaultValue: [Int: CGFloat] = [:]
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
 func nearestPreviewPage(offsets: [Int: CGFloat]) -> (index: Int, offset: CGFloat)? {
     guard let nearest = offsets.filter({ $0.value.isFinite }).min(by: {
         abs($0.value) == abs($1.value) ? $0.key < $1.key : abs($0.value) < abs($1.value)
@@ -426,6 +442,7 @@ struct PhotoPreviewView: View {
     @State private var cropRetry = 0
     @State private var cropLoadingVisible = false
     @State private var geometrySnapshot = PhotoPreviewGeometrySnapshot()
+    @State private var pagerObservation = PhotoPreviewPagerObservation()
     private var currentCropViewport: PhotoPreviewCropViewport? {
         get { geometrySnapshot.viewport }
         nonmutating set { geometrySnapshot.viewport = newValue }
@@ -548,129 +565,136 @@ struct PhotoPreviewView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = ButtonInteractionTrace.recordNow("preview-body")
+        #endif
         ZStack {
             Color.black.opacity((review == nil ? 0.74 : 1) * presentationProgress)
                 .ignoresSafeArea(edges: review == nil ? .all : [])
-            TabView(selection: $pagerSelection) {
-                ForEach(previewPages) { page in
-                    let itemIndex = page.index
-                    let entry = page.entry
-                    Group {
-                        switch entry {
-                        case .photo(let file, _):
-                            PreviewImage(session: session, file: file,
-                                         highResolutionImage: highResolutionImages[file.id],
-                                         rotationDegrees: rotationDegrees,
-                                         infoBottom: landscapeReview ? nil : previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
-                                         interactive: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
-                                         pinchEnabled: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy,
-                                         cropActive: cropPresented && itemIndex == index,
-                                         cropTop: cropTop, cropEditor: cropEditor,
-                                         zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
-                                            !file.fileExtension.lowercased().hasSuffix(".mp4"),
-                                         loadEnabled: deferredLoadsEnabled,
-                                         allowRemoteThumbnailFallback: isSessionConnected &&
-                                            allowPreviewRemoteThumbnailFallback(
-                                                isCurrent: itemIndex == index,
-                                                fhdUnavailable: fhdUnavailable.contains(file.id),
-                                                exifFinished: exifFinished.contains(file.id)
-                                            ),
-                                         onDisplayImage: { image in
-                                             let retained = retainedPhotoPreviewIDs(
-                                                entries: previewEntries, currentIndex: index
-                                             )
-                                             if retained.contains(file.id) { displayedImages[file.id] = image }
-                                             guard photoPreviewHistogramCanAnalyze(
-                                                enabled: histogramVisible, fileExtension: file.fileExtension
-                                             ), currentPhoto?.id == file.id else { return }
-                                             if let image {
-                                                 showHistogram(for: file, image: image)
-                                             } else {
-                                                 histogram.clear()
-                                             }
-                                         }, onTap: {
-                                             if review == nil || (reviewTap.allowed && abs(pageOffsetFraction) < 0.01 && !magnificationActive) {
-                                                 startClose()
-                                             }
-                                         },
-                                         onZoomedChange: { zoomed in if index == itemIndex, currentZoomed != zoomed { currentZoomed = zoomed } },
-                                         onViewportChange: { viewport in
-                                             if index == itemIndex { currentCropViewport = viewport }
-                                         },
-                                         onMagnificationChange: { active in
-                                             guard index == itemIndex else { return }
-                                             magnificationActive = active
-                                             if active {
-                                                 queueDragDirection = .rejected
-                                                 settleQueueDrag()
-                                             }
-                                         },
-                                         isCurrent: index == itemIndex, tapWhenZoomed: review != nil)
-                                .padding(.bottom, landscapeReview ? 0 : previewSafeInsets.bottom + 88)
-                        case .burst(let group):
-                            BurstCollectionPreview(
-                                session: session,
-                                group: group,
-                                loadEnabled: deferredLoadsEnabled && isSessionConnected,
-                                stackMotion: animatedBurstID == group.id ? burstStackMotion : 0,
-                                onTransfer: {
-                                    if let first = group.files.first {
-                                        startQueueFlight(for: first, burstFiles: group.files)
-                                    }
-                                },
-                                onExpand: { expandBurst(group) },
-                                onTap: startClose
-                            )
+            GeometryReader { pagerViewport in
+                TabView(selection: $pagerSelection) {
+                    ForEach(previewPages) { page in
+                        let itemIndex = page.index
+                        let entry = page.entry
+                        Group {
+                            switch entry {
+                            case .photo(let file, _):
+                                PreviewImage(session: session, file: file,
+                                             highResolutionImage: highResolutionImages[file.id],
+                                             rotationDegrees: rotationDegrees,
+                                             infoBottom: landscapeReview ? nil : previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
+                                             interactive: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
+                                             pinchEnabled: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy,
+                                             cropActive: cropPresented && itemIndex == index,
+                                             cropTop: cropTop, cropEditor: cropEditor,
+                                             zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
+                                                !file.fileExtension.lowercased().hasSuffix(".mp4"),
+                                             loadEnabled: deferredLoadsEnabled,
+                                             allowRemoteThumbnailFallback: isSessionConnected &&
+                                                allowPreviewRemoteThumbnailFallback(
+                                                    isCurrent: itemIndex == index,
+                                                    fhdUnavailable: fhdUnavailable.contains(file.id),
+                                                    exifFinished: exifFinished.contains(file.id)
+                                                ),
+                                             onDisplayImage: { image in
+                                                 let retained = retainedPhotoPreviewIDs(
+                                                    entries: previewEntries, currentIndex: index
+                                                 )
+                                                 if retained.contains(file.id) { displayedImages[file.id] = image }
+                                                 guard photoPreviewHistogramCanAnalyze(
+                                                    enabled: histogramVisible, fileExtension: file.fileExtension
+                                                 ), currentPhoto?.id == file.id else { return }
+                                                 if let image {
+                                                     showHistogram(for: file, image: image)
+                                                 } else {
+                                                     histogram.clear()
+                                                 }
+                                             }, onTap: {
+                                                 if review == nil || (reviewTap.allowed && abs(pageOffsetFraction) < 0.01 && !magnificationActive) {
+                                                     startClose()
+                                                 }
+                                             },
+                                             onZoomedChange: { zoomed in if index == itemIndex, currentZoomed != zoomed { currentZoomed = zoomed } },
+                                             onViewportChange: { viewport in
+                                                 if index == itemIndex { currentCropViewport = viewport }
+                                                 #if DEBUG
+                                                 if ButtonInteractionTrace.enabled { ButtonInteractionTrace.recordNow("preview-viewport:\(file.id):\(viewport.size):\(viewport.infoBottom)") }
+                                                 #endif
+                                             },
+                                             onMagnificationChange: { active in
+                                                 guard index == itemIndex else { return }
+                                                 magnificationActive = active
+                                                 if active {
+                                                     queueDragDirection = .rejected
+                                                     settleQueueDrag()
+                                                 }
+                                             },
+                                             isCurrent: index == itemIndex, tapWhenZoomed: review != nil)
+                                    .padding(.bottom, landscapeReview ? 0 : previewSafeInsets.bottom + 88)
+                            case .burst(let group):
+                                BurstCollectionPreview(
+                                    session: session,
+                                    group: group,
+                                    loadEnabled: deferredLoadsEnabled && isSessionConnected,
+                                    stackMotion: animatedBurstID == group.id ? burstStackMotion : 0,
+                                    onTransfer: {
+                                        if let first = group.files.first {
+                                            startQueueFlight(for: first, burstFiles: group.files)
+                                        }
+                                    },
+                                    onExpand: { expandBurst(group) },
+                                    onTap: startClose
+                                )
+                            }
                         }
-                    }
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: PreviewPageOffsets.self,
-                                value: [itemIndex: proxy.size.width > 0
-                                    ? proxy.frame(in: .named("photoPreviewPager")).minX / proxy.size.width : 0])
+                        // PageTabView can revise its safe-area proposal after
+                        // mounting. The full-screen stage owns this size; a
+                        // bitmap arrival must not resize the page mid-animation.
+                        .frame(width: pagerViewport.size.width, height: pagerViewport.size.height)
+                        .background {
+                            PhotoPreviewPageObserver(observation: pagerObservation, index: itemIndex) { page, offset in
+                                guard !closing, effectsFile == nil, !burstTransitionBusy,
+                                      previewEntries.indices.contains(page) else { return }
+                                if index != page { index = page }
+                                pageOffsetFraction = offset
+                                #if DEBUG
+                                if ButtonInteractionTrace.enabled {
+                                    ButtonInteractionTrace.recordNow("preview-page:\(page):offset=\(offset)")
+                                }
+                                #endif
+                            }
                         }
+                        .tag(itemIndex)
                     }
-                    .tag(itemIndex)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .onChange(of: pagerSelection) { index = $0 }
+                .frame(width: pagerViewport.size.width, height: pagerViewport.size.height)
+                .modifier(PhotoPreviewAnchorTransform(
+                    progress: presentationProgress,
+                    anchor: closing ? collapseAnchor : initialAnchor,
+                    enabled: closing ? collapseAnchor != nil : index == initialIndex,
+                    closing: closing
+                ))
+                .scaleEffect(burstPagerScale)
+                .opacity(burstPagerAlpha)
+                .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
+                .modifier(PhotoPreviewQueueMotionTransform(motion: queueMotion))
+                // Once an upward queue drag wins direction arbitration, cancel
+                // the page scroll recognizer for the rest of this touch. A normal
+                // horizontal drag keeps the pager enabled.
+                .scrollDisabled(
+                    effectsFile != nil || cropPresented || cropRestoring || currentZoomed || magnificationActive || queueDragDirection == .upward ||
+                        queueFlightActive || burstTransitionBusy
+                )
+                .allowsHitTesting(
+                    effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !closing && !burstTransitionBusy
+                )
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .coordinateSpace(name: "photoPreviewPager")
-            .onPreferenceChange(PreviewPageOffsets.self) { offsets in
-                guard !closing, effectsFile == nil, !burstTransitionBusy,
-                      let page = nearestPreviewPage(offsets: offsets),
-                      previewEntries.indices.contains(page.index) else { return }
-                // Observation changes current content at halfway; it never sends
-                // a programmatic selection back into the moving TabView.
-                if index != page.index { index = page.index }
-                pageOffsetFraction = page.offset
-            }
-            .onChange(of: pagerSelection) { index = $0 }
-
-            // Android's HorizontalPager owns the complete edge-to-edge stage;
-            // only its controls apply system-bar padding. Center the image in
-            // that same full-screen viewport instead of the reduced safe area.
+            // Keep the edge-to-edge viewport outside every visual transform.
+            // Scaling ignoresSafeArea itself makes its edges leave the safe
+            // area; SwiftUI then shrinks its proposal halfway through flight.
             .ignoresSafeArea(edges: review == nil ? .all : [])
-            .modifier(PhotoPreviewAnchorTransform(
-                progress: presentationProgress,
-                anchor: closing ? collapseAnchor : initialAnchor,
-                enabled: closing ? collapseAnchor != nil : index == initialIndex,
-                closing: closing
-            ))
-            .scaleEffect(burstPagerScale)
-            .opacity(burstPagerAlpha)
-            .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
-            .modifier(PhotoPreviewQueueMotionTransform(motion: queueMotion))
-            // Once an upward queue drag wins direction arbitration, cancel
-            // the page scroll recognizer for the rest of this touch. A normal
-            // horizontal drag keeps the pager enabled.
-            .scrollDisabled(
-                effectsFile != nil || cropPresented || cropRestoring || currentZoomed || magnificationActive || queueDragDirection == .upward ||
-                    queueFlightActive || burstTransitionBusy
-            )
-            .allowsHitTesting(
-                effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !closing && !burstTransitionBusy &&
-                    queueDragDirection != .upward
-            )
             if queueFlightActive, previewEntries.indices.contains(index) {
                 GeometryReader { proxy in
                     let screen = UIScreen.main.bounds
@@ -827,6 +851,7 @@ struct PhotoPreviewView: View {
                 }
             }
         }
+        .coordinateSpace(name: "photoPreviewStage")
         .overlay(alignment: .trailing) {
             if let review, review.loading, index == previewEntries.count - 1 {
                 RemoteCameraToolLoading(diameter: 20, strokeWidth: 2, color: .white).padding(12)
@@ -882,9 +907,8 @@ struct PhotoPreviewView: View {
                 .padding(.trailing, 20).padding(.bottom, 32)
             }
         }
-        // Keep the arbiter on the stable overlay rather than the TabView. The
-        // TabView can therefore be disabled after an upward lock without
-        // cancelling the gesture that owns the queue drag.
+        // Keep the arbiter and its hit-test subtree alive until lift-off. Only
+        // horizontal scrolling is locked after an upward decision.
         .simultaneousGesture(previewQueueSwipeGesture)
         .onChange(of: queueSwipeActive) { active in
             // Android's awaitEachGesture finally block also runs on cancel.
@@ -906,6 +930,7 @@ struct PhotoPreviewView: View {
             }
         }
         .onDisappear {
+            pagerObservation.unlockPaging()
             projection.clear()
             cropCloseTask?.cancel()
             cropPresented = false; cropRestoring = false
@@ -1011,18 +1036,30 @@ struct PhotoPreviewView: View {
 
     private var previewQueueSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 8)
-            .updating($queueSwipeActive) { _, active, _ in active = true }
+            .updating($queueSwipeActive) { _, active, _ in if !active { active = true } }
             .onChanged { value in
+                #if DEBUG
+                if ButtonInteractionTrace.enabled {
+                    ButtonInteractionTrace.recordNow("queue-move:\(value.translation):\(queueDragDirection):page=\(pageOffsetFraction):progress=\(presentationProgress)")
+                }
+                #endif
                 guard effectsFile == nil, !cropPresented, !cropRestoring else { return }
                 guard review == nil, currentPhoto != nil, !currentZoomed, !magnificationActive,
-                      effectsFile == nil, presentationProgress >= 0.99, abs(pageOffsetFraction) < 0.01, !queueFlightActive,
+                      effectsFile == nil, presentationProgress >= 0.99, !queueFlightActive,
                       !closing, !burstTransitionBusy else {
-                    queueDragDirection = .rejected
+                    if queueDragDirection != .rejected { queueDragDirection = .rejected }
                     return
                 }
                 if queueDragDirection == .undecided {
+                    guard abs(pageOffsetFraction) < 0.01 else {
+                        queueDragDirection = .rejected
+                        return
+                    }
                     let resolved = photoPreviewQueueDragDirection(translation: value.translation)
-                    if resolved != .undecided { queueDragDirection = resolved }
+                    if resolved != .undecided {
+                        if resolved == .upward { pagerObservation.lockPaging(to: index) }
+                        queueDragDirection = resolved
+                    }
                 }
                 guard queueDragDirection == .upward else { return }
                 queueDragOffset = photoPreviewQueueVisualOffset(
@@ -1030,13 +1067,17 @@ struct PhotoPreviewView: View {
                 )
             }
             .onEnded { value in
+                #if DEBUG
+                if ButtonInteractionTrace.enabled {
+                    ButtonInteractionTrace.recordNow("queue-end:\(value.translation):\(queueDragDirection)")
+                }
+                #endif
                 defer { finishQueueDrag() }
                 guard review == nil else { return }
                 guard effectsFile == nil, !cropPresented, !cropRestoring else { return }
                 let resolved = queueDragDirection == .undecided
                     ? photoPreviewQueueDragDirection(translation: value.translation)
                     : queueDragDirection
-                queueDragDirection = .undecided
                 guard resolved == .upward,
                       !currentZoomed, !magnificationActive, !queueFlightActive,
                       previewEntries.indices.contains(index) else {
@@ -1052,7 +1093,8 @@ struct PhotoPreviewView: View {
     }
 
     private func finishQueueDrag() {
-        queueDragDirection = .undecided
+        pagerObservation.unlockPaging()
+        if queueDragDirection != .undecided { queueDragDirection = .undecided }
         if !queueFlightActive { settleQueueDrag() }
     }
 
@@ -2177,6 +2219,21 @@ private struct BurstPreviewThumbnail: View {
     }
 }
 
+/// Android keeps the thumbnail opaque during the reveal, then hides it at
+/// the rendered endpoint. Testing the @State target would hide it at frame 0.
+@preconcurrency
+struct PhotoPreviewThumbnailVisibility: AnimatableModifier {
+    var progress: CGFloat
+    let hasFHD: Bool
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        content.opacity(hasFHD && progress >= 1 ? 0 : 1)
+    }
+}
+
 private struct PreviewImage: View {
     let session: CameraSession
     let file: CameraFile
@@ -2224,12 +2281,18 @@ private struct PreviewImage: View {
                 if let cachedThumbnail {
                     Image(uiImage: cachedThumbnail)
                         .resizable().scaledToFit()
-                        // Keep the placeholder opaque underneath the FHD reveal.
-                        .opacity(1)
+                        #if DEBUG
+                        .modifier(PreviewImageGeometryTrace(source: "thumb", id: file.id))
+                        #endif
+                        .modifier(PhotoPreviewThumbnailVisibility(progress: highResolutionAlpha,
+                                                                  hasFHD: highResolutionImage != nil))
                 }
                 if let highResolutionImage {
                     Image(uiImage: highResolutionImage)
                         .resizable().scaledToFit()
+                        #if DEBUG
+                        .modifier(PreviewImageGeometryTrace(source: "fhd", id: file.id))
+                        #endif
                         .opacity(cachedThumbnail == nil ? 1 : highResolutionAlpha)
                 }
                 if zoomEnabled && cachedThumbnail == nil && highResolutionImage == nil {
@@ -2801,7 +2864,7 @@ final class PhotoPreviewQueueMotion: ObservableObject {
 struct PhotoPreviewQueueMotionTransform: ViewModifier {
     @ObservedObject var motion: PhotoPreviewQueueMotion
     func body(content: Content) -> some View {
-        let lift = min(max(-motion.offset / 132, 0), 1)
+        let lift = min(max(-motion.offset / 96, 0), 1)
         content.scaleEffect(1 - lift * 0.055).opacity(1 - lift * 0.07).offset(y: motion.offset)
     }
 }

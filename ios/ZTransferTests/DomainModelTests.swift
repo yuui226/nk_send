@@ -8207,6 +8207,38 @@ final class RemoteToolInputRoutingTests: XCTestCase {
 
 @MainActor
 final class RootPresentationPerformanceTests: XCTestCase {
+    func testConnectionCelebrationRetainsMeasuredHomeAndNativeCards() async throws {
+        let model = try fixture()
+        model.gps.setEnabled(true)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: RootView(presentation: model).environment(\.scenePhase, .active))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func cards(_ view: UIView) -> [NativeAttentionHostView] {
+            if let card = view as? NativeAttentionHostView, card.bounds.height > 200 { return [card] }
+            return view.subviews.flatMap(cards).sorted { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
+        }
+        try await Task.sleep(for: .milliseconds(400))
+        let before = cards(window)
+        XCTAssertEqual(before.count, 2)
+        let origins = before.map { $0.convert($0.bounds, to: window) }
+        model.connection.connectDebugSimulator(previewPremiumAnimation: true)
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertNotNil(model.snapshot.session)
+        let during = cards(window)
+        XCTAssertEqual(during.map(ObjectIdentifier.init), before.map(ObjectIdentifier.init),
+            "Connection success must animate the already measured Home, not mount another pager")
+        XCTAssertEqual(during.map { $0.convert($0.bounds, to: window) }, origins)
+        try await Task.sleep(for: .milliseconds(600))
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let shot = XCTAttachment(image: image); shot.name = "connection-success-hero"; shot.lifetime = .keepAlways; add(shot)
+        try await Task.sleep(for: .milliseconds(1_000))
+        XCTAssertTrue(cards(window).isEmpty, "Finished entry must release Home and its animation hosts")
+    }
+
     private func fixture(directory: DirectoryAccessStore? = nil) throws -> RootPresentationModel {
         let suite = "RootPresentation-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

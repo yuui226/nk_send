@@ -324,14 +324,15 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
     }
 
     func testRealListPreviewRejectsWithoutQueueOrFlightAndKeepsPreview() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--list-admission-ui-test", "--preview-admission", "--photo-preview-ui-test", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        app.launch()
+        // A retired offline catalog intentionally does not scan. Load the real
+        // catalog first, then disconnect while its preview remains mounted.
+        let app = launchHoldFixture(["--preview-admission"])
         defer { app.terminate() }
         let missing = app.descendants(matching: .any).matching(identifier: "photo-cell-702").firstMatch
         XCTAssertTrue(missing.waitForExistence(timeout: 10))
         missing.tap()
         XCTAssertTrue(app.staticTexts["preview-state"].waitForExistence(timeout: 5))
+        app.buttons["admission-connection"].tap()
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
         start.press(forDuration: 0.05, thenDragTo: end)
@@ -342,6 +343,88 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.lifetime = .keepAlways
         add(shot)
+    }
+
+    func testPreviewUpwardDragAcceptsOnceAndKeepsPagerUsable() throws {
+        continueAfterFailure = false
+        let app = launchHoldFixture(["--preview-admission", "--defer-admission", "--all-local-admission", "--preview-motion-fixture"])
+        defer { app.terminate() }
+        firstGridCenter(app).tap()
+        XCTAssertTrue(app.staticTexts["preview-state"].waitForExistence(timeout: 5))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -45)))
+        XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=0"))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 100)))
+        XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=0"))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        let trace = try readHoldTrace(app, name: "preview-opening-and-upward")
+        let pages = trace.filter { $0.event.hasPrefix("preview-page:") }
+        XCTAssertFalse(pages.isEmpty)
+        XCTAssertTrue(pages.allSatisfy { $0.event == "preview-page:0:offset=0.0" },
+            "Opening and vertical scaling must never be interpreted as horizontal paging: \(pages.map(\.event))")
+        let viewports = Set(trace.filter { $0.event.hasPrefix("preview-viewport:") }.map(\.event))
+        XCTAssertEqual(viewports.count, 1, "Safe-area sizing must remain fixed through opening, FHD and throw: \(viewports)")
+        let fhdTime = try XCTUnwrap(trace.first { $0.event.hasPrefix("preview-image:fhd:") }?.milliseconds)
+        let imageFrames = trace.filter { $0.milliseconds < fhdTime && $0.event.hasPrefix("preview-image:thumb:") }
+        XCTAssertGreaterThan(imageFrames.count, 3)
+        let rects = imageFrames.map { $0.event.split(separator: ":").dropFirst(3).compactMap { Double($0) } }
+        let first = try XCTUnwrap(rects.first), last = try XCTUnwrap(rects.last)
+        XCTAssertGreaterThan(last[2] - first[2], 40)
+        for rect in rects {
+            let fraction = (rect[2] - first[2]) / (last[2] - first[2])
+            XCTAssertEqual(rect[1], first[1] + (last[1] - first[1]) * fraction, accuracy: 2,
+                "Opening must stay on one continuous trajectory regardless of sample timing")
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "preview-after-upward-flight"; shot.lifetime = .keepAlways; add(shot)
+        let accepted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "count=1;waiting=1"), object: app.staticTexts["admission-state"])
+        XCTAssertEqual(XCTWaiter.wait(for: [accepted], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["preview-state"].exists)
+        XCTAssertEqual(app.staticTexts["admission-flight-state"].label, "flights=0;held=0")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.45)))
+        XCTAssertTrue(app.staticTexts["preview-state"].label.contains("page=1"))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        let second = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "count=2;waiting=2"), object: app.staticTexts["admission-state"])
+        XCTAssertEqual(XCTWaiter.wait(for: [second], timeout: 5), .completed)
+    }
+
+    func testUpwardDiagonalLocksPagerAndDoesNotRebuildPreviewPerMove() throws {
+        continueAfterFailure = false
+        let app = launchHoldFixture(["--preview-admission", "--defer-admission", "--all-local-admission", "--preview-motion-fixture"])
+        defer { app.terminate() }
+        firstGridCenter(app).tap()
+        XCTAssertTrue(app.staticTexts["preview-state"].waitForExistence(timeout: 5))
+        app.buttons["clear-trace"].tap()
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.65))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -130, dy: -220)),
+                    withVelocity: XCUIGestureVelocity(rawValue: 200), thenHoldForDuration: 0.15)
+        let trace = try readHoldTrace(app, name: "upward-diagonal-paging-and-rendering")
+        let moves = trace.filter { $0.event.hasPrefix("queue-move:") }
+        XCTAssertGreaterThan(moves.count, 5)
+        let begin = try XCTUnwrap(moves.dropFirst(3).first?.milliseconds)
+        let end = try XCTUnwrap(moves.last?.milliseconds)
+        let rebuilds = trace.filter { $0.event == "preview-body" && $0.milliseconds > begin && $0.milliseconds < end }
+        XCTAssertLessThanOrEqual(rebuilds.count, 1, "Finger tracking must not rebuild the whole preview: \(rebuilds.count) bodies / \(moves.count) moves")
+        let images = trace.filter { $0.event.hasPrefix("preview-image:fhd:") && $0.milliseconds > begin && $0.milliseconds < end }
+        let frames = images.map { $0.event.split(separator: ":").dropFirst(3).compactMap { Double($0) } }
+        XCTAssertGreaterThan(frames.count, 5)
+        for frame in frames {
+            XCTAssertEqual(frame[0] + frame[2] / 2, app.frame.width / 2, accuracy: 1,
+                "Horizontal finger movement must not move the displayed photo sideways")
+        }
+        for (previous, next) in zip(frames, frames.dropFirst()) {
+            XCTAssertLessThanOrEqual(next[1], previous[1] + 0.1, "The upward image trajectory must not jump back")
+            XCTAssertLessThan(previous[1] - next[1], 20, "Slow tracking must not jump between distant positions")
+        }
+        XCTAssertTrue(app.staticTexts["preview-state"].label.contains("page=0"))
+        XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=1;waiting=1"))
+        let pages = trace.filter { $0.event.hasPrefix("preview-page:") }
+        XCTAssertTrue(pages.allSatisfy { $0.event == "preview-page:0:offset=0.0" }, "Upward drag must not move the horizontal pager: \(pages.map(\.event))")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.45)))
+        XCTAssertTrue(app.staticTexts["preview-state"].label.contains("page=1"), "Lift-off must release the pager for the next gesture")
     }
 
     func testOfflineRejectionHintIsAbovePreviewAndPreviewStaysOpen() {

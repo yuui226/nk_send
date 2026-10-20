@@ -3,6 +3,209 @@ import SwiftUI
 import UIKit
 @testable import ZTransfer
 
+@MainActor
+final class PhotoPreviewPagerObservationTests: XCTestCase {
+    func testUpwardPagingLockSurvivesUpdatesAndRestoresOnlyItsOwnPanOnReleaseOrRemoval() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.contentSize = CGSize(width: 600, height: 600)
+        window.rootViewController!.view.addSubview(scroll)
+        let observation = PhotoPreviewPagerObservation()
+        var changes = 0
+        let pages = (0...1).map { index in
+            let page = PhotoPreviewPageObserver.Marker(frame: CGRect(x: index * 300, y: 0, width: 300, height: 600))
+            page.index = index; page.observation = observation
+            page.onPage = { _, _ in changes += 1 }
+            scroll.addSubview(page)
+            return page
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        scroll.contentOffset.x = 2 // A small horizontal component before the upward decision.
+        observation.lockPaging(to: 0)
+        XCTAssertFalse(scroll.panGestureRecognizer.isEnabled)
+        XCTAssertEqual(scroll.contentOffset.x, 0)
+        try await Task.sleep(for: .milliseconds(30))
+        let count = changes
+        for _ in 0..<12 {
+            // Subsequent motion/re-render cannot change ownership or page.
+            observation.lockPaging(to: 1)
+            observation.schedule()
+            try await Task.sleep(for: .milliseconds(5))
+            XCTAssertFalse(scroll.panGestureRecognizer.isEnabled)
+            XCTAssertEqual(scroll.contentOffset.x, 0)
+        }
+        XCTAssertEqual(changes, count, "Unchanged page geometry must not repeatedly update preview chrome")
+        observation.unlockPaging()
+        XCTAssertTrue(scroll.panGestureRecognizer.isEnabled)
+        scroll.contentOffset.x = 300
+        observation.lockPaging(to: 1)
+        XCTAssertFalse(scroll.panGestureRecognizer.isEnabled)
+        XCTAssertEqual(scroll.contentOffset.x, 300, "The next gesture may lock a different page")
+        pages.forEach { $0.removeFromSuperview() }
+        XCTAssertTrue(scroll.panGestureRecognizer.isEnabled, "Unmount/cancellation must not strand the native pager")
+        pages.forEach { scroll.addSubview($0) }
+        scroll.panGestureRecognizer.isEnabled = false
+        observation.lockPaging(to: 1)
+        observation.unlockPaging()
+        XCTAssertFalse(scroll.panGestureRecognizer.isEnabled, "Do not enable a pan that was disabled by another owner")
+    }
+
+    private final class Reveal: ObservableObject { @Published var progress: CGFloat = 0 }
+    private struct RevealHarness: View {
+        @ObservedObject var reveal: Reveal
+        var body: some View {
+            ZStack {
+                Color.blue.frame(width: 100, height: 160)
+                    .modifier(PhotoPreviewThumbnailVisibility(progress: reveal.progress, hasFHD: true))
+                Color.orange.frame(width: 100, height: 60).opacity(reveal.progress)
+            }.frame(width: 120, height: 180).background(.white)
+        }
+    }
+    func testThumbnailRemainsDuringRevealThenLeavesNoOldImageBorder() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let reveal = Reveal(), window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 120, height: 180)
+        window.rootViewController = UIHostingController(rootView: RevealHarness(reveal: reveal).ignoresSafeArea())
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        func bluePixels() throws -> Int {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let cg = try XCTUnwrap(image.cgImage)
+            var pixels = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+            let context = try XCTUnwrap(CGContext(data: &pixels, width: cg.width, height: cg.height,
+                bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            return stride(from: 0, to: pixels.count, by: 4).filter { pixels[$0] < 60 && pixels[$0 + 2] > 160 }.count
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertGreaterThan(try bluePixels(), 5_000)
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) { reveal.progress = 1 }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertGreaterThan(try bluePixels(), 5_000, "The state target must not hide the still-visible thumbnail early")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(try bluePixels(), 0, "FHD reveal must retire the old thumbnail at its rendered endpoint")
+    }
+
+    func testTransformsCannotChangePageAndRemovalStopsObservation() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIViewController(); window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 300, height: 600))
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.contentSize = CGSize(width: 600, height: 600)
+        window.rootViewController!.view.addSubview(scroll)
+        let observation = PhotoPreviewPagerObservation()
+        var changes: [(Int, CGFloat)] = []
+        let pages = (0...1).map { index in
+            let page = PhotoPreviewPageObserver.Marker(frame: CGRect(x: index * 300, y: 0, width: 300, height: 600))
+            page.index = index; page.observation = observation
+            page.onPage = { changes.append(($0, $1)) }
+            scroll.addSubview(page)
+            return page
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(changes.last?.0, 0); XCTAssertEqual(changes.last?.1, 0)
+        for scale in [0.3, 0.75, 1, 0.945] {
+            scroll.transform = CGAffineTransform(rotationAngle: .pi / 2).scaledBy(x: scale, y: scale)
+            observation.schedule()
+            try await Task.sleep(for: .milliseconds(10))
+            XCTAssertEqual(changes.last?.0, 0); XCTAssertEqual(changes.last?.1, 0)
+        }
+        scroll.contentOffset.x = 180
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(changes.last?.0, 1)
+        XCTAssertEqual(try XCTUnwrap(changes.last?.1), 0.4, accuracy: 0.001)
+        let count = changes.count
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(changes.count, count, "No idle frame clock")
+        pages.forEach { $0.removeFromSuperview() }
+        scroll.contentOffset.x = 0
+        observation.schedule()
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(changes.count, count)
+    }
+}
+
+@MainActor
+final class ConnectionHeroRenderingTests: XCTestCase {
+    private final class Input: ObservableObject { @Published var start: Date? }
+    private struct Harness: View {
+        @ObservedObject var input: Input
+        let usb: Bool
+        var body: some View {
+            GeometryReader { proxy in
+                Color.white
+                ConnectionMethodCard(mode: usb ? .usb : .wifi, state: ConnectionState(), height: 280,
+                    dimmed: false, attentionActive: false, attentionOrigin: .distantPast,
+                    selected: input.start != nil, celebrationStart: input.start,
+                    previewPremiumCelebration: false)
+                    .frame(width: 175).position(x: usb ? 100 : proxy.size.width - 100, y: 600)
+            }.ignoresSafeArea().environment(\.scenePhase, .active)
+        }
+    }
+
+    func testUSBAndWiFiGlyphsFlyContinuouslyToSameWindowTarget() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for usb in [true, false] {
+            let input = Input(), window = UIWindow(windowScene: scene)
+            window.rootViewController = UIHostingController(rootView: Harness(input: input, usb: usb))
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil }
+            try await Task.sleep(for: .milliseconds(200))
+            input.start = Date()
+            var centers: [CGPoint] = []
+            for sample in 0..<9 {
+                try await Task.sleep(for: .milliseconds(80))
+                let format = UIGraphicsImageRendererFormat(); format.scale = 1
+                let shot = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+                if sample == 4 || sample == 8 {
+                    let attachment = XCTAttachment(image: shot)
+                    attachment.name = "\(usb ? "usb" : "wifi")-hero-\(sample)"
+                    attachment.lifetime = .keepAlways; add(attachment)
+                }
+                let cg = try XCTUnwrap(shot.cgImage)
+                var pixels = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+                let context = try XCTUnwrap(CGContext(data: &pixels, width: cg.width, height: cg.height,
+                    bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                var xs: [Int] = [], ys: [Int] = []
+                // Restrict to the flying badge corridor; exclude fading card text.
+                for y in 180..<min(cg.height, 530) {
+                    for x in 20..<(cg.width - 20) {
+                        let p = (y * cg.width + x) * 4
+                        let glyph = usb ? pixels[p] > 180 && pixels[p + 1] > 45 && pixels[p + 1] < 165 && pixels[p + 2] < 60
+                            : pixels[p] < 60 && pixels[p + 1] > 65 && pixels[p + 2] > 110
+                        if glyph { xs.append(x); ys.append(y) }
+                    }
+                }
+                XCTAssertGreaterThan(xs.count, 12)
+                if let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max() {
+                    centers.append(CGPoint(x: Double(minX + maxX) / 2, y: Double(minY + maxY) / 2))
+                }
+            }
+            XCTAssertEqual(centers.count, 9)
+            for pair in zip(centers, centers.dropFirst()) {
+                XCTAssertLessThanOrEqual(pair.1.y, pair.0.y + 2, "Flight must not jump back: \(centers)")
+            }
+            let end = try XCTUnwrap(centers.last)
+            XCTAssertEqual(end.x, window.bounds.midX, accuracy: 5)
+            XCTAssertEqual(end.y, window.bounds.height / 3, accuracy: 6)
+        }
+    }
+}
+
 final class NativeAttentionMotionTests: XCTestCase {
     @MainActor
     func testOfflineSignalUsesNativeLayerAndStopsWhenRemovedOrBackgrounded() async throws {

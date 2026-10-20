@@ -231,6 +231,57 @@ final class CubeLUTTests: XCTestCase {
         XCTAssertEqual(lut.rgba16FloatUploadValues[3], Float16(1))
     }
 
+    // Android CubeLutParserTest: comments/BOM/CRLF and R-fastest RGB order.
+    func testCommentsBeforeAndWithinTableDoNotBecomeDirectives() throws {
+        let rows = (0..<8).map { index in
+            "\(index & 1) \((index >> 1) & 1) \((index >> 2) & 1)"
+        }
+        let plain = "LUT_3D_SIZE 2\n" + rows.joined(separator: "\n")
+        let annotated = "\u{FEFF}# Exported LUT\r\nTITLE \"Identity\"\r\n# Grid\r\nLUT_3D_SIZE 2 # size\r\n"
+            + rows.map { "# Lattice point\r\n\($0) # RGB\r\n" }.joined() + "# End"
+        let expected = try CubeLUTParser.parse(Data(plain.utf8))
+        let actual = try CubeLUTParser.parse(Data(annotated.utf8))
+        XCTAssertEqual(actual.rgb, expected.rgb)
+        XCTAssertEqual(Array(actual.rgb.prefix(9)), [0, 0, 0, 1, 0, 0, 0, 1, 0])
+        XCTAssertEqual(actual.domainMin, expected.domainMin)
+        XCTAssertEqual(actual.domainMax, expected.domainMax)
+        XCTAssertNotEqual(actual.digest, expected.digest, "The digest still covers the original file bytes")
+    }
+
+    func testMalformedSizeIsInvalidWhileUnsupportedGridIsUnsupported() {
+        let table = String(decoding: cube(), as: UTF8.self)
+        for source in [
+            "LUT_3D_SIZE\n", "LUT_3D_SIZE 2 3\n", "LUT_3D_SIZE two\n",
+            "LUT_3D_SIZE 2.0\n", "LUT_3D_SIZE 2147483648\n",
+            "LUT_3D_SIZE 2\n" + table, table + "LUT_3D_SIZE 2\n"
+        ] {
+            XCTAssertThrowsError(try CubeLUTParser.parse(Data(source.utf8))) {
+                XCTAssertEqual($0 as? CubeLUTFailure, .invalid, source)
+            }
+        }
+        for size in ["-1", "0", "1", "66", "2147483647"] {
+            XCTAssertThrowsError(try CubeLUTParser.parse(Data("LUT_3D_SIZE \(size)\n".utf8))) {
+                XCTAssertEqual($0 as? CubeLUTFailure, .unsupported, size)
+            }
+        }
+    }
+
+    func testCommonGridSizesAndCancellationDuringParsing() throws {
+        for size in [17, 33, 65] {
+            let source = Data(("LUT_3D_SIZE \(size)\n"
+                + String(repeating: "0 0 0\n", count: size * size * size)).utf8)
+            let lut = try CubeLUTParser.parse(source)
+            XCTAssertEqual(lut.size, size)
+            XCTAssertEqual(lut.rgb.count, size * size * size * 3)
+            var checks = 0
+            XCTAssertThrowsError(try CubeLUTParser.parse(source) {
+                checks += 1
+                if checks == 4 { throw CancellationError() }
+            }) { XCTAssertTrue($0 is CancellationError) }
+            XCTAssertEqual(checks, 4)
+        }
+    }
+
     func testParsesDomainAndRejectsMalformedBounds() throws {
         let lut = try CubeLUTParser.parse(cube("DOMAIN_MIN -0.1 0 0\nDOMAIN_MAX 1.2 1 1\n"))
         XCTAssertEqual(lut.domainMin.x, -0.1, accuracy: 0.0001)

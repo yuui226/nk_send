@@ -539,6 +539,27 @@ final class QueueRetryUITests: XCTestCase {
         add(attachment)
     }
 
+    func testRealCardSpeedGrowsAndShrinksToTheRightWithoutTruncating() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--queue-card-presentation-test", "--queue-speed-width-test", "-app_language", "en"]
+        app.launch()
+        defer { app.terminate() }
+        let pill = app.otherElements["queue-card-speed-79"]
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        let first = pill.frame
+        for (phase, speed) in ["9.9 MB/s", "999.9 MB/s", "1.0 MB/s"].enumerated() {
+            if phase > 0 { app.buttons["queue-card-next-state"].tap() }
+            XCTAssertTrue(app.staticTexts[speed].waitForExistence(timeout: 3))
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "speed-width-\(phase)"; shot.lifetime = .keepAlways; add(shot)
+            XCTAssertEqual(pill.frame.minX, first.minX, accuracy: 0.5)
+            XCTAssertLessThan(pill.frame.maxX, app.frame.width - 20)
+            if phase == 1 { XCTAssertGreaterThan(pill.frame.width, first.width + 10) }
+            if phase == 2 { XCTAssertEqual(pill.frame.width, first.width, accuracy: 1) }
+        }
+    }
+
     func testQueuePillWidthExpandsWithinConstraintAndShrinksToWaitingIcon() {
         continueAfterFailure = false
         let app = XCUIApplication()

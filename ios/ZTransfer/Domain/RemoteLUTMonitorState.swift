@@ -96,6 +96,9 @@ final class RemoteLUTMonitorState: ObservableObject {
         self.timeout = timeout
         self.read = read
         self.scan = scan
+        // Android restores folder identity before IO. Re-picking this folder
+        // before the first scan must not clear either mode's saved selection.
+        self.folder = preferences.folder.flatMap { URL(string: $0) }
     }
 
     deinit { ticket?.cancel(); deadline?.cancel() }
@@ -111,8 +114,9 @@ final class RemoteLUTMonitorState: ObservableObject {
         invalidate()
         if active != nil { active = nil }
         guard available else { return }
-        if files.isEmpty, access.bookmarkData != nil { refreshFolder() }
-        else { restoreSelection() }
+        // Android restores only the selected file here; opening the menu scans.
+        // Unrelated directory entries must not delay or prevent restoration.
+        restoreSelection()
     }
 
     /// Backgrounding releases rendering but preserves the mode's saved choice.
@@ -198,8 +202,24 @@ final class RemoteLUTMonitorState: ObservableObject {
 
     private func restoreSelection() {
         guard available, let movie, let id = preferences.selection(movie: movie),
-              id != suppressedSelections[movie], let file = catalog.filesByIdentifier[id] else { return }
+              id != suppressedSelections[movie],
+              let file = catalog.filesByIdentifier[id] ?? savedFile(identifier: id) else { return }
         select(file, manual: false)
+    }
+
+    /// Catalog identifiers are absolute paths; the bookmark reader resolves the
+    /// current root. Rebuild only the saved relative path without filesystem IO.
+    private func savedFile(identifier: String) -> RemoteLUTFile? {
+        guard identifier.hasPrefix("/"), let folder, folder.isFileURL else { return nil }
+        let root = folder.standardizedFileURL.path
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        let url = URL(fileURLWithPath: identifier).standardizedFileURL
+        guard url.path.hasPrefix(prefix) else { return nil }
+        let relative = String(url.path.dropFirst(prefix.count))
+        guard (1...2).contains(relative.split(separator: "/").count),
+              url.pathExtension.caseInsensitiveCompare("cube") == .orderedSame else { return nil }
+        return RemoteLUTFile(identifier: identifier, name: url.lastPathComponent,
+                             relativePath: relative, size: nil)
     }
 
     private static func folderNotice(_ reason: RemoteLUTFolderFailure) -> String {
@@ -220,8 +240,8 @@ final class RemoteLUTMonitorState: ObservableObject {
             if active != nil { active = nil }
             if candidate != nil { candidate = nil }
         }
-        // Current native caller is the explicit replacement-folder picker.
-        notify(Self.folderNotice(reason))
+        // Android reports existing-folder failures inside the menu. Explicit
+        // replacement failures emit a notice from refreshFolder and keep this state.
     }
 
     private func notify(_ resource: String) {

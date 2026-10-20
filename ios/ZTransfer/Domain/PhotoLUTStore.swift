@@ -21,8 +21,23 @@ final class PhotoLUTStore: ObservableObject {
     private var sharedObservation: AnyCancellable?
     private var recipeKey: String { role.selectionKey + "_recipe" }
     private let role: Role
+    private let savesOnCommit: Bool
+    private var draftRecipe: [String: Any]?
+    private var recipe: [String: Any]? {
+        get { savesOnCommit ? draftRecipe : defaults.dictionary(forKey: recipeKey) }
+        set {
+            draftRecipe = newValue
+            if !savesOnCommit { defaults.set(newValue, forKey: recipeKey) }
+        }
+    }
+    // A transfer draft is not yet retained by saved preferences. Keep its
+    // snapshot alive through cleanup until it is committed or discarded.
+    private var recipeOwner: PhotoLUTSnapshotOwner?
     @Published private(set) var folderBookmark: Data?
     @Published private(set) var selectedIdentifier: String?
+    /// Restored once per presentation, not by filesystem checks on each draw.
+    /// Android's controls require a recipe, rather than only a saved source URI.
+    @Published private(set) var hasSelection = false
     @Published private(set) var adjustments = LUTAdjustments()
     @Published private(set) var intensityPercent: Int
     @Published private(set) var favorites: Set<String>
@@ -31,9 +46,12 @@ final class PhotoLUTStore: ObservableObject {
     let snapshotDirectory: URL
     private let legacySnapshotDirectory: URL?
 
-    init(role: Role = .camera, defaults: UserDefaults = .standard, directory: URL? = nil, legacyDirectory: URL? = nil) {
+    init(role: Role = .camera, defaults: UserDefaults = .standard, directory: URL? = nil,
+         legacyDirectory: URL? = nil, savesOnCommit: Bool = false) {
         self.role = role
         self.defaults = defaults
+        self.savesOnCommit = savesOnCommit
+        draftRecipe = defaults.dictionary(forKey: role.selectionKey + "_recipe")
         folderBookmark = defaults.data(forKey: "photo_lut_folder_bookmark")
         selectedIdentifier = defaults.string(forKey: role.selectionKey)
         intensityPercent = Np3FilterEngine.normalizeIntensity(defaults.object(forKey: role.intensityKey) as? Int ?? 80)
@@ -44,10 +62,11 @@ final class PhotoLUTStore: ObservableObject {
         legacySnapshotDirectory = legacyDirectory ?? (directory == nil
             ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("photo-lut-snapshots", isDirectory: true)
             : nil)
-        if let recipe = defaults.dictionary(forKey: recipeKey) {
+        if let recipe {
             adjustments = restoredAdjustments(recipe)
             intensityPercent = restoredIntensity(recipe)
         }
+        hasSelection = restoreSelection() != nil
         sharedObservation = Self.sharedPreferencesChanged.sink { [weak self] in
             self?.reloadSharedPreferences()
         }
@@ -65,9 +84,13 @@ final class PhotoLUTStore: ObservableObject {
     /// An editor can be reopened after another presenter changed the same role.
     func reloadRole() {
         reloadSharedPreferences()
+        recipe = defaults.dictionary(forKey: recipeKey)
+        recipeOwner = nil
+        let available = restoreSelection() != nil
+        if hasSelection != available { hasSelection = available }
         let selected = defaults.string(forKey: role.selectionKey)
         if selectedIdentifier != selected { selectedIdentifier = selected }
-        if let recipe = defaults.dictionary(forKey: recipeKey) {
+        if let recipe {
             let intensity = restoredIntensity(recipe), restored = restoredAdjustments(recipe)
             if intensityPercent != intensity { intensityPercent = intensity }
             if adjustments != restored { adjustments = restored }
@@ -83,18 +106,35 @@ final class PhotoLUTStore: ObservableObject {
         Self.sharedPreferencesChanged.send()
     }
     func select(_ identifier: String?) {
-        if identifier == nil || identifier != selectedIdentifier { defaults.removeObject(forKey: recipeKey) }
+        if identifier == nil || identifier != selectedIdentifier {
+            recipe = nil
+            recipeOwner = nil
+            if hasSelection { hasSelection = false }
+        }
         if selectedIdentifier != identifier { selectedIdentifier = identifier }
-        defaults.set(identifier, forKey: role.selectionKey)
+        if !savesOnCommit { persistRole() }
+    }
+
+    /// SettingsScreen commits the transfer recipe on back/close. The workbench
+    /// saves immediately; folder, favorites and per-LUT parameter memory do too.
+    func commitDraft() {
+        persistRole()
+        recipeOwner = nil
+        Task { await pruneSnapshots() }
+    }
+
+    private func persistRole() {
+        defaults.set(selectedIdentifier, forKey: role.selectionKey)
+        defaults.set(intensityPercent, forKey: role.intensityKey)
+        defaults.set(recipe, forKey: recipeKey)
     }
 
     func setIntensity(_ value: Int) {
         let intensity = Np3FilterEngine.normalizeIntensity(value)
         if intensityPercent != intensity { intensityPercent = intensity }
-        defaults.set(intensityPercent, forKey: role.intensityKey)
-        if var recipe = defaults.dictionary(forKey: recipeKey) {
+        if var recipe {
             recipe["intensity"] = intensityPercent
-            defaults.set(recipe, forKey: recipeKey)
+            self.recipe = recipe
             if let digest = recipe["digest"] as? String {
                 defaults.set(intensityPercent, forKey: "lut_adjustments_v1:\(digest):intensity")
             }
@@ -102,6 +142,7 @@ final class PhotoLUTStore: ObservableObject {
                 defaults.set(intensityPercent, forKey: "strength:\(source)")
             }
         }
+        if !savesOnCommit { persistRole() }
     }
 
     /// Publish the role recipe only after its private table is safely written.
@@ -135,23 +176,24 @@ final class PhotoLUTStore: ObservableObject {
         intensityPercent = Np3FilterEngine.normalizeIntensity(remembered)
         defaults.set(intensityPercent, forKey: intensityKey)
         defaults.set(intensityPercent, forKey: "strength:\(sourceIdentifier)")
-        defaults.set(intensityPercent, forKey: role.intensityKey)
         adjustments = Self.decodeAdjustments(defaults.dictionary(forKey: "lut_adjustments_v1:\(lut.digest)") as? [String: Int])
         let selection = PhotoFilterSelection(preset: .init(id: "cube:\(lut.digest)", name: name),
                                              intensityPercent: intensityPercent, lutAdjustments: adjustments)
-        defaults.set(["digest": lut.digest, "name": name, "source": sourceIdentifier,
-                      "intensity": selection.normalizedIntensityPercent,
-                      "adjustments": Self.encodeAdjustments(adjustments)], forKey: recipeKey)
+        recipe = ["digest": lut.digest, "name": name, "source": sourceIdentifier,
+                  "intensity": selection.normalizedIntensityPercent,
+                  "adjustments": Self.encodeAdjustments(adjustments)]
+        recipeOwner = savesOnCommit ? prepared.owner : nil
+        if !hasSelection { hasSelection = true }
         selectedIdentifier = sourceIdentifier
-        defaults.set(sourceIdentifier, forKey: role.selectionKey)
+        if !savesOnCommit { persistRole() }
         Task { await pruneSnapshots() }
         return selection
     }
 
-    var selectedName: String? { defaults.dictionary(forKey: recipeKey)?["name"] as? String }
+    var selectedName: String? { recipe?["name"] as? String }
 
     func restoreSelection() -> PhotoFilterSelection? {
-        guard let recipe = defaults.dictionary(forKey: recipeKey),
+        guard let recipe,
               let digest = recipe["digest"] as? String,
               let name = recipe["name"] as? String,
               digest.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { return nil }
@@ -193,11 +235,12 @@ final class PhotoLUTStore: ObservableObject {
     func setAdjustments(_ value: LUTAdjustments) {
         let normalized = value.normalized
         if adjustments != normalized { adjustments = normalized }
-        guard var recipe = defaults.dictionary(forKey: recipeKey),
+        guard var recipe,
               let digest = recipe["digest"] as? String else { return }
         let fields = Self.encodeAdjustments(adjustments)
         recipe["adjustments"] = fields
-        defaults.set(recipe, forKey: recipeKey)
+        self.recipe = recipe
+        if !savesOnCommit { persistRole() }
         defaults.set(fields, forKey: "lut_adjustments_v1:\(digest)")
     }
 

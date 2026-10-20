@@ -309,6 +309,7 @@ final class PhotoEffectsPreviewCacheTests: XCTestCase {
         XCTAssertEqual(repeated, [key], "Identical pixels must reuse one production cache key")
         settings.favoriteFilterIDs = ["unused"]
         settings.filterIntensities["unused"] = 12
+        settings.rememberedBuiltinFilter = .init(preset: try XCTUnwrap(PhotoFilterCatalog.presets.first), intensityPercent: 62)
         XCTAssertEqual(PhotoEffectsSettingsPreview.makeRenderKey(settings: settings, source: nil, metadata: nil), key)
         settings.watermark.text = "changed pixels"
         XCTAssertNotEqual(PhotoEffectsSettingsPreview.makeRenderKey(settings: settings, source: nil, metadata: nil), key)

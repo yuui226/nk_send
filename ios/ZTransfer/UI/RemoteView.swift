@@ -34,6 +34,7 @@ private struct RemoteToolIconAnchor: ViewModifier {
         switch tool {
         case .grid: .remoteGrid
         case .pictureControl: .remotePictureControl
+        case .lut: .remoteLUT
         case .whiteBalance: .remoteWhiteBalance
         case .focusArea: .remoteFocusArea
         case .focusMode: .remoteFocusMode
@@ -124,8 +125,8 @@ struct RemoteView: View {
     private var lutMonitor: RemoteLUTMonitorState { lutLifetime.monitor }
     @State private var lutFolderPickerPresented = false
     @State private var lutListPresented = false
+    @State private var lutMenuClosing = false
     @State private var lutPickedFolder: URL?
-    @State private var lutFolderAfterMenu = false
     @State private var dispMode: RemoteDispMode = .camera
     @State private var histogramMode: RemoteHistogramMode = .off
     // The developer entry is deliberately scoped to this RemoteView instance.
@@ -289,16 +290,12 @@ struct RemoteView: View {
         }
         .onChange(of: pictureControlPicker.didReturn) { if $0 { finishPictureControlFolderPicker() } }
         .fileImporter(isPresented: $lutFolderPickerPresented, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            lutPickedFolder = url
-        }
-        .sheet(isPresented: $lutListPresented, onDismiss: {
-            lutMonitor.dismissMenu()
-            if lutFolderAfterMenu { lutFolderAfterMenu = false; lutFolderPickerPresented = true }
-        }) {
-            RemoteLUTPanel(monitor: lutMonitor) {
-                lutFolderAfterMenu = true
-                lutListPresented = false
+            switch result {
+            case .success(let urls): lutPickedFolder = urls.first
+            case .failure(let error):
+                if (error as NSError).code != NSUserCancelledError {
+                    model.showMonitorHint(AppLocalized.resource("lut_folder_denied"), source: .lut)
+                }
             }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -381,7 +378,7 @@ struct RemoteView: View {
             lutMonitor.onCommit = {
                 if exposureMode == .falseColor { exposureMode = .off; tools.exposure = .off }
             }
-            lutMonitor.onCloseMenu = { lutListPresented = false }
+            lutMonitor.onCloseMenu = { lutMenuClosing = true }
             let normalizedDesqueeze = effectiveDesqueeze
             if tools.desqueeze != normalizedDesqueeze { tools.desqueeze = normalizedDesqueeze }
             model.setExposureMeterVisible(tools.meter)
@@ -426,12 +423,13 @@ struct RemoteView: View {
             if !connected { closePictureControl() }
             if !connected && review.active { Task { await review.close() } }
         }
-        .onChange(of: editingTools) { _ in closePictureControl(); monitorHelpPresented = false }
-        .onChange(of: layoutOrientation) { _ in closePictureControl(); monitorHelpPresented = false }
-        .onChange(of: selectedField) { if $0 != nil { closePictureControl() } }
-        .onChange(of: developerPanelPresented) { if $0 { closePictureControl() } }
-        .onChange(of: gridMenuPresented) { if $0 { closePictureControl() } }
-        .onChange(of: model.cameraToolPanel?.id) { if $0 != nil { closePictureControl() } }
+        .onChange(of: editingTools) { _ in closePictureControl(); dismissLUTMenu(); monitorHelpPresented = false }
+        .onChange(of: layoutOrientation) { _ in closePictureControl(); dismissLUTMenu(); monitorHelpPresented = false }
+        .onChange(of: selectedField) { if $0 != nil { closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: developerPanelPresented) { if $0 { closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: gridMenuPresented) { if $0 { closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: model.cameraToolPanel?.id) { if $0 != nil { closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: pictureControlPresented) { if $0 { dismissLUTMenu() } }
         .onChange(of: lutListPresented) { if $0 { closePictureControl() } }
         .onChange(of: dispMode) { mode in
             model.setMovieFormatMonitoring(mode.showsCameraInformation)
@@ -628,9 +626,15 @@ struct RemoteView: View {
         gridMenuPresented = false
         gridMenuClosing = false
         model.dismissCameraTool()
-        lutListPresented = false
+        dismissLUTMenu()
         selectedField = nil
         developerPanelPresented = false
+    }
+
+    private func dismissLUTMenu() {
+        lutMonitor.dismissMenu()
+        lutListPresented = false
+        lutMenuClosing = false
     }
 
     private var remoteTopBar: some View {
@@ -846,6 +850,12 @@ struct RemoteView: View {
         case .lut: return AnyView(configuredRemoteToolButton(.lut, movie: movie, active: lutLifetime.isActive, accessibilityLabel: "LUT", label: {
                 toolMark(.lut)
             }) {
+                closePictureControl()
+                selectedField = nil
+                developerPanelPresented = false
+                model.dismissCameraTool()
+                gridMenuPresented = false
+                lutMenuClosing = false
                 lutMonitor.openMenu()
                 lutListPresented = true
             })
@@ -903,6 +913,13 @@ struct RemoteView: View {
                         landscape: landscape, canWrite: model.pictureControlWritesAllowed,
                         dismiss: { if pictureControlPanel === panel { closePictureControl() } },
                         chooseFolder: choosePictureControlFolder, pickerActive: pictureControlPicker.active)
+                }
+                if lutListPresented {
+                    RemoteLUTPanel(monitor: lutMonitor,
+                        anchor: anchors[.remoteLUT].map { proxy[$0] }, hostSize: proxy.size,
+                        landscape: landscape, closing: lutMenuClosing, pickerActive: lutFolderPickerPresented,
+                        close: { lutMenuClosing = true }, dismiss: dismissLUTMenu,
+                        onChooseFolder: { lutFolderPickerPresented = true })
                 }
                 if gridMenuPresented {
                     RemoteGridMenu(tools: tools, anchor: anchors[.remoteGrid].map { proxy[$0] },
@@ -1038,6 +1055,7 @@ struct RemoteView: View {
             case .hd: model.setHDLiveView(false)
             case .lock: setRotationLocked(false, showHint: false)
             case .pictureControl: closePictureControl()
+            case .lut: lutMonitor.turnOff(); dismissLUTMenu()
             case .computerControl: if model.computerControlEnabled { model.setComputerControl(false) }
             case .histogram:
                 histogramMode = .off

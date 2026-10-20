@@ -30,11 +30,14 @@ struct PhotoListAdmissionHarness: View {
         preferences.set(TransferStorageMode.unified.rawValue, forKey: TransferStorageMode.persistenceKey)
         defaults = preferences
         let lastID = ProcessInfo.processInfo.arguments.contains("--scroll-hold-fixture") ? 760 : burst ? 703 : 702
-        let files = (701...lastID).map { id in
+        let syntheticFiles = (701...lastID).map { id in
             CameraFile(id: UInt32(id), storageID: 1, format: 0x3801, size: 10,
                 fileName: String(format: "DSC_%04d.JPG", id),
                 captureDate: burst || id == 701 ? "20261016T100000" : "20261016T110000", isProtected: false)
         }
+        let files = ProcessInfo.processInfo.arguments.contains("--preview-motion-fixture")
+            ? Array(DebugCameraData.shared.files.filter { $0.fileExtension.lowercased() == ".jpg" }.prefix(3))
+            : syntheticFiles
         model = PhotoListViewModel(scanCatalog: { _, _, _, _, batch in
             try await batch(files)
             return PhotoScanResult(files: files, removedHandles: [], addedHandles: [],

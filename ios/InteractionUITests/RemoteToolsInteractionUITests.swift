@@ -2,6 +2,95 @@ import XCTest
 
 @MainActor
 final class RemoteToolsInteractionUITests: XCTestCase {
+    func testLUTAnchorsToToolAndReturnsFromFolderPickerWithoutSystemSheet() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--remote-tools-ui-test", "--remote-camera-tools-ui-test",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        app.buttons["open-monitor"].tap()
+        let tool = app.buttons["remote-tool-lut"]
+        XCTAssertTrue(tool.waitForExistence(timeout: 10))
+        tool.tap()
+        let off = app.buttons["remote-lut-off"]
+        XCTAssertTrue(off.waitForExistence(timeout: 5))
+        XCTAssertLessThan(off.frame.minY - tool.frame.maxY, 22)
+        XCTAssertGreaterThan(off.frame.minY, tool.frame.maxY)
+        let portrait = XCTAttachment(screenshot: app.screenshot())
+        portrait.name = "LUT anchored empty menu"; portrait.lifetime = .keepAlways; add(portrait)
+        app.buttons["remote-lut-folder"].tap()
+        let cancel = app.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        XCTAssertTrue(off.waitForExistence(timeout: 5))
+        XCTAssertTrue(off.isHittable, "Folder cancellation returns to the same menu")
+        off.tap()
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: off)
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+        app.buttons["remote-tool-rotate"].tap()
+        let dock = app.buttons["remote-landscape-dock"]
+        XCTAssertTrue(dock.waitForExistence(timeout: 5))
+        dock.tap()
+        let toolbarGone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["remote-tool-disp"])
+        XCTAssertEqual(XCTWaiter.wait(for: [toolbarGone], timeout: 5), .completed)
+        XCTAssertTrue(tool.waitForExistence(timeout: 5))
+        if !app.frame.contains(tool.frame) {
+            // The monitor rotates its canvas, not the OS interface. Local
+            // vertical scrolling becomes a rightward drag in this +90° host.
+            let scroll = app.scrollViews.containing(.button, identifier: "remote-tool-lut").firstMatch
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+                .press(forDuration: 0.05, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+        }
+        XCTAssertTrue(app.frame.contains(tool.frame))
+        XCTAssertTrue(tool.isHittable)
+        tool.tap()
+        XCTAssertTrue(off.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(off.frame))
+        let landscape = XCTAttachment(screenshot: app.screenshot())
+        landscape.name = "LUT anchored rotated menu"; landscape.lifetime = .keepAlways; add(landscape)
+        off.tap()
+        let rotatedClosed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: off)
+        XCTAssertEqual(XCTWaiter.wait(for: [rotatedClosed], timeout: 5), .completed)
+    }
+
+    func testLUTCategoryScrollSelectionMetalCommitAndOffUseProductionPanel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--remote-tools-ui-test", "--remote-lut-list-ui-test",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        app.buttons["test-lut-open"].tap()
+        let first = app.buttons["remote-lut-option-A-00"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        let off = app.buttons["remote-lut-off"], header = off.frame
+        XCTAssertEqual(app.tables.count, 2)
+        let files = app.tables.element(boundBy: 1)
+        files.swipeUp()
+        XCTAssertFalse(first.isHittable)
+        XCTAssertEqual(off.frame, header, "Global actions must not scroll with files")
+        let category = app.buttons["remote-lut-category-folder:B"]
+        XCTAssertTrue(category.isHittable, "Scrolling files leaves categories untouched")
+        category.tap()
+        XCTAssertTrue(app.buttons["remote-lut-option-B-00"].isHittable)
+        let selected = app.buttons["remote-lut-option-B-03"]
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "LUT independent category and file columns"; screenshot.lifetime = .keepAlways; add(screenshot)
+        selected.tap()
+        let active = app.staticTexts["test-lut-active"]
+        let committed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "B-03"), object: active)
+        XCTAssertEqual(XCTWaiter.wait(for: [committed], timeout: 5), .completed)
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: off)
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+        app.buttons["test-lut-open"].tap()
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        XCTAssertTrue(selected.isSelected)
+        XCTAssertTrue(category.isSelected)
+        off.tap()
+        let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "off"), object: active)
+        XCTAssertEqual(XCTWaiter.wait(for: [cleared], timeout: 5), .completed)
+    }
 
     func testMonitorHintUsesHeaderAndRotatedViewfinderAnchorsWithoutTouchThrough() {
         continueAfterFailure = false

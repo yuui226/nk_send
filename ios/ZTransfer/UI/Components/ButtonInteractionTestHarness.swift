@@ -11,6 +11,9 @@ struct ButtonInteractionTestHarness: View {
     @State private var trace = "[]"
 
     var body: some View {
+        if ProcessInfo.processInfo.arguments.contains("--rating-chip-interaction-test") {
+            RatingChipInteractionHarness()
+        } else {
         VStack(spacing: 20) {
             HStack {
                 Button("Clear trace") { ButtonInteractionTrace.reset() }
@@ -54,6 +57,29 @@ struct ButtonInteractionTestHarness: View {
         .background { ButtonInteractionTouchTrace() }
         .onAppear { ButtonInteractionTrace.enabled = true; ButtonInteractionTrace.reset() }
         .onDisappear { ButtonInteractionTrace.enabled = false }
+        }
+    }
+}
+
+private struct RatingChipInteractionHarness: View {
+    @State private var enabled = true
+    @State private var toggles = 0
+    @State private var progress = PhotoRatingProgress(PhotoRatingScan(loading: true, total: 10_000))
+    var body: some View {
+        VStack(spacing: 30) {
+            PhotoRatingProgressChip(progress: progress, enabled: enabled, visible: true) {
+                enabled.toggle(); toggles += 1
+            }
+            Text("enabled=\(enabled);toggles=\(toggles)").accessibilityIdentifier("rating-toggle-state")
+        }
+        .task(id: enabled) {
+            guard enabled else { progress.update(PhotoRatingScan()); return }
+            for value in 1...10_000 {
+                guard !Task.isCancelled else { return }
+                progress.update(PhotoRatingScan(loading: true, completed: value, total: 10_000))
+                do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
+            }
+        }
     }
 }
 #endif

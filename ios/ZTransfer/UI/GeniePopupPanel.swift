@@ -438,7 +438,7 @@ enum GeniePopupTrigger: String, Hashable {
     case queueRetry, queueClear
     case filter, settings, gps, remoteWhiteBalance, remoteFocusArea, remoteFocusMode, remoteGrid
     case remoteEV, remoteISO, remoteAperture, remoteShutter
-    case remotePictureControl, photoEffectModules
+    case remotePictureControl, remoteLUT, photoEffectModules
 }
 
 extension RemoteExposureField {

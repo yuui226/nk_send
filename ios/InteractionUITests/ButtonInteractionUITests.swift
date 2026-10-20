@@ -24,6 +24,23 @@ final class ButtonInteractionUITests: XCTestCase {
         return app
     }
 
+    func testRatingLoadingCanBeStoppedWhileProgressChangesAndStartedAgain() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--button-motion-ui-test", "--rating-chip-interaction-test"]
+        app.launch()
+        defer { app.terminate() }
+        let chip = app.buttons["photo-rating-toggle"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        let point = chip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        // Progress changes repeatedly between down and up, below the 450 ms hold.
+        point.press(forDuration: 0.18)
+        XCTAssertEqual(app.staticTexts["rating-toggle-state"].label, "enabled=false;toggles=1")
+        point.tap()
+        XCTAssertEqual(app.staticTexts["rating-toggle-state"].label, "enabled=true;toggles=2")
+        point.press(forDuration: 0.18)
+        XCTAssertEqual(app.staticTexts["rating-toggle-state"].label, "enabled=false;toggles=3")
+    }
+
     func testNativeActionsAndDisabledStateAcrossAllMaterials() {
         for skin in ["FROSTED_GLASS", "TITANIUM", "WOOD", "CAMERA_CONTROLS"] {
             let app = launch(skin: skin)

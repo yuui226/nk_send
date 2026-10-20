@@ -3,6 +3,46 @@ import XCTest
 
 final class PhotoRatingScanTests: XCTestCase {
     @MainActor
+    func testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain() async throws {
+        let gate = RatingLookupGate(), stub = Stub()
+        let model = PhotoRatingScanController(io: PhotoRatingScanIO(
+            generation: { await stub.generation }, invalidate: { await stub.invalidate() },
+            cached: { await stub.cached($0) }, beginPhase: { await stub.begin() }, endPhase: { await stub.end() },
+            read: { _, _ in await gate.lookup()?.value }))
+        defer { model.cancel() }
+        let files = [file(1, "A.JPG", "20261007T120000"), file(2, "B.JPG", "20261007T120001")]
+        let scanInput = input(files, sta: false, loading: false)
+        func waitForRead(_ count: Int) async throws {
+            for _ in 0..<100 where await gate.calls < count { try await Task.sleep(for: .milliseconds(5)) }
+            let actual = await gate.calls
+            XCTAssertEqual(actual, count)
+        }
+        model.update(scanInput, enabled: true)
+        try await waitForRead(1)
+        await gate.release(1, value: PhotoRatingCacheEntry(value: 5, origin: "first-pass"))
+        try await waitForRead(2)
+        XCTAssertEqual(model.state.values[1], .known(5))
+        XCTAssertEqual(model.state.completed, 1)
+        model.update(scanInput, enabled: false)
+        XCTAssertEqual(model.state, PhotoRatingScan())
+        model.update(scanInput, enabled: true)
+        try await waitForRead(3)
+        XCTAssertTrue(model.state.values.isEmpty, "Restart cannot reuse a partially scanned snapshot")
+        await gate.release(2, value: PhotoRatingCacheEntry(value: 5, origin: "late-cancelled"))
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertTrue(model.state.values.isEmpty, "A cancelled read must not repopulate the new scan")
+        await gate.release(3, value: PhotoRatingCacheEntry(value: 1, origin: "second-pass"))
+        try await waitForRead(4)
+        await gate.release(4, value: PhotoRatingCacheEntry(value: 2, origin: "second-pass"))
+        await waitUntil { model.state.complete }
+        XCTAssertEqual(model.state.values, [1: .known(1), 2: .known(2)])
+        let phases = await stub.snapshot()
+        XCTAssertEqual(phases.0, phases.1)
+        let generation = await stub.generation
+        XCTAssertGreaterThanOrEqual(generation, 3, "Off and re-enable both invalidate the camera snapshot")
+    }
+
+    @MainActor
     func testOldReadFinishingCannotDetachReplacementBeforeSecondDisable() async throws {
         let gate = RatingLookupGate()
         let stub = Stub()
