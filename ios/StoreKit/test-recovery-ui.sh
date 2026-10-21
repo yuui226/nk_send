@@ -24,6 +24,7 @@ test_methods=(
     testFreeWorkbenchSavesPhotoThroughSystemAuthorization
     testFreeWorkbenchSavesTwoPhotosThroughSystemAuthorization
     testWorkbenchDeniedPhotoSaveReportsFailureAndCanRetry
+    testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization
 )
 # The current runtime rejects SKTestSession calls from the UI runner. Keep
 # the failing refund probe explicitly runnable; it is NOT a passed UI case.
@@ -93,6 +94,9 @@ for test_method in "${test_methods[@]}"; do
         expected_exports=2
     elif [[ $test_method == testWorkbenchDeniedPhotoSaveReportsFailureAndCanRetry ]]; then
         photo_export=true
+    elif [[ $test_method == testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization ]]; then
+        photo_export=true
+        expected_exports=1
     fi
     if [[ $photo_export == true ]]; then
         python3 "$ios_dir/StoreKit/verify-photo-export.py" check "$1"

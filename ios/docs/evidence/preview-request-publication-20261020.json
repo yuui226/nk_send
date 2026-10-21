@@ -1,0 +1,40 @@
+{
+  "resultsDirectory": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ksDuly",
+  "exitCode": 0,
+  "baselinePrefixMatched": true,
+  "previewEvents": [
+    "1792509477.34965 preview.request.PHOTO_TOP_CENTER",
+    "1792509477.4219599 preview.request.PHOTO_TOP_CENTER",
+    "1792509477.4782748 preview.request.PHOTO_TOP_CENTER",
+    "1792509479.706161 preview.publish.PHOTO_TOP_CENTER",
+    "1792509542.4182591 preview.request.PHOTO_TOP_CENTER",
+    "1792509542.548184 preview.request.PHOTO_TOP_CENTER",
+    "1792509542.6225991 preview.request.PHOTO_TOP_CENTER",
+    "1792509544.581444 preview.publish.PHOTO_TOP_CENTER",
+    "1792509561.4137878 preview.request.PHOTO_TOP_CENTER",
+    "1792509562.502431 preview.publish.PHOTO_TOP_CENTER",
+    "1792509565.751316 preview.request.PHOTO_TOP_CENTER",
+    "1792509566.8235211 preview.publish.PHOTO_TOP_CENTER",
+    "1792509570.1266031 preview.request.PHOTO_TOP_RIGHT",
+    "1792509571.6893501 preview.publish.PHOTO_TOP_RIGHT",
+    "1792509610.691443 preview.request.PHOTO_TOP_RIGHT",
+    "1792509610.807858 preview.request.PHOTO_TOP_RIGHT",
+    "1792509610.913326 preview.request.PHOTO_TOP_RIGHT",
+    "1792509613.282261 preview.publish.PHOTO_TOP_RIGHT"
+  ],
+  "logs": [
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ksDuly/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "sha256": "34e53b6b5d1532632051d0f98159e7de849a457a8c622076c860acfd8583d3d1"
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ksDuly/cleanup.log",
+      "sha256": "3b6d6935223fe1731030dd08b981df7f925bba2933027f5099ec8cf4f122a74e"
+    },
+    {
+      "path": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ksDuly/prepare-testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+      "sha256": "a12de8fe1b19974b59879f9fe93dbf8de528ae3314d9345102a5e71d4ef4485d"
+    }
+  ],
+  "finding": "Production settings preview received and published PHOTO_TOP_RIGHT after editing PHOTO_TOP_CENTER; rendering completed about 1.56 seconds after request. This run does not support missing draft delivery to render task. Screenshots not yet reviewed."
+}

@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-21",
+  "scope": "Small-phone GPS initial layout: reuse the mounted panel natural size and reclaim top whitespace in the same Layout pass. Preserve card sizes, animation and fixed workbench.",
+  "sourceFiles": {
+    "ios/ZTransfer/UI/Connection/ConnectionPage.swift": "d37bc2c8682898b24078f6ddc582bb85ce098d8cee42994666d6452199f8e3e9",
+    "ios/ZTransfer/UI/Connection/GPSConnectionControl.swift": "e82969c099b14475baf4c766738251d6c6c3edc7670cf508b02a592d9ace47bb",
+    "ios/ZTransferTests/CameraConnectionPresentationTests.swift": "3f0341a3d5670491b635e042e6dfa49b39bb56ba9c35fac1df5d3bf199bf42c0",
+    "ios/PopupUITests/PrelaunchLayoutUITests.swift": "3e4479844d8bb94f1b431b825cb9ea965cc2e3bd1c463576fbca94fce8b561f6"
+  },
+  "modelAndHostedTests": {
+    "log": "/tmp/ztransfer-prelaunch-gps-final-model.log",
+    "sha256": "95f68941f4f2490c3f7cfc609bdd0c6e84be51f9886700ef04700ff9ab766da2",
+    "resultBundle": "/tmp/ztransfer-prelaunch-derived/Logs/Test/Test-ZTransfer-2026.10.21_00-15-24-+0800.xcresult",
+    "passed": 12,
+    "failed": 0,
+    "exitCode": 0
+  },
+  "realUI": {
+    "log": "/tmp/ztransfer-prelaunch-gps-final-ui.log",
+    "sha256": "0ce82f06c01938f941fff2b727cbc4fbccfc8a3971ab2b736fa7329d532496ed",
+    "resultBundle": "/tmp/ztransfer-prelaunch-gps-final-ui.xcresult",
+    "passedMethods": 1,
+    "failed": 0,
+    "exitCode": 0,
+    "languages": [
+      "zh-Hans",
+      "zh-Hant",
+      "en"
+    ],
+    "openCloseCyclesPerLanguage": 2,
+    "checks": [
+      "full panel above fixed workbench",
+      "action hittable",
+      "36pt toolbar hittable",
+      "GPS header, toolbar and workbench do not jump after expansion",
+      "no added GPS scroll view"
+    ]
+  },
+  "screenshots": [
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/07D4CCD6-82B3-42F9-83BF-7A6B99C72011.png",
+      "name": "L02-gps-action-reachability-en-2_0_BBCA9BE2-092E-40F1-98F8-4589C6CB18ED.png",
+      "sha256": "16d7b4b63c8bbe89521af5583623904bf7c7a850010fd546c9ef5eb5038bc716",
+      "visuallyReviewed": true,
+      "reviewer": "root"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/1AFF8D92-5E52-4217-B514-5FE7AD7AE3E8.png",
+      "name": "L02-gps-action-reachability-en-1_0_1220EF65-7B0B-428C-97CE-902CDD3A728A.png",
+      "sha256": "739d8383fbedc1bd112e03f21843635b480558aaa04bfa05282e1660133a8edb",
+      "visuallyReviewed": true,
+      "reviewer": "root"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/947B8CB2-3C21-4668-898B-73D96ECDD0D7.png",
+      "name": "L02-gps-before-expansion-en_0_AFDEC2E0-2966-456F-B7B4-39C677A8EA22.png",
+      "sha256": "0f383be74cbe79e30d87f3c308803ebb0d9c3b4733025233ce687c80ce0f9315",
+      "visuallyReviewed": true,
+      "reviewer": "root"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/7F63E37D-EF62-49AA-A8F5-5867BF8297EC.png",
+      "name": "L02-gps-action-reachability-zh-Hant-2_0_F3C824D6-D5EA-4DBA-A290-D94335474999.png",
+      "sha256": "4c348853412ea83989385b569ddb7ca46857e36109e002e9f5a3d9c099951c0e",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/7A64826F-32A4-4FAB-AD9E-98DFD0598A44.png",
+      "name": "L02-gps-action-reachability-zh-Hant-1_0_CD0FE761-E102-4906-9C96-F23D3AC97CB8.png",
+      "sha256": "f7e11f3b94298b416b1f1cb3d91bbaf3995a113305cf2eab1d683b801cc1321e",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/EBA5BE1C-EFB9-41D3-9DDA-6BCCE1564CFF.png",
+      "name": "L02-gps-before-expansion-zh-Hant_0_6B4AC607-3A76-498C-9466-91FDCC40BAF3.png",
+      "sha256": "dc4c37c59c4f0331e08bbedbd5e306027eaaea6b6dc0fff4f48f220a1ae73b83",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/3EC35DAF-55BD-4065-8786-DCD4312D9B5C.png",
+      "name": "L02-gps-action-reachability-zh-Hans-2_0_7C7E470A-D0EA-4433-BB5C-A8CD72D8FC32.png",
+      "sha256": "2ba16d0ec04feac50fe913233d72d3aae7f60d044d51f475fc23fb70dba7278e",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/E7BF8521-E027-4F78-A89C-AD2ECB3D3904.png",
+      "name": "L02-gps-action-reachability-zh-Hans-1_0_43D47D31-6601-4321-A96D-D0541AC02E53.png",
+      "sha256": "7acf899be03d402860d88c625ea9981579f5d210b7e0d283d32562c2421c3526",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review"
+    },
+    {
+      "path": "/tmp/ztransfer-prelaunch-gps-final-ui-images/FAF99957-E23C-4560-AB33-4D34F7C654A7.png",
+      "name": "L02-gps-before-expansion-zh-Hans_0_93901FBB-95E8-4AA5-98FC-9654C8A51ECA.png",
+      "sha256": "70c88c1721f2bce628192443ba681d3d820a54d04fb1afde6bab9d92c34050d9",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review"
+    }
+  ],
+  "historicalFailures": [
+    {
+      "log": "/tmp/ztransfer-prelaunch-gps-overlap-baseline.log",
+      "description": "Initial compact GPS action overlapped workbench."
+    },
+    {
+      "log": "/tmp/ztransfer-prelaunch-final-navigation.log",
+      "exitCode": 65,
+      "description": "Help/settings passed; first whitespace rule still failed English action 608.5 > workbench 605. Whole panel also needed its 10pt bottom padding."
+    }
+  ],
+  "limits": [
+    "English complete panel has only 0.5pt measured nominal clearance; preferred 8pt gap is not guaranteed when space is exhausted.",
+    "This does not accept all L02 states, dynamic-text sizes, iPad resizing or physical camera behavior."
+  ]
+}

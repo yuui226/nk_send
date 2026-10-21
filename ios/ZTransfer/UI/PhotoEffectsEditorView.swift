@@ -23,6 +23,112 @@ extension View {
     }
 }
 
+/// Android WatermarkTextField waits one frame + 180 ms after focus, then
+/// brings its entire 34 dp control into view. Native TextField scrolling can
+/// expose only the glyphs, leaving the surrounding control behind QuickType.
+/// Keep the request local to the existing scroll view in both editor entries.
+private struct PhotoEffectsFocusedFieldVisibility: UIViewRepresentable {
+    let focused: Bool
+    @Environment(\.scenePhase) private var scenePhase
+
+    func makeUIView(context: Context) -> PhotoEffectsFocusedFieldVisibilityProbe {
+        PhotoEffectsFocusedFieldVisibilityProbe()
+    }
+
+    func updateUIView(_ view: PhotoEffectsFocusedFieldVisibilityProbe, context: Context) {
+        view.configure(focused: focused, active: scenePhase == .active)
+    }
+
+    static func dismantleUIView(_ view: PhotoEffectsFocusedFieldVisibilityProbe, coordinator: ()) {
+        view.cancel()
+    }
+}
+
+@MainActor
+final class PhotoEffectsFocusedFieldVisibilityProbe: UIView {
+    private var focusRequested = false
+    private var active = false
+    private var frameLink: CADisplayLink?
+    private var requestTask: Task<Void, Never>?
+    #if DEBUG
+    var keyboardFrameInWindowOverride: CGRect?
+    #endif
+
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(focused: Bool, active: Bool) {
+        guard self.focusRequested != focused || self.active != active else { return }
+        self.focusRequested = focused
+        self.active = active
+        schedule()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        schedule()
+    }
+
+    func cancel() {
+        frameLink?.invalidate()
+        frameLink = nil
+        requestTask?.cancel()
+        requestTask = nil
+    }
+
+    private func schedule() {
+        cancel()
+        guard focusRequested, active, window != nil else { return }
+        let link = ZTransferDisplayLink.make(owner: self) { owner, link in
+            link.invalidate()
+            owner.frameLink = nil
+            owner.requestTask = Task { [weak owner] in
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+                guard !Task.isCancelled, let owner, owner.focusRequested, owner.active,
+                      owner.window != nil else { return }
+                owner.requestTask = nil
+                owner.revealControl()
+            }
+        }
+        frameLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    private func revealControl() {
+        guard let window, let root = window.rootViewController?.view else { return }
+        var ancestor = superview
+        while let view = ancestor, !(view is UIScrollView) { ancestor = view.superview }
+        guard let scroll = ancestor as? UIScrollView else { return }
+
+        // UIKit's guide includes the keyboard's accessory/suggestion area.
+        // Do not use XCUI's main-key frame or change either host's safe area.
+        let guide = root.keyboardLayoutGuide
+        window.layoutIfNeeded()
+        var keyboard = root.convert(guide.layoutFrame, to: scroll)
+        #if DEBUG
+        if let keyboardFrameInWindowOverride {
+            keyboard = window.convert(keyboardFrameInWindowOverride, to: scroll)
+        }
+        #endif
+        let viewport = scroll.bounds.inset(by: scroll.adjustedContentInset)
+        var target = convert(bounds, to: scroll)
+        guard target.width > 0, target.height > 0 else { return }
+        if keyboard.height > 0, keyboard.minY < viewport.maxY, keyboard.maxY > viewport.minY,
+           keyboard.minX < target.maxX, keyboard.maxX > target.minX {
+            // Extend the request by only the occluded viewport portion. Native
+            // scrolling then makes the full control clear the keyboard with
+            // the minimum offset, even in hosts that manage their own insets.
+            target.size.height += viewport.maxY - max(viewport.minY, keyboard.minY)
+        }
+        scroll.scrollRectToVisible(target, animated: true)
+    }
+}
+
 /// Android SettingsScreen.PhotoFilterEditor / PhotoFrameWatermarkEditor are
 /// shared by transfer settings and LocalPhotoEffectsPage. The caller owns the
 /// draft, persistence scope, keyboard focus, and image picker lifecycle.
@@ -377,6 +483,7 @@ struct PhotoEffectsControls: View {
                                 .frame(height: 34)
                                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(ZTransferColors.secondaryText.opacity(0.15)))
+                                .background(PhotoEffectsFocusedFieldVisibility(focused: textFieldFocused))
                             } else {
                                 DetentWheel(label: "", options: [false], selected: false,
                                     optionLabel: { _ in AppLocalized.resource("photo_frame_replace_image") },
@@ -492,29 +599,34 @@ struct PhotoEffectsAnimatedImage: View {
     var cornerRadius: CGFloat = 0
     var restoreRevision = 0
     var failed = false
+    #if DEBUG
+    // Tests can present a real system cover at the otherwise one-frame-wide
+    // cancellation boundary. Nil in ordinary builds; never used for rendering.
+    var crossfadePrepared: (() async -> Void)?
+    #endif
 
     @State private var visible: PhotoEffectsPreviewFrame
     @State private var outgoing: PhotoEffectsPreviewFrame?
     @State private var incomingOpacity: CGFloat = 1
     @State private var replacementOpacity: CGFloat = 1
     @State private var updates = ConflatedPreviewUpdates<Update>()
-    private struct Update {
+    private struct Update: Equatable {
         let frame: PhotoEffectsPreviewFrame
         let canvas: String
         let restore: Int
         let failed: Bool
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.frame.image === rhs.frame.image &&
+                lhs.frame.comparison === rhs.frame.comparison &&
+                lhs.frame.canvasKey == rhs.frame.canvasKey &&
+                lhs.canvas == rhs.canvas &&
+                lhs.restore == rhs.restore &&
+                lhs.failed == rhs.failed
+        }
     }
-    private struct UpdateKey: Equatable {
-        let image: ObjectIdentifier
-        let comparison: ObjectIdentifier?
-        let frameCanvas: String
-        let requestedCanvas: String
-        let restore: Int
-        let failed: Bool
-    }
-    private var updateKey: UpdateKey {
-        .init(image: ObjectIdentifier(frame.image), comparison: frame.comparison.map(ObjectIdentifier.init),
-              frameCanvas: frame.canvasKey, requestedCanvas: requestedCanvasKey, restore: restoreRevision, failed: failed)
+    private var update: Update {
+        .init(frame: frame, canvas: requestedCanvasKey, restore: restoreRevision, failed: failed)
     }
 
     init(
@@ -562,13 +674,29 @@ struct PhotoEffectsAnimatedImage: View {
             )
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .onAppear { enqueue() }
-        .onChange(of: updateKey) { _ in enqueue() }
+        .onAppear {
+            // A system picker can remove this view while the incoming frame
+            // is still transparent. Its cancelled task will never finish the
+            // fade; the same-image update on return must not retain that state.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                outgoing = nil
+                incomingOpacity = 1
+            }
+            enqueue(update)
+        }
+        .onChange(of: update) { value in
+            // SwiftUI can invoke this callback with the previous view value.
+            // Carry the new image and canvas in its argument, rather than
+            // rebuilding them from that captured self after a key-only change.
+            enqueue(value)
+        }
         .onDisappear { updates.close() }
     }
 
-    private func enqueue() {
-        updates.submit(Update(frame: frame, canvas: requestedCanvasKey, restore: restoreRevision, failed: failed)) { target, latest in
+    private func enqueue(_ value: Update) {
+        updates.submit(value) { target, latest in
             let next = target.frame
             // Never install an old rotation/border result after a newer request.
             if next.canvasKey == target.canvas {
@@ -582,6 +710,9 @@ struct PhotoEffectsAnimatedImage: View {
                     }
                 } else {
                     outgoing = visible; visible = next; incomingOpacity = 0
+                    #if DEBUG
+                    await crossfadePrepared?()
+                    #endif
                     await Task.yield()
                     guard !Task.isCancelled else { return }
                     withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) { incomingOpacity = 1 }

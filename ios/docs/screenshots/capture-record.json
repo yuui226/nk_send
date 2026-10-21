@@ -1,0 +1,352 @@
+{
+  "schemaVersion": 1,
+  "status": "candidate_subset_not_final_store_set",
+  "language": "zh-Hans",
+  "release": {
+    "evidence": "../evidence/release-packaging-final-20261021.json",
+    "configuration": "Release",
+    "product": "/private/tmp/ztransfer-prelaunch-release-current/Build/Products/Release-iphonesimulator/ZTransfer.app",
+    "bundleIdentifier": "com.ztransfer.ios",
+    "version": "1.98",
+    "build": "1",
+    "executableSHA256": "bb6128e7cb6819154d64b7c37b09fd28003171b93db82c649e4098f6346f2fc5",
+    "sourceCommit": "97cdc0be6c4316483542ed72734e1b2792bdfe15",
+    "uncommittedChanges": "Includes the frozen, uncommitted iOS prelaunch changes after this commit. The exact 1150 scoped production/build inputs are recorded by the release evidence; HEAD alone does not identify this binary.",
+    "sourceInputsFile": "/tmp/ztransfer-prelaunch-release-final-inputs-before.json",
+    "sourceInputsFileSHA256": "e225c45bc5ae7dce8f51d28b5b9cd212552d6ab89315aa3acdecd305d8245e8a",
+    "scope": "Unsigned simulator Release used for actual normal UI capture, not a distributable App Store archive."
+  },
+  "captureMethod": {
+    "script": "/tmp/ztransfer-prelaunch-clean-captures-v2.sh",
+    "scriptSHA256": "8f7b1f7362178493cd11876044ae3133bb5733f553ab923dc394f89dac91516e",
+    "temporaryUITest": "/tmp/ztransfer-prelaunch-clean-release-capture.swift",
+    "temporaryUITestSHA256": "be656ee7ba87dda050297f6f52766028e6f38ec97fa9f3d297581e5f6ac4e1bb",
+    "method": "PrelaunchLayoutUITests/testCaptureCleanReleaseHomeAndSettingsInSimplifiedChinese()",
+    "launchArguments": [],
+    "launchEnvironment": {},
+    "languageSelection": "Real Settings language control, accepted Simplified Chinese value reopened and verified. No defaults injection.",
+    "systemAppearance": "light",
+    "systemContentSize": "large",
+    "appAppearanceSetting": "Automatic; actual screenshots use system light appearance.",
+    "modeSelection": "Actual AP/STA preference retained; no fabricated connection or mode switch for photography.",
+    "systemAppearanceRestoration": "Parent serial script restores original appearance/content size and shuts down each dedicated device; completion is recorded separately by the parent."
+  },
+  "failures": [
+    {
+      "group": "iphone-medium",
+      "log": "/tmp/ztransfer-prelaunch-clean-iphone-medium.log",
+      "logSHA256": "6234c602ffbadc8d1b874f9b5bbd09e2bfb9d717974b69187ef9ccb86c59ed02",
+      "resultBundle": "/tmp/ztransfer-prelaunch-clean-iphone-medium.xcresult",
+      "result": "TEST FAILED",
+      "exitCode": 65,
+      "tests": 1,
+      "failedTests": 1,
+      "reason": "Capture fixture queried the empty label on the outer connection-workspace button; the Chinese label belongs to its descendant Button. Parent corrected only the temporary capture/window scripts, not the App. The diagnostic image is not used as store art.",
+      "diagnosticVisualReviewer": "Parent inspected the failure screenshot; this screenshot-curation pass did not reuse or re-review it."
+    }
+  ],
+  "runs": [
+    {
+      "group": "iphone-medium",
+      "log": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium.log",
+      "logSHA256": "8086959cbd6594bfc033dceb259da3b734b857af94526c1e7a6aed4c493ba7fd",
+      "resultBundle": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium.xcresult",
+      "result": "TEST SUCCEEDED",
+      "tests": 1,
+      "failedTests": 0,
+      "manifest": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium-images/manifest.json",
+      "manifestSHA256": "bb6b094f0b8676de53a8847f518bbc7e3a79196546def5804cf7fd9f2acb4d92"
+    },
+    {
+      "group": "iphone-large",
+      "log": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large.log",
+      "logSHA256": "c949ae09d3b7e2690a9761008645a814c35276ed80552fd50f21c48eae640e66",
+      "resultBundle": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large.xcresult",
+      "result": "TEST SUCCEEDED",
+      "tests": 1,
+      "failedTests": 0,
+      "manifest": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large-images/manifest.json",
+      "manifestSHA256": "0d6b264dd3d0d13a6eb733bef0f95c30ee255229dab5da47faa16790da521e2d"
+    },
+    {
+      "group": "ipad-13",
+      "log": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13.log",
+      "logSHA256": "4b79b439f18eca470724fc24d8c28316e491daaf9bb070548baa24d6d02f435e",
+      "resultBundle": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13.xcresult",
+      "result": "TEST SUCCEEDED",
+      "tests": 1,
+      "failedTests": 0,
+      "manifest": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13-images/manifest.json",
+      "manifestSHA256": "0d668c7c22cde12dc633038ee6ba26951ac8f766f5024d5fb6ba77290cbafb8b"
+    }
+  ],
+  "images": [
+    {
+      "file": "raw/zh-Hans/iphone-medium/01-connect.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "01cab36541a502ee2bd4601d96a18612ff012d62ebbd6b3ed6e474a28ffb4cb7",
+      "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium-images/9C478088-20B9-4E8B-B064-1957FFADD1AC.png",
+      "sourceSHA256": "01cab36541a502ee2bd4601d96a18612ff012d62ebbd6b3ed6e474a28ffb4cb7",
+      "metadataAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium-images/6D0BD442-B6EF-49BE-BD9C-2019FEAF6A83.txt",
+      "metadataSHA256": "32e38aa32bccf4d9d7fd2e036385dc94f88a2e978981e876813044d1ed7d7596",
+      "captureMetadata": "capturedAt: 2026-10-20 17:44:22 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 402.0, 874.0)\nimagePixels: 1206x2622\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "capturedAtEpoch": 1792518262.45,
+      "pixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "sips width/height/format/hasAlpha plus independent PNG IHDR/chunk inspection; copied bytes unchanged.",
+      "device": {
+        "model": "iPhone 17",
+        "udid": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "name": "ZTransfer-Prelaunch-StandardPhone",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "releaseReference": "release",
+      "page": "01-connect",
+      "pageState": "Real unconnected AP home; GPS collapsed and settings/help closed.",
+      "entitlementState": "No injected/simulated entitlement; settled free state, Unlock Pro visible in same-run Settings.",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review",
+      "observation": "No Debug entry, simulated payment message, keyboard, system prompt or blocked control observed. Actual disconnected-camera AP guidance retained; no fabricated connection.",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved."
+    },
+    {
+      "file": "raw/zh-Hans/iphone-medium/settings-reference.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "657859dea91ffbf29fff4ea7a20abc359d6b07e2b7f98d3716ce209d179979ea",
+      "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium-images/42BED02B-4C36-4642-8504-5339E2CE7170.png",
+      "sourceSHA256": "657859dea91ffbf29fff4ea7a20abc359d6b07e2b7f98d3716ce209d179979ea",
+      "metadataAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium-images/5BA2C22A-AD6C-4178-AA56-58E941232671.txt",
+      "metadataSHA256": "387242eb6b9e5b4a5349f5d1c429c7aac3491886b595a068dcbe5054e03d73bd",
+      "captureMetadata": "capturedAt: 2026-10-20 17:44:58 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 402.0, 874.0)\nimagePixels: 1206x2622\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "capturedAtEpoch": 1792518298.69,
+      "pixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "sips width/height/format/hasAlpha plus independent PNG IHDR/chunk inspection; copied bytes unchanged.",
+      "device": {
+        "model": "iPhone 17",
+        "udid": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "name": "ZTransfer-Prelaunch-StandardPhone",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "releaseReference": "release",
+      "page": "settings-reference",
+      "pageState": "Normal Settings open; transfer folder unset; settled free state with Unlock Pro; Simplified Chinese / Automatic theme / liquid-glass controls.",
+      "entitlementState": "No injected/simulated entitlement; settled free state, Unlock Pro visible in same-run Settings.",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review",
+      "observation": "Header/close, folder section, preference sections, version and feedback are visible; no temporary purchase-verification message. Disabled folder-dependent controls and translucent background are actual UI.",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved."
+    },
+    {
+      "file": "raw/zh-Hans/iphone-large/01-connect.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "cb70a81ce6ad35152127fcefa87e9d3bc7eaac426936576c32e25f57bf6bc11f",
+      "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large-images/5BBD696F-4262-4B0F-8D8F-D5E80BAC1EB6.png",
+      "sourceSHA256": "cb70a81ce6ad35152127fcefa87e9d3bc7eaac426936576c32e25f57bf6bc11f",
+      "metadataAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large-images/B3ABE19E-28FE-4086-8823-B64980488471.txt",
+      "metadataSHA256": "fb2866c5576fe91e47e10d054f7eae5dc7f3a2d88400e2cc125dd67dc026938c",
+      "captureMetadata": "capturedAt: 2026-10-20 17:49:26 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 430.0, 932.0)\nimagePixels: 1290x2796\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "capturedAtEpoch": 1792518566.324,
+      "pixels": {
+        "width": 1290,
+        "height": 2796
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "sips width/height/format/hasAlpha plus independent PNG IHDR/chunk inspection; copied bytes unchanged.",
+      "device": {
+        "model": "iPhone 15 Plus",
+        "udid": "FB86603E-3366-461E-A2A8-0F2CB15FE262",
+        "name": "ZTransfer-Prelaunch-15Plus",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "releaseReference": "release",
+      "page": "01-connect",
+      "pageState": "Real unconnected AP home; GPS collapsed and settings/help closed.",
+      "entitlementState": "No injected/simulated entitlement; settled free state, Unlock Pro visible in same-run Settings.",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review",
+      "observation": "No Debug entry, simulated payment message, keyboard, system prompt or blocked control observed. Actual disconnected-camera AP guidance retained; no fabricated connection.",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved."
+    },
+    {
+      "file": "raw/zh-Hans/iphone-large/settings-reference.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "e21bf3f5b4776fbf1a8ba37d6530de5d38304951e5ffbe14b1bb1337f3394c3e",
+      "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large-images/50E718C2-8B3B-4337-91FC-900CD5590C96.png",
+      "sourceSHA256": "e21bf3f5b4776fbf1a8ba37d6530de5d38304951e5ffbe14b1bb1337f3394c3e",
+      "metadataAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large-images/12F6C00E-BD89-40B6-96EE-F9FB2EE58611.txt",
+      "metadataSHA256": "849c34d4d1eaf4f6309311d907e745d7653408e9458f4f7b6510a97ba398e0ba",
+      "captureMetadata": "capturedAt: 2026-10-20 17:49:57 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 430.0, 932.0)\nimagePixels: 1290x2796\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "capturedAtEpoch": 1792518597.388,
+      "pixels": {
+        "width": 1290,
+        "height": 2796
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "sips width/height/format/hasAlpha plus independent PNG IHDR/chunk inspection; copied bytes unchanged.",
+      "device": {
+        "model": "iPhone 15 Plus",
+        "udid": "FB86603E-3366-461E-A2A8-0F2CB15FE262",
+        "name": "ZTransfer-Prelaunch-15Plus",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "releaseReference": "release",
+      "page": "settings-reference",
+      "pageState": "Normal Settings open; transfer folder unset; settled free state with Unlock Pro; Simplified Chinese / Automatic theme / liquid-glass controls.",
+      "entitlementState": "No injected/simulated entitlement; settled free state, Unlock Pro visible in same-run Settings.",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review",
+      "observation": "Header/close, folder section, preference sections, version and feedback are visible; no temporary purchase-verification message. Disabled folder-dependent controls and translucent background are actual UI.",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved."
+    },
+    {
+      "file": "raw/zh-Hans/ipad-13/01-connect.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "0f3d7473d3b6638d071f79ef35429cdac63a56d3c4b6d471466750eb54a7c5e2",
+      "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13-images/C90F872B-2A2B-45E9-B96F-FB04F237E090.png",
+      "sourceSHA256": "0f3d7473d3b6638d071f79ef35429cdac63a56d3c4b6d471466750eb54a7c5e2",
+      "metadataAttachment": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13-images/B15A2F0E-8894-4150-97F5-158E93B3535A.txt",
+      "metadataSHA256": "b372b2f50fd90a2b8c7b18d619a7ef154399076c535f33cfb6b9927e86c2a18a",
+      "captureMetadata": "capturedAt: 2026-10-20 17:53:56 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 1032.0, 1376.0)\nimagePixels: 2064x2752\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "capturedAtEpoch": 1792518836.423,
+      "pixels": {
+        "width": 2064,
+        "height": 2752
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "sips width/height/format/hasAlpha plus independent PNG IHDR/chunk inspection; copied bytes unchanged.",
+      "device": {
+        "model": "iPad Pro 13-inch (M5)",
+        "udid": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+        "name": "ZTransfer-Prelaunch-13Pad",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "releaseReference": "release",
+      "page": "01-connect",
+      "pageState": "Real unconnected AP home; GPS collapsed and settings/help closed.",
+      "entitlementState": "No injected/simulated entitlement; settled free state, Unlock Pro visible in same-run Settings.",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review",
+      "observation": "No Debug entry, simulated payment message, keyboard, system prompt or blocked control observed. Actual disconnected-camera AP guidance retained; no fabricated connection. The real iPad system window-resize handle remains visible at the lower-right screen edge. No crop or removal was performed; it does not cover the observed app controls.",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
+      "windowScope": "Normal full portrait app frame 1032x1376 points before the separate window-resize test. This screenshot does not establish window-resize acceptance."
+    },
+    {
+      "file": "raw/zh-Hans/ipad-13/settings-reference.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "0614d82f8b4537af2ca6c6ad0bbb0014702758835ecd5d5338d255c17dc3c990",
+      "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13-images/3CBC4FB3-95E5-4C88-855A-5DE62386A33D.png",
+      "sourceSHA256": "0614d82f8b4537af2ca6c6ad0bbb0014702758835ecd5d5338d255c17dc3c990",
+      "metadataAttachment": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13-images/35F42B45-2313-4448-8888-D0F82FA1A359.txt",
+      "metadataSHA256": "f835f1ab16c75d7376d07de38bcb437644283623e9b28fad05070b10ef59f74d",
+      "captureMetadata": "capturedAt: 2026-10-20 17:54:38 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 1032.0, 1376.0)\nimagePixels: 2064x2752\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "capturedAtEpoch": 1792518878.005,
+      "pixels": {
+        "width": 2064,
+        "height": 2752
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "sips width/height/format/hasAlpha plus independent PNG IHDR/chunk inspection; copied bytes unchanged.",
+      "device": {
+        "model": "iPad Pro 13-inch (M5)",
+        "udid": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+        "name": "ZTransfer-Prelaunch-13Pad",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "releaseReference": "release",
+      "page": "settings-reference",
+      "pageState": "Normal Settings open; transfer folder unset; settled free state with Unlock Pro; Simplified Chinese / Automatic theme / liquid-glass controls.",
+      "entitlementState": "No injected/simulated entitlement; settled free state, Unlock Pro visible in same-run Settings.",
+      "visuallyReviewed": true,
+      "reviewer": "preview_review",
+      "observation": "Header/close, folder section, preference sections, version and feedback are visible; no temporary purchase-verification message. Disabled folder-dependent controls and translucent background are actual UI. The real iPad system window-resize handle remains visible at the lower-right screen edge. No crop or removal was performed; it does not cover the observed app controls.",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
+      "windowScope": "Normal full portrait app frame 1032x1376 points before the separate window-resize test. This screenshot does not establish window-resize acceptance."
+    }
+  ],
+  "remaining": [
+    "Core photo-library, transfer, live-monitor and effects scenes need real authorized material/hardware as appropriate.",
+    "Purchase-screen art needs real configured products and usable legal URLs.",
+    "Other planned languages, final artwork selection and App Store Connect preview acceptance remain pending."
+  ],
+  "uploadPolicy": "All files here remain candidate and allowedForUpload=false. No ready files or complete six-scene screenshot set are claimed.",
+  "recordedAt": "2026-10-21T01:55:46.293898+08:00",
+  "counts": {
+    "capturedGroups": 3,
+    "candidateImages": 6,
+    "readyImages": 0
+  },
+  "curationConclusion": "All six native PNG originals (three device groups × connection home/settings reference) were actually opened and visually reviewed, with exact expected dimensions and no alpha. Copied hashes match original attachments. Three capture methods each passed 1/1; historical initial medium fixture failure is retained. This is two scenes across three devices, not six core scenes or a ready-to-upload set."
+}

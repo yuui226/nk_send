@@ -1,0 +1,55 @@
+{
+  "checked_at": "2026-10-21T00:52:45+08:00",
+  "status": "local_source_checks_passed",
+  "delivery_file": "app-icon-1024.png",
+  "copy_method": "Direct byte-for-byte copy of the existing app asset; no image editing, re-encoding, resizing or masking.",
+  "source": {
+    "repository_path": "ios/ZTransfer/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+    "asset_catalog": "ios/ZTransfer/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json",
+    "asset_name": "AppIcon",
+    "asset_entry": {
+      "filename": "AppIcon.png",
+      "idiom": "universal",
+      "platform": "ios",
+      "size": "1024x1024"
+    },
+    "app_version_from_current_project": "1.98",
+    "build_number_from_current_project": "1",
+    "repository_head_at_check": "97cdc0be6c4316483542ed72734e1b2792bdfe15",
+    "source_last_change_commit": "417b9fa82cc4a08f5d43e8454de4a0f5c8f507ff",
+    "source_has_uncommitted_changes": false,
+    "note": "Repository contains other uncommitted work; this record identifies the existing source asset, not a signed submission build."
+  },
+  "file_checks": {
+    "format": "PNG",
+    "width_pixels": 1024,
+    "height_pixels": 1024,
+    "bits_per_channel": 8,
+    "png_color_type": 2,
+    "color_space": "RGB",
+    "has_alpha_channel": false,
+    "has_transparency_chunk": false,
+    "bytes": 41192,
+    "source_sha256": "1f0851dab9fb1c5cde0d5cfbdc40672e44ffed6edee208f15841af72dbfe9384",
+    "delivery_sha256": "1f0851dab9fb1c5cde0d5cfbdc40672e44ffed6edee208f15841af72dbfe9384",
+    "byte_identical_to_source": true,
+    "methods": [
+      "sips format/pixelWidth/pixelHeight/hasAlpha/space/bitsPerSample",
+      "PNG IHDR and chunk inspection",
+      "SHA-256 and exact byte comparison"
+    ]
+  },
+  "visual_review": {
+    "image_actually_opened": true,
+    "observation": "深灰色不透明方形底，白色双Z标志居中，字形完整，四角有完整底色，未预裁圆角，未见额外文字或边缘截断。",
+    "scope": "Reviewed the actual source image; the delivered file is byte-identical."
+  },
+  "apple_service_validation": {
+    "performed": false,
+    "note": "尚未通过Apple的签名Archive验证、上传处理或App Review。这里只确认现有源图标和交付副本的本地技术属性；最终图标随Xcode构建上传App Store Connect。"
+  },
+  "official_references": [
+    "https://developer.apple.com/documentation/xcode/configuring-your-app-icon",
+    "https://developer.apple.com/help/app-store-connect/manage-app-information/add-an-app-icon"
+  ]
+}

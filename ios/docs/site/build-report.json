@@ -15,7 +15,7 @@
     "zh-Hans/privacy: 【待确认：现有 QQ 953000922 是否仍作为本人客服渠道；如改为只用邮箱，先同步修改 App 入口和帮助，再删除本段，不要仅修改政策。】",
     "zh-Hans/privacy: 【待填写：目标年龄定位】",
     "zh-Hans/terms: 【待填写：正式生效日期】",
-    "zh-Hans/terms: 【待核实：发布候选版本的全部额度与付费范围是否仍与上述一致，并逐项对照购买页；变更后同步政策、商店及审核草稿，不以“以页面为准”掩盖不一致。】",
+    "zh-Hans/terms: 【待确认：采用 Apple 标准 EULA，并以本页补充说明应用服务和购买规则。】",
     "zh-Hans/terms: 【待核实：正式商品的家庭共享开关与现有“不启用家庭共享”方案一致；如更改，应补充对应规则。】",
     "en/privacy: [OWNER INPUT: publication date]",
     "en/privacy: [OWNER INPUT: identify the actual online translation/AI service and relevant processing.]",
@@ -23,7 +23,6 @@
     "en/privacy: [OWNER INPUT: confirm intended audience and complete age-rating and applicable regional requirements.]",
     "en/terms: [OWNER INPUT: publication date]",
     "en/terms: [OWNER INPUT: confirm use of Apple's standard EULA with these supplementary service terms.]",
-    "en/terms: [TECHNICAL REVIEW: compare the release candidate and purchase screen with these benefits and limits.]",
     "en/terms: [TECHNICAL REVIEW: verify that the production products match the planned disabled Family Sharing configuration.]"
   ]
 }

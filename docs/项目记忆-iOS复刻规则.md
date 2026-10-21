@@ -1,5 +1,29 @@
 # iOS 复刻项目记忆
 
+## 2026-10-21 本轮付费前准备交接
+
+按用户要求先提交的97cdc0be已完成（116文件、未推送）；之后修复未追加提交。预览旧帧/重复等待、紧凑GPS、英文无线反馈及完整水印输入框可见性已按下方Android依据取得对应专项证据。冻结后模拟器与无签名设备Release均BUILD SUCCEEDED、随包检查通过，1150项输入前后及交付复核一致；法律URL仍为空，设备方向及既有编译警告保留，不等于签名Archive/Apple上传验证。3尺寸首页/设置共6张清洁Release candidate图与1024图标已交付，核心相机素材及正式商品图仍待本人条件。
+
+iPad普通页面按用户决定保持竖屏，不新增方向或全屏配置。iPadOS26.5/13英寸实得945×1260浮窗的首页、帮助末尾、设置底部及恢复接近全屏专项通过；原约70%窄窗口两次未达的失败保留。App.frame仍为1032×1376，不能把系统浮窗呈现当作内部连续重排或全部窗口适配证据。仅限定范围交接；系统27、最低16运行时、全字号和实机不外推。本轮结果/修改汇总及本人操作顺序集中在ios/docs/付费前准备执行记录.md，五项有限清单为四项完成、一项按实际覆盖交接；不是全部发布流程完成。没有新变化时不重跑相同全套，本人资料/网页和账号阶段按原13步手册继续。
+
+## 2026-10-21 上架准备：水印输入框完整焦点可见性（组件及SE工作台专项通过）
+
+SE实际文字输入/重启持久化khDfCu用例1/1通过，但逐张查看键盘图发现34pt输入框下边缘被建议栏覆盖约9.5pt；文字与光标仍可见。XCUI报告的keyboard.frame仅主键区（y451），不含约y407.5开始的建议栏，原相交断言不能证明整个控件无遮挡。依据Android `SettingsScreen.kt:2865–2967` 的WatermarkTextField聚焦后等一帧、延迟180ms、对整个34dp控件bringIntoView，本次在两个现有入口共用的PhotoEffectsControls输入框背景安装无交互UIKit探针，按相同时序向最近原有UIScrollView请求完整控件可见，利用keyboardLayoutGuide计算实际遮挡；不改宿主safearea、尺寸、文案、键盘退出和各自持久化作用域。失焦、场景非active、卸载取消待执行请求，同值更新不重启。生产改动限PhotoEffectsEditorView.swift，既有ConflatedPreviewUpdatesTests.swift新增2项局部滚动/取消测试。首轮构建因局部focused字段与UIView属性重名失败、0项执行，改为focusRequested；夹具补显式MainActor。随后`card-keyboard-fixed`合并专项6项5过1失败：AP4与键盘取消通过，整框用例仅偏移预期9.5与UIKit 3x舍入后9.6666667不符，完整34pt边界及延迟断言均未失败。主任务仅将偏移期望按screen.scale舍入，单项补验与SE实际键盘图仍待结果，不能记6/6同轮通过或缺陷已验收。完整历史保留在`ios/docs/evidence/photo-permission-recovery-20261021.json`及模拟器逐页索引。
+
+单项补验`/tmp/ztransfer-prelaunch-keyboard-pixel-alignment.log/.xcresult`最终1/1、0失败、TEST SUCCEEDED/exit0，仅校准测试的屏幕像素舍入预期，完整框边界与时序断言保持。加上前轮取消用例，2个不同键盘组件用例均有最终通过证据；连同AP4个是6个不同用例最终通过，不能改写前轮合并运行5/6的失败终态。SE实际键盘图及真实keyboardLayoutGuide/宿主滚动范围仍待验证。
+
+最终真实SE工作台文字专项q8FirM及cleanup各1/1、0失败、TEST SUCCEEDED；3张原图已全部打开核看。键盘图完整34pt输入框的下圆角和边框已露出，底边约814px（407pt），建议栏约815px（407.5pt）开始，属于紧贴边界，不再有原约9.5pt遮挡；不用AX主键区frame代替此核看。编辑后/重启后均为UI PRO TEST、Simple、Size71%、Opacity63%、Frame left、Adaptive、Shadow，原输入、退出及持久化断言通过。日志、cleanup、3图及冻结源码SHA-256记录在权限证据JSON的keyboardFlow.finalUI。两个入口共用该修复，但此次真实键盘UI仅工作台，不声称相机设置路径也刚复跑；其他输入法、硬件/浮动键盘、全尺寸和真机仍不外推。
+
+## 已确认的平台差异：iPad 普通页面保持竖屏结构
+
+2026-10-21用户明确回复“我们暂时只支持竖屏，调整大小后也是竖屏布局”。据此保留现有iPad普通页面竖屏方向声明，不添加横屏/倒置竖屏，不移除iPad支持；系统允许缩放窗口时继续使用竖向页面结构，并按实际窗口可用宽高检查内容可达性。此决定不承诺禁止新版iPadOS调整窗口，不影响监看画面内部已批准的旋转交互。有限窗口验证及无签名设备Release结果记录在`ios/docs/发布包静态检查说明.md`与既有上架进度文档，不能用方向配置存在推断全部窗口验收通过。
+
+## 2026-10-21 上架准备：英文无线卡内容溢出修复（组件及三语言页面专项通过）
+
+SE英文GPS截图连续三张实际显示Wi‑Fi标题被挤到卡顶、独立徽章压到STA标签、AP帮助灯泡出卡；根因是iOS将AP步骤与反馈叠放，而Android `HomeScreen.kt` 的实际无线调用设 `feedbackFollowsModeSelector=true`，两者在固定剩余高度槽内互斥。现按该实现共用真实弹性槽，保留卡高/徽章/GPS和footer，反馈入场220ms/延迟50ms、退场130ms及原曲线；AP错误橙色、重连忙碌、识别蓝色且350ms后才出现，复用既有Material3圆进度。iOS AP `.connecting` 的映射已由 `ConnectionViewModel.beginWiFiConnection` 注释和调用确认；单次延迟随状态、后台、卸载取消，不改协议。STA只有失败替换步骤，进度仍仅更新按钮。
+
+`/tmp/ztransfer-prelaunch-card-keyboard-fixed.log` 中 `ConnectionMethodCardLayoutTests` 实际4/4、0失败，16张AP/STA组件原图已逐张核看；同轮包含键盘夹具的6项整体仍为 `TEST FAILED`/exit65，不能写该轮全绿。保留此前两次Swift 6夹具编译失败及首次执行3失败/1通过（161.5pt在3x设备像素对齐、帮助半像素边界、titanium遮罩内找不到原生标签）；修正仅限测试夹具。AP使用titanium、STA使用liquidGlass检查实际标签宿主，长错误正文按Android最多3行+省略号保留。随后 `/tmp/ztransfer-prelaunch-gps-ap-final-ui.log` 的SE三语言普通页面补验1/1、0失败、`TEST SUCCEEDED`/exit0，各语言两轮GPS开合，9张整页原图全部查看：AP反馈独占槽位，旧英文标题/徽章/帮助溢出未复发，完整GPS面板/顶栏/工作台原断言保持通过。记录与源码、25张本轮图片SHA-256在 `ios/docs/evidence/wireless-card-layout-20261021.json`；历史9张组件图和原GPS失败证据保留。此项不外推全尺寸/主题/状态、实体相机或商店截图，L02其他范围仍以逐页索引为准。
+
 ## 已确认的平台差异：监看原生旋转转场
 
 2026-10-20用户明确允许监看旋转采用iOS原生、高性能的布局动画，要求避免先闪烁、再转向。可以用原生合成的连续旋转与旧画面淡出替代安卓先淡到零再换布局；仍保留原220ms总时长、方向稳定判断、锁定/编辑/回看准入和最新方向请求收合。后续对齐不得擅自恢复整页先隐藏的闪烁过程。旋转/锁定固定按钮按安卓主题使用区别于普通工具的底色。具体实施及验证见 `docs/待做/iOS-20261020-监看动画与效果模块菜单.md`，该约定本身不代表开发和实机验收已完成。
@@ -10,11 +34,25 @@
 
 完整回归 `/tmp/ztransfer-prelaunch-storekit-confirmation.log` 为 17/17；新增空测试账户撤权 `/tmp/ztransfer-prelaunch-empty-account.log` 为 1/1，均 TEST SUCCEEDED/exit0，合计 18 个不同集成用例最终通过。历史失败记录保留在 ios/docs/付费前准备执行记录.md；不等于真实沙盒、账户切换、购买 UI 或全部上架准备完成。此次未安装真机、提交或推送。
 
+## 2026-10-20—21 上架准备：效果预览旧帧修复（组件及完整Logo选图专项通过）
+
+对照 Android `SettingsScreen.kt` 的 `collectPhotoEffectsPreviewTransitions`：普通新帧保持旧图并以220ms渐入，画布替换先110ms淡出再190ms恢复，比较图补齐不重播。真实宿主日志 `/tmp/ztransfer-prelaunch-frame-events.log` 已证实 iOS `onChange` 收到新UIImage身份，内部无参 `enqueue()` 却读取捕获旧self的图片；现改为比较完整Update并直接传递回调新值，保留原身份/画布/恢复序号/失败判等及动画规则。另 `/tmp/ztransfer-prelaunch-cover-baseline.log` 已独立复现：新帧准备后系统全屏遮盖确实取消任务，返回500ms后仍为旧红帧（blue=0/red=255，1项2像素断言失败、TEST FAILED/exit65）；原因是取消遗留outgoing与透明的新帧。现重现页面时无动画清除outgoing并恢复incomingOpacity，再续收最新输入。测试先等待真实取消，不能以UIKit present completion推断SwiftUI onDisappear已同步执行；临时逐事件日志及预览请求日志已移除，仅保留DEBUG精确取消边界测试钩子。最终 `/tmp/ztransfer-prelaunch-frame-final.log` 为5/5、0失败、TEST SUCCEEDED/exit0，覆盖普通新帧实际像素、全屏遮盖期间换帧、准备渐入时取消后的恢复及队列收合/取消；证据 `ios/docs/evidence/preview-frame-recovery-20261020.json` 保留失败基线和首轮夹具同步错误。
+
+2026-10-21完整相机设置Logo专项 `testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch` 在iPhone13 mini模拟器fsW8DM运行1/1、0失败、TEST SUCCEEDED，cleanup亦1/1通过。7张原图已分工逐张核看：系统Photos选择器、成功导入后未关闭编辑器即重启保留Logo、取消更换后的控件与完整预览、额外500ms预览、最终重启控件及完整预览；更改后Size75%/Opacity67%/Photo center保持，取消/500ms后/重启的3张完整预览均Logo在照片中央。完整log/result路径、7图SHA-256及分工范围已存上述JSON的fullFlow。此前VQpttT失败为购买Lifetime按钮`tapWhenStable`10秒未稳定，尚未点击购买或进入选图，不能视为预览复发；主任务看过失败图按钮可见，仅加失败采样、未放宽断言，关闭5台闲置自有模拟器后重试通过，但不能据此认定失败原因。该证据覆盖本地StoreKit与模拟相机图库的完整UI流程，不等于实体相机、真实Apple沙盒或所有设备/状态验收；进度继续记入 `ios/docs/付费前准备执行记录.md`。
+
 ## 已确认的平台差异：移除无线设置跳转
 
 2026-10-20 上架准备检查发现 Wi‑Fi/个人热点采用未公开 `App-Prefs` 路径，用户明确回复“那就去掉这个按钮”。据此移除首页 AP 的 Wi‑Fi 设置按钮、STA 热点齿轮，以及离线 AP 空态的同类入口；照片/队列 AP 信号胶囊与 USB/STA 一样只显示状态，不跳转、不响应点击。保留帮助灯泡、STA 配对重置与实际重连、GPS 权限提示的公开 App 设置入口。该差异以后不得按安卓同名按钮自动补回。
 
 已核对 Android `HomeScreen.kt` 的两个系统设置按钮及 iOS 全部 `CameraWirelessSettings` 引用。此次只去掉入口与无用回调，保留提示、现有呼吸时序和信号布局尺寸。专项验证记录在 `ios/docs/付费前准备执行记录.md`；`/tmp/ztransfer-prelaunch-remove-settings.log` 的 5 项模型＋1 项真实顶栏交互共 6/6 通过、TEST SUCCEEDED/exit0，离线列表截图已看；不外推首页新布局与全部尺寸通过。未安装真机、提交或推送。
+
+## 已确认的平台差异：小屏连接页预留 GPS 展开空间
+
+2026-10-20用户否决 GPS 面板新增内部滚动，指定空间不足时减少连接页上方留白，将两张连接卡和 GPS 一起上移；空间足够保持原布局，工作台位置不变。必须在连接页初次布局时完成预留，不能打开 GPS 后再跳位。依据 Android `HomeScreen.kt` 的56dp顶栏、比例留白、固定底部入口及 `SettingsScreen.kt` 的 GPS 自然高度溢出层，首轮沿用原56pt顶部预留/310pt卡片/44+18pt工作台尺寸；复用同一已挂载 GPS 面板同步自然测量，首选8pt底部间距，不重复挂载内容树、不新增尺寸状态回传、不改 GPS 内容与动画。首轮 `/tmp/ztransfer-prelaunch-gps-layout-model.log` 的8项连接/几何与2项真实宿主回归共10/10、0失败、TEST SUCCEEDED/exit0，确认当时几何规则、GPS细节隔离、原生呼吸及面板同一宿主反向开合；不代表后续紧凑规则已验证。具体依据、历史失败及待验证项在 `ios/docs/模拟器逐页执行索引.md`，不因此关闭 L02。
+
+2026-10-21后续实际UI：`/tmp/ztransfer-prelaunch-final-navigation.log` 为失败终态exit65；帮助/设置及GPS简中/繁中各两轮通过，英文首轮操作按钮608.5pt仍超过工作台605pt。完整GPS面板另含10pt底部留白，不能只检查按钮。固定顶栏实际下界6+36=42pt，USB卡原1.04呼吸向上伸出5pt，卡顶至少47pt才不相交；英文完整面板要求卡顶≤42.5pt，单独把56改42的试改因此撤回。现按已批准的“回收上方留白”进一步回收顶栏最多6pt空白：同次四子视图Layout统一放置顶栏、双卡与GPS，顶栏top=min(6,max(0,cardsTop−36−5−1))，按钮仍36pt且在安全区内；极紧凑卡顶42/顶栏top0，峰值呼吸后顶边37与顶栏底36间隔1pt，已测英文完整面板理论底604.5≤工作台605。空间足够继续原顶栏6pt和原比例位置；8pt底部间距为首选，紧凑时可消耗。没有缩字体/卡高、改变呼吸、移动工作台或增加滚动。
+
+最终 `/tmp/ztransfer-prelaunch-gps-final-model.log` 为10项模型/几何＋2项真实宿主共12/12通过；`/tmp/ztransfer-prelaunch-gps-final-ui.log` 和同名 `.xcresult` 的SE三语言各两轮GPS开关专项1/1通过，均TEST SUCCEEDED/exit0。严格断言覆盖完整面板底边、36pt顶栏可点及开合前后的顶栏/GPS/工作台位置不跳，未放宽底部边界。`/tmp/ztransfer-prelaunch-gps-final-ui-images/manifest.json` 的简中/繁中6张原图已逐张查看：面板完整、与工作台有间隔、顶栏无遮挡；主任务核看另3张英文图。首轮帮助/设置底部专项1/1亦通过，3张截图由主任务核看，但同轮旧GPS英文失败仍按exit65保留。当前仅核销SE默认字号这三个语言的GPS重叠缺陷与所列交互，空间充分设备只有模型覆盖，其他GPS状态/字体/窗口和整个L02仍不能据此记为全通过。
 
 ## 已确认的平台差异：监看端侧录制
 

@@ -1,0 +1,191 @@
+{
+  "date": "2026-10-20",
+  "runs": [
+    {
+      "name": "frame-events",
+      "log": "/tmp/ztransfer-prelaunch-frame-events.log",
+      "sha256": "b1f5ebc3afa097fd5ddab8d07e9c573510246063428534f85634bcfea49dfa94",
+      "exitCode": 65,
+      "tests": 2,
+      "failedTests": 2,
+      "resultBundle": "/tmp/ztransfer-prelaunch-derived/Logs/Test/Test-ZTransfer-2026.10.20_23-35-16-+0800.xcresult",
+      "testResults": [
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testCoverInterruptingPreparedCrossfadeRestoresVisibleIncomingFrame]' failed (10.839 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleWithoutLeavingScreen]' failed (2.611 seconds)."
+      ]
+    },
+    {
+      "name": "frame-fix",
+      "log": "/tmp/ztransfer-prelaunch-frame-fix.log",
+      "sha256": "732cee38d752318fa4a29be6723c187a52ed0ebaaaf14eb5903409437fd71301",
+      "exitCode": 65,
+      "tests": 9,
+      "failedTests": 1,
+      "resultBundle": "/tmp/ztransfer-prelaunch-derived/Logs/Test/Test-ZTransfer-2026.10.20_23-39-14-+0800.xcresult",
+      "testResults": [
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testAcceptedTransitionCompletesAndOnlyLatestPendingIsConsumed]' passed (0.046 seconds).",
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testCoverInterruptingPreparedCrossfadeRestoresVisibleIncomingFrame]' failed (4.862 seconds).",
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testLeavingCancelsCurrentAndDropsPendingButReentryWorks]' passed (0.072 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsFallbackLifecycleTests testOfflineSettingsChangesDoNotRestartSourceGrace]' passed (2.476 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsFallbackLifecycleTests testSourceArrivalCancelsFallbackAndReentryStartsNewGrace]' passed (7.268 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsFallbackLifecycleTests testSourceBackedPreviewPublishesLatestLogoPixels]' passed (0.645 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsFallbackLifecycleTests testSourceBackedPreviewPublishesLatestWatermarkPixels]' passed (0.181 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleAfterFullScreenCoverDismissal]' passed (3.219 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleWithoutLeavingScreen]' passed (3.166 seconds)."
+      ]
+    },
+    {
+      "name": "cover-baseline",
+      "log": "/tmp/ztransfer-prelaunch-cover-baseline.log",
+      "sha256": "28ea4498a7f0cfc7810f7be930bd2867779199d9b54b6ec89185005492656051",
+      "exitCode": 65,
+      "tests": 1,
+      "failedTests": 1,
+      "resultBundle": "/tmp/ztransfer-prelaunch-derived/Logs/Test/Test-ZTransfer-2026.10.20_23-44-19-+0800.xcresult",
+      "testResults": [
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testCoverInterruptingPreparedCrossfadeRestoresVisibleIncomingFrame]' failed (4.671 seconds)."
+      ]
+    },
+    {
+      "name": "frame-final",
+      "log": "/tmp/ztransfer-prelaunch-frame-final.log",
+      "sha256": "147cea9d19c07dba03109f641840f53fe3180b214bd4721b12c4c898301f23eb",
+      "exitCode": 0,
+      "tests": 5,
+      "failedTests": 0,
+      "resultBundle": "/tmp/ztransfer-prelaunch-derived/Logs/Test/Test-ZTransfer-2026.10.20_23-47-24-+0800.xcresult",
+      "testResults": [
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testAcceptedTransitionCompletesAndOnlyLatestPendingIsConsumed]' passed (0.088 seconds).",
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testCoverInterruptingPreparedCrossfadeRestoresVisibleIncomingFrame]' passed (2.843 seconds).",
+        "Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testLeavingCancelsCurrentAndDropsPendingButReentryWorks]' passed (0.035 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleAfterFullScreenCoverDismissal]' passed (3.083 seconds).",
+        "Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleWithoutLeavingScreen]' passed (2.956 seconds)."
+      ]
+    }
+  ],
+  "finalResult": "Component regression 5/5 passed; subsequent complete camera-settings Logo import/cancel/relaunch UI 1/1 passed after an earlier purchase-control readiness timeout.",
+  "preservedTimingMilliseconds": {
+    "crossfade": 220,
+    "canvasFadeOut": 110,
+    "canvasFadeIn": 190
+  },
+  "earlierFixtureIssue": "The first interruption assertion assumed UIKit presentation completion already delivered SwiftUI onDisappear. The corrected fixture awaits actual Task cancellation, retaining the original 3s deadline and final pixel assertions.",
+  "baselineWithoutRecovery": "Cover and cancellation assertions passed, but returning still showed red (255) instead of blue (0). Reinstating appearance recovery passed the unchanged pixel assertions.",
+  "scope": "Real hosted UIView/SwiftUI, actual full-screen UIKit cover, queue cancellation/coalescing, and the full camera-settings Logo import/cancel/relaunch path on the iPhone 13 mini simulator with local StoreKit and a simulated camera library. Not physical-camera, Apple sandbox, all-device, or all-state acceptance.",
+  "viewedScreenshots": [
+    {
+      "file": "/tmp/ztransfer-prelaunch-frame-final-images/4D6E3FDB-68D3-497E-8487-2D461D9F5F66.png",
+      "sha256": "807e95e914751e9c99ef3f1b9531ff8fb47ffbf298f6fd8d92444bd474faeb3f"
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-frame-final-images/EBCB53BF-78F5-4FA9-A67E-534AB0FA4AAC.png",
+      "sha256": "404e4d7cd02774d19775e1a6e18af281a655618948af5f24f19025b66af9a160"
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-frame-final-images/10BEECD4-0D20-458E-8AD8-8139871E4274.png",
+      "sha256": "404e4d7cd02774d19775e1a6e18af281a655618948af5f24f19025b66af9a160"
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-frame-final-images/8916CE76-1D52-4EF2-96AD-A39EEDBE872C.png",
+      "sha256": "404e4d7cd02774d19775e1a6e18af281a655618948af5f24f19025b66af9a160"
+    }
+  ],
+  "visualConclusion": "One initial red frame and the blue results for visible update, covered update, and interrupted-crossfade return were visually inspected. Two additional initial-frame attachments were not opened.",
+  "fullFlow": {
+    "date": "2026-10-21",
+    "method": "PremiumRecoveryUITests.testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch",
+    "device": "ZTransfer-Prelaunch-MiniPhone (iPhone 13 mini)",
+    "runs": [
+      {
+        "id": "VQpttT",
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.VQpttT/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+        "sha256": "055060a0104eb8aea52003669f6492c094c732346c6c3ed0ba12d2d8d5bd710f",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.VQpttT/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+        "result": "TEST FAILED",
+        "tests": 1,
+        "failedTests": 1,
+        "failureStage": "tapWhenStable timed out after 10 seconds waiting for the Lifetime Pro purchase button to settle, before tapping purchase or entering the image picker.",
+        "interpretation": "Root inspected the failure screenshot: the purchase button was visible. This run did not reach the preview path and is not evidence of preview-frame recurrence.",
+        "retryChanges": "Added failure sampling without relaxing assertions. Five idle task-owned simulators were shut down before retry; timing alone does not establish the cause of the earlier failure."
+      },
+      {
+        "id": "fsW8DM",
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.fsW8DM/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+        "sha256": "b02de480cefa757d431aa8066fffc1eadbc45995022723afb5d4467eca834466",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.fsW8DM/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+        "result": "TEST SUCCEEDED",
+        "tests": 1,
+        "failedTests": 0,
+        "cleanup": {
+          "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.fsW8DM/cleanup.log",
+          "sha256": "e5a6b93caba7027f73f34744af3e36a8c14523390bfb5bf90b9501795023bb0f",
+          "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.fsW8DM/cleanup.xcresult",
+          "result": "TEST SUCCEEDED",
+          "tests": 1,
+          "failedTests": 0
+        }
+      }
+    ],
+    "manifest": {
+      "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/manifest.json",
+      "sha256": "c53fc895877b272885e020200e9f14c3279cab4eea925e8d14273260fbcb0751"
+    },
+    "viewedScreenshots": [
+      {
+        "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/56F8E6A2-3FBD-4678-9645-21A2D0A5B591.png",
+        "sha256": "0166c6918a53681ac1fc575569de9728c04266611d1774096dbb3bef6a16ee1d",
+        "stage": "camera-logo-full-preview-after-relaunch_0_0E932273-B44C-4C89-B7C0-601A1F2CC494.png",
+        "visuallyReviewed": true,
+        "reviewedBy": "root agent"
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/66442C9B-10FD-45EE-AF92-7C616FC67AEE.png",
+        "sha256": "f66a109b60e646531e8cd69ee8b3fbc5bd2ce904f20ab1ef0ec6a7fd6f1657b3",
+        "stage": "camera-image-watermark-after-relaunch_0_02E8D8D0-E2D6-412B-A492-7C3060377FE8.png",
+        "visuallyReviewed": true,
+        "reviewedBy": "preview_review agent"
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/94B06313-BCD9-4978-904C-067E11A6C55E.png",
+        "sha256": "3d5648415f57ac6de842314306a2de59e742ad0cf4e5366251e4e60f6309e6da",
+        "stage": "camera-logo-full-preview-after-cancel-plus-500ms_0_52482F12-749E-434F-9FD3-21E47B7E2121.png",
+        "visuallyReviewed": true,
+        "reviewedBy": "root agent"
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/CDC89278-5842-4811-91F2-3EEB472CC123.png",
+        "sha256": "190559a4f13ec434e29e8bcc35c94b9568d8befd47970f071d9c959d8b29e7b2",
+        "stage": "camera-logo-full-preview-after-cancel_0_2A65688D-793B-45B7-A3F4-8B6E47763C54.png",
+        "visuallyReviewed": true,
+        "reviewedBy": "root agent"
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/A218F31A-23F3-4860-98CF-88281D1559BD.png",
+        "sha256": "99a3883dde8c0737d1572dda5299abcaa1e79a2fb06a699e730291a8d437adbc",
+        "stage": "camera-image-watermark-after-cancel_0_B7024810-BBA8-4E6F-B7F7-A1AB541D7315.png",
+        "visuallyReviewed": true,
+        "reviewedBy": "root agent"
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/9B21A391-148B-4DDC-8AC9-C8F1B8120191.png",
+        "sha256": "25d204462310e357d5abc3d650d9b39d1c0aadeb0ce4a0f965ebc7e18de2cca1",
+        "stage": "camera-logo-import-saved-before-dismissal_0_9C586917-F887-478E-B9A2-D38E7FE1A449.png",
+        "visuallyReviewed": true,
+        "reviewedBy": "preview_review agent"
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-camera-logo-final-images/CB9135DA-AC64-4C76-B7AF-8061B6363858.png",
+        "sha256": "128cb2dc00985a38a16b6001a872fcd4e53c07cc67352269e355386a7cd57619",
+        "stage": "system-photo-picker-before-selection_0_4BE46F86-26D4-4F9C-8B1B-F51C0887079B.png",
+        "visuallyReviewed": true,
+        "reviewedBy": "preview_review agent"
+      }
+    ],
+    "reviewScope": {
+      "rootAgent": "Four images: controls after picker cancellation and full preview after cancellation, after another 500 ms, and after relaunch.",
+      "previewReviewAgent": "Three images: real system photo picker before selection, successful Logo import surviving relaunch before explicit editor dismissal, and controls after final relaunch.",
+      "conclusion": "The initial post-import state shows Logo at Size 76%, Opacity 68%, Photo top right. After the test changes the three controls, cancellation and final relaunch retain Size 75%, Opacity 67%, Photo center. All three reviewed full previews consistently place the Logo in the photo center.",
+      "limits": "Seven raw images were reviewed; this does not claim continuous-frame or hardware-camera coverage. The 500 ms visual sample supplements, and does not replace, unchanged component pixel assertions."
+    }
+  }
+}

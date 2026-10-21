@@ -13,6 +13,8 @@ struct GPSConnectionControl: View {
     @Binding var showingResetPairing: Bool
     /// Page space below this control, measured by ConnectionPage's layout.
     let availableHeight: CGFloat
+    private let entryWidth: CGFloat
+    private let reservesExpandedHeight: Bool
     @State private var showHelp = false
     @State private var ambientOrigin = Date()
     @Environment(\.scenePhase) private var scenePhase
@@ -23,12 +25,15 @@ struct GPSConnectionControl: View {
     #endif
 
     init(coordinator: GPSCoordinator, expanded: Binding<Bool>, showingResetPairing: Binding<Bool>,
-         availableHeight: CGFloat) {
+         availableHeight: CGFloat, entryWidth: CGFloat = 280,
+         reservesExpandedHeight: Bool = false) {
         self.coordinator = coordinator
         _entry = StateObject(wrappedValue: GPSEntryPresentation(coordinator))
         _expanded = expanded
         _showingResetPairing = showingResetPairing
         self.availableHeight = availableHeight
+        self.entryWidth = entryWidth
+        self.reservesExpandedHeight = reservesExpandedHeight
         _panelVisible = State(initialValue: expanded.wrappedValue)
     }
 
@@ -47,87 +52,82 @@ struct GPSConnectionControl: View {
         #if DEBUG
         let _ = didRender?()
         #endif
-        VStack(alignment: .leading, spacing: 0) {
-            let active = entry.snapshot.enabled
-            let breathing = !expanded && !entryError
-            let ambientPulse = NativeAmbientPulse(origin: ambientOrigin,
-                minimum: active ? 0.075 : 0.050, maximum: active ? 0.160 : 0.145,
-                halfPeriod: active ? 2.4 : 2.8,
-                restingOpacity: entryError ? 0 : (active ? 0.105 : 0.070),
-                breathing: breathing, paused: scenePhase != .active)
-            // Android uses ReleaseCommitWheel for this boolean control. Using
-            // the shared wheel preserves tap-to-toggle, long-press diagnostics,
-            // detent feedback and the same disabled/active material treatment.
-            DetentWheel(
-                label: "",
-                options: [false, true],
-                selected: expanded,
-                optionLabel: { _ in AppLocalized.resource("gps_auto_write") },
-                onCommit: { next in
-                    setExpanded(next)
-                },
-                wheelHeight: headerHeight,
-                cornerRadius: 20,
-                optionFontSize: 18,
-                optionFontWeight: .bold,
-                accentColor: statusAccent,
-                emphasized: expanded || active,
-                showEmphasisBorder: false,
-                showDragHint: false,
-                onDetent: { ZTransferHaptics.shared.play(.navigation) },
-                onLongClick: {
-                    UIPasteboard.general.string = gpsDiagnosticsSnapshot()
-                    hintText = AppLocalized.resource("code_copied")
-                },
-                ambientEffectColor: entryAccent,
-                ambientEffectPulse: ambientPulse,
-                followsButtonSkin: true,
-                prominentPressFeedback: true
-            )
-            .onAppear {
-                updateAmbientPulse()
-            }
-            .onChange(of: active) { _ in updateAmbientPulse() }
-            .onChange(of: expanded) { next in
-                if next { panelVisible = true }
-                updateAmbientPulse()
-            }
-            .onChange(of: entryError) { _ in updateAmbientPulse() }
-        }
-        .geniePopupAnchor(.gps)
-        .accessibilityIdentifier("popup-trigger-gps")
-        .overlayPreferenceValue(GeniePopupAnchorPreferenceKey.self) { anchors in
-            if let anchor = anchors[.gps] {
-                GeometryReader { proxy in
-                    let button = proxy[anchor]
-                    let panelWidth = min(preferredPanelWidth, UIScreen.main.bounds.width - 28)
-                    let panelTop = button.maxY + panelGap
-                    let source = GeniePopupMotion.attachmentAnchor(
-                        for: button, cornerRadius: 20
-                    ).offsetBy(dx: -button.minX, dy: -panelTop)
-                    GeniePopupPanel(
-                        content: GPSInlinePanel(
-                            coordinator: coordinator,
-                            countdownActive: expanded || panelVisible,
-                            showHelp: $showHelp,
-                            showingResetPairing: $showingResetPairing,
-                            hintText: $hintText,
-                            helpViewportHeight: max(1, availableHeight - panelTop)
-                        ),
-                        trigger: .gps,
-                        targetProgress: expanded ? 1 : 0,
-                        anchorX: source.midX / panelWidth,
-                        anchorWidth: source.width / panelWidth,
-                        anchorGap: -source.maxY,
-                        onSettled: { progress in
-                            if progress == 0 && !expanded && panelVisible { panelVisible = false }
-                        }
-                    )
-                    .frame(width: panelWidth)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .offset(x: button.minX, y: panelTop)
+        let panelWidth = min(preferredPanelWidth, UIScreen.main.bounds.width - 28)
+        let panelTop = headerHeight + panelGap
+        let source = GeniePopupMotion.attachmentAnchor(
+            for: CGRect(x: 0, y: 0, width: entryWidth, height: headerHeight), cornerRadius: 20
+        ).offsetBy(dx: 0, dy: -panelTop)
+        GPSControlFootprintLayout(headerHeight: headerHeight, panelGap: panelGap,
+                                  panelWidth: panelWidth, reservesExpandedHeight: reservesExpandedHeight) {
+            VStack(alignment: .leading, spacing: 0) {
+                let active = entry.snapshot.enabled
+                let breathing = !expanded && !entryError
+                let ambientPulse = NativeAmbientPulse(origin: ambientOrigin,
+                    minimum: active ? 0.075 : 0.050, maximum: active ? 0.160 : 0.145,
+                    halfPeriod: active ? 2.4 : 2.8,
+                    restingOpacity: entryError ? 0 : (active ? 0.105 : 0.070),
+                    breathing: breathing, paused: scenePhase != .active)
+                // Android uses ReleaseCommitWheel for this boolean control. Using
+                // the shared wheel preserves tap-to-toggle, long-press diagnostics,
+                // detent feedback and the same disabled/active material treatment.
+                DetentWheel(
+                    label: "",
+                    options: [false, true],
+                    selected: expanded,
+                    optionLabel: { _ in AppLocalized.resource("gps_auto_write") },
+                    onCommit: { next in
+                        setExpanded(next)
+                    },
+                    wheelHeight: headerHeight,
+                    cornerRadius: 20,
+                    optionFontSize: 18,
+                    optionFontWeight: .bold,
+                    accentColor: statusAccent,
+                    emphasized: expanded || active,
+                    showEmphasisBorder: false,
+                    showDragHint: false,
+                    onDetent: { ZTransferHaptics.shared.play(.navigation) },
+                    onLongClick: {
+                        UIPasteboard.general.string = gpsDiagnosticsSnapshot()
+                        hintText = AppLocalized.resource("code_copied")
+                    },
+                    ambientEffectColor: entryAccent,
+                    ambientEffectPulse: ambientPulse,
+                    followsButtonSkin: true,
+                    prominentPressFeedback: true
+                )
+                .onAppear {
+                    updateAmbientPulse()
                 }
+                .onChange(of: active) { _ in updateAmbientPulse() }
+                .onChange(of: expanded) { next in
+                    if next { panelVisible = true }
+                    updateAmbientPulse()
+                }
+                .onChange(of: entryError) { _ in updateAmbientPulse() }
             }
+            .geniePopupAnchor(.gps)
+            .accessibilityIdentifier("popup-trigger-gps")
+            GeniePopupPanel(
+                content: GPSInlinePanel(
+                    coordinator: coordinator,
+                    countdownActive: expanded || panelVisible,
+                    showHelp: $showHelp,
+                    showingResetPairing: $showingResetPairing,
+                    hintText: $hintText,
+                    helpViewportHeight: max(1, availableHeight - panelTop)
+                ),
+                trigger: .gps,
+                targetProgress: expanded ? 1 : 0,
+                anchorX: source.midX / panelWidth,
+                anchorWidth: source.width / panelWidth,
+                anchorGap: -source.maxY,
+                onSettled: { progress in
+                    if progress == 0 && !expanded && panelVisible { panelVisible = false }
+                }
+            )
+            .frame(width: panelWidth)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .overlay(alignment: .topTrailing) {
             if let hintText {
@@ -161,8 +161,33 @@ struct GPSConnectionControl: View {
 
 }
 
+/// A single real panel participates in measurement while hidden. Existing
+/// isolated callers can still request the original 50 pt overflow footprint.
+private struct GPSControlFootprintLayout: Layout {
+    let headerHeight: CGFloat
+    let panelGap: CGFloat
+    let panelWidth: CGFloat
+    let reservesExpandedHeight: Bool
 
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = max(1, proposal.width ?? panelWidth)
+        guard reservesExpandedHeight, subviews.count == 2 else {
+            return CGSize(width: width, height: headerHeight)
+        }
+        let panel = subviews[1].sizeThatFits(.init(width: panelWidth, height: nil))
+        return CGSize(width: width, height: headerHeight + panelGap + panel.height)
+    }
 
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                       cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let panel = subviews[1].sizeThatFits(.init(width: panelWidth, height: nil))
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+                         proposal: .init(width: bounds.width, height: headerHeight))
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + headerHeight + panelGap),
+                         anchor: .topLeading, proposal: .init(width: panelWidth, height: panel.height))
+    }
+}
 
 @MainActor
 private func gpsDiagnosticsSnapshot() -> String {

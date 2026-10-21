@@ -3,6 +3,50 @@ import XCTest
 /// Baseline real-page captures for the seven-device release matrix.
 /// These checks do not claim hardware-camera or complete visual acceptance.
 final class PrelaunchLayoutUITests: XCTestCase {
+    /// HomeScreen TipsBubble ends with tip_path; SettingsScreen keeps its
+    /// version/feedback footer in the same scroll column as the close button.
+    /// Run on the compact phone. Merely opening either panel is insufficient.
+    func testCompactHelpAndSettingsFooterRemainReachable() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.ztransfer.ios")
+        app.launchArguments = ["-app_language", "zh-Hans", "-AppleLanguages", "(zh-Hans)"]
+        app.launch()
+        defer { app.terminate() }
+        let settings = app.buttons["popup-trigger-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 15))
+        let finalHelpText = "菜单 → 自定义设定菜单 → 控制 → 自定义 i 菜单 → 选个顺手的格子 → Wi-Fi 连接"
+        for mode in ["STA", "AP"] {
+            app.buttons[mode].tap()
+            let bulb = app.buttons["tip-trigger-\(mode.lowercased())"]
+            XCTAssertTrue(bulb.isHittable)
+            bulb.tap()
+            let panel = app.scrollViews["tip-panel"].firstMatch
+            XCTAssertTrue(panel.waitForExistence(timeout: 5))
+            let last = panel.staticTexts[finalHelpText]
+            revealEntirely(last, in: panel, app: app)
+            capture(app, "L02-\(mode)-help-last-paragraph")
+            XCTAssertTrue(bulb.isHittable, "The help must still be closable after scrolling")
+            bulb.tap()
+            waitForRemoval(panel)
+        }
+
+        settings.tap()
+        let close = app.buttons["关闭"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        let panel = app.scrollViews.containing(.button, identifier: "反馈").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5), app.debugDescription)
+        let feedback = panel.buttons["反馈"]
+        revealEntirely(feedback, in: panel, app: app)
+        let version = panel.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Z传 v")).firstMatch
+        revealEntirely(version, in: panel, app: app)
+        capture(app, "L07-settings-footer-reachable")
+        // Do not invoke feedback: this test checks layout, not the clipboard.
+        revealEntirely(close, in: panel, app: app, scrollDown: true)
+        close.tap()
+        waitForRemoval(close)
+        XCTAssertTrue(settings.isHittable)
+    }
+
     /// Reuses the production overlay fixture and the established paging/zoom
     /// expectations in PhotoPreviewInteractionUITests. No camera I/O claim.
     func testPhotoPreviewPagingZoomAndEffectsBaselines() {
@@ -90,23 +134,55 @@ final class PrelaunchLayoutUITests: XCTestCase {
     func testGPSActionCanBeReachedWithoutWorkbenchOverlap() {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.ztransfer.ios")
-        app.launchArguments = ["-app_language", "zh-Hans", "-AppleLanguages", "(zh-Hans)"]
-        app.launch()
         defer { app.terminate() }
-        let trigger = app.buttons["popup-trigger-gps"]
-        XCTAssertTrue(trigger.waitForExistence(timeout: 15))
-        trigger.tap()
-        let action = app.descendants(matching: .any).matching(identifier: "gps-status-control").firstMatch
-        XCTAssertTrue(action.waitForExistence(timeout: 5))
-        let workspace = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "滤镜")).firstMatch
-        XCTAssertTrue(workspace.exists)
-        let scroll = app.scrollViews["gps-panel-scroll"]
-        if scroll.exists { scroll.swipeUp() }
-        capture(app, "L02-gps-action-reachability")
-        XCTAssertGreaterThan(action.frame.height, 0)
-        XCTAssertTrue(action.isHittable)
-        XCTAssertLessThanOrEqual(action.frame.maxY, workspace.frame.minY,
-                                "GPS action must be reachable above the fixed workbench entry")
+        for language in ["zh-Hans", "zh-Hant", "en"] {
+            app.launchArguments = ["-app_language", language, "-AppleLanguages", "(\(language))"]
+            app.launch()
+            let trigger = app.buttons["popup-trigger-gps"]
+            XCTAssertTrue(trigger.waitForExistence(timeout: 15))
+            let workspace = app.buttons["connection-workspace"]
+            XCTAssertTrue(workspace.exists)
+            let settings = app.buttons["popup-trigger-settings"]
+            XCTAssertTrue(settings.isHittable)
+            let initialTrigger = trigger.frame
+            let initialWorkspace = workspace.frame
+            let initialSettings = settings.frame
+            XCTAssertGreaterThanOrEqual(initialSettings.minY, app.frame.minY)
+            XCTAssertEqual(initialSettings.height, 36, accuracy: 0.5)
+            capture(app, "L02-gps-before-expansion-\(language)")
+            for attempt in 1...2 {
+                trigger.tap()
+                let action = app.descendants(matching: .any).matching(identifier: "gps-status-control").firstMatch
+                XCTAssertTrue(action.waitForExistence(timeout: 5))
+                let reachable = XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "hittable == true"), object: action)
+                XCTAssertEqual(XCTWaiter.wait(for: [reachable], timeout: 5), .completed)
+                capture(app, "L02-gps-action-reachability-\(language)-\(attempt)")
+                XCTAssertFalse(app.scrollViews["gps-panel-scroll"].exists,
+                               "The approved compact layout moves the scene, without a GPS scroll view")
+                XCTAssertGreaterThan(action.frame.height, 0)
+                XCTAssertLessThanOrEqual(action.frame.maxY, workspace.frame.minY,
+                                        "GPS action must be above the fixed workbench entry")
+                let panel = app.descendants(matching: .any).matching(identifier: "popup-panel-gps").firstMatch
+                XCTAssertTrue(panel.exists)
+                XCTAssertGreaterThan(panel.frame.height, 0)
+                XCTAssertLessThanOrEqual(panel.frame.maxY, workspace.frame.minY,
+                                        "The complete GPS panel, including its bottom padding, must not overlap")
+                XCTAssertEqual(trigger.frame.minY, initialTrigger.minY, accuracy: 0.5,
+                               "Reserve space before expansion, without moving the GPS entry on tap")
+                XCTAssertEqual(workspace.frame.minY, initialWorkspace.minY, accuracy: 0.5)
+                XCTAssertTrue(settings.isHittable)
+                XCTAssertEqual(settings.frame.minY, initialSettings.minY, accuracy: 0.5,
+                               "Toolbar whitespace must be resolved before the GPS panel opens")
+                trigger.tap()
+                waitForRemoval(action)
+                XCTAssertEqual(trigger.frame.minY, initialTrigger.minY, accuracy: 0.5)
+                XCTAssertEqual(workspace.frame.minY, initialWorkspace.minY, accuracy: 0.5)
+                XCTAssertTrue(settings.isHittable)
+                XCTAssertEqual(settings.frame.minY, initialSettings.minY, accuracy: 0.5)
+            }
+            app.terminate()
+        }
     }
 
     func testHomeWirelessSettingsGPSAndPhotoPages() {
@@ -167,6 +243,18 @@ final class PrelaunchLayoutUITests: XCTestCase {
         let gone = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)
+    }
+
+    private func revealEntirely(_ element: XCUIElement, in panel: XCUIElement,
+                                app: XCUIApplication, scrollDown: Bool = false) {
+        for _ in 0..<8 {
+            if element.exists, element.isHittable,
+               panel.frame.insetBy(dx: -1, dy: -1).contains(element.frame),
+               app.frame.insetBy(dx: -1, dy: -1).contains(element.frame) { return }
+            if scrollDown { panel.swipeDown() } else { panel.swipeUp() }
+        }
+        capture(app, "unreachable-panel-content")
+        XCTFail("Panel content is not entirely visible and reachable: \(element)\n\(app.debugDescription)")
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

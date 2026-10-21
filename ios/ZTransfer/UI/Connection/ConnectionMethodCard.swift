@@ -27,6 +27,75 @@ enum STAConnectButtonState: Int {
     }
 }
 
+/// Android HomeScreen.kt's Wi-Fi feedback has priority over the steps inside
+/// one reserved slot. AP probing is .connecting in ConnectionViewModel;
+/// STA search/pair/connect changes only its action label, never this feedback.
+enum ConnectionCardWirelessFeedback: Hashable {
+    case probing, notFound, refused, failed, reconnecting, staFailure(String)
+
+    static let probingDelay: Duration = .milliseconds(350)
+
+    static func isAPProbing(_ state: ConnectionState) -> Bool {
+        state.wirelessMode == .ap && state.usbPhase != .connected && state.wifiPhase == .connecting
+    }
+
+    static func resolve(_ state: ConnectionState, mode: WirelessMode,
+                        showAPProbing: Bool) -> Self? {
+        guard state.wirelessMode == mode else { return nil }
+        if mode == .sta {
+            if case let .failed(message) = state.wifiPhase { return .staFailure(message) }
+            return nil
+        }
+        // USB owns the connection once verified; a late network callback must
+        // not flash AP feedback while the Wi-Fi card is leaving the scene.
+        guard state.usbPhase != .connected else { return nil }
+        switch state.wifiPhase {
+        case .connecting: return showAPProbing ? .probing : nil
+        case .reconnecting: return .reconnecting
+        case .failed:
+            switch state.wifiFailureKind {
+            case .notFound: return .notFound
+            case .refused: return .refused
+            case .failed, .none: return .failed
+            }
+        default: return nil
+        }
+    }
+
+    var title: String {
+        let key = switch self {
+        case .probing: "wifi_identifying_camera"
+        case .notFound: "wifi_camera_not_found"
+        case .refused: "wifi_camera_refused"
+        case .failed: "wifi_camera_connection_failed"
+        case .reconnecting: "wifi_connection_interrupted"
+        case .staFailure: "sta_camera_not_found_short"
+        }
+        return AppLocalized.resource(key)
+    }
+
+    var message: String? {
+        switch self {
+        case .probing: nil
+        case .notFound: AppLocalized.resource("wifi_connect_camera")
+        case .refused: AppLocalized.resource("wifi_check_camera_connection")
+        case .failed: AppLocalized.resource("wifi_restart_camera")
+        case .reconnecting: AppLocalized.resource("wifi_reconnecting")
+        case let .staFailure(message): message
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .probing: ZTransferColors.accentBlue
+        case .staFailure: ZTransferColors.statusError
+        default: ZTransferColors.accentOrange
+        }
+    }
+
+    var busy: Bool { self == .probing || self == .reconnecting }
+}
+
 struct ConnectionMethodCard: View {
     let mode: CameraConnectionMode
     let state: ConnectionState
@@ -55,9 +124,13 @@ struct ConnectionMethodCard: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var tipRects: [TipPopupTrigger: CGRect] = [:]
     @State private var cardWindowFrame = CGRect.zero
+    @State private var showAPProbing = false
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
+    private var isAPProbing: Bool {
+        mode == .wifi && scenePhase == .active && ConnectionCardWirelessFeedback.isAPProbing(state)
+    }
     private var buttonSkin: ZTransferButtonSkin { .init(storedValue: skinPreset) }
     private var materialForeground: Color {
         zTransferButtonForeground(skin: buttonSkin, scheme: colorScheme)
@@ -105,6 +178,14 @@ struct ConnectionMethodCard: View {
         }
         .zIndex(selected ? 3 : 0)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32), value: dimmed)
+        .task(id: isAPProbing) {
+            showAPProbing = false
+            guard isAPProbing else { return }
+            do { try await Task.sleep(for: ConnectionCardWirelessFeedback.probingDelay) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            showAPProbing = true
+        }
     }
 
     private var cardSurface: some View {
@@ -145,7 +226,7 @@ struct ConnectionMethodCard: View {
                 .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22),
                            value: state.wirelessMode)
             } else {
-                if let feedback = wifiFeedback(for: nil) {
+                if let feedback = usbFeedback {
                     // On narrow phones the instructions and a full readiness
                     // explanation do not fit together. Keep the actionable
                     // error intact instead of truncating it or growing the card.
@@ -328,44 +409,33 @@ struct ConnectionMethodCard: View {
                    value: state.wirelessMode)
     }
 
-    @ViewBuilder private func wirelessModeContent(_ wirelessMode: WirelessMode) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if wirelessMode == .sta {
-                // Android reserves this slot. Failure replaces the steps
-                // inside it, leaving both footer rows and the outline fixed.
+    private func wirelessModeContent(_ wirelessMode: WirelessMode) -> some View {
+        let feedback = ConnectionCardWirelessFeedback.resolve(
+            state, mode: wirelessMode, showAPProbing: showAPProbing)
+        return VStack(alignment: .leading, spacing: 0) {
+            // Android's weight(1f) slot must consume only the space left by the
+            // header/tabs/footer. A flexible frame alone still propagates the
+            // long English text's minimum height and can push those controls.
+            GeometryReader { proxy in
                 ZStack(alignment: .topLeading) {
-                    if case let .failed(message) = state.wifiPhase {
-                        ConnectionFeedback(
-                            title: AppLocalized.resource("sta_camera_not_found_short"),
-                            message: message
-                        )
-                        .transition(.asymmetric(
-                            insertion: .opacity.animation(.timingCurve(0, 0, 0.2, 1, duration: 0.22).delay(0.05)),
-                            removal: .opacity.animation(.timingCurve(0.4, 0, 1, 1, duration: 0.13))
-                        ))
-                    } else {
-                        instructions(for: .sta)
-                            .transition(.asymmetric(
-                                insertion: .opacity.animation(.timingCurve(0, 0, 0.2, 1, duration: 0.22).delay(0.05)),
-                                removal: .opacity.animation(.timingCurve(0.4, 0, 1, 1, duration: 0.13))
-                            ))
+                    Group {
+                        if let feedback {
+                            ConnectionFeedback(title: feedback.title, message: feedback.message,
+                                lineLimit: 3, titleLineLimit: 2, verticalPadding: 5,
+                                textSpacing: 0, accent: feedback.accent, busy: feedback.busy)
+                        } else {
+                            instructions(for: wirelessMode)
+                        }
                     }
+                    .id(feedback)
+                    .transition(.asymmetric(
+                        insertion: .opacity.animation(.timingCurve(0, 0, 0.2, 1, duration: 0.22).delay(0.05)),
+                        removal: .opacity.animation(.timingCurve(0.4, 0, 1, 1, duration: 0.13))
+                    ))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 .clipped()
-                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22),
-                           value: state.wifiPhase)
-            } else {
-                instructions(for: .ap)
-                if let feedback = wifiFeedback(for: .ap) {
-                    ConnectionFeedback(title: feedback.title, message: feedback.message)
-                        .padding(.top, 12)
-                        .transition(.asymmetric(
-                            insertion: .opacity.animation(.timingCurve(0, 0, 0.2, 1, duration: 0.22).delay(0.035)),
-                            removal: .opacity.animation(.timingCurve(0.4, 0, 1, 1, duration: 0.15))
-                        ))
-                }
-                Spacer(minLength: 0)
+                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22), value: feedback)
             }
             wirelessFooter(for: wirelessMode)
         }
@@ -431,26 +501,11 @@ struct ConnectionMethodCard: View {
     }
 
     private var staButtonState: STAConnectButtonState { .init(state.wifiPhase) }
-    private func wifiFeedback(for wirelessMode: WirelessMode?) -> (title: String, message: String)? {
-        guard mode == .wifi, wirelessMode != .sta else {
-            if mode == .usb, case let .failed(message) = state.usbPhase {
-                return (AppLocalized.resource("connection_failed_short"), message)
-            }
-            return nil
-        }
-        switch state.wifiPhase {
-        case .reconnecting:
-            return (AppLocalized.resource("wifi_connection_interrupted"), AppLocalized.resource("wifi_reconnecting"))
-        case .failed:
-            switch state.wifiFailureKind {
-            case .notFound: return (AppLocalized.resource("wifi_camera_not_found"), AppLocalized.resource("wifi_connect_camera"))
-            case .refused: return (AppLocalized.resource("wifi_camera_refused"), AppLocalized.resource("wifi_check_camera_connection"))
-            case .failed, .none: return (AppLocalized.resource("wifi_camera_connection_failed"), AppLocalized.resource("wifi_restart_camera"))
-            }
-        default:
-            return nil
-        }
+    private var usbFeedback: (title: String, message: String)? {
+        guard mode == .usb, case let .failed(message) = state.usbPhase else { return nil }
+        return (AppLocalized.resource("connection_failed_short"), message)
     }
+
 }
 
 /// Stores the complete static card subtree as content and refreshes only its
@@ -650,17 +705,36 @@ struct ConnectionSuccessArtwork: View {
 
 private struct ConnectionFeedback: View {
     let title: String
-    let message: String
+    let message: String?
     var lineLimit: Int? = 2
+    var titleLineLimit: Int? = nil
+    var verticalPadding: CGFloat = 7
+    var textSpacing: CGFloat = 3
+    var accent: Color = ZTransferColors.statusError
+    var busy = false
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).zTransferTypography(.labelSmall, weight: .bold)
-                .foregroundStyle(ZTransferColors.statusError)
-            Text(message).zTransferTypography(.labelSmall)
-                .foregroundStyle(ZTransferColors.secondaryText).lineLimit(lineLimit)
+        HStack(spacing: 7) {
+            if busy {
+                // Reuse the Android Material3 head/tail motion and lifecycle.
+                if scenePhase == .active {
+                    RemoteCameraToolLoading(diameter: 14, strokeWidth: 1.5, color: accent)
+                } else {
+                    Color.clear.frame(width: 14, height: 14)
+                }
+            }
+            VStack(alignment: .leading, spacing: textSpacing) {
+                Text(title).zTransferTypography(.labelSmall, weight: .bold)
+                    .foregroundStyle(accent).lineLimit(titleLineLimit)
+                if let message {
+                    Text(message).zTransferTypography(.labelSmall)
+                        .foregroundStyle(ZTransferColors.secondaryText).lineLimit(lineLimit)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 9).padding(.vertical, 7)
+        .padding(.horizontal, 9).padding(.vertical, verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ZTransferColors.statusError.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+        .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
     }
 }

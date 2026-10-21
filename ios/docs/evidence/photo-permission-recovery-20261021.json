@@ -1,0 +1,599 @@
+{
+  "date": "2026-10-21",
+  "method": "PremiumRecoveryUITests.testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization",
+  "device": {
+    "id": "13EB3240-0CC7-4910-8724-1A527489099B",
+    "name": "ZTransfer-Pro-Compact",
+    "model": "iPhone SE (3rd generation)",
+    "runtime": "iOS 26.5"
+  },
+  "runs": [
+    {
+      "id": "N8PHUZ",
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.N8PHUZ/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization.log",
+      "sha256": "56b9fb64842aea3d41abc535cfc9ae8f4e4f9f8ac13e5b41c972f54bec46332e",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.N8PHUZ/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization.xcresult",
+      "result": "TEST FAILED",
+      "tests": 1,
+      "failedTests": 1,
+      "interpretation": "Fixture queried the Settings Apps entry as a labelled cell. The actual iOS Settings hierarchy exposes a nested button with identifier com.apple.settings.apps; this failure did not reach authorization recovery."
+    },
+    {
+      "id": "13NdpZ",
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.13NdpZ/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization.log",
+      "sha256": "f90639c2714ea1f2d5e377de4640b86b1acf44a0bd5c79b4f74658e783e669fc",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.13NdpZ/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization.xcresult",
+      "result": "TEST FAILED",
+      "tests": 1,
+      "failedTests": 1,
+      "interpretation": "Fixture reached Settings authorization, but incorrectly required the process-local selected batch to survive a system-terminated app. The contemporaneous tccd log explicitly attributes termination to kTCCServicePhotosAdd changing."
+    },
+    {
+      "id": "DewgCH",
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization.log",
+      "sha256": "06784edb5083ccbe605d06c25e0d6538934f7c9a117167b8270da269917eb7df",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization.xcresult",
+      "result": "TEST SUCCEEDED",
+      "tests": 1,
+      "failedTests": 0,
+      "interpretation": "Real initial authorization was denied; retry failed without another prompt. Settings was changed from None to Add Photos Only. The app was notRunning on return, so only this branch reselected a photo through the real system picker; production save then succeeded without another permission prompt."
+    }
+  ],
+  "cleanup": {
+    "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/cleanup.log",
+    "sha256": "9b6c1362a69248f34a1c8b50e1f6415a0c4f5a7784b96faf9d342b77b48351ca",
+    "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/cleanup.xcresult",
+    "result": "TEST SUCCEEDED",
+    "tests": 1,
+    "failedTests": 0
+  },
+  "systemLifecycle": {
+    "currentRunAttachment": {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-lifecycle/24EDA7F7-FD4D-4B43-B5C8-385561FE9AFF.txt",
+      "sha256": "ca03f055b5ff99fdd61e99eb9efb962c9444c17b1635858fbec02e3efd5025af",
+      "text": "App state after changing Photos Add permission: 1",
+      "stateRawValue": 1,
+      "state": "notRunning"
+    },
+    "earlierTCCLog": {
+      "file": "/tmp/ztransfer-prelaunch-photos-settings-tcc.log",
+      "sha256": "07007ae7c4247ea43a932e6592a11c360e15296ce18a6796963d7365ba21c443",
+      "observedEvent": "2026-10-21 00:37:54.252 tccd: Terminating com.ztransfer.ios[58077] because access to the kTCCServicePhotosAdd service changed."
+    },
+    "branchRule": "Capture app.state after Settings. Reselect only when that captured state is .notRunning; a surviving process is still required to retain its existing batch.",
+    "scope": "The final real UI run exercised process termination and reselection. It did not exercise the surviving-process branch or prove persistent restoration of an in-memory selection after termination."
+  },
+  "filesystemVerification": {
+    "beforeManifest": {
+      "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization-photos.json",
+      "sha256": "401d7a1510865a383fe9d996bf762f86e502e222cd48dae243e73e0c7ee8360e"
+    },
+    "wrapperVerification": {
+      "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization-photos.verified.json",
+      "sha256": "b80922d3eb7314a41788ecf4172263e056cd83693f09a8fce9f1e43d36963b7e"
+    },
+    "unchangedOriginals": 49,
+    "newOriginalsCount": 1,
+    "newOriginals": [
+      {
+        "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization-photos/IMG_0050.JPG",
+        "bytes": 564399,
+        "sha256": "0b0c1aae259548593b005eeb683dae17f8662e304674714d05de3ea4b33f3836",
+        "dimensions": "/private/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.DewgCH/testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization-photos/IMG_0050.JPG\n  pixelWidth: 1000\n  pixelHeight: 1500",
+        "pixelWidth": 1000,
+        "pixelHeight": 1500,
+        "format": "JPEG"
+      }
+    ],
+    "independentReadOnlyRecheck": "All 49 baseline originals were re-read and matched both byte size and SHA-256; the exported new JPEG matched the wrapper SHA-256 and 564399-byte size.",
+    "baselineOriginals": [
+      {
+        "relativeFile": "100APPLE/IMG_0001.JPG",
+        "bytes": 1896240,
+        "sha256": "a7f1d7c31aa85f51347d27fae0b72dfdede4f5d99f3ba69e0be92b834f8c3eb7"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0002.JPG",
+        "bytes": 2604768,
+        "sha256": "de54fee9832fe61a55780aaed3ce056c67547cbe927967c22ad445272b32904a"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0003.JPG",
+        "bytes": 2505426,
+        "sha256": "85f9341bffbf0e78c97903a1ea12eea79fba31c56f034b39e47b99ab710cfda6"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0004.JPG",
+        "bytes": 1268382,
+        "sha256": "5864d328a5b09805637c971e4a6e8802a184b01d7d1cfe80ff1a61e2783f46f1"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0005.JPG",
+        "bytes": 1852262,
+        "sha256": "02361b65063679d9d2dda1eedbfa49f1f345d22f12201bc6367b79d7c5443f22"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0006.HEIC",
+        "bytes": 2808983,
+        "sha256": "a5d8ea3fb0a478ab5d5736201aeefbfd53441f7864761b2f369607b891b84e61"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0007.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0008.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0009.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0010.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0011.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0012.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0013.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0014.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0015.JPG",
+        "bytes": 146187,
+        "sha256": "31807d8c9b1feba168e5fc21ca6703ec6319a7ff54ca0fec8e37547889b9ce4d"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0016.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0017.JPG",
+        "bytes": 168739,
+        "sha256": "c5310a2f38bc2fa38789e7d6a5c922c72165eeb2dd3b7d233f272a5528bbded0"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0018.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0019.JPG",
+        "bytes": 185804,
+        "sha256": "3fb802d622f8c507685501e294a01a1f8a3d5c4983a89bfbb73d53b971e44b0e"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0020.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0021.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0022.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0023.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0024.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0025.JPG",
+        "bytes": 8879969,
+        "sha256": "5a3820f34301f8e7f6dedba7544c22544e5f939cf617b938588d45c89d70b0f5"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0026.JPG",
+        "bytes": 210708,
+        "sha256": "92ff6a15f2ea0970705e8dc43cc1130b7ae8748d10656597a0f751a74200f9bd"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0027.JPG",
+        "bytes": 185804,
+        "sha256": "3fb802d622f8c507685501e294a01a1f8a3d5c4983a89bfbb73d53b971e44b0e"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0028.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0029.JPG",
+        "bytes": 8879969,
+        "sha256": "5a3820f34301f8e7f6dedba7544c22544e5f939cf617b938588d45c89d70b0f5"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0030.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0031.JPG",
+        "bytes": 8879969,
+        "sha256": "5a3820f34301f8e7f6dedba7544c22544e5f939cf617b938588d45c89d70b0f5"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0032.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0033.JPG",
+        "bytes": 8879969,
+        "sha256": "5a3820f34301f8e7f6dedba7544c22544e5f939cf617b938588d45c89d70b0f5"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0034.JPG",
+        "bytes": 212910,
+        "sha256": "e68832cacac40b3112dc455b0f4c359fa9659dff978254130df68203af93026e"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0035.JPG",
+        "bytes": 248282,
+        "sha256": "c9cbdd0940fe5b390160fa178f7eb8854610b527cb1b39cdead074f3bf827296"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0036.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0037.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0038.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0039.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0040.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0041.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0042.JPG",
+        "bytes": 378071,
+        "sha256": "93aac55331b85f9c9a7eb4cec98438331ed89d6cbd1f79a377698c7a36efd177"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0043.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0044.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0045.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0046.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0047.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0048.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      },
+      {
+        "relativeFile": "100APPLE/IMG_0049.JPG",
+        "bytes": 38181,
+        "sha256": "4c055fcf53dd044e236ca5bf3dd56c4e091d64545d0df995f0a93f529d0046ab"
+      }
+    ],
+    "scope": "The before/after test wrapper recorded exactly one additional JPEG across the complete denial/settings/retry sequence. No intermediate filesystem snapshot was taken immediately after denial; do not claim that such a snapshot exists."
+  },
+  "screenshotManifest": {
+    "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/manifest.json",
+    "sha256": "8d83047b2cd62370d20610bb5d2004ae1f0faa353c30e56da4a5d8457a058efb"
+  },
+  "viewedScreenshots": [
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/EA54F23F-B62B-4110-8F86-3C78E970A6B2.png",
+      "sha256": "ab65b355100d3a3b553ea8b3e274050db487af638eb9062e1bfac241ce3afb07",
+      "stage": "photo-save-after-settings-authorization_0_C125D791-AF82-4523-A3DA-73F73EA6A78E.png",
+      "timestamp": 1792514624.128,
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/65D3B6FE-694B-4F49-841F-AC402CA217A9.png",
+      "sha256": "4aa178a7c131fccf19ae6330c3cac4738123e3135b19f1cddea0837fb59ff34f",
+      "stage": "system-photo-picker-before-selection_0_DA8866F7-494A-48B0-85BD-E05732C98B40.png",
+      "timestamp": 1792514601.09,
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/03761593-BDE5-468D-B652-0D8D0A0001D0.png",
+      "sha256": "9d11f7a113ed2144159fef66fcea8620feb4a101cab3ee71a417e63122ac61e9",
+      "stage": "system-settings-photos-add-allowed_0_C72C208E-0FA9-460E-BEC7-577304DE8117.png",
+      "timestamp": 1792514582.265,
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/ED817B6F-02AB-4565-8F46-BE0E61A53EB8.png",
+      "sha256": "63c125efa0cf3429f0f8d354fefc1220c8355d4f13369d2b7d5d53c4b3c27919",
+      "stage": "system-settings-photos-denied_0_C62DF8CC-E5CB-4B8B-B718-81E449640866.png",
+      "timestamp": 1792514579.359,
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/C75BA435-65A2-44DB-BF23-6C2B38381C2C.png",
+      "sha256": "fe61232c449cdf68fb148503b600f0fb82f844af0b19e598cb1b812e00a2b57c",
+      "stage": "photo-save-denied-retry_0_F0559A53-7C37-484C-9770-01ECC3A64AD7.png",
+      "timestamp": 1792514553.092,
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/FA434CD6-17B3-41E4-8AAB-CE98441DBD20.png",
+      "sha256": "fe61232c449cdf68fb148503b600f0fb82f844af0b19e598cb1b812e00a2b57c",
+      "stage": "photo-save-denied_0_525AB0C4-98C3-4FEA-9700-6AF46D2ED7F1.png",
+      "timestamp": 1792514546.893,
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/4D3395F3-8076-491A-B7C8-7515B79B7363.png",
+      "sha256": "0514c45e6bc284219ef4da086a526a5faba054caa67eda02fd1c40924504c684",
+      "stage": "system-add-photos-authorization_0_DFB00959-2D98-4D49-BB97-E39A90EEA9A6.png",
+      "timestamp": 1792514541.765,
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-permission-recovery-images/C28BDF11-78BB-436B-AAD2-53B9A84D96CD.png",
+      "sha256": "fc12d86e4bfad55eda7a78cd70025ffdc1397aec43a78d6bdba29c263fdab6c6",
+      "stage": "system-photo-picker-before-selection_0_F73DD93B-CBCD-4AAA-B6B8-F6CB9CC81A4B.png",
+      "timestamp": 1792514523.073,
+      "visuallyReviewed": true
+    }
+  ],
+  "visualConclusion": "All eight exported PNGs were opened and inspected: initial picker, real add-photos prompt, denied result, denied retry, Settings with None checked, Settings with Add Photos Only checked, picker after system restart, and Saved 1 photos result. The successful result removes the prior error text. Both denied screenshots show the unchanged-originals notice and permission-denied details.",
+  "coverageLimits": [
+    "A free-account single-photo workbench save on one iPhone SE simulator, using the real Photos picker and Settings UI.",
+    "The test resets this app's Photos permission before starting; it does not use simctl grant, a mock authorizer, or a production bypass between denied and successful saves.",
+    "The final run covers system termination followed by real reselection, not survival of the original selection across process death.",
+    "No physical iPhone, minimum-iOS runtime, all permission combinations, multiple-photo recovery, or all-size UI acceptance is claimed.",
+    "Historical failure logs/result bundles are retained; their screenshot attachments were not exported or visually reviewed in this documentation pass."
+  ],
+  "documentationPass": "No build, simulator operation, production edit, or test edit. Permission export limited to one method: eight PNGs and one lifecycle text; separate keyboard method exported three PNGs, all reviewed.",
+  "keyboardFlow": {
+    "id": "khDfCu",
+    "method": "PremiumRecoveryUITests.testPurchasedWorkbenchEditsAndPersistsTextWatermark",
+    "log": {
+      "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.khDfCu/testPurchasedWorkbenchEditsAndPersistsTextWatermark.log",
+      "sha256": "713ad7dc812e6e5ae1bd6f02ad53d9a07c848f4aa6d2dd6620007758c3102e00"
+    },
+    "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.khDfCu/testPurchasedWorkbenchEditsAndPersistsTextWatermark.xcresult",
+    "result": "TEST SUCCEEDED",
+    "tests": 1,
+    "failedTests": 0,
+    "cleanup": {
+      "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.khDfCu/cleanup.log",
+      "sha256": "cfcb0ca054c60dad9e6392d81c7e3c1d9432d1d386e9421d23feca574066020f",
+      "result": "TEST SUCCEEDED",
+      "tests": 1,
+      "failedTests": 0
+    },
+    "device": "ZTransfer-Pro-Compact (iPhone SE 3rd generation), iOS 26.5 simulator",
+    "manifest": {
+      "file": "/tmp/ztransfer-prelaunch-keyboard-watermark-images/manifest.json",
+      "sha256": "94ede9b2c0b6a1aa7f3eb377c3853af446448c1a4cf38c5e19026ace28f1d1b5"
+    },
+    "viewedScreenshots": [
+      {
+        "file": "/tmp/ztransfer-prelaunch-keyboard-watermark-images/4EB43E37-AEB5-41B1-9008-AA12D4AB6D6A.png",
+        "sha256": "7ecd976783c50a3c22a18ddd93922f5de4d9124cadc2519cbf7e2cc19e4cb75c",
+        "stage": "purchased-workbench-text-watermark-after-relaunch_0_73626A70-DB09-4318-B830-A5E078D6BDD7.png",
+        "visuallyReviewed": true
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-keyboard-watermark-images/C5E43410-08B1-43C0-B671-B3497166D5FF.png",
+        "sha256": "e640e9269b888fe1a146f846f40f08104b3ad90d35bc2a8bad68b685963b6ae4",
+        "stage": "purchased-workbench-text-watermark-edited_0_AA34B877-3C6A-487C-A6D2-C894246CC84F.png",
+        "visuallyReviewed": true
+      },
+      {
+        "file": "/tmp/ztransfer-prelaunch-keyboard-watermark-images/67005F2B-F5B7-4AFA-A699-C58E00ED2BF4.png",
+        "sha256": "941b7b528ac4df7b86d0490e63792b14ed4d116c0ffb57807d1f491f12023431",
+        "stage": "watermark-text-above-keyboard_0_EA9E9CA8-9CD6-4A28-9642-C00C747B9D24.png",
+        "visuallyReviewed": true
+      }
+    ],
+    "assertionCoverage": "Keyboard existence, text hittable and nonintersecting with XCUI keyboard.frame, text replacement, keyboard dismissal, all six changed options, and text/options retained after terminating and relaunching the App.",
+    "visualConclusion": "All three images were opened: the keyboard-expanded image shows readable UI PRO TEST text and caret; edited and after-relaunch images retain UI PRO TEST, Condensed plaque, Size 72%, Opacity 64%, Position Frame auto, Color Rosewood, and Legibility Default.",
+    "visualLimitation": "The keyboard suggestion strip overlaps the bottom border of the input field even though its text and caret remain visible. The log reports the main keyboard frame as {{0,451},{375,216}}; this frame excludes the higher suggestion strip. The passed intersection assertion does not prove the entire input control clears all keyboard chrome.",
+    "scope": "One simulator and this keyboard configuration. No physical keyboard, other language/IME, dynamic-type, or all-device coverage. Do not mark complete input-field visibility as passed.",
+    "fixStatus": "Two distinct keyboard component tests have final passing evidence; final real iPhone SE workbench UI passed and all three screenshots were visually reviewed. Complete 34 pt input border clears the suggestion strip in this tested state. Camera entry shares the component but was not rerun as a keyboard UI path.",
+    "fixBehavior": {
+      "androidBasis": "SettingsScreen.kt:2865–2967 WatermarkTextField: wait one frame, delay 180 ms, bring the entire 34 dp control into view.",
+      "implementation": "Shared PhotoEffectsControls adds an inert full-row UIView probe. It makes a single cancellable nearest-UIScrollView.scrollRectToVisible request after one frame plus 180 ms, accounting for root keyboardLayoutGuide in the same scroll coordinates. Blur, non-active scene, and unmount cancel; unchanged state does not reschedule.",
+      "unchanged": "Existing host safe areas, scroll structure, control dimensions, text, focus dismissal, and separate persistence scopes.",
+      "remainingEvidence": "Real SE workbench guide timing, scroll range, and full-border visibility now have final UI/screenshot evidence. Other entry-specific keyboard flows, input methods, floating/hardware keyboards, and all sizes remain outside this run."
+    },
+    "fixRuns": [
+      {
+        "id": "card-keyboard-verified",
+        "log": {
+          "file": "/tmp/ztransfer-prelaunch-card-keyboard-verified.log",
+          "sha256": "adb52037d7aebebaf01cf8ac39296249b4dc54faa7531ab42b4d80aeb85d4877"
+        },
+        "resultBundle": "/tmp/ztransfer-prelaunch-card-keyboard-verified.xcresult",
+        "result": "BUILD FAILED (xcodebuild TEST FAILED)",
+        "testsRun": 0,
+        "cause": "Probe stored property focused collides with UIView.focused: cannot override with a stored property and overriding-property accessibility errors.",
+        "correction": "Parent renamed the local state to focusRequested. Parent also explicitly isolated nested Fixture to MainActor and replaced the key-path scene-window predicate with a closure before the rerun."
+      },
+      {
+        "id": "card-keyboard-fixed",
+        "log": {
+          "file": "/tmp/ztransfer-prelaunch-card-keyboard-fixed.log",
+          "sha256": "28b6481a43f0f52ecadc2034cbd774bb6e46399e9a4d8862a435e0c9532f99de"
+        },
+        "resultBundle": "/tmp/ztransfer-prelaunch-card-keyboard-fixed.xcresult",
+        "plannedTests": 6,
+        "plannedKeyboardTests": [
+          "PhotoEffectsFocusedFieldVisibilityTests.testWholeControlClearsSuggestionStripAfterOneFrameAnd180Milliseconds",
+          "PhotoEffectsFocusedFieldVisibilityTests.testPendingFocusScrollCancelsForBlurBackgroundAndRemoval"
+        ],
+        "otherPlannedTests": "4 ConnectionMethodCardLayoutTests, recorded separately in the connection-layout evidence.",
+        "result": "TEST FAILED",
+        "testsRun": 6,
+        "passedTests": 5,
+        "failedTests": 1,
+        "keyboardTestsRun": 2,
+        "keyboardPassedTests": 1,
+        "keyboardFailedTests": 1,
+        "failure": "testWholeControlClearsSuggestionStripAfterOneFrameAnd180Milliseconds expected contentOffset.y=9.5 ±0.01; UIKit produced 9.666666666666666 on the 3x window. This was the sole assertion failure. Complete control maxY <= 407.5, full 34 pt height, delay, and one-shot assertions did not fail; the cancellation method passed.",
+        "correction": "Parent changed only the expected offset to round using window.screen.scale. The complete-control keyboard boundary and all timing/cancellation assertions remain unchanged; production code remains frozen."
+      },
+      {
+        "id": "keyboard-pixel-alignment",
+        "log": {
+          "file": "/tmp/ztransfer-prelaunch-keyboard-pixel-alignment.log",
+          "sha256": "98aee0c03a3aeb306ef1d72d558e4f34aca7f609170578fb2fe2579879ae6e91"
+        },
+        "resultBundle": "/tmp/ztransfer-prelaunch-keyboard-pixel-alignment.xcresult",
+        "plannedTests": 1,
+        "method": "PhotoEffectsFocusedFieldVisibilityTests.testWholeControlClearsSuggestionStripAfterOneFrameAnd180Milliseconds",
+        "result": "TEST SUCCEEDED",
+        "exitCode": 0,
+        "testsRun": 1,
+        "passedTests": 1,
+        "failedTests": 0
+      }
+    ],
+    "componentConclusion": "The final single-method run passed after changing only the expected offset to screen-pixel alignment. Together with the earlier cancellation pass, 2 distinct keyboard tests have final passing evidence. Complete-row maxY <= suggestion-strip top and timing/cancellation assertions were retained. Previous build failure and 5/6 combined run remain recorded.",
+    "finalUI": {
+      "id": "q8FirM",
+      "method": "PremiumRecoveryUITests.testPurchasedWorkbenchEditsAndPersistsTextWatermark",
+      "device": {
+        "id": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "name": "ZTransfer-Pro-Compact",
+        "model": "iPhone SE (3rd generation)",
+        "runtime": "iOS 26.5"
+      },
+      "log": {
+        "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.q8FirM/testPurchasedWorkbenchEditsAndPersistsTextWatermark.log",
+        "sha256": "a66bdd8b6bf5eced380559df5567348a0df3dffc9b8e5c033f5d71cc01ff2214"
+      },
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.q8FirM/testPurchasedWorkbenchEditsAndPersistsTextWatermark.xcresult",
+      "result": "TEST SUCCEEDED",
+      "tests": 1,
+      "failedTests": 0,
+      "cleanup": {
+        "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.q8FirM/cleanup.log",
+        "sha256": "860581cd2d49ea3b791399daff9c23c02c709a3a4eb2a401c2ed22d7da19257e",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.q8FirM/cleanup.xcresult",
+        "result": "TEST SUCCEEDED",
+        "tests": 1,
+        "failedTests": 0
+      },
+      "sourceHashesAtFinalReview": [
+        {
+          "file": "ios/ZTransfer/UI/PhotoEffectsEditorView.swift",
+          "sha256": "8bcc2bbf563aca0c95a91436c8eaaeba05e361d53ebcc55e86a31fc698211319"
+        },
+        {
+          "file": "ios/ZTransferTests/ConflatedPreviewUpdatesTests.swift",
+          "sha256": "4f4b7fbbd481d78446ee404a443c9dc44dce410a64a6ad44bccd65fff844b86e"
+        },
+        {
+          "file": "ios/StoreKitUITests/PremiumRecoveryUITests.swift",
+          "sha256": "2db73a82c4d97a69a98eb071a93ef7c1ad88c4326bf49e603a208334779260ed"
+        }
+      ],
+      "sourceHashScope": "Files were frozen during the parent-run component and final UI validations; these hashes record the current source at final review, not an embedded build provenance manifest.",
+      "manifest": {
+        "file": "/tmp/ztransfer-prelaunch-keyboard-final-images/manifest.json",
+        "sha256": "52c826bc397f2b7a9d0a391cf72646a2e6affedfe3c5d5a98086336c1a21e442"
+      },
+      "viewedScreenshots": [
+        {
+          "file": "/tmp/ztransfer-prelaunch-keyboard-final-images/DCFC85A6-992C-421F-9389-B3351AABFCD7.png",
+          "sha256": "26b07706a227ce3b61bace102fdb6897b5bfa3940ee184edbd3d86548cb93cc5",
+          "stage": "purchased-workbench-text-watermark-after-relaunch_0_8C18460C-48B4-4462-A4DD-E57EF8520841.png",
+          "timestamp": 1792516846.985,
+          "visuallyReviewed": true
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-keyboard-final-images/9637B70F-F495-4FCB-8A1B-20EC371E9BBD.png",
+          "sha256": "26b07706a227ce3b61bace102fdb6897b5bfa3940ee184edbd3d86548cb93cc5",
+          "stage": "purchased-workbench-text-watermark-edited_0_8C81AE15-1CC8-45A7-AC7B-256508C4674E.png",
+          "timestamp": 1792516819.971,
+          "visuallyReviewed": true
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-keyboard-final-images/DA87E4DD-689C-4C48-B994-0CE85ADD3852.png",
+          "sha256": "88cec48b3e9212dc511daa344b25626571261f61d3afd7be29d9e17b3b5c8b6d",
+          "stage": "watermark-text-above-keyboard_0_0051D3DD-6511-4A95-8EE2-517700B5C11F.png",
+          "timestamp": 1792516786.673,
+          "visuallyReviewed": true
+        }
+      ],
+      "keyboardVisualConclusion": "The complete 34 pt input box, including both lower corners and its lower border, is visible immediately above the suggestion strip. Visual inspection places its lower border at approximately y814 px (407 pt) and the strip at approximately y815 px (407.5 pt) in the 750x1334 screenshot. This is a close boundary, not a claim of a generous gap. Text and caret are visible. Unlike historical khDfCu, the lower border is no longer covered. These are visual estimates, not an added automated image-coordinate assertion.",
+      "persistedValues": {
+        "text": "UI PRO TEST",
+        "font": "Simple",
+        "size": "71%",
+        "opacity": "63%",
+        "position": "Frame left",
+        "color": "Adaptive",
+        "legibility": "Shadow"
+      },
+      "persistenceVisualConclusion": "Edited and after-relaunch screenshots were both opened and show identical text and all six option values. These values differ from the prior khDfCu run because each run changes controls from its own starting state; they are not substituted into the historical run.",
+      "assertionCoverage": "Actual keyboard existence, input/hit testing, text replacement, keyboard dismissal, six option changes, and persistence after termination/relaunch all passed. The XCTest keyboard.frame assertion still covers only its reported main key area; full-border acceptance additionally relies on explicit review of the actual suggestion-strip image.",
+      "scope": "Real UI evidence is the workbench entry on one iPhone SE simulator with this keyboard configuration. Camera settings uses the same shared control but its keyboard flow was not newly rerun. No physical device, all input methods, floating keyboard, hardware keyboard, dynamic type, or all-size claim.",
+      "exportScope": "Only this method and its three PNG attachments were exported and all were viewed. No tests, simulator operations, production edits, or test edits were performed during this evidence pass."
+    }
+  }
+}

@@ -51,8 +51,7 @@ struct ConnectionPage: View {
                 let layout = ConnectionLayout(size: proxy.size)
                 ZStack(alignment: .topLeading) {
                     ZTransferColors.background.ignoresSafeArea()
-                    HStack(alignment: .top, spacing: ConnectionLayout.cardSpacing) {
-                    VStack(alignment: .leading, spacing: ConnectionLayout.gpsSpacing) {
+                    ConnectionSceneLayout(viewport: proxy.size) {
                         ConnectionMethodCard(
                             mode: .usb, state: model.state,
                             height: layout.usbHeight,
@@ -71,89 +70,85 @@ struct ConnectionPage: View {
                                 coordinator: gpsCoordinator,
                                 expanded: $gpsPanelPresented,
                                 showingResetPairing: $showGPSReset,
-                                availableHeight: max(1, proxy.size.height - layout.gpsTop)
+                                availableHeight: max(1, proxy.size.height - layout.gpsTop),
+                                entryWidth: layout.cardWidth,
+                                reservesExpandedHeight: true
                             )
                         }
-                    }
-                    .frame(width: layout.cardWidth)
-                    .zIndex(1)
-                    ConnectionMethodCard(
-                        mode: .wifi, state: model.state,
-                        height: layout.wifiHeight,
-                        dimmed: gps.enabled,
-                        attentionActive: model.cameraSession == nil && !gps.enabled,
-                        attentionOrigin: attentionOrigin,
-                        selected: model.cameraSession != nil && model.cameraSession?.isUSB == false,
-                        celebrationStart: celebrationStart,
-                        previewPremiumCelebration: model.previewsPremiumConnectionAnimation,
-                        onWirelessModeChanged: model.select(wirelessMode:),
-                        onConnect: {
-                            guard !model.staBusy else { return }
-                            ZTransferHaptics.shared.play(.action)
-                            Task { await model.connectSelectedWiFi() }
-                        },
-                        onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
-                        onSTAHelpRequested: {
-                            tipsWirelessMode = .sta
-                            staHelpViewed = true
-                            showSTATips = true
-                        },
-                        onAPHelpRequested: {
-                            tipsWirelessMode = .ap
-                            apHelpViewed = true
-                            showSTATips = true
-                        },
-                        staHelpViewed: staHelpViewed,
-                        apHelpViewed: apHelpViewed)
-                        .frame(width: layout.cardWidth)
-                        .modifier(GPSBlockedConnectionCard(
-                            blocked: gps.enabled,
-                            onBlockedTap: showGPSConnectionBlockedHint
-                        ))
-                    }
-                    .padding(.horizontal, layout.horizontalPadding)
-                    .padding(.top, layout.cardsTop)
-
-                    ConnectionSceneFadeTimeline(start: celebrationStart) {
-                        HStack(spacing: 8) {
-                            Button {
-                                ZTransferHaptics.shared.play(.navigation)
-                                showSettings = true
-                            } label: {
-                                DoubleZMark(tint: ZTransferColors.primaryText)
-                                    .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
-                                    .padding(.horizontal, 14)
-                                    .frame(height: 36)
-                            }
-                            .buttonStyle(ZTransferGlassButtonStyle(
-                                cornerRadius: 22,
-                                materialContentColor: ZTransferColors.accentYellow,
-                                prominentPressFeedback: true
+                        .zIndex(1)
+                        ConnectionMethodCard(
+                            mode: .wifi, state: model.state,
+                            height: layout.wifiHeight,
+                            dimmed: gps.enabled,
+                            attentionActive: model.cameraSession == nil && !gps.enabled,
+                            attentionOrigin: attentionOrigin,
+                            selected: model.cameraSession != nil && model.cameraSession?.isUSB == false,
+                            celebrationStart: celebrationStart,
+                            previewPremiumCelebration: model.previewsPremiumConnectionAnimation,
+                            onWirelessModeChanged: model.select(wirelessMode:),
+                            onConnect: {
+                                guard !model.staBusy else { return }
+                                ZTransferHaptics.shared.play(.action)
+                                Task { await model.connectSelectedWiFi() }
+                            },
+                            onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
+                            onSTAHelpRequested: {
+                                tipsWirelessMode = .sta
+                                staHelpViewed = true
+                                showSTATips = true
+                            },
+                            onAPHelpRequested: {
+                                tipsWirelessMode = .ap
+                                apHelpViewed = true
+                                showSTATips = true
+                            },
+                            staHelpViewed: staHelpViewed,
+                            apHelpViewed: apHelpViewed)
+                            .frame(width: layout.cardWidth)
+                            .modifier(GPSBlockedConnectionCard(
+                                blocked: gps.enabled,
+                                onBlockedTap: showGPSConnectionBlockedHint
                             ))
-                            .geniePopupAnchor(.settings)
-                            .accessibilityIdentifier("popup-trigger-settings")
-                            #if DEBUG
-                            Button { model.connectDebugSimulator() } label: {
-                                Image(systemName: "photo.on.rectangle.angled")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .frame(width: 40, height: 36)
+                        ConnectionSceneFadeTimeline(start: celebrationStart) {
+                            HStack(spacing: 8) {
+                                Button {
+                                    ZTransferHaptics.shared.play(.navigation)
+                                    showSettings = true
+                                } label: {
+                                    DoubleZMark(tint: ZTransferColors.primaryText)
+                                        .frame(width: 20 * DoubleZMark.aspectRatio, height: 20)
+                                        .padding(.horizontal, 14)
+                                        .frame(height: ConnectionLayout.toolbarHeight)
+                                }
+                                .buttonStyle(ZTransferGlassButtonStyle(
+                                    cornerRadius: 22,
+                                    materialContentColor: ZTransferColors.accentYellow,
+                                    prominentPressFeedback: true
+                                ))
+                                .geniePopupAnchor(.settings)
+                                .accessibilityIdentifier("popup-trigger-settings")
+                                #if DEBUG
+                                Button { model.connectDebugSimulator() } label: {
+                                    Image(systemName: "photo.on.rectangle.angled")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .frame(width: 40, height: ConnectionLayout.toolbarHeight)
+                                }
+                                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+                                // Android combinedClickable uses the platform's
+                                // 500 ms long press. A release tap cannot replace
+                                // the already-created session or its preview mode.
+                                .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
+                                    .onEnded { _ in model.connectDebugSimulator(previewPremiumAnimation: true) })
+                                .accessibilityLabel("打开模拟照片")
+                                .accessibilityAction(named: Text("播放高级版连接成功动画")) {
+                                    model.connectDebugSimulator(previewPremiumAnimation: true)
+                                }
+                                .accessibilityIdentifier("debug-photo-library")
+                                #endif
                             }
-                            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
-                            // Android combinedClickable uses the platform's
-                            // 500 ms long press. A release tap cannot replace
-                            // the already-created session or its preview mode.
-                            .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-                                .onEnded { _ in model.connectDebugSimulator(previewPremiumAnimation: true) })
-                            .accessibilityLabel("打开模拟照片")
-                            .accessibilityAction(named: Text("播放高级版连接成功动画")) {
-                                model.connectDebugSimulator(previewPremiumAnimation: true)
-                            }
-                            .accessibilityIdentifier("debug-photo-library")
-                            #endif
                         }
-                        .padding(.leading, 12)
-                        .padding(.top, 6)
                     }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
                 }
                 .overlay(alignment: .bottom) {
                     ConnectionSceneFadeTimeline(start: celebrationStart) {
@@ -367,6 +362,8 @@ struct ConnectionLayout {
     static let gpsSpacing: CGFloat = 10
     static let gpsHeight: CGFloat = 50
     static let cardRadius: CGFloat = 24
+    static let toolbarHeight: CGFloat = 36
+    static let preferredToolbarTop: CGFloat = 6
     let horizontalPadding: CGFloat
     let cardWidth: CGFloat
     let cardsTop: CGFloat
@@ -376,6 +373,25 @@ struct ConnectionLayout {
     var usbHeight: CGFloat { wifiHeight - Self.gpsSpacing - Self.gpsHeight }
     var gpsTop: CGFloat { cardsTop + usbHeight + Self.gpsSpacing }
 
+    /// User-approved iOS difference: reserve the real GPS panel before it is
+    /// opened, reducing only the whitespace above the entire connection scene.
+    /// In the tightest layouts, also reclaim the toolbar's existing 6 pt top
+    /// whitespace. Its 36 pt buttons stay inside the safe area; leave 1 pt
+    /// after the USB card's original 1.04x centered breathing overflow.
+    /// The fixed 44 + 18 pt workbench allocation stays unchanged.
+    func cardsTop(reservingGPSHeight height: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+        let sceneHeight = max(wifiHeight, usbHeight + Self.gpsSpacing + height)
+        let workspaceTop = viewportHeight - 62
+        let minimumTop = Self.toolbarHeight + toolbarCardClearance
+        return min(cardsTop, max(minimumTop, workspaceTop - 8 - sceneHeight))
+    }
+
+    func toolbarTop(forCardsTop top: CGFloat) -> CGFloat {
+        min(Self.preferredToolbarTop, max(0, top - Self.toolbarHeight - toolbarCardClearance))
+    }
+
+    private var toolbarCardClearance: CGFloat { usbHeight * 0.02 + 1 }
+
     init(size: CGSize) {
         horizontalPadding = size.width < 360 ? 14 : 20
         cardWidth = max(0, (size.width - horizontalPadding * 2 - Self.cardSpacing) / 2)
@@ -383,6 +399,38 @@ struct ConnectionLayout {
         let spacerRoom = max(0, size.height - 56 - wifiHeight - 62)
         let proportionalSpacer = spacerRoom * (0.28 / 1.28)
         cardsTop = 56 + proportionalSpacer * 0.94
+    }
+}
+
+/// The GPS child exposes its already-mounted panel's natural footprint even
+/// while closed. Measure and place in one layout pass, with no duplicate panel,
+/// preference/state feedback, or expansion-driven movement of the cards.
+private struct ConnectionSceneLayout: Layout {
+    let viewport: CGSize
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        viewport
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                       cache: inout ()) {
+        guard subviews.count == 4 else { return }
+        let layout = ConnectionLayout(size: viewport)
+        let gpsSize = subviews[1].sizeThatFits(.init(width: layout.cardWidth, height: nil))
+        let top = layout.cardsTop(reservingGPSHeight: gpsSize.height, viewportHeight: viewport.height)
+        let left = bounds.minX + layout.horizontalPadding
+        subviews[0].place(at: CGPoint(x: left, y: bounds.minY + top), anchor: .topLeading,
+                         proposal: .init(width: layout.cardWidth, height: layout.usbHeight))
+        subviews[1].place(at: CGPoint(x: left,
+                                     y: bounds.minY + top + layout.usbHeight + ConnectionLayout.gpsSpacing),
+                         anchor: .topLeading, proposal: .init(width: layout.cardWidth, height: gpsSize.height))
+        subviews[2].place(at: CGPoint(x: left + layout.cardWidth + ConnectionLayout.cardSpacing,
+                                     y: bounds.minY + top), anchor: .topLeading,
+                         proposal: .init(width: layout.cardWidth, height: layout.wifiHeight))
+        subviews[3].place(at: CGPoint(x: bounds.minX + 12,
+                                     y: bounds.minY + layout.toolbarTop(forCardsTop: top)),
+                         anchor: .topLeading,
+                         proposal: .init(width: nil, height: ConnectionLayout.toolbarHeight))
     }
 }
 
@@ -411,5 +459,6 @@ private struct ConnectionWorkspaceButton: View {
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.45)
         .fixedSize(horizontal: true, vertical: false)
+        .accessibilityIdentifier("connection-workspace")
     }
 }

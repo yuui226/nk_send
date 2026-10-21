@@ -583,6 +583,14 @@ final class PhotoEffectsVisibleFrameTests: XCTestCase {
         }
     }
     func testNewFrameBecomesVisibleAfterFullScreenCoverDismissal() async throws {
+        try await verifyNewVisibleFrame(covered: true)
+    }
+
+    func testNewFrameBecomesVisibleWithoutLeavingScreen() async throws {
+        try await verifyNewVisibleFrame(covered: false)
+    }
+
+    private func verifyNewVisibleFrame(covered: Bool) async throws {
         func bitmap(_ color: UIColor) -> UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 200, height: 200)).image { context in
                 color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
@@ -616,10 +624,14 @@ final class PhotoEffectsVisibleFrameTests: XCTestCase {
         let cover = UIViewController()
         cover.view.backgroundColor = .green
         cover.modalPresentationStyle = .fullScreen
-        await withCheckedContinuation { continuation in host.present(cover, animated: false) { continuation.resume() } }
+        if covered {
+            await withCheckedContinuation { continuation in host.present(cover, animated: false) { continuation.resume() } }
+        }
         state.image = bitmap(.blue)
         try await Task.sleep(for: .milliseconds(100))
-        await withCheckedContinuation { continuation in cover.dismiss(animated: false) { continuation.resume() } }
+        if covered {
+            await withCheckedContinuation { continuation in cover.dismiss(animated: false) { continuation.resume() } }
+        }
         try await Task.sleep(for: .milliseconds(700))
         let final = try centerPixel("visible-after-cover")
         XCTAssertGreaterThan(final[2], 240, "New blue frame must replace old red frame after returning")

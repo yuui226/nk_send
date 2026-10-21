@@ -1,0 +1,183 @@
+{
+  "date": "2026-10-21",
+  "runID": "xAAON1",
+  "method": "PremiumRecoveryUITests.testPurchasePageLayoutInAllLanguages",
+  "methodCount": 1,
+  "methodIsRepeat": true,
+  "distinctUICompatibilityCountImpact": 0,
+  "countingNote": "This is the existing three-language purchase-layout method repeated under dark/maximum accessibility content-size settings. It does not add an 18th distinct UI method.",
+  "device": {
+    "id": "13EB3240-0CC7-4910-8724-1A527489099B",
+    "name": "ZTransfer-Pro-Compact",
+    "model": "iPhone SE (3rd generation)",
+    "runtime": "26.5 (23F77)"
+  },
+  "result": {
+    "status": "TEST SUCCEEDED",
+    "tests": 1,
+    "failedTests": 0,
+    "durationSeconds": 223.237,
+    "logs": [
+      {
+        "phase": "prepare",
+        "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.xAAON1/prepare-testPurchasePageLayoutInAllLanguages.log",
+        "sha256": "d80cbfc65c27cdbaf6b9b67933276204c7b9e34e4ee436a7d151e1d33964d3dc",
+        "result": "TEST SUCCEEDED",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.xAAON1/prepare-testPurchasePageLayoutInAllLanguages.xcresult"
+      },
+      {
+        "phase": "ui",
+        "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.xAAON1/testPurchasePageLayoutInAllLanguages.log",
+        "sha256": "354892d1d0ebe949b2350da93abb26974f1d0a23ee9746724f10f1e3bba7244d",
+        "result": "TEST SUCCEEDED",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.xAAON1/testPurchasePageLayoutInAllLanguages.xcresult"
+      },
+      {
+        "phase": "cleanup",
+        "file": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.xAAON1/cleanup.log",
+        "sha256": "529d96b85b48026dbb3d2a83ddcc93edde263f525c8d50e51abee844e0aa9dea",
+        "result": "TEST SUCCEEDED",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.xAAON1/cleanup.xcresult"
+      }
+    ]
+  },
+  "environment": {
+    "file": "/tmp/ztransfer-prelaunch-purchase-large-text-environment.json",
+    "sha256": "d8a1ad5493fbb4ab2e8f9b5c2d8ad489c61dd4e9367b0e7e8d83cc0fdc4659f2",
+    "readBack": {
+      "recordedAt": "2026-10-21T01:17:56.938925+08:00",
+      "device": "13EB3240-0CC7-4910-8724-1A527489099B",
+      "readBackCommand": "xcrun simctl ui <device> appearance / content_size",
+      "appearance": "dark",
+      "contentSize": "accessibility-extra-extra-extra-large",
+      "source": "Both commands completed with exit 0 during xAAON1 UI run; root inspected their returned values."
+    },
+    "interpretation": "Root directly read back dark appearance and accessibility-extra-extra-extra-large with successful simctl queries; this record is more than a requested launch setting. No environment change was performed during evidence export."
+  },
+  "languages": [
+    "zh-Hans",
+    "zh-Hant",
+    "en"
+  ],
+  "stagesPerLanguage": [
+    "top",
+    "plans",
+    "actions"
+  ],
+  "assertionCoverage": [
+    "Purchase scroll viewport is within the app frame.",
+    "Close control can be revealed and tapped.",
+    "Annual and lifetime plan controls can be fully revealed; the local test-price strings are present.",
+    "Annual-renewal explanation and annual purchase control can be fully revealed; purchase control is enabled.",
+    "Restore and redeem controls can be fully revealed and their horizontal frames do not overlap.",
+    "Closing returns to the settings Unlock Pro entry."
+  ],
+  "screenshots": [
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-zh-Hans-top.png",
+      "stage": "premium-layout-zh-Hans-top",
+      "sha256": "6b484d819b6ea8b923a4c70bad573026836003bc737dcfdb765ec5973572165b",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Title and close control, comparison table, annual and lifetime cards are readable in the captured scroll position; no horizontal text clipping or overlapping foreground labels observed."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-zh-Hans-plans.png",
+      "stage": "premium-layout-zh-Hans-plans",
+      "sha256": "63a8c52d965edf4eafdb1ab166c86b9c3e528a7d906e2c1bb53778749ca527aa",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Both plan cards and their prices fit within the sheet; this scroll position substantially repeats the top capture."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-zh-Hans-actions.png",
+      "stage": "premium-layout-zh-Hans-actions",
+      "sha256": "368b64631c6feb01a8c06b5ee91dfea7e4b9661e7d9b8e6bf7805d8bcbc11f1f",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Account/annual-renewal explanation, annual purchase, restore, redeem and feedback controls are visible and separated after scrolling."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-zh-Hant-top.png",
+      "stage": "premium-layout-zh-Hant-top",
+      "sha256": "071850301de51954f3c839d293bdd51aec1b72432c77b2d6f59c9b2571621c1f",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Traditional-Chinese comparison labels, title and close control are visible; foreground table rows and plan cards do not overlap."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-zh-Hant-plans.png",
+      "stage": "premium-layout-zh-Hant-plans",
+      "sha256": "21ce5d91a39ba67fa68085bde3d9879c9d1740cb4e272bf4a9ad5b95654de38a",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Annual/lifetime plan names, local test prices and duration text fit within their cards; this scroll position substantially repeats the top capture."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-zh-Hant-actions.png",
+      "stage": "premium-layout-zh-Hant-actions",
+      "sha256": "a47d6694fab1e771a7e2e009e1d678d17dc406fa131d4ae8335f68dc284445d8",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Renewal explanation and purchase/restore/redeem/feedback controls remain legible and separated after scrolling."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-en-top.png",
+      "stage": "premium-layout-en-top",
+      "sha256": "0597016d97d86283a03f26d9907f1f2abd21517c86bc9bd249eb95bd71f47815",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Comparison feature names wrap across rows; Annual/Lifetime Unlimited and Supported columns remain tight but do not visibly overlap or truncate horizontally. Lifetime card begins below the viewport and is shown fully in the following captures."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-en-plans.png",
+      "stage": "premium-layout-en-plans",
+      "sha256": "1e206498dbfa676a1fb2129ecf9e612fe3e8058fb3a8d891345105e31618af0f",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Annual and lifetime cards, account and renewal explanation, purchase, restore, redeem and feedback controls are fully shown after scrolling; text wraps within the sheet."
+    },
+    {
+      "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/premium-layout-en-actions.png",
+      "stage": "premium-layout-en-actions",
+      "sha256": "df753f04b8368f0567fd8dce1827a6715cb15e1aa65a06e60d6b74c2fcbd18ce",
+      "pixelWidth": 750,
+      "pixelHeight": 1334,
+      "visuallyReviewed": true,
+      "reviewedBy": "prelaunch_materials agent",
+      "observation": "Operation controls remain separated and readable. This scroll position substantially repeats the plans capture; top-of-table content outside the scroll viewport is not treated as lost content."
+    }
+  ],
+  "screenshotManifest": {
+    "file": "/tmp/ztransfer-prelaunch-purchase-large-text-images/manifest.json",
+    "sha256": "dc0a4ee1bd7b8e28c1a90c162e6c1a922271e2204f96033f41a833f408b9af87",
+    "exportedPNGCount": 9,
+    "visuallyReviewedPNGCount": 9,
+    "method": "Targeted legacy result-object export for this method only; original 750×1334 PNGs viewed individually without image modification."
+  },
+  "visualConclusion": "All nine original images were opened individually. The captured comparison rows, plan cards, annual billing explanation and reachable purchase/restore/redeem controls are readable in dark mode. English paid comparison columns are compact but no foreground text overlap or horizontal clipping was observed in these captures. Vertical movement between top and action sections is normal scrolling, not evidence that all content fits simultaneously on one screen.",
+  "limits": [
+    "Many custom app labels use fixed font sizes. A passing run with the system accessibility maximum selected does not demonstrate comprehensive Dynamic Type scaling or accessibility support.",
+    "This is a Debug/local Xcode StoreKit environment. The Chinese development/simulated-payment banner is present in all languages; these are internal evidence, not App Store screenshots.",
+    "This method did not perform a purchase, restoration, offer redemption, real sandbox transaction, production legal-link visit or storefront price validation.",
+    "Coverage is one iPhone SE simulator and these three languages/states; not iPad, other devices, all app pages, all system text categories, keyboard states or physical-device performance.",
+    "No current Release build or publication approval is inferred.",
+    "No build, test execution, simulator start, settings mutation, application-code change or image editing occurred during this evidence collection."
+  ]
+}

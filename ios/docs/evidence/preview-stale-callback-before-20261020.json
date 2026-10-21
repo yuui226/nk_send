@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-20",
+  "stage": "before explicit Update input fix",
+  "log": "/tmp/ztransfer-prelaunch-frame-events.log",
+  "sha256": "b1f5ebc3afa097fd5ddab8d07e9c573510246063428534f85634bcfea49dfa94",
+  "exitCode": 65,
+  "tests": 2,
+  "failedTests": 2,
+  "failedAssertions": 6,
+  "keyEvidence": [
+    "PREVIEW_TRANSITION_TEST host.body image=ObjectIdentifier(0x0000000129100dc0)",
+    "PREVIEW_TRANSITION_TEST enqueue frame=ObjectIdentifier(0x0000000129100dc0) visible=ObjectIdentifier(0x0000000129100dc0)",
+    "PREVIEW_TRANSITION_TEST operation.begin next=ObjectIdentifier(0x0000000129100dc0) visible=ObjectIdentifier(0x0000000129100dc0) same=true",
+    "PREVIEW_TRANSITION_TEST host.body image=ObjectIdentifier(0x0000000129101900)",
+    "PREVIEW_TRANSITION_TEST change frame=ObjectIdentifier(0x0000000129101900) visible=ObjectIdentifier(0x0000000129100dc0)",
+    "PREVIEW_TRANSITION_TEST enqueue frame=ObjectIdentifier(0x0000000129100dc0) visible=ObjectIdentifier(0x0000000129100dc0)",
+    "PREVIEW_TRANSITION_TEST operation.begin next=ObjectIdentifier(0x0000000129100dc0) visible=ObjectIdentifier(0x0000000129100dc0) same=true"
+  ],
+  "finding": "onChange identifies the new UIImage, but enqueue reads the previous UIImage from its captured view. A separate visible-screen pixel test remains red after changing to blue. The cover-interruption test did not reach its callback, so this run does not prove cancellation recovery.",
+  "diagnostics": "Only this run simctl diagnose process was terminated after the suite finished; xcodebuild exited 65."
+}

@@ -1,0 +1,536 @@
+{
+  "date": "2026-10-21",
+  "status": "Limited pass: the observed 945x1260 system floating window supported the inspected home/help/settings cycle and restoration within 2 pt. Two 55–85% compact-window attempts remain failed; narrower-window adaptation is unverified.",
+  "approvedScope": "Owner confirmed portrait-only iPad layout; resized windows keep the portrait layout structure. No landscape support or orientation configuration change is authorized by this diagnostic.",
+  "initialInspection": {
+    "method": "PrelaunchLayoutUITests.testInspectIPadWindowControls",
+    "device": {
+      "id": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+      "name": "ZTransfer-Prelaunch-13Pad",
+      "model": "iPad Pro 13-inch (M5)",
+      "runtime": "26.5 (23F77)"
+    },
+    "appUnderInspection": {
+      "bundleIdentifier": "com.ztransfer.ios",
+      "configuration": "Previously installed Debug app, as reported by root task",
+      "currentSourceValidated": false,
+      "binaryHash": null,
+      "scope": "Old installed app used only to identify system window controls. This run did not build or validate the current production app source."
+    },
+    "run": {
+      "log": "/tmp/ztransfer-prelaunch-ipad-window-inspection.log",
+      "logSHA256": "6b10096ebef9af8fc1a1141e03852cd85b78df91f4a5f53865c2dddc5f21aa77",
+      "resultBundle": "/tmp/ztransfer-prelaunch-ipad-window-inspection.xcresult",
+      "exitCode": 75,
+      "exitCodeSource": "Root task observed the final shell session exit after sending INT.",
+      "logTerminalResult": "TEST INTERRUPTED",
+      "resultBundleActionStatus": "cancelled",
+      "testSummaryStatus": "Failure",
+      "recordedIssue": "Testing was canceled",
+      "interruption": "Root sent INT after more than six minutes of repeated accessibility/screenshot queries; the task stopped. No test pass or successful resize is inferred.",
+      "logElapsedSeconds": 501.122
+    },
+    "queryTimelineSeconds": {
+      "geometryAttachment": 19.25,
+      "appStructureAttachment": 122.85,
+      "springboardStructureAttachment": 221.06,
+      "appQueryRetries": [
+        253.66,
+        285.35
+      ],
+      "lastRecordedSnapshotRequest": 379.19
+    },
+    "attachments": [
+      {
+        "name": "iPad-window-inspection-geometry",
+        "file": "/tmp/ztransfer-prelaunch-ipad-window-texts/iPad-window-inspection-geometry.txt",
+        "sha256": "4e8ba3f51d82b686afa550243602517cbb8c65bcf89a8f2ecdbe1a379468bedc",
+        "bytes": 128
+      },
+      {
+        "name": "iPad-window-inspection-app-structure",
+        "file": "/tmp/ztransfer-prelaunch-ipad-window-texts/iPad-window-inspection-app-structure.txt",
+        "sha256": "ec3f7bf62e2ad64420f5a51bab789fe56c09bd32b349a3a88fee30f98cedee0b",
+        "bytes": 15084
+      },
+      {
+        "name": "iPad-window-inspection-springboard-structure",
+        "file": "/tmp/ztransfer-prelaunch-ipad-window-texts/iPad-window-inspection-springboard-structure.txt",
+        "sha256": "f76ef6509f9b9ea1d3d6a96da175f45e1aeb94f94de91bc4386221c61a5783d5",
+        "bytes": 8182
+      }
+    ],
+    "attachmentExtraction": {
+      "method": "xcresulttool get/export object --legacy; exported only geometry, app-structure and springboard-structure payloads.",
+      "outputDirectory": "/tmp/ztransfer-prelaunch-ipad-window-texts",
+      "manifest": "/tmp/ztransfer-prelaunch-ipad-window-texts/manifest.json",
+      "manifestSHA256": "3900492fac1ec630cb8003b579e87d79cb04002d4d3d045f7237c6afd739befd",
+      "note": "The higher-level export attachments command failed while writing its TestReport cache. Low-level object export succeeded without changing simulator state or requiring a new run."
+    },
+    "geometry": {
+      "capturedAtUTC": "2026-10-20 16:57:47 +0000",
+      "appStateRaw": 4,
+      "appState": "runningForeground",
+      "appFramePoints": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1032.0,
+        "height": 1376.0
+      },
+      "appWindowCount": 1,
+      "springboardStateRaw": 4,
+      "conclusion": "The captured app window was full-screen portrait. One frame does not demonstrate a resized window."
+    },
+    "systemResizeControl": {
+      "surface": "com.apple.springboard",
+      "elementType": "Other",
+      "identifier": "resize-grabber",
+      "label": "调整“Z传”大小",
+      "value": "右下方",
+      "framePoints": {
+        "x": 1012.0,
+        "y": 1356.0,
+        "width": 40.0,
+        "height": 40.0
+      },
+      "sourceAttachment": "iPad-window-inspection-springboard-structure.txt",
+      "sourceLine": 79,
+      "observedInAppTree": false,
+      "geometricIntersectionWithScreenPoints": {
+        "x": 1012.0,
+        "y": 1356.0,
+        "width": 20.0,
+        "height": 20.0
+      },
+      "interactionValidated": false,
+      "interpretation": "A named system resize control exists in this captured SpringBoard tree. Its AX rectangle extends 20 points past the right and bottom screen edges; the intersection is a geometric calculation, not proof of actual hit testing. Use fresh live UI evidence before a later interaction."
+    },
+    "otherWindowObservation": "SpringBoard also reports a 516×688 system Window. The app tree and geometry still report a single 1032×1376 app window; the smaller system Window is not evidence that ZTransfer was resized.",
+    "independentScreenshot": {
+      "file": "/tmp/ztransfer-prelaunch-ipad-current-window.png",
+      "sha256": "18c34738c2cc8a8520559aa12089f84d18f1920148b75bb98b81f959fa4cfd92",
+      "pixelWidth": 2064,
+      "pixelHeight": 2752,
+      "captureMethod": "simctl screenshot, supplied by root task",
+      "visuallyReviewed": true,
+      "reviewedBy": "root",
+      "reviewSource": "Root reported opening the full-screen image and observing the bottom-right resize handle.",
+      "scope": "Old Debug app at full screen; not a clean Release marketing screenshot or current-source layout acceptance."
+    },
+    "limits": [
+      "The interrupted run is not a product test pass.",
+      "No actual resize gesture, post-resize geometry, compact-window layout or control hit testing was verified.",
+      "No fresh build, simulator start, settings change or UI interaction occurred during this evidence extraction.",
+      "Current candidate Release window behavior and screenshots remain for the root task to verify."
+    ]
+  },
+  "finalReleaseWindowValidation": {
+    "status": "passed_with_explicit_scope_limits",
+    "app": {
+      "evidence": "../evidence/release-packaging-final-20261021.json",
+      "configuration": "Release",
+      "product": "/private/tmp/ztransfer-prelaunch-release-current/Build/Products/Release-iphonesimulator/ZTransfer.app",
+      "bundleIdentifier": "com.ztransfer.ios",
+      "version": "1.98",
+      "build": "1",
+      "executableSHA256": "bb6128e7cb6819154d64b7c37b09fd28003171b93db82c649e4098f6346f2fc5",
+      "sourceCommit": "97cdc0be6c4316483542ed72734e1b2792bdfe15",
+      "uncommittedChanges": "Includes the frozen, uncommitted iOS prelaunch changes after this commit. The exact 1150 scoped production/build inputs are recorded by the release evidence; HEAD alone does not identify this binary.",
+      "sourceInputsFile": "/tmp/ztransfer-prelaunch-release-final-inputs-before.json",
+      "sourceInputsFileSHA256": "e225c45bc5ae7dce8f51d28b5b9cd212552d6ab89315aa3acdecd305d8245e8a",
+      "scope": "Unsigned simulator Release used for actual normal UI capture, not a distributable App Store archive.",
+      "installationEvidence": "The parent clean-captures-v2 serial script installed this simulator Release on the same dedicated iPad immediately before the first window attempt; later window scripts launch the already installed app without reinstalling or business-state injection.",
+      "installationScript": {
+        "file": "/tmp/ztransfer-prelaunch-clean-captures-v2.sh",
+        "sha256": "8f7b1f7362178493cd11876044ae3133bb5733f553ab923dc394f89dac91516e",
+        "bytes": 3561
+      }
+    },
+    "device": {
+      "id": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+      "name": "ZTransfer-Prelaunch-13Pad",
+      "model": "iPad Pro 13-inch (M5)",
+      "runtime": "26.5 (23F77)"
+    },
+    "environment": {
+      "language": "zh-Hans, explicitly selected through real Settings during preceding clean capture and rechecked here",
+      "appearance": "light",
+      "contentSize": "large",
+      "environmentEvidence": "Parent script sets light/large and restores prior values on exit; screenshots visually show the light appearance. This record does not substitute script intent for a separate readback of content size.",
+      "launchArguments": [],
+      "launchEnvironment": {},
+      "mode": "Existing AP mode retained; no camera connection or mode change fabricated."
+    },
+    "failedCompactAttempts": [
+      {
+        "status": "failed",
+        "method": "PrelaunchLayoutUITests.testCleanReleaseIPadWindowResizeKeepsPortraitContentReachable",
+        "resultBundle": "/tmp/ztransfer-prelaunch-ipad-window-final.xcresult",
+        "testsExecuted": 1,
+        "failures": 1,
+        "durationSeconds": 41.658,
+        "exitCode": 65,
+        "exitCodeSource": "Root observed final shell exit; the log independently records TEST EXECUTE FAILED.",
+        "logTerminalResult": "TEST EXECUTE FAILED",
+        "fullScreenFramePoints": {
+          "x": 0,
+          "y": 0,
+          "width": 1032,
+          "height": 1376
+        },
+        "lastWindowFramePoints": {
+          "x": 44,
+          "y": 0.5,
+          "width": 945,
+          "height": 1260
+        },
+        "actualWidthRatio": 0.9156976744186046,
+        "actualHeightRatio": 0.9156976744186046,
+        "requiredCompactRatioRange": [
+          0.55,
+          0.85
+        ],
+        "failedStage": "compact-window stability wait after the first system-grip drag",
+        "reason": "The first drag actually exited full-screen into a 945x1260 floating window, but did not yet meet the unchanged 55–85% compact-size requirement.",
+        "visualReview": "Both original PNGs reviewed. The failure image shows visible desktop around a rounded portrait floating app window. Home content remains visible in that image; no post-resize control acceptance is inferred because the compact-stage assertion was not reached.",
+        "notReached": [
+          "compact-home control assertions",
+          "wireless help open/last paragraph/close",
+          "settings footer reachability/close",
+          "full-screen restoration"
+        ],
+        "attachments": [
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-final.log",
+            "sha256": "8b85b432734aa2a38234ff9786ac91daed7db48b193fcafb516efe674f2df2df",
+            "bytes": 10376
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-final-images/manifest.json",
+            "sha256": "b531ba4d0fab8b9d4b35afbf57913c52b3455df1a398f68a4348a0272767b7e8",
+            "bytes": 3798
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-final-images/24092FB4-A44B-4022-BE46-D66B53A2BDFC.png",
+            "sha256": "392624dccfbff24322c29264dfb9350e79647c5e1c426a06f27f248ee93c1347",
+            "bytes": 301198,
+            "pixelWidth": 2064,
+            "pixelHeight": 2752,
+            "visuallyReviewed": true
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-final-images/40E0F534-9F2C-43A7-8F2D-E9A58ED84002.txt",
+            "sha256": "34fdb9aed13652e239b939a5190c33d4dfbc7c74e41bb955d9ae3cb5be0dc665",
+            "bytes": 1277
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-final-images/644E0707-E033-4AC2-BC14-2EF3945A18AE.png",
+            "sha256": "0822bbbfc5d9ed4a7cefacc16053f5e1ab8a2a586b051dea7bb6c5d4df9dc23c",
+            "bytes": 1055966,
+            "pixelWidth": 2064,
+            "pixelHeight": 2752,
+            "visuallyReviewed": true
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-final-images/BE392AB4-4D81-463A-8F71-C05AF9CBE690.txt",
+            "sha256": "a39d5fdaf5efc1794320e1cd9864ea1b668d19fa0ff77bba4af543a609b28171",
+            "bytes": 1655
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-final-images/179E665B-E446-45FE-B92E-6C233E664277.txt",
+            "sha256": "4c3766c462723e312b45d0cb0f76065196e62d170e6a9faab38a9aa82658d535",
+            "bytes": 326
+          }
+        ],
+        "testOnlyFollowup": "Root revised the temporary driver to restore a retained floating state before starting, then re-read the actual system grabber after the first drag and perform a second drag while retaining the original compact ratio and all content assertions. No app-source fix is implied."
+      },
+      {
+        "status": "failed",
+        "method": "PrelaunchLayoutUITests.testCleanReleaseIPadWindowResizeKeepsPortraitContentReachable",
+        "resultBundle": "/tmp/ztransfer-prelaunch-ipad-window-v2.xcresult",
+        "testsExecuted": 1,
+        "failures": 1,
+        "durationSeconds": 60.141,
+        "exitCode": 65,
+        "exitCodeSource": "Root observed final shell exit; the log independently records TEST EXECUTE FAILED.",
+        "logTerminalResult": "TEST FAILED",
+        "fullScreenFramePoints": {
+          "x": 0,
+          "y": 0,
+          "width": 1032,
+          "height": 1376
+        },
+        "lastWindowFramePoints": {
+          "x": 44,
+          "y": 0.5,
+          "width": 945,
+          "height": 1260
+        },
+        "actualWidthRatio": 0.9156976744186046,
+        "actualHeightRatio": 0.9156976744186046,
+        "requiredCompactRatioRange": [
+          0.55,
+          0.85
+        ],
+        "failedStage": "compact-window stability wait after the second system-grip drag",
+        "reason": "First drag exited full-screen into the observed 945x1260 floating window. The second drag, starting at the newly read system grip visible center, left the same last frame and did not meet the unchanged 55–85% compact-size requirement.",
+        "visualReview": "Both original PNGs reviewed. The failure image shows visible desktop around a rounded portrait floating app window. Home content remains visible in that image; no post-resize control acceptance is inferred because the compact-stage assertion was not reached.",
+        "notReached": [
+          "compact-home control assertions",
+          "wireless help open/last paragraph/close",
+          "settings footer reachability/close",
+          "full-screen restoration"
+        ],
+        "attachments": [
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-v2.log",
+            "sha256": "20d9ca3e0ab9a3e7e9e29e7e77f4c0805e23f1ce896a3cb9d6f4705fb77c5ccd",
+            "bytes": 45792
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-v2-images/manifest.json",
+            "sha256": "e534d5176d873741e0904d3a6226870581878795148b3f05fc5e523ee633f683",
+            "bytes": 4635
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-resize.swift",
+            "sha256": "0e150aba69587edc04c83806b37dd089db54f88bb1669ec72604b8e5fccea3b7",
+            "bytes": 17684
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-v2-images/086D58A3-FCED-416B-9E16-B4E2318D1FB1.txt",
+            "sha256": "5453669de760123bbc4bb0f0d469b4969a74986290f75290cc7b33c6c1c2f824",
+            "bytes": 2193
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-v2-images/32B42044-3E64-401F-8939-5861EAD49AB4.png",
+            "sha256": "ab72244b1f38680fd2aac17a0240f57067ff8ac2ab1c52e724adb73eca49c7f4",
+            "bytes": 297136,
+            "pixelWidth": 2064,
+            "pixelHeight": 2752,
+            "visuallyReviewed": true
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-v2-images/48EC00BB-19B6-4240-87A3-C72F494C8FB5.txt",
+            "sha256": "4c3766c462723e312b45d0cb0f76065196e62d170e6a9faab38a9aa82658d535",
+            "bytes": 326
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-v2-images/A19B8CAB-9045-48DB-9E15-A0B9D237B7B8.png",
+            "sha256": "edc196c478a47818708eb1f63184e0985ada954ddd326443889430aa6394b2a0",
+            "bytes": 1055717,
+            "pixelWidth": 2064,
+            "pixelHeight": 2752,
+            "visuallyReviewed": true
+          },
+          {
+            "file": "/tmp/ztransfer-prelaunch-ipad-window-v2-images/BCE65779-414D-43DE-AA71-8B17A85B5A40.txt",
+            "sha256": "160c161bd0997f98abd6f608d5018c1de1413e8ed262c62b2559cc667b38c29f",
+            "bytes": 1375
+          }
+        ],
+        "testOnlyFollowup": "A separate method was started to inspect content at the actually observed 945x1260 floating size. This failed 55–85% run is retained and is not reclassified as a pass. The two runs do not establish a system minimum size or a root cause.",
+        "secondGrip": {
+          "framePoints": {
+            "x": 969,
+            "y": 1241,
+            "width": 40,
+            "height": 40
+          },
+          "visibleIntersectionPoints": {
+            "x": 969,
+            "y": 1241,
+            "width": 20,
+            "height": 19.5
+          },
+          "dragStartPoints": [
+            979,
+            1250.75
+          ],
+          "dragEndPoints": [
+            712.4,
+            953.2
+          ]
+        }
+      }
+    ],
+    "observedFloatingWindowRun": {
+      "method": "PrelaunchLayoutUITests.testCleanReleaseIPadObservedFloatingWindowKeepsPortraitContentReachable",
+      "scope": "A separate, explicitly bounded method for one full-screen -> actually observed 945x1260 floating window -> near-full-screen cycle. It does not reclassify the preceding 55–85% method failures.",
+      "result": "TEST SUCCEEDED",
+      "exitCode": 0,
+      "exitCodeSource": "Root observed final session 35121 exit 0; the log independently records TEST SUCCEEDED.",
+      "testsExecuted": 1,
+      "failures": 0,
+      "durationSeconds": 80.394,
+      "log": {
+        "file": "/tmp/ztransfer-prelaunch-ipad-window-observed.log",
+        "sha256": "9df63e9205376940e9e28e27d7545e874e7878aebe943bafef2202a578dbf770",
+        "bytes": 54703
+      },
+      "resultBundle": "/tmp/ztransfer-prelaunch-ipad-window-observed.xcresult",
+      "driver": {
+        "file": "/tmp/ztransfer-prelaunch-window-observed.sh",
+        "sha256": "0d9d82965e8d58720ea1046e9d0d67b79980b9e293ebb4ab6c9b253e4ee88686",
+        "bytes": 1580
+      },
+      "temporaryTestSource": {
+        "file": "/tmp/ztransfer-prelaunch-ipad-window-observed.swift",
+        "sha256": "45a7a9e70baca2430c6c6d7fe80a6a8f9c25482c968081a623bd5849830e8977",
+        "bytes": 16940
+      },
+      "geometry": {
+        "referenceFullScreenPoints": {
+          "x": 0,
+          "y": 0,
+          "width": 1032,
+          "height": 1376
+        },
+        "observedFloatingPrimaryWindowPoints": {
+          "x": 44,
+          "y": 0.5,
+          "width": 945,
+          "height": 1260
+        },
+        "observedAppFrameWhileFloatingPoints": {
+          "x": 0,
+          "y": 0,
+          "width": 1032,
+          "height": 1376
+        },
+        "widthRatio": 0.9156976744186046,
+        "heightRatio": 0.9156976744186046,
+        "lastRestoredPrimaryWindowPoints": {
+          "x": 0.808652294689864,
+          "y": 0.20216307367240915,
+          "width": 1030.5444258695582,
+          "height": 1374.0592344927443
+        },
+        "restoreTolerancePoints": 2,
+        "interpretation": "The primary system window really became smaller. app.frame remained full-screen and controls approximately scale by 0.9157, so this proves the observed floating presentation and reachability, not an internal available-size change, layout reflow or continuous responsive adaptation. The final screenshot visually fills the display; exact post-sample geometry is not asserted."
+      },
+      "assertionsPassed": [
+        "No debug-photo-library button; normal Release launch without injected app arguments or environment.",
+        "Settings, GPS, workspace, STA and AP controls fully contained and hittable in the initial, floating and restored window.",
+        "Actual AP help opens; its final instruction paragraph is fully visible; the help trigger remains reachable and closes the panel.",
+        "Settings opens; Simplified Chinese remains selected; feedback and version footer are visible together; the close control remains reachable and closes the panel.",
+        "Window remains at the observed floating dimensions during panel checks; actual system grip restores it to within 2 pt of initial full-screen bounds."
+      ],
+      "imagesCount": 5,
+      "geometryAttachmentsCount": 5,
+      "allImagesVisuallyReviewed": true,
+      "attachments": [
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/FE7BF03C-0EC4-4CCF-AFE7-71AE58426D75.png",
+          "sha256": "1530d66a3fd615d95d848e71449416a3210fb5aad3d43cb68bc5688b9592dfb7",
+          "bytes": 296850,
+          "attachmentName": "iPad-window-01-full-screen_0_C4D0A4D2-4E15-43AB-B2A4-1EBEEA7B62CE.png",
+          "timestampUnix": 1792519350.938,
+          "pixelWidth": 2064,
+          "pixelHeight": 2752,
+          "visuallyReviewed": true,
+          "review": "Portrait full-screen home visible; actual unconnected AP feedback, GPS and bottom workspace entry are present."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/5C760091-105D-4585-A723-2B7838F98D46.txt",
+          "sha256": "675e69d0991a1ea5374eb2b4e4b4828a2d6f91b35ec4d12a9e6f2fffc91718d6",
+          "bytes": 1439,
+          "attachmentName": "iPad-window-01-full-screen-geometry_0_1E0910EF-2709-4EF9-8E87-E0D6804D2146.txt",
+          "timestampUnix": 1792519350.977,
+          "role": "Cumulative execution geometry trace; final attachment contains the complete cycle."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/31DDF601-BDB4-4D35-970B-1E198F5FC5ED.png",
+          "sha256": "08fa88cc8aba990a4a7f6a1a152ddf745b6e1e86406d2a7fe92e6a0ebd942808",
+          "bytes": 1055252,
+          "attachmentName": "iPad-window-02-compact-home_0_403B86C0-BF66-4EEC-925E-9D76D06AF6CA.png",
+          "timestampUnix": 1792519364.659,
+          "pixelWidth": 2064,
+          "pixelHeight": 2752,
+          "visuallyReviewed": true,
+          "review": "Actual rounded floating window has visible desktop at the sides and below. Home controls and bottom workspace entry remain within its boundary."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/0BDE1955-F4F9-4222-9AD7-8005AABE9EF0.txt",
+          "sha256": "f347a55953f155015282419ae61b976eb8075cb459a60ace8d6d88d02ca0fdf5",
+          "bytes": 2433,
+          "attachmentName": "iPad-window-02-compact-home-geometry_0_72B83B7E-4638-4F08-8D7A-2A4ED07C7E5E.txt",
+          "timestampUnix": 1792519364.663,
+          "role": "Cumulative execution geometry trace; final attachment contains the complete cycle."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/A1B3FB29-7C5F-4EB2-8F75-17D68BD78F63.png",
+          "sha256": "61ae4d86b7973064601d5aad03d0509f151035bdd1f4c6aab50ef46388b7d5a6",
+          "bytes": 1153103,
+          "attachmentName": "iPad-window-03-compact-help-last-paragraph_0_5DA79CF4-321F-40AC-8157-B6C9D5512B53.png",
+          "timestampUnix": 1792519369.437,
+          "pixelWidth": 2064,
+          "pixelHeight": 2752,
+          "visuallyReviewed": true,
+          "review": "AP help panel and its final instruction paragraph are fully visible inside the actual floating window; the preceding test checks and subsequent close check passed."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/FA96EB6A-0245-40D9-8983-8384EDF8A950.txt",
+          "sha256": "c986602fbf65a83fc8d62df59ff6cacc56926f9d0fd2c2edeac184263c6cb713",
+          "bytes": 2569,
+          "attachmentName": "iPad-window-03-compact-help-last-paragraph-geometry_0_30E75790-56E1-48EC-AA42-59F1F5842763.txt",
+          "timestampUnix": 1792519369.443,
+          "role": "Cumulative execution geometry trace; final attachment contains the complete cycle."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/1E53A913-B91C-4CB7-A8E1-12871B38F8B9.png",
+          "sha256": "27d50f390347be7bd2c14bcf15b832ecf290e4ac6d13fea6b05b7ff584a248c7",
+          "bytes": 1167963,
+          "attachmentName": "iPad-window-04-compact-settings-footer_0_0EEC8FB9-7666-40F1-8686-6760A08C02D1.png",
+          "timestampUnix": 1792519380.585,
+          "pixelWidth": 2064,
+          "pixelHeight": 2752,
+          "visuallyReviewed": true,
+          "review": "Settings panel, explicit Simplified Chinese value, feedback and Z传 v1.98 footer, and close control are visible inside the actual floating window. Disabled directory-dependent controls retain their real state."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/6A75FB8C-061E-4BB4-979B-66D913B21136.txt",
+          "sha256": "c8a33d83a813807e5134ac71bbbce63dababf3ea5db9f93e7a6d679b39b81da4",
+          "bytes": 2781,
+          "attachmentName": "iPad-window-04-compact-settings-footer-geometry_0_D9A3C668-A585-41F1-96EC-F63A7E7E1DCF.txt",
+          "timestampUnix": 1792519380.59,
+          "role": "Cumulative execution geometry trace; final attachment contains the complete cycle."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/38D76C5A-9723-44BD-91F1-2345F1B67A41.png",
+          "sha256": "6a6a732f010623f309088d4772276cfb7179396dac1d0cf254a9eb2e84ccd00c",
+          "bytes": 298407,
+          "attachmentName": "iPad-window-05-restored-full-screen_0_E796AD96-A9F9-4CEB-9A75-7EF4E54D1BE2.png",
+          "timestampUnix": 1792519403.786,
+          "pixelWidth": 2064,
+          "pixelHeight": 2752,
+          "visuallyReviewed": true,
+          "review": "Final screenshot visually fills the portrait display and no desktop border is apparent; home controls are visible. The last numeric AX sample is within 2 pt of reference rather than exactly equal."
+        },
+        {
+          "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/53555DB9-C9B4-416A-B0B3-F975A70D9BDE.txt",
+          "sha256": "b84d9f3482c36be2810443b9cfd084af5cadf4ff5751df415b8d701d942b7efb",
+          "bytes": 4573,
+          "attachmentName": "iPad-window-05-restored-full-screen-geometry_0_507CB3BE-F610-47B9-A83C-5072ED40F793.txt",
+          "timestampUnix": 1792519403.794,
+          "role": "Cumulative execution geometry trace; final attachment contains the complete cycle."
+        }
+      ],
+      "manifest": {
+        "file": "/tmp/ztransfer-prelaunch-ipad-window-observed-images/manifest.json",
+        "sha256": "4c35efd2a210e4acd0599755fde53266ddd9c6ed04d31fe567ae37b66d9dc91e",
+        "bytes": 4942
+      },
+      "limits": [
+        "Only one iPad Pro 13-inch M5 simulator on iPadOS 26.5 (23F77), one language, light appearance, normal configured content size and the inspected home/AP-help/settings states.",
+        "No arbitrary narrow-window, minimum-size, iPadOS 27, older-system, multi-window or full-page/state adaptation claim. The two 55–85% attempts remain failed and do not establish a system minimum or cause.",
+        "The test locates the AP help final paragraph and settings footer and scrolls only if needed; at this size their visibility does not prove a long-content scrolling case.",
+        "GPS expansion, photo/workbench pages, keyboard, other popups and real camera/hardware behavior were not covered by this method.",
+        "These full-display images retain the system desktop/window border and are diagnostic evidence, not the separate clean App Store candidate set.",
+        "This evidence extraction only reads existing results and changes documentation; no app source, build or simulator operation was performed by the documentation subtask."
+      ]
+    },
+    "reviewedPNGCountAcrossReleaseRuns": 9,
+    "remaining": "A genuinely narrower window and systems other than iPadOS 26.5 remain unverified. Signed Archive/Validate App/App Store server acceptance remain dependent on the owner account stage."
+  }
+}

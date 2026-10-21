@@ -741,7 +741,14 @@ final class PremiumRecoveryUITests: XCTestCase {
         verifyWorkbenchPhotoSave(allow: false)
     }
 
-    private func verifyWorkbenchPhotoSave(allow: Bool, count: Int = 1) {
+    /// The shell verifies exactly one new JPEG and unchanged originals.
+    /// Permission changes happen in the real Settings UI, never in a mock
+    /// authorizer or a simctl grant between the failed and successful saves.
+    func testWorkbenchDeniedPhotoSaveRecoversAfterSettingsAuthorization() {
+        verifyWorkbenchPhotoSave(allow: false, recoverInSettings: true)
+    }
+
+    private func verifyWorkbenchPhotoSave(allow: Bool, count: Int = 1, recoverInSettings: Bool = false) {
         let app = XCUIApplication()
         app.launchArguments = ["-app_language", "en"]
         addTeardownBlock {
@@ -822,7 +829,92 @@ final class PremiumRecoveryUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Generation failed"].waitForExistence(timeout: 10))
             XCTAssertFalse(system.alerts.firstMatch.exists, "A denied permission must not be requested repeatedly")
             attachScreenshot(app, name: "photo-save-denied-retry")
+            if recoverInSettings {
+                allowPhotoAddInSystemSettings()
+                let stateAfterSettings = app.state
+                let lifecycle = XCTAttachment(string: "App state after changing Photos Add permission: \(stateAfterSettings.rawValue)")
+                lifecycle.name = "photo-permission-return-lifecycle"
+                lifecycle.lifetime = .keepAlways
+                add(lifecycle)
+                app.activate()
+                if stateAfterSettings == .notRunning {
+                    // The observed simulator TCC log explicitly terminates
+                    // this App when kTCCServicePhotosAdd changes. Selection is
+                    // process-local; use the real picker again after that
+                    // system restart, without bypassing the new permission.
+                    XCTAssertTrue(workbench.waitForExistence(timeout: 10))
+                    tapWhenStable(workbench)
+                    revealEffectsControl(choose, in: app)
+                    tapWhenStable(choose)
+                    selectSystemPhotos(app, count: count)
+                }
+                XCTAssertTrue(reselect.waitForExistence(timeout: 10),
+                              "A surviving process must retain its batch; a system restart must allow reselection")
+                XCTAssertTrue(generate.waitForExistence(timeout: 10))
+                let retryReady = XCTNSPredicateExpectation(
+                    predicate: NSPredicate { _, _ in generate.isEnabled }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [retryReady], timeout: 5), .completed)
+                revealEffectsControl(generate, in: app)
+                tapWhenStable(generate)
+                XCTAssertTrue(app.buttons["Saved \(count) photos"].waitForExistence(timeout: 15),
+                              app.debugDescription)
+                XCTAssertFalse(app.staticTexts["1 photos could not be saved. Originals are unchanged."].exists)
+                XCTAssertFalse(system.alerts.firstMatch.exists,
+                               "Settings authorization must allow saving without another permission prompt")
+                attachScreenshot(app, name: "photo-save-after-settings-authorization")
+            }
         }
+    }
+
+    private func allowPhotoAddInSystemSettings() {
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        settings.launch()
+        addTeardownBlock { settings.terminate() }
+        let rootNames = ["Settings", "设置", "設定"]
+        // iOS 26's Settings collection cells have no accessibility label;
+        // the actual Apps action is the nested button exposed by the system.
+        let apps = settings.buttons["com.apple.settings.apps"]
+        // Settings may restore its last subpage. Back out through its actual
+        // navigation bar, then scroll its normal Apps entry into view.
+        for _ in 0..<8 {
+            if apps.exists, apps.isHittable { break }
+            let atRoot = settings.navigationBars.matching(NSPredicate(format: "identifier IN %@", rootNames)).firstMatch.exists
+            if atRoot {
+                settings.swipeUp()
+            } else {
+                let back = settings.navigationBars.buttons.firstMatch
+                XCTAssertTrue(back.waitForExistence(timeout: 3), settings.debugDescription)
+                back.tap()
+            }
+        }
+        XCTAssertTrue(apps.exists && apps.isHittable, settings.debugDescription)
+        tapWhenStable(apps)
+        let search = settings.searchFields.firstMatch
+        if search.waitForExistence(timeout: 3) {
+            tapWhenStable(search)
+            search.typeText("Z传")
+        }
+        let ownApp = settings.cells.containing(.staticText, identifier: "Z传").firstMatch
+        for _ in 0..<8 {
+            if ownApp.exists, ownApp.isHittable { break }
+            settings.swipeUp()
+        }
+        XCTAssertTrue(ownApp.exists && ownApp.isHittable, settings.debugDescription)
+        tapWhenStable(ownApp)
+        let photos = settings.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+            "Photos", "照片", "相片")).firstMatch
+        XCTAssertTrue(photos.waitForExistence(timeout: 5), settings.debugDescription)
+        tapWhenStable(photos)
+        let addOnly = settings.staticTexts.matching(NSPredicate(
+            format: "label IN %@", ["Add Photos Only", "仅添加照片", "只添加照片", "僅加入照片", "僅新增照片"]
+        )).firstMatch
+        XCTAssertTrue(addOnly.waitForExistence(timeout: 5), settings.debugDescription)
+        attachScreenshot(settings, name: "system-settings-photos-denied")
+        tapWhenStable(addOnly)
+        attachScreenshot(settings, name: "system-settings-photos-add-allowed")
+        // The following production save plus filesystem verification is the
+        // effective permission check; cell selection traits vary by OS.
     }
 
     func testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices() {
@@ -1137,11 +1229,19 @@ final class PremiumRecoveryUITests: XCTestCase {
 
     private func tapWhenStable(_ element: XCUIElement) {
         var previous = CGRect.zero
+        var observations: [String] = []
+        let began = Date()
         let stable = NSPredicate { _, _ in
             // Read enabled/frame from one snapshot. Separate property queries
             // each traverse the remote Photos hierarchy and can exhaust the
             // timeout before two samples, even for a stationary system button.
-            guard let snapshot = try? element.snapshot(), snapshot.isEnabled, element.isHittable else { return false }
+            guard let snapshot = try? element.snapshot() else {
+                observations.append("\(Date().timeIntervalSince(began)): snapshot unavailable")
+                return false
+            }
+            let hittable = element.isHittable
+            observations.append("\(Date().timeIntervalSince(began)): enabled=\(snapshot.isEnabled), hittable=\(hittable), frame=\(snapshot.frame)")
+            guard snapshot.isEnabled, hittable else { return false }
             let current = snapshot.frame
             defer { previous = current }
             return current == previous && current.width > 0
@@ -1151,6 +1251,10 @@ final class PremiumRecoveryUITests: XCTestCase {
         let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: stable, object: nil)], timeout: 10)
         if result != .completed {
             attachScreenshot(XCUIApplication(), name: "unstable-control")
+            let trace = XCTAttachment(string: observations.joined(separator: "\n"))
+            trace.name = "unstable-control-observations"
+            trace.lifetime = .keepAlways
+            add(trace)
         }
         XCTAssertEqual(result, .completed, "Control did not settle: \(element), last frame: \(previous)")
         element.tap()
