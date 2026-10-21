@@ -2653,9 +2653,6 @@ private fun ZoomablePreviewViewport(
         animationSpec = tween(220),
         label = "previewRotation",
     )
-    val comparisonFeedback = if (comparisonEnabled) {
-        com.ztransfer.ui.util.rememberLongPressFeedback()
-    } else null
     val latestOnComparisonChange by rememberUpdatedState(onComparisonChange)
     val localState=remember(stateKey) { PreviewViewportState() }
     val viewportState=externalState ?: localState
@@ -2824,20 +2821,20 @@ private fun ZoomablePreviewViewport(
                     } while (event.changes.any { it.pressed })
                 }
             }
-            .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom, comparisonEnabled, comparisonFeedback) {
+            .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom, comparisonEnabled) {
                 val containerWidth = size.width.toFloat()
                 val containerHeight = size.height.toFloat()
                 detectTapGestures(
                     onPress = {
                         try {
-                            if (comparisonFeedback != null) comparisonFeedback.trackPress(this)
-                            else tryAwaitRelease()
+                            // Image gestures stay silent, including the press before a pinch or pan.
+                            tryAwaitRelease()
                         } finally {
                             latestOnComparisonChange(false)
                         }
                     },
                     onLongPress = if (comparisonEnabled) ({
-                        comparisonFeedback?.trigger { latestOnComparisonChange(true) }
+                        latestOnComparisonChange(true)
                     }) else null,
                     onTap = { if (scale <= 1.01f || tapWhenZoomed) onTap() },
                     onDoubleTap = { tap ->

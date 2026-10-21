@@ -7,6 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
@@ -24,13 +26,19 @@ internal fun PhotoGrainEditor(
     hapticsEnabled: Boolean,
 ) {
     val colors = AppTheme.colors
+    // Muted olive distinguishes grain from the blue, teal, orange and purple effect groups.
+    val grainAccent = if (colors.background.luminance() < 0.5f) {
+        Color(0xFFE3EEBB)
+    } else {
+        Color(0xFF59682D)
+    }
     val haptics = rememberHaptics(hapticsEnabled)
     val normalized = settings.normalized()
     val levels = remember { (100 downTo 0).toList() }
     val styleOptions = remember { listOf(null) + PhotoGrainStyle.entries }
     val styleLabels = PhotoGrainStyle.entries.associateWith { photoGrainStyleLabel(it) }
     val offLabel = stringResource(R.string.setting_off)
-    SettingsCard(borderColor = colors.accentBlue.copy(alpha = 0.24f), tintColor = colors.accentBlue) {
+    SettingsCard(borderColor = grainAccent.copy(alpha = 0.24f), tintColor = grainAccent) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ReleaseCommitWheel(
                 options = styleOptions,
@@ -40,7 +48,7 @@ internal fun PhotoGrainEditor(
                 onDetent = haptics::tick,
                 label = stringResource(R.string.photo_grain),
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                accentColor = colors.accentBlue,
+                accentColor = grainAccent,
                 modifier = Modifier.weight(PHOTO_COLOR_NAME_WEIGHT),
             )
             // A style change cancels any unfinished strength drag for the previous style.
@@ -56,7 +64,7 @@ internal fun PhotoGrainEditor(
                     label = stringResource(R.string.photo_filter_intensity),
                     enabled = normalized.enabled,
                     wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                    accentColor = colors.accentBlue,
+                    accentColor = grainAccent,
                     modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
                 )
             }

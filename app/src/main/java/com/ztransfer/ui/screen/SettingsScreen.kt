@@ -3046,7 +3046,6 @@ internal fun PhotoEffectsRenderedPreview(
     prefetchFilters: List<PhotoFilterSelection> = emptyList(),
     onOpen: ((Bitmap, Rect, () -> Bitmap?) -> Unit)?,
 ) {
-    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback()
     val colors = AppTheme.colors
     val context = LocalContext.current
     val placeLookupAllowed by remember(context) {
@@ -3384,13 +3383,12 @@ internal fun PhotoEffectsRenderedPreview(
                 // 横图和竖图各用稳定视口；边框成片在内部 Fit，完整呈现对应方向的留白与铭牌。
                 .aspectRatio(viewportAspectRatio)
                 .onGloballyPositioned { previewBounds = it.boundsInRoot() }
-                .pointerInput(previewForGesture, boundsForGesture, longPressFeedback, onRotate != null) {
+                .pointerInput(previewForGesture, boundsForGesture, onRotate != null) {
                     if (previewForGesture == null || boundsForGesture == null) return@pointerInput
                     detectTapGestures(
                         onPress = {
                             try {
-                                if (previewForGesture.unfilteredBitmap != null) longPressFeedback.trackPress(this)
-                                else tryAwaitRelease()
+                                tryAwaitRelease()
                             } finally {
                                 showUnfiltered = false
                             }
@@ -3404,7 +3402,7 @@ internal fun PhotoEffectsRenderedPreview(
                         onDoubleTap = if (onRotate != null) ({ latestOnRotate?.invoke() }) else null,
                         onLongPress = {
                             if (previewForGesture.unfilteredBitmap != null) {
-                                longPressFeedback.trigger { showUnfiltered = true }
+                                showUnfiltered = true
                             }
                         },
                     )
