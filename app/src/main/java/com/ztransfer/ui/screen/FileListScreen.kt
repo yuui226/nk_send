@@ -210,6 +210,7 @@ internal data class FileListCameraUiState(
     val cameraManufacturer: String?,
     val cameraModel: String?,
     val effectPreviewExif: PhotoExif?,
+    val effectPreviewFileName: String? = null,
 )
 
 internal fun CameraState.toFileListCameraUiState(): FileListCameraUiState =
@@ -225,6 +226,7 @@ internal fun CameraState.toFileListCameraUiState(): FileListCameraUiState =
         cameraManufacturer = cameraManufacturer,
         cameraModel = cameraModel,
         effectPreviewExif = effectPreviewExif,
+        effectPreviewFileName = effectPreviewFileName,
     )
 
 /** 与网格和预览直接相关的传输状态；高频下载进度仍走独立的 activeProgress 流。 */
@@ -2132,6 +2134,7 @@ fun FileListScreen(
             SettingsOverlay(
                 viewModel = transferViewModel,
                 effectPreviewSource = state.effectPreviewBitmap,
+                effectPreviewSourceName = state.effectPreviewFileName.orEmpty(),
                 effectPreviewCameraManufacturer = state.cameraManufacturer,
                 effectPreviewCameraModel = state.cameraModel,
                 effectPreviewExif = state.effectPreviewExif,

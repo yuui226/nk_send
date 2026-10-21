@@ -2,6 +2,11 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.effects.PhotoEffectModule
 import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
+import com.ztransfer.grain.PhotoGrainPreferences
+import com.ztransfer.grain.normalizedPhotoGrainIntensities
+import com.ztransfer.effects.restorePhotoEffectModules
 import com.ztransfer.effects.normalizePhotoEffectModules
 import com.ztransfer.effects.showsPhotoEffect
 
@@ -51,6 +56,8 @@ internal data class LocalPhotoEffectsSettings(
     val filterIntensities: Map<String, Int> = emptyMap(),
     val favoritePhotoFilters: List<FavoritePhotoFilter> = emptyList(),
     val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
+    val grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    val grainIntensities: Map<PhotoGrainStyle, Int> = normalizedPhotoGrainIntensities(),
 )
 
 internal fun defaultLocalPhotoEffectsSettings(defaultFilterId: String?) =
@@ -97,6 +104,9 @@ internal fun normalizeLocalPhotoEffectsSettings(
         ?: normalizePhotoFilterIntensity(settings.filterIntensityPercent)
     if (currentCatalogKey != null) filterIntensities.putIfAbsent(currentCatalogKey, currentIntensity)
     return settings.copy(
+        grain = settings.grain.normalized(),
+        grainIntensities = normalizedPhotoGrainIntensities(settings.grainIntensities) +
+            (settings.grain.style to settings.grain.normalized().intensityPercent),
         watermark = settings.watermark.copy(
             content = watermarkContent,
             text = limitPhotoFrameWatermarkText(settings.watermark.text),
@@ -126,18 +136,49 @@ internal fun normalizeLocalPhotoEffectsSettings(
     )
 }
 
+/** Hiding an editor disables its effect; showing it again must not restore stale settings. */
+internal fun applyLocalPhotoEffectModuleVisibility(
+    settings: LocalPhotoEffectsSettings,
+    modules: Int,
+): LocalPhotoEffectsSettings {
+    val mask = normalizePhotoEffectModules(modules)
+    val border = settings.borderEnabled && mask.showsPhotoEffect(PhotoEffectModule.FRAME)
+    val watermark = settings.watermark.copy(enabled = settings.watermark.enabled &&
+        mask.showsPhotoEffect(PhotoEffectModule.WATERMARK))
+    return settings.copy(
+        borderEnabled = border,
+        watermark = watermark,
+        grain = if (mask.showsPhotoEffect(PhotoEffectModule.GRAIN)) settings.grain.normalized()
+            else settings.grain.normalized().copy(enabled = false),
+        decorationEnabled = settings.decorationEnabled && (border || watermark.enabled),
+        filterEnabled = settings.filterEnabled && mask.showsPhotoEffect(PhotoEffectModule.FILTER),
+    )
+}
+
 /** A separate preference file keeps phone-photo drafts independent from camera-transfer effects. */
 internal class LocalPhotoEffectsPreferences(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val grainPreferences = PhotoGrainPreferences(preferences, "grain")
 
-    fun restoreModules(): Int = normalizePhotoEffectModules(
-        preferences.getInt(KEY_MODULES, ALL_PHOTO_EFFECT_MODULES))
+    fun restoreModules(): Int {
+        val introduced = preferences.getBoolean(KEY_GRAIN_INTRODUCED, false)
+        val restored = restorePhotoEffectModules(
+            preferences.getInt(KEY_MODULES, ALL_PHOTO_EFFECT_MODULES), introduced,
+        )
+        if (!introduced) {
+            preferences.edit().putInt(KEY_MODULES, restored)
+                .putBoolean(KEY_GRAIN_INTRODUCED, true).apply()
+        }
+        return restored
+    }
 
     fun saveModules(mask: Int) {
         val next = normalizePhotoEffectModules(mask)
         preferences.edit().apply {
             putInt(KEY_MODULES, next)
+            putBoolean(KEY_GRAIN_INTRODUCED, true)
+            if (!next.showsPhotoEffect(PhotoEffectModule.GRAIN)) putBoolean(KEY_GRAIN_ENABLED, false)
             if (!next.showsPhotoEffect(PhotoEffectModule.FILTER)) putBoolean(KEY_FILTER_ENABLED, false)
             if (!next.showsPhotoEffect(PhotoEffectModule.FRAME)) putBoolean(KEY_BORDER_ENABLED, false)
             if (!next.showsPhotoEffect(PhotoEffectModule.WATERMARK)) putBoolean(KEY_WATERMARK_ENABLED, false)
@@ -148,7 +189,11 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
     }
 
     fun restore(availableFilterIds: List<String>): LocalPhotoEffectsSettings {
+        val restoredGrain = grainPreferences.load(
+            allowEnabled = restoreModules().showsPhotoEffect(PhotoEffectModule.GRAIN),
+        )
         val fallback = defaultLocalPhotoEffectsSettings(availableFilterIds.firstOrNull())
+            .copy(grain = restoredGrain.settings, grainIntensities = restoredGrain.intensities)
         val availableFilterIdSet = availableFilterIds.toSet()
         val validCatalogKeys = availableFilterIds
             .map { filterId -> BuiltInPhotoFilters.catalogKey(filterId) ?: filterId }
@@ -198,6 +243,8 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
                 ),
                 effect = values.enum(KEY_WATERMARK_EFFECT, fallback.watermark.effect),
             ),
+            grain = restoredGrain.settings,
+            grainIntensities = restoredGrain.intensities,
             filterId = storedFilterId,
             filterEnabled = values.boolean(KEY_FILTER_ENABLED, fallback.filterEnabled),
             filterIntensityPercent = values.int(
@@ -231,6 +278,7 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         val settings = visibleSettings(value)
         preferences.edit().apply {
             putInt(KEY_VERSION, SETTINGS_VERSION)
+            grainPreferences.writeTo(this, settings.grain, settings.grainIntensities)
             putBoolean(KEY_DECORATION_ENABLED, settings.decorationEnabled)
             putBoolean(KEY_BORDER_ENABLED, settings.borderEnabled)
             putString(KEY_PRESET, settings.preset.name)
@@ -268,15 +316,8 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         }.apply()
     }
 
-    private fun visibleSettings(settings: LocalPhotoEffectsSettings): LocalPhotoEffectsSettings {
-        val mask = restoreModules()
-        val border = settings.borderEnabled && mask.showsPhotoEffect(PhotoEffectModule.FRAME)
-        val watermark = settings.watermark.copy(enabled = settings.watermark.enabled &&
-            mask.showsPhotoEffect(PhotoEffectModule.WATERMARK))
-        return settings.copy(borderEnabled = border, watermark = watermark,
-            decorationEnabled = settings.decorationEnabled && (border || watermark.enabled),
-            filterEnabled = settings.filterEnabled && mask.showsPhotoEffect(PhotoEffectModule.FILTER))
-    }
+    private fun visibleSettings(settings: LocalPhotoEffectsSettings): LocalPhotoEffectsSettings =
+        applyLocalPhotoEffectModuleVisibility(settings, restoreModules())
 
     private fun normalize(
         settings: LocalPhotoEffectsSettings,
@@ -303,6 +344,8 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         const val SETTINGS_VERSION = 3
         const val KEY_VERSION = "settings_version"
         const val KEY_MODULES = "visible_modules"
+        const val KEY_GRAIN_INTRODUCED = "grain_introduced"
+        const val KEY_GRAIN_ENABLED = "grain_enabled"
         const val KEY_DECORATION_ENABLED = "decoration_enabled"
         const val KEY_BORDER_ENABLED = "border_enabled"
         const val KEY_PRESET = "frame_preset"

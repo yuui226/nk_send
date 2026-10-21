@@ -42,8 +42,6 @@ internal fun PhotoEffectModuleMenu(
     val density = LocalDensity.current
     val top = anchor?.let { with(density) { it.bottom.toDp() } - parentTopInset + 8.dp } ?: 64.dp
     val haptics = rememberHaptics(hapticsEnabled)
-    val labels = listOf(R.string.photo_effect_module_filter, R.string.photo_effect_module_lut,
-        R.string.photo_effect_module_frame, R.string.photo_effect_module_watermark)
     AnchorPopup(anchorBounds = anchor, onDismiss = onDismiss, dim = false,
         panelAlignment = Alignment.TopEnd,
         shape = RoundedCornerShape(18.dp),
@@ -53,7 +51,13 @@ internal fun PhotoEffectModuleMenu(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PhotoEffectModule.entries.forEach { module ->
                 FilterChip(
-                    label = stringResource(labels[module.ordinal]),
+                    label = stringResource(when (module) {
+                        PhotoEffectModule.FILTER -> R.string.photo_effect_module_filter
+                        PhotoEffectModule.LUT -> R.string.photo_effect_module_lut
+                        PhotoEffectModule.FRAME -> R.string.photo_effect_module_frame
+                        PhotoEffectModule.WATERMARK -> R.string.photo_effect_module_watermark
+                        PhotoEffectModule.GRAIN -> R.string.photo_grain
+                    }),
                     selected = mask.showsPhotoEffect(module),
                     onClick = {
                         val next = togglePhotoEffectModule(mask, module, isPro)

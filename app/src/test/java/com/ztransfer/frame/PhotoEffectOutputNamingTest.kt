@@ -6,6 +6,11 @@ import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.lut.CubeLutParser
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
+import com.ztransfer.grain.photoGrainSeed
+import java.security.MessageDigest
+import java.util.Locale
 import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
@@ -66,6 +71,164 @@ class PhotoEffectOutputNamingTest {
                 borderEnabled = false, filter = filter,
             ),
         )
+    }
+
+    @Test
+    fun grainAddsOneShortMarkerAfterExistingEffects() {
+        val grain = PhotoGrainSettings(40, enabled = true)
+        assertEquals("DSC_g.jpg", photoFrameOutputName(
+            "DSC.JPG", PhotoFramePreset.MIST, noWatermark,
+            borderEnabled = false, grain = grain,
+        ))
+        assertEquals("DSC_f_g.jpg", photoFrameOutputName(
+            "DSC.JPG", PhotoFramePreset.MIST, grain = grain,
+        ))
+        assertEquals("DSC_w_g.jpg", photoFrameOutputName(
+            "DSC.JPG", PhotoFramePreset.MIST, watermark,
+            borderEnabled = false, grain = grain,
+        ))
+        assertEquals("DSC_c_f_e_g.jpg", photoFrameOutputName(
+            "DSC_c.JPG", PhotoFramePreset.MIST, filter = filter, grain = grain,
+        ))
+        assertEquals("DSC_w_e_g.jpg", photoFrameOutputName(
+            "DSC.JPG", PhotoFramePreset.MIST, watermark,
+            borderEnabled = false, filter = filter, grain = grain,
+        ))
+        assertEquals("DSC_e_g.jpg", photoFrameOutputName(
+            "DSC.JPG", PhotoFramePreset.MIST, noWatermark,
+            borderEnabled = false, filter = filter, grain = grain,
+        ))
+    }
+
+    @Test
+    fun disabledGrainPreservesLegacyNamesAndIdentityExactly() {
+        val legacy = legacyPhotoFrameOutputName(
+            "DSC.JPG", PhotoFramePreset.MIST, watermark, filter = filter,
+        )
+        val legacyIdentity = MessageDigest.getInstance("SHA-256")
+            .digest(legacy.lowercase(Locale.ROOT).toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }
+        PhotoGrainStyle.entries.flatMap { style ->
+            listOf(
+                PhotoGrainSettings.OFF.copy(style = style),
+                PhotoGrainSettings(-10, enabled = true, style = style),
+                PhotoGrainSettings(73, enabled = false, style = style),
+            )
+        }.forEach { grain ->
+            assertEquals("DSC_f_e.jpg", photoFrameOutputName(
+                "DSC.JPG", PhotoFramePreset.MIST, watermark, filter = filter, grain = grain,
+            ))
+            assertEquals(legacyIdentity, photoFrameOutputIdentity(
+                "DSC.JPG", PhotoFramePreset.MIST, watermark, filter = filter, grain = grain,
+            ))
+            assertTrue(isPhotoFrameOutputFor(
+                legacy, "DSC.JPG", PhotoFramePreset.MIST, watermark, filter = filter, grain = grain,
+            ))
+        }
+    }
+
+    @Test
+    fun fineGrainPreservesItsExistingVersionOneIdentity() {
+        val legacy = legacyPhotoFrameOutputName(
+            "DSC.JPG", PhotoFramePreset.MIST, watermark, filter = filter,
+        )
+        val versionOneInput = legacy.lowercase(Locale.ROOT) +
+            "\u0000grain-v=1\u0000i=40\u0000seed=${photoGrainSeed("DSC.JPG")}"
+        val versionOneIdentity = MessageDigest.getInstance("SHA-256")
+            .digest(versionOneInput.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(Locale.ROOT, it.toInt() and 0xff) }
+        val fine = PhotoGrainSettings(40, enabled = true, style = PhotoGrainStyle.FINE)
+
+        assertEquals(versionOneIdentity, photoFrameOutputIdentity(
+            "DSC.JPG", PhotoFramePreset.MIST, watermark, filter = filter, grain = fine,
+        ))
+        assertTrue(isPhotoFrameOutputFor(
+            "DSC_f_e_g (2).jpg", "DSC.JPG", PhotoFramePreset.MIST, watermark,
+            filter = filter, identity = versionOneIdentity, grain = fine,
+        ))
+    }
+
+    @Test
+    fun sameAmountOfDifferentGrainStylesKeepsShortNamesButNeverDeduplicates() {
+        val identities = PhotoGrainStyle.entries.associateWith { style ->
+            photoFrameOutputIdentity(
+                "DSC.JPG", PhotoFramePreset.MIST,
+                grain = PhotoGrainSettings(40, enabled = true, style = style),
+            )
+        }
+        assertEquals(PhotoGrainStyle.entries.size, identities.values.toSet().size)
+        PhotoGrainStyle.entries.forEach { requestedStyle ->
+            val settings = PhotoGrainSettings(40, enabled = true, style = requestedStyle)
+            assertEquals("DSC_f_g.jpg", photoFrameOutputName(
+                "DSC.JPG", PhotoFramePreset.MIST, grain = settings,
+            ))
+            identities.forEach { (savedStyle, savedIdentity) ->
+                assertEquals(
+                    "saved=$savedStyle requested=$requestedStyle",
+                    savedStyle == requestedStyle,
+                    isPhotoFrameOutputFor(
+                        "DSC_f_g (1).jpg", "DSC.JPG", PhotoFramePreset.MIST,
+                        identity = savedIdentity, grain = settings,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun grainDedupRequiresTheSameNormalizedAmountAndSeed() {
+        val grain = PhotoGrainSettings(40, enabled = true)
+        val identity = photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, grain = grain)
+        assertEquals(identity, photoFrameOutputIdentity("dsc.jpg", PhotoFramePreset.MIST, grain = grain))
+        assertNotEquals(identity, photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST))
+        assertNotEquals(identity, photoFrameOutputIdentity(
+            "DSC.JPG", PhotoFramePreset.MIST, grain = PhotoGrainSettings(41, enabled = true),
+        ))
+        // Extensions are part of the grain seed even though the old visible stem omits them.
+        assertNotEquals(identity, photoFrameOutputIdentity("DSC.JPEG", PhotoFramePreset.MIST, grain = grain))
+        assertEquals(
+            photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, grain = PhotoGrainSettings(100, enabled = true)),
+            photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, grain = PhotoGrainSettings(500, enabled = true)),
+        )
+        assertTrue(isPhotoFrameOutputFor(
+            "DSC_f_g (2).jpg", "DSC.JPG", PhotoFramePreset.MIST, identity = identity, grain = grain,
+        ))
+        assertFalse(isPhotoFrameOutputFor(
+            "DSC_f_g.jpg", "DSC.JPG", PhotoFramePreset.MIST, grain = grain,
+        ))
+        assertFalse(isPhotoFrameOutputFor(
+            "DSC_f_g.jpg", "DSC.JPG", PhotoFramePreset.MIST,
+            identity = identity, grain = PhotoGrainSettings(41, enabled = true),
+        ))
+    }
+
+    @Test
+    fun grainNeverReusesAnOlderOutputWithoutGrain() {
+        val grain = PhotoGrainSettings(40, enabled = true)
+        val legacy = legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST)
+        val oldIdentity = photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST)
+        val grainIdentity = photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, grain = grain)
+        assertFalse(isPhotoFrameOutputFor(legacy, "DSC.JPG", PhotoFramePreset.MIST, grain = grain))
+        assertFalse(isPhotoFrameOutputFor(
+            "DSC_f.jpg", "DSC.JPG", PhotoFramePreset.MIST, identity = oldIdentity, grain = grain,
+        ))
+        assertFalse(isPhotoFrameOutputFor(
+            "DSC_f_g.jpg", "DSC.JPG", PhotoFramePreset.MIST, identity = oldIdentity, grain = grain,
+        ))
+        assertFalse(hasPhotoEffectOutput(setOf(legacy), "DSC_f_g.jpg", null, grainIdentity) {
+            error("Legacy ungrained names must not be read as grain candidates")
+        })
+    }
+
+    @Test
+    fun grainMarkersNeedMetadataAndPreserveCollisionNumbering() {
+        val identity = photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, grain = PhotoGrainSettings(30, enabled = true))
+        listOf("DSC_g.jpg", "DSC_f_g.jpg", "DSC_w_e_g (2).jpg", "DSC_c_e_g.JPG").forEach { name ->
+            assertTrue(isShortPhotoFrameOutputName(name))
+            assertFalse(isPhotoFrameOutputName(name))
+            assertTrue(isPhotoFrameOutputName(name, identity))
+        }
+        assertEquals("DSC_g (2).jpg", uniqueName("DSC_g.jpg", setOf("DSC_g.jpg", "DSC_g (1).jpg")))
     }
 
     @Test

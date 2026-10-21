@@ -170,6 +170,9 @@ import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.photoFrameDatePatternExample
 import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
+import com.ztransfer.grain.photoGrainSeed
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterCategory
@@ -236,6 +239,7 @@ fun SettingsOverlay(
     viewModel: TransferViewModel,
     showPhotoEffectsEntry: Boolean = true,
     effectPreviewSource: Bitmap? = null,
+    effectPreviewSourceName: String = "",
     effectPreviewCameraManufacturer: String? = null,
     effectPreviewCameraModel: String? = null,
     effectPreviewExif: PhotoExif? = null,
@@ -362,12 +366,14 @@ fun SettingsOverlay(
         mutableStateOf(state.selectedPhotoFilterId ?: state.photoFilters.firstOrNull()?.id)
     }
     var filterDraftEnabled by remember { mutableStateOf(state.photoFilterEnabled) }
+    var grainDraft by remember { mutableStateOf(state.photoGrain.normalized()) }
     var filterDraftIntensity by remember {
         mutableIntStateOf(state.photoFilterIntensityPercent)
     }
     val photoLutDraft = rememberPhotoLutDraft("transfer", state.photoLut) { filterDraftEnabled = false }
     fun applyModuleVisibility(mask: Int) {
         if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) filterDraftEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.GRAIN)) grainDraft = grainDraft.copy(enabled = false)
         if (!mask.showsPhotoEffect(PhotoEffectModule.LUT)) photoLutDraft.off()
         if (!mask.showsPhotoEffect(PhotoEffectModule.FRAME)) frameDraftBorderEnabled = false
         if (!mask.showsPhotoEffect(PhotoEffectModule.WATERMARK)) watermarkDraft = watermarkDraft.copy(enabled = false)
@@ -457,6 +463,7 @@ fun SettingsOverlay(
         )
     }
     fun commitPhotoEffectsDraft() {
+        viewModel.setPhotoGrain(grainDraft)
         commitPhotoFilterDraft()
         commitPhotoFrameDraft()
     }
@@ -829,6 +836,8 @@ fun SettingsOverlay(
                         if (previewSource != null) {
                             PhotoEffectsRenderedPreview(
                                 source = previewSource.bitmap,
+                                sourceName = effectPreviewSourceName,
+                                grain = grainDraft,
                                 showSourceWhileRendering = effectsOnly,
                                 metadata = effectPreviewMetadata,
                                 sourceRotationQuarterTurns = previewSource.quarterTurns,
@@ -888,6 +897,22 @@ fun SettingsOverlay(
                     visible = visibleModules.showsPhotoEffect(PhotoEffectModule.LUT) && (!(filterDraftEnabled && state.photoFilters.any { it.id == filterDraftId }) || photoLutDraft.selection != null),
                 ) {
                     PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
+                }
+                PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.GRAIN)) {
+                    PhotoGrainEditor(
+                        settings = grainDraft,
+                        onStyleSelected = { style ->
+                            grainDraft = grainDraft.selectStyle(style, viewModel.state.value.photoGrainIntensities)
+                        },
+                        onIntensityChanged = { style, intensity ->
+                            val next = grainDraft.changeIntensity(style, intensity)
+                            if (next != grainDraft) {
+                                grainDraft = next
+                                viewModel.rememberPhotoGrainIntensity(next.style, next.intensityPercent)
+                            }
+                        },
+                        hapticsEnabled = state.hapticsEnabled,
+                    )
                 }
                 PhotoFrameWatermarkEditor(
                     showFrame = visibleModules.showsPhotoEffect(PhotoEffectModule.FRAME),
@@ -1238,6 +1263,7 @@ fun SettingsOverlay(
                     ?: state.photoFilters.firstOrNull()?.id
                 filterDraftIntensity = state.photoFilterIntensityPercent
                 filterDraftEnabled = state.photoFilterEnabled
+                grainDraft = state.photoGrain.normalized()
                 photoLutDraft.reset(state.photoLut, photoLutDraft.store.uri("transfer"))
                 frameDraftDecorationEnabled = state.photoFrameEnabled
                 // 编辑草稿使用各子项的配置，不受照片效果总开关影响。
@@ -1252,7 +1278,7 @@ fun SettingsOverlay(
             }
             SettingsCard(
                 borderColor = colors.accentOrange.copy(
-                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoLut != null || state.photoFrameEnabled)) 0.56f
+                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoLut != null || state.photoFrameEnabled || state.photoGrain.isEnabled)) 0.56f
                     else 0.30f
                 ),
                 pressAccentColor = colors.accentOrange,
@@ -1288,7 +1314,10 @@ fun SettingsOverlay(
                 ) {
                     PhotoEffectSummaryItem(
                         label = if (state.photoLut != null) "LUT" else stringResource(R.string.photo_filter),
-                        valueLines = filterSummaryLines,
+                        valueLines = if (state.photoGrain.isEnabled) filterSummaryLines +
+                            stringResource(R.string.photo_grain_intensity_summary,
+                                photoGrainStyleLabel(state.photoGrain.style), state.photoGrain.normalized().intensityPercent)
+                        else filterSummaryLines,
                         accentColor = if (state.photoLut != null)
                             androidx.compose.ui.graphics.lerp(colors.statusConnected, colors.accentBlue, .35f)
                         else colors.accentBlue,
@@ -1548,6 +1577,7 @@ internal fun PhotoEffectsInfoBubble(
             settingsHelpItem(R.string.photo_effect_module_filter, R.string.photo_effects_help_filters),
             settingsHelpItem(R.string.lut_folder, R.string.photo_lut_help),
             settingsHelpItem(R.string.photo_lut_settings, R.string.photo_effects_help_lut_settings),
+            settingsHelpItem(R.string.photo_grain, R.string.photo_grain_hint),
         )),
         TipBubbleSection(stringResource(R.string.photo_effects_help_decoration), listOf(
             settingsHelpItem(R.string.photo_frame_style_short, R.string.photo_effects_help_frame),
@@ -2998,6 +3028,8 @@ private fun PhotoEffectsPreviewLoadingPlaceholder() {
 @Composable
 internal fun PhotoEffectsRenderedPreview(
     source: Bitmap,
+    sourceName: String = "",
+    grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     resetOnSourceChange: Boolean = false,
     showSourceWhileRendering: Boolean = false,
     metadata: PhotoFrameMetadata = EMPTY_PHOTO_EFFECTS_PREVIEW_METADATA,
@@ -3035,7 +3067,11 @@ internal fun PhotoEffectsRenderedPreview(
             preset = preset.takeIf { borderEnabled },
         )
     }
+    val normalizedGrain = grain.normalized()
+    val grainSeed = remember(sourceName) { photoGrainSeed(sourceName) }
+    val hasColorEffects = filter != null || normalizedGrain.isEnabled
     val currentFilterKey = PhotoEffectsPreviewCacheKey.from(filter)
+    val currentRenderKey = PhotoEffectsPreviewCacheKey.from(filter, normalizedGrain, grainSeed)
     val previewCaches = remember(
         source,
         metadata,
@@ -3058,12 +3094,12 @@ internal fun PhotoEffectsRenderedPreview(
     DisposableEffect(previewCaches) {
         onDispose { previewCaches.close() }
     }
-    val currentPreviewCache = remember(previewCaches, currentFilterKey) {
-        previewCaches.getOrCreate(currentFilterKey)
+    val currentPreviewCache = remember(previewCaches, currentRenderKey) {
+        previewCaches.getOrCreate(currentRenderKey)
     }
     val previewDemand = remember(previewCaches) { PhotoEffectsPreviewDemand() }
-    // 对比图不含滤镜，切换滤镜时仍然有效；与主成片分开缓存，避免重复合成相同底图。
-    val comparisonCache = if (filter == null) {
+    // 对比图不含滤镜和颗粒，保留相同边框水印；调节颜色效果时不重复合成。
+    val comparisonCache = if (!hasColorEffects) {
         null
     } else remember(
         source,
@@ -3099,29 +3135,29 @@ internal fun PhotoEffectsRenderedPreview(
     suspend fun renderPreview(
         selection: PhotoFilterSelection?,
         useCurrentFilteredSource: Boolean,
+        includeGrain: Boolean = true,
     ): Bitmap {
-        val selectionKey = PhotoEffectsPreviewCacheKey.from(selection)
-        val outputCache = if (selection == null && filter != null) {
+        val appliedGrain = if (includeGrain) normalizedGrain else PhotoGrainSettings.OFF
+        val selectionKey = PhotoEffectsPreviewCacheKey.from(selection, appliedGrain, grainSeed)
+        val isComparison = !includeGrain && selection == null && hasColorEffects
+        val outputCache = if (isComparison) {
             checkNotNull(comparisonCache)
         } else {
             previewCaches.getOrCreate(selectionKey)
         }
         return outputCache.getOrRender(
-            isObsolete = {
-                selection != null && !previewDemand.isRequested(selectionKey)
-            },
+            isObsolete = { !isComparison && !previewDemand.isRequested(selectionKey) },
         ) { isCancelled ->
-            // Keep filtering inside the completed-frame cache. A recent full-preview hit must not
-            // rebuild an intermediate filtered bitmap before discovering that output already exists.
+            // Current filter input is cached independently of grain/frame/watermark. The exporter
+            // applies grain only to photo pixels, retaining a clean backdrop and color palette.
             val input = if (useCurrentFilteredSource) {
                 filteredSource(selection)
             } else {
-                selection?.let {
-                    PhotoFilterRenderer.render(source, it, isCancelled)
-                } ?: source
+                selection?.let { PhotoFilterRenderer.render(source, it, isCancelled) } ?: source
             }
             var output: Bitmap? = null
             try {
+                if (isCancelled()) throw CancellationException("Preview render superseded")
                 output = PhotoFrameExporter.renderPreview(
                     context = context,
                     source = input,
@@ -3135,31 +3171,31 @@ internal fun PhotoEffectsRenderedPreview(
                     longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
                     filter = null,
                     previewPlaceholders = previewPlaceholders,
+                    grain = appliedGrain,
+                    grainSeed = grainSeed,
+                    backdropSource = source,
+                    isCancelled = isCancelled,
                 )
                 checkNotNull(output)
             } finally {
-                // Prefetch intermediates are never displayed or retained. The selected filter's
-                // intermediate keeps its existing cache so border/watermark edits do not refilter.
-                // With no frame/watermark the exporter may return input itself; ownership then
-                // transfers to the completed-preview cache and it must remain alive.
-                if (
-                    shouldRecyclePrefetchInput(
-                        useCurrentFilteredSource = useCurrentFilteredSource,
-                        inputIsSource = input === source,
-                        outputIsInput = output === input,
-                    )
-                ) {
-                    input.recycle()
-                }
+                // Current/cache/displayed inputs stay alive. Only an unretained prefetch bitmap
+                // belongs to this operation; output may itself alias that input when effects are off.
+                if (shouldRecyclePrefetchInput(
+                    useCurrentFilteredSource = useCurrentFilteredSource,
+                    inputIsSource = input === source,
+                    outputIsInput = output === input,
+                )) input.recycle()
             }
         }
     }
 
-    LaunchedEffect(currentPreviewCache, filter, prefetchFilters) {
+    LaunchedEffect(currentPreviewCache, filter, normalizedGrain, grainSeed, prefetchFilters) {
         previewDemand.replaceRequested(
             buildSet {
-                add(currentFilterKey)
-                prefetchFilters.forEach { add(PhotoEffectsPreviewCacheKey.from(it)) }
+                add(currentRenderKey)
+                prefetchFilters.forEach {
+                    add(PhotoEffectsPreviewCacheKey.from(it, normalizedGrain, grainSeed))
+                }
             },
         )
         try {
@@ -3178,6 +3214,12 @@ internal fun PhotoEffectsRenderedPreview(
             // duration in front of the existing long-press comparison work.
             val prefetchJob = launch {
                 try {
+                    // Grain adjustments invalidate all neighbor outputs. Wait briefly so another
+                    // wheel commit cancels this work before refiltering two unrelated presets.
+                    // The selected preview is already visible; grain-off prefetch stays unchanged.
+                    if (normalizedGrain.isEnabled && prefetchFilters.isNotEmpty()) {
+                        delay(PHOTO_GRAIN_PREFETCH_DELAY_MS)
+                    }
                     prefetchFilters.forEach { nextFilter ->
                         ensureActive()
                         renderPreview(nextFilter, useCurrentFilteredSource = false)
@@ -3191,13 +3233,13 @@ internal fun PhotoEffectsRenderedPreview(
                 }
             }
 
-            // 对比图只跳过滤镜，继续使用完全相同的边框、水印、尺寸和元数据。
-            // 无滤镜基线同样进入缓存，所有滤镜共用，不再为每次长按重复渲染。
-            if (filter != null) {
+            // 对比图跳过滤镜与颗粒，继续使用相同边框、水印、尺寸和元数据。
+            // 仅启用颗粒时也能长按对比；无效果的基线由所有颜色调整共用。
+            if (hasColorEffects) {
                 try {
                     // 主预览优先显示；继续调参时该延时会被取消，旧对比图不会抢占下一次渲染。
                     delay(PHOTO_EFFECTS_COMPARISON_DELAY_MS)
-                    val comparison = renderPreview(null, useCurrentFilteredSource = false)
+                    val comparison = renderPreview(null, useCurrentFilteredSource = false, includeGrain = false)
                     ensureActive()
                     rendered.value = RenderedPhotoEffectsPreview(
                         bitmap = output,
@@ -3449,6 +3491,7 @@ private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
 private const val PHOTO_EFFECTS_RECENT_PREVIEW_CACHE_SIZE = 3
 private const val PHOTO_EFFECTS_FORWARD_PREFETCH_COUNT = 2
 private const val PHOTO_EFFECTS_COMPARISON_DELAY_MS = 500L
+private const val PHOTO_GRAIN_PREFETCH_DELAY_MS = 600L
 private const val PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS = 140L
 private const val PHOTO_EFFECTS_FALLBACK_GRACE_MS = 2_200L
 // 边框合成无法在 Canvas 绘制途中取消；全局串行可防止旧 FHD 成片并发拖慢最新预览。
@@ -3524,17 +3567,25 @@ private data class PhotoEffectsPreviewFrameLayout(
     val preset: PhotoFramePreset?,
 )
 
-private data class PhotoEffectsPreviewCacheKey(
+internal data class PhotoEffectsPreviewCacheKey(
     val filterId: String?,
     val intensityPercent: Int,
     val contrast: Int,
     val saturation: Int,
     val highlights: Int,
     val shadows: Int,
+    val grainIntensityPercent: Int = 0,
+    val grainSeed: Int = 0,
+    val grainStyle: PhotoGrainStyle? = null,
 ) {
     companion object {
-        fun from(selection: PhotoFilterSelection?): PhotoEffectsPreviewCacheKey =
-            selection?.let {
+        fun from(
+            selection: PhotoFilterSelection?,
+            grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+            seed: Int = 0,
+        ): PhotoEffectsPreviewCacheKey {
+            val normalizedGrain = grain.normalized()
+            val filterKey = selection?.let {
                 PhotoEffectsPreviewCacheKey(
                     filterId = it.preset.id,
                     intensityPercent = it.normalizedIntensityPercent,
@@ -3544,6 +3595,12 @@ private data class PhotoEffectsPreviewCacheKey(
                     shadows = it.lutAdjustments.shadows,
                 )
             } ?: PhotoEffectsPreviewCacheKey(null, 0, 0, 0, 0, 0)
+            return filterKey.copy(
+                grainIntensityPercent = if (normalizedGrain.isEnabled) normalizedGrain.intensityPercent else 0,
+                grainSeed = if (normalizedGrain.isEnabled) seed else 0,
+                grainStyle = normalizedGrain.style.takeIf { normalizedGrain.isEnabled },
+            )
+        }
     }
 }
 

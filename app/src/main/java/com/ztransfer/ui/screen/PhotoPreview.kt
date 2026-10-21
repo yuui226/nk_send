@@ -1694,6 +1694,7 @@ internal fun PhotoPreviewOverlay(
                         viewModel = effectsViewModel,
                         effectsOnly = true,
                         effectPreviewSource = source?.asAndroidBitmap(),
+                        effectPreviewSourceName = request.file.fileName,
                         effectPreviewInitialRotationQuarterTurns = request.rotationQuarterTurns,
                         effectPreviewExif = exifData[request.file.handle],
                         effectPreviewCameraManufacturer = cameraState.cameraManufacturer,

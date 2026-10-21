@@ -426,6 +426,7 @@ data class CameraState(
     /** Latest camera still, quietly prefetched at FHD for the frame/filter settings demos. */
     val effectPreviewBitmap: Bitmap? = null,
     val effectPreviewFileKey: String? = null,
+    val effectPreviewFileName: String? = null,
     /** EXIF belonging to [effectPreviewFileKey], published atomically with the FHD bitmap. */
     val effectPreviewExif: PhotoExif? = null,
     // 当前候选 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；无候选链路时为 null。
@@ -1259,6 +1260,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         effectPreviewBitmap = thumbnail,
                         // 缩略图只是立即可见的真实占位；null 保证后续仍会升级为 FHD。
                         effectPreviewFileKey = null,
+                        effectPreviewFileName = latest.fileName,
                         effectPreviewExif = null,
                     )
                 }
@@ -1446,6 +1448,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             it.copy(
                                 effectPreviewBitmap = bitmap,
                                 effectPreviewFileKey = key,
+                                effectPreviewFileName = latest.fileName,
                                 effectPreviewExif = exif,
                             )
                         }
@@ -2399,6 +2402,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 storageIds = if (preserveExisting) it.storageIds else emptyList(),
                 effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
                 effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
+                effectPreviewFileName = if (preserveExisting) it.effectPreviewFileName else null,
                 effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
             )
         }
@@ -3126,6 +3130,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 storageIds = if (preserveExisting) it.storageIds else emptyList(),
                 effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
                 effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
+                effectPreviewFileName = if (preserveExisting) it.effectPreviewFileName else null,
                 effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
             )
         }

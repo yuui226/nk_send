@@ -1091,8 +1091,12 @@ private fun transferTaskEffectText(task: TransferTask): String? {
         "${photoFilterDisplayName(it.preset)} ${it.normalizedIntensityPercent}%"
     }
     val cropName = if (task.cropRecipe != null) stringResource(R.string.crop_title) else null
+    val grainName = task.photoGrainRequested.takeIf { it.isEnabled }?.let {
+        stringResource(R.string.photo_grain_intensity_summary,
+            photoGrainStyleLabel(it.style), it.normalized().intensityPercent)
+    }
     val parts = if (task.cropEffectsSkipped) listOfNotNull(cropName, stringResource(R.string.crop_effects_skipped))
-        else listOfNotNull(cropName, frameName, filterName)
+        else listOfNotNull(cropName, frameName, filterName, grainName)
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 

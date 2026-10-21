@@ -1,5 +1,9 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
+import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
+import com.ztransfer.effects.PhotoEffectModule
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -11,6 +15,72 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LocalPhotoEffectsPreferencesTest {
+    @Test
+    fun currentStyleAndOtherStyleMemoriesSurviveNormalizationAndModuleHiding() {
+        val intensities = mapOf(PhotoGrainStyle.FINE to 30, PhotoGrainStyle.MEDIUM to 50,
+            PhotoGrainStyle.COARSE to 70)
+        val original = defaultLocalPhotoEffectsSettings(null).copy(
+            grain = PhotoGrainSettings(0, true, PhotoGrainStyle.MEDIUM),
+            grainIntensities = intensities,
+        )
+        val normalized = normalizeLocalPhotoEffectsSettings(original, emptySet()) { false }
+        assertEquals(original.grain, normalized.grain)
+        assertEquals(intensities + (PhotoGrainStyle.MEDIUM to 0), normalized.grainIntensities)
+        val hidden = applyLocalPhotoEffectModuleVisibility(normalized,
+            ALL_PHOTO_EFFECT_MODULES xor PhotoEffectModule.GRAIN.bit)
+        val shown = applyLocalPhotoEffectModuleVisibility(hidden, ALL_PHOTO_EFFECT_MODULES)
+        assertEquals(normalized.grain.copy(enabled = false), shown.grain)
+        assertEquals(normalized.grainIntensities, shown.grainIntensities)
+    }
+
+    @Test
+    fun grainDefaultsOffAndRetainsSwitchAndExactIntensityAcrossNormalization() {
+        val settings = defaultLocalPhotoEffectsSettings(null)
+        assertEquals(PhotoGrainSettings(50, enabled = false), settings.grain)
+        assertEquals(mapOf(PhotoGrainStyle.FINE to 50, PhotoGrainStyle.MEDIUM to 40,
+            PhotoGrainStyle.COARSE to 30), settings.grainIntensities)
+        for (intensity in listOf(0, 1, 37, 100)) {
+            for (enabled in listOf(false, true)) {
+                val grain = PhotoGrainSettings(intensity, enabled)
+                val restored = normalizeLocalPhotoEffectsSettings(
+                    settings.copy(grain = grain), emptySet(),
+                ) { false }
+                assertEquals(grain, restored.grain)
+            }
+        }
+        assertEquals(PhotoGrainSettings(100, enabled = false), normalizeLocalPhotoEffectsSettings(
+            settings.copy(grain = PhotoGrainSettings(120, enabled = false)), emptySet(),
+        ) { false }.grain)
+        assertEquals(PhotoGrainSettings(0, enabled = true), normalizeLocalPhotoEffectsSettings(
+            settings.copy(grain = PhotoGrainSettings(-3, enabled = true)), emptySet(),
+        ) { false }.grain)
+    }
+
+    @Test
+    fun hidingGrainRetainsIntensityAndShowingItAgainDoesNotEnableIt() {
+        val original = defaultLocalPhotoEffectsSettings("forest").copy(
+            grain = PhotoGrainSettings(37, enabled = true),
+            filterEnabled = true, decorationEnabled = true,
+        )
+        val hidden = applyLocalPhotoEffectModuleVisibility(
+            original, ALL_PHOTO_EFFECT_MODULES xor PhotoEffectModule.GRAIN.bit,
+        )
+        assertEquals(original.copy(grain = PhotoGrainSettings(37, enabled = false)), hidden)
+        assertEquals(hidden, applyLocalPhotoEffectModuleVisibility(hidden, ALL_PHOTO_EFFECT_MODULES))
+        val restored = normalizeLocalPhotoEffectsSettings(hidden, setOf("forest")) { false }
+        assertEquals(PhotoGrainSettings(37, enabled = false), restored.grain)
+    }
+
+    @Test
+    fun hidingAnAlreadyDisabledGrainDoesNotResetItsRememberedStrength() {
+        val original = defaultLocalPhotoEffectsSettings(null).copy(
+            grain = PhotoGrainSettings(73, enabled = false),
+        )
+        assertEquals(original, applyLocalPhotoEffectModuleVisibility(
+            original, ALL_PHOTO_EFFECT_MODULES xor PhotoEffectModule.GRAIN.bit,
+        ))
+    }
+
     @Test
     fun widthsAreIndependentForEveryPresetAndSurviveWorkbenchNormalization() {
         val values = com.ztransfer.frame.PhotoFramePreset.entries.associateWith {

@@ -4,8 +4,12 @@ package com.ztransfer.viewmodel
 import com.ztransfer.effects.effectivePhotoEffectModules
 import com.ztransfer.effects.PhotoEffectModule
 import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
-import com.ztransfer.effects.normalizePhotoEffectModules
+import com.ztransfer.effects.restorePhotoEffectModules
 import com.ztransfer.effects.showsPhotoEffect
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
+import com.ztransfer.grain.PhotoGrainPreferences
+import com.ztransfer.grain.normalizedPhotoGrainIntensities
 
 import com.ztransfer.util.HistogramMode
 
@@ -249,7 +253,12 @@ data class TransferTask(
     val sourceMetadataPrepared: Boolean = false,
     val metadataCameraIdentity: String? = null,
     val metadataCameraSession: String? = null,
+    /** 入队时固定颗粒强度；之后调参或隐藏模块不会更改这个任务。 */
+    val photoGrainRequested: PhotoGrainSettings = PhotoGrainSettings.OFF,
 )
+
+internal val TransferTask.hasPhotoEffects: Boolean
+    get() = framePreset != null || photoFilterRequested != null || photoGrainRequested.isEnabled
 
 /** Pending work retains its busy state but has no running stopwatch. */
 internal fun TransferTask.queueFrameGeneration(): TransferTask = copy(
@@ -272,7 +281,7 @@ internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask
 /** Preserve the queued recipe so future tasks and explicit retries still use their snapshot. */
 internal fun TransferTask.skipFrameGeneration(): TransferTask = copy(
     frameGenerationError = null,
-    frameGenerationSkipped = framePreset != null || photoFilterRequested != null,
+    frameGenerationSkipped = hasPhotoEffects,
     isGeneratingFrame = false,
     frameGenerationStartedAtElapsedMs = null,
     frameGenerationElapsedMs = null,
@@ -541,6 +550,8 @@ data class TransferState(
     // 开启后：受支持的原图落盘成功，再派生一张保留原片细节的边框/水印效果图。
     val transferPhotoEffectModules: Int = ALL_PHOTO_EFFECT_MODULES,
     val photoEffectsEnabled: Boolean = true,
+    val photoGrain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    val photoGrainIntensities: Map<PhotoGrainStyle, Int> = normalizedPhotoGrainIntensities(),
     val photoFrameEnabled: Boolean = false,
     // 总开关开启时，边框与水印可以独立组合；false 允许只在原照片上叠水印。
     val photoFrameBorderEnabled: Boolean = true,
@@ -821,11 +832,12 @@ internal fun createQueueTasks(
     photoFilter: PhotoFilterSelection? = null,
     organizeTransfersByDate: Boolean,
     queuedDate: LocalDate = LocalDate.now(),
+    photoGrain: PhotoGrainSettings = PhotoGrainSettings.OFF,
 ): List<TransferTask> = createQueueTasks(
     files, photoFrameEnabled, photoFrameBorderEnabled, photoFramePreset,
     photoFrameWatermark, photoFrameMetadataSettings, photoFilter,
     if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
-    queuedDate,
+    queuedDate, photoGrain,
 )
 
 internal fun createQueueTasks(
@@ -839,6 +851,7 @@ internal fun createQueueTasks(
     photoFilter: PhotoFilterSelection? = null,
     storageMode: TransferStorageMode = TransferStorageMode.UNIFIED,
     queuedDate: LocalDate = LocalDate.now(),
+    photoGrain: PhotoGrainSettings = PhotoGrainSettings.OFF,
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
     .distinctBy { it.handle }
@@ -854,6 +867,9 @@ internal fun createQueueTasks(
             photoFilterRequested = photoFilter.takeIf {
                 isSupportedPhotoFrameSourceExtension(file.extension)
             },
+            photoGrainRequested = if (isSupportedPhotoFrameSourceExtension(file.extension)) {
+                photoGrain.normalized()
+            } else PhotoGrainSettings.OFF,
             destinationFolderName = transferDestinationFolderName(
                 captureDate = file.captureDate,
                 storageMode = storageMode,
@@ -886,6 +902,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     @Volatile
     private var preferHighThroughputTransfers: Boolean = false
     private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
+    private val photoGrainPreferences = PhotoGrainPreferences(prefs, "photo_grain")
     private val contentResolver = application.contentResolver
     /**
      * 原图品质效果导出使用一个低优先级工作线程，避免多张完整输出画布同时驻留。
@@ -1203,6 +1220,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
         }
         val storedPreferences = prefs.all
+        val grainIntroduced = prefs.getBoolean("photo_effect_grain_introduced", false)
+        val restoredEffectModules = restorePhotoEffectModules(
+            prefs.getInt("photo_effect_modules", ALL_PHOTO_EFFECT_MODULES),
+            grainIntroduced,
+        )
+        if (!grainIntroduced) {
+            prefs.edit().putInt("photo_effect_modules", restoredEffectModules)
+                .putBoolean("photo_effect_grain_introduced", true).apply()
+        }
+        val restoredPhotoGrain = photoGrainPreferences.load(
+            allowEnabled = restoredEffectModules.showsPhotoEffect(PhotoEffectModule.GRAIN),
+        )
         // 卡槽筛选只属于当前相机会话。清掉旧版本曾持久化的值，避免升级后继续恢复单卡状态。
         if ("filter_storage_slot" in storedPreferences) {
             prefs.edit().remove("filter_storage_slot").apply()
@@ -1315,8 +1344,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     prefs.getString("preview_histogram_mode", null),
                     prefs.getBoolean("preview_histogram_enabled", false),
                 ),
-                transferPhotoEffectModules = normalizePhotoEffectModules(prefs.getInt("photo_effect_modules", ALL_PHOTO_EFFECT_MODULES)),
+                transferPhotoEffectModules = restoredEffectModules,
                 photoEffectsEnabled = prefs.getBoolean("photo_effects_enabled", true),
+                photoGrain = restoredPhotoGrain.settings,
+                photoGrainIntensities = restoredPhotoGrain.intensities,
                 photoFrameEnabled = prefs.getBoolean("photo_frame_enabled", false),
                 photoFrameBorderEnabled = prefs.getBoolean("photo_frame_border_enabled", true),
                 photoFramePreset = runCatching {
@@ -1526,13 +1557,22 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(previewHistogramMode = mode) }
     }
 
-    /** Camera-photo editor visibility; hiding clears enabled flags but preserves tuning values. */
+    /** Hiding an editor disables its effect without changing already queued recipes. */
     fun setTransferPhotoEffectModules(mask: Int) {
         val next = effectivePhotoEffectModules(mask, LicenseManager.isPro.value)
         if (next == _state.value.transferPhotoEffectModules) return
         prefs.edit().putInt("photo_effect_modules", next).apply()
         _state.update { it.copy(transferPhotoEffectModules = next) }
         val snapshot = _state.value
+        if (!next.showsPhotoEffect(PhotoEffectModule.GRAIN)) {
+            // A draft may already have remembered newer detents than the committed recipe.
+            // Hiding its editor disables grain without restoring the recipe's older intensity.
+            setPhotoGrain(snapshot.photoGrain.copy(
+                enabled = false,
+                intensityPercent = snapshot.photoGrainIntensities[snapshot.photoGrain.style]
+                    ?: snapshot.photoGrain.intensityPercent,
+            ))
+        }
         setPhotoFilterConfiguration(
             snapshot.selectedPhotoFilterId, snapshot.photoFilterIntensityPercent,
             snapshot.photoFilterEnabled && next.showsPhotoEffect(PhotoEffectModule.FILTER),
@@ -1555,6 +1595,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         prefs.edit().putBoolean("photo_effects_enabled", enabled).apply()
         _state.update { it.copy(photoEffectsEnabled = enabled) }
         photoGenerationQueue.reconsider()
+    }
+
+    fun setPhotoGrain(settings: PhotoGrainSettings) {
+        val snapshot = _state.value
+        val normalized = settings.normalized()
+        val next = if (snapshot.transferPhotoEffectModules.showsPhotoEffect(PhotoEffectModule.GRAIN)) {
+            normalized
+        } else normalized.copy(enabled = false)
+        val intensities = normalizedPhotoGrainIntensities(snapshot.photoGrainIntensities) +
+            (next.style to next.intensityPercent)
+        if (snapshot.photoGrain == next && snapshot.photoGrainIntensities == intensities) return
+        photoGrainPreferences.save(next, intensities)
+        _state.update { it.copy(photoGrain = next, photoGrainIntensities = intensities) }
+    }
+
+    /** Remember a draft detent without changing the recipe used by newly queued photos. */
+    fun rememberPhotoGrainIntensity(style: PhotoGrainStyle, intensityPercent: Int) {
+        val intensity = intensityPercent.coerceIn(0, 100)
+        val snapshot = _state.value
+        if (snapshot.photoGrainIntensities[style] == intensity) return
+        val intensities = normalizedPhotoGrainIntensities(snapshot.photoGrainIntensities) +
+            (style to intensity)
+        photoGrainPreferences.rememberIntensity(style, intensity)
+        _state.update { it.copy(photoGrainIntensities = intensities) }
     }
 
     fun setPhotoFrameEnabled(enabled: Boolean) {
@@ -2148,6 +2212,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             ),
             photoFilter = snapshot.photoFilterSelection,
             storageMode = snapshot.storageMode,
+            photoGrain = snapshot.photoGrain,
         )
         val admittedTasks = if (cropRecipe == null) newTasks else newTasks.map { it.copy(cropRecipe = cropRecipe) }
         if (admittedTasks.isEmpty()) return
@@ -2345,7 +2410,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                         val preset = task.framePreset
                         val filter = task.photoFilterRequested
-                        val needsGeneration = preset != null || filter != null || task.cropRecipe != null
+                        val needsGeneration = task.hasPhotoEffects || task.cropRecipe != null
                         updateTask(taskId) {
                             it.copy(
                                 status = TransferStatus.COMPLETED,
@@ -2379,6 +2444,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     watermarkRequested = task.frameWatermarkRequested,
                                     decorationRequested = preset != null,
                                     filterRequested = filter,
+                                    grainRequested = task.photoGrainRequested,
                                     skipIfExisting = true,
                                     metadataFile = task.file,
                                     metadataCamera = cameraProvider(),
@@ -2799,7 +2865,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         val effectsEnabled = _state.value.photoEffectsEnabled
                                         val framePreset = task.framePreset
                                         val photoFilter = task.photoFilterRequested
-                                        val shouldGenerateFrame = framePreset != null || photoFilter != null || task.cropRecipe != null
+                                        val shouldGenerateFrame = task.hasPhotoEffects || task.cropRecipe != null
                                         // 起点由协议层在本文件进入下载流程时记录（包含为大图/EXIF
                                         // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
                                         val elapsed = android.os.SystemClock.elapsedRealtime() -
@@ -2847,6 +2913,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                                     watermarkRequested = task.frameWatermarkRequested,
                                                     decorationRequested = framePreset != null,
                                                     filterRequested = photoFilter,
+                                                    grainRequested = task.photoGrainRequested,
                                                     skipIfExisting = true,
                                                     metadataFile = task.file,
                                                     metadataCamera = camera,
@@ -3542,6 +3609,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         capturedHeader: ByteArray? = null,
         cropRecipe: com.ztransfer.crop.JpegCropSelection? = null,
         savedCropOutput: SavedCropOutput? = null,
+        grainRequested: PhotoGrainSettings = PhotoGrainSettings.OFF,
     ) {
         val taskSnapshot = _state.value.tasks.firstOrNull { it.taskId == taskId } ?: return
         val needsMetadata = borderEnabled && metadataSettings.requiresCameraMetadata &&
@@ -3572,6 +3640,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         else -> "滤镜"
                     }
                     append("$kind ${filterRequested?.normalizedIntensityPercent ?: 0}%")
+                    append(" grain=${if (grainRequested.isEnabled) grainRequested.normalized().intensityPercent else 0}%")
                     append(" frame=${if (borderEnabled) preset.name else "off"}")
                     append(" meta=${if (!needsMetadata) "ready/none" else if (capturedHeader != null) "captured" else "read"}")
                     filterRequested?.let { append(" name=${it.preset.name}") }
@@ -3622,7 +3691,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 effectSourceName = saved.name
                 frameExportSaved = true
                 val effectsEnabled = _state.value.photoEffectsEnabled
-                val hasEffects = decorationRequested || filterRequested != null
+                val hasEffects = decorationRequested || filterRequested != null || grainRequested.isEnabled
                 updateTask(taskId) { it.copy(cropEffectsSkipped = !effectsEnabled && hasEffects) }
                 if (!effectsEnabled || !hasEffects) {
                     probeOutcome = "saved:crop"
@@ -3674,6 +3743,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         borderEnabled = effectiveBorder,
                         metadataSettings = metadataSettings,
                         filter = filterRequested,
+                        grain = grainRequested,
                     )
                 ) {
                     FrameExportOutcome.AlreadyExists
@@ -3701,6 +3771,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         borderEnabled = effectiveBorder,
                         metadataSettings = metadataSettings,
                         filter = filterRequested,
+                        grain = grainRequested,
                         probeSessionId = probeSession,
                         metadataSnapshot = metadataResult.get()?.value,
                         allowLocalMetadataRead = false,
@@ -4124,6 +4195,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         watermarkRequested = task.frameWatermarkRequested,
                         decorationRequested = task.framePreset != null,
                         filterRequested = task.photoFilterRequested,
+                        grainRequested = task.photoGrainRequested,
                         skipIfExisting = true,
                         metadataFile = task.file,
                         // Supplement only from the same body, never reinterpret a handle on a

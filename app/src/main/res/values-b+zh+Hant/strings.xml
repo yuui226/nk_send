@@ -269,7 +269,7 @@
     <string name="photo_effects_open_editor">編輯照片效果</string>
     <string name="photo_effects_info_title">照片效果說明</string>
     <string name="photo_effects_info_description">僅處理 JPG/JPEG，保留原圖，效果圖另存；RAW 和影片不生效。調整用於後續加入佇列的照片。</string>
-    <string name="photo_effects_gesture_hint">點擊放大，雙擊旋轉；長按對比調色前後。</string>
+    <string name="photo_effects_gesture_hint">點擊放大，雙擊旋轉；長按對比調色與顆粒效果。</string>
     <string name="photo_effects_wheel_hint">上下拖動快速調整，也可點按切換。</string>
     <string name="photo_effects_full_chooser_hint">長按濾鏡撥輪可按分類選擇</string>
     <string name="photo_filter_off_option">無濾鏡</string>
@@ -560,7 +560,7 @@
     <string name="local_photo_effects_entry">濾鏡·LUT·邊框·浮水印</string>
     <string name="local_photo_effects_info_description">可多選照片，共用目前效果，效果圖另存。</string>
     <string name="local_photo_effects_exif_hint">邊框：截圖等無 EXIF 的圖片不顯示拍攝參數</string>
-    <string name="local_photo_effects_gesture_hint">點擊放大，左右滑動換圖；長按對比調色前後。</string>
+    <string name="local_photo_effects_gesture_hint">點擊放大，左右滑動換圖；長按對比調色與顆粒效果。</string>
     <string name="local_photo_multi_select">（可多選）</string>
     <string name="local_photo_reselect">重新選擇（%1$d）</string>
     <string name="local_photo_batch_generating">產生中</string>
@@ -707,4 +707,10 @@
     <string name="remote_review_empty">暫無照片</string>
     <string name="remote_review_retry">載入失敗 · 重試</string>
     <string name="remote_review_disconnected">相機已中斷連線</string>
+    <string name="photo_grain">膠片顆粒</string>
+    <string name="photo_grain_fine">細顆粒</string>
+    <string name="photo_grain_medium">中顆粒</string>
+    <string name="photo_grain_coarse">粗顆粒</string>
+    <string name="photo_grain_intensity_summary">%1$s %2$d%%</string>
+    <string name="photo_grain_hint">選擇顆粒粗細，再調整強度；各檔強度分別儲存。</string>
 </resources>

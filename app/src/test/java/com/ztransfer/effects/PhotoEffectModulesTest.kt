@@ -31,9 +31,24 @@ class PhotoEffectModulesTest {
         assertEquals(1, togglePhotoEffectModule(13, PhotoEffectModule.WATERMARK, false))
         assertEquals(13, togglePhotoEffectModule(1, PhotoEffectModule.FRAME, false))
     }
+    @Test fun grainIsIntroducedOnceWithoutChangingExistingVisibility() {
+        for (oldMask in 1..15) {
+            val upgraded = restorePhotoEffectModules(oldMask, grainIntroduced = false)
+            assertEquals(oldMask or PhotoEffectModule.GRAIN.bit, upgraded)
+            assertEquals(upgraded, restorePhotoEffectModules(upgraded, grainIntroduced = true))
+            val hiddenAgain = togglePhotoEffectModule(upgraded, PhotoEffectModule.GRAIN)
+            assertEquals(oldMask, hiddenAgain)
+            assertEquals(hiddenAgain, restorePhotoEffectModules(hiddenAgain, grainIntroduced = true))
+        }
+        assertEquals(PhotoEffectModule.GRAIN.bit, normalizePhotoEffectModules(16))
+        for (invalidMask in listOf(0, 32, 64)) {
+            assertEquals(ALL_PHOTO_EFFECT_MODULES,
+                restorePhotoEffectModules(invalidMask, grainIntroduced = false))
+        }
+    }
     @Test fun invalidEmptyConfigurationRestoresAllModules() {
         assertEquals(ALL_PHOTO_EFFECT_MODULES, normalizePhotoEffectModules(0))
-        assertEquals(ALL_PHOTO_EFFECT_MODULES, normalizePhotoEffectModules(16))
-        assertEquals(1, normalizePhotoEffectModules(17))
+        assertEquals(ALL_PHOTO_EFFECT_MODULES, normalizePhotoEffectModules(32))
+        assertEquals(1, normalizePhotoEffectModules(33))
     }
 }

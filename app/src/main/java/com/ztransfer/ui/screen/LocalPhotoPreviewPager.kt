@@ -27,7 +27,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private data class LocalPhotoPreview(val bitmap: Bitmap, val metadata: PhotoFrameMetadata)
+private data class LocalPhotoPreview(
+    val bitmap: Bitmap,
+    val metadata: PhotoFrameMetadata,
+    val sourceName: String,
+)
 
 @Composable
 internal fun LocalPhotoPreviewPager(
@@ -100,9 +104,11 @@ private fun LocalPhotoPreviewPage(
     val preview by produceState<Result<LocalPhotoPreview>?>(null, uri) {
         value = try {
             Result.success(withContext(Dispatchers.IO) {
+                val sourceName = PhotoFrameExporter.readPreviewSourceName(context, context.contentResolver, uri)
+                val metadata = PhotoFrameExporter.readPreviewMetadata(context.contentResolver, uri)
                 val bitmap = PhotoFrameExporter.decodePreview(context.contentResolver, uri, maxEdge = 1_280)
                     ?: error("Cannot decode selected photo")
-                LocalPhotoPreview(bitmap, PhotoFrameExporter.readPreviewMetadata(context.contentResolver, uri))
+                LocalPhotoPreview(bitmap, metadata, sourceName)
             })
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -117,6 +123,7 @@ private fun LocalPhotoPreviewPage(
         when {
             loaded != null -> PhotoEffectsRenderedPreview(
                 source = loaded.bitmap,
+                sourceName = loaded.sourceName,
                 resetOnSourceChange = true,
                 metadata = if (com.ztransfer.BuildConfig.DEBUG && debugBrand != null) {
                     loaded.metadata.copy(make = debugBrand, model = "Model")
@@ -135,6 +142,7 @@ private fun LocalPhotoPreviewPage(
                 previewPlaceholders = true,
                 watermark = effects.watermark,
                 filter = effects.filter,
+                grain = effects.grain,
                 prefetchFilters = prefetchFilters,
                 onOpen = onOpen,
             )

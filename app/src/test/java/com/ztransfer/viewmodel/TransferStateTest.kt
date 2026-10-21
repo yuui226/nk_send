@@ -11,6 +11,8 @@ import com.ztransfer.frame.PhotoFrameWatermarkPosition
 import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
 import com.ztransfer.protocol.NikonCamera
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
@@ -19,6 +21,70 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class TransferStateTest {
+    @Test
+    fun grainOnlyTaskIsAnEffectAndKeepsItsQueuedRecipeOnSkipAndRetry() {
+        val settings = PhotoGrainSettings(45, enabled = true, style = PhotoGrainStyle.COARSE)
+        val task = createQueueTasks(
+            files = listOf(file(1)),
+            photoFrameEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false),
+            photoGrain = settings,
+        ).single()
+        assertNull(task.framePreset)
+        assertNull(task.photoFilterRequested)
+        assertTrue(task.hasPhotoEffects)
+        assertEquals(settings, task.photoGrainRequested)
+        val skipped = task.skipFrameGeneration()
+        assertTrue(skipped.frameGenerationSkipped)
+        assertEquals(settings, skipped.photoGrainRequested)
+        val retried = task.copy(
+            status = TransferStatus.COMPLETED,
+            frameGenerationError = "disk full",
+            savedOriginalOutput = SavedOriginalOutput("content://source", "content://tree",
+                "content://parent", task.file.fileName),
+        ).newAttempt()
+        assertTrue(retried.isGeneratingFrame)
+        assertEquals(TransferStatus.COMPLETED, retried.status)
+        assertEquals(settings, retried.photoGrainRequested)
+        assertEquals(PhotoGrainSettings.OFF, TransferState().photoGrain)
+        assertEquals(mapOf(PhotoGrainStyle.FINE to 50, PhotoGrainStyle.MEDIUM to 40,
+            PhotoGrainStyle.COARSE to 30), TransferState().photoGrainIntensities)
+        assertEquals(false, TransferTask(file(1)).hasPhotoEffects)
+    }
+
+    @Test
+    fun grainSnapshotIsNormalizedAndExcludedFromRawAndVideoTasks() {
+        val tasks = createQueueTasks(
+            files = listOf(file(1), file(2).copy(fileName = "DSC_2.NEF"),
+                file(3).copy(fileName = "DSC_3.MOV")),
+            photoFrameEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false),
+            photoGrain = PhotoGrainSettings(200, enabled = true),
+        )
+        assertEquals(PhotoGrainSettings(100, enabled = true), tasks[0].photoGrainRequested)
+        assertEquals(PhotoGrainSettings.OFF, tasks[1].photoGrainRequested)
+        assertEquals(PhotoGrainSettings.OFF, tasks[2].photoGrainRequested)
+        assertEquals(false, tasks[1].hasPhotoEffects)
+        assertEquals(false, tasks[2].hasPhotoEffects)
+    }
+
+    @Test
+    fun disabledGrainRetainsIntensityWithoutRequestingAnEffect() {
+        val settings = PhotoGrainSettings(73, enabled = false)
+        val task = createQueueTasks(
+            files = listOf(file(1)),
+            photoFrameEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false),
+            photoGrain = settings,
+        ).single()
+        assertEquals(settings, task.photoGrainRequested)
+        assertEquals(false, task.hasPhotoEffects)
+        assertEquals(false, task.skipFrameGeneration().frameGenerationSkipped)
+    }
+
     @Test
     fun cropThenPreparationWaitDoesNotCountWaitingAsGenerationTime() {
         val task = TransferTask(file(1), status = TransferStatus.COMPLETED)

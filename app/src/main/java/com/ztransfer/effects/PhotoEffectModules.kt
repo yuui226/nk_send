@@ -2,11 +2,16 @@ package com.ztransfer.effects
 
 /** Visibility is independent of effect selection. At least one editor remains accessible. */
 enum class PhotoEffectModule(val bit: Int) {
-    FILTER(1), LUT(2), FRAME(4), WATERMARK(8);
+    FILTER(1), LUT(2), FRAME(4), WATERMARK(8), GRAIN(16);
 }
-const val ALL_PHOTO_EFFECT_MODULES = 15
+const val ALL_PHOTO_EFFECT_MODULES = 31
 fun normalizePhotoEffectModules(mask: Int): Int =
     (mask and ALL_PHOTO_EFFECT_MODULES).takeIf { it != 0 } ?: ALL_PHOTO_EFFECT_MODULES
+/** Introduce grain once; subsequent restores must respect the user's visibility choice. */
+fun restorePhotoEffectModules(mask: Int, grainIntroduced: Boolean): Int {
+    val normalized = normalizePhotoEffectModules(mask)
+    return if (grainIntroduced) normalized else normalized or PhotoEffectModule.GRAIN.bit
+}
 fun Int.showsPhotoEffect(module: PhotoEffectModule): Boolean = this and module.bit != 0
 private val FRAME_AND_WATERMARK = PhotoEffectModule.FRAME.bit or PhotoEffectModule.WATERMARK.bit
 

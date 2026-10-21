@@ -273,7 +273,7 @@
     <string name="photo_effects_open_editor">编辑照片效果</string>
     <string name="photo_effects_info_title">照片效果说明</string>
     <string name="photo_effects_info_description">仅处理 JPG/JPEG，原图保留，效果图另存；RAW 和视频不生效。调整用于后续入队照片。</string>
-    <string name="photo_effects_gesture_hint">点击放大，双击旋转；长按对比调色前后。</string>
+    <string name="photo_effects_gesture_hint">点击放大，双击旋转；长按对比调色与颗粒效果。</string>
     <string name="photo_effects_wheel_hint">上下拖动快速调节，也可点按切换。</string>
     <string name="photo_effects_full_chooser_hint">长按滤镜拨轮可按分类选择</string>
     <string name="photo_filter_off_option">无滤镜</string>
@@ -564,7 +564,7 @@
     <string name="local_photo_effects_entry">滤镜·LUT·边框·水印</string>
     <string name="local_photo_effects_info_description">可多选照片，共用当前效果，效果图另存。</string>
     <string name="local_photo_effects_exif_hint">边框：截图等无 EXIF 的图片不显示拍摄参数</string>
-    <string name="local_photo_effects_gesture_hint">点击放大，左右滑动换图；长按对比调色前后。</string>
+    <string name="local_photo_effects_gesture_hint">点击放大，左右滑动换图；长按对比调色与颗粒效果。</string>
     <string name="local_photo_multi_select">（可多选）</string>
     <string name="local_photo_reselect">重新选择（%1$d）</string>
     <string name="local_photo_batch_generating">生成中</string>
@@ -711,4 +711,10 @@
     <string name="remote_review_empty">暂无照片</string>
     <string name="remote_review_retry">加载失败 · 重试</string>
     <string name="remote_review_disconnected">相机已断开</string>
+    <string name="photo_grain">胶片颗粒</string>
+    <string name="photo_grain_fine">细颗粒</string>
+    <string name="photo_grain_medium">中颗粒</string>
+    <string name="photo_grain_coarse">粗颗粒</string>
+    <string name="photo_grain_intensity_summary">%1$s %2$d%%</string>
+    <string name="photo_grain_hint">选择颗粒粗细，再调节强度；各档强度分别保存。</string>
 </resources>

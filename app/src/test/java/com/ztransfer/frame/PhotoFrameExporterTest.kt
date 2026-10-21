@@ -28,6 +28,23 @@ class PhotoFrameExporterTest {
     }
 
     @Test
+    fun grainOnlyRegionsUseSmallScratchWhileCombinedEffectsReuseTheFilterBuffer() {
+        for (width in listOf(4000, 6000, 8256, 12000)) {
+            val height = photoFrameRegionRows(width)
+            val grain = photoFrameEffectScratchPixelCount(width, height, false, true)
+            val filter = photoFrameEffectScratchPixelCount(width, height, true, false)
+            assertEquals(0, photoFrameEffectScratchPixelCount(width, height, false, false))
+            assertTrue(grain >= width && grain <= 512 * 1024)
+            assertEquals(width * height, filter)
+            assertTrue(grain < filter)
+            assertEquals(filter, photoFrameEffectScratchPixelCount(width, height, true, true))
+        }
+        // Small sources should allocate only their real pixels, with no stripe-sized minimum.
+        assertEquals(3500, photoFrameEffectScratchPixelCount(50, 70, false, true))
+        assertEquals(3500, photoFrameEffectScratchPixelCount(50, 70, true, true))
+    }
+
+    @Test
     fun localPhotoOutputRecognizesStandardAndRestrictedImageDirectories() {
         assertTrue(isStandardImageRelativePath("DCIM/Camera/"))
         assertTrue(isStandardImageRelativePath("pictures/Screenshots"))

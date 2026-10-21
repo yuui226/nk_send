@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.ztransfer.effects.PhotoEffectsBatchProgress
 import com.ztransfer.effects.generatePhotoEffectsBatch
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.grain.PhotoGrainSettings
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFramePreset
@@ -27,6 +28,7 @@ internal data class LocalPhotoBatchEffects(
     val borderEnabled: Boolean,
     val metadataSettings: PhotoFrameMetadataSettings,
     val filter: PhotoFilterSelection?,
+    val grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
 )
 
 internal enum class LocalPhotoBatchPhase { READY, GENERATING, COMPLETE, PARTIAL, FAILED }
@@ -83,6 +85,7 @@ internal class LocalPhotoBatchViewModel(application: Application) : AndroidViewM
                                 borderEnabled = effects.borderEnabled,
                                 metadataSettings = effects.metadataSettings,
                                 filter = effects.filter,
+                                grain = effects.grain,
                             ).getOrThrow()
                             true
                         } catch (cancelled: CancellationException) {

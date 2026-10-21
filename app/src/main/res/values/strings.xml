@@ -273,7 +273,7 @@
     <string name="photo_effects_open_editor">Edit photo effects</string>
     <string name="photo_effects_info_title">About photo effects</string>
     <string name="photo_effects_info_description">JPG/JPEG only; RAW and video are unchanged. Originals are preserved and edited copies saved separately. Changes apply to photos queued next.</string>
-    <string name="photo_effects_gesture_hint">Tap to enlarge, double-tap to rotate, and hold to compare color adjustments.</string>
+    <string name="photo_effects_gesture_hint">Tap to enlarge, double-tap to rotate, and hold to compare color and grain effects.</string>
     <string name="photo_effects_wheel_hint">Drag up or down for quick adjustments, or tap to change options.</string>
     <string name="photo_effects_full_chooser_hint">Hold the photo filter wheel to choose by category</string>
     <string name="photo_filter_off_option">No filter</string>
@@ -567,7 +567,7 @@
     <string name="local_photo_effects_entry">Filter · LUT · Frame · Watermark</string>
     <string name="local_photo_effects_info_description">Select multiple photos to apply the same effects. Edited photos are saved as new copies.</string>
     <string name="local_photo_effects_exif_hint">Frame: Images without EXIF data, such as screenshots, won’t show shooting details</string>
-    <string name="local_photo_effects_gesture_hint">Tap to enlarge, swipe between photos, and hold to compare color adjustments.</string>
+    <string name="local_photo_effects_gesture_hint">Tap to enlarge, swipe between photos, and hold to compare color and grain effects.</string>
     <string name="local_photo_multi_select">(Select multiple photos)</string>
     <string name="local_photo_reselect">Choose again (%1$d)</string>
     <string name="local_photo_batch_generating">Generating</string>
@@ -714,4 +714,10 @@
     <string name="remote_review_empty">No photos</string>
     <string name="remote_review_retry">Load failed · Retry</string>
     <string name="remote_review_disconnected">Camera disconnected</string>
+    <string name="photo_grain">Film grain</string>
+    <string name="photo_grain_fine">Fine grain</string>
+    <string name="photo_grain_medium">Medium grain</string>
+    <string name="photo_grain_coarse">Coarse grain</string>
+    <string name="photo_grain_intensity_summary">%1$s %2$d%%</string>
+    <string name="photo_grain_hint">Choose a grain size and adjust its strength. Each size remembers its own strength.</string>
 </resources>
