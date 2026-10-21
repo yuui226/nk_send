@@ -748,9 +748,9 @@ class PhotoFrameExporterTest {
 
     @Test
     fun existingFrameLookupMatchesOnlyTheSameSourceAndPreset() {
-        val mistName = photoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST)
+        val mistName = legacyPhotoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST)
         val mistStem = mistName.substringBeforeLast('.')
-        val plaqueName = photoFrameOutputName("DSC_0123 (1).JPG", PhotoFramePreset.PLAQUE)
+        val plaqueName = legacyPhotoFrameOutputName("DSC_0123 (1).JPG", PhotoFramePreset.PLAQUE)
         val plaqueStem = plaqueName.substringBeforeLast('.')
 
         assertTrue(mistName.matches(Regex("DSC_0123_frame_mist_w[0-9a-f]{12}\\.jpg")))
@@ -770,14 +770,14 @@ class PhotoFrameExporterTest {
         )
         assertTrue(
             !isPhotoFrameOutputFor(
-                photoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.CINEMA),
+                legacyPhotoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.CINEMA),
                 "DSC_0123.JPG",
                 PhotoFramePreset.MIST,
             ),
         )
         assertTrue(
             !isPhotoFrameOutputFor(
-                photoFrameOutputName("DSC_9999.JPG", PhotoFramePreset.MIST),
+                legacyPhotoFrameOutputName("DSC_9999.JPG", PhotoFramePreset.MIST),
                 "DSC_0123.JPG",
                 PhotoFramePreset.MIST,
             ),
@@ -797,13 +797,13 @@ class PhotoFrameExporterTest {
             text = "Studio",
             position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
         )
-        val mist = photoFrameOutputName(
+        val mist = legacyPhotoFrameOutputName(
             "DSC.JPG",
             PhotoFramePreset.MIST,
             watermark,
             borderEnabled = false,
         )
-        val plaque = photoFrameOutputName(
+        val plaque = legacyPhotoFrameOutputName(
             "DSC.JPG",
             PhotoFramePreset.PLAQUE,
             watermark,
@@ -838,10 +838,10 @@ class PhotoFrameExporterTest {
         val first = PhotoFrameWatermark(text = "Studio A")
         val same = PhotoFrameWatermark(text = " Studio A ")
         val second = PhotoFrameWatermark(text = "Studio B")
-        val firstName = photoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST, first)
+        val firstName = legacyPhotoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST, first)
 
-        assertEquals(firstName, photoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST, same))
-        assertTrue(firstName != photoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST, second))
+        assertEquals(firstName, legacyPhotoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST, same))
+        assertTrue(firstName != legacyPhotoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST, second))
         assertTrue(firstName.matches(Regex("DSC_0123_frame_mist_w[0-9a-f]{12}\\.jpg")))
         assertTrue(!firstName.contains("Studio", ignoreCase = true))
         assertTrue(isPhotoFrameOutputName(firstName))
@@ -852,16 +852,16 @@ class PhotoFrameExporterTest {
     @Test
     fun visuallyEquivalentAutoAndExplicitPositionsShareAnOutputIdentity() {
         assertEquals(
-            photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST),
-            photoFrameOutputName(
+            legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST),
+            legacyPhotoFrameOutputName(
                 "DSC.JPG",
                 PhotoFramePreset.MIST,
                 PhotoFrameWatermark(position = PhotoFrameWatermarkPosition.CENTER),
             ),
         )
         assertEquals(
-            photoFrameOutputName("DSC.JPG", PhotoFramePreset.PLAQUE),
-            photoFrameOutputName(
+            legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.PLAQUE),
+            legacyPhotoFrameOutputName(
                 "DSC.JPG",
                 PhotoFramePreset.PLAQUE,
                 PhotoFrameWatermark(position = PhotoFrameWatermarkPosition.LEFT),
@@ -877,13 +877,13 @@ class PhotoFrameExporterTest {
         )
 
         assertEquals(
-            photoFrameOutputName(
+            legacyPhotoFrameOutputName(
                 "DSC.JPG",
                 PhotoFramePreset.MIST,
                 automatic,
                 borderEnabled = false,
             ),
-            photoFrameOutputName(
+            legacyPhotoFrameOutputName(
                 "DSC.JPG",
                 PhotoFramePreset.PLAQUE,
                 explicit,
@@ -896,12 +896,12 @@ class PhotoFrameExporterTest {
     fun watermarkColorChangesTheVersionedOutputIdentity() {
         val adaptive = PhotoFrameWatermark(color = PhotoFrameWatermarkColor.ADAPTIVE)
         val gold = PhotoFrameWatermark(color = PhotoFrameWatermarkColor.GOLD)
-        val adaptiveName = photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, adaptive)
+        val adaptiveName = legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, adaptive)
 
         assertTrue(adaptiveName.matches(Regex("DSC_frame_mist_w[0-9a-f]{12}\\.jpg")))
-        assertEquals(adaptiveName, photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, adaptive))
+        assertEquals(adaptiveName, legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, adaptive))
         assertTrue(
-            photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, gold) !=
+            legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, gold) !=
                 adaptiveName,
         )
     }
@@ -992,12 +992,12 @@ class PhotoFrameExporterTest {
     @Test
     fun watermarkV2AlwaysUsesAStableVersionedIdentity() {
         val baseline = PhotoFrameWatermark(text = "Studio A")
-        val baselineName = photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, baseline)
-        val defaultName = photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST)
+        val baselineName = legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, baseline)
+        val defaultName = legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST)
 
         assertTrue(baselineName.matches(Regex("DSC_frame_mist_w[0-9a-f]{12}\\.jpg")))
         assertTrue(defaultName.matches(Regex("DSC_frame_mist_w[0-9a-f]{12}\\.jpg")))
-        assertEquals(baselineName, photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, baseline))
+        assertEquals(baselineName, legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, baseline))
         assertTrue(defaultName != "DSC_frame_mist.jpg")
 
         val subtle = baseline.copy(opacityPercent = 40)

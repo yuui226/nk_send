@@ -1,0 +1,28 @@
+Tool: built-in image_gen
+Reference icon: docs/品牌素材/ztransfer_icon_1024.png
+
+Initial generation prompt:
+Use case: ads-marketing.
+Create ONE polished, attention-grabbing Chinese Xiaohongshu cover for the independent Android photography app Z传. Portrait 3:4 format, preferably 1536x2048. Final finished editorial advertising artwork, not a mockup on a wall or screen.
+Input image 1 is the ORIGINAL Z传 app icon, supporting brand asset only. Reproduce its exact white angular Z-shaped mark and charcoal square faithfully in the final cover. Do not redesign this mark or replace it with an ordinary letter Z.
+
+Design direction: confident contemporary camera-magazine cover, striking Nikon-yellow / near-black / warm ivory palette. Premium print texture, restrained grain, art-directed product photography with bold Chinese typography. Legible in a small mobile feed thumbnail, highly attractive but not cluttered. Strong hierarchy, generous intentional spacing, no generic futuristic tech look.
+
+Layout: top roughly 40% dominated by enormous beautifully kerned heavy simplified-Chinese sans-serif headline across 2–3 lines. Yellow background and near-black type. Highlight the quoted 云创 phrase with an elegant high-contrast black block and yellow letters if it improves readability. Keep all important content inside generous 6% margins.
+Middle/lower hero: realistic Nikon Z30 camera with compact NIKKOR Z DX 16–50mm kit lens, front three-quarter view, black detailed textured body, accurate Z30 LOW FLAT TOP WITHOUT AN EVF HUMP, natural red grip accent, convincing premium studio lighting, soft grounded shadow. Make camera recognizable and substantial, not a tiny decoration. Behind it, two slightly overlapping tasteful photographic print cards, one warm cinematic street scene and one muted green landscape, suggesting diverse in-camera color recipes. A discreet small yellow/black arrow and a tiny NP3 document motif may convey importing a preset into the camera, but avoid interface screenshots or made-up app UI.
+Bottom: clean brand lockup using the provided original app icon, clearly readable name Z传, and a concise compelling line. The bottom should feel professionally composed, with enough negative space; do not turn it into several competing badges.
+
+Exact visible Chinese copy, spelling MUST be correct:
+Main headline: “尼康 Z30”
+Main headline continuation: “也能用「云创」”
+One compact supporting line: “手机写入机内预设”
+Brand name alongside original icon: “Z传”
+Bottom supporting slogan: “换个预设，直接出片”
+Small but readable contextual label near brand: “第三方预设工具”
+
+Meaning: 云创 in the headline is a quoted analogy for picture-control preset functionality provided by Z传. Present an independent third-party app, not an official Nikon cloud service or official partnership.
+Constraints: only the above copy plus tiny authentic Nikon / Z30 product markings and optional NP3 on the small document motif. No QR codes, no fabricated URL, no official-cloud logo, no app-store badge, no fake prices, no device compatibility claims beyond Z30. No starbursts, emojis, fake like counts, comparison claims, excessive decorations or tiny unreadable copy. Camera product realism, excellent Chinese typography, high visual quality.
+
+Final correction prompt:
+Edit this finished Xiaohongshu cover with ONE precise correction only: the small curved yellow arrow between the NP3 document and the Nikon Z30 camera must indicate importing the NP3 INTO the camera, not exporting. Reverse its direction so the arrowhead points LEFT toward the camera, and its tail begins beside the NP3 document on the right. Keep the curved arrow small, elegant and clearly visible against the dark camera/green background. Preserve EVERYTHING ELSE exactly: the full poster composition, 3:4 aspect ratio and resolution, all Chinese copy and typography, yellow/cream background, Nikon Z30 product photograph, two photo prints, original Z传 app icon and brand text, all lighting and textures. Do not add any text or other changes.
+

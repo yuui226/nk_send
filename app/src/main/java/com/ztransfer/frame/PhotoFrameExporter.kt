@@ -285,7 +285,15 @@ private const val PHOTO_FRAME_EXPORT_TAG = "PhotoFrameExporter"
 internal data class PhotoFrameDestination(
     val directoryUri: Uri,
     val occupiedNames: MutableSet<String>,
-)
+    val documents: MutableMap<String, Uri>,
+    val readIdentity: (Uri) -> String?,
+) {
+    fun recordPublished(name: String, uri: Uri) {
+        // Keep distinct documents on case-sensitive providers; matching remains case-insensitive.
+        documents[name] = uri
+        occupiedNames.add(name)
+    }
+}
 
 private fun concurrentPhotoFrameNames(names: Collection<String>): MutableSet<String> =
     ConcurrentHashMap.newKeySet<String>().apply { addAll(names) }
@@ -1129,12 +1137,25 @@ object PhotoFrameExporter {
                 PHOTO_FRAME_OUTPUT_DIRECTORY,
             )
             ?: error("Cannot create frame output directory")
+        val documents = ConcurrentHashMap<String, Uri>()
         return PhotoFrameDestination(
             directoryUri = directoryUri,
             occupiedNames = concurrentPhotoFrameNames(
-                listChildNames(resolver, treeUri, directoryUri),
+                listChildNames(resolver, treeUri, directoryUri, documents),
             ),
+            documents = documents,
+            readIdentity = { uri -> readOutputIdentity(resolver, uri) },
         )
+    }
+
+    /** Read only JPEG header metadata; no bitmap decode or writable file descriptor needed. */
+    internal fun readOutputIdentity(resolver: ContentResolver, uri: Uri): String? = try {
+        resolver.openInputStream(uri)?.buffered()?.use(PhotoEffectIdentityJpeg::read)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        // Missing, inaccessible or externally rewritten files must never cause a false skip.
+        null
     }
 
     private fun findFrameDirectory(
@@ -1187,6 +1208,7 @@ object PhotoFrameExporter {
         resolver: ContentResolver,
         treeUri: Uri,
         directoryUri: Uri,
+        documents: MutableMap<String, Uri>,
     ): Set<String> {
         val documentId = DocumentsContract.getDocumentId(directoryUri)
         val childrenUri =
@@ -1228,6 +1250,12 @@ object PhotoFrameExporter {
                         }
                     } else {
                         add(name)
+                        if (idColumn >= 0) {
+                            cursor.getString(idColumn)?.let { childId ->
+                                documents[name] =
+                                    DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                            }
+                        }
                     }
                 }
             }
@@ -4546,6 +4574,9 @@ object PhotoFrameExporter {
             filter = filter,
         )
         val name = uniqueName(preferred, source.occupiedNames)
+        val identity = photoFrameOutputIdentity(
+            source.displayName, preset, watermark, borderEnabled, metadataSettings, filter,
+        )
         val originalPath = source.relativePath
         val canTryOriginal = originalPath != null && canCreateDerivedImageInOriginalPath(
             relativePath = originalPath,
@@ -4564,6 +4595,7 @@ object PhotoFrameExporter {
                     relativePath = checkNotNull(originalPath),
                     relatedMediaUri = source.relatedMediaUri,
                     name = name,
+                    identity = identity,
                     bitmap = bitmap,
                     occupiedNames = source.occupiedNames,
                 )
@@ -4599,6 +4631,7 @@ object PhotoFrameExporter {
                 relativePath = LOCAL_PHOTO_FALLBACK_RELATIVE_PATH,
                 relatedMediaUri = null,
                 name = name,
+                identity = identity,
                 bitmap = bitmap,
                 occupiedNames = source.occupiedNames,
             )
@@ -4617,6 +4650,7 @@ object PhotoFrameExporter {
         relativePath: String,
         relatedMediaUri: Uri?,
         name: String,
+        identity: String,
         bitmap: Bitmap,
         occupiedNames: MutableSet<String>,
     ): PhotoFrameExportResult {
@@ -4644,7 +4678,9 @@ object PhotoFrameExporter {
         var keepTarget = false
         try {
             val written = resolver.openOutputStream(target, "w")?.let { raw ->
-                BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
+                PhotoEffectIdentityJpeg.outputStream(
+                    BufferedOutputStream(raw, COPY_BUFFER_BYTES), identity,
+                ).use { output ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_FRAME_JPEG_QUALITY, output)
                 }
             } == true
@@ -4699,6 +4735,10 @@ object PhotoFrameExporter {
             metadataSettings = metadataSettings,
             filter = filter,
         )
+        val identity = photoFrameOutputIdentity(
+            sourceName, preset, watermark, borderEnabled, metadataSettings, filter,
+        )
+        // Validate identity before reserving; failed settings must not consume a filename.
         // Reserve before touching the provider so concurrent exporters never select the same name.
         val name = reservePhotoFrameName(preferred, destination.occupiedNames)
         val tempName = photoFrameTempName(System.nanoTime())
@@ -4724,7 +4764,9 @@ object PhotoFrameExporter {
         try {
             val jpegStartedAtMs = generationProbeClock()
             val written = resolver.openOutputStream(temp, "w")?.let { raw ->
-                BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
+                PhotoEffectIdentityJpeg.outputStream(
+                    BufferedOutputStream(raw, COPY_BUFFER_BYTES), identity,
+                ).use { output ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_FRAME_JPEG_QUALITY, output)
                 }
             } == true
@@ -4769,7 +4811,7 @@ object PhotoFrameExporter {
                 val result = PhotoFrameExportResult(
                     displayName = displayNameOf(resolver, renamed) ?: name,
                 )
-                destination.occupiedNames.add(result.displayName)
+                destination.recordPublished(result.displayName, renamed)
                 keepReservedName = true
                 return result
             }
@@ -4788,7 +4830,7 @@ object PhotoFrameExporter {
             val result = PhotoFrameExportResult(
                 displayName = displayNameOf(resolver, copied) ?: name,
             )
-            destination.occupiedNames.add(result.displayName)
+            destination.recordPublished(result.displayName, copied)
             keepReservedName = true
             return result
         } finally {
@@ -5794,11 +5836,53 @@ private const val FILM_GALLERY_RENDER_VERSION = 1
 private const val FILM_NEGATIVE_RENDER_VERSION = 2
 private const val PHOTO_FILTER_RENDER_VERSION = 3
 
-internal fun isPhotoFrameOutputName(name: String): Boolean =
-    PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name)
+private val SHORT_PHOTO_EFFECT_OUTPUT_PATTERN =
+    Regex("""_(?:f(?:_e)?|w(?:_e)?|e)(?: \(\d+\)|_\d+)?\.jpe?g$""", RegexOption.IGNORE_CASE)
+private val PHOTO_EFFECT_IDENTITY_PATTERN = Regex("[0-9a-f]{64}", RegexOption.IGNORE_CASE)
 
-/** 同一张本地原片、同一预设及同一水印配置对应的首选输出名。 */
+internal fun isShortPhotoFrameOutputName(name: String): Boolean =
+    SHORT_PHOTO_EFFECT_OUTPUT_PATTERN.containsMatchIn(name)
+
+/** Short suffixes alone are not proof: a user's original can legitimately end in _f. */
+internal fun isPhotoFrameOutputName(name: String, identity: String? = null): Boolean =
+    PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name) ||
+        (isShortPhotoFrameOutputName(name) &&
+            identity != null && PHOTO_EFFECT_IDENTITY_PATTERN.matches(identity))
+
+/** Visible names describe operations only; render parameters live in the JPEG metadata. */
+@Suppress("UNUSED_PARAMETER")
 internal fun photoFrameOutputName(
+    sourceName: String,
+    preset: PhotoFramePreset,
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+    filter: PhotoFilterSelection? = null,
+): String {
+    val decoration = when {
+        borderEnabled -> "_f"
+        watermark.enabled -> "_w"
+        else -> ""
+    }
+    val suffix = decoration + if (filter != null) "_e" else ""
+    return "${File(sourceName).nameWithoutExtension}${suffix.ifEmpty { "_e" }}.jpg"
+}
+
+/** Keep the exact legacy identity inputs, including every existing render-version token. */
+internal fun photoFrameOutputIdentity(
+    sourceName: String,
+    preset: PhotoFramePreset,
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+    filter: PhotoFilterSelection? = null,
+): String = MessageDigest.getInstance("SHA-256")
+    .digest(legacyPhotoFrameOutputName(sourceName, preset, watermark, borderEnabled,
+        metadataSettings, filter).lowercase(Locale.ROOT).toByteArray(Charsets.UTF_8))
+    .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
+
+/** Existing long filenames remain readable and retain their exact deduplication semantics. */
+internal fun legacyPhotoFrameOutputName(
     sourceName: String,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
@@ -5977,9 +6061,8 @@ private fun resolvedWatermarkPosition(
 /**
  * 判断目标目录中是否已经有该原片按指定预设与水印配置生成的成片。
  *
- * 除首选名外也识别导出器为重名冲突生成的 " (n)" / 时间戳副本，避免用户重新点击
- * 已传照片时继续制造同款副本。原片名和扩展名均按 DocumentsProvider 的常见行为
- * 做大小写不敏感比较。
+ * 旧长名继续按文件名查重；新短名读取 JPEG 内的配置标识，不能仅凭短名跳过。
+ * 两者都识别编号副本并按大小写不敏感比较；仅打开同来源、同操作标记的短名候选。
  */
 internal fun PhotoFrameDestination.hasFrameFor(
     sourceName: String,
@@ -5992,15 +6075,28 @@ internal fun PhotoFrameDestination.hasFrameFor(
     // A filename only records selected fields, not whether an earlier geocoder succeeded.
     // Explicit re-export must be allowed to fill in a place missing from an offline export.
     if (borderEnabled && (metadataSettings.showCity || metadataSettings.showRegion)) return false
-    val pattern = photoFrameOutputPattern(
-        sourceName,
-        preset,
-        watermark,
-        borderEnabled,
-        metadataSettings,
-        filter,
-    )
-    return occupiedNames.any(pattern::matches)
+    return hasPhotoEffectOutput(
+        occupiedNames,
+        photoFrameOutputName(sourceName, preset, watermark, borderEnabled, metadataSettings, filter),
+        legacyPhotoFrameOutputName(sourceName, preset, watermark, borderEnabled, metadataSettings, filter),
+        photoFrameOutputIdentity(sourceName, preset, watermark, borderEnabled, metadataSettings, filter),
+    ) { name -> documents[name]?.let(readIdentity) }
+}
+
+/** Rebuilding a destination after restart needs only the files, never an app-private record. */
+internal fun hasPhotoEffectOutput(
+    occupiedNames: Set<String>,
+    shortName: String,
+    legacyName: String,
+    identity: String,
+    readIdentity: (String) -> String?,
+): Boolean {
+    val legacyPattern = photoFrameOutputPattern(legacyName)
+    if (occupiedNames.any(legacyPattern::matches)) return true
+    val shortPattern = photoFrameOutputPattern(shortName)
+    return occupiedNames.any { name ->
+        shortPattern.matches(name) && identity.equals(readIdentity(name), ignoreCase = true)
+    }
 }
 
 internal fun isPhotoFrameOutputFor(
@@ -6011,31 +6107,15 @@ internal fun isPhotoFrameOutputFor(
     borderEnabled: Boolean = true,
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
-): Boolean = photoFrameOutputPattern(
-    sourceName,
-    preset,
-    watermark,
-    borderEnabled,
-    metadataSettings,
-    filter,
-).matches(name)
+    identity: String? = null,
+): Boolean = hasPhotoEffectOutput(
+    setOf(name),
+    photoFrameOutputName(sourceName, preset, watermark, borderEnabled, metadataSettings, filter),
+    legacyPhotoFrameOutputName(sourceName, preset, watermark, borderEnabled, metadataSettings, filter),
+    photoFrameOutputIdentity(sourceName, preset, watermark, borderEnabled, metadataSettings, filter),
+) { identity }
 
-private fun photoFrameOutputPattern(
-    sourceName: String,
-    preset: PhotoFramePreset,
-    watermark: PhotoFrameWatermark,
-    borderEnabled: Boolean,
-    metadataSettings: PhotoFrameMetadataSettings,
-    filter: PhotoFilterSelection?,
-): Regex {
-    val preferred = photoFrameOutputName(
-        sourceName,
-        preset,
-        watermark,
-        borderEnabled,
-        metadataSettings,
-        filter,
-    )
+private fun photoFrameOutputPattern(preferred: String): Regex {
     val dot = preferred.lastIndexOf('.')
     val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
     val extension = if (dot >= 0) preferred.substring(dot) else ""
@@ -6052,11 +6132,12 @@ internal fun uniqueName(preferred: String, occupied: Set<String>): String {
     val dot = preferred.lastIndexOf('.')
     val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
     val ext = if (dot >= 0) preferred.substring(dot) else ""
-    for (index in 1..999) {
+    var index = 1L
+    while (true) {
         val candidate = "$stem ($index)$ext"
         if (candidate.lowercase(Locale.ROOT) !in normalizedOccupied) return candidate
+        index++
     }
-    return "${stem}_${System.currentTimeMillis()}$ext"
 }
 
 private fun formatAperture(value: Double): String =

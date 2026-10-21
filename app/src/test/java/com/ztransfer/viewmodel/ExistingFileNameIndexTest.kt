@@ -141,4 +141,21 @@ class ExistingFileNameIndexTest {
         assertNull(index.find("trip.JPG", 123L))
         assertEquals("photo", index.find("HOLIDAY.jpg", 123L)?.value)
     }
+
+    @Test
+    fun shortDerivedNamesNeverStandInForTheCameraOriginal() {
+        val suffixes = listOf("c", "f", "w", "e", "f_e", "w_e", "c_f_e")
+        for (suffix in suffixes) {
+            for (number in listOf("", " (1)", " (1000)")) {
+                val name = "DSC_9049_$suffix$number.jpg"
+                val index = ExistingFileNameIndex<String>().apply { add(name, 123L, "derived") }
+                assertNull(name, index.find("DSC_9049.JPG", 123L))
+                assertNull(name, index.find("Z30_9049.JPG", 123L))
+                assertEquals("derived", index.find(name, 123L)?.value)
+
+                val exported = ExportedOriginalIndex().apply { add(name, 123L) }
+                assertFalse(name, exported.contains(file("Z30_9049.JPG", 123L)))
+            }
+        }
+    }
 }

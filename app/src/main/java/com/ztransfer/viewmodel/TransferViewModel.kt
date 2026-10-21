@@ -54,6 +54,7 @@ import com.ztransfer.frame.PHOTO_FRAME_PART_PREFIX
 import com.ztransfer.frame.hasFrameFor
 import com.ztransfer.frame.isCurrentPhotoFrameTempName
 import com.ztransfer.frame.isPhotoFrameOutputName
+import com.ztransfer.frame.isShortPhotoFrameOutputName
 import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.frame.isSupportedPhotoFrameSourceExtension
 import com.ztransfer.frame.migratedPhotoFrameWatermarkSizePercent
@@ -1034,10 +1035,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             .find(file.fileName, file.size)
             ?.let { LocalOriginal(it.displayName, it.size, it.value) }
 
-        fun exportedOriginalEntries(): Sequence<IndexedExistingFile<Uri>> = files.entries()
+        fun exportedOriginalEntries(readIdentity: (Uri) -> String?): Sequence<IndexedExistingFile<Uri>> = files.entries()
                 .asSequence()
                 .filterNot {
                     isPhotoFrameOutputName(it.displayName) ||
+                        (isShortPhotoFrameOutputName(it.displayName) &&
+                            isPhotoFrameOutputName(it.displayName, readIdentity(it.value))) ||
                         it.displayName.equals(PHOTO_FRAME_OUTPUT_DIRECTORY, ignoreCase = true)
                 }
                 .map {
@@ -2068,7 +2071,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             directoryIndexes.forEach { (destinationFolderName, directoryIndex) ->
                 if (
                     snapshot.existingExportIndex.addAll(
-                        entries = directoryIndex.exportedOriginalEntries(),
+                        entries = directoryIndex.exportedOriginalEntries { uri ->
+                            PhotoFrameExporter.readOutputIdentity(contentResolver, uri)
+                        },
                         destinationFolderName = destinationFolderName,
                     )
                 ) {
@@ -3030,7 +3035,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
             context.ensureActive()
             val index = getDirectoryIndex(treeUri, destinationUri)
-            val preferred = sourceName.substringBeforeLast('.') + "_crop.jpg"
+            val preferred = sourceName.substringBeforeLast('.') + "_c.jpg"
             val name = index.reserveDisplayName(preferred, ::suffixedName)
             try {
                 // Record a publication crossing the cancellation boundary so retries can reuse it.
