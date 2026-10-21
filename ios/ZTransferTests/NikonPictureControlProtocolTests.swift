@@ -1,5 +1,4 @@
 import XCTest
-import CryptoKit
 @testable import ZTransfer
 
 final class NikonPictureControlProtocolTests: XCTestCase {
@@ -79,7 +78,7 @@ final class NikonPictureControlProtocolTests: XCTestCase {
     }
 
     func testProductionWriteBacksUpEmptySlotAndAcceptsOnlyDocumentedDefaultCurveOmission() async throws {
-        let file = try XCTUnwrap(builtInPictureControls().first).read()
+        let file = try SyntheticPictureControlFixture.file()
         let encoded = try file.encodeClassicPictureControl()
         var defaultHeader = Data(encoded.prefix(36)); defaultHeader[35] = 0
         let empty = Data(repeating: 0, count: 36)
@@ -106,7 +105,7 @@ final class NikonPictureControlProtocolTests: XCTestCase {
     }
 
     func testAmbiguousWriteFailureRestoresOriginalThroughActualRepositoryProtocol() async throws {
-        let file = try XCTUnwrap(builtInPictureControls().first).read()
+        let file = try SyntheticPictureControlFixture.file()
         let encoded = try file.encodeClassicPictureControl()
         let previous = dataset()
         let wire = PictureControlWire([
@@ -278,22 +277,23 @@ final class NikonLegacyPictureControlTests: XCTestCase {
             XCTAssertThrowsError(try NikonPictureControlData(item: 203, responseCode: 0x2001, data: bad, format: .legacyV2))
         }
     }
-    func testBundledV2EncodingPreservesIndependentNP2CurveHashesAndRejectsNewerAdjustments() throws {
-        let expected = ["Kodak Ektar Green": "4f41279ce59e1c543289785563b435dea08f600df5392e8764f59be7ca4af5e6",
-                        "LINKS-Nature": "e84a01548e1e0858d9271acfbeeff90a7764b30438e2e1c59f2bf302f5eaa5c2"]
-        var unsupported = Set<String>()
-        for preset in try builtInPictureControls() {
-            let file = try preset.read()
+    func testUserNP3V2EncodingPreservesCurveAndRejectsNewerAdjustments() throws {
+        for withCurve in [false, true] {
+            let file = try SyntheticPictureControlFixture.file(withCurve: withCurve)
             XCTAssertEqual(try file.encodePictureControl(format: .classicZ), try file.encodeClassicPictureControl())
-            do {
-                let data = try file.encodePictureControl(format: .legacyV2)
-                let parsed = try NikonPictureControlData(item: 209, responseCode: 0x2001, data: data, format: .legacyV2)
-                XCTAssertEqual(parsed.name, file.name)
-                if let hash = expected[file.name] { XCTAssertEqual(SHA256.hash(data: data.subdata(in: 32..<610)).map { String(format: "%02x", $0) }.joined(), hash) }
-            } catch NikonPictureControlError.presetUnsupported { unsupported.insert(file.name) }
+            let data = try file.encodePictureControl(format: .legacyV2)
+            let parsed = try NikonPictureControlData(item: 209, responseCode: 0x2001, data: data, format: .legacyV2)
+            XCTAssertEqual(parsed.name, file.name)
+            XCTAssertEqual(data.count, withCurve ? 610 : 32)
+            XCTAssertEqual(data[2], 1, "User NP3 must be registered as custom")
+            if withCurve { XCTAssertEqual(data.subdata(in: 32..<610), SyntheticPictureControlFixture.curve) }
         }
-        XCTAssertEqual(unsupported, ["Kodak-Sun-Nature"])
-        let file = try XCTUnwrap(builtInPictureControls().first { $0.name == "Kodak Ektar Green" }).read()
+        let unsupported = try SyntheticPictureControlFixture.file(midRange: 4)
+        XCTAssertNoThrow(try unsupported.encodePictureControl(format: .classicZ))
+        XCTAssertThrowsError(try unsupported.encodePictureControl(format: .legacyV2)) {
+            guard case NikonPictureControlError.presetUnsupported = $0 else { return XCTFail("Wrong error: \($0)") }
+        }
+        let file = try SyntheticPictureControlFixture.file()
         let classic = try file.encodeClassicPictureControl()
         for (offset, value) in [(0, 111), (25, 255), (26, 4), (22, 10), (23, 1), (24, 1), (32, 1), (33, 1), (34, 1)] {
             var changed = classic; changed[offset] = UInt8(value)

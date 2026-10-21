@@ -7,14 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		91C3682D875B418992CA5011 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 91C3682D875B418992CA5012 /* ThirdPartyNotices.txt */; };
-		91C3682D875B418992CA5001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 91C3682D875B418992CA5002 /* PrivacyInfo.xcprivacy */; };
-		25EEACED831FB5948D96E186 /* QueueTopControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */; };
-		CFFE89B33DB4BA87C30E539D /* QueueTopIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */; };
-		07D196CBCE1AE019DBA26586 /* QueueTopControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46BABF58F95603C73D247FD /* QueueTopControls.swift */; };
-		F58F6D6A16E09A2634D7A7CB /* ModalPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00753B4CE3A01EDD6487ABEA /* ModalPresentationTests.swift */; };
-		EAF39EF21DD2FBAAE566E5DA /* AndroidDialogPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55C87D3A5ED076313CD5B27E /* AndroidDialogPresentation.swift */; };
-		A4E0E77D663548B78D0E6A24 /* RemoteLUTPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E0E77D663548B78D0E6A23 /* RemoteLUTPanel.swift */; };
 		0017B12265DF2B75A6026010 /* firework-1-1200.png in Resources */ = {isa = PBXBuildFile; fileRef = 95E04AB25ADC7EE62B3DAE30 /* firework-1-1200.png */; };
 		0073BCF4497DD37C3661B7DE /* RemoteLUTState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873F9C8A1B94288FB1C66886 /* RemoteLUTState.swift */; };
 		00DC4529DA733509F741F333 /* RestoredCameraWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 963159759C53600E4797F989 /* RestoredCameraWorkspaceTests.swift */; };
@@ -38,6 +30,7 @@
 		068361B4BF60CFACA957C619 /* AndroidShadowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2FB548A10098CF1F2E3D691 /* AndroidShadowView.swift */; };
 		075325CEBC09C41F344985F4 /* STAProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC4F7B00A76D4F318D10B0E /* STAProfileStore.swift */; };
 		07536DCEAC6F73F298D92823 /* PhotoThumbnailFillQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */; };
+		07D196CBCE1AE019DBA26586 /* QueueTopControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46BABF58F95603C73D247FD /* QueueTopControls.swift */; };
 		08C4065ABC588B1A0854510E /* RemoteToolModeCrossfade.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C776746630D8F925E8A5DC3 /* RemoteToolModeCrossfade.swift */; };
 		08FAF1172B59F5DAF4CA1CC5 /* jquant1-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 522AA7890BBCE2070E2A5510 /* jquant1-12.c */; };
 		09490C6EB36E679EDDF9483F /* STAJpegThumbnail.swift in Sources */ = {isa = PBXBuildFile; fileRef = B687D10284CA50FCE86F2E5B /* STAJpegThumbnail.swift */; };
@@ -46,6 +39,7 @@
 		0B9004FE46C1C1BA63C8C911 /* jccoefct-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 8B6CA6A6E3F5A903D6ED598C /* jccoefct-12.c */; };
 		0C57D49D98674B2A387B41B9 /* jccolor-16.c in Sources */ = {isa = PBXBuildFile; fileRef = C0B7B587F1F0751EBD2648E1 /* jccolor-16.c */; };
 		0CE24FB43D1972CF18B5D787 /* QueueSwipeInteractionHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CEE7D0D00A0FB592A6FBC0 /* QueueSwipeInteractionHarness.swift */; };
+		0D0588FAB7E6A0FE083B2617 /* RemoteToolMarkAndPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */; };
 		0DA45CBBA84B5DCA4C0BBBA8 /* PhotoFrameCoordinateFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D331FCEE042A720D8DF2EDCD /* PhotoFrameCoordinateFormatTests.swift */; };
 		0DE58F9F3A05BC1AD129BE66 /* RemoteLiveViewAttitudeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7B4A65B9C87E58EC9C670B /* RemoteLiveViewAttitudeTests.swift */; };
 		0E1739467119ADD78EC6FFB0 /* STAResetPairingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */; };
@@ -56,6 +50,7 @@
 		0FD6C1294D20D6498B7DAF2D /* LosslessCropProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78A06DFB6CD821F0E2DAD5C /* LosslessCropProcessor.swift */; };
 		10BA2D27B0425D2A34F982F2 /* RemoteViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */; };
 		10CCCC43C90C4BAC80EA839E /* jclhuff.c in Sources */ = {isa = PBXBuildFile; fileRef = 23E671E64F284B2F3771C6BB /* jclhuff.c */; };
+		1247DA6DFC0B675D9077ACD7 /* RemoteToolMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */; };
 		12ACC8900A88AC9927EA63AB /* RemoteToolsInteractionHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F8AF750CC99BF1A1C36EEBB /* RemoteToolsInteractionHarness.swift */; };
 		130D0D059E7A05672A3B50CA /* jdmarker.c in Sources */ = {isa = PBXBuildFile; fileRef = 0B09A6962A999D2E30CC871B /* jdmarker.c */; };
 		134C865E22C05925A5292EC4 /* ZTransferButtonPressState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1BFE54840B23AFF2DD72D4 /* ZTransferButtonPressState.swift */; };
@@ -73,7 +68,6 @@
 		1793BC1FEEB38A9051630D1C /* NikonPictureControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B78CB0F985A39FDB47256C20 /* NikonPictureControl.swift */; };
 		17A163DBDD4C7061970846D1 /* QueueCardSwipeInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC28B7A2CA5A97C97B62DB7 /* QueueCardSwipeInput.swift */; };
 		18058907C2A51BE251568D3E /* jdsample-16.c in Sources */ = {isa = PBXBuildFile; fileRef = 0E93B2903B6D585FBE6EEE30 /* jdsample-16.c */; };
-		184FC3E52FA3CCE5853A2F52 /* PhotoFrameBrandLogoCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59C7B150B97663D472FFC131 /* PhotoFrameBrandLogoCatalogTests.swift */; };
 		18885565EAE33BA504E27902 /* PictureControlBackupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8605768F5E9211393FA89E /* PictureControlBackupStore.swift */; };
 		1899EFC2A607956D76A25F78 /* QueueRetryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8ADFEE0179A205DDFC8E57D /* QueueRetryUITests.swift */; };
 		192B58B8BE22C28B1DEE5C25 /* JpegCropHeaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2140A85EB77C6128F9F8EA13 /* JpegCropHeaderTests.swift */; };
@@ -82,7 +76,6 @@
 		1E5DF47D76E46FEB32ACBEED /* QueuePillVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC195B93C2BD33E13CE4D584 /* QueuePillVisibility.swift */; };
 		1EC248878C9206BCE45D8400 /* jcmaster.c in Sources */ = {isa = PBXBuildFile; fileRef = C90A0A722107244840B5DF08 /* jcmaster.c */; };
 		1F069ED71F8E352C34908B93 /* AutoTransferMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF75090392EAE250C293306C /* AutoTransferMode.swift */; };
-		1FC02F762D8AC9BAAE3E836D /* PhotoFrameBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFAFC5849A3B8ED41A318E4 /* PhotoFrameBrand.swift */; };
 		1FCCB40574D1DA7E23BE18A6 /* RemoteToolDragStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6220C572967539054EFC1A /* RemoteToolDragStateTests.swift */; };
 		1FD01BC646C7E68E9E60F7AF /* CropGestureState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8059435BDAA6FA1AC2DEAA96 /* CropGestureState.swift */; };
 		20A31526061194512CF6A933 /* RemoteHorizonRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C327CE176B8B9471281D46E2 /* RemoteHorizonRenderingTests.swift */; };
@@ -92,21 +85,18 @@
 		2169A13888DB16AC2D8E7238 /* ZTransferShadowConvexMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B379D3F720DA3A5E385AF8D /* ZTransferShadowConvexMesh.swift */; };
 		21D76A003E53CEC06E75D738 /* QueueSwipeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB9500909CA70EEB2E2072BC /* QueueSwipeUITests.swift */; };
 		227F00B8598EBC807A581E46 /* AndroidMotion.json in Resources */ = {isa = PBXBuildFile; fileRef = D23BF8F2AA50C9EF1CD14241 /* AndroidMotion.json */; };
-		22E87FA22682324C825DB38D /* honor.svg in Resources */ = {isa = PBXBuildFile; fileRef = 09784A016E60C7D2BB629605 /* honor.svg */; };
 		2382366433F4EB9F54DB0C4E /* jcapistd-12.c in Sources */ = {isa = PBXBuildFile; fileRef = CF852A2D92D72850530FE16F /* jcapistd-12.c */; };
 		23F0E5C28B51D6BB445BB8A1 /* jmemnobs.c in Sources */ = {isa = PBXBuildFile; fileRef = 7994D9F303824C2E0C6DD846 /* jmemnobs.c */; };
-		244D563033EAB5E86527D812 /* leica.svg in Resources */ = {isa = PBXBuildFile; fileRef = FCBF6EF835C1B57D8A186CD8 /* leica.svg */; };
 		24DF7C6996A6FC75764BB8A1 /* ZTransferShadowPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F9103C41A82D96E5A5C6462 /* ZTransferShadowPath.swift */; };
 		24E74AA743868EC96490AE8E /* CameraConnectionPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9326F326B0EE22E874CB7C /* CameraConnectionPresentation.swift */; };
+		25EEACED831FB5948D96E186 /* QueueTopControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */; };
 		2605D49FA9859E0E41665E82 /* TransferDirectoryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61EB2E2964B68484692D083 /* TransferDirectoryIndex.swift */; };
 		277840DA4447BCE16DEA75E7 /* jchuff.c in Sources */ = {isa = PBXBuildFile; fileRef = F9990F377542E1CB4DB3BCF4 /* jchuff.c */; };
 		27B42A4945BF0DA7716E8C2A /* HapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F760D1D1890D58F122FDA6 /* HapticsTests.swift */; };
 		287D40003B7F0E8B3AE69DD6 /* android15-shadow-inverses.json in Resources */ = {isa = PBXBuildFile; fileRef = 4D5FDCA4F2FA53292AF348EA /* android15-shadow-inverses.json */; };
 		28B3F74FF921D952492C8C1C /* PhotoFrameTextLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95AB5EA7C8D3692B4E2C4C23 /* PhotoFrameTextLayoutTests.swift */; };
-		28C6107713C0DBE43F6AC65A /* PhotoFrameBrandLogoCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFCB4E033397AFA07066F8FD /* PhotoFrameBrandLogoCatalog.swift */; };
 		292103669C90CDDEDA3242D0 /* QueueItemPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EC8A4C8DF7FD91D71D584F /* QueueItemPlacement.swift */; };
 		29A20683725C6207281B84FF /* ZTransferMaterialTextureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D72A45633A3BC4352CACAC31 /* ZTransferMaterialTextureStore.swift */; };
-		29E9611A5E035B277D9E4CBC /* fujifilm.svg in Resources */ = {isa = PBXBuildFile; fileRef = EA3DB9B7B2871B859EA0BC6E /* fujifilm.svg */; };
 		2B14E3B205CBC8ED8289E7EC /* DoubleZMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DF8FBC08956F02D0F24ACFD /* DoubleZMark.swift */; };
 		2B587F39DDD6FF4A1F402548 /* jdmerge-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 4382B0F87F3E3D689CE96BAC /* jdmerge-8.c */; };
 		2BFE42A6495739D2D7A49C9C /* jdapistd-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 27B6D22657CF09F7D7F5E14D /* jdapistd-8.c */; };
@@ -124,7 +114,6 @@
 		307D60C303D75C3EB71D6D5F /* RemoteToolModeTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E1D672B4733BD5BCDE786B /* RemoteToolModeTransitionTests.swift */; };
 		309F3C1CE60201091141FE56 /* AndroidX-motion-NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 2A843DBA46468A9C2C95F0D5 /* AndroidX-motion-NOTICE.txt */; };
 		30ADE789048A1904E44C6940 /* android15-shadow-blur-kernel.json in Resources */ = {isa = PBXBuildFile; fileRef = 93D8ABDF848D9BA14BDFE46F /* android15-shadow-blur-kernel.json */; };
-		30C079B99A796AB71D18CA85 /* sony.svg in Resources */ = {isa = PBXBuildFile; fileRef = 33802C013793FDBA1E0A5A12 /* sony.svg */; };
 		31364EA5B4D2B85491C63E1B /* jcprepct-16.c in Sources */ = {isa = PBXBuildFile; fileRef = 405A8EAFCBA0FB74204F7205 /* jcprepct-16.c */; };
 		3155D971BF9B55A0B0AC26A1 /* ZTransferDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */; };
 		31DB6BB8EF18EE14863798D7 /* PremiumRecoveryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C232943A606B25F2DE57D6C5 /* PremiumRecoveryUITests.swift */; };
@@ -150,6 +139,7 @@
 		3FD1B9CB241A588B6BBF4232 /* ZTransferAndroidMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAECF35EED7EB8A962F02A15 /* ZTransferAndroidMath.swift */; };
 		3FDE535F77D9A0BEC7795CDE /* JpegCropTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20900EAA32C3C007ABE26AA7 /* JpegCropTests.swift */; };
 		404DCA8D475005F535F1504C /* PTPIPPOSIXChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F6062089B30115F5D3264F /* PTPIPPOSIXChannel.swift */; };
+		408D244D2A2F6921ADFB082C /* PhotoLUTEditorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA4A743875686F0F28005B2 /* PhotoLUTEditorState.swift */; };
 		4111DA67E202D4EAC4B1468E /* RemoteConfiguredToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C87E736EE473C8810873A141 /* RemoteConfiguredToolbar.swift */; };
 		432DE7AD3A233E561BCC94A6 /* jutils-16.c in Sources */ = {isa = PBXBuildFile; fileRef = E7EAFCD5ED8077DDBAFBA128 /* jutils-16.c */; };
 		43C9EBA903FDF6CB881EDDB4 /* RemoteShutterButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1737C3BB17F59BA3C3346A1C /* RemoteShutterButton.swift */; };
@@ -174,7 +164,6 @@
 		4C892823DF148B4A64346F14 /* PhotoCropEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC57B08925281E07166717A /* PhotoCropEditor.swift */; };
 		4CA650AED34EB21C692D5AE9 /* BuiltInPictureControlsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A859C658BC826AB5B298A5 /* BuiltInPictureControlsTests.swift */; };
 		4CBAFB94832F0DDAB95FA79A /* QueueBadgeIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43DFA49E9913F317C98483AE /* QueueBadgeIcon.swift */; };
-		4D6B54E2818A4984F0F7F982 /* samsung.svg in Resources */ = {isa = PBXBuildFile; fileRef = D1F8A63D174C4A924C8B277D /* samsung.svg */; };
 		4E6912D45117355E97EA8583 /* CameraRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */; };
 		4EC9985B073E184DC416ADE7 /* RemoteExposureTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */; };
 		4F05D95DA449C2CFADFB4344 /* RemoteLUTMetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE4BE767C8E9D5922FFE191 /* RemoteLUTMetalRenderer.swift */; };
@@ -189,9 +178,11 @@
 		53050A00F15AA49DE998807E /* RemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2482C61B58C4A4EE95210CDA /* RemoteView.swift */; };
 		53A0052ADB6D6C16A7F32137 /* LosslessJpegBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3435F2457F5670A5939AF091 /* LosslessJpegBridge.swift */; };
 		54139D7D47D99B8C688166C6 /* PhotoPreviewEffectsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3CB71A3046CEE20E138E1EF /* PhotoPreviewEffectsTests.swift */; };
+		55778E486ECD538D41EF36D9 /* RemotePictureControlMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */; };
 		5620189F575207554839BC45 /* PhotoCubeLUTMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C3837863B81E37130FFE6B5 /* PhotoCubeLUTMapper.swift */; };
 		56E53EB3962005FBF9BB8A78 /* android15-shadow-small-blur.json in Resources */ = {isa = PBXBuildFile; fileRef = 5A59CBE24D73DC7A12289792 /* android15-shadow-small-blur.json */; };
 		570C1EE8A1C684480EC1ACB9 /* PhotoFrameBrandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 763F1C5B9BCBF9BF45603728 /* PhotoFrameBrandTests.swift */; };
+		57A64316951E128337CD8D7A /* PhotoLUTEditorStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059A019FEB97CAEB6E88DA6F /* PhotoLUTEditorStateTests.swift */; };
 		57CAAEE1F0E2A6C012D36E10 /* jdatasrc.c in Sources */ = {isa = PBXBuildFile; fileRef = 8DBF3647DFFF1AA3C5EA356D /* jdatasrc.c */; };
 		57D46B6D186F0B4BE7FF06A1 /* ZTransferShadowInset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06EBB0AA4A32A107A613DF6C /* ZTransferShadowInset.swift */; };
 		5847B86DF637C69FB7A9E604 /* Np3FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F372F3899BF36619208BF340 /* Np3FilterEngine.swift */; };
@@ -286,14 +277,12 @@
 		78393FF3CAA66DA21ABB70E4 /* CropAnimationTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDB895389A73FACE264D1CC /* CropAnimationTimingTests.swift */; };
 		787EFF0B5BF6D95EF5E669A8 /* ZTransferAndroidColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80E9480B37EC28D8C56DE93 /* ZTransferAndroidColor.swift */; };
 		7884258CDE091748C39C081A /* RemoteHorizonOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00DFB5370FE62695737A8492 /* RemoteHorizonOverlay.swift */; };
-		D65C227E49E2438E8EC71932 /* PhotoEffectsExpandedImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B2C65F67084973A13B8961 /* PhotoEffectsExpandedImage.swift */; };
 		78F70C867D96D34E4C409B3D /* CropPreparationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26732137A810847EF35EF3C /* CropPreparationState.swift */; };
 		799B31751855E74416F9A579 /* PictureControlPanelModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7B8E7F98FA135BF5E55B709 /* PictureControlPanelModelTests.swift */; };
 		79DEFEAB43C56CB6A324F2F1 /* NikonPictureControlSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E79F3FA26C3DC0035B69A30 /* NikonPictureControlSelectionTests.swift */; };
 		79DF53F7FB57B0EF6D965D7C /* RemoteStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3505DCCE29F149C76595F9C3 /* RemoteStateTests.swift */; };
 		7A3F3E578852D2077CE05A5E /* RemoteViewfinderInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 895233AC318FE068350BD0AB /* RemoteViewfinderInput.swift */; };
 		7AF73FEFF2FAC3BA9EC8D3C7 /* PTPIPDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */; };
-		7B76F3AB21BBFF7C22898054 /* google.svg in Resources */ = {isa = PBXBuildFile; fileRef = 9E75C60CE4836243F49CF53C /* google.svg */; };
 		7B7C4CC106B2144DFB1FCF0F /* PTPTransferDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D3396754C6922C246FC07B /* PTPTransferDiagnostics.swift */; };
 		7BE96D350B5305152D1CDB16 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F6F2458B24ED1BDFC716A4 /* RootView.swift */; };
 		7C742388BB5952231E42CDB4 /* RemoteExposureParameters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A685D1B40DF8FD791E95CF20 /* RemoteExposureParameters.swift */; };
@@ -306,13 +295,13 @@
 		81810CC6C13DC80C7462847D /* RemoteLUTMonitorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CE7A99A92C40F392847424 /* RemoteLUTMonitorState.swift */; };
 		81D72837C26131849E77990D /* RemotePhotoReviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1FC2E876EE810EA986CDE9E /* RemotePhotoReviewModel.swift */; };
 		81E117A7AEE12FD8BD458E08 /* CropAnimationTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30B5C835A4CB75EA8B18CF0D /* CropAnimationTiming.swift */; };
-		823542F891BDDC0FA1BB47C1 /* nikon.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0DA8782135A88D20E5E91602 /* nikon.svg */; };
 		823A11BECB918BA55D0BE52D /* GPSState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37584615FF21622BEB453C72 /* GPSState.swift */; };
 		82C2CB5E5068C162593867DB /* NikonGPSBluetoothClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC1138C5A091551C7393C0F /* NikonGPSBluetoothClient.swift */; };
 		82C69505CC0D0D6BC02C6A80 /* DirectoryAccessStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEAA3B6FEB394BB8C05D321 /* DirectoryAccessStore.swift */; };
 		83091CBEAA938F8060B47E03 /* STAObjectReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D07A4A00FD9B80E732050F4 /* STAObjectReader.swift */; };
 		830DE8E9242CCF2DBD01EA9B /* PreviewPhotoEffectsEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C835825BFF8A24B401975734 /* PreviewPhotoEffectsEditor.swift */; };
 		83C0DB06A7765F2C9779E7B3 /* ScanBatchPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08BF873A252AFFCCC24B042 /* ScanBatchPolicyTests.swift */; };
+		84C84DBB264605869ED7B42F /* PhotoPreviewPagerObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F32FBE12F60CCBD081E6FCE5 /* PhotoPreviewPagerObserver.swift */; };
 		84D63D54C3A80152A3433554 /* CameraDisconnectedState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2918BDFED6B200519B27259A /* CameraDisconnectedState.swift */; };
 		85AAEF06282C5DBEDE9E0F75 /* jcapistd-8.c in Sources */ = {isa = PBXBuildFile; fileRef = CC1BF43AB4B2517DF4C8BCF9 /* jcapistd-8.c */; };
 		860AD30C1E5CCAF27083E610 /* RemoteZoomableViewfinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A43A64914F29A0DED08C4364 /* RemoteZoomableViewfinder.swift */; };
@@ -320,6 +309,7 @@
 		869A53D192D749074D2FD83E /* PictureControlPanelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB61CF42A7E9BAC7341EA7C6 /* PictureControlPanelModel.swift */; };
 		86ED54F4E3D196FAF34BBC0C /* RemoteDisplayOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4206A8EDAC8C835E874251CB /* RemoteDisplayOptions.swift */; };
 		873A6B7B39D069D290ECD832 /* DetentWheel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */; };
+		87813AF0CC08CBE6C42F8D85 /* RemoteLUTPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 328740A77B7A24AB140629C8 /* RemoteLUTPanel.swift */; };
 		87A1F0FD21011AD9F08882A1 /* PhotoEffectsPreviewCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2167113DD0BB11B324F599C /* PhotoEffectsPreviewCacheTests.swift */; };
 		87D13A96498B08315123D268 /* RemoteMonitorHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414F5F3EF8EACF63BE617A8B /* RemoteMonitorHint.swift */; };
 		8891E8F7DF379F5BD970B5F4 /* android15-shadow-box-blur.json in Resources */ = {isa = PBXBuildFile; fileRef = 0DAB6CD620E6C72686456076 /* android15-shadow-box-blur.json */; };
@@ -329,14 +319,11 @@
 		8AA6ACA383E44092DD8ACAB5 /* jidctred-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 7F6ADE35C29B956339D74B3A /* jidctred-12.c */; };
 		8AC694F9C8EE1BE77F158F6E /* jcinit.c in Sources */ = {isa = PBXBuildFile; fileRef = EB4A2A39D24C032C0DAB3B47 /* jcinit.c */; };
 		8AC6AF18D9DF05472B3AB990 /* QueueRetryInteractionHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E3A8EE6F48C93D62B1E246 /* QueueRetryInteractionHarness.swift */; };
-		8B4C510CB16D5AF3C724CEFE /* BuiltInPictureControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70613B41F5787FACBA789D35 /* BuiltInPictureControls.swift */; };
 		8CCA93635020531D7483F725 /* PhotoLUTStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4750F886691AC47E6801F907 /* PhotoLUTStore.swift */; };
-		BC50FE05F6E74F89837DF6C8 /* PhotoLUTEditorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A2930BD4F2D4EC3998590A9 /* PhotoLUTEditorState.swift */; };
 		8D09EED2361BD02A1CD95F60 /* RemoteReviewCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3486A449432EB3AA8F2B82CD /* RemoteReviewCatalogTests.swift */; };
 		8D6DA87271A2A18C83AAC752 /* GPSConnectionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */; };
 		8DB920E849C85D7C786C3437 /* CameraConnectionPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA76D93CA2E56F7B9B789751 /* CameraConnectionPresentationTests.swift */; };
 		8EEDBA32D35A11889C89C07A /* PhotoLUTChooser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F118DAAAE8C7F7F5A18002 /* PhotoLUTChooser.swift */; };
-		49052789734745099C7A5293 /* PhotoEffectChooserDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DDFA62E6D494816B30C09C8 /* PhotoEffectChooserDialog.swift */; };
 		8F84A801F84694E63C801A52 /* LosslessCropTaskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 350BA7DC36C8534E89AD6AFA /* LosslessCropTaskTests.swift */; };
 		8FA9EDF328D5762F505C1CE8 /* RemoteDispModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FD88D8110A65A5F21AE5E4A /* RemoteDispModeTests.swift */; };
 		8FB26966AAE2721DCF13FEF9 /* GPSProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */; };
@@ -354,10 +341,10 @@
 		96DEA04E945E6D36C01F49F5 /* ButtonInteractionTestHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = A89C3FABC5C66C28E87AEB39 /* ButtonInteractionTestHarness.swift */; };
 		976E4A7ED23DE481DD29FCF2 /* PhotoListScrollActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1859B44045B28A43D42E2E71 /* PhotoListScrollActivity.swift */; };
 		9780BAFD64887582C32F1A8E /* ButtonStateLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09617D59E8633E234BFDB9A1 /* ButtonStateLabel.swift */; };
-		C4CE9D4845A2496B9AA1FA10 /* PhotoPreviewPagerObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4CE9D4845A2496B9AA1FA11 /* PhotoPreviewPagerObserver.swift */; };
 		9786E89F5F30322D450707BB /* jquant2-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 3986666F059D579B295071CB /* jquant2-8.c */; };
 		97AD66B183EB8C54C77F62D9 /* PhotoEffectsMasterSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD17C4052EC0FE1B1F1CEB11 /* PhotoEffectsMasterSwitch.swift */; };
 		9890E821584122B7EA506522 /* RemoteFramingGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63405BC0AB340F106E7B71B5 /* RemoteFramingGrid.swift */; };
+		98C6F606D1EA548025C88F15 /* RemotePictureControlGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */; };
 		98E089B58806AE12E88BF0F3 /* RemoteLUTStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97232A1BD4CD03B337BB0A09 /* RemoteLUTStateTests.swift */; };
 		993DCFA6B1D01106479A25F3 /* PhotoEffectsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */; };
 		995ADD15687E136D8DB094A7 /* RemoteViewfinderViewportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D04F733754DD88FB3D29B2E9 /* RemoteViewfinderViewportTests.swift */; };
@@ -382,11 +369,11 @@
 		A08A2BE34D46BA1F3B8655B9 /* PTPIPCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0253EE3A7C88ECD34EEACC /* PTPIPCodecTests.swift */; };
 		A0D609EE4E38AF06D31F099E /* PhotoRatingScanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19462E94E2FCF80AA898D8F5 /* PhotoRatingScanTests.swift */; };
 		A0ECB8F10DFD0EB47B38ECAA /* ZTransferButtonMotionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76E1E01044F31163D2B73DA4 /* ZTransferButtonMotionController.swift */; };
+		A177151A6CA74AB5BAB2CD28 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B9BE3422D34018D6F03279BE /* PrivacyInfo.xcprivacy */; };
 		A1ED5C10E0494E34AA2A3373 /* ShadowBlurRecursiveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D62C7DE248A333A82C00D927 /* ShadowBlurRecursiveTests.swift */; };
 		A3A7FDF3CB413D61BEB5057A /* RemoteParameterPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C83370A1FF2564237752BAC /* RemoteParameterPanel.swift */; };
 		A5922DC4DAC7567C4710A561 /* MaterialTextureStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E47418A29FCF2B72E5F11FA6 /* MaterialTextureStoreTests.swift */; };
 		A6D3233E0FE135CA3FA1CDB4 /* jcdctmgr-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AB769A0CB252E869A2A9994 /* jcdctmgr-8.c */; };
-		A8459257157AB15DBABE35C3 /* xiaomi.svg in Resources */ = {isa = PBXBuildFile; fileRef = AB1F183FFE818E96F13B1DD6 /* xiaomi.svg */; };
 		A99FDDA9AB95ED76B1DBB53C /* VideoRatingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C7B3D73604E444B4A5A7F0 /* VideoRatingTests.swift */; };
 		A9BC084CD2324B6A4D52CF84 /* PhotoRating.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E793B4317AA9E6CFDB2B4A2 /* PhotoRating.swift */; };
 		A9C301803E6F049E806AA7ED /* PhotoThumbnailDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */; };
@@ -412,20 +399,17 @@
 		B18D3BBA61C09BD246ACA56B /* PTPCodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB36939BEE4031E42F768A83 /* PTPCodecTests.swift */; };
 		B2BCDA3EE87598367F1136BF /* ClassicUSBIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */; };
 		B2FC4C41DACE088F6CD957AF /* jcmainct-16.c in Sources */ = {isa = PBXBuildFile; fileRef = 74993BA8967581869EFD825C /* jcmainct-16.c */; };
-		B34B2B1ADB3FDE50B2287F76 /* NikonBrandGradients.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC452C56C688B088EF34665 /* NikonBrandGradients.swift */; };
 		B3EC02F7CC3C9E3845301127 /* jdapistd-16.c in Sources */ = {isa = PBXBuildFile; fileRef = E3F06EE32ED7006E27A04BBB /* jdapistd-16.c */; };
 		B4ACC847646BE0F5855F7AA6 /* jidctint-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 0426DEB172A9676DA3736D3B /* jidctint-12.c */; };
 		B52485D02BD44B118CFE849C /* PTPIPSocketConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF0A99134BFE6440B62D20A4 /* PTPIPSocketConnection.swift */; };
 		B5DC92C200A313FB028618C6 /* STAConnectionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BDFC95EFE4D4DCA6606AE2F /* STAConnectionCoordinatorTests.swift */; };
 		B65D4CAFE0F7F72AFD32F179 /* CameraDownload.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC2E153F5F165AE7B762862 /* CameraDownload.swift */; };
-		B6C12920D54B7DE1E510EAD0 /* PictureControls in Resources */ = {isa = PBXBuildFile; fileRef = 12B87141DD887529341BCBB5 /* PictureControls */; };
 		B6D16C86C91D6A584E8BA61C /* LosslessJpegBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = 1EAE39A229EA99F382C018B4 /* LosslessJpegBridge.c */; };
 		B71A590A15214655341C49A6 /* jdatadst.c in Sources */ = {isa = PBXBuildFile; fileRef = 2A081B9E550720A763B8F5AD /* jdatadst.c */; };
 		B73A36411E114B2B9F7601E2 /* ScalarAnimationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4BCA8EF1DF259910354482D /* ScalarAnimationTests.swift */; };
 		B7BC9983E022AA9BFAAA844B /* RemoteUsageMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3625B07327D28D31668CA23D /* RemoteUsageMeter.swift */; };
 		B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */; };
 		B859743BF9DE3D059481E4BF /* jdlhuff.c in Sources */ = {isa = PBXBuildFile; fileRef = 46A581BA8442F4DD2E5DB1E3 /* jdlhuff.c */; };
-		B88392EA743A420701F1C6A5 /* dji.svg in Resources */ = {isa = PBXBuildFile; fileRef = CC3D7C1ADC6EACA3950A33FD /* dji.svg */; };
 		B8C0F45BB12E1361F00E6731 /* ConflatedPreviewUpdatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E586178E3A79A8D04553105B /* ConflatedPreviewUpdatesTests.swift */; };
 		B8D564597B91BD4AB8009B2C /* RemoteToolsInteractionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85F8C62358F160B0746CFCB5 /* RemoteToolsInteractionUITests.swift */; };
 		B8FB7D2547F6FFA961FEB3CE /* ConnectionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44ACCD4A54AA0F8443CA869B /* ConnectionViewModel.swift */; };
@@ -434,7 +418,6 @@
 		B951B6994BDAEF497432BE13 /* CropPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F921E8718E862AA46202FE /* CropPreview.swift */; };
 		B990A406E1BC3A82DCE82A12 /* RemoteHorizonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE16290D3E7CB967AF593CC3 /* RemoteHorizonTests.swift */; };
 		BA4DF02542C81A5F677C42D5 /* PhotoFrameMetadataSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3080B65DD80FD0410662178 /* PhotoFrameMetadataSettingsTests.swift */; };
-		BA5D06BC805EC8A67235AA4C /* oppo.svg in Resources */ = {isa = PBXBuildFile; fileRef = 4D32DB74E82CA947E6537F26 /* oppo.svg */; };
 		BADF7CD7F32B68DCF3D97C3F /* LocalPhotoEffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */; };
 		BB7C9E564E98685A2DE02907 /* CubeLUT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99ABEA8FDA00E7202B0AEE25 /* CubeLUT.swift */; };
 		BC0DF658B509A43762DEF6DD /* jutils-12.c in Sources */ = {isa = PBXBuildFile; fileRef = BEAA70590700E3570F5C1192 /* jutils-12.c */; };
@@ -449,11 +432,8 @@
 		BF9CB5E4157F2E6259D88432 /* RemoteChoicePopup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B17F2DC53C015416FB4D42 /* RemoteChoicePopup.swift */; };
 		C05F75E05BFD7827D3284C79 /* RemoteCameraToolController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D190C08910E9463FC83134 /* RemoteCameraToolController.swift */; };
 		C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 23F79E3B04FE343289768099 /* cormorant_garamond_medium_italic.ttf */; };
-		C178BF0B12C7B472EBEBCA57 /* nokia.svg in Resources */ = {isa = PBXBuildFile; fileRef = 73FEA2036B59B64BDF5BB8C3 /* nokia.svg */; };
-		C18B40D41FFA727EC247B6C0 /* apple.svg in Resources */ = {isa = PBXBuildFile; fileRef = 60F466ABB71F2EC38BDC166D /* apple.svg */; };
 		C2220F21D63C5E2C88F1E672 /* HapticPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A5E77B2C0E19B2B1CD5F24 /* HapticPolicy.swift */; };
 		C2B1F15D120EECDFE3C148D6 /* PhotoExif.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */; };
-		C32850E98BB3CD6334726B3C /* huawei.svg in Resources */ = {isa = PBXBuildFile; fileRef = C2CFAF2A1895996941BEC9EC /* huawei.svg */; };
 		C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */; };
 		C3C9FE27A93F76EF94AEEC4F /* RemoteHorizonAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9509D70DA2963AB0DC08BE0 /* RemoteHorizonAnimation.swift */; };
 		C47EE7A521C4554CB9D112FB /* AndroidThumbnailProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */; };
@@ -467,7 +447,6 @@
 		C7E2CC56C6BA3E009920D93B /* jcprepct-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 9581D59C12F4579C2B43596B /* jcprepct-12.c */; };
 		C85E831899FE297C9D01D1B9 /* NikonPictureControlAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72BD4923C4F0D287252BABD /* NikonPictureControlAccess.swift */; };
 		C95B148D877FE03E80C799F4 /* PhotoLUTStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C147F04B379414C294CA4EF /* PhotoLUTStoreTests.swift */; };
-		127EDD8FF6E24750B98E8CD7 /* PhotoLUTEditorStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 568340EBA7B449D4B7546A52 /* PhotoLUTEditorStateTests.swift */; };
 		CAB77B1C9934F4CDF69C0FD4 /* RemoteParameterWheel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37310FECE29AF5403D0A42AE /* RemoteParameterWheel.swift */; };
 		CB99922E4C5C868F6F4EAA41 /* PhotoFilterPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */; };
 		CBEB599B28F9477176061658 /* CameraTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B13A99D0C74F65A242E106 /* CameraTransport.swift */; };
@@ -478,8 +457,10 @@
 		CDA839B3BA3291E7FA00F976 /* Np3FilterCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B121CC0D58A97AD69EEF11 /* Np3FilterCatalog.swift */; };
 		CDADC4E5ED00753D9C4F2966 /* jdcolor-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 02FA4635ABE0F5B79D477678 /* jdcolor-12.c */; };
 		CDAE10D36A90B5FDC96D27B2 /* jidctfst-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 2E1A9E1366568AB2208544BD /* jidctfst-8.c */; };
+		CF2298B6CE98BD0D905CF920 /* RemoteCapturePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25301799676467176353FF4A /* RemoteCapturePerformanceTests.swift */; };
 		CF46C74D9806A588BE116E37 /* GeniePopupMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D328616E8BD4A0E6052DD95 /* GeniePopupMotion.swift */; };
 		CF53EFF0332425AC4585D8E3 /* RemoteToolbarGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4E1778458633C47A4B7C38 /* RemoteToolbarGeometryTests.swift */; };
+		CFFE89B33DB4BA87C30E539D /* QueueTopIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */; };
 		D00D46ACB4EDFC44A7A88FD2 /* ZTransferAndroidShadowMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E22B5DC948F34D63BDAAB7 /* ZTransferAndroidShadowMetrics.swift */; };
 		D04301D28576638B68A89795 /* PhotoRatingScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457C3F4F1FAA167CE42EF0C6 /* PhotoRatingScan.swift */; };
 		D07331BCFF59AB8559F67780 /* RemoteToolEditorMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A97BEF46C586CFF6734D901 /* RemoteToolEditorMotion.swift */; };
@@ -494,6 +475,7 @@
 		D416AB35B2F0062DDAC92255 /* jctrans.c in Sources */ = {isa = PBXBuildFile; fileRef = A6136729ECA02F602A4F5E0B /* jctrans.c */; };
 		D48305D06926CD24336DAFA5 /* ConnectionPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */; };
 		D4B9062CFBAB45359274FBBA /* android15-shadow-curves.json in Resources */ = {isa = PBXBuildFile; fileRef = 9452BDFBFEF0E931C296F0EE /* android15-shadow-curves.json */; };
+		D4D8A02B9A16028930B1EC05 /* PhotoEffectsExpandedImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA9CBBB7574ADA1B2C77A88E /* PhotoEffectsExpandedImage.swift */; };
 		D53B19501BE3F3C5AF623DB1 /* ZTransferShadowBlurRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6DF24C0856D129D02C20A3C /* ZTransferShadowBlurRenderer.swift */; };
 		D5AA7687642FFB42F491E7E0 /* PTPSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9983A9D8E56D67C98AA6B4 /* PTPSessionTests.swift */; };
 		D5D9950F9DB290E9BB454C5D /* QueueCardSwipeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA908258965C54FE2E2E147 /* QueueCardSwipeTests.swift */; };
@@ -509,13 +491,11 @@
 		D8352ADE78EDFB31B7F5CB14 /* jcarith.c in Sources */ = {isa = PBXBuildFile; fileRef = C8906C46853A30EAF10C747A /* jcarith.c */; };
 		D8D08925AE2BBE7285BEF5F0 /* jccolor-8.c in Sources */ = {isa = PBXBuildFile; fileRef = F1A4CCBF83AA01B124C25BFF /* jccolor-8.c */; };
 		D8E34361399C4B8632C05E64 /* android15-shadow-matrix-predicates.json in Resources */ = {isa = PBXBuildFile; fileRef = 7F5BC948E8EBCFED05BEBE93 /* android15-shadow-matrix-predicates.json */; };
-		D8E76CEE9CA044E66DAD7048 /* panasonic.svg in Resources */ = {isa = PBXBuildFile; fileRef = 3693B86355F9F2C21B08C52F /* panasonic.svg */; };
 		D9A8136268F4B3C1CFEEB6F4 /* AOSP-shadow-NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 250213A8042128973C9861E5 /* AOSP-shadow-NOTICE.txt */; };
 		DAA5C8C2E23830F5C8B6971E /* RemoteLUTMetalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9967A06A7297A08CC0763403 /* RemoteLUTMetalView.swift */; };
 		DC150D71EA8DD2558BBE1895 /* ButtonMotionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0281874E6565671EFB1BD4C /* ButtonMotionControllerTests.swift */; };
 		DC1B61ECEB7FE50F4B2B03E1 /* jddctmgr-8.c in Sources */ = {isa = PBXBuildFile; fileRef = E1E9E97784D8D29F9D64F7F8 /* jddctmgr-8.c */; };
 		DC69B36F0FE73CF8C0545367 /* transupp.c in Sources */ = {isa = PBXBuildFile; fileRef = 6426E77198ACFF1839CCB8A5 /* transupp.c */; };
-		DC80DDF78487CAFF164BD63D /* RemoteCapturePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DFADBC08D9B4E019BC048A /* RemoteCapturePerformanceTests.swift */; };
 		DCCD413F72FF786A58BF71F4 /* PhotoMetadataPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18B4B326B729FD6F2F937135 /* PhotoMetadataPreparation.swift */; };
 		DEB58A69C568F36181C8CE98 /* Apache-2.0.txt in Resources */ = {isa = PBXBuildFile; fileRef = D1EB62AADCDF15964FB70883 /* Apache-2.0.txt */; };
 		DFC4E7BF20645C6EDB939734 /* TipAttentionMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94872EDA00F4ABDC5BEC055D /* TipAttentionMotion.swift */; };
@@ -528,6 +508,7 @@
 		E3B84DE322CFE0370B36709F /* android15-shadow-convex-meshes.json in Resources */ = {isa = PBXBuildFile; fileRef = 6E84CB314463BAA684E99552 /* android15-shadow-convex-meshes.json */; };
 		E3E951A09525F4943D0EE779 /* jddctmgr-12.c in Sources */ = {isa = PBXBuildFile; fileRef = EB543684EAEEB7B36FC82F51 /* jddctmgr-12.c */; };
 		E3EBD260373FF0B6C635611E /* PTPIPSocketTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E7177E4804514D52C91294 /* PTPIPSocketTransport.swift */; };
+		E40267DACE74C87EA52AE547 /* PhotoEffectChooserDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE47A6A54335F4A7699918F /* PhotoEffectChooserDialog.swift */; };
 		E40876E8B4AD0F708C239C2B /* PictureControlFolderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10DFA171C8D971E39C998BFD /* PictureControlFolderState.swift */; };
 		E4D8222B6AA51B16490F3C7E /* jdpostct-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 4FDF0FF54EEA68AB6180B5DF /* jdpostct-12.c */; };
 		E53D7823F83F03C998DF1614 /* RemoteMonitorHintBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18AD6A5BC7B19AAB406CB26B /* RemoteMonitorHintBubble.swift */; };
@@ -540,9 +521,9 @@
 		E8FAC959B890B065FF02DED3 /* TransferQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17D81EDE19E9E8343BD531F /* TransferQueueView.swift */; };
 		EA2A5E73813646829194CCFC /* SettingsPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03DEDD0C14571253802D484 /* SettingsPopupOverlay.swift */; };
 		EAA5DF5FD98BD21E0A03F030 /* PhotoEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66FA5BCCCA104E827B8A69A1 /* PhotoEffects.swift */; };
+		EAF39EF21DD2FBAAE566E5DA /* AndroidDialogPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55C87D3A5ED076313CD5B27E /* AndroidDialogPresentation.swift */; };
 		EB2AEC4BC1473CCED0046D95 /* PhotoPreviewInteractionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7A35A85D13A669C4DD08E4 /* PhotoPreviewInteractionUITests.swift */; };
 		EB397171018AC4FF4A5ACF53 /* jidctfst-12.c in Sources */ = {isa = PBXBuildFile; fileRef = DBBF9E8924BD6E9BF38EF874 /* jidctfst-12.c */; };
-		EB92201A2FC4EBAF3FB252A4 /* motorola.svg in Resources */ = {isa = PBXBuildFile; fileRef = E9993810218A19C2326AF3A3 /* motorola.svg */; };
 		EB9D2DD53D857430FBAFB048 /* RemoteToolLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 801B6DAFA6B804072D62D981 /* RemoteToolLayout.swift */; };
 		EBB483C81F84DE2CA63E70B3 /* ZTransferShadowBoxBlur.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96FE15C7DC39F4DE7670675A /* ZTransferShadowBoxBlur.swift */; };
 		EBC712E423E08D6ADE73D2FD /* jcicc.c in Sources */ = {isa = PBXBuildFile; fileRef = 0CA3FA57DBC25D5DD0FB4859 /* jcicc.c */; };
@@ -550,7 +531,6 @@
 		EC1989DF0D106801A61B7C07 /* jcapistd-16.c in Sources */ = {isa = PBXBuildFile; fileRef = 9133E95F1B185BCE15AA3E1C /* jcapistd-16.c */; };
 		ED48900C7FEEC4A5D4E5F0AB /* DisconnectedRemoteCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D55BE121BB01AE00462313 /* DisconnectedRemoteCamera.swift */; };
 		EDD67CAAFF119B9C5243898D /* CropPreviewBoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 646BCBA0BD3F7AF6CA5AED36 /* CropPreviewBoundsTests.swift */; };
-		EDE2F5607026929FB31254BF /* nikon-official.svg in Resources */ = {isa = PBXBuildFile; fileRef = 321DBCDC9D738FBA439C013F /* nikon-official.svg */; };
 		EE6A98701A28A8FD07117E91 /* jcomapi.c in Sources */ = {isa = PBXBuildFile; fileRef = 2AF5668CE36798DBB7BE35D5 /* jcomapi.c */; };
 		EF41E7491538468946FF947B /* PremiumFireworks.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30D50D08DD29F5CC98E366E /* PremiumFireworks.swift */; };
 		F0DB971C9B03609A6C8976F2 /* QueuePillWidthLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25FA413F6BCED3FC9A3A2443 /* QueuePillWidthLayout.swift */; };
@@ -565,8 +545,10 @@
 		F461F6F2640D24E1C10CD599 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 492C1EF3D28AAC9526188721 /* Assets.xcassets */; };
 		F4AE42628784C2832738BB79 /* PhotoListAdmissionHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E23E26E26C55D2BF312CDC /* PhotoListAdmissionHarness.swift */; };
 		F564BFEF95954C7E4C545CB1 /* ZTransferPhysicalMaterialFinish.swift in Sources */ = {isa = PBXBuildFile; fileRef = 959712A78A4D2632F7FED741 /* ZTransferPhysicalMaterialFinish.swift */; };
+		F58F6D6A16E09A2634D7A7CB /* ModalPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00753B4CE3A01EDD6487ABEA /* ModalPresentationTests.swift */; };
 		F59586599BD0E42593AE4731 /* RemoteVideoDiagnosticTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BE4655188DEE36989677F28 /* RemoteVideoDiagnosticTests.swift */; };
 		F60A347F4C1257D1C906BD74 /* jccolor-12.c in Sources */ = {isa = PBXBuildFile; fileRef = AB561CF8701FA416177D1FFF /* jccolor-12.c */; };
+		F63C94BB8ECCCDACA3096335 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 6447401A0454C267A53B50E3 /* ThirdPartyNotices.txt */; };
 		F67283E3704E1D0FBACFA486 /* jdmerge-12.c in Sources */ = {isa = PBXBuildFile; fileRef = D9EB21C57E769771D7F5B120 /* jdmerge-12.c */; };
 		F6DD889BF1224E71AA63252B /* PhotoRatingPairs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0557A5CC0CFE7CE33210C4F /* PhotoRatingPairs.swift */; };
 		F71D8A9B159231C86891AB85 /* RemoteToolPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38F1B980C42BA7ED2F318409 /* RemoteToolPreferencesTests.swift */; };
@@ -577,16 +559,10 @@
 		FB147176EC46C834B17B3EFF /* CropPreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF4B6C5A93A0095BC7D5DDF /* CropPreviewTests.swift */; };
 		FB665603737D98CF66B03FD9 /* PhotoPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */; };
 		FCCBF3B431F7D324E01C488C /* firework-4-480.png in Resources */ = {isa = PBXBuildFile; fileRef = 2CA5C235E46FF5AD69960DCF /* firework-4-480.png */; };
-		FD4BBD4FF7701473E68B85C6 /* vivo.svg in Resources */ = {isa = PBXBuildFile; fileRef = 7B5D3CFB8B07CBE750EE2B79 /* vivo.svg */; };
-		FD4CB6FD193685DCC75E5D02 /* oneplus.svg in Resources */ = {isa = PBXBuildFile; fileRef = 3CE1546AD62AC14FBFB98DD8 /* oneplus.svg */; };
 		FDA8F91DDF72DF4F3C8D6855 /* jcsample-12.c in Sources */ = {isa = PBXBuildFile; fileRef = D2ECA8D7A433F956DC47877A /* jcsample-12.c */; };
 		FDC455DA213E797E48B4CD02 /* STAEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F1C6844BE03BFF28A13A05 /* STAEvent.swift */; };
 		FFDA02E8E126B442FEECC834 /* jdlossls-12.c in Sources */ = {isa = PBXBuildFile; fileRef = 5CB21FE4937AE8215CB58EA3 /* jdlossls-12.c */; };
 		FFF675ED9789571FA7B55D18 /* android15-shadow-integrated.json in Resources */ = {isa = PBXBuildFile; fileRef = 7746562452178FF5B9A3CF24 /* android15-shadow-integrated.json */; };
-		1247DA6DFC0B675D9077ACD7 /* RemoteToolMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */; };
-		98C6F606D1EA548025C88F15 /* RemotePictureControlGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */; };
-		55778E486ECD538D41EF36D9 /* RemotePictureControlMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */; };
-		0D0588FAB7E6A0FE083B2617 /* RemoteToolMarkAndPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -621,16 +597,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		91C3682D875B418992CA5012 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
-		91C3682D875B418992CA5002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopControlTests.swift; sourceTree = "<group>"; };
-		121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopIcon.swift; sourceTree = "<group>"; };
-		D46BABF58F95603C73D247FD /* QueueTopControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopControls.swift; sourceTree = "<group>"; };
 		00753B4CE3A01EDD6487ABEA /* ModalPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalPresentationTests.swift; sourceTree = "<group>"; };
-		55C87D3A5ED076313CD5B27E /* AndroidDialogPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidDialogPresentation.swift; sourceTree = "<group>"; };
-		A4E0E77D663548B78D0E6A23 /* RemoteLUTPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTPanel.swift; sourceTree = "<group>"; };
 		00DFB5370FE62695737A8492 /* RemoteHorizonOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHorizonOverlay.swift; sourceTree = "<group>"; };
-		A4B2C65F67084973A13B8961 /* PhotoEffectsExpandedImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsExpandedImage.swift; sourceTree = "<group>"; };
 		0217CE88D9C38A7150F3C00E /* CameraIOGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraIOGateTests.swift; sourceTree = "<group>"; };
 		02FA4635ABE0F5B79D477678 /* jdcolor-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jdcolor-12.c"; sourceTree = "<group>"; };
 		03D3B6EEC0B03021E23E7B54 /* GPSProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSProtocolTests.swift; sourceTree = "<group>"; };
@@ -638,6 +606,7 @@
 		04CF114EAD03DD0A9683D811 /* android15-shadow-rrect-paths.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-rrect-paths.json"; sourceTree = "<group>"; };
 		04D190C08910E9463FC83134 /* RemoteCameraToolController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCameraToolController.swift; sourceTree = "<group>"; };
 		052D85124E9DF64D9FE08176 /* ZTransferScalarAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferScalarAnimation.swift; sourceTree = "<group>"; };
+		059A019FEB97CAEB6E88DA6F /* PhotoLUTEditorStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTEditorStateTests.swift; sourceTree = "<group>"; };
 		05BF81D82B8830A8EEEDC291 /* WiFiKeepaliveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WiFiKeepaliveTests.swift; sourceTree = "<group>"; };
 		05D82805D3979526A0778D18 /* jdphuff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdphuff.c; sourceTree = "<group>"; };
 		0633BE1C1FE630EF2A5FA8A2 /* jdhuff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdhuff.c; sourceTree = "<group>"; };
@@ -647,15 +616,12 @@
 		08A63488ED8A93E07B72E112 /* NEFExifParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NEFExifParityTests.swift; sourceTree = "<group>"; };
 		08F760D1D1890D58F122FDA6 /* HapticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticsTests.swift; sourceTree = "<group>"; };
 		09617D59E8633E234BFDB9A1 /* ButtonStateLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStateLabel.swift; sourceTree = "<group>"; };
-		C4CE9D4845A2496B9AA1FA11 /* PhotoPreviewPagerObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewPagerObserver.swift; sourceTree = "<group>"; };
-		09784A016E60C7D2BB629605 /* honor.svg */ = {isa = PBXFileReference; path = honor.svg; sourceTree = "<group>"; };
 		0994973567FB60B02328A65F /* PhotoListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListView.swift; sourceTree = "<group>"; };
 		0A8963248A55F8AEA3DEE263 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		0B09A6962A999D2E30CC871B /* jdmarker.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdmarker.c; sourceTree = "<group>"; };
 		0BF7192940B87E9E26E8F792 /* jidctflt-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jidctflt-12.c"; sourceTree = "<group>"; };
 		0C2D3F7511237006742926D0 /* PhotoThumbnailFillQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailFillQueue.swift; sourceTree = "<group>"; };
 		0CA3FA57DBC25D5DD0FB4859 /* jcicc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jcicc.c; sourceTree = "<group>"; };
-		0DA8782135A88D20E5E91602 /* nikon.svg */ = {isa = PBXFileReference; path = nikon.svg; sourceTree = "<group>"; };
 		0DAB6CD620E6C72686456076 /* android15-shadow-box-blur.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-box-blur.json"; sourceTree = "<group>"; };
 		0E1287D031D2798958DFD105 /* LosslessCropProcessorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LosslessCropProcessorTests.swift; sourceTree = "<group>"; };
 		0E20FABF2CECBED5A93AB576 /* PTPIPDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscovery.swift; sourceTree = "<group>"; };
@@ -669,13 +635,14 @@
 		108B2E143BFD744A85D0F48F /* jcdiffct-16.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jcdiffct-16.c"; sourceTree = "<group>"; };
 		108FC623D5DB4E020466333F /* jutils-8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jutils-8.c"; sourceTree = "<group>"; };
 		10DFA171C8D971E39C998BFD /* PictureControlFolderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureControlFolderState.swift; sourceTree = "<group>"; };
+		114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopControlTests.swift; sourceTree = "<group>"; };
 		11F000D2D25EA86B4B38DC87 /* jdmainct-8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jdmainct-8.c"; sourceTree = "<group>"; };
 		11F6F2458B24ED1BDFC716A4 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		11F921E8718E862AA46202FE /* CropPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropPreview.swift; sourceTree = "<group>"; };
+		121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopIcon.swift; sourceTree = "<group>"; };
 		124BD8386CE8A9658D4548A8 /* ZTransfer.storekit */ = {isa = PBXFileReference; path = ZTransfer.storekit; sourceTree = "<group>"; };
 		125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTile.swift; sourceTree = "<group>"; };
 		1296F8C7D12744333924C160 /* LosslessCropTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LosslessCropTask.swift; sourceTree = "<group>"; };
-		12B87141DD887529341BCBB5 /* PictureControls */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PictureControls; sourceTree = SOURCE_ROOT; };
 		1425A3DB082FEB3542E34F8C /* DownloadIntegrityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadIntegrityTests.swift; sourceTree = "<group>"; };
 		1449968BB2DEF0E632E53EAE /* PhotoThumbnailDiskCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailDiskCacheTests.swift; sourceTree = "<group>"; };
 		15CE2B24C8F035D7C1826919 /* STABrowsingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STABrowsingSessionTests.swift; sourceTree = "<group>"; };
@@ -689,7 +656,6 @@
 		1AC1138C5A091551C7393C0F /* NikonGPSBluetoothClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NikonGPSBluetoothClient.swift; sourceTree = "<group>"; };
 		1BE6ED91EBE2C4A8FF721EAC /* AndroidColorInterpolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidColorInterpolationTests.swift; sourceTree = "<group>"; };
 		1C147F04B379414C294CA4EF /* PhotoLUTStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTStoreTests.swift; sourceTree = "<group>"; };
-		568340EBA7B449D4B7546A52 /* PhotoLUTEditorStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTEditorStateTests.swift; sourceTree = "<group>"; };
 		1C2A00CCF6BA2D73B89A2F32 /* RemoteLUTLoadQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTLoadQueue.swift; sourceTree = "<group>"; };
 		1C48325DF451C8857DFEA55C /* ImageCaptureUSBTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCaptureUSBTransport.swift; sourceTree = "<group>"; };
 		1C4FA1695B5A335C5C70E926 /* PhotoEffectsSettingsHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsSettingsHarness.swift; sourceTree = "<group>"; };
@@ -712,6 +678,7 @@
 		2482C61B58C4A4EE95210CDA /* RemoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteView.swift; sourceTree = "<group>"; };
 		24C8E936E3696B963593A915 /* ZTransferStoreKitTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ZTransferStoreKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		250213A8042128973C9861E5 /* AOSP-shadow-NOTICE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "AOSP-shadow-NOTICE.txt"; sourceTree = "<group>"; };
+		25301799676467176353FF4A /* RemoteCapturePerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCapturePerformanceTests.swift; sourceTree = "<group>"; };
 		254BB3CE1E7FAFE99544469E /* FileScanBatchSize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileScanBatchSize.swift; sourceTree = "<group>"; };
 		25DA65AB7E6B869A2B7A6F7B /* RemoteExposureParametersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureParametersTests.swift; sourceTree = "<group>"; };
 		25FA413F6BCED3FC9A3A2443 /* QueuePillWidthLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuePillWidthLayout.swift; sourceTree = "<group>"; };
@@ -748,10 +715,9 @@
 		30B5C835A4CB75EA8B18CF0D /* CropAnimationTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropAnimationTiming.swift; sourceTree = "<group>"; };
 		319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterPopupOverlay.swift; sourceTree = "<group>"; };
 		31DAC772EDDF21E548CF81FF /* PhotoListScrollActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoListScrollActivityTests.swift; sourceTree = "<group>"; };
-		321DBCDC9D738FBA439C013F /* nikon-official.svg */ = {isa = PBXFileReference; path = "nikon-official.svg"; sourceTree = "<group>"; };
+		328740A77B7A24AB140629C8 /* RemoteLUTPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTPanel.swift; sourceTree = "<group>"; };
 		328894309311582E8EECDA44 /* debug_sample_fhd.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = debug_sample_fhd.jpg; sourceTree = "<group>"; };
 		33279386E0991EC7E2719EFC /* android15-shadow-umbra.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-umbra.json"; sourceTree = "<group>"; };
-		33802C013793FDBA1E0A5A12 /* sony.svg */ = {isa = PBXFileReference; path = sony.svg; sourceTree = "<group>"; };
 		33D6747E8BCF4B6F29315432 /* ZTransferTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ZTransferTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		33E73E99F903B6CD18EEED66 /* RemoteLUTMonitorStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTMonitorStateTests.swift; sourceTree = "<group>"; };
 		341299C34669842D43A516C0 /* PhotoThumbnailStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailStoreTests.swift; sourceTree = "<group>"; };
@@ -762,7 +728,6 @@
 		350BA7DC36C8534E89AD6AFA /* LosslessCropTaskTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LosslessCropTaskTests.swift; sourceTree = "<group>"; };
 		35A6F4F2C7E68040845615FB /* jaricom.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jaricom.c; sourceTree = "<group>"; };
 		3625B07327D28D31668CA23D /* RemoteUsageMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteUsageMeter.swift; sourceTree = "<group>"; };
-		3693B86355F9F2C21B08C52F /* panasonic.svg */ = {isa = PBXFileReference; path = panasonic.svg; sourceTree = "<group>"; };
 		36B7104B54ACFC67BA930DDA /* AndroidColorInterpolation.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AndroidColorInterpolation.json; sourceTree = "<group>"; };
 		37310FECE29AF5403D0A42AE /* RemoteParameterWheel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteParameterWheel.swift; sourceTree = "<group>"; };
 		37584615FF21622BEB453C72 /* GPSState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSState.swift; sourceTree = "<group>"; };
@@ -777,7 +742,6 @@
 		3C3D425FF88B55E75EC1CEA3 /* JpegCropHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JpegCropHeader.swift; sourceTree = "<group>"; };
 		3C76F0F0260760721CD58EA4 /* ZTransferHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferHaptics.swift; sourceTree = "<group>"; };
 		3CC8C5625130C6409DD261D3 /* TransferQueueViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferQueueViewModel.swift; sourceTree = "<group>"; };
-		3CE1546AD62AC14FBFB98DD8 /* oneplus.svg */ = {isa = PBXFileReference; path = oneplus.svg; sourceTree = "<group>"; };
 		3D81E775ED73D4F65B2476C1 /* android15-shadow-rescale.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-rescale.json"; sourceTree = "<group>"; };
 		3DE23631DD841D16961C9AA6 /* great_vibes_regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = great_vibes_regular.ttf; sourceTree = "<group>"; };
 		3E5D3F75A8E65FDF84E1ED39 /* FreeUsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeUsageStore.swift; sourceTree = "<group>"; };
@@ -801,7 +765,6 @@
 		465B286F7A06BEC7225038F8 /* CropPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropPreparation.swift; sourceTree = "<group>"; };
 		46A581BA8442F4DD2E5DB1E3 /* jdlhuff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdlhuff.c; sourceTree = "<group>"; };
 		4750F886691AC47E6801F907 /* PhotoLUTStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTStore.swift; sourceTree = "<group>"; };
-		7A2930BD4F2D4EC3998590A9 /* PhotoLUTEditorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTEditorState.swift; sourceTree = "<group>"; };
 		47E6EFAE1E51765C2F07A090 /* RatingProtocolReplayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatingProtocolReplayTests.swift; sourceTree = "<group>"; };
 		47F1C6844BE03BFF28A13A05 /* STAEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAEvent.swift; sourceTree = "<group>"; };
 		48BD1D226D3EDFB117AE536B /* jpeg_nbits.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jpeg_nbits.c; sourceTree = "<group>"; };
@@ -814,7 +777,6 @@
 		4B2971CFDD3F6EBEF2ACA1A8 /* RemoteViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteViewModel.swift; sourceTree = "<group>"; };
 		4C31C90D73DDE407941D9C78 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
 		4D246AB34F9D8193AD689AC0 /* STAMediaMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAMediaMetadata.swift; sourceTree = "<group>"; };
-		4D32DB74E82CA947E6537F26 /* oppo.svg */ = {isa = PBXFileReference; path = oppo.svg; sourceTree = "<group>"; };
 		4D5FDCA4F2FA53292AF348EA /* android15-shadow-inverses.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-inverses.json"; sourceTree = "<group>"; };
 		4DCA594BEF961ED0607FA676 /* RemoteLandscapeLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLandscapeLayout.swift; sourceTree = "<group>"; };
 		4E6F870D5A9832287D86A91E /* PhotoFramePlaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFramePlaceTests.swift; sourceTree = "<group>"; };
@@ -832,13 +794,13 @@
 		538A2FD484D2734CC691DA00 /* ConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionState.swift; sourceTree = "<group>"; };
 		545DCB3052FFC34B79B7F9D7 /* MaterialTextureReferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterialTextureReferenceTests.swift; sourceTree = "<group>"; };
 		558EB92AB9673B59E1581EF2 /* PhotoMetadataPreparationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoMetadataPreparationTests.swift; sourceTree = "<group>"; };
+		55C87D3A5ED076313CD5B27E /* AndroidDialogPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidDialogPresentation.swift; sourceTree = "<group>"; };
 		55D55BE121BB01AE00462313 /* DisconnectedRemoteCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisconnectedRemoteCamera.swift; sourceTree = "<group>"; };
 		55E5A0EF9EEE6944C08F254E /* ConnectionPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPage.swift; sourceTree = "<group>"; };
 		571D6BA0E01CAEA4CAD53A27 /* jdsample-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jdsample-12.c"; sourceTree = "<group>"; };
 		583525C8870B5E378E678F16 /* jcphuff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jcphuff.c; sourceTree = "<group>"; };
 		58BF167C40D7C0D115B35CA5 /* NativeAttentionMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAttentionMotion.swift; sourceTree = "<group>"; };
 		59406C990E72248071072192 /* RemoteHorizonColorReferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHorizonColorReferenceTests.swift; sourceTree = "<group>"; };
-		59C7B150B97663D472FFC131 /* PhotoFrameBrandLogoCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameBrandLogoCatalogTests.swift; sourceTree = "<group>"; };
 		59F6B50FACC860CB7B9DCBE5 /* RemoteExposureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureTests.swift; sourceTree = "<group>"; };
 		5A1870AC6A1B85DF8F95F4C1 /* RemoteCameraToolMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCameraToolMenu.swift; sourceTree = "<group>"; };
 		5A59CBE24D73DC7A12289792 /* android15-shadow-small-blur.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-small-blur.json"; sourceTree = "<group>"; };
@@ -852,7 +814,6 @@
 		5EE7E180A63F2667D786F4D4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5FDFB87A6DCFBFA7FCD2525B /* VideoRating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoRating.swift; sourceTree = "<group>"; };
 		60CEE7D0D00A0FB592A6FBC0 /* QueueSwipeInteractionHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueSwipeInteractionHarness.swift; sourceTree = "<group>"; };
-		60F466ABB71F2EC38BDC166D /* apple.svg */ = {isa = PBXFileReference; path = apple.svg; sourceTree = "<group>"; };
 		615EEFA9D6159AC37C5A31C7 /* PTPSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPSession.swift; sourceTree = "<group>"; };
 		6172DA6B9AB09B1410CF76FE /* QueueTopPillMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopPillMotion.swift; sourceTree = "<group>"; };
 		61D169051707952E648CD5F4 /* PhotoRatingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoRatingTests.swift; sourceTree = "<group>"; };
@@ -863,6 +824,7 @@
 		63405BC0AB340F106E7B71B5 /* RemoteFramingGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFramingGrid.swift; sourceTree = "<group>"; };
 		63454445A9D66CEB5CC965E0 /* RemoteEntryIntroPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteEntryIntroPolicyTests.swift; sourceTree = "<group>"; };
 		6426E77198ACFF1839CCB8A5 /* transupp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = transupp.c; sourceTree = "<group>"; };
+		6447401A0454C267A53B50E3 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 		6465F292E3393A23E08BD473 /* jfdctint-8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jfdctint-8.c"; sourceTree = "<group>"; };
 		646BCBA0BD3F7AF6CA5AED36 /* CropPreviewBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropPreviewBoundsTests.swift; sourceTree = "<group>"; };
 		64A847FECA21275B94488595 /* jcapimin.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jcapimin.c; sourceTree = "<group>"; };
@@ -892,13 +854,11 @@
 		6F8AF750CC99BF1A1C36EEBB /* RemoteToolsInteractionHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolsInteractionHarness.swift; sourceTree = "<group>"; };
 		6FF4B6C5A93A0095BC7D5DDF /* CropPreviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropPreviewTests.swift; sourceTree = "<group>"; };
 		7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndroidThumbnailProcessor.swift; sourceTree = "<group>"; };
-		70613B41F5787FACBA789D35 /* BuiltInPictureControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInPictureControls.swift; sourceTree = "<group>"; };
 		70EC8A4C8DF7FD91D71D584F /* QueueItemPlacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueItemPlacement.swift; sourceTree = "<group>"; };
 		71B8786780F1D163E78259D2 /* PhotoMetadataIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoMetadataIdentity.swift; sourceTree = "<group>"; };
 		721EE1E4462782AD6B669580 /* GeniePopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeniePopupPanel.swift; sourceTree = "<group>"; };
 		72757BCC923622558D27F45D /* STAConnectionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAConnectionCoordinator.swift; sourceTree = "<group>"; };
 		735B01C7B51F1898DD8E413D /* PictureControlReplacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureControlReplacement.swift; sourceTree = "<group>"; };
-		73FEA2036B59B64BDF5BB8C3 /* nokia.svg */ = {isa = PBXFileReference; path = nokia.svg; sourceTree = "<group>"; };
 		74805F75A0AF850185B9FB51 /* PhotoEffectsMasterUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsMasterUITests.swift; sourceTree = "<group>"; };
 		74993BA8967581869EFD825C /* jcmainct-16.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jcmainct-16.c"; sourceTree = "<group>"; };
 		7530BB4953CDCB614059E626 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -913,11 +873,9 @@
 		792B946134C85A2249E485F3 /* jclossls-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jclossls-12.c"; sourceTree = "<group>"; };
 		79735AB03A21EBB50D28C3DA /* NikonPictureControlProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NikonPictureControlProtocolTests.swift; sourceTree = "<group>"; };
 		7994D9F303824C2E0C6DD846 /* jmemnobs.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jmemnobs.c; sourceTree = "<group>"; };
-		79DFADBC08D9B4E019BC048A /* RemoteCapturePerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCapturePerformanceTests.swift; sourceTree = "<group>"; };
 		7A212849FDB757B232CE3700 /* GPSConnectionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSConnectionControl.swift; sourceTree = "<group>"; };
 		7AB867EB2BECB1D2DE3F9D52 /* CropViewportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropViewportTests.swift; sourceTree = "<group>"; };
 		7AD9D374C7D0C7B45D77B516 /* PhotoCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCatalog.swift; sourceTree = "<group>"; };
-		7B5D3CFB8B07CBE750EE2B79 /* vivo.svg */ = {isa = PBXFileReference; path = vivo.svg; sourceTree = "<group>"; };
 		7B84B48793ED342FBA1F6D10 /* STAResetPairingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAResetPairingOverlay.swift; sourceTree = "<group>"; };
 		7BEAA3B6FEB394BB8C05D321 /* DirectoryAccessStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryAccessStore.swift; sourceTree = "<group>"; };
 		7C8D85042F86E7CE49C16BF8 /* PTPIPDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPDiscoveryService.swift; sourceTree = "<group>"; };
@@ -978,6 +936,7 @@
 		96B612A8BF3FB5AB025F9CED /* RemoteParameterWheelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteParameterWheelTests.swift; sourceTree = "<group>"; };
 		96FE15C7DC39F4DE7670675A /* ZTransferShadowBoxBlur.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferShadowBoxBlur.swift; sourceTree = "<group>"; };
 		97232A1BD4CD03B337BB0A09 /* RemoteLUTStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTStateTests.swift; sourceTree = "<group>"; };
+		97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolMarkAndPresetTests.swift; sourceTree = "<group>"; };
 		983A625A8805E43B4E71A74F /* PhotoEffectModulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectModulesTests.swift; sourceTree = "<group>"; };
 		993B2BE760B558C7DCB1A48B /* AndroidMaterialTextures.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AndroidMaterialTextures.json; sourceTree = "<group>"; };
 		99593872316326F7AF0C137F /* firework-1-480.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "firework-1-480.png"; sourceTree = "<group>"; };
@@ -988,11 +947,9 @@
 		9AEEC99D5D548F9DBE0C8129 /* android15-shadow-circle-profile.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-circle-profile.json"; sourceTree = "<group>"; };
 		9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
 		9CEBFBB42C89586314B7CDF4 /* CameraRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRepository.swift; sourceTree = "<group>"; };
-		9CFAFC5849A3B8ED41A318E4 /* PhotoFrameBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameBrand.swift; sourceTree = "<group>"; };
 		9D096209BDDBA2BD1948EFA4 /* DebugCameraData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugCameraData.swift; sourceTree = "<group>"; };
 		9D0EB4858E4B5D28780BA3BE /* AndroidHorizonColors.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AndroidHorizonColors.json; sourceTree = "<group>"; };
 		9E44BD3A96C8965980DD7D9B /* SelectedUSBPTPTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectedUSBPTPTransport.swift; sourceTree = "<group>"; };
-		9E75C60CE4836243F49CF53C /* google.svg */ = {isa = PBXFileReference; path = google.svg; sourceTree = "<group>"; };
 		9EE75A7628B03907A86E5E68 /* SimulatorDebug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SimulatorDebug.entitlements; sourceTree = "<group>"; };
 		A0007760B2E7926265160125 /* RemoteFramingGridTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFramingGridTests.swift; sourceTree = "<group>"; };
 		A04B419A267646369F123163 /* RemoteMonitorHintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteMonitorHintTests.swift; sourceTree = "<group>"; };
@@ -1025,7 +982,6 @@
 		A8F2B5547678C8346649CFDB /* StoreKitPurchaseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitPurchaseStore.swift; sourceTree = "<group>"; };
 		AA746937F57F91A1A5DC2C00 /* RemoteToolLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolLayoutTests.swift; sourceTree = "<group>"; };
 		AA8DAB4EE5A76236D0FA5A04 /* AndroidX-color-NOTICE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "AndroidX-color-NOTICE.txt"; sourceTree = "<group>"; };
-		AB1F183FFE818E96F13B1DD6 /* xiaomi.svg */ = {isa = PBXFileReference; path = xiaomi.svg; sourceTree = "<group>"; };
 		AB561CF8701FA416177D1FFF /* jccolor-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jccolor-12.c"; sourceTree = "<group>"; };
 		AB9500909CA70EEB2E2072BC /* QueueSwipeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueSwipeUITests.swift; sourceTree = "<group>"; };
 		ABB6ABEB61F331E00A6882EA /* ZTransferShadowGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferShadowGeometry.swift; sourceTree = "<group>"; };
@@ -1053,6 +1009,7 @@
 		B7B75986641EDE5E24183EA9 /* QueuePillVisibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuePillVisibilityTests.swift; sourceTree = "<group>"; };
 		B82C7713844C4C72E0292FEE /* jdcoefct-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jdcoefct-12.c"; sourceTree = "<group>"; };
 		B8E5F0504E1E56C59E21D761 /* ZTransferDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferDesign.swift; sourceTree = "<group>"; };
+		B9BE3422D34018D6F03279BE /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		BA1BFE54840B23AFF2DD72D4 /* ZTransferButtonPressState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferButtonPressState.swift; sourceTree = "<group>"; };
 		BA5A5EB2EE3C624D2C951974 /* PhotoThumbnailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailStore.swift; sourceTree = "<group>"; };
 		BA7454E422D1473CC4E740CD /* AsyncDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncDeadline.swift; sourceTree = "<group>"; };
@@ -1069,10 +1026,8 @@
 		C2204231ED7C21FAAAA7E39C /* android15-shadow-rrect-plan.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-rrect-plan.json"; sourceTree = "<group>"; };
 		C232943A606B25F2DE57D6C5 /* PremiumRecoveryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumRecoveryUITests.swift; sourceTree = "<group>"; };
 		C2A4DF8AB5591D3EDFC75973 /* jidctred-8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jidctred-8.c"; sourceTree = "<group>"; };
-		C2CFAF2A1895996941BEC9EC /* huawei.svg */ = {isa = PBXFileReference; path = huawei.svg; sourceTree = "<group>"; };
 		C327CE176B8B9471281D46E2 /* RemoteHorizonRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHorizonRenderingTests.swift; sourceTree = "<group>"; };
 		C3F118DAAAE8C7F7F5A18002 /* PhotoLUTChooser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTChooser.swift; sourceTree = "<group>"; };
-		9DDFA62E6D494816B30C09C8 /* PhotoEffectChooserDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectChooserDialog.swift; sourceTree = "<group>"; };
 		C537587F3F20DEE8C60FA711 /* GPSCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSCoordinator.swift; sourceTree = "<group>"; };
 		C6B51959B0CA4F46B1909760 /* MonitorStorageSchedulingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorStorageSchedulingTests.swift; sourceTree = "<group>"; };
 		C7B8E7F98FA135BF5E55B709 /* PictureControlPanelModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureControlPanelModelTests.swift; sourceTree = "<group>"; };
@@ -1088,7 +1043,6 @@
 		CA973AB0465AC66EF948D85A /* ZTransferColorAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferColorAnimation.swift; sourceTree = "<group>"; };
 		CB36939BEE4031E42F768A83 /* PTPCodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPCodecTests.swift; sourceTree = "<group>"; };
 		CC1BF43AB4B2517DF4C8BCF9 /* jcapistd-8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jcapistd-8.c"; sourceTree = "<group>"; };
-		CC3D7C1ADC6EACA3950A33FD /* dji.svg */ = {isa = PBXFileReference; path = dji.svg; sourceTree = "<group>"; };
 		CCD2213ABE76196F9366BB4C /* jcdctmgr-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jcdctmgr-12.c"; sourceTree = "<group>"; };
 		CCFAA104235DF2FB0FB9B928 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		CEC2E153F5F165AE7B762862 /* CameraDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDownload.swift; sourceTree = "<group>"; };
@@ -1103,7 +1057,6 @@
 		D08BF873A252AFFCCC24B042 /* ScanBatchPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanBatchPolicyTests.swift; sourceTree = "<group>"; };
 		D1D3396754C6922C246FC07B /* PTPTransferDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPTransferDiagnostics.swift; sourceTree = "<group>"; };
 		D1EB62AADCDF15964FB70883 /* Apache-2.0.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Apache-2.0.txt"; sourceTree = "<group>"; };
-		D1F8A63D174C4A924C8B277D /* samsung.svg */ = {isa = PBXFileReference; path = samsung.svg; sourceTree = "<group>"; };
 		D23BF8F2AA50C9EF1CD14241 /* AndroidMotion.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AndroidMotion.json; sourceTree = "<group>"; };
 		D2B51C2A8D807D8A9CA21F9E /* ZTransferGlassSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferGlassSurface.swift; sourceTree = "<group>"; };
 		D2ECA8D7A433F956DC47877A /* jcsample-12.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jcsample-12.c"; sourceTree = "<group>"; };
@@ -1112,6 +1065,7 @@
 		D331FCEE042A720D8DF2EDCD /* PhotoFrameCoordinateFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameCoordinateFormatTests.swift; sourceTree = "<group>"; };
 		D403B031ADD1B0F9C560F22D /* ClassicUSBIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicUSBIcon.swift; sourceTree = "<group>"; };
 		D40B340AC13401D86C00C2D8 /* PTPDataset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPDataset.swift; sourceTree = "<group>"; };
+		D46BABF58F95603C73D247FD /* QueueTopControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueTopControls.swift; sourceTree = "<group>"; };
 		D4AF838C144C9373DAC66FCB /* jdinput.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdinput.c; sourceTree = "<group>"; };
 		D5A141881A4EEBF0C3CF247A /* PhotoFilterComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilterComponents.swift; sourceTree = "<group>"; };
 		D62C7DE248A333A82C00D927 /* ShadowBlurRecursiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShadowBlurRecursiveTests.swift; sourceTree = "<group>"; };
@@ -1131,7 +1085,7 @@
 		DDA63EBA5B97739366D2CF6E /* StoreKitPurchaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitPurchaseTests.swift; sourceTree = "<group>"; };
 		DE16290D3E7CB967AF593CC3 /* RemoteHorizonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHorizonTests.swift; sourceTree = "<group>"; };
 		DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFilter.swift; sourceTree = "<group>"; };
-		DEC452C56C688B088EF34665 /* NikonBrandGradients.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NikonBrandGradients.swift; sourceTree = "<group>"; };
+		DEE47A6A54335F4A7699918F /* PhotoEffectChooserDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectChooserDialog.swift; sourceTree = "<group>"; };
 		DEE4BE767C8E9D5922FFE191 /* RemoteLUTMetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteLUTMetalRenderer.swift; sourceTree = "<group>"; };
 		DEEDF20F860B3EA00E76284A /* RemoteVideoDiagnostic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteVideoDiagnostic.swift; sourceTree = "<group>"; };
 		DF0A99134BFE6440B62D20A4 /* PTPIPSocketConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTPIPSocketConnection.swift; sourceTree = "<group>"; };
@@ -1139,7 +1093,6 @@
 		DF9539324F4DB53B0B922D67 /* RemoteRecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecordingTests.swift; sourceTree = "<group>"; };
 		DFAA2B6DB34FC856607CABA8 /* RemoteEntryIntroPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteEntryIntroPolicy.swift; sourceTree = "<group>"; };
 		DFC57B08925281E07166717A /* PhotoCropEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCropEditor.swift; sourceTree = "<group>"; };
-		DFCB4E033397AFA07066F8FD /* PhotoFrameBrandLogoCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFrameBrandLogoCatalog.swift; sourceTree = "<group>"; };
 		DFCE274B28617B726971F013 /* PhotoGenerationTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGenerationTimingTests.swift; sourceTree = "<group>"; };
 		E07B884479E397CBD201214F /* jmemmgr.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jmemmgr.c; sourceTree = "<group>"; };
 		E0A2F8C5E60C4BF02A411C7D /* firework-4-1800.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "firework-4-1800.png"; sourceTree = "<group>"; };
@@ -1167,9 +1120,7 @@
 		E85463B2BAE75685B39B4959 /* firework-4-200.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "firework-4-200.png"; sourceTree = "<group>"; };
 		E86031753282E0D240CE8D41 /* ButtonStateLabelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStateLabelTests.swift; sourceTree = "<group>"; };
 		E9883FB2EED7B4AEA280DCB9 /* ZTransferShadowConic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferShadowConic.swift; sourceTree = "<group>"; };
-		E9993810218A19C2326AF3A3 /* motorola.svg */ = {isa = PBXFileReference; path = motorola.svg; sourceTree = "<group>"; };
 		E999FE16B4B6B70CA9DA4F87 /* jdarith.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jdarith.c; sourceTree = "<group>"; };
-		EA3DB9B7B2871B859EA0BC6E /* fujifilm.svg */ = {isa = PBXFileReference; path = fujifilm.svg; sourceTree = "<group>"; };
 		EA76D93CA2E56F7B9B789751 /* CameraConnectionPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConnectionPresentationTests.swift; sourceTree = "<group>"; };
 		EAECF35EED7EB8A962F02A15 /* ZTransferAndroidMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferAndroidMath.swift; sourceTree = "<group>"; };
 		EB4A2A39D24C032C0DAB3B47 /* jcinit.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jcinit.c; sourceTree = "<group>"; };
@@ -1178,13 +1129,16 @@
 		ECDEA795752767FBE8FFC99F /* ZTransferApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferApp.swift; sourceTree = "<group>"; };
 		ECE19CBDB5CA1F0E0A01C45E /* PremiumBusinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumBusinessTests.swift; sourceTree = "<group>"; };
 		EDE7552A6B315888DE6033D1 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePictureControlGlyph.swift; sourceTree = "<group>"; };
 		EEE18D92C45AB1F3AF2BDC6E /* ZTransferAndroidShadowRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferAndroidShadowRenderer.swift; sourceTree = "<group>"; };
 		EEF4E060045A208C99599DA2 /* CropPreparationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropPreparationTests.swift; sourceTree = "<group>"; };
+		EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePictureControlMotion.swift; sourceTree = "<group>"; };
 		F02C5CEA3C71B80C300E86D2 /* PictureControlFixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PictureControlFixtures; sourceTree = SOURCE_ROOT; };
 		F0A7D6022EF952E7B9E010CD /* RemoteExposureMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteExposureMeterTests.swift; sourceTree = "<group>"; };
 		F14F1A2A9B549B003A113515 /* firework-1-200.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "firework-1-200.png"; sourceTree = "<group>"; };
 		F1A4CCBF83AA01B124C25BFF /* jccolor-8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "jccolor-8.c"; sourceTree = "<group>"; };
 		F265CFFFCA5BE91B25DBEDD7 /* PhotoGenerationTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGenerationTiming.swift; sourceTree = "<group>"; };
+		F32FBE12F60CCBD081E6FCE5 /* PhotoPreviewPagerObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewPagerObserver.swift; sourceTree = "<group>"; };
 		F372F3899BF36619208BF340 /* Np3FilterEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngine.swift; sourceTree = "<group>"; };
 		F3A859C658BC826AB5B298A5 /* BuiltInPictureControlsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInPictureControlsTests.swift; sourceTree = "<group>"; };
 		F3CB71A3046CEE20E138E1EF /* PhotoPreviewEffectsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewEffectsTests.swift; sourceTree = "<group>"; };
@@ -1203,21 +1157,19 @@
 		F85063E6D9C8D1B9992E1178 /* PictureControlReplacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureControlReplacementTests.swift; sourceTree = "<group>"; };
 		F8ADFEE0179A205DDFC8E57D /* QueueRetryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRetryUITests.swift; sourceTree = "<group>"; };
 		F9990F377542E1CB4DB3BCF4 /* jchuff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = jchuff.c; sourceTree = "<group>"; };
+		FA9CBBB7574ADA1B2C77A88E /* PhotoEffectsExpandedImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoEffectsExpandedImage.swift; sourceTree = "<group>"; };
 		FAA908258965C54FE2E2E147 /* QueueCardSwipeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueCardSwipeTests.swift; sourceTree = "<group>"; };
 		FB0A31F84E18361C03E3C902 /* android15-shadow-fallback.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-fallback.json"; sourceTree = "<group>"; };
 		FB4F9C50800B1AB3BC4C279E /* Np3AndroidGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3AndroidGoldenTests.swift; sourceTree = "<group>"; };
 		FC195B93C2BD33E13CE4D584 /* QueuePillVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuePillVisibility.swift; sourceTree = "<group>"; };
-		FCBF6EF835C1B57D8A186CD8 /* leica.svg */ = {isa = PBXFileReference; path = leica.svg; sourceTree = "<group>"; };
 		FCD67906893DA353A437E6A3 /* Np3FilterEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3FilterEngineTests.swift; sourceTree = "<group>"; };
+		FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolMark.swift; sourceTree = "<group>"; };
 		FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetentWheel.swift; sourceTree = "<group>"; };
 		FE4B3BCA5A9BADB279FD8240 /* NikonPictureControlSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NikonPictureControlSelection.swift; sourceTree = "<group>"; };
 		FE4B8301EA73B6C49D96971D /* ButtonPressStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonPressStateTests.swift; sourceTree = "<group>"; };
+		FEA4A743875686F0F28005B2 /* PhotoLUTEditorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLUTEditorState.swift; sourceTree = "<group>"; };
 		FF0DBC489F5750977C11989A /* PremiumEntitlement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumEntitlement.swift; sourceTree = "<group>"; };
 		FF2055C352664BEFA3E8DA24 /* verify-photo-export.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "verify-photo-export.py"; sourceTree = "<group>"; };
-		FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolMark.swift; sourceTree = "<group>"; };
-		EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePictureControlGlyph.swift; sourceTree = "<group>"; };
-		EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePictureControlMotion.swift; sourceTree = "<group>"; };
-		97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteToolMarkAndPresetTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -1254,7 +1206,6 @@
 				A913A5BD665D140FFD76666E /* ZTransfer */,
 				28966BF0D630B4FFE2350F88 /* ZTransferTests */,
 				F02C5CEA3C71B80C300E86D2 /* PictureControlFixtures */,
-				12B87141DD887529341BCBB5 /* PictureControls */,
 				EB72BEFF74DE3D43332D2792 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -1272,7 +1223,6 @@
 		28966BF0D630B4FFE2350F88 /* ZTransferTests */ = {
 			isa = PBXGroup;
 			children = (
-				00753B4CE3A01EDD6487ABEA /* ModalPresentationTests.swift */,
 				DE00765EEE35F454836357AE /* FireworkReferenceFrames */,
 				F55B99EE2D534C81466A5412 /* Fixtures */,
 				1BE6ED91EBE2C4A8FF721EAC /* AndroidColorInterpolationTests.swift */,
@@ -1290,7 +1240,6 @@
 				0217CE88D9C38A7150F3C00E /* CameraIOGateTests.swift */,
 				E586178E3A79A8D04553105B /* ConflatedPreviewUpdatesTests.swift */,
 				61F577AFF70C53D32A99AB7B /* ConnectionStateTests.swift */,
-				114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */,
 				2EDB895389A73FACE264D1CC /* CropAnimationTimingTests.swift */,
 				A646EC0DF2998B2B14DA092F /* CropGestureStateTests.swift */,
 				422AD2304A594E41F3B92EAF /* CropPreparationStateTests.swift */,
@@ -1311,6 +1260,7 @@
 				350BA7DC36C8534E89AD6AFA /* LosslessCropTaskTests.swift */,
 				545DCB3052FFC34B79B7F9D7 /* MaterialTextureReferenceTests.swift */,
 				E47418A29FCF2B72E5F11FA6 /* MaterialTextureStoreTests.swift */,
+				00753B4CE3A01EDD6487ABEA /* ModalPresentationTests.swift */,
 				C6B51959B0CA4F46B1909760 /* MonitorStorageSchedulingTests.swift */,
 				A1A1EA276EC9A7EA8F8B6F40 /* NativeAttentionMotionTests.swift */,
 				79735AB03A21EBB50D28C3DA /* NikonPictureControlProtocolTests.swift */,
@@ -1320,15 +1270,14 @@
 				983A625A8805E43B4E71A74F /* PhotoEffectModulesTests.swift */,
 				06DB43031D32A50EBF319843 /* PhotoEffectsMasterSwitchTests.swift */,
 				E2167113DD0BB11B324F599C /* PhotoEffectsPreviewCacheTests.swift */,
-				59C7B150B97663D472FFC131 /* PhotoFrameBrandLogoCatalogTests.swift */,
 				763F1C5B9BCBF9BF45603728 /* PhotoFrameBrandTests.swift */,
 				D331FCEE042A720D8DF2EDCD /* PhotoFrameCoordinateFormatTests.swift */,
 				B3080B65DD80FD0410662178 /* PhotoFrameMetadataSettingsTests.swift */,
 				4E6F870D5A9832287D86A91E /* PhotoFramePlaceTests.swift */,
 				DFCE274B28617B726971F013 /* PhotoGenerationTimingTests.swift */,
 				31DAC772EDDF21E548CF81FF /* PhotoListScrollActivityTests.swift */,
+				059A019FEB97CAEB6E88DA6F /* PhotoLUTEditorStateTests.swift */,
 				1C147F04B379414C294CA4EF /* PhotoLUTStoreTests.swift */,
-				568340EBA7B449D4B7546A52 /* PhotoLUTEditorStateTests.swift */,
 				34D352858226BF1F83138FC5 /* PhotoMetadataIdentityTests.swift */,
 				558EB92AB9673B59E1581EF2 /* PhotoMetadataPreparationTests.swift */,
 				F3CB71A3046CEE20E138E1EF /* PhotoPreviewEffectsTests.swift */,
@@ -1347,9 +1296,11 @@
 				CEFC164E56E020DEF9CE5F77 /* PremiumFireworksTests.swift */,
 				FAA908258965C54FE2E2E147 /* QueueCardSwipeTests.swift */,
 				B7B75986641EDE5E24183EA9 /* QueuePillVisibilityTests.swift */,
+				114ACD098C2B7A3A19FBD01C /* QueueTopControlTests.swift */,
 				47E6EFAE1E51765C2F07A090 /* RatingProtocolReplayTests.swift */,
 				D00237C891B57D9975209D6E /* RemoteCameraToolMenuTests.swift */,
 				7EC21072BA6F9C8F7609BC66 /* RemoteCameraToolTests.swift */,
+				25301799676467176353FF4A /* RemoteCapturePerformanceTests.swift */,
 				2FD88D8110A65A5F21AE5E4A /* RemoteDispModeTests.swift */,
 				D0427DA0D15F03413CD2BA7C /* RemoteEntryIntroLifecycleTests.swift */,
 				63454445A9D66CEB5CC965E0 /* RemoteEntryIntroPolicyTests.swift */,
@@ -1372,13 +1323,12 @@
 				A04B419A267646369F123163 /* RemoteMonitorHintTests.swift */,
 				96B612A8BF3FB5AB025F9CED /* RemoteParameterWheelTests.swift */,
 				2F397D01DBAFC8B42C069FCE /* RemotePhotoReviewModelTests.swift */,
-				79DFADBC08D9B4E019BC048A /* RemoteCapturePerformanceTests.swift */,
 				3486A449432EB3AA8F2B82CD /* RemoteReviewCatalogTests.swift */,
 				0F703D47BDE986E85F3A5321 /* RemoteShutterTests.swift */,
 				2F4E1778458633C47A4B7C38 /* RemoteToolbarGeometryTests.swift */,
 				0E6220C572967539054EFC1A /* RemoteToolDragStateTests.swift */,
-				97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */,
 				AA746937F57F91A1A5DC2C00 /* RemoteToolLayoutTests.swift */,
+				97F0FD96C8D126341831C4C5 /* RemoteToolMarkAndPresetTests.swift */,
 				22E1D672B4733BD5BCDE786B /* RemoteToolModeTransitionTests.swift */,
 				38F1B980C42BA7ED2F318409 /* RemoteToolPreferencesTests.swift */,
 				A5B564A8962AECB38EC7EC7A /* RemoteToolSlotMotionTests.swift */,
@@ -1534,15 +1484,16 @@
 				A89C3FABC5C66C28E87AEB39 /* ButtonInteractionTestHarness.swift */,
 				5B21ACE28B9FBC8D9AFB57B1 /* ButtonInteractionTrace.swift */,
 				09617D59E8633E234BFDB9A1 /* ButtonStateLabel.swift */,
-				C4CE9D4845A2496B9AA1FA11 /* PhotoPreviewPagerObserver.swift */,
 				2918BDFED6B200519B27259A /* CameraDisconnectedState.swift */,
 				FDDA62402A7BB9E32721C7D4 /* DetentWheel.swift */,
+				FA9CBBB7574ADA1B2C77A88E /* PhotoEffectsExpandedImage.swift */,
 				AD17C4052EC0FE1B1F1CEB11 /* PhotoEffectsMasterSwitch.swift */,
 				1C4FA1695B5A335C5C70E926 /* PhotoEffectsSettingsHarness.swift */,
 				86E23E26E26C55D2BF312CDC /* PhotoListAdmissionHarness.swift */,
 				E6BFF65E8ABBE7522EDCAC0E /* PhotoListHint.swift */,
 				1859B44045B28A43D42E2E71 /* PhotoListScrollActivity.swift */,
 				ECCBBC9EFD32B99494B78432 /* PhotoPreviewInteractionHarness.swift */,
+				F32FBE12F60CCBD081E6FCE5 /* PhotoPreviewPagerObserver.swift */,
 				965161D224DE9140E2B3DBB9 /* PreviewPinchObserver.swift */,
 				43DFA49E9913F317C98483AE /* QueueBadgeIcon.swift */,
 				7EA42095E02983A1EC5BB626 /* QueueCardContentSize.swift */,
@@ -1554,31 +1505,30 @@
 				22E3A8EE6F48C93D62B1E246 /* QueueRetryInteractionHarness.swift */,
 				60CEE7D0D00A0FB592A6FBC0 /* QueueSwipeInteractionHarness.swift */,
 				F76F92A0F03BC97EE6FBCB98 /* QueueTaskStatusBadge.swift */,
-				6172DA6B9AB09B1410CF76FE /* QueueTopPillMotion.swift */,
-				121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */,
 				D46BABF58F95603C73D247FD /* QueueTopControls.swift */,
+				121AACBEEFC6C6B43311ABA1 /* QueueTopIcon.swift */,
+				6172DA6B9AB09B1410CF76FE /* QueueTopPillMotion.swift */,
 				1F6EF3907674771C30A26106 /* RemoteAdaptiveToolLayout.swift */,
 				9244F978D17717AA90072D18 /* RemoteCameraToolIndicators.swift */,
 				5A1870AC6A1B85DF8F95F4C1 /* RemoteCameraToolMenu.swift */,
 				D8B17F2DC53C015416FB4D42 /* RemoteChoicePopup.swift */,
 				C87E736EE473C8810873A141 /* RemoteConfiguredToolbar.swift */,
-				FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */,
-				EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */,
-				EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */,
 				F6C5D9CBF90643BBCF20085A /* RemoteEditorIcon.swift */,
 				F4A43D3CDCC85ED79FCF1B45 /* RemoteEntryButton.swift */,
 				125A2CF683765CC9A3041412 /* RemoteExposureTile.swift */,
 				BF7E2304FF41DD0FEC3E95E0 /* RemoteFramingGridOverlay.swift */,
 				622FB11FA5ECB4E0C8F9C339 /* RemoteGridMenu.swift */,
 				00DFB5370FE62695737A8492 /* RemoteHorizonOverlay.swift */,
-				A4B2C65F67084973A13B8961 /* PhotoEffectsExpandedImage.swift */,
 				E6B162C26FC2DE71F1E53C79 /* RemoteLandscapeControls.swift */,
 				18AD6A5BC7B19AAB406CB26B /* RemoteMonitorHintBubble.swift */,
 				27B26716BCDA09A3DCBC8C68 /* RemoteParameterInput.swift */,
 				1C83370A1FF2564237752BAC /* RemoteParameterPanel.swift */,
+				EECF54D9DD6C851EA7F36D8C /* RemotePictureControlGlyph.swift */,
+				EF7721646BB0849D054104AC /* RemotePictureControlMotion.swift */,
 				1737C3BB17F59BA3C3346A1C /* RemoteShutterButton.swift */,
 				A55562BC16E9BB145A7532A7 /* RemoteToolDragState.swift */,
 				6A97BEF46C586CFF6734D901 /* RemoteToolEditorMotion.swift */,
+				FD57FEB4E150B6C8D4BB35B7 /* RemoteToolMark.swift */,
 				1C776746630D8F925E8A5DC3 /* RemoteToolModeCrossfade.swift */,
 				6F8AF750CC99BF1A1C36EEBB /* RemoteToolsInteractionHarness.swift */,
 				895233AC318FE068350BD0AB /* RemoteViewfinderInput.swift */,
@@ -1625,7 +1575,6 @@
 			children = (
 				7014EFB81AA1037FAD74859E /* AndroidThumbnailProcessor.swift */,
 				DF75090392EAE250C293306C /* AutoTransferMode.swift */,
-				70613B41F5787FACBA789D35 /* BuiltInPictureControls.swift */,
 				F7E4E42CE0C6B8BF610B6BA4 /* CachedThumbnailBatchPolicy.swift */,
 				3B9326F326B0EE22E874CB7C /* CameraConnectionPresentation.swift */,
 				1623B90210C055F71FFFB2FD /* CameraConnectionService.swift */,
@@ -1657,7 +1606,6 @@
 				A78A06DFB6CD821F0E2DAD5C /* LosslessCropProcessor.swift */,
 				1296F8C7D12744333924C160 /* LosslessCropTask.swift */,
 				3435F2457F5670A5939AF091 /* LosslessJpegBridge.swift */,
-				DEC452C56C688B088EF34665 /* NikonBrandGradients.swift */,
 				1AC1138C5A091551C7393C0F /* NikonGPSBluetoothClient.swift */,
 				B78CB0F985A39FDB47256C20 /* NikonPictureControl.swift */,
 				F72BD4923C4F0D287252BABD /* NikonPictureControlAccess.swift */,
@@ -1674,16 +1622,14 @@
 				8FFDE9BAC912EED3139672E5 /* PhotoExif.swift */,
 				4F0B7C798712246B70C8C2D0 /* PhotoExifStore.swift */,
 				DE7320E831B92FDF16C5A2A8 /* PhotoFilter.swift */,
-				9CFAFC5849A3B8ED41A318E4 /* PhotoFrameBrand.swift */,
-				DFCB4E033397AFA07066F8FD /* PhotoFrameBrandLogoCatalog.swift */,
 				86CEE16F4CB166FF233B98C2 /* PhotoFramePlace.swift */,
 				E32009AE62F0AE94FF877474 /* PhotoFramePlaceResolver.swift */,
 				D961B6709BEFEB665F1D0932 /* PhotoFrameTextLayout.swift */,
 				F265CFFFCA5BE91B25DBEDD7 /* PhotoGenerationTiming.swift */,
 				21FE65A239E26AF1D7198CF5 /* PhotoListViewModel.swift */,
+				FEA4A743875686F0F28005B2 /* PhotoLUTEditorState.swift */,
 				F48547F5A881D04F37BB5DA7 /* PhotoLUTRuntime.swift */,
 				4750F886691AC47E6801F907 /* PhotoLUTStore.swift */,
-				7A2930BD4F2D4EC3998590A9 /* PhotoLUTEditorState.swift */,
 				18B4B326B729FD6F2F937135 /* PhotoMetadataPreparation.swift */,
 				457C3F4F1FAA167CE42EF0C6 /* PhotoRatingScan.swift */,
 				A0FCBDED0111A21DB70B4D2F /* PhotoThumbnailDiskCache.swift */,
@@ -1735,31 +1681,6 @@
 				78966E9706F5C8C280CCCE90 /* WiFiKeepaliveLoop.swift */,
 			);
 			path = Domain;
-			sourceTree = "<group>";
-		};
-		A2176B0406EDFA448C1FD69A /* BrandLogos */ = {
-			isa = PBXGroup;
-			children = (
-				60F466ABB71F2EC38BDC166D /* apple.svg */,
-				CC3D7C1ADC6EACA3950A33FD /* dji.svg */,
-				EA3DB9B7B2871B859EA0BC6E /* fujifilm.svg */,
-				9E75C60CE4836243F49CF53C /* google.svg */,
-				09784A016E60C7D2BB629605 /* honor.svg */,
-				C2CFAF2A1895996941BEC9EC /* huawei.svg */,
-				FCBF6EF835C1B57D8A186CD8 /* leica.svg */,
-				E9993810218A19C2326AF3A3 /* motorola.svg */,
-				321DBCDC9D738FBA439C013F /* nikon-official.svg */,
-				0DA8782135A88D20E5E91602 /* nikon.svg */,
-				73FEA2036B59B64BDF5BB8C3 /* nokia.svg */,
-				3CE1546AD62AC14FBFB98DD8 /* oneplus.svg */,
-				4D32DB74E82CA947E6537F26 /* oppo.svg */,
-				3693B86355F9F2C21B08C52F /* panasonic.svg */,
-				D1F8A63D174C4A924C8B277D /* samsung.svg */,
-				33802C013793FDBA1E0A5A12 /* sony.svg */,
-				7B5D3CFB8B07CBE750EE2B79 /* vivo.svg */,
-				AB1F183FFE818E96F13B1DD6 /* xiaomi.svg */,
-			);
-			path = BrandLogos;
 			sourceTree = "<group>";
 		};
 		A913A5BD665D140FFD76666E /* ZTransfer */ = {
@@ -1863,14 +1784,13 @@
 		B7C3A266EE6105531AAAF0D2 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				A2176B0406EDFA448C1FD69A /* BrandLogos */,
 				1FDAFED6652BDAF104D56E54 /* Fonts */,
 				FBAC3D5E224E943E00BD3937 /* licenses */,
 				F5B0DCD9EF4268A3ACA7C197 /* Localizable.strings */,
-				91C3682D875B418992CA5002 /* PrivacyInfo.xcprivacy */,
 				492C1EF3D28AAC9526188721 /* Assets.xcassets */,
 				F4065A70797FFC0036A880A0 /* debug_sample_01.jpg */,
 				328894309311582E8EECDA44 /* debug_sample_fhd.jpg */,
+				B9BE3422D34018D6F03279BE /* PrivacyInfo.xcprivacy */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -1884,18 +1804,18 @@
 				721EE1E4462782AD6B669580 /* GeniePopupPanel.swift */,
 				B7580B5DC6E6B426AFDCD70C /* LocalPhotoEffectsView.swift */,
 				DFC57B08925281E07166717A /* PhotoCropEditor.swift */,
+				DEE47A6A54335F4A7699918F /* PhotoEffectChooserDialog.swift */,
 				6C73EF01969DAC563DA91DD0 /* PhotoEffectsEditorView.swift */,
 				D5A141881A4EEBF0C3CF247A /* PhotoFilterComponents.swift */,
 				319C94935AB93C922D1BE545 /* PhotoFilterPopupOverlay.swift */,
 				0994973567FB60B02328A65F /* PhotoListView.swift */,
 				C3F118DAAAE8C7F7F5A18002 /* PhotoLUTChooser.swift */,
-				9DDFA62E6D494816B30C09C8 /* PhotoEffectChooserDialog.swift */,
 				9C82DE7EDD874E138885C18B /* PhotoPreviewView.swift */,
 				D30D50D08DD29F5CC98E366E /* PremiumFireworks.swift */,
 				A1DC8FD007EB06AB0B15D896 /* PremiumPurchaseView.swift */,
 				C835825BFF8A24B401975734 /* PreviewPhotoEffectsEditor.swift */,
 				9967A06A7297A08CC0763403 /* RemoteLUTMetalView.swift */,
-				A4E0E77D663548B78D0E6A23 /* RemoteLUTPanel.swift */,
+				328740A77B7A24AB140629C8 /* RemoteLUTPanel.swift */,
 				A7564F9A5DB5742E5AE8F875 /* RemotePhotoReviewView.swift */,
 				409437DA67206B67DA4FCEC1 /* RemotePictureControlPanel.swift */,
 				2482C61B58C4A4EE95210CDA /* RemoteView.swift */,
@@ -2058,9 +1978,9 @@
 				AA8DAB4EE5A76236D0FA5A04 /* AndroidX-color-NOTICE.txt */,
 				2A843DBA46468A9C2C95F0D5 /* AndroidX-motion-NOTICE.txt */,
 				250213A8042128973C9861E5 /* AOSP-shadow-NOTICE.txt */,
-				91C3682D875B418992CA5012 /* ThirdPartyNotices.txt */,
 				D1EB62AADCDF15964FB70883 /* Apache-2.0.txt */,
 				3BD42CB0DB87576C5B3187DD /* Skia-BSD.txt */,
+				6447401A0454C267A53B50E3 /* ThirdPartyNotices.txt */,
 			);
 			path = licenses;
 			sourceTree = "<group>";
@@ -2251,36 +2171,17 @@
 				D9A8136268F4B3C1CFEEB6F4 /* AOSP-shadow-NOTICE.txt in Resources */,
 				6387552CE235DC0EF599F7CC /* AndroidX-color-NOTICE.txt in Resources */,
 				309F3C1CE60201091141FE56 /* AndroidX-motion-NOTICE.txt in Resources */,
-				91C3682D875B418992CA5011 /* ThirdPartyNotices.txt in Resources */,
 				DEB58A69C568F36181C8CE98 /* Apache-2.0.txt in Resources */,
 				F461F6F2640D24E1C10CD599 /* Assets.xcassets in Resources */,
 				B104166B4E6A8060016636A2 /* Localizable.strings in Resources */,
-				91C3682D875B418992CA5001 /* PrivacyInfo.xcprivacy in Resources */,
-				B6C12920D54B7DE1E510EAD0 /* PictureControls in Resources */,
+				A177151A6CA74AB5BAB2CD28 /* PrivacyInfo.xcprivacy in Resources */,
 				E6C9523D60D283ECD4C79AF6 /* Skia-BSD.txt in Resources */,
-				C18B40D41FFA727EC247B6C0 /* apple.svg in Resources */,
+				F63C94BB8ECCCDACA3096335 /* ThirdPartyNotices.txt in Resources */,
 				76FA040ADFD4573DBDA00991 /* bebas_neue_regular.ttf in Resources */,
 				C127B5B73435A9434E2EEF30 /* cormorant_garamond_medium_italic.ttf in Resources */,
 				0A8544825B726D3116C5420F /* debug_sample_01.jpg in Resources */,
 				EC141CEEC0B3CC2493824E36 /* debug_sample_fhd.jpg in Resources */,
-				B88392EA743A420701F1C6A5 /* dji.svg in Resources */,
-				29E9611A5E035B277D9E4CBC /* fujifilm.svg in Resources */,
-				7B76F3AB21BBFF7C22898054 /* google.svg in Resources */,
 				481FE39822F171E89584DA10 /* great_vibes_regular.ttf in Resources */,
-				22E87FA22682324C825DB38D /* honor.svg in Resources */,
-				C32850E98BB3CD6334726B3C /* huawei.svg in Resources */,
-				244D563033EAB5E86527D812 /* leica.svg in Resources */,
-				EB92201A2FC4EBAF3FB252A4 /* motorola.svg in Resources */,
-				EDE2F5607026929FB31254BF /* nikon-official.svg in Resources */,
-				823542F891BDDC0FA1BB47C1 /* nikon.svg in Resources */,
-				C178BF0B12C7B472EBEBCA57 /* nokia.svg in Resources */,
-				FD4CB6FD193685DCC75E5D02 /* oneplus.svg in Resources */,
-				BA5D06BC805EC8A67235AA4C /* oppo.svg in Resources */,
-				D8E76CEE9CA044E66DAD7048 /* panasonic.svg in Resources */,
-				4D6B54E2818A4984F0F7F982 /* samsung.svg in Resources */,
-				30C079B99A796AB71D18CA85 /* sony.svg in Resources */,
-				FD4BBD4FF7701473E68B85C6 /* vivo.svg in Resources */,
-				A8459257157AB15DBABE35C3 /* xiaomi.svg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2350,7 +2251,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F58F6D6A16E09A2634D7A7CB /* ModalPresentationTests.swift in Sources */,
 				E39724DF63E2D38A0698C6E3 /* AndroidColorInterpolationTests.swift in Sources */,
 				6BA6A1A1DD41BE273A7B8101 /* AndroidMotionReferenceTests.swift in Sources */,
 				3BD32121A7B5912509D6D118 /* AndroidShadowMetricsTests.swift in Sources */,
@@ -2366,7 +2266,6 @@
 				493A04F66D4FC115A856ACB8 /* CameraIOGateTests.swift in Sources */,
 				B8C0F45BB12E1361F00E6731 /* ConflatedPreviewUpdatesTests.swift in Sources */,
 				48EBBB7703B0E57F6AC878EA /* ConnectionStateTests.swift in Sources */,
-				25EEACED831FB5948D96E186 /* QueueTopControlTests.swift in Sources */,
 				78393FF3CAA66DA21ABB70E4 /* CropAnimationTimingTests.swift in Sources */,
 				5F1EFB891FFBE8904BB09C5D /* CropGestureStateTests.swift in Sources */,
 				6AADCCC66C00A779A0655AFE /* CropPreparationStateTests.swift in Sources */,
@@ -2388,6 +2287,7 @@
 				8F84A801F84694E63C801A52 /* LosslessCropTaskTests.swift in Sources */,
 				96AC4C18ECDDC6793559C2AE /* MaterialTextureReferenceTests.swift in Sources */,
 				A5922DC4DAC7567C4710A561 /* MaterialTextureStoreTests.swift in Sources */,
+				F58F6D6A16E09A2634D7A7CB /* ModalPresentationTests.swift in Sources */,
 				ACBCB31848967F1C7E83F6DC /* MonitorStorageSchedulingTests.swift in Sources */,
 				ADD2ABB3801C54382250156B /* NEFExifParityTests.swift in Sources */,
 				9CCE41D9F6C72F5B783C40B2 /* NativeAttentionMotionTests.swift in Sources */,
@@ -2409,15 +2309,14 @@
 				501B9EDBF24732451874BB1D /* PhotoEffectsBatchTests.swift in Sources */,
 				F2EF9E8D5908209078D6269D /* PhotoEffectsMasterSwitchTests.swift in Sources */,
 				87A1F0FD21011AD9F08882A1 /* PhotoEffectsPreviewCacheTests.swift in Sources */,
-				184FC3E52FA3CCE5853A2F52 /* PhotoFrameBrandLogoCatalogTests.swift in Sources */,
 				570C1EE8A1C684480EC1ACB9 /* PhotoFrameBrandTests.swift in Sources */,
 				0DA45CBBA84B5DCA4C0BBBA8 /* PhotoFrameCoordinateFormatTests.swift in Sources */,
 				BA4DF02542C81A5F677C42D5 /* PhotoFrameMetadataSettingsTests.swift in Sources */,
 				68EB86F4466F792FC86FE43D /* PhotoFramePlaceTests.swift in Sources */,
 				28B3F74FF921D952492C8C1C /* PhotoFrameTextLayoutTests.swift in Sources */,
 				0245D4B52E1942B715287732 /* PhotoGenerationTimingTests.swift in Sources */,
+				57A64316951E128337CD8D7A /* PhotoLUTEditorStateTests.swift in Sources */,
 				C95B148D877FE03E80C799F4 /* PhotoLUTStoreTests.swift in Sources */,
-				127EDD8FF6E24750B98E8CD7 /* PhotoLUTEditorStateTests.swift in Sources */,
 				51346779425A82E6CF6266F6 /* PhotoListScrollActivityTests.swift in Sources */,
 				6B4E1397BB07ACCC3CF8B4A5 /* PhotoMetadataIdentityTests.swift in Sources */,
 				918AB59D0864820C06D19861 /* PhotoMetadataPreparationTests.swift in Sources */,
@@ -2437,9 +2336,11 @@
 				36A98E348D4EDFA2BC74367A /* PremiumFireworksTests.swift in Sources */,
 				D5D9950F9DB290E9BB454C5D /* QueueCardSwipeTests.swift in Sources */,
 				619FBA55E53B68A5AE9AF891 /* QueuePillVisibilityTests.swift in Sources */,
+				25EEACED831FB5948D96E186 /* QueueTopControlTests.swift in Sources */,
 				7D2A78A235A8A0AE6DC94FCD /* RatingProtocolReplayTests.swift in Sources */,
 				CC4E8C8F30760908D6F48F5B /* RemoteCameraToolMenuTests.swift in Sources */,
 				9CADBE13F32E8704DCAAF584 /* RemoteCameraToolTests.swift in Sources */,
+				CF2298B6CE98BD0D905CF920 /* RemoteCapturePerformanceTests.swift in Sources */,
 				8FA9EDF328D5762F505C1CE8 /* RemoteDispModeTests.swift in Sources */,
 				74E84075DD48D6F57974F658 /* RemoteEntryIntroLifecycleTests.swift in Sources */,
 				6936BED968B716935D762312 /* RemoteEntryIntroPolicyTests.swift in Sources */,
@@ -2463,14 +2364,13 @@
 				867806A5DE87DE273956B1CF /* RemoteMonitorHintTests.swift in Sources */,
 				6D5E7439CCE3D8020E36A358 /* RemoteParameterWheelTests.swift in Sources */,
 				646885A879D0C630A90F7793 /* RemotePhotoReviewModelTests.swift in Sources */,
-				DC80DDF78487CAFF164BD63D /* RemoteCapturePerformanceTests.swift in Sources */,
 				946D307C7E78C2701BC6151F /* RemoteRecordingTests.swift in Sources */,
 				8D09EED2361BD02A1CD95F60 /* RemoteReviewCatalogTests.swift in Sources */,
 				601ABFAD39A866300F2A56F9 /* RemoteShutterTests.swift in Sources */,
 				79DF53F7FB57B0EF6D965D7C /* RemoteStateTests.swift in Sources */,
 				1FCCB40574D1DA7E23BE18A6 /* RemoteToolDragStateTests.swift in Sources */,
-				0D0588FAB7E6A0FE083B2617 /* RemoteToolMarkAndPresetTests.swift in Sources */,
 				C4E9830EC6359E896006CC04 /* RemoteToolLayoutTests.swift in Sources */,
+				0D0588FAB7E6A0FE083B2617 /* RemoteToolMarkAndPresetTests.swift in Sources */,
 				307D60C303D75C3EB71D6D5F /* RemoteToolModeTransitionTests.swift in Sources */,
 				F71D8A9B159231C86891AB85 /* RemoteToolPreferencesTests.swift in Sources */,
 				15194F35C0191118927B1114 /* RemoteToolSlotMotionTests.swift in Sources */,
@@ -2524,11 +2424,9 @@
 				C47EE7A521C4554CB9D112FB /* AndroidThumbnailProcessor.swift in Sources */,
 				B7E26AA94FF197578A633BE6 /* AsyncDeadline.swift in Sources */,
 				1F069ED71F8E352C34908B93 /* AutoTransferMode.swift in Sources */,
-				8B4C510CB16D5AF3C724CEFE /* BuiltInPictureControls.swift in Sources */,
 				96DEA04E945E6D36C01F49F5 /* ButtonInteractionTestHarness.swift in Sources */,
 				76612E81B2E7FC81FAF512B1 /* ButtonInteractionTrace.swift in Sources */,
 				9780BAFD64887582C32F1A8E /* ButtonStateLabel.swift in Sources */,
-				C4CE9D4845A2496B9AA1FA10 /* PhotoPreviewPagerObserver.swift in Sources */,
 				67B055857353A3B48D76838B /* CachedThumbnailBatchPolicy.swift in Sources */,
 				24E74AA743868EC96490AE8E /* CameraConnectionPresentation.swift in Sources */,
 				171B3B7D9317366D04867322 /* CameraConnectionService.swift in Sources */,
@@ -2578,7 +2476,6 @@
 				53A0052ADB6D6C16A7F32137 /* LosslessJpegBridge.swift in Sources */,
 				ACE910F4598DDD5D707BC9F0 /* NEFExifThumbnail.swift in Sources */,
 				BF8F9659A65C0392337FC695 /* NativeAttentionMotion.swift in Sources */,
-				B34B2B1ADB3FDE50B2287F76 /* NikonBrandGradients.swift in Sources */,
 				82C2CB5E5068C162593867DB /* NikonGPSBluetoothClient.swift in Sources */,
 				1793BC1FEEB38A9051630D1C /* NikonPictureControl.swift in Sources */,
 				C85E831899FE297C9D01D1B9 /* NikonPictureControlAccess.swift in Sources */,
@@ -2599,9 +2496,11 @@
 				3987F16AD0DE800CDE55D66E /* PhotoCatalog.swift in Sources */,
 				4C892823DF148B4A64346F14 /* PhotoCropEditor.swift in Sources */,
 				5620189F575207554839BC45 /* PhotoCubeLUTMapper.swift in Sources */,
+				E40267DACE74C87EA52AE547 /* PhotoEffectChooserDialog.swift in Sources */,
 				EAA5DF5FD98BD21E0A03F030 /* PhotoEffects.swift in Sources */,
 				3C86D76849976090B4967FFB /* PhotoEffectsBatch.swift in Sources */,
 				993DCFA6B1D01106479A25F3 /* PhotoEffectsEditorView.swift in Sources */,
+				D4D8A02B9A16028930B1EC05 /* PhotoEffectsExpandedImage.swift in Sources */,
 				97AD66B183EB8C54C77F62D9 /* PhotoEffectsMasterSwitch.swift in Sources */,
 				D7821DAC36D8988C77EAB2B1 /* PhotoEffectsPreviewCache.swift in Sources */,
 				AE7CD25C554B94537BE4BE8F /* PhotoEffectsRenderer.swift in Sources */,
@@ -2611,17 +2510,14 @@
 				CCC3F71A5AF4D6584D1FC2EE /* PhotoFilter.swift in Sources */,
 				952C9E5420A97B8788F42568 /* PhotoFilterComponents.swift in Sources */,
 				CB99922E4C5C868F6F4EAA41 /* PhotoFilterPopupOverlay.swift in Sources */,
-				1FC02F762D8AC9BAAE3E836D /* PhotoFrameBrand.swift in Sources */,
-				28C6107713C0DBE43F6AC65A /* PhotoFrameBrandLogoCatalog.swift in Sources */,
 				495E06F8CC900F0FDBC4D215 /* PhotoFramePlace.swift in Sources */,
 				2F00B1925844486AFA46EFAC /* PhotoFramePlaceResolver.swift in Sources */,
 				C3B0EBF639B834E335A187A5 /* PhotoFrameTextLayout.swift in Sources */,
 				746A7F964235E98E8E845C88 /* PhotoGenerationTiming.swift in Sources */,
 				8EEDBA32D35A11889C89C07A /* PhotoLUTChooser.swift in Sources */,
-				49052789734745099C7A5293 /* PhotoEffectChooserDialog.swift in Sources */,
+				408D244D2A2F6921ADFB082C /* PhotoLUTEditorState.swift in Sources */,
 				5D9BC0CEB4B90256B431C24B /* PhotoLUTRuntime.swift in Sources */,
 				8CCA93635020531D7483F725 /* PhotoLUTStore.swift in Sources */,
-				BC50FE05F6E74F89837DF6C8 /* PhotoLUTEditorState.swift in Sources */,
 				F4AE42628784C2832738BB79 /* PhotoListAdmissionHarness.swift in Sources */,
 				F8170B367BD71572C031D42E /* PhotoListHint.swift in Sources */,
 				976E4A7ED23DE481DD29FCF2 /* PhotoListScrollActivity.swift in Sources */,
@@ -2630,6 +2526,7 @@
 				7087FEBB6FB1BD97D49A700F /* PhotoMetadataIdentity.swift in Sources */,
 				DCCD413F72FF786A58BF71F4 /* PhotoMetadataPreparation.swift in Sources */,
 				D351793BBEA59B023DF79CBB /* PhotoPreviewInteractionHarness.swift in Sources */,
+				84C84DBB264605869ED7B42F /* PhotoPreviewPagerObserver.swift in Sources */,
 				FB665603737D98CF66B03FD9 /* PhotoPreviewView.swift in Sources */,
 				A9BC084CD2324B6A4D52CF84 /* PhotoRating.swift in Sources */,
 				F6DD889BF1224E71AA63252B /* PhotoRatingPairs.swift in Sources */,
@@ -2656,9 +2553,9 @@
 				8AC6AF18D9DF05472B3AB990 /* QueueRetryInteractionHarness.swift in Sources */,
 				0CE24FB43D1972CF18B5D787 /* QueueSwipeInteractionHarness.swift in Sources */,
 				D3F7A2FA964C498E0341A09C /* QueueTaskStatusBadge.swift in Sources */,
-				499C955B4CC96624219EB263 /* QueueTopPillMotion.swift in Sources */,
-				CFFE89B33DB4BA87C30E539D /* QueueTopIcon.swift in Sources */,
 				07D196CBCE1AE019DBA26586 /* QueueTopControls.swift in Sources */,
+				CFFE89B33DB4BA87C30E539D /* QueueTopIcon.swift in Sources */,
+				499C955B4CC96624219EB263 /* QueueTopPillMotion.swift in Sources */,
 				13B51A94A37BF769EE5EA6F9 /* RemoteAdaptiveToolLayout.swift in Sources */,
 				04E30F9F00DE029EC2AB6876 /* RemoteCameraTool.swift in Sources */,
 				C05F75E05BFD7827D3284C79 /* RemoteCameraToolController.swift in Sources */,
@@ -2667,9 +2564,6 @@
 				BF9CB5E4157F2E6259D88432 /* RemoteChoicePopup.swift in Sources */,
 				4111DA67E202D4EAC4B1468E /* RemoteConfiguredToolbar.swift in Sources */,
 				86ED54F4E3D196FAF34BBC0C /* RemoteDisplayOptions.swift in Sources */,
-				1247DA6DFC0B675D9077ACD7 /* RemoteToolMark.swift in Sources */,
-				98C6F606D1EA548025C88F15 /* RemotePictureControlGlyph.swift in Sources */,
-				55778E486ECD538D41EF36D9 /* RemotePictureControlMotion.swift in Sources */,
 				74669B68F587235071ACF437 /* RemoteEditorIcon.swift in Sources */,
 				588BB42D144D7E3C8BE692B1 /* RemoteEntryButton.swift in Sources */,
 				169B60F6D4A362EA10368369 /* RemoteEntryIntroPolicy.swift in Sources */,
@@ -2684,14 +2578,13 @@
 				E55B5D7F8AC94EACC1404CC3 /* RemoteHorizon.swift in Sources */,
 				C3C9FE27A93F76EF94AEEC4F /* RemoteHorizonAnimation.swift in Sources */,
 				7884258CDE091748C39C081A /* RemoteHorizonOverlay.swift in Sources */,
-				D65C227E49E2438E8EC71932 /* PhotoEffectsExpandedImage.swift in Sources */,
 				6066F71D6F80B32B36020C1B /* RemoteLUTCatalog.swift in Sources */,
 				9C138419D1790D0D7591271D /* RemoteLUTFolderAccess.swift in Sources */,
 				30146DB9556B2A1FACF06D2F /* RemoteLUTLoadQueue.swift in Sources */,
 				4F05D95DA449C2CFADFB4344 /* RemoteLUTMetalRenderer.swift in Sources */,
 				DAA5C8C2E23830F5C8B6971E /* RemoteLUTMetalView.swift in Sources */,
-				A4E0E77D663548B78D0E6A24 /* RemoteLUTPanel.swift in Sources */,
 				81810CC6C13DC80C7462847D /* RemoteLUTMonitorState.swift in Sources */,
+				87813AF0CC08CBE6C42F8D85 /* RemoteLUTPanel.swift in Sources */,
 				C51345BB8B27F312BBA25647 /* RemoteLUTPreferences.swift in Sources */,
 				0073BCF4497DD37C3661B7DE /* RemoteLUTState.swift in Sources */,
 				BE5606FBE5BF562163253204 /* RemoteLandscapeControls.swift in Sources */,
@@ -2704,6 +2597,8 @@
 				CAB77B1C9934F4CDF69C0FD4 /* RemoteParameterWheel.swift in Sources */,
 				81D72837C26131849E77990D /* RemotePhotoReviewModel.swift in Sources */,
 				043D67115E440938913CBF03 /* RemotePhotoReviewView.swift in Sources */,
+				98C6F606D1EA548025C88F15 /* RemotePictureControlGlyph.swift in Sources */,
+				55778E486ECD538D41EF36D9 /* RemotePictureControlMotion.swift in Sources */,
 				3E20FB1D5F2FAA80E9030D12 /* RemotePictureControlPanel.swift in Sources */,
 				D5F4DFE0596F042BD0AA0510 /* RemoteProperty.swift in Sources */,
 				E83ECCE5BCE39DD2EF826CB4 /* RemoteReviewCatalog.swift in Sources */,
@@ -2712,6 +2607,7 @@
 				4B2742CE4F12A7495A8A95C7 /* RemoteToolDragState.swift in Sources */,
 				D07331BCFF59AB8559F67780 /* RemoteToolEditorMotion.swift in Sources */,
 				EB9D2DD53D857430FBAFB048 /* RemoteToolLayout.swift in Sources */,
+				1247DA6DFC0B675D9077ACD7 /* RemoteToolMark.swift in Sources */,
 				08C4065ABC588B1A0854510E /* RemoteToolModeCrossfade.swift in Sources */,
 				9B94EC85477AED9DB9590003 /* RemoteToolPreferences.swift in Sources */,
 				12ACC8900A88AC9927EA63AB /* RemoteToolsInteractionHarness.swift in Sources */,
@@ -2992,11 +2888,11 @@
 		6D98BC54B61B8D4930829071 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				EXCLUDED_SOURCE_FILE_NAMES = "$(inherited) debug_sample_01.jpg debug_sample_fhd.jpg";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ZTransfer/ZTransfer.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				EXCLUDED_SOURCE_FILE_NAMES = "$(inherited) debug_sample_01.jpg debug_sample_fhd.jpg";
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/ThirdParty/libjpeg-8bit/src",

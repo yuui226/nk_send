@@ -1,0 +1,26 @@
+{
+  "label": "release-device",
+  "command": [
+    "xcodebuild",
+    "-project",
+    "ios/ZTransfer.xcodeproj",
+    "-scheme",
+    "ZTransfer",
+    "-configuration",
+    "Release",
+    "-destination",
+    "generic/platform=iOS",
+    "-derivedDataPath",
+    "/tmp/ztransfer-removal-derived-20261021",
+    "CODE_SIGNING_ALLOWED=NO",
+    "build"
+  ],
+  "startedAt": "2026-10-21T15:18:35.588390+08:00",
+  "finishedAt": "2026-10-21T15:36:34.119951+08:00",
+  "exitCode": 0,
+  "log": "/tmp/ztransfer-removal-validation-20261021/release-device.log",
+  "sha256": "69361201cd1ba8bf01270b8d37ee072544cb8545d34738f8db569280bbcb87ed",
+  "markers": [
+    "** BUILD SUCCEEDED **"
+  ]
+}

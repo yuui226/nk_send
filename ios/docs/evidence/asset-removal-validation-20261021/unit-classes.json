@@ -1,0 +1,21 @@
+[
+  "PhotoFrameBrandMigrationTests",
+  "PhotoFrameBrandTests",
+  "PhotoFrameMetadataPersistenceTests",
+  "PhotoFrameMetadataOutputIdentityTests",
+  "UserPictureControlResourcesTests",
+  "NikonPictureControlTests",
+  "NikonPictureControlProtocolTests",
+  "NikonLegacyPictureControlTests",
+  "NikonLegacyPictureControlMutationTests",
+  "PictureControlFolderStateTests",
+  "PictureControlPanelModelTests",
+  "PictureControlReplacementTests",
+  "PictureControlBackupStoreTests",
+  "NikonPictureControlSelectionTests",
+  "Np3FilterEngineTests",
+  "Np3AndroidGoldenTests",
+  "Np3BitmapFilterTests",
+  "PhotoEffectsBatchTests",
+  "RemoteToolMarkAndPresetTests"
+]

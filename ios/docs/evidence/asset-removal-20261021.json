@@ -1,0 +1,308 @@
+{
+  "date": "2026-10-21",
+  "scope": "Remove only bundled camera NP3 presets and brand graphics; retain user NP3 input, mobile color filters, ordinary brand text and custom image watermarks.",
+  "tasks": {
+    "implementationAndBoundedChecksCompleted": 5,
+    "implementationAndBoundedChecksTotal": 5,
+    "newAppBuildOrUIValidated": false
+  },
+  "resources": {
+    "cameraNP3FilesRemoved": 22,
+    "duplicatedThirdPartyTestNP3FilesRemoved": 22,
+    "brandSVGFilesRemoved": 18,
+    "productionNP3DirectoryAbsent": true,
+    "brandResourceDirectoryAbsent": true,
+    "productionNP3FilesPresent": 0
+  },
+  "project": {
+    "generator": "xcodegen generate --spec ios/project.yml --project ios",
+    "exitCode": 0,
+    "plistLintExitCode": 0,
+    "semanticChanges": {
+      "ZTransferTests PBXSourcesBuildPhase": {
+        "removed": [
+          "PhotoFrameBrandLogoCatalogTests.swift"
+        ],
+        "added": []
+      },
+      "ZTransfer PBXSourcesBuildPhase": {
+        "removed": [
+          "BuiltInPictureControls.swift",
+          "NikonBrandGradients.swift",
+          "PhotoFrameBrand.swift",
+          "PhotoFrameBrandLogoCatalog.swift"
+        ],
+        "added": []
+      },
+      "ZTransfer PBXResourcesBuildPhase": {
+        "removed": [
+          "PictureControls",
+          "apple.svg",
+          "dji.svg",
+          "fujifilm.svg",
+          "google.svg",
+          "honor.svg",
+          "huawei.svg",
+          "leica.svg",
+          "motorola.svg",
+          "nikon-official.svg",
+          "nikon.svg",
+          "nokia.svg",
+          "oneplus.svg",
+          "oppo.svg",
+          "panasonic.svg",
+          "samsung.svg",
+          "sony.svg",
+          "vivo.svg",
+          "xiaomi.svg"
+        ],
+        "added": []
+      }
+    },
+    "targetBuildSettingsUnchanged": true
+  },
+  "np3Standalone": {
+    "date": "2026-10-21",
+    "scope": "Remove only the 22 camera-writable bundled NP3 presets; user explicitly retains mobile photo color filters.",
+    "standaloneCheck": {
+      "result": "PASS",
+      "exitCode": 0,
+      "assertions": 1113,
+      "kind": "macOS host executable, actual production NikonPictureControl.swift plus test-only generated neutral NP3 factory",
+      "command": "xcrun swiftc -module-cache-path /tmp/ztransfer-user-np3-check-20261021/module-cache ios/ZTransfer/Domain/NikonPictureControl.swift /tmp/ztransfer-user-np3-check-20261021/SyntheticPictureControlFixture.swift /tmp/ztransfer-user-np3-check-20261021/main.swift -o /tmp/ztransfer-user-np3-check-20261021/check",
+      "run": "/tmp/ztransfer-user-np3-check-20261021/check",
+      "output": "PASS: 1113 assertions using actual NikonPictureControl.swift and generated neutral test fixtures",
+      "coverage": [
+        "NP3 container full/truncated reads",
+        "Classic Z and legacy V2 encoding with/without synthetic identity curve",
+        "all 257 arithmetic tone samples preserved",
+        "unknown version write rejection",
+        "legacy V2 mid-range unsupported rejection",
+        "bounded streams and cancellation"
+      ]
+    },
+    "notRun": [
+      "Xcode app build",
+      "App-hosted XCTest",
+      "UIKit layout / simulator visual review",
+      "physical camera write / rollback"
+    ],
+    "sourceSha256": {
+      "ios/ZTransfer/Domain/NikonPictureControl.swift": "4acf4401a06763be48f90984e178e98e09d6ac4f691efbf524036118a95e0621",
+      "ios/ZTransfer/Domain/PictureControlPanelModel.swift": "14afb54706d5b014e045ff5b07db1d1690533c08168b5a9cfc5de45617b81738",
+      "ios/ZTransfer/UI/RemotePictureControlPanel.swift": "924e4c1a8ff531ce24dada140a89e04b8f3def6da9a7b691c22140c577a51eee",
+      "ios/ZTransferTests/BuiltInPictureControlsTests.swift": "5404abcaec31012ba866479bfb1fc1b279f92859dee91abadb6a094dc03893c8",
+      "ios/ZTransferTests/NikonPictureControlProtocolTests.swift": "abb5463766346e8b734749fa8e01cd5e89794e02c80ef2edac801ce732b134c7",
+      "ios/ZTransferTests/NikonPictureControlTests.swift": "05faea427662dab84a55da52b7237e5b4f2874b3e5db3c4bb35837de18f488cd",
+      "ios/ZTransferTests/RemoteToolMarkAndPresetTests.swift": "b63b70da6cdfd69e6e48d028eccae1e4be485c057018240399c1d5d28e296372"
+    }
+  },
+  "brandDataModelStandalone": {
+    "source": "/Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffects.swift",
+    "sourceSha256": "7ef1069f206b79c7c1154973fedcee00553cd0c89f7da4a070c19c13553b4ca9",
+    "generatedFile": "/tmp/ztransfer-brand-foundation-check-20261021/ProductionBrandMetadata.swift",
+    "generatedSha256": "8a719d10927c4fb93b5898b93e3a6ac4686189c6cb911c5ac4581eae3815d816",
+    "extraction": "Complete unmodified declaration blocks copied from current production source; only Foundation import and separators added.",
+    "declarations": [
+      {
+        "declaration": "enum PhotoFramePreset:",
+        "startLine": 105,
+        "endLine": 111,
+        "sha256": "3006b4e9060ad5886194ca0737e6fb2982a37abd8bf8abf74b29b7410846c415"
+      },
+      {
+        "declaration": "enum PhotoFrameBrandStyle:",
+        "startLine": 301,
+        "endLine": 301,
+        "sha256": "5a79253d5d813608499ec4545306dc042591041cea55553370a9dabca95f5a10"
+      },
+      {
+        "declaration": "func normalizePhotoFrameWidthPercent(",
+        "startLine": 302,
+        "endLine": 302,
+        "sha256": "b1c33543b38d39b8a589f7050c52ab973e5d70d80f38d6168947de9cd6145886"
+      },
+      {
+        "declaration": "func normalizePhotoFrameBackdropPercent(",
+        "startLine": 303,
+        "endLine": 303,
+        "sha256": "4e5393a6a3698f3782571a76e8567901459219e443f0b5d34f5fe77938afb17f"
+      },
+      {
+        "declaration": "private extension Int {",
+        "startLine": 314,
+        "endLine": 314,
+        "sha256": "9eb96dc024a5b05d986b2ddad4a9360e09840ba1074544af4556e073c6a1e2f0"
+      },
+      {
+        "declaration": "struct PhotoFrameMetadataSettings:",
+        "startLine": 316,
+        "endLine": 407,
+        "sha256": "0040aa4907a815805ce029ae491f258bafb90ecd1e512fe4e0be58babbce3d36"
+      },
+      {
+        "declaration": "extension PhotoFrameMetadataSettings {",
+        "startLine": 519,
+        "endLine": 531,
+        "sha256": "ead013d0fff37e3319aba5f2d79b096790b96d6f63e0c959d357c839d5190111"
+      }
+    ],
+    "scope": [
+      "ordinary brand visibility cycle",
+      "legacy metadata JSON decode and encode",
+      "legacy brandStyle construction and assignment"
+    ],
+    "notCovered": [
+      "PhotoEffectsStore persistence",
+      "Android preference parsing",
+      "complete effect recipe decoding",
+      "preview cache",
+      "renderer",
+      "iOS UI",
+      "UIKit build"
+    ],
+    "compile": {
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-brand-foundation-check-20261021/compile.log",
+      "compiler": "xcrun swiftc",
+      "moduleCache": "/tmp/ztransfer-brand-foundation-check-20261021/module-cache"
+    },
+    "run": {
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-brand-foundation-check-20261021/run.log",
+      "testGroups": 3,
+      "assertions": 174,
+      "result": "passed"
+    },
+    "sourceUnchangedAfterRun": true,
+    "artifacts": [
+      {
+        "file": "/tmp/ztransfer-brand-foundation-check-20261021/extract.py",
+        "sha256": "5dddf14a89e42e8ea520f4c17594c342ebb6d591efef6668a93a5ed7c9d39c52"
+      },
+      {
+        "file": "/tmp/ztransfer-brand-foundation-check-20261021/main.swift",
+        "sha256": "9d19931a5ffd90e014c3fe51f105497425f3824a616a75cf905e5b8fad9217a0"
+      },
+      {
+        "file": "/tmp/ztransfer-brand-foundation-check-20261021/compile.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "file": "/tmp/ztransfer-brand-foundation-check-20261021/run.log",
+        "sha256": "47b1ae98c07a7b2e8cd5747092c89884757c8c85bff4924f9f380f3b4ce6b8f1"
+      },
+      {
+        "file": "/tmp/ztransfer-brand-foundation-check-20261021/brand-metadata-check",
+        "sha256": "beabe4da5d2b5b359a2eae90a82c0a888a401358da235966ca245937bd8c8f6e"
+      }
+    ]
+  },
+  "packagingScriptTests": {
+    "command": "python3 ios/scripts/test_verify_release_bundle.py -v",
+    "exitCode": 0,
+    "testMethods": 4,
+    "scenarios": 25,
+    "realAppBundle": false,
+    "result": "OK"
+  },
+  "swiftSyntax": {
+    "command": "xcrun swiftc -frontend -parse <modified existing Swift files>",
+    "files": 26,
+    "exitCode": 0,
+    "isTypecheckOrAppBuild": false
+  },
+  "swiftPackageAttempt": {
+    "exitCode": 1,
+    "executedTests": 0,
+    "reason": "Existing macOS Package includes sources importing UIKit.",
+    "errors": [
+      "error: /Users/orys/code/nk_send/ios/ZTransfer/Domain/RemoteFrameParser.swift:2:8 unable to resolve module dependency: 'UIKit'",
+      "error: SwiftDriver ZTransferRemote normal arm64 com.apple.xcode.tools.swift.compiler failed with a nonzero exit code. Command line:     cd /Users/orys/code/nk_send",
+      "error: /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffects.swift:64:8 unable to resolve module dependency: 'UIKit'",
+      "error: SwiftDriver ZTransferEffects normal arm64 com.apple.xcode.tools.swift.compiler failed with a nonzero exit code. Command line:     cd /Users/orys/code/nk_send",
+      "error: Build failed",
+      "error: fatalError"
+    ],
+    "originalLogSha256": "1c234fcea8ecbdba45bbe7b63e9b448f14d24cf274257581d40e03486ab2d41e"
+  },
+  "retainedScope": {
+    "ios/ZTransfer/Domain/Np3FilterCatalog.swift": {
+      "sha256": "95ed694fb78e159e52764a61dd3ff4876a0d7ff625421192bf7045e751fb5b07",
+      "unchangedFromHEAD": true
+    },
+    "ios/ZTransfer/Domain/Np3FilterEngine.swift": {
+      "sha256": "9a64190402ff40befd3136b999870fde77c44882a167b5a34700faee02552375",
+      "unchangedFromHEAD": true
+    },
+    "ios/ZTransfer/Domain/Np3BitmapFilter.swift": {
+      "sha256": "fe6513feabcc14464f47096c0e2aa7d645c03d3c720b8b12322fe2f65ddbc0f4",
+      "unchangedFromHEAD": true
+    },
+    "androidDiffFiles": []
+  },
+  "independentReview": "No blocking finding; renderer follows existing plain-text branches. Brand visibility assertion strengthened, UIKit tests remain unrun.",
+  "notRun": [
+    "Xcode app build / new Release bundle verification",
+    "App-hosted XCTest / renderer / SwiftUI interactions",
+    "Physical camera writes and rollback",
+    "Signing, upload, submission"
+  ],
+  "sourceSha256": {
+    "ios/EffectsTests/PhotoEffectsBatchTests.swift": "1c2034c00333638f78dcaaf19bc21c54b67c0e6c9070f33b5ffa0ed8154df716",
+    "ios/PopupUITests/PrelaunchLayoutUITests.swift": "37ec5a759997d1e74af444226d4b398ce0d99e7a039aea6017800c7d385a9bc1",
+    "ios/ZTransfer.xcodeproj/project.pbxproj": "e0f363b38360d6f95024ee5c512b70fbf7c186d185281004650e9207af8bd380",
+    "ios/ZTransfer/App/IOSLocalization.swift": "b1b130e3da453b9264f8ee1666053d53f3e7c9d240fba005f99d63df8c77446c",
+    "ios/ZTransfer/Domain/PhotoEffects.swift": "7ef1069f206b79c7c1154973fedcee00553cd0c89f7da4a070c19c13553b4ca9",
+    "ios/ZTransfer/Domain/PhotoEffectsRenderer.swift": "a4c231109c2120cf192fb8aedd091f02d1bfdd9f5740780d6a21fccdb806655d",
+    "ios/ZTransfer/Domain/PhotoListViewModel.swift": "8ab53f576c46f15cbd713a0916a6c78289d83b31a49acf50edd5c2aa2aeaa610",
+    "ios/ZTransfer/Domain/PhotoThumbnailFillQueue.swift": "f29f312a567eacded05319dd27b1720b281580fc9de01d69931af53618588844",
+    "ios/ZTransfer/Domain/PictureControlPanelModel.swift": "14afb54706d5b014e045ff5b07db1d1690533c08168b5a9cfc5de45617b81738",
+    "ios/ZTransfer/Domain/RemoteLandscapeLayout.swift": "5c64c4f7a93cb8c6c4f7f73dbd821d4aebdf6515b9cf2a6cb7fe1315948f079e",
+    "ios/ZTransfer/UI/Components/RemoteLandscapeControls.swift": "b57a2a5a09894b4113c4481086443afcdf388d59d373ae4b63feda57ab9ac628",
+    "ios/ZTransfer/UI/Components/RemoteZoomableViewfinder.swift": "65a42c588ba0773a31f0bc7d2d8e5f7ffd986ca3c97befa4fa8598f8896116f7",
+    "ios/ZTransfer/UI/PremiumPurchaseView.swift": "b9eac317bcf752b038074d8d04d2b56dc339e7491df3e33474c07b22a183250c",
+    "ios/ZTransfer/UI/RemotePictureControlPanel.swift": "924e4c1a8ff531ce24dada140a89e04b8f3def6da9a7b691c22140c577a51eee",
+    "ios/ZTransfer/UI/RemoteView.swift": "bbf2331c642f3c6a2af09b98514da7103f329b73d3533553a28807f3d973e431",
+    "ios/ZTransfer/UI/SettingsView.swift": "b3a5c05f2bf682fcc8d18c4f75e454c441947464660f0093cd0d9f7652604440",
+    "ios/ZTransferTests/BuiltInPictureControlsTests.swift": "5404abcaec31012ba866479bfb1fc1b279f92859dee91abadb6a094dc03893c8",
+    "ios/ZTransferTests/DomainModelTests.swift": "8807d5fdb58dd4aacedf6c8c2cb2d01cab2675cb4226fb24c267ad35b180919f",
+    "ios/ZTransferTests/NikonPictureControlProtocolTests.swift": "abb5463766346e8b734749fa8e01cd5e89794e02c80ef2edac801ce732b134c7",
+    "ios/ZTransferTests/NikonPictureControlTests.swift": "05faea427662dab84a55da52b7237e5b4f2874b3e5db3c4bb35837de18f488cd",
+    "ios/ZTransferTests/PhotoFrameBrandTests.swift": "a53c155ccbace8989a666bb3296c949fa58a71c52331c809daa70703103d4112",
+    "ios/ZTransferTests/PhotoFramePlaceTests.swift": "ed11bea50b06d78c6aa510a31bb962cb4ed1a86b6a8b128aa259246e30bef863",
+    "ios/ZTransferTests/PhotoThumbnailStoreTests.swift": "82175f6677875c9f6b2471f3f38b33695509628326bcef6daaba184eed7f3213",
+    "ios/ZTransferTests/PremiumBusinessTests.swift": "7223917e3a1bac0661b9dee8b079a0359a20c0d476d05f99cacfcb539436023d",
+    "ios/ZTransferTests/RemoteLandscapeLayoutTests.swift": "b94ba0c30297e8030c1243e92d1c67db74ef5a3ca28ecc0079a27005fa21a1e5",
+    "ios/ZTransferTests/RemoteToolMarkAndPresetTests.swift": "b63b70da6cdfd69e6e48d028eccae1e4be485c057018240399c1d5d28e296372",
+    "ios/ZTransferTests/RemoteViewfinderRenderingTests.swift": "22c98e1d078c92b89cfe8120873d5c213430f7e2b5dd799a824fa06e31d982ef",
+    "ios/project.yml": "de879b3cf182c3c312a38ca4d5a29e3ac122e776abcc23041a3488f3a3f76f86",
+    "ios/scripts/test_verify_release_bundle.py": "ab4795d6e53c58bceb93335ee0edec7264f2f6efa9056224919e9cc4b5230dd2",
+    "ios/scripts/verify-release-bundle.py": "81f1e4ca054d8824dd813f7093c65c50cd691cce2fafbc00350c8cf56e72f057"
+  },
+  "archivedStandaloneEvidence": {
+    "ios/docs/evidence/asset-removal-20261021/np3-result.json": "68447b32d3986203521127531e46a70fe5b788d7095a66db31540b9d003893c1",
+    "ios/docs/evidence/asset-removal-20261021/np3-main.swift": "82e75cced001a9dc661d840a0be8ca031c405d9ddbbd516549d44f50a8f12fc3",
+    "ios/docs/evidence/asset-removal-20261021/np3-SyntheticPictureControlFixture.swift": "9f79a89401a4762a710f1e42705d034ef1820fa75c43dcb56c5d5b07e649f80b",
+    "ios/docs/evidence/asset-removal-20261021/brand-evidence.json": "d90e4428cc166f2374ef6a33f7d07e27859d6b9c8b733b31d0095571a7ac04ff",
+    "ios/docs/evidence/asset-removal-20261021/brand-extract.py": "5dddf14a89e42e8ea520f4c17594c342ebb6d591efef6668a93a5ed7c9d39c52",
+    "ios/docs/evidence/asset-removal-20261021/brand-main.swift": "9d19931a5ffd90e014c3fe51f105497425f3824a616a75cf905e5b8fad9217a0",
+    "ios/docs/evidence/asset-removal-20261021/brand-ProductionBrandMetadata.swift": "8a719d10927c4fb93b5898b93e3a6ac4686189c6cb911c5ac4581eae3815d816",
+    "ios/docs/evidence/asset-removal-20261021/brand-compile.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ios/docs/evidence/asset-removal-20261021/brand-run.log": "47b1ae98c07a7b2e8cd5747092c89884757c8c85bff4924f9f380f3b4ce6b8f1"
+  },
+  "actionsNotPerformed": [
+    "App install",
+    "Git commit or push",
+    "Website deployment",
+    "Author/brand outreach"
+  ],
+  "finalVerification": {
+    "swiftSyntaxFiles": 26,
+    "swiftSyntaxExitCode": 0,
+    "localDocumentLinks": 209,
+    "missingLocalLinks": 0,
+    "evidenceSourcesAndArchivesHashesMatch": true,
+    "gitDiffCheckExitCode": 0
+  }
+}

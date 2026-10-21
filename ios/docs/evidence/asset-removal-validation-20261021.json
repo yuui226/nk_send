@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-21",
+  "scope": "User-requested iOS build and regression verification after removing bundled camera NP3 and graphical camera/phone brand logos; preserve user NP3, mobile photo filters and custom watermarks.",
+  "status": "passed-with-explicit-scope-limits",
+  "tasks": {
+    "RV01": "passed",
+    "RV02": "passed",
+    "RV03": "passed"
+  },
+  "evidenceDirectory": "asset-removal-validation-20261021",
+  "release": {
+    "configuration": "Release",
+    "destination": "generic/platform=iOS",
+    "codeSigningAllowed": false,
+    "result": "BUILD SUCCEEDED",
+    "exitCode": 0,
+    "commandRecord": "release-device.json",
+    "bundleAudit": "release-bundle-audit-output.json",
+    "bundleFileManifest": "release-bundle-files.json",
+    "bundleFileCount": 19,
+    "noRemovedCameraNP3OrBrandGraphicResources": true,
+    "noTestFixturesInBundle": true
+  },
+  "focusedTests": {
+    "configuration": "Debug",
+    "result": "TEST SUCCEEDED",
+    "passed": 183,
+    "failed": 0,
+    "skipped": 0,
+    "commandRecord": "focused-unit.json",
+    "summary": "focused-unit-summary.json",
+    "scope": [
+      "Legacy brand setting migration, two-state controls, independent stores and metadata persistence",
+      "All 15 frame layouts, ordinary brand text and user watermarks",
+      "All 50 mobile filters against Android pixel oracle; engine, bitmap and batch effects",
+      "Synthetic user NP3 parsing/scanning/bookmark handling/cancellation and component states",
+      "Camera protocol doubles for slot selection, writing verification, backup and rollback",
+      "Missing/corrupt custom-image watermarks, frozen-asset retries after replacement/refund"
+    ]
+  },
+  "ui": {
+    "configuration": "Debug",
+    "distinctTestMethods": 4,
+    "successfulExecutions": 5,
+    "initialFourReport": "initial-ui-report.json",
+    "supplementalReport": "supplemental-ui-report.json",
+    "allPrepareAndCleanupStagesPassed": true,
+    "storeKit": "Local Xcode StoreKit Test only; no real Apple sandbox or payment.",
+    "cameraConnection": "Debug mock camera/photo library only",
+    "selectedScreenshots": "selected-screenshots.json",
+    "brandPreviewConclusion": "Initial screenshots captured an earlier rendered frame while the control already showed off. Added test-only OCR requiring visible Z233 and matching Nikon visibility in two consecutive frames. Supplemental test and four manually viewed off/text screenshots pass before and after relaunch. No production fix made.",
+    "customWatermarkConclusion": "Both settings flows preserve imported image after cancellation/relaunch; camera full-preview images show the watermark. Original watermark region pixel data matches across three final captures. Workbench UI has no base photo and does not independently prove a composited preview; actual render/export logic is covered by focused XCTest.",
+    "supplementalIndependentVisualReview": "ui-camera-preview-confirmation-visual-review.json",
+    "visualReviews": [
+      "ui-camera-preview-confirmation-visual-review.json",
+      "ui-free-camera-visual-review.json",
+      "ui-free-workbench-visual-review.json",
+      "ui-watermark-camera-visual-review.json",
+      "ui-watermark-workbench-visual-review.json"
+    ],
+    "customWatermarkPixelComparison": "ui-watermark-camera-watermark-region-pixel-comparison.json"
+  },
+  "inputs": {
+    "productionComparison": "input-comparison.json",
+    "productionFileCount": 1102,
+    "productionUnchangedThroughoutVerification": true,
+    "mobileFilterSourceHashes": "preserved-filter-hashes.json",
+    "testChanges": "Added NP3 real component coverage and brand-control UI assertions; then strengthened only camera preview readiness with test-only Vision OCR."
+  },
+  "testEnvironment": {
+    "architecture": "arm64",
+    "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+    "modelName": "iPhone 17",
+    "osBuildNumber": "23F77",
+    "osVersion": "26.5",
+    "platform": "iOS Simulator"
+  },
+  "simulatorCleanup": {
+    "dedicatedSimulatorOriginally": "Shutdown",
+    "dedicatedSimulatorRestored": "Shutdown",
+    "observedFinalDevices": [
+      {
+        "name": "ZTransfer-iOS191-Tests",
+        "udid": "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "state": "Booted"
+      },
+      {
+        "name": "ZTransfer-Prelaunch-StandardPhone",
+        "udid": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "state": "Shutdown"
+      }
+    ],
+    "storeKitCleanupPassed": true
+  },
+  "warningsAndHistory": [
+    "Existing Swift concurrency/orientation compiler warnings remain; build succeeded.",
+    "Restricted-shell simulator/xcresult access and OCR preflight encountered host permission errors; authorized host retries passed. These were tool environment failures, not failing application tests.",
+    "Earlier macOS Swift Package UIKit dependency failure remains historical and was not repaired or relabeled as a pass.",
+    "Original early camera screenshots retained with their limitation; supplemental results supersede their incomplete preview-readiness evidence."
+  ],
+  "notCovered": [
+    "Physical iPhone/iPad execution or real camera USB/Wi-Fi NP3 writes",
+    "System Files provider grant/revocation across real providers end to end (component/scanner/bookmark/protocol tests do not substitute)",
+    "All supported camera models/firmware, all iOS versions/device sizes/themes/languages (runtime here iPhone 17, iOS 26.5)",
+    "Signed Archive, TestFlight/App Store upload or actual Apple sandbox purchases",
+    "All project test suites or asset-license clearance",
+    "Live legal website access or in-app legal navigation repeated in this turn"
+  ],
+  "actionsNotTaken": [
+    "No production code modification during this validation",
+    "No Android code modification",
+    "No commit, push or deploy",
+    "No physical device install or payment"
+  ],
+  "finalStaticChecks": {
+    "gitDiffCheck": {
+      "exitCode": 0,
+      "output": ""
+    },
+    "androidTrackedAndUntrackedChanges": [],
+    "removedProductionSymbols": "No references in production Swift/source config; only historical BuiltInPictureControlsTests.swift filename remains in test target."
+  }
+}

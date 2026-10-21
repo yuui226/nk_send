@@ -4,6 +4,52 @@ import XCTest
 #endif
 
 final class PhotoThumbnailStoreTests: XCTestCase {
+    func testNewPhotosBypassHistoricalRangeAcrossPauseRetryAndRescan() async throws {
+        for sequential in [false, true] {
+            let queue = PhotoThumbnailFillQueue(sequential: sequential)
+            let range = PhotoDateRange(start: "20261019", end: "20261020")
+            func file(_ id: UInt32, _ day: String) -> CameraFile {
+                CameraFile(id: id, storageID: 1, format: 0x3801, size: 100,
+                           fileName: "\(id).JPG", captureDate: day + "T120000", isProtected: false)
+            }
+            let historical = file(1, "20261018")
+            let captures = [file(2, "20261021"), file(3, "20261017")]
+            await queue.beginScan()
+            await queue.seed([historical], loadingRange: range)
+            let historicalWork = await queue.poll()
+            XCTAssertNil(historicalWork, "Historical loading still respects the range")
+            await queue.enqueueNew(captures)
+            var seen = Set<UInt32>()
+            for _ in captures {
+                let next = await queue.poll()
+                let work = try XCTUnwrap(next, "A new camera object must bypass both range bounds")
+                seen.insert(work.id)
+                await queue.returnToFront(work.id, expectedRevision: work.revision, owner: work.owner)
+                let resumed = await queue.poll()
+                XCTAssertEqual(resumed?.id, work.id, "A foreground pause must not lose a new photo")
+                await queue.finish(work.id, expectedRevision: work.revision, owner: work.owner, settled: false)
+            }
+            XCTAssertEqual(seen, Set(captures.map(\.id)))
+            await queue.enqueueNew(captures)
+            let duplicate = await queue.poll()
+            XCTAssertNil(duplicate, "Duplicate events cannot hot-retry a failed photo")
+            await queue.retryFailed()
+            var retried = Set<UInt32>()
+            while let work = await queue.poll() { retried.insert(work.id) }
+            XCTAssertEqual(retried, seen)
+            await queue.beginScan()
+            await queue.seed([historical] + captures, loadingRange: range)
+            var rescanned = Set<UInt32>()
+            while let work = await queue.poll() { rescanned.insert(work.id) }
+            XCTAssertEqual(rescanned, seen, "Same-session rescan must not lose unfinished new work")
+            await queue.remove(seen)
+            await queue.beginScan()
+            await queue.seed([historical] + captures, loadingRange: range)
+            let reused = await queue.poll()
+            XCTAssertNil(reused, "Deletion retires the exemption along with the queue owner")
+        }
+    }
+
     func testSharedPrefetchWaitersReceiveTheSameWriteFailure() async throws {
         for invalidBytes in [false, true] {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

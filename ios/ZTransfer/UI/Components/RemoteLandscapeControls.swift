@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// Final Android LandscapeMonitorControls.kt layout. The caller retains all
-/// camera actions and preferences; this component owns only transient Dock UI.
+/// Android LandscapeMonitorControls.kt actions and Dock lifecycle, with the
+/// user's 2026-10-21 viewport navigation / separated capture-row layout.
+/// All frames use the same viewport; navigation never follows the bottom panel.
 struct RemoteLandscapeControls: View {
     let layout: RemoteLandscapeLayout
     @ObservedObject var toolLayout: RemoteToolLayout
@@ -23,13 +24,29 @@ struct RemoteLandscapeControls: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            panel
+                .frame(width: layout.controls.width, height: layout.controls.height)
+                .offset(x: layout.controls.minX, y: layout.controls.minY)
+            header
+                .frame(width: layout.navigation.width, height: layout.navigation.height)
+                .offset(x: layout.navigation.minX, y: layout.navigation.minY)
+        }
+        .onAppear { onPanelChange(); applyLayout() }
+        .onChange(of: layout) { _ in onPanelChange() }
+        .onChange(of: toolLayout.hidden) { _ in applyLayout() }
+        .onChange(of: ObjectIdentifier(toolLayout)) { _ in applyLayout() }
+        .onDisappear { motion.stop() }
+    }
+
+    private var panel: some View {
+        ZStack(alignment: .topLeading) {
             if layout.bottomControls {
                 HStack(spacing: 8) {
                     parameters.frame(maxWidth: .infinity, maxHeight: .infinity)
                     captureCluster.frame(width: max(layout.photoReview ? 128 : 116, layout.shutterSize + 52))
+                        .frame(maxHeight: .infinity, alignment: .bottom)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 40)
             } else {
                 VStack(spacing: 4) {
                     Color.clear.frame(height: 36)
@@ -42,33 +59,31 @@ struct RemoteLandscapeControls: View {
                 RemoteLandscapeDock(tools: toolLayout.shownTools + RemoteTool.pinned, control: control, bottom: layout.bottomControls)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.top, 40)
-            HStack(spacing: 0) {
-                Button {
-                    onTick()
-                    onPanelChange()
-                    dockOpen.toggle()
-                    motion.setOpen(dockOpen)
-                } label: {
-                    RemoteDockMark().stroke(dockOpen ? ZTransferColors.accentBlue : ZTransferColors.primaryText,
-                                            lineWidth: 1.6)
-                        .frame(width: 19, height: 19)
-                        .frame(width: 42, height: 36)
-                }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22, active: dockOpen))
-                .accessibilityLabel(AppLocalized.resource("remote_tool_dock"))
-                .accessibilityIdentifier("remote-landscape-dock")
-                .accessibilityValue(dockOpen ? "open" : "closed")
-                Spacer(minLength: 0)
-                layer(dock: false) { back }
-            }
-            .frame(height: 36)
+            .padding(.top, layout.controlsTopInset)
         }
-        .onAppear { onPanelChange(); applyLayout() }
-        .onChange(of: layout) { _ in onPanelChange() }
-        .onChange(of: toolLayout.hidden) { _ in applyLayout() }
-        .onChange(of: ObjectIdentifier(toolLayout)) { _ in applyLayout() }
-        .onDisappear { motion.stop() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 0) {
+            Button {
+                onTick()
+                onPanelChange()
+                dockOpen.toggle()
+                motion.setOpen(dockOpen)
+            } label: {
+                RemoteDockMark().stroke(dockOpen ? ZTransferColors.accentBlue : ZTransferColors.primaryText,
+                                        lineWidth: 1.6)
+                    .frame(width: 19, height: 19)
+                    .frame(width: 42, height: 36)
+            }
+            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22, active: dockOpen))
+            .accessibilityLabel(AppLocalized.resource("remote_tool_dock"))
+            .accessibilityIdentifier("remote-landscape-dock")
+            .accessibilityValue(dockOpen ? "open" : "closed")
+            Spacer(minLength: 0)
+            layer(dock: false) { back }
+        }
+        .frame(height: 36)
     }
 
     private func applyLayout() { applyHidden(toolLayout.hiddenTools) }
@@ -95,11 +110,7 @@ struct RemoteLandscapeControls: View {
 
     private var captureCluster: some View {
         GeometryReader { proxy in
-            ZStack(alignment: .bottomLeading) {
-                VStack(spacing: 4) {
-                    layer(dock: false) { disp }.frame(width: 36, height: 36)
-                    layer(dock: false) { rotate }.frame(width: 36, height: 36)
-                }.padding(.leading, 4)
+            VStack(spacing: 0) {
                 if layout.photoReview {
                     let pair = RemotePhotoCaptureSizes(availableWidth: proxy.size.width, preferredShutter: layout.shutterSize)
                     ZStack(alignment: .leading) {
@@ -110,12 +121,19 @@ struct RemoteLandscapeControls: View {
                                 alignment: !layout.bottomControls && layout.columns == 2 ? .top : .topTrailing)
                     }
                     .frame(height: max(pair.shutter, pair.reviewHeight))
-                    .frame(maxHeight: .infinity, alignment: .top)
                 } else {
                     layer(dock: false) { shutter(layout.shutterSize) }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity,
+                        .frame(height: layout.shutterSize)
+                        .frame(maxWidth: .infinity,
                             alignment: !layout.bottomControls && layout.columns == 2 ? .top : .topTrailing)
                 }
+                Spacer(minLength: 8)
+                HStack(spacing: 8) {
+                    layer(dock: false) { disp }.frame(width: 36, height: 36)
+                    layer(dock: false) { rotate }.frame(width: 36, height: 36)
+                }
+                .padding(.leading, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(height: layout.footerHeight + layout.captureLift)

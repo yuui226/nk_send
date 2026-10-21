@@ -364,7 +364,7 @@ final class PhotoFrameMetadataPersistenceTests: XCTestCase {
         }
         let camera = PhotoEffectsStore(defaults: defaults, scope: .cameraTransfer)
         XCTAssertTrue(camera.settings.metadata.showCity)
-        XCTAssertEqual(camera.settings.metadata.brandStyle, .logo)
+        XCTAssertEqual(camera.settings.metadata.brandStyle, .text)
     }
 
     @MainActor
@@ -378,7 +378,7 @@ final class PhotoFrameMetadataPersistenceTests: XCTestCase {
             let fields = PhotoEffectsStore(defaults: defaults).settings.metadataByPreset[PhotoFramePreset.mist.rawValue]
             XCTAssertEqual(fields?.showCity, true)
             XCTAssertEqual(fields?.showRegion, false)
-            XCTAssertEqual(fields?.brandStyle, suffix.contains("LOGO") ? .logo : .text)
+            XCTAssertEqual(fields?.brandStyle, .text, "Legacy LOGO must retain the entry as ordinary brand text")
             XCTAssertEqual(fields?.widthPercent, suffix.contains("65") ? 65 : 100)
             XCTAssertEqual(fields?.backgroundMaskPercent, suffix.contains("170") ? 170 : 100)
         }
@@ -407,7 +407,7 @@ final class PhotoFrameMetadataPersistenceTests: XCTestCase {
         XCTAssertEqual(second.widthPercent, 200)
         XCTAssertEqual(second.backgroundBlurPercent, 200)
         XCTAssertEqual(second.backgroundMaskPercent, 0)
-        XCTAssertEqual(second.brandStyle, .logo)
+        XCTAssertEqual(second.brandStyle, .text)
 
         var settings = PhotoEffectsSettings()
         var fields = settings.metadata
@@ -442,7 +442,8 @@ final class PhotoFrameMetadataOutputIdentityTests: XCTestCase {
         XCTAssertNotEqual(name { $0.backgroundBlurPercent = 30 }, name { $0.backgroundBlurPercent = 70 })
         XCTAssertNotEqual(name { $0.backgroundMaskPercent = 30 }, name { $0.backgroundMaskPercent = 70 })
         XCTAssertNotEqual(name { $0.showCity = true }, name { $0.showRegion = true })
-        XCTAssertNotEqual(name { $0.brandStyle = .text }, name { $0.brandStyle = .logo })
+        XCTAssertEqual(name { $0.brandStyle = .text }, name { $0.brandStyle = .logo },
+                       "Legacy logo selections now have the same pixels and identity as text")
         XCTAssertEqual(name(.immersive) { $0.widthPercent = 60 }, name(.immersive) { $0.widthPercent = 200 })
         XCTAssertEqual(name(.plaque) { $0.backgroundBlurPercent = 0 }, name(.plaque) { $0.backgroundBlurPercent = 200 })
         XCTAssertEqual(name { $0.backgroundBlurPercent = 73 }, name { $0.backgroundBlurPercent = 70 })
@@ -525,29 +526,6 @@ final class PhotoFrameMetadataOutputIdentityTests: XCTestCase {
 
 }
 
-final class PhotoFrameBrandControlTests: XCTestCase {
-    func testEveryPresetCyclesOffTextLogoOffWithoutChangingOtherFields() {
-        for preset in PhotoFramePreset.allCases {
-            for remembered in PhotoFrameBrandStyle.allCases {
-                var value = PhotoFrameMetadataSettings.defaults(for: preset)
-                value.showBrand = false; value.brandStyle = remembered
-                value.showCity = true; value.widthPercent = 135
-                var expected = value
-                XCTAssertEqual(value.brandControlLabelKey, "photo_frame_metadata_brand")
-                value.cycleBrandStyle()
-                expected.showBrand = true; expected.brandStyle = .text
-                XCTAssertEqual(value, expected)
-                XCTAssertEqual(value.brandControlLabelKey, "photo_frame_metadata_brand_text")
-                value.cycleBrandStyle(); expected.brandStyle = .logo
-                XCTAssertEqual(value, expected)
-                XCTAssertEqual(value.brandControlLabelKey, "photo_frame_metadata_brand_logo")
-                value.cycleBrandStyle(); expected.showBrand = false; expected.brandStyle = .text
-                XCTAssertEqual(value, expected)
-                XCTAssertEqual(value.brandControlLabelKey, "photo_frame_metadata_brand")
-            }
-        }
-    }
-}
 
 
 extension PhotoFramePlaceResolverTests {

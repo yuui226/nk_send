@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-21",
+  "scope": "Five bounded prepayment recheck tasks, not complete release approval.",
+  "status": "passed",
+  "auditTasksCompleted": 5,
+  "auditTasksTotal": 5,
+  "localMarkdownTargetsChecked": 181,
+  "missingMarkdownTargets": [],
+  "jsonFilesParsed": 47,
+  "gitDiffCheck": {
+    "exitCode": 0,
+    "output": ""
+  },
+  "fieldBodies": [
+    {
+      "file": "商店文案草稿.md",
+      "characters": 1179,
+      "utf8Bytes": 2807,
+      "sha256": "ae5a9eb4fa0e6423fbbcbed13def7642c967cc6061b7ef0e0c085f9f1946dc63",
+      "bodyUnchangedDuringInternalCleanup": true
+    },
+    {
+      "file": "商店英文文案草稿.md",
+      "characters": 3074,
+      "utf8Bytes": 3074,
+      "sha256": "ab583d06e2c7222db76120d4d681f3fa7c4d6385e6696d3efc200933d4e761ca",
+      "bodyUnchangedDuringInternalCleanup": true
+    },
+    {
+      "file": "审核说明草稿.md",
+      "characters": 3244,
+      "utf8Bytes": 3611,
+      "sha256": "19dc3e97fb98589ca5076e0113d4e9eb15b04ffec62426814f3c16250e674548",
+      "bodyUnchangedDuringInternalCleanup": true
+    }
+  ],
+  "settingsImageComparison": [
+    {
+      "file": "ios/docs/screenshots/raw/zh-Hans/iphone-medium/settings-reference-20261021-published-legal.png",
+      "matchesEvidence": true,
+      "reviewer": "root viewed original exported attachment, which is byte-identical to retained image"
+    },
+    {
+      "file": "ios/docs/screenshots/raw/zh-Hans/iphone-large/settings-reference-20261021-published-legal.png",
+      "matchesEvidence": true,
+      "reviewer": "root viewed original exported attachment, which is byte-identical to retained image"
+    },
+    {
+      "file": "ios/docs/screenshots/raw/zh-Hans/ipad-13/settings-reference-20261021-published-legal.png",
+      "matchesEvidence": true,
+      "reviewer": "root viewed original exported attachment, which is byte-identical to retained image"
+    }
+  ],
+  "documentSHA256": {
+    "付费前最终核对-20261021.md": "5c73dc6ae46a3895d8a7afa0ead2393a7a34b77ed3cb2316d48553e2c7612124",
+    "README.md": "41b353ab235175756a00a921dbdf2a316923879e7281c8ee5fd6f08eb1c1a5d7",
+    "上架所需信息与材料.md": "e4ec168879e42fc1135a858a5e770ce5cc1b3a5fb6ca16d6dc4d43b275b3bca4",
+    "付费前准备执行记录.md": "85e95d56e64c6a3abd7d63ac6bd2f51254e713ced60cf5c3c4e0d53a88125ebe",
+    "AppStore上架步骤与分工.md": "590b4cb61d87c0f561771376c190be8dec36c718942f6e8bae842e3cd1e54b72",
+    "App隐私问卷填写依据.md": "514c30d2bec2d91ddf165e74d55d394a4d66a8ce8107ddb5570dba8b4f7d4002",
+    "商店文案草稿.md": "63ada8c66da921e2cc44f03c26dad26e5e495680be8fd0442e45b3691c507cf9",
+    "商店英文文案草稿.md": "23da5b814de78db01a986d1a9fe31cc58584dedb8a4a63a92fd0c1120c01d21b",
+    "审核说明草稿.md": "86341be4f2289944d46b831e6d5afb1b1ce80b2157f3afaf2292130641392240",
+    "上架前验收清单.md": "7161ee3b4710d62fa880aebcee00e07766575f5612c584f4c08d10fcd13afcdc",
+    "发布包静态检查说明.md": "08f1fcda45987e31815bb29548878183140683e1e15d52d5b06cab939e3798f4",
+    "screenshots/README.md": "c4f04600db09985b9065cde0e4ff084918ef2597a7908d1751a821becd85357b"
+  },
+  "buildEvidence": "prepayment-ready-recheck-20261021.json",
+  "liveWebsiteEvidence": "prepayment-policy-recheck-20261021.json",
+  "remainingOwnerGroups": [
+    "Resource usage basis or explicit replacement/removal scope",
+    "Representative hardware records, footage and publishable photos",
+    "Copyright year, final store identity/language and review phone"
+  ],
+  "membershipPhase": [
+    "App and products, pricing/family sharing",
+    "Agreements/tax/bank and region facts",
+    "Signing/Archive/upload",
+    "Real Apple sandbox and final metadata/assets"
+  ],
+  "notClaimed": [
+    "All devices/windows/minimum OS tested",
+    "Full V01-V16 validation",
+    "Real Apple payment or App Review passed",
+    "Complete ready-to-upload store screenshots"
+  ]
+}

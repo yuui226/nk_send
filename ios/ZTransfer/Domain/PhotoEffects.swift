@@ -296,6 +296,8 @@ struct PhotoFrameFavorite: Codable, Equatable, Sendable {
     }
 }
 
+/// `logo` remains readable only for recipes saved before the user-approved iOS
+/// removal on 2026-10-21. Metadata always normalizes it to ordinary brand text.
 enum PhotoFrameBrandStyle: String, Codable, CaseIterable, Sendable { case text, logo }
 func normalizePhotoFrameWidthPercent(_ value: Int) -> Int { min(max(value, 60), 200).rounded(toMultipleOf: 5) }
 func normalizePhotoFrameBackdropPercent(_ value: Int) -> Int { min(max(value, 0), 200).rounded(toMultipleOf: 10) }
@@ -324,7 +326,9 @@ struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
     var showAddress = false
     var showCity = false
     var showRegion = false
-    var brandStyle: PhotoFrameBrandStyle = .text
+    var brandStyle: PhotoFrameBrandStyle = .text {
+        didSet { if brandStyle != .text { brandStyle = .text } }
+    }
     var widthPercent = 100
     var backgroundBlurPercent = 100
     var backgroundMaskPercent = 100
@@ -339,7 +343,7 @@ struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
     init(showDate: Bool, showTime: Bool, showFocalLength: Bool, showExposure: Bool, showBrand: Bool, showModel: Bool, showLensModel: Bool, showCoordinates: Bool, showAltitude: Bool, datePattern: String, timePattern: String, brandStyle: PhotoFrameBrandStyle = .text, showAddress: Bool = false, showCity: Bool = false, showRegion: Bool = false, widthPercent: Int = 100, backgroundBlurPercent: Int = 100, backgroundMaskPercent: Int = 100) {
         self.showDate = showDate; self.showTime = showTime; self.showFocalLength = showFocalLength; self.showExposure = showExposure
         self.showBrand = showBrand; self.showModel = showModel; self.showLensModel = showLensModel; self.showCoordinates = showCoordinates; self.showAltitude = showAltitude
-        self.showAddress = showAddress; self.showCity = showCity; self.showRegion = showRegion; self.brandStyle = brandStyle
+        self.showAddress = showAddress; self.showCity = showCity; self.showRegion = showRegion; self.brandStyle = .text
         self.widthPercent = widthPercent; self.backgroundBlurPercent = backgroundBlurPercent; self.backgroundMaskPercent = backgroundMaskPercent
         self.datePattern = datePattern; self.timePattern = timePattern
     }
@@ -357,7 +361,10 @@ struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
         showAddress = try c.decodeIfPresent(Bool.self, forKey: .showAddress) ?? false
         showCity = try c.decodeIfPresent(Bool.self, forKey: .showCity) ?? false
         showRegion = try c.decodeIfPresent(Bool.self, forKey: .showRegion) ?? false
-        brandStyle = try c.decodeIfPresent(PhotoFrameBrandStyle.self, forKey: .brandStyle) ?? .text
+        // Accept the former `logo` payload without discarding the rest of the
+        // recipe, but never restore its removed graphical rendering mode.
+        _ = try c.decodeIfPresent(PhotoFrameBrandStyle.self, forKey: .brandStyle)
+        brandStyle = .text
         widthPercent = normalizePhotoFrameWidthPercent(try c.decodeIfPresent(Int.self, forKey: .widthPercent) ?? 100)
         backgroundBlurPercent = normalizePhotoFrameBackdropPercent(try c.decodeIfPresent(Int.self, forKey: .backgroundBlurPercent) ?? 100)
         backgroundMaskPercent = normalizePhotoFrameBackdropPercent(try c.decodeIfPresent(Int.self, forKey: .backgroundMaskPercent) ?? 100)
@@ -510,16 +517,16 @@ enum PhotoFilterCatalog {
 }
 
 extension PhotoFrameMetadataSettings {
-    /// Android nextBrandStyle: disabling always resets the remembered style to text.
+    /// User-approved iOS difference from Android's off → text → logo cycle:
+    /// only ordinary brand text and off remain; other metadata is untouched.
     mutating func cycleBrandStyle() {
-        if !showBrand { showBrand = true; brandStyle = .text }
-        else if brandStyle == .text { brandStyle = .logo }
-        else { showBrand = false; brandStyle = .text }
+        showBrand.toggle()
+        brandStyle = .text
     }
 
     var brandControlLabelKey: String {
         guard showBrand else { return "photo_frame_metadata_brand" }
-        return brandStyle == .logo ? "photo_frame_metadata_brand_logo" : "photo_frame_metadata_brand_text"
+        return "photo_frame_metadata_brand_text"
     }
 }
 
@@ -963,7 +970,6 @@ private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, prese
         base.append("measured-layout-v=6")
         if preset == .frosted { base.append("glass-panel-v=2") }
     }
-    if metadata.brandStyle == .logo { base.append("brand-logo-v=3") }
     return androidSHA256Hex(base.joined(separator: "\u{0}"), bytes: 6)
 }
 
@@ -1682,10 +1688,10 @@ final class PhotoEffectsStore: ObservableObject {
             guard v != .defaults(for: p) else { return nil }
             var fields = [p.rawValue, String(v.showDate), String(v.showTime), String(v.showFocalLength), String(v.showExposure), String(v.showBrand), String(v.showModel), String(v.showLensModel), String(v.showCoordinates), String(v.showAltitude), v.datePattern, v.timePattern]
             let backdrop = v.backgroundBlurPercent != 100 || v.backgroundMaskPercent != 100
-            if backdrop || v.widthPercent != 100 || v.brandStyle == .logo || v.showCity || v.showRegion {
+            if backdrop || v.widthPercent != 100 || v.showCity || v.showRegion {
                 fields += [String(v.showCity), String(v.showRegion)]
             }
-            if backdrop || v.widthPercent != 100 || v.brandStyle == .logo { fields.append(v.brandStyle.rawValue.uppercased()) }
+            if backdrop || v.widthPercent != 100 { fields.append(PhotoFrameBrandStyle.text.rawValue.uppercased()) }
             if backdrop || v.widthPercent != 100 { fields.append(String(normalizePhotoFrameWidthPercent(v.widthPercent))) }
             if backdrop { fields += [String(normalizePhotoFrameBackdropPercent(v.backgroundBlurPercent)), String(normalizePhotoFrameBackdropPercent(v.backgroundMaskPercent))] }
             return fields.joined(separator: "|")

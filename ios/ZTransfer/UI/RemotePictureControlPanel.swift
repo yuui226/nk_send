@@ -17,7 +17,7 @@ struct RemotePictureControlPanel: View {
     @Environment(\.displayScale) private var scale
     @StateObject private var motion = RemotePictureControlMotion()
     @State private var confirmation: RemotePictureControlPage.Confirmation?
-    @State private var category = "built-in"
+    @State private var category = ""
     @State private var shareURL: URL?
     @State private var sharing = false
     private func text(_ key: String) -> String { AppLocalized.resource(key) }
@@ -27,26 +27,30 @@ struct RemotePictureControlPanel: View {
         let accessible = folders.failure != .missing && folders.failure != .denied
         let catalog = folders.catalog
         let labels = catalog.labels(uncategorized: text("lut_uncategorized"))
-        return [.init(id: "built-in", label: text("picture_control_built_in"),
-                      choices: model.presets.map { .init(choice: .builtIn($0), label: $0.name) })] +
-            (accessible ? catalog.categories.map { name in
-                RemotePresetCategory(id: name.map { "folder:" + $0 } ?? "root", label: name ?? text("lut_uncategorized"),
-                    choices: (catalog.filesByCategory[name] ?? []).map { .init(choice: .document($0), label: labels[$0.identifier] ?? $0.label) })
-            } : [])
+        return accessible ? catalog.categories.map { name in
+            RemotePresetCategory(id: name.map { "folder:" + $0 } ?? "root", label: name ?? text("lut_uncategorized"),
+                choices: (catalog.filesByCategory[name] ?? []).map { .init(choice: .document($0), label: labels[$0.identifier] ?? $0.label) })
+        } : []
     }
     private var guidance: String? {
         guard phase == .active, model.editingSlot != nil, confirmation == nil, !model.closeRequested,
               !folders.scanning else { return nil }
         if let failure = folders.failure { return PictureControlFolderState.message(failure) }
         if folders.hasSnapshot && folders.folder != nil && folders.files.isEmpty { return "picture_control_folder_empty" }
-        if model.presetsFailed { return "picture_control_files_failed" }
         return nil
+    }
+    private var emptyMessage: String? {
+        guard categories.isEmpty else { return nil }
+        if folders.scanning || folders.isRestoring { return text("lut_reading_folder") }
+        if let failure = folders.failure { return text(PictureControlFolderState.message(failure)) }
+        return text(folders.folder == nil ? "picture_control_choose_folder_hint" : "picture_control_folder_empty")
     }
     var body: some View {
         Group {
             if model.overview != nil {
                 let layout = RemotePictureControlLayout(overview: model.overview!, categories: categories,
-                    category: category, hostSize: hostSize, anchor: anchor, landscape: landscape, scale: scale)
+                    category: category, hostSize: hostSize, anchor: anchor, landscape: landscape, scale: scale,
+                    emptyMessage: emptyMessage)
                 let targetSize = layout.size(for: page)
                 RemoteChoicePopup(anchor: anchor, hostSize: hostSize, landscape: landscape,
                     width: motion.ready ? motion.size.width : targetSize.width,
@@ -77,13 +81,14 @@ struct RemotePictureControlPanel: View {
         }
         .sheet(isPresented: $sharing) { if let shareURL { PictureControlShareSheet(url: shareURL) } }
         .onAppear {
+            if !categories.contains(where: { $0.id == category }) { category = categories.first?.id ?? "" }
             model.open()
             folders.onNotice = { [weak model] in model?.notice(AppLocalized.resource($0)) }
         }
         .onDisappear { motion.stop() }
         .onChange(of: model.editingSlot) { slot in
             confirmation = nil
-            if slot != nil { category = "built-in"; folders.refresh() }
+            if slot != nil { category = categories.first?.id ?? ""; folders.refresh() }
         }
         .onChange(of: phase) {
             model.interactionAllowed = $0 == .active && !pickerActive
@@ -91,7 +96,7 @@ struct RemotePictureControlPanel: View {
         }
         .onChange(of: pickerActive) { model.interactionAllowed = !$0 && phase == .active }
         .onChange(of: categories.map(\.id)) { keys in
-            if !keys.contains(category) { category = keys.first ?? "built-in" }
+            if !keys.contains(category) { category = keys.first ?? "" }
         }
         .task(id: guidance) { if let guidance { model.notice(text(guidance)) } }
 
@@ -141,13 +146,25 @@ struct RemotePictureControlPanel: View {
                         }
                     }.presetScrollEdges()
                 } else {
-                    RemotePresetCategoryBrowser(categories: layout.categories, category: $category,
-                        enabled: enabled, row: { item in
-                            RemotePresetChoiceRow(text: item.label, pending: pendingKey == item.id,
-                                enabled: enabled && canWrite && slot.map(model.canEdit) == true &&
-                                    (item.isBuiltIn || !folders.scanning)) { perform(.write(number, item.choice)) }
-                        })
-                        .onAppear { if active && phase == .active { folders.refresh() } }
+                    Group {
+                        if let message = layout.emptyMessage {
+                            ScrollView(showsIndicators: false) {
+                                Text(message).font(.system(size: 14))
+                                    .foregroundStyle(ZTransferColors.secondaryText)
+                                    .lineSpacing(RemotePictureControlLayout.bodyLineSpacing)
+                                    .padding(.vertical, RemotePictureControlLayout.bodyLineSpacing / 2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true).padding(12)
+                            }.presetScrollEdges()
+                        } else {
+                            RemotePresetCategoryBrowser(categories: layout.categories, category: $category,
+                                enabled: enabled, row: { item in
+                                    RemotePresetChoiceRow(text: item.label, pending: pendingKey == item.id,
+                                        enabled: enabled && canWrite && slot.map(model.canEdit) == true &&
+                                            !folders.scanning) { perform(.write(number, item.choice)) }
+                                })
+                        }
+                    }.onAppear { if active && phase == .active { folders.refresh() } }
                 }
             } else {
                 ScrollView(showsIndicators: false) {
@@ -286,7 +303,6 @@ struct RemotePresetItem: Identifiable {
     let choice: PictureControlPresetChoice
     let label: String
     var id: String { choice.id }
-    var isBuiltIn: Bool { if case .builtIn = choice { true } else { false } }
 }
 
 /// LutCategoryList.kt: independent scroll columns .36/.64, 6pt gap, category
@@ -366,6 +382,7 @@ struct RemotePictureControlLayout {
     let anchor: CGRect?
     let landscape: Bool
     let scale: CGFloat
+    var emptyMessage: String? = nil
     static var labelLineSpacing: CGFloat { max(0, 20 - UIFont.systemFont(ofSize: 14, weight: .medium).lineHeight) }
     static var bodyLineSpacing: CGFloat { max(0, 20 - UIFont.systemFont(ofSize: 14).lineHeight) }
     static func slotLabel(_ item: PictureControlSlotInfo) -> String {
@@ -401,6 +418,8 @@ struct RemotePictureControlLayout {
             let message = confirmation == .folder ? AppLocalized.resource("picture_control_choose_folder_hint") :
                 String(format: AppLocalized.resource("picture_control_clear_confirm"), (page.slot ?? 200) - 200)
             h = 46 + height(message, width: w - 40, limit: nil, medium: false) + 24 + 72
+        } else if let emptyMessage {
+            h = 46 + height(emptyMessage, width: w - 40, limit: nil, medium: false) + 24
         } else {
             let inner = max(1, w - 22)
             let left = categories.reduce(CGFloat(0)) { $0 + height($1.label, width: inner * 0.36 - 16) + 20 + 2 }

@@ -42,30 +42,20 @@ final class NikonPictureControlTests: XCTestCase {
         }
     }
 
-    func testBundledPresetsRoundTripAndEncodeWithoutDroppingCurveBytes() throws {
-        let root = try XCTUnwrap(Bundle(for: Self.self).resourceURL)
-            .appendingPathComponent("PictureControlFixtures/built-in")
-        let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "NP3" }
-        XCTAssertEqual(files.count, 22)
-        let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("built-in/catalog.json")) as? [String: Any])
-        let entries = try XCTUnwrap(catalog["presets"] as? [[String: Any]])
-        let displayed = Set(entries.compactMap { $0["file"] as? String })
-        XCTAssertEqual(displayed.count, 20)
-        for url in files {
-            let data = try Data(contentsOf: url)
+    func testUserNP3RoundTripAndEncodeWithoutDroppingCurveBytes() throws {
+        for withCurve in [false, true] {
+            let data = SyntheticPictureControlFixture.data(withCurve: withCurve)
             let file = try NikonPictureControlFile(data)
             XCTAssertEqual(file.data, data)
-            XCTAssertEqual(file.name, url.deletingPathExtension().lastPathComponent)
+            XCTAssertEqual(file.name, "Test Neutral")
             XCTAssertEqual(file.sha256.count, 64)
-            XCTAssertEqual(try NikonPictureControlToneCurve(XCTUnwrap(file.field(2))).samples.count, 257)
-            guard displayed.contains(url.lastPathComponent) else {
-                XCTAssertThrowsError(try file.encodeClassicPictureControl())
-                continue
-            }
             let encoded = try file.encodeClassicPictureControl()
-            XCTAssertEqual(encoded.count, 614)
-            XCTAssertEqual(encoded.subdata(in: 36..<614), file.field(2))
+            XCTAssertEqual(encoded.count, withCurve ? 614 : 36)
+            if withCurve {
+                let curve = try NikonPictureControlToneCurve(XCTUnwrap(file.field(2)))
+                XCTAssertEqual(curve.samples, (0...256).map { $0 * 32767 / 256 })
+                XCTAssertEqual(encoded.subdata(in: 36..<614), SyntheticPictureControlFixture.curve)
+            } else { XCTAssertNil(file.field(2)) }
         }
     }
 
@@ -87,7 +77,7 @@ final class NikonPictureControlTests: XCTestCase {
     }
 
     func testTruncationAndNewVersionsCannotBecomeWritableOrEmptySlots() throws {
-        let data = try fixture("built-in/Kodak Ektar Green.NP3")
+        let data = SyntheticPictureControlFixture.data()
         for length in 0..<data.count { XCTAssertThrowsError(try NikonPictureControlFile(Data(data.prefix(length)))) }
         for version in ["0301", "0310", "0399"] {
             var changed = data
@@ -103,7 +93,7 @@ final class NikonPictureControlTests: XCTestCase {
     }
 
     func testBoundedStreamAndCancellation() throws {
-        let data = try fixture("built-in/Kodak Ektar Green.NP3")
+        let data = SyntheticPictureControlFixture.data()
         let input = InputStream(data: data); input.open(); defer { input.close() }
         XCTAssertEqual(try NikonPictureControlFile.read(input).data, data)
         let oversized = InputStream(data: Data(repeating: 0, count: 100_000)); oversized.open(); defer { oversized.close() }

@@ -1,0 +1,3018 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-21",
+  "scope": "Public-source rights research for 22 bundled NP3 files and 18 SVG files representing 17 brands; no legal determination of infringement.",
+  "userInstruction": "Research and list owner actions; retain all existing features and assets.",
+  "summary": {
+    "presetFiles": 22,
+    "brandSvgFiles": 18,
+    "brands": 17,
+    "fullCurrentUsePublicLicenseConfirmedPresets": 0,
+    "fullCurrentUsePublicLicenseConfirmedSvgFiles": 0,
+    "featuresAndAssetsRetained": true,
+    "messagesSent": false,
+    "buildOrInstallPerformed": false
+  },
+  "presets": {
+    "schemaVersion": 1,
+    "checkedAt": "2026-10-21T06:31:51.008830+00:00",
+    "scope": "22 NP3 currently bundled in the iOS app; commercial worldwide app redistribution and conversion, not only end-user photography",
+    "summary": {
+      "total": 22,
+      "listed": 20,
+      "research": 2,
+      "phpstoneArchiveMatches": 5,
+      "nikonpcCurrentParameterMatches": 17,
+      "catalog20HashMatches": true,
+      "verifiedUnrestrictedBundling": 0,
+      "needsUseBasisClarified": 22,
+      "productFilesChanged": false,
+      "messagesSent": false,
+      "newBuildsRun": false
+    },
+    "classificationDefinition": "No verified permission means public sources did not expressly establish the actual app redistribution use; it is neither an infringement finding nor a conclusion that every parameter necessarily is copyrightable. An actual statutory basis, if relied upon, needs case-specific assessment.",
+    "primarySources": [
+      {
+        "id": "phpstone-article",
+        "url": "https://phpstone.com/nikon-picture-control/",
+        "status": "HTTP 200 direct TLS fetch; web tool also read",
+        "observation": "Article attributes landscape presets to Links and states its portrait presets were created by the author; discusses personal camera use and sharing; no express commercial app redistribution scope found.",
+        "scope": "The article and exact ZIP source; no standalone license file in ZIP."
+      },
+      {
+        "id": "phpstone-about",
+        "url": "https://phpstone.com/about/",
+        "status": "HTTP 200 direct TLS fetch; web tool cache miss, not outage",
+        "observation": "Public contact account etmile; no terms granting app redistribution.",
+        "scope": "Contact and publisher identity, not license."
+      },
+      {
+        "id": "phpstone-subscriber",
+        "url": "https://phpstone.com/subscriber/",
+        "status": "HTTP 200 direct TLS fetch",
+        "observation": "Public accounts etmile and keer-movie; no preset license located.",
+        "scope": "Contact, not license."
+      },
+      {
+        "id": "nikonpc",
+        "url": "https://nikonpc.com/",
+        "status": "HTTP 200 direct TLS fetch; web tool also read",
+        "observation": "All 17 exact paths listed. Current responses match all recorded source settings. 17 responses have no author/license field. Homepage lists support@nikonpc.com and states unofficial Nikon utility.",
+        "scope": "Public download/editor usage, not blanket third-party commercial file redistribution."
+      },
+      {
+        "id": "biodiscus-patreon",
+        "url": "https://www.patreon.com/biodiscus",
+        "status": "web tool open read",
+        "observation": "NikonPC links here, and profile links its online Nikon tool and GitHub webdiscus. Free/open-source statement expressly describes code, not preset data.",
+        "scope": "Code statement cannot license independently authored community presets."
+      },
+      {
+        "id": "links-bilibili",
+        "url": "https://www.bilibili.com/video/BV15o4y1S7XQ/",
+        "status": "web tool indexed primary author page read",
+        "observation": "Author profile gives work email linksphotograph@gmail.com. No license covering these exact three preset files established from accessible page. Video no-repost language is not treated as preset-specific prohibition.",
+        "scope": "Contact corroboration only."
+      },
+      {
+        "id": "links-weibo",
+        "url": "https://weibo.com/2835750511/Nw2Cwbbmy",
+        "status": "web tool open read",
+        "observation": "Author profile independently publishes linksphotograph@gmail.com.",
+        "scope": "Contact corroboration only."
+      }
+    ],
+    "archive": {
+      "url": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+      "sha256": "d25c70d6bf201069a12d0ba561f174a745c5e92362f998a3c2f006c3e5e0f429",
+      "shaMatchesOriginalRecord": true,
+      "np3Matches": [
+        "LINKS-Nature.NP3",
+        "PORTRAIT-03.NP3",
+        "PORTRAIT-02.NP3",
+        "Kodak Ektar Green.NP3",
+        "Kodak-Sun-Nature.NP3"
+      ],
+      "licenseOrReadmeMembers": [],
+      "memberNameEncodingNote": "ZIP names were CP437-decoded by Python; Chinese parent directory can be restored by cp437 bytes -> UTF-8. File basenames and binary hashes unambiguous."
+    },
+    "sourceFetches": [
+      {
+        "file": "phpstone.html",
+        "url": "https://phpstone.com/nikon-picture-control/",
+        "status": 200,
+        "finalUrl": "https://phpstone.com/nikon-picture-control/",
+        "fetchedAt": "2026-10-21T06:26:10.686372+00:00",
+        "bytes": 40886,
+        "sha256": "b60ddc7a6af8ebcfc660e173ddaf0291d07aa4dc002d4e5e1523bb2bfb037484"
+      },
+      {
+        "file": "phpstone-home.html",
+        "url": "https://phpstone.com/",
+        "status": 200,
+        "finalUrl": "https://phpstone.com/",
+        "fetchedAt": "2026-10-21T06:26:10.998687+00:00",
+        "bytes": 71446,
+        "sha256": "dae4d50d1fda0c4fdbd39d455911118c07a65db16e55b24446c50ad1654cc40a"
+      },
+      {
+        "file": "nikonpc.html",
+        "url": "https://nikonpc.com/",
+        "status": 200,
+        "finalUrl": "https://nikonpc.com/",
+        "fetchedAt": "2026-10-21T06:26:15.518357+00:00",
+        "bytes": 47810,
+        "sha256": "5300b72266cd6175e247c539afb6af7d03a54e6452a32d6f4e09751bba541583"
+      },
+      {
+        "file": "nikon-presets.zip",
+        "url": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+        "status": 200,
+        "finalUrl": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+        "fetchedAt": "2026-10-21T06:26:15.652171+00:00",
+        "bytes": 10819,
+        "sha256": "d25c70d6bf201069a12d0ba561f174a745c5e92362f998a3c2f006c3e5e0f429"
+      },
+      {
+        "file": "phpstone-about.html",
+        "url": "https://phpstone.com/about/",
+        "status": 200,
+        "finalUrl": "https://phpstone.com/about/",
+        "fetchedAt": "2026-10-21T06:27:06.890357+00:00",
+        "bytes": 31116,
+        "sha256": "755e04df26f6dbc78032a44a3d05ea10707599fd271bdc8d8b546dac8d28e63c"
+      },
+      {
+        "file": "nikonpc-app.js",
+        "url": "https://nikonpc.com/assets/js/app.1237fd4d.js",
+        "status": 200,
+        "finalUrl": "https://nikonpc.com/assets/js/app.1237fd4d.js",
+        "fetchedAt": "2026-10-21T06:27:09.181741+00:00",
+        "bytes": 69388,
+        "sha256": "0af22f4b395b1af894448b28d2a77d5d56b2a351264ec7b1a4b398e5b444591d"
+      },
+      {
+        "file": "phpstone-subscriber.html",
+        "url": "https://phpstone.com/subscriber/",
+        "method": "GET",
+        "requestData": null,
+        "status": 200,
+        "finalUrl": "https://phpstone.com/subscriber/",
+        "fetchedAt": "2026-10-21T06:27:57.142425+00:00",
+        "bytes": 31433,
+        "sha256": "2a53cb418a8cb62d9ce0c5358fcad57c8dd584d13237f4de12982d44159632ea"
+      },
+      {
+        "file": "nikonpc-agfa-response.txt",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "requestData": "name=Agfa%2FPICCON01.NCP",
+        "status": 200,
+        "finalUrl": "https://nikonpc.com/?cmd=loadNpc",
+        "fetchedAt": "2026-10-21T06:27:58.707777+00:00",
+        "bytes": 8549,
+        "sha256": "efd47d09ac46327279764483cd4f800d186cb661d186c0fb32eed06ef3c3ef2c"
+      },
+      {
+        "file": "nikonpc-zcptech-response.txt",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "requestData": "name=z_cptech%2FPICCON08.NCP",
+        "status": 200,
+        "finalUrl": "https://nikonpc.com/?cmd=loadNpc",
+        "fetchedAt": "2026-10-21T06:28:00.688321+00:00",
+        "bytes": 8841,
+        "sha256": "3dbb67fd598c10085a7f15a444f9785c29956c58737c927ac4f641141b21d19c"
+      }
+    ],
+    "nikonpcPresetFetches": [
+      {
+        "name": "Agfa Optima",
+        "sourcePath": "Agfa/PICCON01.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Agfa Optima.txt",
+        "fetchedAt": "2026-10-21T06:28:47.022387+00:00",
+        "bytes": 8549,
+        "sha256": "efd47d09ac46327279764483cd4f800d186cb661d186c0fb32eed06ef3c3ef2c",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Agfa Vista 200",
+        "sourcePath": "z_cptech/PICCON08.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Agfa Vista 200.txt",
+        "fetchedAt": "2026-10-21T06:28:46.452276+00:00",
+        "bytes": 8841,
+        "sha256": "3dbb67fd598c10085a7f15a444f9785c29956c58737c927ac4f641141b21d19c",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Fuji Astia",
+        "sourcePath": "Fuji/PICCON02.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Fuji Astia.txt",
+        "fetchedAt": "2026-10-21T06:28:47.219157+00:00",
+        "bytes": 8589,
+        "sha256": "b2e788fc7170fc262bf08d603b7f2b00220919c6eb1c95a5037b578351232e9c",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Fuji Provia",
+        "sourcePath": "Fuji/PICCON03.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Fuji Provia.txt",
+        "fetchedAt": "2026-10-21T06:28:48.103970+00:00",
+        "bytes": 8566,
+        "sha256": "2962186cb852a4f6d4aff9259fd96979ad19375501286f85775548b3700908ff",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Fuji Provia 100F",
+        "sourcePath": "z_cptech/PICCON18.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Fuji Provia 100F.txt",
+        "fetchedAt": "2026-10-21T06:28:48.663378+00:00",
+        "bytes": 8564,
+        "sha256": "64129d6cdd106c67196b9d491481851027c65d2551da97b19635b4b426dafb05",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Fuji Superia Reala",
+        "sourcePath": "Fuji/PICCON04.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Fuji Superia Reala.txt",
+        "fetchedAt": "2026-10-21T06:28:48.794904+00:00",
+        "bytes": 8588,
+        "sha256": "4f090513c55ed98cb5a03c063895af8599acd9140034ef8ab5862368d7a477ec",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Fuji Velvia",
+        "sourcePath": "Fuji/PICCON07.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Fuji Velvia.txt",
+        "fetchedAt": "2026-10-21T06:28:50.030188+00:00",
+        "bytes": 8716,
+        "sha256": "58e12f975903719b30bead8247eb652f912ffe73be7bcc49d9ec254f8674ff69",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Fuji Velvia 100F",
+        "sourcePath": "z_cptech/PICCON17.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Fuji Velvia 100F.txt",
+        "fetchedAt": "2026-10-21T06:28:51.144308+00:00",
+        "bytes": 8998,
+        "sha256": "427efeca0169ab5b28ac90863cdd6078a461dc77ad282ab325d82ff0c60272f9",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "FUJI-SUPERIA",
+        "sourcePath": "Fuji/PICCON16.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/FUJI-SUPERIA.txt",
+        "fetchedAt": "2026-10-21T06:28:51.175074+00:00",
+        "bytes": 8718,
+        "sha256": "b2f5a7fcb96bcbb066abc7815eaff7a89c4f55a4621980879ccb33f702bf0474",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Kodak E100 VS",
+        "sourcePath": "z_cptech/PICCON01.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Kodak E100 VS.txt",
+        "fetchedAt": "2026-10-21T06:28:51.753630+00:00",
+        "bytes": 8933,
+        "sha256": "2edfe9c6431ebd50e4edba0c1049b61cd6f4a0446ceac8299ace8bffba4c8279",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Kodak Ektachrome",
+        "sourcePath": "Kodak/PICCON09.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Kodak Ektachrome.txt",
+        "fetchedAt": "2026-10-21T06:28:52.865416+00:00",
+        "bytes": 8458,
+        "sha256": "70019ced95b7e67973829a50c8ddfb7697068cc1d9df39fe739f0b08f6e99506",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Kodak EliteChrome",
+        "sourcePath": "z_cptech/PICCON09.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Kodak EliteChrome.txt",
+        "fetchedAt": "2026-10-21T06:28:52.753916+00:00",
+        "bytes": 8617,
+        "sha256": "64f50fc21631425afc9d32b2a9956205e169cb4cb19e73d418cadf80a9caf036",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Kodak Gold 100",
+        "sourcePath": "z_cptech/PICCON15.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Kodak Gold 100.txt",
+        "fetchedAt": "2026-10-21T06:28:54.593441+00:00",
+        "bytes": 8669,
+        "sha256": "999ef5600c4eaca9325d334fc530eb77d27fd7711e6af4b660a3daafe3429f08",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Kodak Kodachrome 2",
+        "sourcePath": "Kodak/PICCON08.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Kodak Kodachrome 2.txt",
+        "fetchedAt": "2026-10-21T06:28:54.491183+00:00",
+        "bytes": 8653,
+        "sha256": "ad2bdc37920a817e7a28b1512a519b99ab87f22092d86830b4deef366d03e2d2",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Kodak Portra 160NC",
+        "sourcePath": "z_cptech/PICCON04.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Kodak Portra 160NC.txt",
+        "fetchedAt": "2026-10-21T06:28:54.400366+00:00",
+        "bytes": 8630,
+        "sha256": "8935310c980c6155957656399993452bed483aad1a44d6aaa34047cacfaa2590",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Kodak Portra NC",
+        "sourcePath": "Kodak/PICCON14.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Kodak Portra NC.txt",
+        "fetchedAt": "2026-10-21T06:28:55.874324+00:00",
+        "bytes": 8620,
+        "sha256": "0b9b225a9c1bec12ff418e0a262c2562801684475a046b17c9a1351d1e772d51",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      },
+      {
+        "name": "Ferrania Solaris",
+        "sourcePath": "z_cptech/PICCON03.NCP",
+        "url": "https://nikonpc.com/?cmd=loadNpc",
+        "method": "POST read existing preset",
+        "listedOnCurrentHomepage": true,
+        "status": 200,
+        "file": "nikonpc-presets/Ferrania Solaris.txt",
+        "fetchedAt": "2026-10-21T06:28:55.992284+00:00",
+        "bytes": 8483,
+        "sha256": "4db0fb6d4bb8a90294e637ecf8f170e88a77bc0895ea3c546743d903d4fbbfa1",
+        "responseKeys": [
+          "filename",
+          "name",
+          "picCtrl",
+          "reserved02",
+          "customCurveFlag",
+          "sharpening",
+          "contrast",
+          "brightness",
+          "splain",
+          "lut",
+          "lutSource",
+          "saturation",
+          "hue"
+        ],
+        "hasAuthorOrLicenseField": false,
+        "matchesRecordedSettings": true
+      }
+    ],
+    "files": [
+      {
+        "file": "Kodak Ektar Green.NP3",
+        "sizeBytes": 834,
+        "sha256": "9553ef2653c74f4c7ba98cbd8f9a02dc205e478f3049ab97c5c26ef940d2004f",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "phpstone",
+        "sourceUrl": "https://phpstone.com/nikon-picture-control/",
+        "candidateContact": "Links: linksphotograph@gmail.com; Chris confirms upstream authority",
+        "likelyAuthor": "Links attribution in source article; confirm exact file authorship",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "archiveMember": "NikonΣ╝ÿσîûµáíσçå/Kodak Ektar Green.NP3",
+        "archiveByteMatch": true,
+        "downloadUrl": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+        "archiveSha256": "d25c70d6bf201069a12d0ba561f174a745c5e92362f998a3c2f006c3e5e0f429",
+        "archiveMemberDisplay": "Nikon优化校准/Kodak Ektar Green.NP3"
+      },
+      {
+        "file": "Kodak-Sun-Nature.NP3",
+        "sizeBytes": 834,
+        "sha256": "6f00688f6ad44d95ccc75065232284f8084176224b45540a6f1cc863f6326d53",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "phpstone",
+        "sourceUrl": "https://phpstone.com/nikon-picture-control/",
+        "candidateContact": "Links: linksphotograph@gmail.com; Chris confirms upstream authority",
+        "likelyAuthor": "Links attribution in source article; confirm exact file authorship",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "archiveMember": "NikonΣ╝ÿσîûµáíσçå/Kodak-Sun-Nature.NP3",
+        "archiveByteMatch": true,
+        "downloadUrl": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+        "archiveSha256": "d25c70d6bf201069a12d0ba561f174a745c5e92362f998a3c2f006c3e5e0f429",
+        "archiveMemberDisplay": "Nikon优化校准/Kodak-Sun-Nature.NP3"
+      },
+      {
+        "file": "LINKS-Nature.NP3",
+        "sizeBytes": 904,
+        "sha256": "41a499ca19e96197f06d527faab4a2c867a1f8284d2551406e660cb9f2331f9f",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "phpstone",
+        "sourceUrl": "https://phpstone.com/nikon-picture-control/",
+        "candidateContact": "Links: linksphotograph@gmail.com; Chris confirms upstream authority",
+        "likelyAuthor": "Links attribution in source article; confirm exact file authorship",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "archiveMember": "NikonΣ╝ÿσîûµáíσçå/LINKS-Nature.NP3",
+        "archiveByteMatch": true,
+        "downloadUrl": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+        "archiveSha256": "d25c70d6bf201069a12d0ba561f174a745c5e92362f998a3c2f006c3e5e0f429",
+        "archiveMemberDisplay": "Nikon优化校准/LINKS-Nature.NP3"
+      },
+      {
+        "file": "Agfa Optima.NP3",
+        "sizeBytes": 834,
+        "sha256": "521f614e38a3091f3126ee552466c92b2a74277443633d5ba273e3394b0195ca",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Agfa/PICCON01.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Agfa Optima.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Agfa Vista 200.NP3",
+        "sizeBytes": 834,
+        "sha256": "ef2cf26ad283898ac56e2bbe0a0eb5937235ba09ada6ce0ae19d5ff0e9cdaf46",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON08.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Agfa Vista 200.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Fuji Astia.NP3",
+        "sizeBytes": 834,
+        "sha256": "d4e4b9f6a2be74dec2ef1221adb79b230d15e268883d9b22984a8eae91e1ec41",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Fuji/PICCON02.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Fuji Astia.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Fuji Provia.NP3",
+        "sizeBytes": 834,
+        "sha256": "d03bcd5d9e5cc8497621e299096bd2adf2f611780e4b4625b66b4aaf1539b8b9",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Fuji/PICCON03.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Fuji Provia.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Fuji Provia 100F.NP3",
+        "sizeBytes": 834,
+        "sha256": "0fa8001625b1bbaa941993189debeaee34262a0761412fe689bb92a4eb84b8d0",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON18.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Fuji Provia 100F.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Fuji Superia Reala.NP3",
+        "sizeBytes": 834,
+        "sha256": "de5c8368a1c88d15be9981c962f0f34607e1b19a3feec804cb331ea1426987d9",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Fuji/PICCON04.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Fuji Superia Reala.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Fuji Velvia.NP3",
+        "sizeBytes": 834,
+        "sha256": "2e3150a88cc2cff65893c72ce6253c9c13e76035ece75b4e7aa8611b9361c769",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Fuji/PICCON07.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Fuji Velvia.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Fuji Velvia 100F.NP3",
+        "sizeBytes": 834,
+        "sha256": "356b816a82bef8fef13011651aa68ceb763a081a5fc51b6776b1aa4aec1d7bb0",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON17.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Fuji Velvia 100F.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "FUJI-SUPERIA.NP3",
+        "sizeBytes": 834,
+        "sha256": "c2a7a95a34eb9d3f1360ee95cd126aaec695fc8331ff373071c67e8ae9528ae7",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Fuji/PICCON16.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/FUJI-SUPERIA.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Kodak E100 VS.NP3",
+        "sizeBytes": 834,
+        "sha256": "78ecc0180ad4d694f9bf33c0677cab2decdd33cc4918f4f69a1b25fc2f754608",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON01.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Kodak E100 VS.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Kodak Ektachrome.NP3",
+        "sizeBytes": 834,
+        "sha256": "de58a6337ecbeab4f9868937ffeafc6ed42f67e579d83bd72337b5cfe8942c69",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Kodak/PICCON09.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Kodak Ektachrome.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Kodak EliteChrome.NP3",
+        "sizeBytes": 834,
+        "sha256": "37ea21a8b4d0e4093f0f7af5177ee1150823cdf208640445f18449040a7643d9",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON09.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Kodak EliteChrome.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Kodak Gold 100.NP3",
+        "sizeBytes": 834,
+        "sha256": "31981ac13cdd60e332c0225fdad68e55381bc03a9211bd75c864081ce35e60b0",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON15.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Kodak Gold 100.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Kodak Kodachrome 2.NP3",
+        "sizeBytes": 834,
+        "sha256": "37c93cdd65c0961aef1e87fd3cdef0ee220ad76c8d906e6ac12c08ad2c911437",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Kodak/PICCON08.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Kodak Kodachrome 2.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Kodak Portra 160NC.NP3",
+        "sizeBytes": 834,
+        "sha256": "ec209a39e37441d7fbb9ff58f3ca47f0985061bedb87334dac20930c2a08a1c8",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON04.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Kodak Portra 160NC.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Kodak Portra NC.NP3",
+        "sizeBytes": 834,
+        "sha256": "897a91aa9940e0618d96c66f203a33e94521cd4489a158ee1502cb3315c4102c",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "Kodak/PICCON14.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Kodak Portra NC.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "Ferrania Solaris.NP3",
+        "sizeBytes": 834,
+        "sha256": "98bebe3154a97e1bc3eaf8a9b26b0483611c483f5869db70f620e7c9626a272b",
+        "listedInUI": true,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "nikonpc",
+        "sourceUrl": "https://nikonpc.com/",
+        "candidateContact": "support@nikonpc.com",
+        "likelyAuthor": "individual preset author not established",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": true,
+        "originalNCPPath": "z_cptech/PICCON03.NCP",
+        "currentUpstreamSettingsMatch": true,
+        "upstreamMetadataHasAuthorOrLicense": false,
+        "sourceResponseEvidence": "nikonpc-presets/Ferrania Solaris.txt",
+        "conversion": "Original 257-sample lutSource preserved; NCP-to-NP3 conversion; clarity and mid-range sharpening zero; does not establish rights"
+      },
+      {
+        "file": "PORTRAIT-02.NP3",
+        "sizeBytes": 834,
+        "sha256": "93708cee24a1814b5fdd83450e72e81bc6de04ed545112d76048722f4837ab58",
+        "listedInUI": false,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "phpstone",
+        "sourceUrl": "https://phpstone.com/nikon-picture-control/",
+        "candidateContact": "Chris via etmile / original article comment",
+        "likelyAuthor": "Chris, supported by original article self-authorship statement and archive-byte match",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": null,
+        "archiveMember": "NikonΣ╝ÿσîûµáíσçå/PORTRAIT-02.NP3",
+        "archiveByteMatch": true,
+        "downloadUrl": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+        "archiveSha256": "d25c70d6bf201069a12d0ba561f174a745c5e92362f998a3c2f006c3e5e0f429",
+        "archiveMemberDisplay": "Nikon优化校准/PORTRAIT-02.NP3"
+      },
+      {
+        "file": "PORTRAIT-03.NP3",
+        "sizeBytes": 906,
+        "sha256": "620de54e5f3ba665d9fe99d2d140473a815877c4d59108cb6071b03d8d99d2d6",
+        "listedInUI": false,
+        "currentAction": "retain unchanged pending rights clarification",
+        "releaseRightsStatus": "no verified app-redistribution permission found",
+        "copyrightConclusion": "not determined; absent license is not a finding of infringement",
+        "sourceGroup": "phpstone",
+        "sourceUrl": "https://phpstone.com/nikon-picture-control/",
+        "candidateContact": "Chris via etmile / original article comment",
+        "likelyAuthor": "Chris, supported by original article self-authorship statement and archive-byte match",
+        "needsOwner": [
+          "obtain a reply or other documented use basis covering this exact preset",
+          "confirm app bundling, optional IAP commercial context, format conversion, worldwide App Store redistribution, attribution, duration and continued existing-user use"
+        ],
+        "catalogHashMatches": null,
+        "archiveMember": "NikonΣ╝ÿσîûµáíσçå/PORTRAIT-03.NP3",
+        "archiveByteMatch": true,
+        "downloadUrl": "https://phpstone.com/wp-content/uploads/2024/05/Nikon%E4%BC%98%E5%8C%96%E6%A0%A1%E5%87%86.zip",
+        "archiveSha256": "d25c70d6bf201069a12d0ba561f174a745c5e92362f998a3c2f006c3e5e0f429",
+        "archiveMemberDisplay": "Nikon优化校准/PORTRAIT-03.NP3"
+      }
+    ],
+    "ownerNextActions": [
+      {
+        "contact": "Chris / 克里斯的网络生活",
+        "channel": "https://phpstone.com/about/ ; public account etmile ; original article comment",
+        "files": [
+          "PORTRAIT-02.NP3",
+          "PORTRAIT-03.NP3"
+        ],
+        "ask": "Confirm authorship and authority for these two exact-byte samples; permit optional-IAP app bundling, worldwide redistribution and conversion. Also ask original source/authority of the 3 Links-attributed files.",
+        "sent": false
+      },
+      {
+        "contact": "Linksphotograph",
+        "channel": "linksphotograph@gmail.com",
+        "files": [
+          "Kodak Ektar Green.NP3",
+          "Kodak-Sun-Nature.NP3",
+          "LINKS-Nature.NP3"
+        ],
+        "ask": "Confirm exact files are their own or identify appropriate holder; grant app bundling and redistribution, with naming/attribution conditions.",
+        "sent": false
+      },
+      {
+        "contact": "NikonPC / biodiscus",
+        "channel": "support@nikonpc.com",
+        "files": [
+          "Agfa Optima.NP3",
+          "Agfa Vista 200.NP3",
+          "Fuji Astia.NP3",
+          "Fuji Provia.NP3",
+          "Fuji Provia 100F.NP3",
+          "Fuji Superia Reala.NP3",
+          "Fuji Velvia.NP3",
+          "Fuji Velvia 100F.NP3",
+          "FUJI-SUPERIA.NP3",
+          "Kodak E100 VS.NP3",
+          "Kodak Ektachrome.NP3",
+          "Kodak EliteChrome.NP3",
+          "Kodak Gold 100.NP3",
+          "Kodak Kodachrome 2.NP3",
+          "Kodak Portra 160NC.NP3",
+          "Kodak Portra NC.NP3",
+          "Ferrania Solaris.NP3"
+        ],
+        "ask": "Can the operator license these 17 exact source presets including converted NP3, and if not identify original holders or their original license pages. A reply permitting website use only is insufficient for app bundling.",
+        "sent": false
+      }
+    ],
+    "unconfirmedLeads": [
+      {
+        "url": "https://www.flickr.com/groups/1759530@N20/discuss/72157632779598630/",
+        "note": "Community thread links old cptech package and showhss Xuite blogger for 29-picture-control set. z_cptech 8 names overlap, but no original-byte verification, current first-party authorization, or verified current contact. Do not promote this lead to established authorship/permission."
+      },
+      {
+        "url": "https://www.flickr.com/groups/479891@N21/discuss/72157604263679013/",
+        "note": "Old users discuss Agfa Optima / Fuji Astia / Fuji Velvia downloads. Name similarity or Flickr photo license does not authorize current app resources."
+      }
+    ]
+  },
+  "cameraBrands": {
+    "date": "2026-10-21",
+    "scope": "相机/影像6品牌、7个SVG；生产代码只读；未发邮件/表单；未改动素材和功能",
+    "intendedUse": "带内购的独立App内置图形；按EXIF品牌用于边框/水印；导出用户照片；非Nikon随文字色；可能全球分发",
+    "finding": "0个品牌的当前Logo用途被本轮确认具备公开直接许可；不等于裁定现有使用违法。网站条款、商标法定例外、版权与媒体许可须分别判断。",
+    "productionEvidence": [
+      "ios/ZTransfer/Domain/PhotoFrameBrand.swift:3",
+      "ios/ZTransfer/Domain/PhotoFrameBrandLogoCatalog.swift:114",
+      "ios/ZTransfer/Domain/PhotoEffectsRenderer.swift:1282",
+      "docs/brand-logo-research/README.md",
+      "docs/brand-logo-research/metadata-source.json"
+    ],
+    "records": [
+      {
+        "brand": "Nikon",
+        "assets": [
+          "nikon-official.svg",
+          "nikon.svg"
+        ],
+        "status": "未确认当前用途的公开许可；官网素材条款要求事前书面许可，商标条款保留法律允许使用例外",
+        "runtime": "nikon-official.svg 为当前加载路径；nikon.svg 随资源存在但不是正常 Nikon 首选。",
+        "sources": [
+          {
+            "url": "https://www.nikon.com/usage/group-info/",
+            "title": "Terms and Conditions of Use",
+            "scope": "日本尼康集团网站素材的复制、修改、分发等；有个人非商业及法律例外。"
+          },
+          {
+            "url": "https://nij.nikon.com/information/",
+            "title": "Nikon Imaging 网站使用说明",
+            "scope": "日本影像网站明确将版权条件指向日本集团网站条款。"
+          },
+          {
+            "url": "https://www.jp.nikon.com/usage/group-info/",
+            "title": "日本尼康集团网站使用条款",
+            "scope": "直接来源站点现行条款链；保留著作权法和商标法允许的使用。"
+          }
+        ],
+        "contact": {
+          "url": "https://www.nikon.com/contacts/form/",
+          "label": "Corporate Information 表单",
+          "note": "选 Other Corporate Information，要求转交品牌/知识产权许可负责人；网站标明 Corporate Communications Department。"
+        },
+        "action": "一并申请官方彩色版和如拟启用的单色版，用于App内识别和用户导出照片；明确全球/地区、收费、缩放、颜色、截图宣传。",
+        "assetEvidence": [
+          {
+            "path": "ios/ZTransfer/Resources/BrandLogos/nikon-official.svg",
+            "sha256": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53"
+          },
+          {
+            "path": "ios/ZTransfer/Resources/BrandLogos/nikon.svg",
+            "sha256": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc"
+          }
+        ],
+        "archiveComparisons": [
+          {
+            "asset": "nikon-official.svg",
+            "archiveSha256": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53",
+            "runtimeSha256": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53",
+            "byteIdentical": true,
+            "pathDataExactEqual": true,
+            "archivePaths": 11,
+            "runtimePaths": 11,
+            "archiveViewBox": "0 0 400 400",
+            "runtimeViewBox": "0 0 400 400",
+            "archiveElementTypes": [
+              "defs",
+              "linearGradient",
+              "path",
+              "rect",
+              "stop",
+              "svg",
+              "title"
+            ],
+            "runtimeElementTypes": [
+              "defs",
+              "linearGradient",
+              "path",
+              "rect",
+              "stop",
+              "svg",
+              "title"
+            ]
+          },
+          {
+            "asset": "nikon.svg",
+            "archiveSha256": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc",
+            "runtimeSha256": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc",
+            "byteIdentical": true,
+            "pathDataExactEqual": true,
+            "archivePaths": 1,
+            "runtimePaths": 1,
+            "archiveViewBox": "0 0 24 24",
+            "runtimeViewBox": "0 0 24 24",
+            "archiveElementTypes": [
+              "path",
+              "svg",
+              "title"
+            ],
+            "runtimeElementTypes": [
+              "path",
+              "svg",
+              "title"
+            ]
+          }
+        ]
+      },
+      {
+        "brand": "Sony",
+        "assets": [
+          "sony.svg"
+        ],
+        "status": "未确认当前用途的公开许可；集团网站素材商用需事前书面许可",
+        "runtime": "Simple Icons 单色路径，跟随文字色。",
+        "sources": [
+          {
+            "url": "https://www.sony.com/en/copyright/",
+            "title": "Sony Group Corporation Web Site: Terms and Conditions",
+            "scope": "个人非商业内部使用之外，网站素材的复制、修改、发布、分发等需要许可；明确SONY Logo为商标。"
+          },
+          {
+            "url": "https://dealersource.electronics.sony.com/static/media/Dealer%20Source%20Terms%20and%20Conditions%2004-15-20.74a303e103fe7079ba10.pdf",
+            "title": "Sony Electronics Digital Asset License Agreement",
+            "scope": "经销商、转售商和受邀用户协议；仅授权其销售的Sony产品推广，不能当作一般独立App的开放许可。"
+          }
+        ],
+        "contact": {
+          "url": "https://www.sony.com/en/SonyInfo/SupportAll/",
+          "label": "Sony Group Support / Contact Us",
+          "note": "选 Others 或相机产品所在地区，要求转交品牌许可；通用转介入口，并非已确认授权部门。"
+        },
+        "action": "申请SONY文字Logo路径在App和导出图中使用、单色/随文字色和宽高缩放；不采用Sony Pictures电影Logo申请地址冒充相机品牌部门。",
+        "assetEvidence": [
+          {
+            "path": "ios/ZTransfer/Resources/BrandLogos/sony.svg",
+            "sha256": "1ebe41fd11e744264f345c1d3fa46ff6966c7349f585477bb1d9be0daa7c9e6c"
+          }
+        ],
+        "archiveComparisons": [
+          {
+            "asset": "sony.svg",
+            "archiveSha256": "d012ec936e65a255f7b7b49a7e99c5aa7ab919fbc1487d8e09af82031c0e7090",
+            "runtimeSha256": "1ebe41fd11e744264f345c1d3fa46ff6966c7349f585477bb1d9be0daa7c9e6c",
+            "byteIdentical": false,
+            "pathDataExactEqual": true,
+            "archivePaths": 1,
+            "runtimePaths": 1,
+            "archiveViewBox": "0 0 24 24",
+            "runtimeViewBox": "0 0 24 24",
+            "archiveElementTypes": [
+              "path",
+              "svg",
+              "title"
+            ],
+            "runtimeElementTypes": [
+              "path",
+              "svg"
+            ]
+          }
+        ]
+      },
+      {
+        "brand": "Fujifilm",
+        "assets": [
+          "fujifilm.svg"
+        ],
+        "status": "官网明确商标/Logo需权利人事前书面同意；未发现当前用途的公开许可",
+        "runtime": "Simple Icons 单色路径，跟随文字色。",
+        "sources": [
+          {
+            "url": "https://www.fujifilm.com/us/en/terms",
+            "title": "Terms of Use | Fujifilm United States",
+            "scope": "第5项商标、商号、Logo及服务标记。"
+          },
+          {
+            "url": "https://global.fujifilm.com/en/terms",
+            "title": "Terms of Use | Fujifilm Global",
+            "scope": "全球页面仅给予个人非商业下载/打印，改动/提取图像需特许或权利人事先许可。"
+          },
+          {
+            "url": "https://global.fujifilm.com/en/about/brand/logo",
+            "title": "Corporate Brand Logo",
+            "scope": "品牌历史介绍，未提供App再分发/导出照片的开放授权。"
+          }
+        ],
+        "contact": {
+          "url": "https://holdings.fujifilm.com/en/form/FH-General-En",
+          "label": "Contact FUJIFILM Holdings",
+          "note": "全球条款直接链接的咨询表单；说明Logo许可问题并要求转至适当部门。"
+        },
+        "action": "申请Logo App随包、导出图及单色显示；不要将品牌介绍页或Simple Icons来源当作已授权。",
+        "assetEvidence": [
+          {
+            "path": "ios/ZTransfer/Resources/BrandLogos/fujifilm.svg",
+            "sha256": "b6b432bac50df29727fcfd0fa9d1965f0449160037be89387b3844c92bbb944d"
+          }
+        ],
+        "archiveComparisons": [
+          {
+            "asset": "fujifilm.svg",
+            "archiveSha256": "32614acc01d693ef73bfa82680f10c07d5a433d78896c013c2d6fb2b9ee379b4",
+            "runtimeSha256": "b6b432bac50df29727fcfd0fa9d1965f0449160037be89387b3844c92bbb944d",
+            "byteIdentical": false,
+            "pathDataExactEqual": true,
+            "archivePaths": 1,
+            "runtimePaths": 1,
+            "archiveViewBox": "0 0 24 24",
+            "runtimeViewBox": "0 0 24 24",
+            "archiveElementTypes": [
+              "path",
+              "svg",
+              "title"
+            ],
+            "runtimeElementTypes": [
+              "path",
+              "svg"
+            ]
+          }
+        ]
+      },
+      {
+        "brand": "Panasonic",
+        "assets": [
+          "panasonic.svg"
+        ],
+        "status": "官网要求联系权利人取得许可，同时保留法律允许使用例外；未确认当前用途的公开许可",
+        "runtime": "Simple Icons 单色路径，跟随文字色。",
+        "sources": [
+          {
+            "url": "https://holdings.panasonic/global/terms-of-use.html",
+            "title": "Panasonic Holdings Terms of Use",
+            "scope": "第2项商标、Logo及产品名；明确法律允许的特定使用例外。"
+          },
+          {
+            "url": "https://na.panasonic.com/terms",
+            "title": "Panasonic North America Terms & Conditions",
+            "scope": "北美站另写商标使用需事前书面许可，不能将北美条款视为所有国家实体的自动统一许可。"
+          }
+        ],
+        "contact": {
+          "url": "https://holdings.panasonic/global/support/get-support.html",
+          "label": "Panasonic 官方地区联系入口",
+          "note": "按 China 或目标地区联系，要求转交品牌/知识产权许可部门；这是转介入口。"
+        },
+        "action": "说明独立摄影App、仅按EXIF使用、照片导出及动态文字色，申请明确的Logo权限/允许版本。",
+        "assetEvidence": [
+          {
+            "path": "ios/ZTransfer/Resources/BrandLogos/panasonic.svg",
+            "sha256": "534bf3863fa41f7703fc3ec9a84a964ef29e239a1193d4859573d63a3fc0bc04"
+          }
+        ],
+        "archiveComparisons": [
+          {
+            "asset": "panasonic.svg",
+            "archiveSha256": "72034f2812318af5b16607f0038d7477678705a812a00d25149357e5bf472dd7",
+            "runtimeSha256": "534bf3863fa41f7703fc3ec9a84a964ef29e239a1193d4859573d63a3fc0bc04",
+            "byteIdentical": false,
+            "pathDataExactEqual": true,
+            "archivePaths": 1,
+            "runtimePaths": 1,
+            "archiveViewBox": "0 0 24 24",
+            "runtimeViewBox": "0 0 24 24",
+            "archiveElementTypes": [
+              "path",
+              "svg",
+              "title"
+            ],
+            "runtimeElementTypes": [
+              "path",
+              "svg"
+            ]
+          }
+        ]
+      },
+      {
+        "brand": "Leica",
+        "assets": [
+          "leica.svg"
+        ],
+        "status": "官网明确Logo需Leica Camera AG事前书面同意；未确认当前用途的公开许可",
+        "runtime": "Simple Icons 单色路径，跟随文字色，不能自动当成获准的红点官方版本。",
+        "sources": [
+          {
+            "url": "https://leica-camera.com/en-US/legal-notices",
+            "title": "Leica Legal Notices",
+            "scope": "BRANDS AND LOGOS段明确适用于网站中的品牌与Logo。"
+          },
+          {
+            "url": "https://leica-camera.com/en-US/newsroom",
+            "title": "Leica Newsroom",
+            "scope": "图片下载定位为press needs，新闻素材入口不构成App装饰/导出水印的通用授权。"
+          }
+        ],
+        "contact": {
+          "url": "https://leica-camera.com/en-int/imprint",
+          "label": "Leica Camera AG 官方联系资料",
+          "email": "info@leica-camera.com",
+          "note": "官网 Imprint 明示总联系邮箱；要求转交商标许可负责人。"
+        },
+        "action": "先问清允许单色图形/改色/圆形标志的版本及照片导出传播范围，取得与当前独立App使用相符的许可。",
+        "assetEvidence": [
+          {
+            "path": "ios/ZTransfer/Resources/BrandLogos/leica.svg",
+            "sha256": "b9b7ee14970a3f27353dc66f94ae8daf74c62fbe7364608d98d45c383b361393"
+          }
+        ],
+        "archiveComparisons": [
+          {
+            "asset": "leica.svg",
+            "archiveSha256": "7d5b56ebd41655776bc0f3c2ffd1c94565a0a5d4482b1df968d2d62d5ac67fa8",
+            "runtimeSha256": "b9b7ee14970a3f27353dc66f94ae8daf74c62fbe7364608d98d45c383b361393",
+            "byteIdentical": false,
+            "pathDataExactEqual": true,
+            "archivePaths": 1,
+            "runtimePaths": 1,
+            "archiveViewBox": "0 0 24 24",
+            "runtimeViewBox": "0 0 24 24",
+            "archiveElementTypes": [
+              "path",
+              "svg",
+              "title"
+            ],
+            "runtimeElementTypes": [
+              "path",
+              "svg"
+            ]
+          }
+        ]
+      },
+      {
+        "brand": "DJI",
+        "assets": [
+          "dji.svg"
+        ],
+        "status": "Logo明确需书面许可；真实兼容性说明和事实描述的普通文字有条件可用，不能外推至Logo",
+        "runtime": "Simple Icons 单色路径，跟随文字色。",
+        "sources": [
+          {
+            "url": "https://www.dji.com/terms",
+            "title": "Guidelines for Using DJI Trademarks and Copyrights",
+            "scope": "Logo用于产品等须书面许可。第7/8节允许符合规范的普通文字商标真实说明兼容性/事实，但明确不包括Logo；第1节改动需同意。"
+          }
+        ],
+        "contact": {
+          "url": "https://www.dji.com/terms",
+          "label": "DJI Intellectual Property Department",
+          "email": "dept-ip@dji.com",
+          "note": "官网商标指南段直接列出知识产权部门邮箱。"
+        },
+        "action": "向IP部门申请Logo随包、以EXIF识别后导出、与照片组合、单色/改色、商业分发；如果只用普通文字，逐项落实事实准确、从属显示、无背书及归属规范。",
+        "assetEvidence": [
+          {
+            "path": "ios/ZTransfer/Resources/BrandLogos/dji.svg",
+            "sha256": "3bd16a0cb92a60e5a5a7c6deb2bf278eb3f0dedb53c7d303c592992b9fe6ef54"
+          }
+        ],
+        "archiveComparisons": [
+          {
+            "asset": "dji.svg",
+            "archiveSha256": "8a589463e3007e665ffe1f36fa484fefdb34247aad77cca7a3983d2ba38ef1be",
+            "runtimeSha256": "3bd16a0cb92a60e5a5a7c6deb2bf278eb3f0dedb53c7d303c592992b9fe6ef54",
+            "byteIdentical": false,
+            "pathDataExactEqual": true,
+            "archivePaths": 1,
+            "runtimePaths": 1,
+            "archiveViewBox": "0 0 24 24",
+            "runtimeViewBox": "0 0 24 24",
+            "archiveElementTypes": [
+              "path",
+              "svg",
+              "title"
+            ],
+            "runtimeElementTypes": [
+              "path",
+              "svg"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "phoneBrands": {
+    "checkedAt": "2026-10-21",
+    "scope": "11个手机品牌SVG：随有内购的独立相机App分发，按照片EXIF选择，在水印/边框导出用户成片；当前单色跟随边框文字色。",
+    "method": "阅读本地iOS项目记忆、来源README及metadata-source.json；浏览官方商标/网站许可/品牌资产页及联系入口。这里判断公开许可是否明确覆盖本用途，不判定某地域法律上的侵权或法定合理使用。没有联系品牌、注册账户、发送信息、提交申请或修改任何功能。",
+    "result": "11个Logo均未找到明确覆盖上述商业App内置及用户成片导出的公开许可；保持本地功能不变，提交前需要品牌书面确认或针对实际指称用途的权利评估。Apple/Google文字指称另有有限官方可用规则，不等于图形Logo获许可。",
+    "brands": [
+      {
+        "brand": "Apple",
+        "slug": "apple",
+        "classification": "explicit_written_license_policy",
+        "sources": [
+          {
+            "url": "https://www.apple.com/legal/intellectual-property/guidelinesfor3rdparties.html",
+            "finding": "Unauthorized Use第2项要求Apple图形Logo获得明确书面商标许可；Compatibility项允许符合条件的纯文字兼容性指称，明确排除Apple Logo。普通Apple开发者会员不等于此Logo许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "不要把Apple键盘字符、相似苹果图案或重绘路径当作规避；此轮未核定具体获准艺术文件。",
+        "ownerAction": "向Apple商标/权利许可入口提交本App及真实边框示例，明确内购、随包矢量、按EXIF导出及全球用户分享范围，请求书面许可或确认无需许可的依据。",
+        "contactUrl": "https://www.apple.com/legal/contact/trademark-information.html",
+        "alternateContactUrl": "https://www.apple.com/legal/contact/rights-permissions.html",
+        "contactType": "官方商标问题及Rights & Permissions表单；不需要假装有合作关系。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/apple.svg",
+          "sha256": "a5c0ab1705f3f9ed175996cdfa177765b1aa265949a2d7df9b1d55eb38aeb4ba",
+          "archivePath": "docs/brand-logo-research/apple.svg",
+          "archiveSha256": "2a1509dccd25e6d2bc7a11a8e52941077e1a48555e192ce638699b9f083c2a7c",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "Samsung",
+        "slug": "samsung",
+        "classification": "no_commercial_license_granted",
+        "sources": [
+          {
+            "url": "https://www.samsung.com/us/common/legal/",
+            "finding": "版权条款只给个人使用；商业复制分发等不获此条款许可，Reservation of Rights明确不授予名称、商标或Logo使用权。该页面是美国站条款，不等于对所有司法辖区法律结论。"
+          },
+          {
+            "url": "https://www.samsung.com/us/about-us/brand-identity/logo/",
+            "finding": "官方标识页展示Samsung蓝、黑、白及留白要求，没有针对独立App的通用商标许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "即使后来获许可，随任意边框文字色上色也需再核对；官方当前页列出的颜色是蓝/黑/白。",
+        "ownerAction": "通过官方媒体联系人请求转交品牌/商标授权团队，申请商业App及导出范围；明确这不是新闻报道用途。",
+        "contactUrl": "https://news.samsung.com/us/press-resources/media-contacts/",
+        "contactEmail": "corp.comm@sea.samsung.com",
+        "contactType": "官方公布的Corporate Communications(US)，可请求转介；未找到公开自助Logo商用授权表单。全球联系人该页为samsungpr@edelman.com。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/samsung.svg",
+          "sha256": "e29e10099eecd64d44a5db80b2701c04d9d277bfc328c175eec00de86d08042b",
+          "archivePath": "docs/brand-logo-research/samsung.svg",
+          "archiveSha256": "4a241ca8ebab6e71883b172acb9fb454efa69f308e4f2c31ec80668aeb6627d9",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "Huawei",
+        "slug": "huawei",
+        "classification": "explicit_prior_authorization_policy",
+        "sources": [
+          {
+            "url": "https://consumer.huawei.com/en/legal/intellectual-property/trademark-authorization/view-progress/",
+            "finding": "合作伙伴品牌使用协议明确以预先授权为前提，使用场景、地域、期限、颜色位置等受批准范围约束。该协议针对已建立/将建立合作的Partner，不能把它视为所有第三方自动可申请通过。"
+          },
+          {
+            "url": "https://consumer.huawei.com/en/legal/terms-of-use/",
+            "finding": "消费者官网内容的商用需预先书面同意，个人非商用下载例外不覆盖App内置导出。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "官方协议要求依许可遵守样式、字体、尺寸、位置、颜色；当前单色随文本颜色必须明确纳入申请。",
+        "ownerAction": "先向华为确认个人独立开发者申请路径；公开表单要求合作协议、被授权主体及公司邮箱，不能编造合作协议。表单接受后提交使用示例/地域/期限，保存授权函。",
+        "contactUrl": "https://consumer.huawei.com/en/legal/intellectual-property/trademark-authorization/application/",
+        "contactType": "官方商标授权申请入口；表单明确要求Cooperation Agreement及公司登记邮箱，个人可能需要转人工。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/huawei.svg",
+          "sha256": "91e6fd86914e991a3ab801db258be9bb8e150c95b3424ce327f9a768f8662741",
+          "archivePath": "docs/brand-logo-research/huawei.svg",
+          "archiveSha256": "eb43e0a9450cef22ce70d624a60622a0aa542142102e402a293578b388b876f5",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": false
+        }
+      },
+      {
+        "brand": "Xiaomi",
+        "slug": "xiaomi",
+        "classification": "explicit_written_consent_policy",
+        "sources": [
+          {
+            "url": "https://www.mi.com/global/about/agreement/",
+            "finding": "Intellectual property段将小米Logo图形/文字/组合列为商标，要求书面同意；另有限制网站内容商用。媒体资源页目前只有新闻联络，没有App许可条款。"
+          },
+          {
+            "url": "https://www.mi.com/global/about/mediakit/",
+            "finding": "此入口公布global-pr@xiaomi.com，身份是新闻联络，不是向所有App授予许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "本轮未找到允许任意单色处理的适用官方规则；申请同时问当前标志版本、颜色及留白。",
+        "ownerAction": "给用户协议Contact us列明的法律联系邮箱提交授权询问，附App/成片示例并问转正确品牌团队；如有需要经媒体邮箱转介。",
+        "contactUrl": "https://www.mi.com/global/about/agreement/",
+        "contactEmail": "legalqa@xiaomi.com",
+        "contactType": "协议末尾Contact us实际列明的法律联系邮箱；同页也被用于侵权举报，询问信中明确请求Logo使用许可，不提交虚假侵权投诉。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/xiaomi.svg",
+          "sha256": "e1a5c7dc62eba325a68936c1b16b7198628f5d69bb809d523b006a9e697ab551",
+          "archivePath": "docs/brand-logo-research/xiaomi.svg",
+          "archiveSha256": "8866d12a70d85ab43acd3b9c80f1b37792d91160d8273efffdf817af5fd608cb",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "OPPO",
+        "slug": "oppo",
+        "classification": "explicit_commercial_written_consent_policy",
+        "sources": [
+          {
+            "url": "https://www.oppo.com/en/terms/",
+            "finding": "第II部分把Logo纳入Content；商业用途需事先书面同意。下载产品信息仅允许非商用、未修改并保留权利声明，不覆盖本用途。来源中的Figma媒体包不能单凭可下载视作另有许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "单色改色及在用户成片中的位置/尺寸需要一并确认。",
+        "ownerAction": "由官方Media Contacts请求品牌/法务确认App内置及导出许可，标明商业App，不以媒体身份套用新闻材料。",
+        "contactUrl": "https://www.oppo.com/en/contact/",
+        "contactEmail": "press@oppo.com",
+        "contactType": "官方媒体联络，可请求转交授权团队；未找到公开通用商标许可表单。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/oppo.svg",
+          "sha256": "c6782d501f63070374d3f23cec501db3b19f87cde1781037581cb7b6a3a9e6dc",
+          "archivePath": "docs/brand-logo-research/oppo.svg",
+          "archiveSha256": "0af8ef2d3f3ada53779f8dbaab6243ceccb530a03deebe9bc7a054c89189cf5a",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "vivo",
+        "slug": "vivo",
+        "classification": "explicit_written_permission_policy",
+        "sources": [
+          {
+            "url": "https://www.vivo.com/en/activity/termsofuse",
+            "finding": "Trademark段要求事先明确书面许可；官网材料个人非商业例外还要求不修改/保留声明，商业App内置不获该例外许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "没有从已读页面找到允许任意文字色的规范。",
+        "ownerAction": "经官方Email Us提交简短转介请求给品牌/法务，得到正确授权路径后提交App和成片范围。不要给隐私申诉邮箱或某地区售后邮箱冒充商标许可申请。",
+        "contactUrl": "https://www.vivo.com/en/emailSupport?channel=PC",
+        "contactType": "从vivo官方条款页Email Us链接到达的一般客服表单；不是直接授予商标许可的团队，需转介。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/vivo.svg",
+          "sha256": "ca64bdb5af025309fdd2d852a8e0071102be714f1191ca4b971d1fd5f569e514",
+          "archivePath": "docs/brand-logo-research/vivo.svg",
+          "archiveSha256": "1db247986bd07a7b7a1754fa285f61c445d4767037fda96b6e5d72a60d1e4f94",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "HONOR",
+        "slug": "honor",
+        "classification": "explicit_contract_and_written_permission_policy",
+        "sources": [
+          {
+            "url": "https://www.honor.com/in/company-trademark-policy/",
+            "finding": "专门商标政策给出授权申请邮箱，商用须先书面许可；境内/境外商标标注规则不同，需按实际发行范围办。"
+          },
+          {
+            "url": "https://www.honor.com/pk/brand-guideline11/basics/logo/",
+            "finding": "Logo下载页页末明确仅契约授权者可使用；正文要求原始官方艺术文件、不可改字体/颜色/拉伸。黑白版背景规则、O字高度留白、数字最小20px可在获授权后执行。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "现有任意文字色不自动符合；黑白版本本身存在但并不免除授权。",
+        "ownerAction": "向专门商标邮箱申请，附中国/全球发行范围、黑白或拟用颜色、边框截图、内购和用户分享；请对方确认要求的权利声明和合同/授权函。",
+        "contactUrl": "https://www.honor.com/in/company-trademark-policy/",
+        "contactEmail": "trademark@hihonor.com",
+        "contactType": "官方明确的商标授权申请邮箱。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/honor.svg",
+          "sha256": "dcaf6f85756023aa4d7f5773191624691f94b23ec163849c199739516de54472",
+          "archivePath": "docs/brand-logo-research/honor.svg",
+          "archiveSha256": "f0b59f37b9da2bc9f0b6df63a8ee371b6e77bfa49931715904c6a993f32e5402",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "OnePlus",
+        "slug": "oneplus",
+        "classification": "explicit_written_permission_policy",
+        "sources": [
+          {
+            "url": "https://www.oneplus.com/us/legal/user-agreement",
+            "finding": "IV.4.5明确要求商标书面许可；IV.4.2网站材料仅个人非商业使用。Brand Assets提供下载并未在页面授予独立商业App内置/导出许可。该条款为美国站。"
+          },
+          {
+            "url": "https://www.oneplus.com/uk/brand/asset",
+            "finding": "已由官网HTML定位并正常下载5,694,069字节ZIP。20份实际品牌文件仅PNG/JPG/EPS，没有独立LICENSE/README/品牌指南文件；6份EPS内检索只有Adobe生成器版权和品牌色板等元数据，未发现本用途许可。可下载不等于商业App授权。"
+          },
+          {
+            "url": "https://oasis.opstatics.com/content/dam/oasis/page/vi/OnePlus-brand-assets.zip",
+            "finding": "已读公开品牌包目录及6份EPS文本；包含红/黑/白Logo与Lock-up文件，以及NEVER SETTLE组合素材。无独立许可文档，不改变官网商标条款所要求的事先书面许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "公开品牌包确有红/黑/白Logo和组合版本，但没有发现允许任意改色的通用规则，颜色/留白及App导出仍需书面确认。",
+        "ownerAction": "向官方Press Enquiries请求品牌/法务确认App用途并提供适用许可；附实际1+图形及导出示例，询问官方红/黑/白版本和拟用任意边框颜色是否允许。",
+        "contactUrl": "https://www.oneplus.com/us/press-enquiry",
+        "contactEmail": "press@oneplus.com",
+        "contactType": "官方新闻联络表单/邮箱，可请求转介；不是已获许可。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/oneplus.svg",
+          "sha256": "536f915451c27cda9e1c2d8a5c7ca57f30f778eecafa0acfe01d09d8f66c8a98",
+          "archivePath": "docs/brand-logo-research/oneplus.svg",
+          "archiveSha256": "36383c496fa98bdc3b4b72507e42408faaabb1887bbfd384aa4dd9c83a0686e6",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        },
+        "officialArchiveEvidence": {
+          "checkedAt": "2026-10-21",
+          "sourcePage": "https://www.oneplus.com/uk/brand/asset",
+          "downloadUrl": "https://oasis.opstatics.com/content/dam/oasis/page/vi/OnePlus-brand-assets.zip",
+          "savedAt": "/tmp/ztransfer-oneplus-brand-assets-20261021.zip",
+          "bytes": 5694069,
+          "sha256": "bb4418994996cee0afce0a960ba741b72e68c184ed2e4205aefd2de721c5a68e",
+          "contentFiles": 20,
+          "contentExtensions": {
+            ".png": 10,
+            ".jpg": 4,
+            ".eps": 6
+          },
+          "licenseReadmeGuidelineNamedFiles": [],
+          "entries": [
+            {
+              "name": "OnePlus-brand-assets/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/.DS_Store",
+              "bytes": 8196
+            },
+            {
+              "name": "__MACOSX/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/._.DS_Store",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/OP_NS_Reg_2L_RGB_blk.png",
+              "bytes": 50453
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/._OP_NS_Reg_2L_RGB_blk.png",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/OP_NS_Reg_1L_RGB_wht.png",
+              "bytes": 48095
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/._OP_NS_Reg_1L_RGB_wht.png",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/OP_NS_Reg_2L_RGB_wht.png",
+              "bytes": 46787
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/._OP_NS_Reg_2L_RGB_wht.png",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/OP_NS_Reg_1L_RGB_blk.png",
+              "bytes": 52011
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/PNG/._OP_NS_Reg_1L_RGB_blk.png",
+              "bytes": 312
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/._PNG",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/OP_NS_Reg_2L_RGB_blkwht.jpg",
+              "bytes": 180730
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/._OP_NS_Reg_2L_RGB_blkwht.jpg",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/OP_NS_Reg_1L_RGB_whtblk.jpg",
+              "bytes": 196534
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/._OP_NS_Reg_1L_RGB_whtblk.jpg",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/OP_NS_Reg_2L_RGB_whtblk.jpg",
+              "bytes": 190875
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/._OP_NS_Reg_2L_RGB_whtblk.jpg",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/OP_NS_Reg_1L_RGB_blkwht.jpg",
+              "bytes": 181757
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/JPG/._OP_NS_Reg_1L_RGB_blkwht.jpg",
+              "bytes": 312
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus NEVER SETTLE/._JPG",
+              "bytes": 212
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/._OnePlus NEVER SETTLE",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/.DS_Store",
+              "bytes": 10244
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/._.DS_Store",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/.DS_Store",
+              "bytes": 10244
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/._.DS_Store",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/.DS_Store",
+              "bytes": 10244
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/._.DS_Store",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/OnePlus_LU_White_RGB.png",
+              "bytes": 29961
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/._OnePlus_LU_White_RGB.png",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/OnePlus_LU_Black_RGB.png",
+              "bytes": 31911
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/._OnePlus_LU_Black_RGB.png",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/OnePlus_LU_Red_RGB.png",
+              "bytes": 32261
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up RGB/._OnePlus_LU_Red_RGB.png",
+              "bytes": 312
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/._Lock-Up RGB",
+              "bytes": 302
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/OnePlus_LU_White_CMYK.eps",
+              "bytes": 1528878
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/._OnePlus_LU_White_CMYK.eps",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/OnePlus_LU_Red_CMYKeps.eps",
+              "bytes": 1534670
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/._OnePlus_LU_Red_CMYKeps.eps",
+              "bytes": 368
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/OnePlus_LU_Black_CMYK.eps",
+              "bytes": 1536406
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/Lock-Up CMYK/._OnePlus_LU_Black_CMYK.eps",
+              "bytes": 368
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Lock-Up/._Lock-Up CMYK",
+              "bytes": 302
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/._Lock-Up",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/.DS_Store",
+              "bytes": 6148
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/._.DS_Store",
+              "bytes": 212
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/OnePlus_L_Black_CMYK.eps",
+              "bytes": 1279910
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/._OnePlus_L_Black_CMYK.eps",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/OnePlus_L_White_CMYK.eps",
+              "bytes": 1275366
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/._OnePlus_L_White_CMYK.eps",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/OnePlus_L_Red_CMYK.eps",
+              "bytes": 1281350
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo CMYK/._OnePlus_L_Red_CMYK.eps",
+              "bytes": 312
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/._Logo CMYK",
+              "bytes": 302
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/",
+              "bytes": 0
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/OnePlus_L_White_RGB.png",
+              "bytes": 7388
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/",
+              "bytes": 0
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/._OnePlus_L_White_RGB.png",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/OnePlus_L_Red_RGB.png",
+              "bytes": 7489
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/._OnePlus_L_Red_RGB.png",
+              "bytes": 312
+            },
+            {
+              "name": "OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/OnePlus_L_Black_RGB.png",
+              "bytes": 7468
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/Logo RGB/._OnePlus_L_Black_RGB.png",
+              "bytes": 312
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/Logo/._Logo RGB",
+              "bytes": 302
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/OnePlus LOGO/._Logo",
+              "bytes": 212
+            },
+            {
+              "name": "__MACOSX/OnePlus-brand-assets/._OnePlus LOGO",
+              "bytes": 212
+            },
+            {
+              "name": "__MACOSX/._OnePlus-brand-assets",
+              "bytes": 312
+            }
+          ],
+          "inspection": "直接读取官网HTML定位公开href；常规HTTPS GET成功，无登录/绕过。ZIP中央目录20份实际品牌图像/矢量（PNG10、JPG4、EPS6），其余目录及macOS元数据。无LICENSE/README/Guideline/Usage/Terms命名说明文档；六份EPS逐一全文检查license/licence/permission/copyright/rights/trademark/usage，出现的是Adobe生成器版权及OnePlus色板/clearspace元数据，未发现授予App使用的许可语句。未逐张OCR品牌图像，未将无说明等同许可。"
+        }
+      },
+      {
+        "brand": "Google",
+        "slug": "google",
+        "classification": "business_use_not_covered_and_current_style_conflict",
+        "sources": [
+          {
+            "url": "https://partnermarketinghub.withgoogle.com/brands/google/branding-guidelines/how-to-show-googles-brand/",
+            "finding": "公开页自述面向任何想用Google品牌的人，合作伙伴另登录看专属细则。区分完整wordmark和Google G/Super G。允许新闻/课堂等非营销非商业指称；G当前要求最新渐变全彩、不得改色。并未授权商业App自动按EXIF批量导出。页未标明更新时间，以本次读取日期为准。"
+          },
+          {
+            "url": "https://about.google/brand-resource-center/guidance/",
+            "finding": "普通Resource Center仍说明信息性上下文可按商标规则用纯文字；其rules入口已重定向到新Hub，不能将文字/教学媒体例外扩展为本App的Logo许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "本地google.svg是一条G图形路径、无渐变定义；不是Google完整wordmark，也不是Google产品图标。当前跟随文字色的G不符合现行公开视觉规范。是否允许特定单色例外应获单独明确答复。",
+        "ownerAction": "经官方Hub联系/注册和Asset approval询问本App的精确用途是否可获许可；请求真实相机来源指称及用户导出范围的书面答复，不能只申请宣传页权限。若获准，按指定最新版文件/颜色/留白处理。",
+        "contactUrl": "https://partnermarketinghub.withgoogle.com/support/contact-us/",
+        "contactType": "官方Hub注册帮助及Asset approval入口；常规入口面向品牌营销材料，是否接受独立App应询问，不能保证获准。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/google.svg",
+          "sha256": "0f82f115f6f5f95bfe48acce7f0e76f8f3d23ba458e1131c179626ce67b24d85",
+          "archivePath": "docs/brand-logo-research/google.svg",
+          "archiveSha256": "d8cf9fb2d5e234e03254f1d6400d8cc8160c309b010d031a64f37084b5a21d01",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "Motorola",
+        "slug": "motorola",
+        "classification": "no_license_granted_and_written_consent_required_for_other_content_use",
+        "sources": [
+          {
+            "url": "https://www.motorola.com/us/en/legal/terms-of-use",
+            "finding": "手机公司Motorola Mobility官网明确公开标志不授予许可；网站内容个人浏览之外的复制分发等须事先明确书面同意。权利主体标为Motorola Trademark Holdings, LLC。"
+          },
+          {
+            "url": "https://brand-guidelines.motorolasolutions.com/legal",
+            "finding": "另搜到Motorola Solutions规范，但它针对其员工/代理/已授权者；不能把另一公司指南当Motorola手机标志的通用许可。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "不要套用Motorola Solutions配色/组合许可；手机标志使用版本由手机业务/权利人确认。",
+        "ownerAction": "经Motorola Mobility官方品牌合作页联系，说明只是App内相机来源标注及导出，询问应由MTH还是品牌团队审批及适用许可。",
+        "contactUrl": "https://www.motorola.com/us/en/about/licensing",
+        "contactEmail": "jm2016@motorola.com",
+        "contactType": "官方网站公开的Strategic Brand Partnerships联络；该项目偏硬件品牌合作，需说明App用途并请求转介，不能保证适用。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/motorola.svg",
+          "sha256": "acdc0c4d8cba44b720d893d8e3742f207244da05ca5c050df8cb723756a417ed",
+          "archivePath": "docs/brand-logo-research/motorola.svg",
+          "archiveSha256": "1ada1dc9593faf751a956ef08ce7810830f11ccffea12e9b43bcc318c2dc1044",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      },
+      {
+        "brand": "Nokia",
+        "slug": "nokia",
+        "classification": "no_mark_license_granted",
+        "sources": [
+          {
+            "url": "https://www.nokia.com/notices/terms/",
+            "finding": "网站内容一般只限私人非商业，公开新闻稿/文件在标注来源的公共传播另有例外；商标段明确网站访问不授予任何标志许可。媒体例外不等于独立App内置Logo及用户成片导出获准。"
+          }
+        ],
+        "coveredUse": false,
+        "styleNotes": "申请时附本地实际NOKIA字样SVG，询问旧手机来源是否应保留对应年代标志；不能自行将新版企业标志替换为所有旧照片的品牌标志。",
+        "ownerAction": "经Nokia官方媒体/一般联络请求转交品牌商标授权；如果照片对应HMD制造手机，可抄送官方列出的Nokia phones媒体联系人协助，但HMD关系本身不构成本App许可。",
+        "contactUrl": "https://www.nokia.com/contact-us/",
+        "contactEmail": "press.services@nokia.com",
+        "alternateContactEmail": "press@hmdglobal.com",
+        "contactType": "官方当前页面分别列Nokia媒体、Nokia phones媒体联系人；都仅是转介渠道，不是公开自助许可。",
+        "localEvidence": {
+          "path": "ios/ZTransfer/Resources/BrandLogos/nokia.svg",
+          "sha256": "c41b3fa32537c383216c1c312e294e597de7f2dae1ea00a5adaa5b4c2d950ada",
+          "archivePath": "docs/brand-logo-research/nokia.svg",
+          "archiveSha256": "0c26dfafc1b4267233783285f884cf0ff49113bcfce70e8ef57b5f47086fb896",
+          "rawEqual": false,
+          "viewBoxEqual": true,
+          "pathDStringsEqual": true
+        }
+      }
+    ],
+    "commonRequestContents": [
+      "申请者真实姓名/联系方式和独立个人开发者身份",
+      "App名Z传/ZTransfer、网站、iOS/Android及含内购事实",
+      "准确SVG和真实UI/导出示例，注明仅按EXIF展示照片拍摄设备品牌",
+      "随安装包分发矢量以及用户可导出/保存/分享成片，明确是否需要覆盖用户商业分享或打印",
+      "拟全球发行、期限、支持的颜色/最小尺寸/留白/是否允许转换SVG路径",
+      "不宣称品牌官方、合作、赞助或背书；要求书面确认许可范围及可给Apple审核的证明"
+    ],
+    "evidenceLimitations": [
+      "未取得任何私人授权函，也未代表本人联络品牌",
+      "这份报告是公开许可适配核查，品牌网站条款与法定指称/合理使用不是同一问题，不据此断言所有真实EXIF指称都侵权",
+      "不能把合作伙伴/记者媒体许可自动用到独立App",
+      "不因发现规范差异而删除功能或替换素材",
+      "OnePlus公开ZIP已补读目录及EPS文本，未逐张OCR其品牌图像；无独立许可文档。"
+    ],
+    "localComparisonMethod": "Python ElementTree逐文件读取ios/ZTransfer/Resources/BrandLogos/{slug}.svg与docs/brand-logo-research/{slug}.svg；比较原始SHA-256、viewBox及全部path的d字符串数组。11份文件原始字节均不同，viewBox均一致；10份d数组精确相同，Huawei不同。Huawei差异具体为两处弧线参数添加空格以展开00等标记；未以此声称图形语义不同，也未跑独立SVG几何等价验证。当前Google文件单path且无gradient节点，与新全彩G要求不同。"
+  },
+  "simpleIcons": {
+    "retrieval": {
+      "retrievalDate": "2026-10-21",
+      "repository": "simple-icons/simple-icons",
+      "ref": {
+        "sha": "c71c69e3a27e4436936b831c72643e6513b9f49b",
+        "commitDate": "2026-10-19T11:30:13Z"
+      },
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/LICENSE.md",
+          "status": "read",
+          "bytes": 6569,
+          "sha256": "9046848b63a5c92bff14e4accca80bd987e0623b74adf9226ce5198d312b79d5"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/DISCLAIMER.md",
+          "status": "read",
+          "bytes": 4604,
+          "sha256": "5757a1f28eff735a8b5e7425478f367812d71e974530f5bedd01219480965f4a"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/_data/simple-icons.json",
+          "status": "unavailable",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ],
+      "svgComparison": [
+        {
+          "file": "apple.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/apple.svg",
+          "status": "read",
+          "sha256": "2a1509dccd25e6d2bc7a11a8e52941077e1a48555e192ce638699b9f083c2a7c",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "dji.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/dji.svg",
+          "status": "read",
+          "sha256": "8a589463e3007e665ffe1f36fa484fefdb34247aad77cca7a3983d2ba38ef1be",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "fujifilm.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/fujifilm.svg",
+          "status": "read",
+          "sha256": "32614acc01d693ef73bfa82680f10c07d5a433d78896c013c2d6fb2b9ee379b4",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "google.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/google.svg",
+          "status": "read",
+          "sha256": "d8cf9fb2d5e234e03254f1d6400d8cc8160c309b010d031a64f37084b5a21d01",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "honor.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/honor.svg",
+          "status": "read",
+          "sha256": "f0b59f37b9da2bc9f0b6df63a8ee371b6e77bfa49931715904c6a993f32e5402",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "huawei.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/huawei.svg",
+          "status": "read",
+          "sha256": "eb43e0a9450cef22ce70d624a60622a0aa542142102e402a293578b388b876f5",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "leica.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/leica.svg",
+          "status": "read",
+          "sha256": "7d5b56ebd41655776bc0f3c2ffd1c94565a0a5d4482b1df968d2d62d5ac67fa8",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "motorola.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/motorola.svg",
+          "status": "read",
+          "sha256": "1ada1dc9593faf751a956ef08ce7810830f11ccffea12e9b43bcc318c2dc1044",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "nikon-official.svg",
+          "source": "Nikon official; not Simple Icons"
+        },
+        {
+          "file": "nikon.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/nikon.svg",
+          "status": "read",
+          "sha256": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc",
+          "matchesBundledFile": true
+        },
+        {
+          "file": "nokia.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/nokia.svg",
+          "status": "read",
+          "sha256": "0c26dfafc1b4267233783285f884cf0ff49113bcfce70e8ef57b5f47086fb896",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "oneplus.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/oneplus.svg",
+          "status": "read",
+          "sha256": "36383c496fa98bdc3b4b72507e42408faaabb1887bbfd384aa4dd9c83a0686e6",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "oppo.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/oppo.svg",
+          "status": "read",
+          "sha256": "0af8ef2d3f3ada53779f8dbaab6243ceccb530a03deebe9bc7a054c89189cf5a",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "panasonic.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/panasonic.svg",
+          "status": "read",
+          "sha256": "72034f2812318af5b16607f0038d7477678705a812a00d25149357e5bf472dd7",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "samsung.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/samsung.svg",
+          "status": "read",
+          "sha256": "4a241ca8ebab6e71883b172acb9fb454efa69f308e4f2c31ec80668aeb6627d9",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "sony.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/sony.svg",
+          "status": "read",
+          "sha256": "d012ec936e65a255f7b7b49a7e99c5aa7ab919fbc1487d8e09af82031c0e7090",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "vivo.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/vivo.svg",
+          "status": "read",
+          "sha256": "1db247986bd07a7b7a1754fa285f61c445d4767037fda96b6e5d72a60d1e4f94",
+          "matchesBundledFile": false
+        },
+        {
+          "file": "xiaomi.svg",
+          "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/icons/xiaomi.svg",
+          "status": "read",
+          "sha256": "8866d12a70d85ab43acd3b9c80f1b37792d91160d8273efffdf817af5fd608cb",
+          "matchesBundledFile": false
+        }
+      ],
+      "scope": "Provenance and upstream metadata only; no brand trademark permission inferred."
+    },
+    "currentMetadata": {
+      "retrievalDate": "2026-10-21",
+      "repository": "simple-icons/simple-icons",
+      "commit": "c71c69e3a27e4436936b831c72643e6513b9f49b",
+      "pathDiscoveredFrom": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/README.md",
+      "discovery": "README icon count badge raw URL contains data/simple-icons.json; current path has no leading underscore.",
+      "url": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/data/simple-icons.json",
+      "finalUrl": "https://raw.githubusercontent.com/simple-icons/simple-icons/c71c69e3a27e4436936b831c72643e6513b9f49b/data/simple-icons.json",
+      "httpStatus": 200,
+      "bytes": 460358,
+      "sha256": "e0d5381526b2d3caa594749fb93e74596ceb23b2feb012615ad0efbcd0064ff5",
+      "totalRecords": 3466,
+      "requestedCount": 17,
+      "foundCount": 17,
+      "records": [
+        {
+          "requestedBrand": "Apple",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Apple",
+              "source": "https://www.apple.com",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Nikon",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Nikon",
+              "source": "https://www.nikon.com",
+              "guidelines": "https://www.nikon.com/usage/group-info",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Sony",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Sony",
+              "source": "https://www.sony.com",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Fujifilm",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Fujifilm",
+              "source": "https://www.fujifilm.com",
+              "guidelines": "https://www.fujifilm.com/us/en/terms",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Panasonic",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Panasonic",
+              "source": "https://www.panasonic.com",
+              "guidelines": "https://holdings.panasonic/global/terms-of-use.html",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Leica",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Leica",
+              "source": "https://leica-camera.com",
+              "guidelines": "https://leica-camera.com/en-US/legal-notices",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "DJI",
+          "status": "found",
+          "entries": [
+            {
+              "title": "DJI",
+              "source": "https://www.dji.com",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Samsung",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Samsung",
+              "source": "https://www.samsung.com/us/about-us/brand-identity/logo/",
+              "guidelines": "https://www.samsung.com/us/about-us/brand-identity/logo/",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Huawei",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Huawei",
+              "source": "https://e.huawei.com/ph/material/partner/0a72728b864949c48b22106454352483",
+              "guidelines": "https://e.huawei.com/ph/material/partner/0a72728b864949c48b22106454352483",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Xiaomi",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Xiaomi",
+              "source": "https://www.mi.com/global",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "OPPO",
+          "status": "found",
+          "entries": [
+            {
+              "title": "OPPO",
+              "source": "https://www.figma.com/community/file/832815970641696814/OPPO-Media-Kit",
+              "guidelines": "https://www.oppo.com/en/terms/",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "vivo",
+          "status": "found",
+          "entries": [
+            {
+              "title": "vivo",
+              "source": "https://www.vivo.com",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "HONOR",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Honor",
+              "source": "https://www.hihonor.com",
+              "guidelines": "https://www.hihonor.com/global/brand-guideline11/basics/logo",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "OnePlus",
+          "status": "found",
+          "entries": [
+            {
+              "title": "OnePlus",
+              "source": "https://www.oneplus.com/ca_en/brand/asset",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Google",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Google",
+              "source": "https://partnermarketinghub.withgoogle.com",
+              "guidelines": "https://about.google/brand-resource-center/brand-elements/",
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Motorola",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Motorola",
+              "source": "https://motorola-global-portal-de.custhelp.com",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        },
+        {
+          "requestedBrand": "Nokia",
+          "status": "found",
+          "entries": [
+            {
+              "title": "Nokia",
+              "source": "https://www.nokia.com",
+              "guidelines": null,
+              "license": null
+            }
+          ]
+        }
+      ],
+      "interpretation": "null 表示该commit元数据未提供此字段，并非没有商标权或无需许可。Simple Icons元数据不替代品牌官方授权，未确认其当前描述能覆盖商业App随包、导出照片及修改颜色。"
+    },
+    "note": "Old _data path returned 404, resolved by README to data/simple-icons.json (200); missing per-icon license is not permission. Project CC0 does not grant trademark rights."
+  },
+  "logoArchiveComparison": [
+    {
+      "file": "apple.svg",
+      "currentBytes": 620,
+      "archivedBytes": 650,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "a5c0ab1705f3f9ed175996cdfa177765b1aa265949a2d7df9b1d55eb38aeb4ba",
+      "archivedSHA256": "2a1509dccd25e6d2bc7a11a8e52941077e1a48555e192ce638699b9f083c2a7c"
+    },
+    {
+      "file": "dji.svg",
+      "currentBytes": 1618,
+      "archivedBytes": 1646,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "3bd16a0cb92a60e5a5a7c6deb2bf278eb3f0dedb53c7d303c592992b9fe6ef54",
+      "archivedSHA256": "8a589463e3007e665ffe1f36fa484fefdb34247aad77cca7a3983d2ba38ef1be"
+    },
+    {
+      "file": "fujifilm.svg",
+      "currentBytes": 1542,
+      "archivedBytes": 1575,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "b6b432bac50df29727fcfd0fa9d1965f0449160037be89387b3844c92bbb944d",
+      "archivedSHA256": "32614acc01d693ef73bfa82680f10c07d5a433d78896c013c2d6fb2b9ee379b4"
+    },
+    {
+      "file": "google.svg",
+      "currentBytes": 426,
+      "archivedBytes": 457,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "0f82f115f6f5f95bfe48acce7f0e76f8f3d23ba458e1131c179626ce67b24d85",
+      "archivedSHA256": "d8cf9fb2d5e234e03254f1d6400d8cc8160c309b010d031a64f37084b5a21d01"
+    },
+    {
+      "file": "honor.svg",
+      "currentBytes": 1044,
+      "archivedBytes": 1074,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "dcaf6f85756023aa4d7f5773191624691f94b23ec163849c199739516de54472",
+      "archivedSHA256": "f0b59f37b9da2bc9f0b6df63a8ee371b6e77bfa49931715904c6a993f32e5402"
+    },
+    {
+      "file": "huawei.svg",
+      "currentBytes": 1298,
+      "archivedBytes": 1323,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": false,
+      "currentSHA256": "91e6fd86914e991a3ab801db258be9bb8e150c95b3424ce327f9a768f8662741",
+      "archivedSHA256": "eb43e0a9450cef22ce70d624a60622a0aa542142102e402a293578b388b876f5"
+    },
+    {
+      "file": "leica.svg",
+      "currentBytes": 2106,
+      "archivedBytes": 2136,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "b9b7ee14970a3f27353dc66f94ae8daf74c62fbe7364608d98d45c383b361393",
+      "archivedSHA256": "7d5b56ebd41655776bc0f3c2ffd1c94565a0a5d4482b1df968d2d62d5ac67fa8"
+    },
+    {
+      "file": "motorola.svg",
+      "currentBytes": 533,
+      "archivedBytes": 566,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "acdc0c4d8cba44b720d893d8e3742f207244da05ca5c050df8cb723756a417ed",
+      "archivedSHA256": "1ada1dc9593faf751a956ef08ce7810830f11ccffea12e9b43bcc318c2dc1044"
+    },
+    {
+      "file": "nikon-official.svg",
+      "currentBytes": 7441,
+      "archivedBytes": 7441,
+      "identicalBytes": true,
+      "currentPathCount": 11,
+      "archivedPathCount": 11,
+      "identicalPathStrings": true,
+      "currentSHA256": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53",
+      "archivedSHA256": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53"
+    },
+    {
+      "file": "nikon.svg",
+      "currentBytes": 1026,
+      "archivedBytes": 1026,
+      "identicalBytes": true,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc",
+      "archivedSHA256": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc"
+    },
+    {
+      "file": "nokia.svg",
+      "currentBytes": 568,
+      "archivedBytes": 598,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "c41b3fa32537c383216c1c312e294e597de7f2dae1ea00a5adaa5b4c2d950ada",
+      "archivedSHA256": "0c26dfafc1b4267233783285f884cf0ff49113bcfce70e8ef57b5f47086fb896"
+    },
+    {
+      "file": "oneplus.svg",
+      "currentBytes": 320,
+      "archivedBytes": 352,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "536f915451c27cda9e1c2d8a5c7ca57f30f778eecafa0acfe01d09d8f66c8a98",
+      "archivedSHA256": "36383c496fa98bdc3b4b72507e42408faaabb1887bbfd384aa4dd9c83a0686e6"
+    },
+    {
+      "file": "oppo.svg",
+      "currentBytes": 1190,
+      "archivedBytes": 1219,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "c6782d501f63070374d3f23cec501db3b19f87cde1781037581cb7b6a3a9e6dc",
+      "archivedSHA256": "0af8ef2d3f3ada53779f8dbaab6243ceccb530a03deebe9bc7a054c89189cf5a"
+    },
+    {
+      "file": "panasonic.svg",
+      "currentBytes": 4841,
+      "archivedBytes": 4875,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "534bf3863fa41f7703fc3ec9a84a964ef29e239a1193d4859573d63a3fc0bc04",
+      "archivedSHA256": "72034f2812318af5b16607f0038d7477678705a812a00d25149357e5bf472dd7"
+    },
+    {
+      "file": "samsung.svg",
+      "currentBytes": 2255,
+      "archivedBytes": 2287,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "e29e10099eecd64d44a5db80b2701c04d9d277bfc328c175eec00de86d08042b",
+      "archivedSHA256": "4a241ca8ebab6e71883b172acb9fb454efa69f308e4f2c31ec80668aeb6627d9"
+    },
+    {
+      "file": "sony.svg",
+      "currentBytes": 2716,
+      "archivedBytes": 2745,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "1ebe41fd11e744264f345c1d3fa46ff6966c7349f585477bb1d9be0daa7c9e6c",
+      "archivedSHA256": "d012ec936e65a255f7b7b49a7e99c5aa7ab919fbc1487d8e09af82031c0e7090"
+    },
+    {
+      "file": "vivo.svg",
+      "currentBytes": 1239,
+      "archivedBytes": 1268,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "ca64bdb5af025309fdd2d852a8e0071102be714f1191ca4b971d1fd5f569e514",
+      "archivedSHA256": "1db247986bd07a7b7a1754fa285f61c445d4767037fda96b6e5d72a60d1e4f94"
+    },
+    {
+      "file": "xiaomi.svg",
+      "currentBytes": 872,
+      "archivedBytes": 903,
+      "identicalBytes": false,
+      "currentPathCount": 1,
+      "archivedPathCount": 1,
+      "identicalPathStrings": true,
+      "currentSHA256": "e1a5c7dc62eba325a68936c1b16b7198628f5d69bb809d523b006a9e697ab551",
+      "archivedSHA256": "8866d12a70d85ab43acd3b9c80f1b37792d91160d8273efffdf817af5fd608cb"
+    }
+  ],
+  "verification": {
+    "method": "SHA-256 before and after research",
+    "inputCount": 44,
+    "changedInputCount": 0,
+    "changedInputs": [],
+    "allInputsUnchanged": true,
+    "before": {
+      "ios/PictureControls/Kodak E100 VS.NP3": "78ecc0180ad4d694f9bf33c0677cab2decdd33cc4918f4f69a1b25fc2f754608",
+      "ios/PictureControls/Fuji Provia 100F.NP3": "0fa8001625b1bbaa941993189debeaee34262a0761412fe689bb92a4eb84b8d0",
+      "ios/PictureControls/Ferrania Solaris.NP3": "98bebe3154a97e1bc3eaf8a9b26b0483611c483f5869db70f620e7c9626a272b",
+      "ios/PictureControls/Fuji Velvia.NP3": "2e3150a88cc2cff65893c72ce6253c9c13e76035ece75b4e7aa8611b9361c769",
+      "ios/PictureControls/Fuji Velvia 100F.NP3": "356b816a82bef8fef13011651aa68ceb763a081a5fc51b6776b1aa4aec1d7bb0",
+      "ios/PictureControls/Agfa Vista 200.NP3": "ef2cf26ad283898ac56e2bbe0a0eb5937235ba09ada6ce0ae19d5ff0e9cdaf46",
+      "ios/PictureControls/Fuji Superia Reala.NP3": "de5c8368a1c88d15be9981c962f0f34607e1b19a3feec804cb331ea1426987d9",
+      "ios/PictureControls/Kodak Portra NC.NP3": "897a91aa9940e0618d96c66f203a33e94521cd4489a158ee1502cb3315c4102c",
+      "ios/PictureControls/Kodak Portra 160NC.NP3": "ec209a39e37441d7fbb9ff58f3ca47f0985061bedb87334dac20930c2a08a1c8",
+      "ios/PictureControls/LINKS-Nature.NP3": "41a499ca19e96197f06d527faab4a2c867a1f8284d2551406e660cb9f2331f9f",
+      "ios/PictureControls/Kodak Kodachrome 2.NP3": "37c93cdd65c0961aef1e87fd3cdef0ee220ad76c8d906e6ac12c08ad2c911437",
+      "ios/PictureControls/Fuji Astia.NP3": "d4e4b9f6a2be74dec2ef1221adb79b230d15e268883d9b22984a8eae91e1ec41",
+      "ios/PictureControls/PORTRAIT-03.NP3": "620de54e5f3ba665d9fe99d2d140473a815877c4d59108cb6071b03d8d99d2d6",
+      "ios/PictureControls/Agfa Optima.NP3": "521f614e38a3091f3126ee552466c92b2a74277443633d5ba273e3394b0195ca",
+      "ios/PictureControls/FUJI-SUPERIA.NP3": "c2a7a95a34eb9d3f1360ee95cd126aaec695fc8331ff373071c67e8ae9528ae7",
+      "ios/PictureControls/PORTRAIT-02.NP3": "93708cee24a1814b5fdd83450e72e81bc6de04ed545112d76048722f4837ab58",
+      "ios/PictureControls/Fuji Provia.NP3": "d03bcd5d9e5cc8497621e299096bd2adf2f611780e4b4625b66b4aaf1539b8b9",
+      "ios/PictureControls/catalog.json": "4b0a9030c705cf86c1ed853fe17b82f2e35ed3e05b0af6e5a5155b631fc32ace",
+      "ios/PictureControls/Kodak Gold 100.NP3": "31981ac13cdd60e332c0225fdad68e55381bc03a9211bd75c864081ce35e60b0",
+      "ios/PictureControls/Kodak Ektar Green.NP3": "9553ef2653c74f4c7ba98cbd8f9a02dc205e478f3049ab97c5c26ef940d2004f",
+      "ios/PictureControls/Kodak EliteChrome.NP3": "37ea21a8b4d0e4093f0f7af5177ee1150823cdf208640445f18449040a7643d9",
+      "ios/PictureControls/Kodak-Sun-Nature.NP3": "6f00688f6ad44d95ccc75065232284f8084176224b45540a6f1cc863f6326d53",
+      "ios/PictureControls/Kodak Ektachrome.NP3": "de58a6337ecbeab4f9868937ffeafc6ed42f67e579d83bd72337b5cfe8942c69",
+      "ios/ZTransfer/Resources/BrandLogos/fujifilm.svg": "b6b432bac50df29727fcfd0fa9d1965f0449160037be89387b3844c92bbb944d",
+      "ios/ZTransfer/Resources/BrandLogos/xiaomi.svg": "e1a5c7dc62eba325a68936c1b16b7198628f5d69bb809d523b006a9e697ab551",
+      "ios/ZTransfer/Resources/BrandLogos/motorola.svg": "acdc0c4d8cba44b720d893d8e3742f207244da05ca5c050df8cb723756a417ed",
+      "ios/ZTransfer/Resources/BrandLogos/samsung.svg": "e29e10099eecd64d44a5db80b2701c04d9d277bfc328c175eec00de86d08042b",
+      "ios/ZTransfer/Resources/BrandLogos/nokia.svg": "c41b3fa32537c383216c1c312e294e597de7f2dae1ea00a5adaa5b4c2d950ada",
+      "ios/ZTransfer/Resources/BrandLogos/huawei.svg": "91e6fd86914e991a3ab801db258be9bb8e150c95b3424ce327f9a768f8662741",
+      "ios/ZTransfer/Resources/BrandLogos/dji.svg": "3bd16a0cb92a60e5a5a7c6deb2bf278eb3f0dedb53c7d303c592992b9fe6ef54",
+      "ios/ZTransfer/Resources/BrandLogos/oneplus.svg": "536f915451c27cda9e1c2d8a5c7ca57f30f778eecafa0acfe01d09d8f66c8a98",
+      "ios/ZTransfer/Resources/BrandLogos/nikon-official.svg": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53",
+      "ios/ZTransfer/Resources/BrandLogos/panasonic.svg": "534bf3863fa41f7703fc3ec9a84a964ef29e239a1193d4859573d63a3fc0bc04",
+      "ios/ZTransfer/Resources/BrandLogos/vivo.svg": "ca64bdb5af025309fdd2d852a8e0071102be714f1191ca4b971d1fd5f569e514",
+      "ios/ZTransfer/Resources/BrandLogos/leica.svg": "b9b7ee14970a3f27353dc66f94ae8daf74c62fbe7364608d98d45c383b361393",
+      "ios/ZTransfer/Resources/BrandLogos/sony.svg": "1ebe41fd11e744264f345c1d3fa46ff6966c7349f585477bb1d9be0daa7c9e6c",
+      "ios/ZTransfer/Resources/BrandLogos/google.svg": "0f82f115f6f5f95bfe48acce7f0e76f8f3d23ba458e1131c179626ce67b24d85",
+      "ios/ZTransfer/Resources/BrandLogos/oppo.svg": "c6782d501f63070374d3f23cec501db3b19f87cde1781037581cb7b6a3a9e6dc",
+      "ios/ZTransfer/Resources/BrandLogos/honor.svg": "dcaf6f85756023aa4d7f5773191624691f94b23ec163849c199739516de54472",
+      "ios/ZTransfer/Resources/BrandLogos/apple.svg": "a5c0ab1705f3f9ed175996cdfa177765b1aa265949a2d7df9b1d55eb38aeb4ba",
+      "ios/ZTransfer/Resources/BrandLogos/nikon.svg": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc",
+      "ios/ZTransfer/Domain/PhotoFrameBrandLogoCatalog.swift": "21c2f2c5b76e1a45001417482ff692ef69bda2542b2d7051acf140c30ea1d142",
+      "ios/ZTransfer/Domain/PhotoEffectsRenderer.swift": "ea91ae9d5e0a272e5628d4aaca2157e9392dc35063a566e74cfc597686ddf8d4",
+      "ios/project.yml": "963e29d25a2086b6b1b7c0878eed1169395f571c15504c9296b68f570503dd7f"
+    },
+    "after": {
+      "ios/PictureControls/Kodak E100 VS.NP3": "78ecc0180ad4d694f9bf33c0677cab2decdd33cc4918f4f69a1b25fc2f754608",
+      "ios/PictureControls/Fuji Provia 100F.NP3": "0fa8001625b1bbaa941993189debeaee34262a0761412fe689bb92a4eb84b8d0",
+      "ios/PictureControls/Ferrania Solaris.NP3": "98bebe3154a97e1bc3eaf8a9b26b0483611c483f5869db70f620e7c9626a272b",
+      "ios/PictureControls/Fuji Velvia.NP3": "2e3150a88cc2cff65893c72ce6253c9c13e76035ece75b4e7aa8611b9361c769",
+      "ios/PictureControls/Fuji Velvia 100F.NP3": "356b816a82bef8fef13011651aa68ceb763a081a5fc51b6776b1aa4aec1d7bb0",
+      "ios/PictureControls/Agfa Vista 200.NP3": "ef2cf26ad283898ac56e2bbe0a0eb5937235ba09ada6ce0ae19d5ff0e9cdaf46",
+      "ios/PictureControls/Fuji Superia Reala.NP3": "de5c8368a1c88d15be9981c962f0f34607e1b19a3feec804cb331ea1426987d9",
+      "ios/PictureControls/Kodak Portra NC.NP3": "897a91aa9940e0618d96c66f203a33e94521cd4489a158ee1502cb3315c4102c",
+      "ios/PictureControls/Kodak Portra 160NC.NP3": "ec209a39e37441d7fbb9ff58f3ca47f0985061bedb87334dac20930c2a08a1c8",
+      "ios/PictureControls/LINKS-Nature.NP3": "41a499ca19e96197f06d527faab4a2c867a1f8284d2551406e660cb9f2331f9f",
+      "ios/PictureControls/Kodak Kodachrome 2.NP3": "37c93cdd65c0961aef1e87fd3cdef0ee220ad76c8d906e6ac12c08ad2c911437",
+      "ios/PictureControls/Fuji Astia.NP3": "d4e4b9f6a2be74dec2ef1221adb79b230d15e268883d9b22984a8eae91e1ec41",
+      "ios/PictureControls/PORTRAIT-03.NP3": "620de54e5f3ba665d9fe99d2d140473a815877c4d59108cb6071b03d8d99d2d6",
+      "ios/PictureControls/Agfa Optima.NP3": "521f614e38a3091f3126ee552466c92b2a74277443633d5ba273e3394b0195ca",
+      "ios/PictureControls/FUJI-SUPERIA.NP3": "c2a7a95a34eb9d3f1360ee95cd126aaec695fc8331ff373071c67e8ae9528ae7",
+      "ios/PictureControls/PORTRAIT-02.NP3": "93708cee24a1814b5fdd83450e72e81bc6de04ed545112d76048722f4837ab58",
+      "ios/PictureControls/Fuji Provia.NP3": "d03bcd5d9e5cc8497621e299096bd2adf2f611780e4b4625b66b4aaf1539b8b9",
+      "ios/PictureControls/catalog.json": "4b0a9030c705cf86c1ed853fe17b82f2e35ed3e05b0af6e5a5155b631fc32ace",
+      "ios/PictureControls/Kodak Gold 100.NP3": "31981ac13cdd60e332c0225fdad68e55381bc03a9211bd75c864081ce35e60b0",
+      "ios/PictureControls/Kodak Ektar Green.NP3": "9553ef2653c74f4c7ba98cbd8f9a02dc205e478f3049ab97c5c26ef940d2004f",
+      "ios/PictureControls/Kodak EliteChrome.NP3": "37ea21a8b4d0e4093f0f7af5177ee1150823cdf208640445f18449040a7643d9",
+      "ios/PictureControls/Kodak-Sun-Nature.NP3": "6f00688f6ad44d95ccc75065232284f8084176224b45540a6f1cc863f6326d53",
+      "ios/PictureControls/Kodak Ektachrome.NP3": "de58a6337ecbeab4f9868937ffeafc6ed42f67e579d83bd72337b5cfe8942c69",
+      "ios/ZTransfer/Resources/BrandLogos/fujifilm.svg": "b6b432bac50df29727fcfd0fa9d1965f0449160037be89387b3844c92bbb944d",
+      "ios/ZTransfer/Resources/BrandLogos/xiaomi.svg": "e1a5c7dc62eba325a68936c1b16b7198628f5d69bb809d523b006a9e697ab551",
+      "ios/ZTransfer/Resources/BrandLogos/motorola.svg": "acdc0c4d8cba44b720d893d8e3742f207244da05ca5c050df8cb723756a417ed",
+      "ios/ZTransfer/Resources/BrandLogos/samsung.svg": "e29e10099eecd64d44a5db80b2701c04d9d277bfc328c175eec00de86d08042b",
+      "ios/ZTransfer/Resources/BrandLogos/nokia.svg": "c41b3fa32537c383216c1c312e294e597de7f2dae1ea00a5adaa5b4c2d950ada",
+      "ios/ZTransfer/Resources/BrandLogos/huawei.svg": "91e6fd86914e991a3ab801db258be9bb8e150c95b3424ce327f9a768f8662741",
+      "ios/ZTransfer/Resources/BrandLogos/dji.svg": "3bd16a0cb92a60e5a5a7c6deb2bf278eb3f0dedb53c7d303c592992b9fe6ef54",
+      "ios/ZTransfer/Resources/BrandLogos/oneplus.svg": "536f915451c27cda9e1c2d8a5c7ca57f30f778eecafa0acfe01d09d8f66c8a98",
+      "ios/ZTransfer/Resources/BrandLogos/nikon-official.svg": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53",
+      "ios/ZTransfer/Resources/BrandLogos/panasonic.svg": "534bf3863fa41f7703fc3ec9a84a964ef29e239a1193d4859573d63a3fc0bc04",
+      "ios/ZTransfer/Resources/BrandLogos/vivo.svg": "ca64bdb5af025309fdd2d852a8e0071102be714f1191ca4b971d1fd5f569e514",
+      "ios/ZTransfer/Resources/BrandLogos/leica.svg": "b9b7ee14970a3f27353dc66f94ae8daf74c62fbe7364608d98d45c383b361393",
+      "ios/ZTransfer/Resources/BrandLogos/sony.svg": "1ebe41fd11e744264f345c1d3fa46ff6966c7349f585477bb1d9be0daa7c9e6c",
+      "ios/ZTransfer/Resources/BrandLogos/google.svg": "0f82f115f6f5f95bfe48acce7f0e76f8f3d23ba458e1131c179626ce67b24d85",
+      "ios/ZTransfer/Resources/BrandLogos/oppo.svg": "c6782d501f63070374d3f23cec501db3b19f87cde1781037581cb7b6a3a9e6dc",
+      "ios/ZTransfer/Resources/BrandLogos/honor.svg": "dcaf6f85756023aa4d7f5773191624691f94b23ec163849c199739516de54472",
+      "ios/ZTransfer/Resources/BrandLogos/apple.svg": "a5c0ab1705f3f9ed175996cdfa177765b1aa265949a2d7df9b1d55eb38aeb4ba",
+      "ios/ZTransfer/Resources/BrandLogos/nikon.svg": "f8d218c1c1188412c0975ea5815cbb3f82923af68adecf3389ae01d41215cedc",
+      "ios/ZTransfer/Domain/PhotoFrameBrandLogoCatalog.swift": "21c2f2c5b76e1a45001417482ff692ef69bda2542b2d7051acf140c30ea1d142",
+      "ios/ZTransfer/Domain/PhotoEffectsRenderer.swift": "ea91ae9d5e0a272e5628d4aaca2157e9392dc35063a566e74cfc597686ddf8d4",
+      "ios/project.yml": "963e29d25a2086b6b1b7c0878eed1169395f571c15504c9296b68f570503dd7f"
+    },
+    "buildsRun": false,
+    "testsRun": false,
+    "reason": "Documentation/source-license research only; no production behavior or assets changed.",
+    "documentationChecks": {
+      "localLinksChecked": 15,
+      "missingLocalLinks": 0,
+      "jsonParsed": true,
+      "presetEntries": 22,
+      "svgFilesPresent": 18,
+      "brandEntries": 17,
+      "contactAttachmentRows": 25,
+      "uniqueAttachmentPresets": 22,
+      "attachmentHashesAndOriginalPathsVerified": true,
+      "gitDiffCheckPassedForUpdatedTrackedDocuments": true,
+      "independentReview": "One stale future-tense verification sentence corrected; no further concrete finding."
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "label": "ui-free-workbench",
+  "command": [
+    "env",
+    "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+    "bash",
+    "ios/StoreKit/test-recovery-ui.sh",
+    "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames"
+  ],
+  "startedAt": "2026-10-21T15:47:25.978860+08:00",
+  "finishedAt": "2026-10-21T15:51:10.730926+08:00",
+  "exitCode": 0,
+  "log": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench.log",
+  "sha256": "1cc56d6179ef79a265c60ac6b7737b64338a270745adc4ada207c4389a92601a",
+  "markers": []
+}

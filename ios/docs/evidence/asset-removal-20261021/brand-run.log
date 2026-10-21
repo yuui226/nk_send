@@ -1,0 +1,4 @@
+PASS: legacy JSON is preserved and rewritten as text for visible and hidden brands
+PASS: two-state cycle for 15 presets and both historical style values
+PASS: constructor and assignment cannot reactivate brand graphics
+PASS: 3 Foundation checks, 174 assertions; Store, cache, UIKit rendering and UI not covered

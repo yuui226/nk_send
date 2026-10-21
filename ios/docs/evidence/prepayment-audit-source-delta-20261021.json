@@ -1,0 +1,48 @@
+{
+  "recordedAt": "2026-10-21",
+  "baseline": "ios/docs/evidence/release-packaging-final-20261021.json",
+  "comparedInputs": 1150,
+  "changed": [
+    {
+      "path": "ios/ZTransfer/Domain/PhotoListViewModel.swift",
+      "oldSHA256": "494706a7699143ae9737e75cd220d7aaa7ccc0497f2f602626eef67f138374f9",
+      "currentSHA256": "8ab53f576c46f15cbd713a0916a6c78289d83b31a49acf50edd5c2aa2aeaa610"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/PhotoThumbnailFillQueue.swift",
+      "oldSHA256": "b68c612b71432de1e7cadab797ccc406b91639803f77848c1b09ebe719807823",
+      "currentSHA256": "f29f312a567eacded05319dd27b1720b281580fc9de01d69931af53618588844"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/RemoteLandscapeLayout.swift",
+      "oldSHA256": "af92fa0812ab10833bbab54ac2e6e1fdf3439ddda4892f6c45e9d5beecc2ec42",
+      "currentSHA256": "5c64c4f7a93cb8c6c4f7f73dbd821d4aebdf6515b9cf2a6cb7fe1315948f079e"
+    },
+    {
+      "path": "ios/ZTransfer/Resources/licenses/ThirdPartyNotices.txt",
+      "oldSHA256": "f8ea0079eedd8f6e3e552d3a98afdcba62363f05d07ac5882b583de799cafc4f",
+      "currentSHA256": "a404fae5a063bc9a39f6a41d2c53eb9b4dcce60c7be44a1062818733de7b62b5"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/RemoteLandscapeControls.swift",
+      "oldSHA256": "5d42f82c0dd1c6b7f2db499e6ff3f053e774a6a2fa898a3c706bdf4b831e68c6",
+      "currentSHA256": "b57a2a5a09894b4113c4481086443afcdf388d59d373ae4b63feda57ab9ac628"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/RemoteZoomableViewfinder.swift",
+      "oldSHA256": "f39ddfa75c6bb42e994e63c253d6898fed7938774ba6ad8fb7b4752a94a51a5e",
+      "currentSHA256": "65a42c588ba0773a31f0bc7d2d8e5f7ffd986ca3c97befa4fa8598f8896116f7"
+    },
+    {
+      "path": "ios/ZTransfer/UI/RemoteView.swift",
+      "oldSHA256": "547a8e2102ce58ae648e9b134e454d9fdeda4ee27a2ec5e38acaef0354908ecc",
+      "currentSHA256": "bbf2331c642f3c6a2af09b98514da7103f329b73d3533553a28807f3d973e431"
+    },
+    {
+      "path": "ios/scripts/verify-release-bundle.py",
+      "oldSHA256": "b1923abf4dea76bfb57656ac148d8d2c30f580721301c508273223058bb6cd6f",
+      "currentSHA256": "d1652cfc9b913768580d04f672a9297b46f66aaaf302a480b9f572d7fe1dd06a"
+    }
+  ],
+  "scope": "Existing baseline input files only; does not prove no newly added files or that current sources were built. Parallel work remains in progress. No builds or tests rerun."
+}

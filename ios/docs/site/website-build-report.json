@@ -1,0 +1,14 @@
+{
+  "mode": "release",
+  "output": "website-dist",
+  "effectiveDate": "2026-10-21",
+  "pages": [
+    "zh-Hans/privacy",
+    "zh-Hans/terms",
+    "zh-Hans/support",
+    "en/privacy",
+    "en/terms",
+    "en/support"
+  ],
+  "unresolvedMarkers": []
+}

@@ -1,0 +1,17 @@
+{
+  "label": "ui-free-camera",
+  "command": [
+    "env",
+    "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+    "bash",
+    "ios/StoreKit/test-recovery-ui.sh",
+    "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices"
+  ],
+  "startedAt": "2026-10-21T15:51:10.836771+08:00",
+  "finishedAt": "2026-10-21T15:55:03.402101+08:00",
+  "exitCode": 0,
+  "log": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera.log",
+  "sha256": "85b32d9e2bbe280122f6ca7ccc5ef8abafc9e3227fe6cdb74e308581c7dcd6dd",
+  "markers": []
+}

@@ -5,6 +5,12 @@ import Foundation
 /// guidance and setup steps live here so regeneration cannot remove them.
 enum IOSLocalization {
     static let byResource: [String: [String: String]] = [
+        // User-approved iOS difference (2026-10-21): NP3 files are supplied by the user.
+        "monitor_help_tool_picture_control": [
+            "en": "Switch between existing camera presets, or tap the pencil for a slot to replace or clear it. Choose a folder containing your own .np3 files. Flexible Color .np3 files are not yet supported.",
+            "zh": "支持相机已有预设切换，点槽位对应画笔更换或清除。请选择含自行收集的 .np3 文件的文件夹，暂不支持灵活色彩的 .np3。",
+            "hant": "支援相機已有預設切換，點槽位對應畫筆更換或清除。請選擇含自行收集的 .np3 檔案的資料夾，暫不支援靈活色彩的 .np3。",
+        ],
         "usb_camera_not_ready": [
             "zh": "相机尚未就绪，请确认相机已开机并检查连接",
             "en": "Camera is not ready. Make sure it is powered on and check the connection.",
@@ -55,6 +61,8 @@ enum IOSLocalization {
         "iap_continue": ["zh": "继续购买", "en": "Continue purchase", "hant": "繼續購買"],
         "iap_privacy": ["zh": "隐私政策", "en": "Privacy policy", "hant": "隱私政策"],
         "iap_terms": ["zh": "使用条款", "en": "Terms of use", "hant": "使用條款"],
+        "settings_privacy": ["zh": "隐私", "en": "Privacy", "hant": "隱私"],
+        "settings_terms": ["zh": "条款", "en": "Terms", "hant": "條款"],
         "iap_redeem_version": ["zh": "永久版优惠码需要 iOS 16.3 或更高版本", "en": "Lifetime offer codes require iOS 16.3 or later", "hant": "永久版優惠碼需要 iOS 16.3 或更新版本"],
         "usb_permission_required": [
             "zh": "未获得相机访问权限，请到系统设置允许访问",

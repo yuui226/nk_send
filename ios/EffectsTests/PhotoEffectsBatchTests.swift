@@ -213,3 +213,134 @@ private actor BatchProbe {
         (maximumActive, started, progress)
     }
 }
+
+
+/// Approved iOS difference: legacy graphical brand selections become ordinary text.
+final class PhotoFrameBrandMigrationTests: XCTestCase {
+    func testLegacyLogoOutputUsesTextIdentityInsteadOfPreviousGraphicalCacheKey() throws {
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true
+        settings.watermark.enabled = false
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let text = try encoder.encode(settings)
+        let legacy = try XCTUnwrap(String(data: text, encoding: .utf8))
+            .replacingOccurrences(of: #""brandStyle":"text""#, with: #""brandStyle":"logo""#)
+        XCTAssertTrue(legacy.contains(#""brandStyle":"logo""#))
+        let restored = try JSONDecoder().decode(PhotoEffectsSettings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(try encoder.encode(restored), text,
+                       "JSON-based preview identities must use normalized text settings")
+        XCTAssertNotEqual(try encoder.encode(restored), Data(legacy.utf8))
+        let name = androidPhotoFrameOutputName(sourceName: "camera.jpg", settings: restored)
+        XCTAssertEqual(name, "camera_frame_mist_wc08a79143377.jpg")
+        // Previous LOGO fixture used metadata's 15-field LOGO token plus
+        // brand-logo-v=3. It must never be reused for the new text render.
+        XCTAssertNotEqual(name, "camera_frame_mist_w1a5601a33d47.jpg")
+    }
+
+    func testLegacyLogoPayloadKeepsMetadataAndReencodesAsText() throws {
+        for visible in [true, false] {
+            let data = Data("""
+                {"showBrand":\(visible),"brandStyle":"logo","showModel":false,
+                 "showLensModel":true,"showCity":true,"showRegion":true,
+                 "widthPercent":135,"backgroundBlurPercent":30,"backgroundMaskPercent":170,
+                 "datePattern":"yyyy/MM/dd","timePattern":"HH.mm"}
+                """.utf8)
+            let value = try JSONDecoder().decode(PhotoFrameMetadataSettings.self, from: data)
+            XCTAssertEqual(value.showBrand, visible)
+            XCTAssertEqual(value.brandStyle, .text)
+            XCTAssertFalse(value.showModel)
+            XCTAssertTrue(value.showLensModel)
+            XCTAssertTrue(value.showCity)
+            XCTAssertTrue(value.showRegion)
+            XCTAssertEqual(value.widthPercent, 135)
+            XCTAssertEqual(value.backgroundBlurPercent, 30)
+            XCTAssertEqual(value.backgroundMaskPercent, 170)
+            XCTAssertEqual(value.datePattern, "yyyy/MM/dd")
+            XCTAssertEqual(value.timePattern, "HH.mm")
+            let rewritten = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? [String: Any])
+            XCTAssertEqual(rewritten["brandStyle"] as? String, "text")
+        }
+    }
+
+    func testLegacyLogoConstructorAndAssignmentsCannotEnableGraphics() {
+        var value = PhotoFrameMetadataSettings(showDate: true, showTime: false,
+            showFocalLength: true, showExposure: true, showBrand: false, showModel: true,
+            showLensModel: true, showCoordinates: true, showAltitude: false,
+            datePattern: "yyyy/MM/dd", timePattern: "HH:mm", brandStyle: .logo)
+        XCTAssertEqual(value.brandStyle, .text)
+        XCTAssertFalse(value.showBrand)
+        value.brandStyle = .logo
+        XCTAssertEqual(value.brandStyle, .text)
+        XCTAssertFalse(value.showBrand, "Normalizing a removed style cannot reveal a hidden brand")
+    }
+
+    func testLegacyLogoRecipeRetainsOtherEffectsAndCustomImageWatermark() throws {
+        var original = PhotoEffectsSettings()
+        original.photoFrameEnabled = true
+        original.photoFramePreset = .filmNegative
+        original.metadata = .defaults(for: .filmNegative)
+        original.metadata.widthPercent = 135
+        original.metadata.showCity = true
+        original.metadataByPreset[PhotoFramePreset.filmNegative.rawValue] = original.metadata
+        original.watermark.content = .image
+        original.watermark.imageHash = String(repeating: "ab", count: 32)
+        original.watermark.sizePercent = 42
+        original.favoriteFrameEffects = [.init(preset: .filmNegative, watermark: original.watermark)]
+        let encoded = try JSONEncoder().encode(original)
+        let legacy = try XCTUnwrap(String(data: encoded, encoding: .utf8))
+            .replacingOccurrences(of: #""brandStyle":"text""#, with: #""brandStyle":"logo""#)
+        XCTAssertTrue(legacy.contains(#""brandStyle":"logo""#))
+        let restored = try JSONDecoder().decode(PhotoEffectsSettings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(restored, original, "Removing brand graphics must not discard an old recipe or user watermark")
+        XCTAssertEqual(restored.metadataByPreset[PhotoFramePreset.filmNegative.rawValue]?.brandStyle, .text)
+    }
+
+    @MainActor
+    func testLegacyLogoEntriesMigrateInBothIndependentStoreScopes() {
+        let suite = "legacy-brand-logo-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for (scope, key, width) in [(PhotoEffectsStore.Scope.cameraTransfer, "photo_frame_metadata_settings_v1", 65),
+                                   (.localPhotos, "frame_metadata_settings_v1", 135)] {
+            if scope == .localPhotos { defaults.set(3, forKey: "settings_version") }
+            defaults.set("MIST|true|false|true|true|false|true|true|true|false|yyyy/MM/dd|HH.mm|true|false|LOGO|\(width)|30|170", forKey: key)
+            let restored = PhotoEffectsStore(defaults: defaults, scope: scope)
+            XCTAssertEqual(restored.settings.metadata.brandStyle, .text)
+            XCTAssertFalse(restored.settings.metadata.showBrand)
+            XCTAssertTrue(restored.settings.metadata.showLensModel)
+            // The local workspace already suppresses location fields; the
+            // logo migration must preserve that existing scope policy.
+            XCTAssertEqual(restored.settings.metadata.showCoordinates, scope == .cameraTransfer)
+            XCTAssertEqual(restored.settings.metadata.showCity, scope == .cameraTransfer)
+            XCTAssertEqual(restored.settings.metadata.widthPercent, width)
+            XCTAssertEqual(restored.settings.metadata.backgroundBlurPercent, 30)
+            XCTAssertEqual(restored.settings.metadata.backgroundMaskPercent, 170)
+            XCTAssertEqual(restored.settings.metadata.datePattern, "yyyy/MM/dd")
+            XCTAssertFalse(defaults.string(forKey: key)?.contains("|LOGO") ?? true)
+            XCTAssertEqual(PhotoEffectsStore(defaults: defaults, scope: scope).settings.metadata, restored.settings.metadata)
+        }
+        XCTAssertEqual(PhotoEffectsStore(defaults: defaults, scope: .cameraTransfer).settings.metadata.widthPercent, 65)
+        XCTAssertEqual(PhotoEffectsStore(defaults: defaults, scope: .localPhotos).settings.metadata.widthPercent, 135)
+    }
+
+
+    func testEveryPresetCyclesOnlyOffAndTextWithoutChangingOtherFields() {
+        for preset in PhotoFramePreset.allCases {
+            for remembered in PhotoFrameBrandStyle.allCases {
+                var value = PhotoFrameMetadataSettings.defaults(for: preset)
+                value.showBrand = false; value.brandStyle = remembered
+                value.showCity = true; value.widthPercent = 135
+                var expected = value
+                XCTAssertEqual(value.brandControlLabelKey, "photo_frame_metadata_brand")
+                value.cycleBrandStyle()
+                expected.showBrand = true; expected.brandStyle = .text
+                XCTAssertEqual(value, expected)
+                XCTAssertEqual(value.brandControlLabelKey, "photo_frame_metadata_brand_text")
+                value.cycleBrandStyle(); expected.showBrand = false; expected.brandStyle = .text
+                XCTAssertEqual(value, expected)
+                XCTAssertEqual(value.brandControlLabelKey, "photo_frame_metadata_brand")
+            }
+        }
+    }
+}

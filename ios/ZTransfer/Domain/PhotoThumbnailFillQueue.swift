@@ -22,6 +22,10 @@ actor PhotoThumbnailFillQueue {
     private var seededRevision = -1
     private var priorityRange: PhotoDateRange?
     private var loadingRange: PhotoDateRange?
+    // Loading range bounds historical enumeration, not live camera additions
+    // (Android enqueueNew/returnToFront). Keep that admission through pauses,
+    // explicit retries and same-session scans; removal retires the handle.
+    private var liveHandles = Set<UInt32>()
     private var wakePending = false
     private var wakeWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
@@ -93,8 +97,9 @@ actor PhotoThumbnailFillQueue {
         for file in files {
             filesByID[file.id] = file
             if ownership[file.id] == nil { ownership[file.id] = UUID() }
+            liveHandles.insert(file.id)
         }
-        for file in files where isInLoadingRange(file) && !settled.contains(file.id) {
+        for file in files where !settled.contains(file.id) && !failed.contains(file.id) {
             enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: !sequential)
         }
     }
@@ -148,6 +153,7 @@ actor PhotoThumbnailFillQueue {
         priority.removeAll { ids.contains($0) }
         regular.removeAll { ids.contains($0) }
         pending.subtract(ids); failed.subtract(ids); settled.subtract(ids)
+        liveHandles.subtract(ids)
         failedOrder.removeAll { ids.contains($0) }
         ids.forEach {
             filesByID.removeValue(forKey: $0)
@@ -229,6 +235,7 @@ actor PhotoThumbnailFillQueue {
     }
 
     private func isInLoadingRange(_ file: CameraFile?) -> Bool {
+        if let file, liveHandles.contains(file.id) { return true }
         guard let loadingRange, let file else { return loadingRange == nil }
         return file.captureDate == nil || loadingRange.contains(file.captureDate)
     }

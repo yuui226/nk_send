@@ -49,9 +49,6 @@ targets:
     platform: iOS
     sources:
       - path: ZTransfer
-      - path: PictureControls
-        type: folder
-        buildPhase: resources
       - path: ThirdParty/libjpeg-8bit/LosslessJpegBridge.c
       - path: ThirdParty/libjpeg-8bit/src/transupp.c
       - path: ThirdParty/libjpeg-8bit/src/jaricom.c
@@ -164,6 +161,8 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleDisplayName: Z传
+        ZTransferPrivacyPolicyURL: "https://www.ztransfer.top/ios/privacy/"
+        ZTransferTermsOfUseURL: "https://www.ztransfer.top/ios/terms/"
         CADisableMinimumFrameDurationOnPhone: true
         LSApplicationCategoryType: public.app-category.photography
         NSLocationWhenInUseUsageDescription: 用于向相机写入拍摄位置

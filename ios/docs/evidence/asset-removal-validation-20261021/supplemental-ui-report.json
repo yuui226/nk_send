@@ -1,0 +1,83 @@
+{
+  "run": {
+    "label": "ui-camera-preview-confirmation",
+    "command": [
+      "env",
+      "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+      "bash",
+      "ios/StoreKit/test-recovery-ui.sh",
+      "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices"
+    ],
+    "startedAt": "2026-10-21T16:06:22.490052+08:00",
+    "finishedAt": "2026-10-21T16:10:53.651417+08:00",
+    "exitCode": 0,
+    "log": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation.log",
+    "sha256": "7af156531c21b550b2e3f17c314b8fee6c0ff514667b398636b9ad517a804581",
+    "markers": []
+  },
+  "summary": {
+    "devicesAndConfigurations": [
+      {
+        "device": {
+          "architecture": "arm64",
+          "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+          "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+          "modelName": "iPhone 17",
+          "osBuildNumber": "23F77",
+          "osVersion": "26.5",
+          "platform": "iOS Simulator"
+        },
+        "expectedFailures": 0,
+        "failedTests": 0,
+        "passedTests": 1,
+        "skippedTests": 0,
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Test Scheme Action"
+        }
+      }
+    ],
+    "environmentDescription": "ZTransfer-StoreKitUI · Built with macOS 27.0.1",
+    "expectedFailures": 0,
+    "failedTests": 0,
+    "finishTime": 1792570228.961,
+    "passedTests": 1,
+    "result": "Passed",
+    "runtimeWarnings": [],
+    "skippedTests": 0,
+    "startTime": 1792569997.297,
+    "statistics": [],
+    "testFailures": [],
+    "title": "Test - ZTransfer-StoreKitUI",
+    "topInsights": [],
+    "totalTestCount": 1
+  },
+  "stages": [
+    {
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dk2U1l/cleanup.log",
+      "sha256": "d0c8412b0f214659810c08529f646275b91cd09d21dbd777508b93bd83275d41",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dk2U1l/cleanup.xcresult",
+      "passed": true,
+      "testCount": 1,
+      "failures": 0
+    },
+    {
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dk2U1l/prepare-testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.log",
+      "sha256": "2cfab4f64400af8ff100b1c0b6a0199fcf26625e9bf3328a70dfda1578a8c4ca",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dk2U1l/prepare-testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.xcresult",
+      "passed": true,
+      "testCount": 1,
+      "failures": 0
+    },
+    {
+      "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dk2U1l/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.log",
+      "sha256": "bdfe071e899af72e129b04ce8cba5f5ff4145d09623efaf379f3e11c1ef8a82c",
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.dk2U1l/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.xcresult",
+      "passed": true,
+      "testCount": 1,
+      "failures": 0
+    }
+  ],
+  "reason": "Wait for actual camera preview pixels rather than only the control label, then verify off/text before and after relaunch. No production code changed."
+}

@@ -1,0 +1,15 @@
+{
+  "label": "release-bundle-audit",
+  "command": [
+    "python3",
+    "ios/scripts/verify-release-bundle.py",
+    "/tmp/ztransfer-removal-derived-20261021/Build/Products/Release-iphoneos/ZTransfer.app",
+    "--submission"
+  ],
+  "startedAt": "2026-10-21T15:36:44.059718+08:00",
+  "finishedAt": "2026-10-21T15:36:44.225059+08:00",
+  "exitCode": 0,
+  "log": "/tmp/ztransfer-removal-validation-20261021/release-bundle-audit.log",
+  "sha256": "14926c55e0ab31a2445bfa9af845a333dc100c686a8229ef41525b5d503546ac",
+  "markers": []
+}

@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "preview-build": "node build.mjs",
-    "release-build": "node build.mjs --release"
+    "release-build": "node build.mjs --release",
+    "website-preview": "node build.mjs --website",
+    "website-release": "node build.mjs --website --release"
   },
   "dependencies": { "marked": "17.0.5" }
 }

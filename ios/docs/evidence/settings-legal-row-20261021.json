@@ -1,0 +1,482 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-10-21",
+  "recordedAt": "2026-10-21T11:57:30.530688+08:00",
+  "timezone": "Asia/Shanghai",
+  "status": "final-inline-compact-three-language-ui-and-unsigned-release-passed-public-urls-pending",
+  "scope": "仅设置法律短标签的同行布局、紧凑屏宽度与 iPad 三语言关闭路径的有限证据；保留中间失败，不视为全部发布验收。",
+  "userDecision": {
+    "text": "并列在反馈左边，不要另起一行",
+    "order": [
+      "版本",
+      "弹性空白",
+      "隐私 / Privacy / 隱私",
+      "条款 / Terms / 條款",
+      "反馈 / Feedback / 回饋"
+    ],
+    "iPad": "继续普通页面竖屏，不修改支持方向。"
+  },
+  "earlierTwoRowEvidence": {
+    "path": "/Users/orys/code/nk_send/ios/docs/evidence/settings-legal-links-20261021.json",
+    "sha256": "d27a40bb176c68c0ed3fe84e171c9abdd5653cfd3ae799579978d4a2420c97f5",
+    "scope": "历史共享配置与路由/三语标签单元 3/3；两行布局简中 SE UI 1/1。原外层 AX 空标签失败及修正均在原证据中，不等于当前同行布局通过。",
+    "unitLog": {
+      "path": "/tmp/ztransfer-prepayment-legal-hd-baseline.log",
+      "sha256": "b4f9f061bb1852327e82e26a594a46f827a50b4dabde40e63a4f1673186ea967"
+    },
+    "unitMethods": [
+      "AppLegalLinksTests.testConfiguredHTTPSDestinationsRouteThroughOpenURLWithoutPurchase",
+      "AppLegalLinksTests.testMissingAndInvalidDestinationsRemainUnavailableAndNeverOpen",
+      "AppLegalLinksTests.testSettingsShortLabelsPreserveCompletePurchaseLabelsInEverySupportedLanguage"
+    ],
+    "legalTests": {
+      "executed": 3,
+      "passed": 3,
+      "failed": 0
+    },
+    "realPublishedDestinationsVerified": false
+  },
+  "chronology": [
+    {
+      "path": "/tmp/ztransfer-prepayment-settings-refresh-20261021/ipad-13.log",
+      "sha256": "e5985f6813ec68f9a59523761d24437fa0b2fa42a95b24f01537cccc580ceb26",
+      "xcresult": "/tmp/ztransfer-prepayment-settings-refresh-20261021/ipad-13.xcresult",
+      "xcresultExists": true,
+      "result": "TEST EXECUTE FAILED",
+      "executed": 1,
+      "passed": 0,
+      "failed": 1,
+      "durationSeconds": 59.493,
+      "exitCode": 65,
+      "exitCodeSource": "root observed process completion",
+      "stage": "superseded-two-row-clean-release-ipad-capture",
+      "method": "PrelaunchLayoutUITests.testCaptureCleanReleaseSettingsWithLegalFooterInSimplifiedChinese",
+      "releaseEvidence": "release-prepayment-final-20261021.json",
+      "sourceScope": "用户同排要求之前的两行法律 footer Release；临时无业务注入的正常启动采集。",
+      "failure": "选择/确认简中后的首次关闭设置未在 8 秒内完成；未到第二次打开与最终 settings 候选截图阶段。",
+      "diagnosticOnly": true,
+      "threeDeviceRefreshComplete": false,
+      "inspection": {
+        "attachmentExport": "/tmp/ztransfer-prepayment-settings-refresh-20261021/ipad-13-failure-images",
+        "screenshot": {
+          "path": "/tmp/ztransfer-prepayment-settings-refresh-20261021/ipad-13-failure-images/A4DBFF40-4C54-413D-8D17-2D9648AAC80C.png",
+          "sha256": "4dcb95d883071e29b59a87ff4b4b5f0cbe5e88b140d7975d5b2dbf4b6701ec45"
+        },
+        "movie": {
+          "path": "/tmp/ztransfer-prepayment-settings-refresh-20261021/ipad-13-failure-images/8578EAA6-2FB0-48BF-BAB0-9865D14BC700.mp4",
+          "sha256": "d9e3c79ec590a9bcbc0f1e23c3784913c47ddcb19f46e33affdeebf5d16d2b01"
+        },
+        "syntheticTap": {
+          "path": "/tmp/ztransfer-prepayment-settings-refresh-20261021/ipad-13-failure-images/6311BCD2-24BF-4DA5-BC7D-859B05422CF9",
+          "sha256": "1375e97c0f5848d932054e2dc548bc45de0efb8ed4df090f1483a12decf7e47d"
+        },
+        "actualReview": "release_audit 已实际查看失败截图及从该电影导出的 42/44/48 秒帧，设置仍保持打开；完整竖屏 2064×2752。",
+        "tapGeometry": "合成事件目标进程 99189；1032×1376 pt window 内 (988,114) 对应原图 (1976,228)，目视落在关闭图标中心；没有发现错误目标或窗口坐标不匹配的证据。",
+        "rootCause": "unproven",
+        "reason": "附件没有触摸投递到 App/action 回调的证据，不能区分未投递与 App 未处理。随后不同 Debug 版本三语言关闭成功不能追溯性说明此失败已修复。"
+      },
+      "retained": true
+    },
+    {
+      "path": "/tmp/ztransfer-prepayment-legal-row-ui.log",
+      "sha256": "5cbf13a5bc64e6bb85a5d38da9bad1ac7f7ed54ea5790dc8a329fb4ebd0ebf5a",
+      "xcresult": "/tmp/ztransfer-prepayment-legal-row-ui.xcresult",
+      "xcresultExists": true,
+      "result": "TEST FAILED",
+      "executed": 1,
+      "passed": 0,
+      "failed": 1,
+      "durationSeconds": 48.016,
+      "stage": "initial-inline-compact-ui",
+      "method": "PrelaunchLayoutUITests.testCompactSettingsLegalFooterFitsOneRowInAllLanguages",
+      "sourceScope": "首个同排版本；不是当前最终宽度修复版本。历史生产/测试源未独立冻结，不绑定当前文件哈希。",
+      "failure": "英文 Privacy 控件宽 55 pt，小于原断言要求 69.727778673172 pt；执行到英文终止，繁中未执行。",
+      "screenshots": [
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-ui-images/F53E310A-2BAE-444E-B6AB-78696FE63539.png",
+          "sha256": "a84b2c752251f0a695838793c2e680130b6d2a82b7eb3b5ef4f6e262ae4bdb57",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hans_0_7C0A22F1-B802-482C-880E-76A37320CC1D.png",
+          "language": "zh-Hans",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "同排隐私、条款、反馈完整可见；有 v1.98-D。",
+          "storeCandidate": false
+        },
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-ui-images/29F84DF4-A23B-45B7-8EB8-632E3DC522F8.png",
+          "sha256": "0800a8461ab9804329c90cc9c8b8c6b447f7abda38e76ef7314925115b42a7bd",
+          "attachmentName": "L07-settings-legal-same-row-en_0_4CAA04C6-BC85-41EF-AB63-52BC6689653E.png",
+          "language": "en",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "Privacy 与 Terms 被换成两行，版本牌显示省略号；明确未满足同排完整文字要求。",
+          "storeCandidate": false
+        }
+      ]
+    },
+    {
+      "path": "/tmp/ztransfer-prepayment-legal-row-fit-ui.log",
+      "sha256": "da6ea7b84e77d215cbf715514e75d7b4721fe89cb20f7a5bf305f815b31bb554",
+      "xcresult": "/tmp/ztransfer-prepayment-legal-row-fit-ui.xcresult",
+      "xcresultExists": true,
+      "result": "TEST SUCCEEDED",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "durationSeconds": 61.805,
+      "stage": "intermediate-inline-compact-ui",
+      "method": "PrelaunchLayoutUITests.testCompactSettingsLegalFooterFitsOneRowInAllLanguages",
+      "sourceScope": "第一次紧凑间距/固定文字调整；早于最终 ViewThatFits 宽度约束。历史源未独立冻结。",
+      "visualAcceptance": false,
+      "visualIssue": "三语方法通过，但英文面板在原图中比简中/繁中更宽；root 观察为总宽增加约 13 pt。此数字是根代理目视/边界判断，非本记录重新测量值。未用 AX scroll 全窗 frame 把表面撑宽判为正常。",
+      "screenshots": [
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-fit-ui-images/B051C97C-5384-4080-BDB8-496A851E5584.png",
+          "sha256": "13cfe4d965f019a8ca314b6be038153fd51a9bde3cad14c9e9ea435ee13b1a08",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hans_0_30898AF1-9633-47C7-9046-A58FB94A89A2.png",
+          "language": "zh-Hans",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "隐私、条款在反馈左侧同排，文字完整，面板保留正常左右边距；v1.98-D。",
+          "storeCandidate": false
+        },
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-fit-ui-images/F01F7649-A07F-410D-9414-941D66037C2D.png",
+          "sha256": "b0210474a3124a161e0ccd28ce461d41bf0444302c915dcb1dfc59bcf967bf34",
+          "attachmentName": "L07-settings-legal-same-row-en_0_CDF03594-6083-45B4-A08B-577037A01F97.png",
+          "language": "en",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "Privacy、Terms、Feedback 与版本文字完整同排，但整个设置面板左右更贴近屏幕，宽于另外两语；因此该次视觉验收不通过。",
+          "storeCandidate": false
+        },
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-fit-ui-images/5CB5BFD4-AA7E-4477-AD70-08D72352958D.png",
+          "sha256": "14b7a2aac2b4276a755cad694f8e14883f4e885dac9d4aea1ad0e00273316193",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hant_0_C63750E1-411F-4A86-9EE9-6C1E3BBE3DED.png",
+          "language": "zh-Hant",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "隱私、條款在回饋左侧同排，文字完整，面板保留正常左右边距；v1.98-D。",
+          "storeCandidate": false
+        }
+      ]
+    },
+    {
+      "path": "/tmp/ztransfer-prepayment-legal-row-ipad-ui.log",
+      "sha256": "8710c1aa059890aba2babd67b714cfe9d877ef3af376b7dfceaa5cc77978de88",
+      "xcresult": "/tmp/ztransfer-prepayment-legal-row-ipad-ui.xcresult",
+      "xcresultExists": true,
+      "result": "TEST EXECUTE SUCCEEDED",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "durationSeconds": 205.257,
+      "exitCode": 0,
+      "exitCodeSource": "root observed process completion",
+      "stage": "intermediate-inline-ipad-ui",
+      "method": "PrelaunchLayoutUITests.testCompactSettingsLegalFooterFitsOneRowInAllLanguages",
+      "sourceScope": "使用 intermediate fit 的 Debug App / 已构建 runner；早于最新英文 host 宽度约束。不能用该轮证明最终源码已跑 iPad。",
+      "device": {
+        "id": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+        "name": "ZTransfer-Prelaunch-13Pad",
+        "portraitOnly": true
+      },
+      "languages": [
+        "zh-Hans",
+        "en",
+        "zh-Hant"
+      ],
+      "coverage": [
+        "三语言设置实际显示法律短标签；顺序为版本、隐私、条款、反馈，无购买弹窗。",
+        "三语言各自点击关闭后，关闭按钮消失且首页设置入口可操作；日志顺序与已完成方法对应。"
+      ],
+      "closeEvidenceLogLines": {
+        "zh-Hans": "147–161",
+        "en": "250–264",
+        "zh-Hant": "353–367"
+      },
+      "screenshots": [
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-ipad-ui-images/AEEA4DE0-4F06-4ED3-ABEA-7C6D22A7BBDB.png",
+          "sha256": "1d623dccc66aaa3d4fbb6b548e9c953df325b2a6b273048582a8b40cd60c4603",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hans_0_44CAD594-A8A5-43ED-8D35-D0DDE81DACF7.png",
+          "language": "zh-Hans",
+          "width": 2064,
+          "height": 2752,
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "设置面板和完整 footer 可见；隐私、条款在反馈左侧同排，无重叠或截断；灰色禁用法律入口，v1.98-D。",
+          "storeCandidate": false
+        },
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-ipad-ui-images/C4C4790F-89C9-4EBB-8A27-C99780CA7BAA.png",
+          "sha256": "32dcf80c59caa852027e85f7eb7b12a52b02d4d8a0c9b1664d91f63aa043af93",
+          "attachmentName": "L07-settings-legal-same-row-en_0_5B88D0B6-56C3-4B92-A9AF-312B933F0BD3.png",
+          "language": "en",
+          "width": 2064,
+          "height": 2752,
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "Privacy、Terms 在 Feedback 左侧同排，英文与版本文字完整；面板保持与中/繁相同的正常左右边距，无重叠或截断；v1.98-D。",
+          "storeCandidate": false
+        },
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-ipad-ui-images/47B333CE-143B-4951-AB02-892CD0EDDDB8.png",
+          "sha256": "a6c6dda63393962168ec6b664599dca2601999bec269eb368df3e48acb03cb2c",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hant_0_620E6B1E-CB10-4D6A-8774-A0F8BCF8E6D5.png",
+          "language": "zh-Hant",
+          "width": 2064,
+          "height": 2752,
+          "deviceId": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+          "deviceName": "ZTransfer-Prelaunch-13Pad",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "隱私、條款在回饋左侧同排，完整可见；面板边界正常，无重叠或截断；v1.98-D。",
+          "storeCandidate": false
+        }
+      ],
+      "limitations": [
+        "Debug 诊断图不是清洁 Release 商店素材。",
+        "未实际打开法律 URL；未测试所有字号、窗口、权益或设备。",
+        "后续 Debug 三语关闭通过，不证明此前 Release 关闭失败的根因或修复。"
+      ]
+    },
+    {
+      "path": "/tmp/ztransfer-prepayment-legal-row-bounds-ui.log",
+      "sha256": "2aff6586d8b20958b64e1c90524bb094c322584f0a285b9d3b21137749844ab0",
+      "xcresult": "/tmp/ztransfer-prepayment-legal-row-bounds-ui.xcresult",
+      "xcresultExists": true,
+      "result": "TEST FAILED",
+      "executed": 1,
+      "passed": 0,
+      "failed": 1,
+      "durationSeconds": 18.227,
+      "stage": "final-width-fix-first-bounds-ui",
+      "method": "PrelaunchLayoutUITests.testCompactSettingsLegalFooterFitsOneRowInAllLanguages",
+      "failure": "简中版本牌 AX staticText 的 frame 已包括整个牌子，旧断言却额外按内部文字位置比较：29.0 < 40.0；在第一种语言终止。",
+      "diagnosisSource": "root 判断并只修正测试；当前源码可见改为整个 plaque 在 host 的 16 pt 内边距内、牌宽至少完整文字宽+24 pt 装饰。",
+      "sourceScope": "已包含最终 ViewThatFits 宽度约束及 compact 间距；此轮失败不能改写为通过，修正后的最终三语运行另记。",
+      "screenshots": [
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-bounds-ui-images/E255EBA8-1ADC-4867-9757-0DF4A71F7AF8.png",
+          "sha256": "8bfaf925cd79cd1e73889caed72593e75f6793dc9c8cf4e2a7122a5197906a91",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hans_0_09ABD2A4-3B30-44E0-BD8A-16B14A5FEAE2.png",
+          "language": "zh-Hans",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewer": "release_audit",
+          "observation": "简中实际设置面板保持正常左右边距；本轮版本牌断言失败仍保留，不外推英文或繁中。",
+          "storeCandidate": false
+        }
+      ]
+    },
+    {
+      "stage": "final-inline-width-compact-ui",
+      "path": "/tmp/ztransfer-prepayment-legal-row-final-ui.log",
+      "sha256": "de4b887c06f2d21be4aadcc00c741e6444d653b0fb28cf535219453173a92840",
+      "xcresult": "/tmp/ztransfer-prepayment-legal-row-final-ui.xcresult",
+      "xcresultExists": true,
+      "result": "TEST SUCCEEDED",
+      "exitCode": 0,
+      "exitCodeSource": "root observed process completion",
+      "executed": 1,
+      "passed": 1,
+      "failed": 0,
+      "durationSeconds": 97.023,
+      "method": "PrelaunchLayoutUITests.testCompactSettingsLegalFooterFitsOneRowInAllLanguages",
+      "device": {
+        "id": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "name": "ZTransfer-Pro-Compact",
+        "formFactor": "iPhone SE simulator"
+      },
+      "languages": [
+        "zh-Hans",
+        "en",
+        "zh-Hant"
+      ],
+      "languageCasesAreSeparateXCTests": false,
+      "buildConfiguration": "Debug",
+      "visualAcceptance": true,
+      "coverage": [
+        "实际设置 host 的左右边界各距 app 12 pt；完整 footer 保持在 host 的 16 pt 内容边距内。",
+        "三语版本、隐私、条款、反馈同行；三个按钮 28 pt 高，完整原字号文本宽度、顺序与无重叠断言通过，实际截图确认无换行或截断。",
+        "三语言各自打开设置、读取实际短标签、关闭后等待关闭按钮消失，且首页设置入口再次可操作；未出现购买面板。"
+      ],
+      "sourceHashesRecordedAfterRun": {
+        "ios/ZTransfer/UI/SettingsView.swift": "b3a5c05f2bf682fcc8d18c4f75e454c441947464660f0093cd0d9f7652604440",
+        "ios/ZTransfer/UI/PremiumPurchaseView.swift": "b9eac317bcf752b038074d8d04d2b56dc339e7491df3e33474c07b22a183250c",
+        "ios/ZTransfer/App/IOSLocalization.swift": "788a4ee209ad872fad9f63d65ef94c844ce37ef35842568b1d77974038f78286",
+        "ios/PopupUITests/PrelaunchLayoutUITests.swift": "37ec5a759997d1e74af444226d4b398ce0d99e7a039aea6017800c7d385a9bc1",
+        "ios/ZTransferTests/PremiumBusinessTests.swift": "7223917e3a1bac0661b9dee8b079a0359a20c0d476d05f99cacfcb539436023d"
+      },
+      "matchesPreviouslyRecordedFinalWidthSourceSnapshot": true,
+      "sourceBindingLimit": "当前四项源/测试指纹与先前最终宽度待验快照逐项比较；附加法律单元测试当前指纹。本记录没有独立重建完整构建输入清单，不把此范围外的文件或工具链推断为冻结。",
+      "temporaryRunnerSource": {
+        "path": "/tmp/ztransfer-prelaunch-layout-v2-fdtv2nsu/PrelaunchLayoutUITests.swift",
+        "sha256": "37ec5a759997d1e74af444226d4b398ce0d99e7a039aea6017800c7d385a9bc1",
+        "matchesCurrentUITestFile": true
+      },
+      "attachmentManifest": {
+        "path": "/tmp/ztransfer-prepayment-legal-row-final-ui-images/manifest.json",
+        "sha256": "260ee0a7a92602c81b31de91a4b98de7d234e6137ea1be7643dfcdfb0262334f"
+      },
+      "screenshots": [
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-final-ui-images/D8711B6D-34AC-4E99-BFB7-E313AA553EE4.png",
+          "sha256": "c0fe948b20652f7556daf0b5f39bda4f0143ba2bc4e7b0cfad5074841a1e8949",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hans_0_70167CBE-3271-43F8-A6BC-D477C3CD82B9.png",
+          "language": "zh-Hans",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewers": [
+            "root",
+            "release_audit"
+          ],
+          "observation": "正常左右边距；版本、隐私、条款、反馈全部完整同排，法律入口在反馈左侧且灰色禁用；无重叠、换行或截断；v1.98-D。",
+          "storeCandidate": false
+        },
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-final-ui-images/A7FC89B9-D68F-4DDE-A4BF-C25FBC5D54AB.png",
+          "sha256": "29c84bb2e50b203ca68dab25b05ee16eb155e7a1516fe528b893f256bab37848",
+          "attachmentName": "L07-settings-legal-same-row-en_0_BD557598-3834-473E-8A39-C2CDEE0455E6.png",
+          "language": "en",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewers": [
+            "root",
+            "release_audit"
+          ],
+          "observation": "面板已回到与简中/繁中一致的正常宽度；ZTransfer v1.98-D、Privacy、Terms、Feedback 全部完整同排，无省略号、文字换行或互相重叠；法律入口灰色禁用。",
+          "storeCandidate": false
+        },
+        {
+          "path": "/tmp/ztransfer-prepayment-legal-row-final-ui-images/A065D03B-59AB-4C21-9015-3D2A8A084C39.png",
+          "sha256": "c514e2bddc93020df37f216e6c21cf5bdab34cf1d89b226fd84b790da760f27e",
+          "attachmentName": "L07-settings-legal-same-row-zh-Hant_0_BFE758B1-F684-4F39-96F8-6284A61019E1.png",
+          "language": "zh-Hant",
+          "width": 750,
+          "height": 1334,
+          "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+          "deviceName": "ZTransfer-Pro-Compact",
+          "visuallyReviewed": true,
+          "reviewers": [
+            "root",
+            "release_audit"
+          ],
+          "observation": "正常左右边距；版本、隱私、條款、回饋全部完整同排，法律入口在回饋左侧且灰色禁用；无重叠、换行或截断；v1.98-D。",
+          "storeCandidate": false
+        }
+      ],
+      "limits": [
+        "这次是一个 XCTest 方法含三个语言分支，不写成 3 个独立测试。",
+        "最新源码仅本轮 SE 三语言实际 UI 通过；iPad 仍只有上面中间版本的三语言证据。",
+        "当前法律 URL 缺配置，未实际点击打开公开网页；不是政策可访问已完成。",
+        "Debug 图片不是商店候选；本记录不证明最终 Release、上传验证、所有设备/字号/窗口或真实购买已通过。"
+      ]
+    }
+  ],
+  "currentFinalStage": {
+    "status": "compact-three-language-ui-passed",
+    "productionChange": "ViewThatFits 的外层 frame(minWidth:0,maxWidth:.infinity)；紧凑内/外间距各 2 pt、版本牌水平内距 4 pt；正常间距 8 pt 保留；字体不缩小。",
+    "debugBuild": {
+      "path": "/tmp/ztransfer-prepayment-legal-row-bounds-debug.log",
+      "sha256": "cf15ac5bb554db283695869e3a986b681c6e98aea8ac0fd9d8f3186112bd3f0e",
+      "result": "BUILD SUCCEEDED",
+      "exitCode": 0,
+      "exitCodeSource": "root observed process completion"
+    },
+    "testCorrection": "AX 版本节点为整个牌子：使用 host 16 pt 内边距与牌宽>=完整文字宽+24 pt 装饰；继续断言真实 host 的屏幕左右各 12 pt、三个短标签完整单行、28 pt 高、相互边界及关闭。",
+    "plannedUIResult": "/tmp/ztransfer-prepayment-legal-row-final-ui.xcresult",
+    "plannedUILog": "/tmp/ztransfer-prepayment-legal-row-final-ui.log",
+    "method": "PrelaunchLayoutUITests.testCompactSettingsLegalFooterFitsOneRowInAllLanguages",
+    "sourceSnapshotNow": {
+      "ios/ZTransfer/UI/SettingsView.swift": "b3a5c05f2bf682fcc8d18c4f75e454c441947464660f0093cd0d9f7652604440",
+      "ios/ZTransfer/UI/PremiumPurchaseView.swift": "b9eac317bcf752b038074d8d04d2b56dc339e7491df3e33474c07b22a183250c",
+      "ios/ZTransfer/App/IOSLocalization.swift": "788a4ee209ad872fad9f63d65ef94c844ce37ef35842568b1d77974038f78286",
+      "ios/PopupUITests/PrelaunchLayoutUITests.swift": "37ec5a759997d1e74af444226d4b398ce0d99e7a039aea6017800c7d385a9bc1"
+    },
+    "sourceSnapshotLimit": "先前最终宽度待验指纹保留；最终通过运行的当前源/测试比对与实际图片见 chronology 最后一项。iPad 中间版本证据不替代本轮最终源码验证。",
+    "actualUIResultStage": "final-inline-width-compact-ui",
+    "releaseEvidence": "release-prepayment-inline-20261021.json"
+  },
+  "screenshotDelivery": {
+    "originalCaptureRecord": {
+      "path": "/Users/orys/code/nk_send/ios/docs/screenshots/capture-record.json",
+      "sha256": "45aa2a79e3d72d1c1093d8f744ffde26567adc1724dbf8b24ed49d64a8b835ee"
+    },
+    "originalSixFilesPreserved": true,
+    "originalSourceHistoryPreserved": true,
+    "affectedOriginalReferences": [
+      "raw/zh-Hans/iphone-medium/settings-reference.png",
+      "raw/zh-Hans/iphone-large/settings-reference.png",
+      "raw/zh-Hans/ipad-13/settings-reference.png"
+    ],
+    "affectedReferencesRepresentCurrentFooter": false,
+    "intermediateTwoRowCaptureApplied": false,
+    "currentInlineStoreScreenshotsCaptured": false,
+    "nextStep": "正式法律 URL 接入后，使用选定后续清洁 Release 只刷新受影响的三张设置参考图；保留原图/来源历史。不能将本证据 Debug 图当商店候选。"
+  },
+  "remaining": [
+    "部署并接入公开 HTTPS 隐私政策和条款后，实际验证设置及购买页链接；当前缺配置入口仍禁用。",
+    "正式 URL 和发布候选确定后，刷新受影响的三张设置商店参考图；最终同行无签名 Release 构建已经通过，但没有执行新的清洁商店图采集。"
+  ],
+  "recordingMethod": "本记录只读取既有日志/附件/源码并逐张查看初次 2 图、中间 SE 3 图、iPad 3 图及 bounds 简中 1 图；未启动构建、测试、App、模拟器或商店截图采集。 后续追加最终 SE 三语言日志和 3 张逐张实际核看的原图；原 chronology 各历史记录完整保留。",
+  "updatedAt": "2026-10-21T11:59:45.378397+08:00",
+  "archivedFinalUIImages": [
+    {
+      "language": "zh-Hans",
+      "path": "settings-legal-row-20261021/zh-Hans.png",
+      "source": "/tmp/ztransfer-prepayment-legal-row-final-ui-images/D8711B6D-34AC-4E99-BFB7-E313AA553EE4.png",
+      "sha256": "c0fe948b20652f7556daf0b5f39bda4f0143ba2bc4e7b0cfad5074841a1e8949",
+      "purpose": "Final SE Debug layout verification only; not clean Release store artwork."
+    },
+    {
+      "language": "en",
+      "path": "settings-legal-row-20261021/en.png",
+      "source": "/tmp/ztransfer-prepayment-legal-row-final-ui-images/A7FC89B9-D68F-4DDE-A4BF-C25FBC5D54AB.png",
+      "sha256": "29c84bb2e50b203ca68dab25b05ee16eb155e7a1516fe528b893f256bab37848",
+      "purpose": "Final SE Debug layout verification only; not clean Release store artwork."
+    },
+    {
+      "language": "zh-Hant",
+      "path": "settings-legal-row-20261021/zh-Hant.png",
+      "source": "/tmp/ztransfer-prepayment-legal-row-final-ui-images/A065D03B-59AB-4C21-9015-3D2A8A084C39.png",
+      "sha256": "c514e2bddc93020df37f216e6c21cf5bdab34cf1d89b226fd84b790da760f27e",
+      "purpose": "Final SE Debug layout verification only; not clean Release store artwork."
+    }
+  ]
+}

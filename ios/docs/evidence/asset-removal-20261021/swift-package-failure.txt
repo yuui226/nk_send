@@ -1,0 +1,6 @@
+error: /Users/orys/code/nk_send/ios/ZTransfer/Domain/RemoteFrameParser.swift:2:8 unable to resolve module dependency: 'UIKit'
+error: SwiftDriver ZTransferRemote normal arm64 com.apple.xcode.tools.swift.compiler failed with a nonzero exit code. Command line:     cd /Users/orys/code/nk_send
+error: /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffects.swift:64:8 unable to resolve module dependency: 'UIKit'
+error: SwiftDriver ZTransferEffects normal arm64 com.apple.xcode.tools.swift.compiler failed with a nonzero exit code. Command line:     cd /Users/orys/code/nk_send
+error: Build failed
+error: fatalError

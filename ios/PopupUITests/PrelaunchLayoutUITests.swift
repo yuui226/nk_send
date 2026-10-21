@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Baseline real-page captures for the seven-device release matrix.
 /// These checks do not claim hardware-camera or complete visual acceptance.
@@ -39,12 +40,110 @@ final class PrelaunchLayoutUITests: XCTestCase {
         revealEntirely(feedback, in: panel, app: app)
         let version = panel.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Z传 v")).firstMatch
         revealEntirely(version, in: panel, app: app)
+        let privacy = panel.buttons["legal-link-privacy"]
+        let terms = panel.buttons["legal-link-terms"]
+        // These remain visible before publication URLs are configured. Disabled
+        // controls need an entire visible frame, not an enabled tap target.
+        revealEntirely(privacy, in: panel, app: app, requireHittable: false)
+        revealEntirely(terms, in: panel, app: app, requireHittable: false)
+        // The glass style exposes an outer wrapper and the native labeled
+        // button below it, as the existing connection-workspace control does.
+        XCTAssertTrue(privacy.descendants(matching: .button)["隐私"].exists)
+        XCTAssertTrue(terms.descendants(matching: .button)["条款"].exists)
+        for element in [privacy, terms, feedback, version] {
+            XCTAssertTrue(panel.frame.insetBy(dx: -1, dy: -1).contains(element.frame))
+            XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(element.frame))
+        }
+        XCTAssertFalse(privacy.frame.intersects(terms.frame))
+        XCTAssertLessThanOrEqual(version.frame.maxX, privacy.frame.minX)
+        XCTAssertLessThanOrEqual(privacy.frame.maxX, terms.frame.minX)
+        XCTAssertLessThanOrEqual(terms.frame.maxX, feedback.frame.minX)
+        XCTAssertEqual(privacy.frame.midY, feedback.frame.midY, accuracy: 1)
+        XCTAssertEqual(terms.frame.midY, feedback.frame.midY, accuracy: 1)
+        XCTAssertFalse(app.scrollViews["premium-purchase-panel"].exists,
+                       "Legal entries must be reachable directly in settings")
         capture(app, "L07-settings-footer-reachable")
         // Do not invoke feedback: this test checks layout, not the clipboard.
         revealEntirely(close, in: panel, app: app, scrollDown: true)
         close.tap()
         waitForRemoval(close)
         XCTAssertTrue(settings.isHittable)
+    }
+
+    /// Android keeps version/feedback in one footer row. The user-approved iOS
+    /// legal entries belong immediately left of feedback, also in that row.
+    @MainActor
+    func testCompactSettingsLegalFooterFitsOneRowInAllLanguages() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.ztransfer.ios")
+        defer { app.terminate() }
+        let cases = [
+            (language: "zh-Hans", feedback: "反馈", close: "关闭", version: "Z传 v", privacy: "隐私", terms: "条款"),
+            (language: "en", feedback: "Feedback", close: "Close", version: "ZTransfer v", privacy: "Privacy", terms: "Terms"),
+            (language: "zh-Hant", feedback: "回饋", close: "關閉", version: "Z傳 v", privacy: "隱私", terms: "條款"),
+        ]
+        for item in cases {
+            app.launchArguments = ["-app_language", item.language, "-AppleLanguages", "(\(item.language))"]
+            app.launch()
+            let settings = app.buttons["popup-trigger-settings"]
+            XCTAssertTrue(settings.waitForExistence(timeout: 15))
+            settings.tap()
+            let close = app.buttons[item.close]
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            let panel = app.scrollViews.containing(.button, identifier: item.feedback).firstMatch
+            XCTAssertTrue(panel.waitForExistence(timeout: 5), app.debugDescription)
+            let feedback = panel.buttons[item.feedback]
+            let privacy = panel.buttons["legal-link-privacy"]
+            let terms = panel.buttons["legal-link-terms"]
+            let version = panel.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", item.version)).firstMatch
+            for element in [version, privacy, terms, feedback] {
+                revealEntirely(element, in: panel, app: app, requireHittable: false)
+            }
+            capture(app, "L07-settings-legal-same-row-\(item.language)")
+            // The scroll AX frame can be the whole window. Use the actual
+            // fixed-width popup host to detect content widening the surface.
+            let host = app.otherElements["popup-panel-settings"]
+            XCTAssertEqual(host.frame.minX, app.frame.minX + 12, accuracy: 1)
+            XCTAssertEqual(host.frame.maxX, app.frame.maxX - 12, accuracy: 1)
+            for control in [version, privacy, terms, feedback] {
+                XCTAssertGreaterThanOrEqual(control.frame.minX + 1, host.frame.minX + 16)
+                XCTAssertLessThanOrEqual(control.frame.maxX, host.frame.maxX - 16 + 1)
+            }
+            for (control, label) in [(privacy, item.privacy), (terms, item.terms)] {
+                XCTAssertTrue(control.descendants(matching: .button)[label].exists)
+            }
+            for element in [version, privacy, terms, feedback] {
+                XCTAssertTrue(panel.frame.insetBy(dx: -1, dy: -1).contains(element.frame))
+                XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(element.frame))
+                XCTAssertEqual(element.frame.midY, feedback.frame.midY, accuracy: 1, item.language)
+            }
+            XCTAssertLessThanOrEqual(version.frame.maxX, privacy.frame.minX)
+            XCTAssertLessThanOrEqual(privacy.frame.maxX, terms.frame.minX)
+            XCTAssertLessThanOrEqual(terms.frame.maxX, feedback.frame.minX)
+            // AX retains complete labels even when rendered text truncates.
+            // Keep 14 pt semibold text complete. The narrow legal controls may
+            // use 4 pt padding; feedback retains its original 10 pt padding.
+            // screenshots remain the check for actual glyph rendering.
+            let labelFont = UIFont.systemFont(ofSize: 14, weight: .semibold)
+            for (control, label) in [(privacy, item.privacy), (terms, item.terms), (feedback, item.feedback)] {
+                let textWidth = (label as NSString).size(withAttributes: [.font: labelFont]).width
+                let minimumPadding: CGFloat = label == item.feedback ? 20 : 8
+                XCTAssertGreaterThanOrEqual(control.frame.width + 1, textWidth + minimumPadding, "Complete \(item.language) label: \(label)")
+                XCTAssertEqual(control.frame.height, 28, accuracy: 1, "Footer labels must stay on one line")
+            }
+            let versionWidth = (version.label as NSString).size(withAttributes: [
+                .font: UIFont.systemFont(ofSize: 10, weight: .medium),
+            ]).width
+            // This static-text AX node spans the entire plaque, including the
+            // two dots, gaps and at least 4 pt padding on each side.
+            XCTAssertGreaterThanOrEqual(version.frame.width + 1, versionWidth + 24, "Complete version label")
+            XCTAssertFalse(app.scrollViews["premium-purchase-panel"].exists)
+            revealEntirely(close, in: panel, app: app, scrollDown: true)
+            close.tap()
+            waitForRemoval(close)
+            XCTAssertTrue(settings.isHittable)
+            app.terminate()
+        }
     }
 
     /// Reuses the production overlay fixture and the established paging/zoom
@@ -246,9 +345,10 @@ final class PrelaunchLayoutUITests: XCTestCase {
     }
 
     private func revealEntirely(_ element: XCUIElement, in panel: XCUIElement,
-                                app: XCUIApplication, scrollDown: Bool = false) {
+                                app: XCUIApplication, scrollDown: Bool = false,
+                                requireHittable: Bool = true) {
         for _ in 0..<8 {
-            if element.exists, element.isHittable,
+            if element.exists, (!requireHittable || element.isHittable),
                panel.frame.insetBy(dx: -1, dy: -1).contains(element.frame),
                app.frame.insetBy(dx: -1, dy: -1).contains(element.frame) { return }
             if scrollDown { panel.swipeDown() } else { panel.swipeUp() }

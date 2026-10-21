@@ -1,0 +1,214 @@
+[
+  {
+    "label": "ui-free-workbench",
+    "run": {
+      "label": "ui-free-workbench",
+      "command": [
+        "env",
+        "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+        "bash",
+        "ios/StoreKit/test-recovery-ui.sh",
+        "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames"
+      ],
+      "startedAt": "2026-10-21T15:47:25.978860+08:00",
+      "finishedAt": "2026-10-21T15:51:10.730926+08:00",
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench.log",
+      "sha256": "1cc56d6179ef79a265c60ac6b7737b64338a270745adc4ada207c4389a92601a",
+      "markers": []
+    },
+    "resultsDirectory": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu",
+    "stages": [
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/cleanup.log",
+        "sha256": "d2568fe3d54c3a807c6a2e7a28837f50f76391af0b34383a2d7db9d13b70cf7f",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/cleanup.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/prepare-testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.log",
+        "sha256": "4aa1324b6834247447333cc5b70d05a076f262e6fbf23ab1cb7a662d7438663c",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/prepare-testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.log",
+        "sha256": "219693fbd757f840a06d3c30d8b3e09b35de77b72121d3ddc47cb34e5681d507",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "ui-free-camera",
+    "run": {
+      "label": "ui-free-camera",
+      "command": [
+        "env",
+        "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+        "bash",
+        "ios/StoreKit/test-recovery-ui.sh",
+        "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices"
+      ],
+      "startedAt": "2026-10-21T15:51:10.836771+08:00",
+      "finishedAt": "2026-10-21T15:55:03.402101+08:00",
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera.log",
+      "sha256": "85b32d9e2bbe280122f6ca7ccc5ef8abafc9e3227fe6cdb74e308581c7dcd6dd",
+      "markers": []
+    },
+    "resultsDirectory": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr",
+    "stages": [
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/cleanup.log",
+        "sha256": "20277ec643137dac7df6dd79cddedbb6d9af6e0dc6b48dc872ff7b1c4ab0e522",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/cleanup.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/prepare-testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.log",
+        "sha256": "2c1b6837999b23c1b7bfd7ae11a5c9c6b79abc3dac8e8cdfa2967ab441fe4ec0",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/prepare-testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.log",
+        "sha256": "f00744f0963c86d718b36cfdda5cdf58c9c3254e322844d4320688acccc892cf",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "ui-watermark-workbench",
+    "run": {
+      "label": "ui-watermark-workbench",
+      "command": [
+        "env",
+        "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+        "bash",
+        "ios/StoreKit/test-recovery-ui.sh",
+        "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch"
+      ],
+      "startedAt": "2026-10-21T15:55:03.462667+08:00",
+      "finishedAt": "2026-10-21T15:57:18.131910+08:00",
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench.log",
+      "sha256": "b59117c904231df0bc23d569c773089ed705607ed045c0ff48d4902f84d55e00",
+      "markers": []
+    },
+    "resultsDirectory": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs",
+    "stages": [
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/cleanup.log",
+        "sha256": "3c9f4dcbdc1285eb193705b5d3c156564a83732f79080b1c55b08a55c99fc809",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/cleanup.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/prepare-testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+        "sha256": "ab2cdc69301d1fffe1e434d987f923b4ed1d9dc4fa3707fde651c47e4082596a",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/prepare-testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+        "sha256": "da71c68c434bfe116a5a9283236bb1d1bcca3f91284a7d7e1b1a3da7ab9e7e2e",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "ui-watermark-camera",
+    "run": {
+      "label": "ui-watermark-camera",
+      "command": [
+        "env",
+        "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+        "bash",
+        "ios/StoreKit/test-recovery-ui.sh",
+        "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch"
+      ],
+      "startedAt": "2026-10-21T15:57:18.194933+08:00",
+      "finishedAt": "2026-10-21T16:01:23.413726+08:00",
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera.log",
+      "sha256": "7c53cbe7f8a454618dae4e7772b06e0e5b05d5a27d89d360a1f4e1e11824e81a",
+      "markers": []
+    },
+    "resultsDirectory": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU",
+    "stages": [
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/cleanup.log",
+        "sha256": "099472423ada2af17f7ac2db4a4e1e8d4731521bc02bb936f2ccde3f9d415097",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/cleanup.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/prepare-testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+        "sha256": "1333c9d6b4c5a6073a776c635c8ada58403eb82ecba145b6a3612c2f3789b750",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/prepare-testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      },
+      {
+        "log": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.log",
+        "sha256": "bd36d2dcdea99e6686033d916b7b0799a81bcdb75d1387423b0f8bbde0298781",
+        "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+        "passed": true,
+        "testCounts": [
+          "1",
+          "0"
+        ]
+      }
+    ]
+  }
+]

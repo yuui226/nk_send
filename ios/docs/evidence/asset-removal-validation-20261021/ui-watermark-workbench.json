@@ -1,0 +1,17 @@
+{
+  "label": "ui-watermark-workbench",
+  "command": [
+    "env",
+    "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+    "bash",
+    "ios/StoreKit/test-recovery-ui.sh",
+    "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch"
+  ],
+  "startedAt": "2026-10-21T15:55:03.462667+08:00",
+  "finishedAt": "2026-10-21T15:57:18.131910+08:00",
+  "exitCode": 0,
+  "log": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench.log",
+  "sha256": "b59117c904231df0bc23d569c773089ed705607ed045c0ff48d4902f84d55e00",
+  "markers": []
+}

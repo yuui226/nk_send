@@ -40,7 +40,7 @@ import SwiftUI
     func testEveryPresetPageFitsPortraitAndLandscapeWithoutFullHeightPlaceholder() {
         for (host, anchor, landscape) in [(CGSize(width: 320, height: 568), CGRect(x: 265, y: 150, width: 36, height: 36), false),
                                          (CGSize(width: 700, height: 250), CGRect(x: 620, y: 200, width: 36, height: 36), true)] {
-            let layout = RemotePictureControlLayout(overview: Self.overview, categories: [], category: "built-in",
+            let layout = RemotePictureControlLayout(overview: Self.overview, categories: [], category: "",
                 hostSize: host, anchor: anchor, landscape: landscape, scale: 3)
             for page in [RemotePictureControlPage.slots, .init(slot: 201), .init(slot: 201, confirmation: .clear), .init(slot: 201, confirmation: .folder)] {
                 let size = layout.size(for: page)
@@ -125,6 +125,18 @@ import SwiftUI
         // 19dp mark, while staying comfortably inside the 36dp button.
         XCTAssertLessThan(try XCTUnwrap(xs.min()), 8 * 3)
         XCTAssertGreaterThan(try XCTUnwrap(xs.max()), (8 + 19) * 3)
+    }
+    func testUserNP3EmptyFolderGuidanceHasMeasuredContentHeight() {
+        for message in ["Choose a folder containing .np3 files; one level of subfolders is supported as categories.",
+                        "选择含 .np3 文件的文件夹，支持一层子文件夹作为分类。", "No .np3 files found"] {
+            let layout = RemotePictureControlLayout(overview: Self.overview, categories: [], category: "",
+                hostSize: CGSize(width: 393, height: 700), anchor: nil, landscape: false, scale: 3,
+                emptyMessage: message)
+            let size = layout.size(for: .init(slot: 201))
+            XCTAssertGreaterThan(size.height, 46, "The folder guidance must not collapse to a header-only popup")
+            XCTAssertLessThan(size.height, 700)
+            XCTAssertEqual(size.width, 260)
+        }
     }
     func testPresetTransitionRetainsOutgoingPageAndWaitsForSizeAndAlpha() {
         let motion = RemotePictureControlMotion()
@@ -229,6 +241,84 @@ import SwiftUI
         XCTAssertFalse(model.loading)
         model.requestClose()
     }
+    /// The camera overview and provider scan are deterministic inputs. The real
+    /// production popup, folder owner, categories and transitions render here;
+    /// this does not simulate a security-scoped grant or perform a camera write.
+    func testActualUserNP3PopupKeepsFolderAndSlotAcrossCancellationAndEmptyRefresh() async throws {
+        let suite = "user-np3-panel-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let folderURL = URL(fileURLWithPath: "/user-np3-panel-test")
+        let files = [
+            PresetFile(identifier: "neutral", name: "User Neutral.NP3", relativePath: "User Neutral.NP3", size: 834),
+            PresetFile(identifier: "film", name: "User Film.NP3", relativePath: "My Files/User Film.NP3", size: 834),
+        ]
+        let source = UserPictureControlPanelFiles(files)
+        let folders = PictureControlFolderState(defaults: defaults, queue: PresetIOQueue(), scan: { _, _, ticket in
+            try ticket.checkCancellation()
+            return .init(bookmark: Data([1]), files: source.read(), root: folderURL)
+        })
+        let model = PictureControlPanelModel(folders: folders, current: { true }, allowed: { true }, busy: { _ in true },
+            readOverview: { _ in Self.overview }, change: { _, _, _ in XCTFail("Browsing must not mutate the camera") })
+        model.editingSlot = 209
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 700)
+        let host = UIHostingController(rootView: RemotePictureControlPanel(model: model, folders: folders,
+            anchor: CGRect(x: 170, y: 80, width: 36, height: 36), hostSize: window.bounds.size,
+            dismiss: {}, chooseFolder: { _ in XCTFail("The system picker is outside this component test") })
+            .background(Color.gray).environment(\.colorScheme, .light))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { model.close(); window.isHidden = true; window.rootViewController = nil }
+        func screenshot(_ name: String) {
+            window.layoutIfNeeded()
+            attach(UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }, name)
+        }
+        try await Task.sleep(for: .milliseconds(900))
+        XCTAssertNotNil(model.overview)
+        XCTAssertNil(folders.folder)
+        XCTAssertTrue(folders.files.isEmpty)
+        XCTAssertEqual(model.editingSlot, 209)
+        screenshot("user-np3-01-no-folder-guidance")
+
+        folders.changeFolder(folderURL)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while folders.scanning && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(folders.scanning)
+        XCTAssertEqual(folders.files, files)
+        XCTAssertEqual(Set(folders.catalog.categories), Set([nil, "My Files"]))
+        XCTAssertNil(folders.failure)
+        try await Task.sleep(for: .milliseconds(700))
+        screenshot("user-np3-02-user-folder-categories")
+
+        var picker = PictureControlFolderPickerState()
+        picker.begin(slot: 209)
+        picker.complete(folder: nil)
+        XCTAssertNil(picker.consume(resumed: false))
+        let returned = try XCTUnwrap(picker.consume(resumed: true))
+        XCTAssertNil(returned.folder)
+        model.editingSlot = returned.slot
+        XCTAssertEqual(model.editingSlot, 209)
+        XCTAssertEqual(folders.folder, folderURL)
+        XCTAssertEqual(folders.files, files)
+        XCTAssertNil(host.presentedViewController)
+
+        source.replace([])
+        folders.refresh()
+        let refreshDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while folders.scanning && ContinuousClock.now < refreshDeadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(folders.scanning)
+        XCTAssertTrue(folders.files.isEmpty)
+        XCTAssertTrue(folders.hasSnapshot)
+        XCTAssertEqual(folders.folder, folderURL)
+        XCTAssertEqual(model.editingSlot, 209)
+        try await Task.sleep(for: .milliseconds(700))
+        screenshot("user-np3-03-empty-folder-guidance")
+        XCTAssertNil(model.pending)
+    }
+
     private static var overview: PictureControlOverview {
         .init(slots: (201...209).map { .init(slot: $0, availability: $0 == 201 ? .occupied : .empty, name: $0 == 201 ? "Standard" : nil) },
               selected: 201, canActivate: true, canEdit: true)
@@ -272,4 +362,13 @@ import SwiftUI
         context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
         return stride(from: 0, to: data.count, by: 4).reduce(0) { $0 + (matching(Array(data[$1..<$1+3])) ? 1 : 0) }
     }
+}
+
+/// A scanner snapshot, not a document read or fake security-scoped permission.
+private final class UserPictureControlPanelFiles: @unchecked Sendable {
+    private let lock = NSLock()
+    private var files: [PresetFile]
+    init(_ files: [PresetFile]) { self.files = files }
+    func read() -> [PresetFile] { lock.lock(); defer { lock.unlock() }; return files }
+    func replace(_ files: [PresetFile]) { lock.lock(); defer { lock.unlock() }; self.files = files }
 }

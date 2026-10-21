@@ -11,6 +11,30 @@ extension EnvironmentValues {
     }
 }
 
+/// A single antialiased contour clips the live image and owns its inset stroke.
+/// Normal monitoring previously only had a clipped edge; the recording stroke
+/// straddled that edge. Keep the full stroke inside the same rounded shape so
+/// corners cannot lose half their width during resizing/rotation (2026-10-21).
+struct RemoteViewfinderSurface: ViewModifier {
+    let recording: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    private let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+
+    func body(content: Content) -> some View {
+        content
+            .clipShape(shape, style: FillStyle(antialiased: true))
+            .overlay {
+                shape.strokeBorder(recording
+                    ? Color(red: 1, green: 66.0 / 255, blue: 77.0 / 255)
+                    : Color(white: colorScheme == .dark ? 0.32 : 0.66),
+                    lineWidth: recording ? 2 : 1)
+                    .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.28), value: recording)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(shape)
+    }
+}
+
 /// One interpolated aspect drives the viewport, its mask and all image layers.
 /// AspectRatioLayout alone changes its proposal immediately; animating only an
 /// inner image then leaves a band while the surrounding layout catches up.

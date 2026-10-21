@@ -1,0 +1,167 @@
+[
+  {
+    "file": "camera-brand-off-before-relaunch.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/FF701EAE-7123-48D5-ABF3-B2F2BF6EAB86.png",
+    "sha256": "cb1eaaa6f96419dd0650d03c3d1dc7f4ccd3cdfbfcd32a7513098d1b23304881",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "FF701EAE-7123-48D5-ABF3-B2F2BF6EAB86.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-brand-off-no-graphic-option_0_2C66A90A-6854-4AF3-8CCC-7723B605229D.png",
+      "timestamp": 1792570050.492
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "camera-brand-text-before-relaunch.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/61F3E5B0-F250-41EC-88EB-3354D12AC220.png",
+    "sha256": "a38c53629166082b5fe5fc5835d5b46d75093954a22b3ed43a7a615da20ee7e6",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "61F3E5B0-F250-41EC-88EB-3354D12AC220.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-brand-text-no-graphic-option_0_F7BD0B9B-7CEE-43D6-A7B7-00D23CA7E012.png",
+      "timestamp": 1792570058.985
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "camera-brand-off-after-relaunch.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/E36607AC-1CC6-4506-B6C1-461BBBABDE67.png",
+    "sha256": "9a55183e8fe599accf7774c0feb475b2383cedc2285066a378d461a4f8788e7d",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "E36607AC-1CC6-4506-B6C1-461BBBABDE67.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-brand-off-no-graphic-option_0_6C376D8A-D8E3-4831-BAF7-54592167F8FF.png",
+      "timestamp": 1792570156.594
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "camera-brand-text-after-relaunch.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/5DF54189-D4B9-4552-9A2D-62B2E2DB738E.png",
+    "sha256": "0232043e7220f2f7ad058e5578e3195132226c1a4cbb03d3333c0d70df341662",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "5DF54189-D4B9-4552-9A2D-62B2E2DB738E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-brand-text-no-graphic-option_0_84783EB0-ED19-482E-82BC-2E94A03051F5.png",
+      "timestamp": 1792570164.849
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "custom-watermark-after-cancel.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+    "sha256": "08a2eaee87a5e54786e3aba39b4486bb6a1c994362343161436a20e79230f59e",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-logo-full-preview-after-cancel_0_C195A87B-1327-4B43-B190-D78DB02636E1.png",
+      "timestamp": 1792569615.649
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "custom-watermark-after-cancel-500ms.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/03F2B191-C966-4397-A63A-5F779F35C744.png",
+    "sha256": "08a2eaee87a5e54786e3aba39b4486bb6a1c994362343161436a20e79230f59e",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "03F2B191-C966-4397-A63A-5F779F35C744.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-logo-full-preview-after-cancel-plus-500ms_0_B8ED8BDB-B0B0-4275-AD8D-4D224F927E13.png",
+      "timestamp": 1792569616.515
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "custom-watermark-after-relaunch.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/840F1B1E-5BF3-4BBB-BCB1-6F7BACC34956.png",
+    "sha256": "5e400be51ce75a29e23bfa82490a66fc1fb52f577869f44782b18e623eca01a6",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "840F1B1E-5BF3-4BBB-BCB1-6F7BACC34956.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-logo-full-preview-after-relaunch_0_D75B5391-0047-4F00-868C-38477410B9D0.png",
+      "timestamp": 1792569667.547
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "workbench-watermark-settings-after-cancel.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench-attachments/CF1A4FA5-362C-49F3-BBBD-408AE1E98377.png",
+    "sha256": "dd6855293519504cbe503b7270f1e157100adea238ca469bbc6ce91543402b8c",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "CF1A4FA5-362C-49F3-BBBD-408AE1E98377.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "purchased-workbench-image-watermark-after-cancel_0_2A119E7B-3D73-43B1-8B4F-FC31DE399EDC.png",
+      "timestamp": 1792569410.5
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "workbench-watermark-settings-after-relaunch.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench-attachments/A846A11B-28BB-4790-AA7D-59A16D79526E.png",
+    "sha256": "c9d17a6780ca7781c89158964faa7d805110a1bc69bf2aab6ed9ee3abf315630",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "A846A11B-28BB-4790-AA7D-59A16D79526E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "purchased-workbench-image-watermark-after-relaunch_0_F403652D-F370-4FFC-AEC5-3A7E4AD166BF.png",
+      "timestamp": 1792569423.841
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "workbench-brand-control-text.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench-attachments/E8772942-405B-4F86-86BF-9744B915877E.png",
+    "sha256": "15e5004250243b2bc78271b7d0296fbbcf5b4ac60f5497074e279128c8109bda",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "E8772942-405B-4F86-86BF-9744B915877E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "workbench-brand-text-no-graphic-option_0_BD4EF823-61BC-414C-A484-42D6A5555AF6.png",
+      "timestamp": 1792569013.64
+    },
+    "imageUnmodified": true
+  },
+  {
+    "file": "historical-camera-brand-off-before-preview-ready.png",
+    "source": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/584C91A0-CCEE-4D98-9FE9-E12AEE2B9AC9.png",
+    "sha256": "68e0af8f3ece16fa26a0a52c6537cf5483ed5cd497b118d1ed6c2ffdd3e7a4ca",
+    "attachment": {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "584C91A0-CCEE-4D98-9FE9-E12AEE2B9AC9.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-brand-off-no-graphic-option_0_8C553818-05BE-4F84-8392-C617A81E602E.png",
+      "timestamp": 1792569128.318
+    },
+    "imageUnmodified": true
+  }
+]

@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-21",
+  "scope": "Remove only the 22 camera-writable bundled NP3 presets; user explicitly retains mobile photo color filters.",
+  "standaloneCheck": {
+    "result": "PASS",
+    "exitCode": 0,
+    "assertions": 1113,
+    "kind": "macOS host executable, actual production NikonPictureControl.swift plus test-only generated neutral NP3 factory",
+    "command": "xcrun swiftc -module-cache-path /tmp/ztransfer-user-np3-check-20261021/module-cache ios/ZTransfer/Domain/NikonPictureControl.swift /tmp/ztransfer-user-np3-check-20261021/SyntheticPictureControlFixture.swift /tmp/ztransfer-user-np3-check-20261021/main.swift -o /tmp/ztransfer-user-np3-check-20261021/check",
+    "run": "/tmp/ztransfer-user-np3-check-20261021/check",
+    "output": "PASS: 1113 assertions using actual NikonPictureControl.swift and generated neutral test fixtures",
+    "coverage": [
+      "NP3 container full/truncated reads",
+      "Classic Z and legacy V2 encoding with/without synthetic identity curve",
+      "all 257 arithmetic tone samples preserved",
+      "unknown version write rejection",
+      "legacy V2 mid-range unsupported rejection",
+      "bounded streams and cancellation"
+    ]
+  },
+  "notRun": [
+    "Xcode app build",
+    "App-hosted XCTest",
+    "UIKit layout / simulator visual review",
+    "physical camera write / rollback"
+  ],
+  "sourceSha256": {
+    "ios/ZTransfer/Domain/NikonPictureControl.swift": "4acf4401a06763be48f90984e178e98e09d6ac4f691efbf524036118a95e0621",
+    "ios/ZTransfer/Domain/PictureControlPanelModel.swift": "14afb54706d5b014e045ff5b07db1d1690533c08168b5a9cfc5de45617b81738",
+    "ios/ZTransfer/UI/RemotePictureControlPanel.swift": "924e4c1a8ff531ce24dada140a89e04b8f3def6da9a7b691c22140c577a51eee",
+    "ios/ZTransferTests/BuiltInPictureControlsTests.swift": "5404abcaec31012ba866479bfb1fc1b279f92859dee91abadb6a094dc03893c8",
+    "ios/ZTransferTests/NikonPictureControlProtocolTests.swift": "abb5463766346e8b734749fa8e01cd5e89794e02c80ef2edac801ce732b134c7",
+    "ios/ZTransferTests/NikonPictureControlTests.swift": "05faea427662dab84a55da52b7237e5b4f2874b3e5db3c4bb35837de18f488cd",
+    "ios/ZTransferTests/RemoteToolMarkAndPresetTests.swift": "b63b70da6cdfd69e6e48d028eccae1e4be485c057018240399c1d5d28e296372"
+  }
+}

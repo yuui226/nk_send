@@ -1037,10 +1037,9 @@ enum PhotoEffectsRenderer {
         let font = UIFont(name: "HelveticaNeue-BlackItalic", size: width * 0.034)
             ?? UIFont.italicSystemFont(ofSize: width * 0.034)
         let color = UIColor(red: 0.04, green: 0.043, blue: 0.047, alpha: 1)
-        let logo = settings.showBrand && settings.brandStyle == .logo
         let photoWidth = width / 1.06
-        let rows = frameIdentityRows(metadata: metadata, logoEnabled: logo, brandFont: font, modelFont: font,
-            color: color, gap: photoWidth * 0.012, width: photoWidth * 0.9, logoScale: 1.55,
+        let rows = frameIdentityRows(metadata: metadata, brandFont: font, modelFont: font,
+            color: color, gap: photoWidth * 0.012, width: photoWidth * 0.9,
             uppercaseBrand: true, preserveUnbreakableWidth: true, verticalPaddingRatio: 0.035)
         return MetadataRowsPlan(rows: rows, watermarkIndex: nil)
     }
@@ -1085,9 +1084,8 @@ enum PhotoEffectsRenderer {
         let identityFont = UIFont.systemFont(ofSize: brandGallery ? 1064 * 0.052 : film ? 21 : 28,
                                             weight: film || brandGallery ? .bold : .regular)
         let identity = negative || edgeFrame || classic || archive || strip?.identity != nil ? [] : frameIdentityRows(metadata: metadata,
-            logoEnabled: settings.metadata.showBrand && settings.metadata.brandStyle == .logo,
             brandFont: identityFont, modelFont: identityFont,
-            color: ink, gap: 12, width: 900, logoScale: brandGallery ? 1.55 : film ? 1.15 : 1.45,
+            color: ink, gap: 12, width: 900,
             uppercaseBrand: brandGallery, preserveUnbreakableWidth: true, verticalPaddingRatio: 0.035)
         let detailValues = film
             ? [metadata.lensModel ?? "", metadata.frameDetailLine] + metadata.locationRows + (strip?.date == nil ? [metadata.dateTime ?? ""] : [])
@@ -1280,70 +1278,39 @@ enum PhotoEffectsRenderer {
             .map { $0.addingVerticalPadding(max(1, font.pointSize * 0.2)) }
     }
 
-    static func frameIdentityRow(metadata: PhotoFrameMetadata, logoEnabled: Bool, font: UIFont,
-                                 color: UIColor, trailingRuns: [NSAttributedString], gap: CGFloat, logoScale: CGFloat = 1.35, uppercaseBrand: Bool = false, includeRunInk: Bool = true, verticalPaddingRatio: CGFloat = 0) -> PhotoFrameTextRow {
+    /// iOS release scope (2026-10-21): brand identity is plain EXIF text only.
+    /// Keep Android's existing text measurements, model runs and wrapping;
+    /// the user explicitly removed the bundled brand-logo mode and assets.
+    static func frameIdentityRow(metadata: PhotoFrameMetadata, font: UIFont,
+                                 color: UIColor, trailingRuns: [NSAttributedString], gap: CGFloat,
+                                 uppercaseBrand: Bool = false, includeRunInk: Bool = true,
+                                 verticalPaddingRatio: CGFloat = 0) -> PhotoFrameTextRow {
         let brandText = uppercaseBrand ? metadata.normalizedMake.uppercased() : metadata.normalizedMake
-        let lettering = metadataRow(brandText, font: font, color: color)
-        guard logoEnabled,
-              let brand = photoFrameBrandIdentity(make: metadata.make, model: metadata.model).brand,
-              let asset = PhotoFrameBrandLogoCatalog.load(brand) else {
-            return PhotoFrameTextRow([metadataText(brandText, font: font, color: color)] + trailingRuns, gap: gap, includeRunInk: includeRunInk, verticalPaddingRatio: verticalPaddingRatio)
-        }
-        let layers = asset.pathDatas.compactMap {
-            PhotoFrameBrandLogoAsset(brand: brand, viewBox: asset.viewBox, pathData: $0).makePath()
-        }
-        guard !layers.isEmpty, asset.viewBox.width > 0, asset.viewBox.height > 0 else {
-            return PhotoFrameTextRow([metadataText(brandText, font: font, color: color)] + trailingRuns, gap: gap, includeRunInk: includeRunInk, verticalPaddingRatio: verticalPaddingRatio)
-        }
-        var height = max(1, lettering.bounds.height) * logoScale * brand.logoHeightFactor
-        var width = height * asset.viewBox.width / asset.viewBox.height
-        if brand != .nikon, width > max(1, lettering.width) {
-            height *= max(1, lettering.width) / width
-            width = max(1, lettering.width)
-        }
-        let bounds = CGRect(x: 0, y: lettering.bounds.midY - height / 2, width: width, height: height)
-        return PhotoFrameTextRow(leadingBounds: bounds, drawLeading: { cg in
-            cg.saveGState()
-            cg.translateBy(x: bounds.minX, y: bounds.minY)
-            cg.scaleBy(x: bounds.width / asset.viewBox.width, y: bounds.height / asset.viewBox.height)
-            cg.translateBy(x: -asset.viewBox.minX, y: -asset.viewBox.minY)
-            cg.setFillColor(color.cgColor)
-            for (index, path) in layers.enumerated() {
-                drawBrandLogoLayer(cg, path: path, bounds: asset.viewBox, gradient: brand == .nikon, layerIndex: index)
-            }
-            cg.restoreGState()
-        }, runs: trailingRuns, gap: gap, includeRunInk: includeRunInk, verticalPaddingRatio: verticalPaddingRatio,
-            leadingVerticalPadding: font.pointSize * verticalPaddingRatio)
+        return PhotoFrameTextRow([metadataText(brandText, font: font, color: color)] + trailingRuns,
+            gap: gap, includeRunInk: includeRunInk, verticalPaddingRatio: verticalPaddingRatio)
     }
 
-    static func cameraIdentityRow(_ metadata: PhotoFrameMetadata, logoEnabled: Bool,
-                                  font: UIFont, color: UIColor, logoScale: CGFloat, uppercaseBrand: Bool = false,
-                                  separator: String = " ") -> PhotoFrameTextRow {
-        guard logoEnabled, photoFrameBrandIdentity(make: metadata.make, model: metadata.model).brand != nil else {
-            let brand = uppercaseBrand ? metadata.normalizedMake.uppercased() : metadata.normalizedMake
-            return metadataRow([brand, metadata.normalizedModel].filter { !$0.isEmpty }.joined(separator: separator), font: font, color: color)
-        }
-        return frameIdentityRow(metadata: metadata, logoEnabled: true, font: font, color: color,
-            trailingRuns: [metadataText(metadata.normalizedModel.isEmpty ? "" : separator + metadata.normalizedModel, font: font, color: color)],
-            gap: 0, logoScale: logoScale, includeRunInk: false)
+    static func cameraIdentityRow(_ metadata: PhotoFrameMetadata, font: UIFont, color: UIColor,
+                                  uppercaseBrand: Bool = false, separator: String = " ") -> PhotoFrameTextRow {
+        let brand = uppercaseBrand ? metadata.normalizedMake.uppercased() : metadata.normalizedMake
+        return metadataRow([brand, metadata.normalizedModel].filter { !$0.isEmpty }.joined(separator: separator),
+            font: font, color: color)
     }
 
-    static func frameIdentityRows(metadata: PhotoFrameMetadata, logoEnabled: Bool, brandFont: UIFont,
-                                  modelFont: UIFont, color: UIColor, gap: CGFloat, width: CGFloat, logoScale: CGFloat = 1.35, uppercaseBrand: Bool = false,
-                                  preserveUnbreakableWidth: Bool = false, verticalPaddingRatio: CGFloat = 0) -> [PhotoFrameTextRow] {
+    static func frameIdentityRows(metadata: PhotoFrameMetadata, brandFont: UIFont,
+                                  modelFont: UIFont, color: UIColor, gap: CGFloat, width: CGFloat,
+                                  uppercaseBrand: Bool = false, preserveUnbreakableWidth: Bool = false,
+                                  verticalPaddingRatio: CGFloat = 0) -> [PhotoFrameTextRow] {
         guard !metadata.identity.isEmpty else { return [] }
         let model = metadataText(metadata.normalizedModel, font: modelFont, color: color)
-        let combined = frameIdentityRow(metadata: metadata, logoEnabled: logoEnabled, font: brandFont,
-            color: color, trailingRuns: [model], gap: gap, logoScale: logoScale, uppercaseBrand: uppercaseBrand, verticalPaddingRatio: verticalPaddingRatio)
+        let combined = frameIdentityRow(metadata: metadata, font: brandFont, color: color,
+            trailingRuns: [model], gap: gap, uppercaseBrand: uppercaseBrand, verticalPaddingRatio: verticalPaddingRatio)
         if (preserveUnbreakableWidth ? combined.layoutWidth : combined.width) <= width { return [combined] }
         var rows: [PhotoFrameTextRow] = []
         if !metadata.normalizedMake.isEmpty {
-            if logoEnabled, photoFrameBrandIdentity(make: metadata.make, model: metadata.model).brand != nil {
-                rows.append(frameIdentityRow(metadata: metadata, logoEnabled: true, font: brandFont,
-                    color: color, trailingRuns: [], gap: 0, logoScale: logoScale, uppercaseBrand: uppercaseBrand, verticalPaddingRatio: verticalPaddingRatio))
-            } else {
-                rows += metadataDescriptionRows(uppercaseBrand ? metadata.normalizedMake.uppercased() : metadata.normalizedMake, font: brandFont, color: color, width: width, preserveUnbreakableWidth: preserveUnbreakableWidth).map { $0.addingVerticalPadding(brandFont.pointSize * verticalPaddingRatio) }
-            }
+            rows += metadataDescriptionRows(uppercaseBrand ? metadata.normalizedMake.uppercased() : metadata.normalizedMake,
+                font: brandFont, color: color, width: width, preserveUnbreakableWidth: preserveUnbreakableWidth)
+                .map { $0.addingVerticalPadding(brandFont.pointSize * verticalPaddingRatio) }
         }
         rows += PhotoFrameTextRow.wrappedDescriptions(model, width: width).map {
             let row = PhotoFrameTextRow([$0], verticalPaddingRatio: verticalPaddingRatio)
@@ -1393,8 +1360,7 @@ enum PhotoEffectsRenderer {
         }
         let brandFont = UIFont(name: "HelveticaNeue-BoldItalic", size: canvasWidth * 0.032)
             ?? UIFont.italicSystemFont(ofSize: canvasWidth * 0.032)
-        rows += frameIdentityRows(metadata: metadata, logoEnabled: settings.showBrand && settings.brandStyle == .logo,
-            brandFont: brandFont, modelFont: .systemFont(ofSize: canvasWidth * 0.024), color: color,
+        rows += frameIdentityRows(metadata: metadata, brandFont: brandFont, modelFont: .systemFont(ofSize: canvasWidth * 0.024), color: color,
             gap: canvasWidth * 0.016, width: columnWidth,
             preserveUnbreakableWidth: true, verticalPaddingRatio: 0.035)
         let detailWidth = columnWidth
@@ -1515,12 +1481,7 @@ enum PhotoEffectsRenderer {
         var left: [PhotoFrameTextRow] = []
         if let primary = labels.primary {
             let font = UIFont.systemFont(ofSize: width * 0.027, weight: .medium)
-            if settings.showBrand && settings.brandStyle == .logo,
-               photoFrameBrandIdentity(make: metadata.make, model: metadata.model).brand != nil {
-                left.append(frameIdentityRow(metadata: metadata, logoEnabled: true, font: font, color: .black, trailingRuns: [], gap: 0, verticalPaddingRatio: 0.035))
-            } else {
-                left += descriptions(primary, font: font, color: .black, width: leftWidth)
-            }
+            left += descriptions(primary, font: font, color: .black, width: leftWidth)
         }
         left += descriptions(labels.secondary ?? "", font: .systemFont(ofSize: width * 0.0165), color: UIColor(white: 0.4, alpha: 1), width: leftWidth)
         let signature = hasWatermark ? watermarkDescriptionRows(watermark.displayText,
@@ -1625,9 +1586,8 @@ enum PhotoEffectsRenderer {
         rows.append(contentsOf: details.filter { !$0.isEmpty }.map { ($0, brandDetailFont(size: min(photo.width * 0.021, shortEdge * 0.047))) })
         let font = UIFont.systemFont(ofSize: min(photo.width * 0.043, shortEdge * 0.095), weight: .black)
         let identity = frameIdentityRows(metadata: metadata,
-            logoEnabled: settings.showBrand && settings.brandStyle == .logo,
             brandFont: font, modelFont: font, color: .white, gap: font.pointSize * 0.3,
-            width: photo.width * 0.78, logoScale: 1.45, preserveUnbreakableWidth: true)
+            width: photo.width * 0.78, preserveUnbreakableWidth: true)
         return try brandRows(photo: photo, rows: rows, occupied: occupied,
             preferredBottomRatio: 0.030, gapRatio: 0.020, identity: identity)
     }
@@ -1663,19 +1623,6 @@ enum PhotoEffectsRenderer {
                 x: target.midX - row.layoutWidth * placement.scale * 0.5 - min(0, row.bounds.minX) * placement.scale,
                 baseline: placement.baselines[index], signature: false)
         }
-    }
-
-    private static func drawBrandLogoLayer(_ cg: CGContext, path: CGPath, bounds: CGRect, gradient: Bool, layerIndex: Int) {
-        guard gradient else { cg.addPath(path); cg.fillPath(); return }
-        cg.saveGState(); cg.addPath(path); cg.clip()
-        let colors = [UIColor(red: 1, green: 0.894, blue: 0.098, alpha: 1).cgColor,
-                      UIColor.white.cgColor, UIColor.white.cgColor,
-                      UIColor(red: 1, green: 0.894, blue: 0.098, alpha: 1).cgColor] as CFArray
-        guard let shader = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors,
-                                      locations: [0, 0.34, 0.66, 1]) else { cg.restoreGState(); return }
-        let spec = NikonBrandGradients.specs[min(layerIndex, NikonBrandGradients.specs.count - 1)]
-        cg.drawLinearGradient(shader, start: spec.start, end: spec.end, options: [])
-        cg.restoreGState()
     }
 
     static func photoWatermarkOccupiedBounds(photo: CGRect, watermark: PhotoFrameWatermark, referenceShortEdge: CGFloat? = nil) throws -> CGRect? {
@@ -1746,8 +1693,7 @@ enum PhotoEffectsRenderer {
                                   settings: PhotoFrameMetadataSettings, photoSize: CGSize) -> PhotoFrameTextRow? {
         let shortEdge = min(photoSize.width, photoSize.height)
         let camera = metadata.identity.isEmpty ? nil : cameraIdentityRow(metadata,
-            logoEnabled: settings.showBrand && settings.brandStyle == .logo,
-            font: .systemFont(ofSize: shortEdge * 0.030, weight: .medium), color: .white, logoScale: 1.30)
+            font: .systemFont(ofSize: shortEdge * 0.030, weight: .medium), color: .white)
         var runs: [NSAttributedString] = []
         if watermark.enabled && watermark.content == .text && watermark.position == .auto {
             if camera != nil {
@@ -1862,8 +1808,7 @@ enum PhotoEffectsRenderer {
         let labelFont = UIFont.monospacedSystemFont(ofSize: unit * 0.021, weight: .bold)
         let attrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: ink]
         if !identity.isEmpty {
-            let row = cameraIdentityRow(metadata, logoEnabled: settings.showBrand && settings.brandStyle == .logo,
-                font: labelFont, color: ink, logoScale: 1.20, separator: " · ").fitting(width: unit * 0.46)
+            let row = cameraIdentityRow(metadata, font: labelFont, color: ink, separator: " · ").fitting(width: unit * 0.46)
             row.draw(in: cg, x: photo.minX + unit * 0.028, baseline: photo.minY * 0.58)
         }
         let number = stableFilmFrameNumber(metadata)
@@ -1899,7 +1844,6 @@ enum PhotoEffectsRenderer {
         let text: String
         let font: UIFont
         let alpha: CGFloat
-        let logo: Bool
         let label: String?
         var gap: CGFloat
     }
@@ -1939,15 +1883,15 @@ enum PhotoEffectsRenderer {
         let w = source.width, h = source.height, portrait = h > w
         let ratio = CGFloat(normalizePhotoFrameWidthPercent(settings.widthPercent)) / 100
         func spec(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular, italic: Bool = false,
-                  alpha: CGFloat = 1, logo: Bool = false, label: String? = nil, gap: CGFloat = 0) -> PosterSpec {
+                  alpha: CGFloat = 1, label: String? = nil, gap: CGFloat = 0) -> PosterSpec {
             let font = italic ? UIFont(name: "HelveticaNeue-BoldItalic", size: size) ?? .boldSystemFont(ofSize: size)
                 : UIFont.systemFont(ofSize: size, weight: weight)
-            return PosterSpec(text: text, font: font, alpha: alpha, logo: logo, label: label, gap: gap)
+            return PosterSpec(text: text, font: font, alpha: alpha, label: label, gap: gap)
         }
         let body = w * (portrait ? 0.034 : 0.025)
         let identity = [
             spec(metadata.normalizedMake, size: w * (portrait ? 0.112 : 0.078), weight: .bold, italic: true,
-                 logo: settings.showBrand && settings.brandStyle == .logo, gap: w * 0.012),
+                 gap: w * 0.012),
             spec(metadata.normalizedModel, size: w * (portrait ? 0.068 : 0.047), weight: .medium, alpha: 245 / 255, gap: w * 0.016),
             spec(metadata.lensModel ?? "", size: body * 0.88, alpha: 205 / 255),
         ].filter { !$0.text.isEmpty }
@@ -1966,13 +1910,11 @@ enum PhotoEffectsRenderer {
         }
         func row(_ spec: PosterSpec) -> PhotoFrameTextRow {
             let color = UIColor.white.withAlphaComponent(spec.alpha)
-            return spec.logo ? frameIdentityRow(metadata: metadata, logoEnabled: true, font: spec.font, color: color,
-                trailingRuns: [], gap: 0, logoScale: 1.65) : metadataRow(spec.text, font: spec.font, color: color)
+            return metadataRow(spec.text, font: spec.font, color: color)
         }
         func minimumWidth(_ specs: [PosterSpec]) -> CGFloat {
             specs.map { item in
                 let measured = row(item).width, size = item.font.pointSize
-                if item.logo { return measured / 0.96 }
                 if item.label != nil { return size * 4.6 + measured }
                 return min(measured / 0.96, size * 6)
             }.max() ?? 0
@@ -1980,7 +1922,7 @@ enum PhotoEffectsRenderer {
         func measure(_ specs: [PosterSpec], width: CGFloat) -> PosterColumn {
             let rows = specs.flatMap { item -> [PosterMeasuredRow] in
                 let size = item.font.pointSize
-                let values = item.logo || item.label != nil ? [row(item)]
+                let values = item.label != nil ? [row(item)]
                     : metadataDescriptionRows(item.text, font: item.font, color: .white.withAlphaComponent(item.alpha), width: width * 0.96)
                 return values.enumerated().map { index, value in
                     // ParameterPosterFrame.drawPosterRows: only the FL/F/ISO/S
@@ -2095,8 +2037,8 @@ enum PhotoEffectsRenderer {
         for location in metadata.locationRows { rows.append((location, UIFont.systemFont(ofSize: photo.width * 0.0185), .black, .regular)) }
         let textRows = rows.enumerated().flatMap { index, row -> [PhotoFrameTextRow] in
             if index == 0, !identity.isEmpty {
-                return frameIdentityRows(metadata: metadata, logoEnabled: settings.showBrand && settings.brandStyle == .logo, brandFont: row.1, modelFont: row.1,
-                    color: row.2, gap: width * 0.012, width: textWidth, logoScale: 1.30, uppercaseBrand: true, preserveUnbreakableWidth: true)
+                return frameIdentityRows(metadata: metadata, brandFont: row.1, modelFont: row.1,
+                    color: row.2, gap: width * 0.012, width: textWidth, uppercaseBrand: true, preserveUnbreakableWidth: true)
             }
             return metadataDescriptionRows(row.0, font: row.1, color: row.2, width: textWidth, preserveUnbreakableWidth: true)
         }
@@ -2126,10 +2068,9 @@ enum PhotoEffectsRenderer {
         guard !metadata.identity.isEmpty else { return nil }
         let font = UIFont.boldSystemFont(ofSize: width * 0.021)
         let color = UIColor(red: 184.0 / 255.0, green: 132.0 / 255.0, blue: 99.0 / 255.0, alpha: 1)
-        let row = frameIdentityRow(metadata: metadata, logoEnabled: settings.showBrand && settings.brandStyle == .logo,
-            font: font, color: color,
+        let row = frameIdentityRow(metadata: metadata, font: font, color: color,
             trailingRuns: [metadataText(metadata.normalizedModel, font: font, color: color)],
-            gap: width * 0.006, logoScale: 1.15, verticalPaddingRatio: 0.035)
+            gap: width * 0.006, verticalPaddingRatio: 0.035)
         // Android moves oversized identities into the information band instead of shrinking the strip.
         return row.layoutWidth <= width * 0.58 && row.bounds.height <= width * 0.030 ? row : nil
     }
@@ -2231,20 +2172,19 @@ enum PhotoEffectsRenderer {
         let maxWidth = width * 0.90
         let percent = CGFloat(normalizePhotoFrameWidthPercent(settings.widthPercent)) / 100
         var identityGap: CGFloat = 0
-        let logo = settings.showBrand && settings.brandStyle == .logo
         let details = [metadata.lensModel ?? "", metadata.frameDetailLine, metadata.dateTime ?? ""].filter { !$0.isEmpty }.joined(separator: "   ")
         let tail = [metadata.normalizedModel, details].filter { !$0.isEmpty }.joined(separator: "   ")
         var rows: [PhotoFrameTextRow] = []
         if !metadata.identity.isEmpty || !details.isEmpty {
-            let caption = frameIdentityRow(metadata: metadata, logoEnabled: logo, font: font, color: color,
-                trailingRuns: [metadataText(tail, font: font, color: color)], gap: width * 0.012 * percent, logoScale: 1.20, verticalPaddingRatio: 0.035)
+            let caption = frameIdentityRow(metadata: metadata, font: font, color: color,
+                trailingRuns: [metadataText(tail, font: font, color: color)], gap: width * 0.012 * percent, verticalPaddingRatio: 0.035)
             if caption.layoutWidth <= maxWidth { rows.append(caption) }
             else {
                 if !metadata.identity.isEmpty {
                     let identityFont = UIFont(descriptor: font.fontDescriptor.withSymbolicTraits([.traitCondensed, .traitBold]) ?? font.fontDescriptor,
                                               size: baseSize)
-                    let identity = frameIdentityRows(metadata: metadata, logoEnabled: logo, brandFont: identityFont, modelFont: identityFont,
-                        color: color, gap: width * 0.012, width: maxWidth, logoScale: 1.20, preserveUnbreakableWidth: true, verticalPaddingRatio: 0.035)
+                    let identity = frameIdentityRows(metadata: metadata, brandFont: identityFont, modelFont: identityFont,
+                        color: color, gap: width * 0.012, width: maxWidth, preserveUnbreakableWidth: true, verticalPaddingRatio: 0.035)
                     rows += identity
                     if identity.count == 1 && identity[0].layoutWidth <= maxWidth {
                         identityGap = width * 0.005 * min(max(percent, 0.65), 1)
@@ -2452,8 +2392,7 @@ extension PhotoFrameMetadata {
         let validAltitude = altitude?.isFinite == true && altitude != 0
         return PhotoFrameMetadata(
             make: !settings.showBrand ? nil
-                : sourceMake ?? (settings.brandStyle == .logo && inferredBrand != nil ? inferredBrand
-                    : !settings.showModel ? inferredBrand ?? (preview ? "NIKON" : nil)
+                : sourceMake ?? (!settings.showModel ? inferredBrand ?? (preview ? "NIKON" : nil)
                     : preview ? inferredBrand ?? "NIKON" : nil),
             model: !settings.showModel ? nil
                 : !settings.showBrand ? modelValue ?? (preview ? "Z 233" : nil)

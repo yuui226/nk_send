@@ -1,0 +1,101 @@
+{
+  "source": "/Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffects.swift",
+  "sourceSha256": "7ef1069f206b79c7c1154973fedcee00553cd0c89f7da4a070c19c13553b4ca9",
+  "generatedFile": "/tmp/ztransfer-brand-foundation-check-20261021/ProductionBrandMetadata.swift",
+  "generatedSha256": "8a719d10927c4fb93b5898b93e3a6ac4686189c6cb911c5ac4581eae3815d816",
+  "extraction": "Complete unmodified declaration blocks copied from current production source; only Foundation import and separators added.",
+  "declarations": [
+    {
+      "declaration": "enum PhotoFramePreset:",
+      "startLine": 105,
+      "endLine": 111,
+      "sha256": "3006b4e9060ad5886194ca0737e6fb2982a37abd8bf8abf74b29b7410846c415"
+    },
+    {
+      "declaration": "enum PhotoFrameBrandStyle:",
+      "startLine": 301,
+      "endLine": 301,
+      "sha256": "5a79253d5d813608499ec4545306dc042591041cea55553370a9dabca95f5a10"
+    },
+    {
+      "declaration": "func normalizePhotoFrameWidthPercent(",
+      "startLine": 302,
+      "endLine": 302,
+      "sha256": "b1c33543b38d39b8a589f7050c52ab973e5d70d80f38d6168947de9cd6145886"
+    },
+    {
+      "declaration": "func normalizePhotoFrameBackdropPercent(",
+      "startLine": 303,
+      "endLine": 303,
+      "sha256": "4e5393a6a3698f3782571a76e8567901459219e443f0b5d34f5fe77938afb17f"
+    },
+    {
+      "declaration": "private extension Int {",
+      "startLine": 314,
+      "endLine": 314,
+      "sha256": "9eb96dc024a5b05d986b2ddad4a9360e09840ba1074544af4556e073c6a1e2f0"
+    },
+    {
+      "declaration": "struct PhotoFrameMetadataSettings:",
+      "startLine": 316,
+      "endLine": 407,
+      "sha256": "0040aa4907a815805ce029ae491f258bafb90ecd1e512fe4e0be58babbce3d36"
+    },
+    {
+      "declaration": "extension PhotoFrameMetadataSettings {",
+      "startLine": 519,
+      "endLine": 531,
+      "sha256": "ead013d0fff37e3319aba5f2d79b096790b96d6f63e0c959d357c839d5190111"
+    }
+  ],
+  "scope": [
+    "ordinary brand visibility cycle",
+    "legacy metadata JSON decode and encode",
+    "legacy brandStyle construction and assignment"
+  ],
+  "notCovered": [
+    "PhotoEffectsStore persistence",
+    "Android preference parsing",
+    "complete effect recipe decoding",
+    "preview cache",
+    "renderer",
+    "iOS UI",
+    "UIKit build"
+  ],
+  "compile": {
+    "exitCode": 0,
+    "log": "/tmp/ztransfer-brand-foundation-check-20261021/compile.log",
+    "compiler": "xcrun swiftc",
+    "moduleCache": "/tmp/ztransfer-brand-foundation-check-20261021/module-cache"
+  },
+  "run": {
+    "exitCode": 0,
+    "log": "/tmp/ztransfer-brand-foundation-check-20261021/run.log",
+    "testGroups": 3,
+    "assertions": 174,
+    "result": "passed"
+  },
+  "sourceUnchangedAfterRun": true,
+  "artifacts": [
+    {
+      "file": "/tmp/ztransfer-brand-foundation-check-20261021/extract.py",
+      "sha256": "5dddf14a89e42e8ea520f4c17594c342ebb6d591efef6668a93a5ed7c9d39c52"
+    },
+    {
+      "file": "/tmp/ztransfer-brand-foundation-check-20261021/main.swift",
+      "sha256": "9d19931a5ffd90e014c3fe51f105497425f3824a616a75cf905e5b8fad9217a0"
+    },
+    {
+      "file": "/tmp/ztransfer-brand-foundation-check-20261021/compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "/tmp/ztransfer-brand-foundation-check-20261021/run.log",
+      "sha256": "47b1ae98c07a7b2e8cd5747092c89884757c8c85bff4924f9f380f3b4ce6b8f1"
+    },
+    {
+      "file": "/tmp/ztransfer-brand-foundation-check-20261021/brand-metadata-check",
+      "sha256": "beabe4da5d2b5b359a2eae90a82c0a888a401358da235966ca245937bd8c8f6e"
+    }
+  ]
+}

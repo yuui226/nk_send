@@ -1,5 +1,6 @@
 import XCTest
 import StoreKitTest
+import Vision
 
 /// Exercises the actual App process and purchase button. Killing the App is
 /// distinct from replacing one manager inside a still-running StoreKit client.
@@ -427,6 +428,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         let selectedFrame = frame.value as? String
         XCTAssertNotEqual(selectedFrame, "Off")
 
+        let brandWasText = verifyBrandControlHasOnlyTextAndOff(app)
         verifyFreeWatermarkControls(app)
         attachScreenshot(app, name: "free-workbench-watermark-locked")
 
@@ -440,6 +442,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         XCTAssertEqual(filter.value as? String, selectedFilter)
         revealEffectsControl(frame, in: app)
         XCTAssertEqual(frame.value as? String, selectedFrame)
+        verifyBrandControlHasOnlyTextAndOff(app, expectedInitialText: brandWasText)
         verifyFreeWatermarkControls(app)
         attachScreenshot(app, name: "free-workbench-watermark-after-relaunch")
     }
@@ -936,6 +939,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         XCTAssertNotEqual(frame.value as? String, previousFrame)
         if frame.value as? String == "Off" { tapWhenStable(frame) }
         let savedFrame = frame.value as? String
+        let brandWasText = verifyBrandControlHasOnlyTextAndOff(app, scrollView: panel)
         verifyFreeWatermarkControls(app, scrollView: panel)
         attachScreenshot(app, name: "free-camera-effects-locked")
         // Android saves the draft on returning to main settings; this is not
@@ -950,6 +954,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         XCTAssertEqual(filter.value as? String, savedFilter)
         revealEffectsControl(frame, in: app, scrollView: panel)
         XCTAssertEqual(frame.value as? String, savedFrame)
+        verifyBrandControlHasOnlyTextAndOff(app, scrollView: panel, expectedInitialText: brandWasText)
         verifyFreeWatermarkControls(app, scrollView: panel)
         attachScreenshot(app, name: "free-camera-effects-after-relaunch")
     }
@@ -1047,6 +1052,128 @@ final class PremiumRecoveryUITests: XCTestCase {
         let editor = app.scrollViews.containing(.button, identifier: "Frame").firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
         return editor
+    }
+
+    /// User-approved iOS difference: the metadata control must skip the
+    /// removed brand graphic, while the separate user-image Logo wheel stays.
+    @discardableResult
+    private func verifyBrandControlHasOnlyTextAndOff(_ app: XCUIApplication,
+                                                    scrollView: XCUIElement? = nil,
+                                                    expectedInitialText: Bool? = nil) -> Bool {
+        let settings = app.buttons.matching(NSPredicate(format: "value == %@", "Frame settings")).firstMatch
+        let text = app.buttons["Brand · Text"].firstMatch
+        let off = app.buttons["Brand"].firstMatch
+        let logo = app.buttons["Brand · Logo"].firstMatch
+        let wasExpanded = text.exists || off.exists
+        if !wasExpanded {
+            revealEffectsControl(settings, in: app, scrollView: scrollView)
+            tapWhenStable(settings)
+        }
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            text.exists || off.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed, app.debugDescription)
+        XCTAssertFalse(logo.exists, "The removed graphical brand state must not be exposed")
+        let initiallyText = text.exists
+        if let expectedInitialText {
+            XCTAssertEqual(initiallyText, expectedInitialText, "Brand visibility must survive relaunch")
+        }
+        if !initiallyText {
+            revealEffectsControl(off, in: app, scrollView: scrollView)
+            tapWhenStable(off)
+            XCTAssertTrue(text.waitForExistence(timeout: 5), app.debugDescription)
+        }
+        revealEffectsControl(text, in: app, scrollView: scrollView)
+        if scrollView != nil { waitForCameraBrandPreview(app, hasBrand: true) }
+        tapWhenStable(text)
+        XCTAssertTrue(off.waitForExistence(timeout: 5), "Text must switch directly to off, skipping the former logo state")
+        XCTAssertFalse(logo.exists)
+        if scrollView != nil { waitForCameraBrandPreview(app, hasBrand: false) }
+        attachScreenshot(app, name: scrollView == nil ? "workbench-brand-off-no-graphic-option" : "camera-brand-off-no-graphic-option")
+        tapWhenStable(off)
+        XCTAssertTrue(text.waitForExistence(timeout: 5), "Off must switch directly to ordinary brand text")
+        XCTAssertFalse(logo.exists)
+        if scrollView != nil { waitForCameraBrandPreview(app, hasBrand: true) }
+        attachScreenshot(app, name: scrollView == nil ? "workbench-brand-text-no-graphic-option" : "camera-brand-text-no-graphic-option")
+        // Restore the previous visible state so the existing filter/frame and
+        // watermark-lock checks keep testing the same persisted preferences.
+        if !initiallyText {
+            tapWhenStable(text)
+            XCTAssertTrue(off.waitForExistence(timeout: 5), app.debugDescription)
+        }
+        if !wasExpanded {
+            revealEffectsControl(settings, in: app, scrollView: scrollView)
+            tapWhenStable(settings)
+            let collapsed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !text.exists && !off.exists
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [collapsed], timeout: 5), .completed)
+        }
+        return initiallyText
+    }
+
+    /// This Debug camera fixture renders the conspicuous model placeholder
+    /// Z 233 over its real sample photo, as verified in the original captures.
+    /// Require that model in the actual preview pixels, so an empty, cropped
+    /// or failed OCR result can never count as a hidden-brand success.
+    private func waitForCameraBrandPreview(_ app: XCUIApplication, hasBrand: Bool) {
+        let deadline = Date().addingTimeInterval(20)
+        var consecutiveMatches = 0
+        var observations: [String] = []
+        while Date() < deadline {
+            let screen = app.frame
+            let popup = app.otherElements["popup-panel-settings"].frame.intersection(screen)
+            let filter = app.buttons["Photo filter"].firstMatch
+            guard filter.exists, screen.width > 0, screen.height > 0,
+                  popup.width > 0, filter.frame.minY > popup.minY else {
+                observations.append("The preview region above Photo filter is not visible")
+                break
+            }
+            let preview = CGRect(x: popup.minX, y: popup.minY,
+                                 width: popup.width, height: filter.frame.minY - popup.minY)
+                .intersection(screen)
+            let screenshot = app.screenshot()
+            guard let image = screenshot.image.cgImage else {
+                observations.append("The app screenshot has no CGImage")
+                break
+            }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["en-US"]
+            request.usesLanguageCorrection = false
+            // Test-only CPU recognition avoids hardware/model warm-up stalls
+            // and works on the minimum iOS 16 runtime as well as simulators.
+            request.usesCPUOnly = true
+            // Vision uses normalized bottom-left coordinates; XCUI frames
+            // use screen points from the top-left, independent of pixel scale.
+            request.regionOfInterest = CGRect(
+                x: (preview.minX - screen.minX) / screen.width,
+                y: 1 - (preview.maxY - screen.minY) / screen.height,
+                width: preview.width / screen.width,
+                height: preview.height / screen.height)
+            do {
+                try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+                let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+                let tokens = lines.map { $0.uppercased().filter { $0.isLetter || $0.isNumber } }
+                let modelVisible = tokens.contains { $0.contains("Z233") }
+                let brandVisible = tokens.contains { $0.contains("NIKON") }
+                observations.append("expectedBrand=\(hasBrand); model=\(modelVisible); brand=\(brandVisible); OCR=\(lines)")
+                consecutiveMatches = modelVisible && brandVisible == hasBrand ? consecutiveMatches + 1 : 0
+                if consecutiveMatches == 2 { return }
+            } catch {
+                consecutiveMatches = 0
+                observations.append("OCR error: \(error)")
+            }
+            // This is only the OCR polling interval. Success requires two
+            // observed matching frames, never merely the passage of time.
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        attachScreenshot(app, name: hasBrand ? "camera-brand-text-preview-not-ready" : "camera-brand-off-preview-not-ready")
+        let trace = XCTAttachment(string: observations.joined(separator: "\n"))
+        trace.name = "camera-brand-preview-ocr-observations"
+        trace.lifetime = .keepAlways
+        add(trace)
+        XCTFail("Camera preview did not show Z 233 with brand \(hasBrand ? "visible" : "hidden") within 20 seconds")
     }
 
     private func verifyFreeWatermarkControls(_ app: XCUIApplication, scrollView: XCUIElement? = nil) {

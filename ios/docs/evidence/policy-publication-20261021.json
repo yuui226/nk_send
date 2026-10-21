@@ -1,0 +1,355 @@
+{
+  "date": "2026-10-21",
+  "timeZone": "Asia/Shanghai",
+  "status": "published",
+  "repository": "yuui226/ztransfer-site",
+  "branch": "master",
+  "commit": "3d138907edde01603e2ae57bf19a87ec37bc143d",
+  "deployment": {
+    "status": "built",
+    "createdAtUTC": "2026-10-21T05:05:10Z",
+    "completedAtUTC": "2026-10-21T05:05:29Z",
+    "error": null
+  },
+  "ownerDecisions": {
+    "translation": "Do not send support content to third-party AI or online translation for now.",
+    "audience": "General photography audience, not specifically child-directed.",
+    "license": "Apple standard EULA plus supplementary service terms.",
+    "publish": "Publish once the missing content is completed."
+  },
+  "unresolvedPublicMarkers": 0,
+  "effectiveDate": "2026-10-21",
+  "static": {
+    "pages": 7,
+    "localLinkChecks": 114,
+    "externalOrMailLinks": 23,
+    "errors": [],
+    "originalMainPreserved": true,
+    "CNAMEAndIconPreserved": true,
+    "outputSHA256": {
+      ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "CNAME": "fc815a1cb552481a07ac310e86913b01c500a408ce11dcac49f9686688fd1f35",
+      "icon-320.png": "3e2d954c048cd04dfe11727094d2157ce8c354a818411721a74bd57691acc476",
+      "index.html": "3f63d81011d41eb076a548d8cc15e4ab1a645ba35c43e3400c8b365e7f8e2642",
+      "ios/assets/style.css": "054d1f26a3bbfcf623126183b453d93875613f3284a31a441d39a131d75ededc",
+      "ios/en/privacy/index.html": "12b969d5012c8b24c3895b59a39e9cbbaee990e61c296ca6a1e5ebe2950cd5bd",
+      "ios/en/support/index.html": "edabd434a6084fe0f6eb39266791d4ef182daa3a650b66b43e10f08cce6440a9",
+      "ios/en/terms/index.html": "0fe6b6b22338ada3f2f97b1c50266b0bb1ea694ed29eed60f450987eefcfdb94",
+      "ios/privacy/index.html": "f9ea7ac4b4a31b7918775f2853cbb14022056f3e4ee73f4e04e0d941335862f1",
+      "ios/support/index.html": "3892e5471f7b49aa0f656cba37e64b2b31058376d12e0b8eb9f399f1de410197",
+      "ios/terms/index.html": "ea599ab3422fbdc10ef16250bd7b444cb6608ee624a7b70e299babf6ecc6082d"
+    }
+  },
+  "browser": {
+    "origin": "http://127.0.0.1:57010",
+    "localOnly": true,
+    "checks": [
+      {
+        "route": "",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/privacy/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/terms/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/support/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/en/privacy/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/en/terms/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/en/support/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/privacy/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/terms/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/support/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/en/privacy/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/en/terms/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      },
+      {
+        "route": "ios/en/support/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "styleSheets": 1,
+        "hasDraft": false
+      }
+    ],
+    "flows": [
+      "home → Chinese privacy → English privacy → original home"
+    ],
+    "pageErrors": [],
+    "screenshots": [
+      "home-footer-mobile.png",
+      "home-footer-desktop.png",
+      "privacy-zh-mobile.png",
+      "privacy-en-dark-mobile.png"
+    ],
+    "scope": "Local Chromium HTTP release output, mobile light/dark layouts and link flow. No public hosting, mobile Safari, DNS or App build."
+  },
+  "images": [
+    {
+      "path": "policy-publication-20261021/home-footer-mobile.png",
+      "sha256": "ecadf23158ec0ab9b7fa7b2b075e7fce48543094b018d8ddc8e97fbc00761e59",
+      "visuallyReviewed": true
+    },
+    {
+      "path": "policy-publication-20261021/home-footer-desktop.png",
+      "sha256": "948112cf79e438a259afa94222a14b23095218ff0971e3334783803d95cd968c",
+      "visuallyReviewed": true
+    },
+    {
+      "path": "policy-publication-20261021/privacy-zh-mobile.png",
+      "sha256": "b7acb87e020069430a03ad03a429250b58d8178564a53514717dda9e0d2c71a4",
+      "visuallyReviewed": true
+    },
+    {
+      "path": "policy-publication-20261021/privacy-en-dark-mobile.png",
+      "sha256": "c9fc261b2ed1a4cbcc4f72f9ae0944da549804a8c14406bb4e468d665f055e50",
+      "visuallyReviewed": true
+    }
+  ],
+  "public": {
+    "normalTLSValidation": true,
+    "results": [
+      {
+        "url": "https://www.ztransfer.top/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/",
+        "sha256": "3f63d81011d41eb076a548d8cc15e4ab1a645ba35c43e3400c8b365e7f8e2642",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/ios/privacy/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/privacy/",
+        "sha256": "f9ea7ac4b4a31b7918775f2853cbb14022056f3e4ee73f4e04e0d941335862f1",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/ios/terms/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/terms/",
+        "sha256": "ea599ab3422fbdc10ef16250bd7b444cb6608ee624a7b70e299babf6ecc6082d",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/ios/support/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/support/",
+        "sha256": "3892e5471f7b49aa0f656cba37e64b2b31058376d12e0b8eb9f399f1de410197",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/ios/en/privacy/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/en/privacy/",
+        "sha256": "12b969d5012c8b24c3895b59a39e9cbbaee990e61c296ca6a1e5ebe2950cd5bd",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/ios/en/terms/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/en/terms/",
+        "sha256": "0fe6b6b22338ada3f2f97b1c50266b0bb1ea694ed29eed60f450987eefcfdb94",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/ios/en/support/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/en/support/",
+        "sha256": "edabd434a6084fe0f6eb39266791d4ef182daa3a650b66b43e10f08cce6440a9",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/ios/assets/style.css",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/assets/style.css",
+        "sha256": "054d1f26a3bbfcf623126183b453d93875613f3284a31a441d39a131d75ededc",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://www.ztransfer.top/icon-320.png",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/icon-320.png",
+        "sha256": "3e2d954c048cd04dfe11727094d2157ce8c354a818411721a74bd57691acc476",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://ztransfer.top/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/",
+        "sha256": "3f63d81011d41eb076a548d8cc15e4ab1a645ba35c43e3400c8b365e7f8e2642",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://ztransfer.top/ios/privacy/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/privacy/",
+        "sha256": "f9ea7ac4b4a31b7918775f2853cbb14022056f3e4ee73f4e04e0d941335862f1",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://ztransfer.top/ios/terms/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/terms/",
+        "sha256": "ea599ab3422fbdc10ef16250bd7b444cb6608ee624a7b70e299babf6ecc6082d",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://ztransfer.top/ios/support/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/support/",
+        "sha256": "3892e5471f7b49aa0f656cba37e64b2b31058376d12e0b8eb9f399f1de410197",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://ztransfer.top/ios/en/privacy/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/en/privacy/",
+        "sha256": "12b969d5012c8b24c3895b59a39e9cbbaee990e61c296ca6a1e5ebe2950cd5bd",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://ztransfer.top/ios/en/terms/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/en/terms/",
+        "sha256": "0fe6b6b22338ada3f2f97b1c50266b0bb1ea694ed29eed60f450987eefcfdb94",
+        "matchesRelease": true
+      },
+      {
+        "url": "https://ztransfer.top/ios/en/support/",
+        "status": 200,
+        "finalURL": "https://www.ztransfer.top/ios/en/support/",
+        "sha256": "edabd434a6084fe0f6eb39266791d4ef182daa3a650b66b43e10f08cce6440a9",
+        "matchesRelease": true
+      }
+    ],
+    "checked": 16,
+    "expectedCommit": "3d138907edde01603e2ae57bf19a87ec37bc143d"
+  },
+  "dateGate": {
+    "invalidDate": "2026-02-30",
+    "rejected": true,
+    "existingOutputPreserved": true
+  },
+  "appConfiguration": {
+    "URLs": {
+      "ZTransferPrivacyPolicyURL": "https://www.ztransfer.top/ios/privacy/",
+      "ZTransferTermsOfUseURL": "https://www.ztransfer.top/ios/terms/"
+    },
+    "plistParsed": true,
+    "projectYAMLMatches": true,
+    "xcodeAppConfigurationsUsingPlist": 2,
+    "SwiftBehaviorChanged": false,
+    "appBuildRun": false,
+    "deviceInstallRun": false,
+    "limit": "The next built app still needs bundle validation and real in-app link taps; existing installed builds are unchanged."
+  },
+  "sourceSHA256": {
+    "隐私政策草稿.md": "3a381165f1a36c328c2fdf37009fa7d6a28a27cd37ce59acb8e37ef28371d96a",
+    "使用条款草稿.md": "a6cdf97a8b3b162009b420d6b2567b5b7f2c824af1dd41252b2584a1aea52c93",
+    "英文隐私与条款草稿.md": "2201f8b42525277d761932c3050ab5b992b3fafe89c1d4f4c8ac478bb58a91ce",
+    "支持页面草稿.md": "2a254111d7603f2a0de0226480f94be1d4ed33289fd931fddcb96e7d1f7070e7",
+    "site/build.mjs": "4d8d6eb5c32cc1dc3ac4b45e891492a0f43757036dffc1b79af3e9ce2a4b473a",
+    "site/README.md": "8b8956e433d910d6b4166a989515fa6936b9555dc103b18da7110da4a1637ef1",
+    "iOS协议页定稿与发布记录-20261021.md": "76decb0b17b008b66d38e4837793b1b534b56c4386808d8b628b3401d4ea8e70"
+  },
+  "appSourceSHA256": {
+    "ios/project.yml": "963e29d25a2086b6b1b7c0878eed1169395f571c15504c9296b68f570503dd7f",
+    "ios/ZTransfer/Info.plist": "f1b423b1ff3beeb60b79edcb5cac362bbe3e19bb65b32a0627636c760901235d"
+  },
+  "notCompleted": [
+    "App Store Connect production products and Family Sharing configuration",
+    "Age-rating questionnaire and regional submission requirements",
+    "New app package and in-app live-link validation",
+    "Physical hardware demonstration and final review submission"
+  ],
+  "officialSources": [
+    "https://developer.apple.com/app-store/review/guidelines/",
+    "https://developer.apple.com/help/app-store-connect/manage-app-information/provide-a-custom-license-agreement/",
+    "https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/turn-on-family-sharing-for-in-app-purchases/"
+  ]
+}

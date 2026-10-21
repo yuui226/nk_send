@@ -546,8 +546,7 @@ struct RemoteView: View {
                     review: { AnyView(reviewButton(large: false, sizeScale: $0)) }, parameter: { index, height in
                         AnyView(exposureTile(exposureFields[index], height: height))
                     })
-                    .frame(width: layout.controls.width, height: layout.controls.height)
-                    .offset(x: layout.controls.minX, y: layout.controls.minY)
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 RemoteMonitorHintAnchor(horizontalInset: 12)
                     .frame(width: layout.image.width)
                     .offset(x: layout.image.minX, y: layout.image.minY + layout.image.height * 0.20)
@@ -1268,13 +1267,12 @@ struct RemoteView: View {
             landscape: layoutOrientation.isLandscape, movie: model.movieMode,
             showExposure: tools.meter, audioEnabled: isSessionConnected && model.movieMode && tools.audio)
         return ZStack {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(RadialGradient(
-                    colors: [Color(white: 0.38), Color(white: 0.18)],
-                    center: .center,
-                    startRadius: 12,
-                    endRadius: 420
-                ))
+            RadialGradient(
+                colors: [Color(white: 0.38), Color(white: 0.18)],
+                center: .center,
+                startRadius: 12,
+                endRadius: 420
+            )
             if let image {
                 let metadata = model.frameMetadata
                 let focusBlock = focusDisplayState(now: ProcessInfo.processInfo.systemUptime, metadata: metadata)
@@ -1391,16 +1389,7 @@ struct RemoteView: View {
                 monitorPortraitStatusOverlay
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            // Android ViewfinderCard owns recording feedback; toolbar
-            // controls are outside this recording surface.
-            if showCameraRecording {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color(red: 1, green: 0.259, blue: 0.302), lineWidth: 2)
-                    .allowsHitTesting(false)
-            }
-        }
+        .modifier(RemoteViewfinderSurface(recording: showCameraRecording))
         .overlay {
             if !isSessionConnected {
                 Text(AppLocalized.resource("camera_not_connected"))
@@ -1412,7 +1401,6 @@ struct RemoteView: View {
                     .allowsHitTesting(false)
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private var remoteViewfinderAspect: CGFloat {

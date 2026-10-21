@@ -3405,6 +3405,84 @@ private actor SequentialListHarness {
     }
 }
 
+@MainActor
+final class NewPhotoThumbnailRangeTests: XCTestCase {
+    func testLiveCatalogAdditionLoadsAfterRangeBoundedScanInBothQueueModes() async throws {
+        for sequential in [false, true] {
+            let (model, io) = makeModel(sequential: sequential)
+            defer { model.transportDidDisconnect() }
+            await model.reload()
+            try await waitForRemoteLifecycle { await io.fetched.count == 5 }
+            let added = Self.file(22)
+            await model.applyCatalogUpdate(Self.history + [added])
+            try await waitForRemoteLifecycle { await io.fetched.contains(22) }
+            XCTAssertTrue(model.displayedFiles.contains(added))
+            XCTAssertEqual(model.photoLoadingRange, .five)
+            let fetched = await io.fetched
+            XCTAssertFalse(fetched.contains(15), "Old historical photos must remain outside the loading scope")
+        }
+    }
+
+    func testRemoteReturnDeltaAndLaterEventBothLoadWithoutRepeatingOldThumbnails() async throws {
+        let (model, io) = makeModel(sequential: false)
+        defer { model.transportDidDisconnect() }
+        await model.reload()
+        try await waitForRemoteLifecycle { await io.fetched.count == 5 }
+        await model.pauseForRemote()
+        await io.capture(Self.file(21))
+        await model.resumeAfterRemote(isConnected: true)
+        try await waitForRemoteLifecycle {
+            let fetched = await io.fetched
+            return model.hasCompletedFileScan && fetched.contains(21)
+        }
+        // A delayed ObjectAdded may arrive after the monitor's refresh/seed.
+        // Its new capture day lies past the queue's last historical range end.
+        await model.applyCatalogUpdate(Self.history + [Self.file(21), Self.file(22)])
+        try await waitForRemoteLifecycle { await io.fetched.contains(22) }
+        let fetched = await io.fetched
+        XCTAssertEqual(fetched.sorted(), Array(16...22).map(UInt32.init))
+        XCTAssertEqual(model.photoLoadingRange, .five)
+    }
+
+    private func makeModel(sequential: Bool) -> (PhotoListViewModel, NewPhotoThumbnailIO) {
+        let previous = PhotoFilterPersistence.loadPhotoLoadingRange()
+        PhotoFilterPersistence.savePhotoLoadingRange(.five)
+        defer { PhotoFilterPersistence.savePhotoLoadingRange(previous) }
+        let io = NewPhotoThumbnailIO(files: Self.history)
+        let model = PhotoListViewModel(scanCatalog: { _, _, detectNew, _, _ in
+            await io.scan(detectNew: detectNew)
+        }, prefetchBatch: { await io.prefetch($0) }, canFill: { await io.canFill },
+            setRemoteGate: { await io.setRemote($0) },
+            sequentialLoading: sequential)
+        return (model, io)
+    }
+
+    private static var history: [CameraFile] { (15...20).map(file) }
+    private static func file(_ day: Int) -> CameraFile {
+        CameraFile(id: UInt32(day), storageID: 1, format: 0x3801, size: 100,
+                   fileName: "\(day).JPG", captureDate: "202610\(day)T120000", isProtected: false)
+    }
+}
+
+private actor NewPhotoThumbnailIO {
+    private var files: [CameraFile]
+    private var added = Set<UInt32>()
+    private var remote = false
+    private(set) var fetched: [UInt32] = []
+    var canFill: Bool { !remote }
+    init(files: [CameraFile]) { self.files = files }
+    func setRemote(_ active: Bool) { remote = active }
+    func capture(_ file: CameraFile) { files.append(file); added.insert(file.id) }
+    func scan(detectNew: Bool) -> PhotoScanResult {
+        PhotoScanResult(files: files, removedHandles: [], addedHandles: detectNew ? added : [],
+                        handleQueriesSucceeded: true, metadataComplete: true)
+    }
+    func prefetch(_ files: [CameraFile]) -> ThumbnailBatchResult {
+        fetched += files.map(\.id)
+        return ThumbnailBatchResult(settled: Set(files.map(\.id)))
+    }
+}
+
 private actor RemoteListLifecycleHarness {
     struct ScanCall: Equatable, Sendable {
         let preserve: Bool

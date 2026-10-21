@@ -1,0 +1,28 @@
+{
+  "bundle": "/private/tmp/ztransfer-removal-derived-20261021/Build/Products/Release-iphoneos/ZTransfer.app",
+  "version": "1.98",
+  "build": "1",
+  "minimumOS": "16.0",
+  "deviceFamilies": [
+    1,
+    2
+  ],
+  "packagingChecksPassed": true,
+  "errors": [],
+  "removedCameraPresetsAndBrandLogosAbsent": true,
+  "removedCameraPresetAndBrandLogoResources": [],
+  "validationMode": "packaging-and-submission-configuration",
+  "selectedChecksPassed": true,
+  "legalURLs": {
+    "ZTransferPrivacyPolicyURL": "https://www.ztransfer.top/ios/privacy/",
+    "ZTransferTermsOfUseURL": "https://www.ztransfer.top/ios/terms/"
+  },
+  "legalURLConfigurationPassed": true,
+  "legalURLConfigurationErrors": [],
+  "notCovered": [
+    "Code signing, device Archive validation and App Store upload",
+    "Live legal URLs, policy content, in-app link reachability and all submission metadata",
+    "Runtime behavior, permissions, hardware, UI and real Apple sandbox",
+    "Complete data-flow, encryption classification and intellectual-property review"
+  ]
+}

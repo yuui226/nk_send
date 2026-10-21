@@ -1,0 +1,92 @@
+{
+  "reviewDate": "2026-10-21",
+  "reviewer": "remove_logo_controls",
+  "result": "passed within the observed scope",
+  "device": "ZTransfer-Prelaunch-StandardPhone",
+  "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+  "language": "English",
+  "theme": "light",
+  "testIdentifier": "PremiumRecoveryUITests/testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames()",
+  "logs": [
+    {
+      "stage": "prepare",
+      "path": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/prepare-testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.log",
+      "sha256": "4aa1324b6834247447333cc5b70d05a076f262e6fbf23ab1cb7a662d7438663c",
+      "tests": 1,
+      "failures": 0,
+      "marker": "TEST SUCCEEDED"
+    },
+    {
+      "stage": "ui",
+      "path": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames.log",
+      "sha256": "219693fbd757f840a06d3c30d8b3e09b35de77b72121d3ddc47cb34e5681d507",
+      "tests": 1,
+      "failures": 0,
+      "marker": "TEST SUCCEEDED"
+    },
+    {
+      "stage": "cleanup",
+      "path": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.ie1ndu/cleanup.log",
+      "sha256": "d2568fe3d54c3a807c6a2e7a28837f50f76391af0b34383a2d7db9d13b70cf7f",
+      "tests": 1,
+      "failures": 0,
+      "marker": "TEST SUCCEEDED"
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench-attachments/469D270D-7C06-45AE-9C7B-10C3B6263E70.png",
+      "name": "workbench-brand-off-no-graphic-option_0_5207BE6B-95F2-4807-A6E9-9CBF36493DA6.png",
+      "timestamp": 1792568932.894,
+      "sha256": "4205d95429b0eeb4bda1a0485005a08452e4a7d03619d1aecc65ea96fbb198a3",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench-attachments/6FE953FE-B147-444C-ABFF-A16833014175.png",
+      "name": "workbench-brand-text-no-graphic-option_0_A09971F6-BA64-4067-9B50-C308F0E74C47.png",
+      "timestamp": 1792568937.021,
+      "sha256": "2bd0419df67ec5da6cba0ed4db3dcb331238611bd70a3b0ae1dd6209405ff71a",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench-attachments/372753D6-6996-4D5B-B046-C4002E9C9D2A.png",
+      "name": "free-workbench-watermark-locked_0_0D801AA4-3B52-4380-B7ED-5533212B864A.png",
+      "timestamp": 1792568980.233,
+      "sha256": "a85745b32b08160de3ddabadb8883c2622429d489491794a9b304ae4b7eccd74",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench-attachments/A72555FF-F39E-485E-93A2-F1C4FBDCCFF7.png",
+      "name": "workbench-brand-off-no-graphic-option_0_B4F35654-F3EF-4C87-BD9B-95FF769B6AB7.png",
+      "timestamp": 1792569009.57,
+      "sha256": "e87a16e15d16ed8c06d8696aa6d391af7aeec8a27aa93c9563bc88244d00e463",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench-attachments/E8772942-405B-4F86-86BF-9744B915877E.png",
+      "name": "workbench-brand-text-no-graphic-option_0_BD4EF823-61BC-414C-A484-42D6A5555AF6.png",
+      "timestamp": 1792569013.64,
+      "sha256": "15e5004250243b2bc78271b7d0296fbbcf5b4ac60f5497074e279128c8109bda",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-workbench-attachments/B4895207-2635-4D2D-B31C-FC1B650B6744.png",
+      "name": "free-workbench-watermark-after-relaunch_0_5EB99474-5620-49FA-A1C4-534273A89EAD.png",
+      "timestamp": 1792569057.93,
+      "sha256": "32d2718bd0ebcc611c8c1c92fad6946491e9a4d8e75aa13dd09a024bf9f2a7b1",
+      "visuallyReviewed": true
+    }
+  ],
+  "observations": [
+    "All six unmodified exported screenshots were opened and visually inspected.",
+    "Before and after relaunch, Brand appears gray when off; Brand · Text appears orange when enabled. Labels fit their controls and align with Model and Lens; no brand graphic option is shown.",
+    "The retained phone filter remains Forest Verdure at 80% and the selected frame remains Mist before and after relaunch.",
+    "Free watermark controls remain disabled with Text / ZTransfer; the transient Available in Pro only toast is visible in both watermark screenshots.",
+    "The page header uses a one-line ellipsis for its long English title. This review does not establish a new header regression."
+  ],
+  "limits": [
+    "The photo area is intentionally empty in this test, so these screenshots do not prove rendered photo pixels or export output.",
+    "Only this simulator, language, theme, free state and flow were reviewed.",
+    "User-image watermark import and camera NP3 folder behavior belong to separate tests."
+  ]
+}

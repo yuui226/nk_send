@@ -1,0 +1,37 @@
+{
+  "method": "Read-only PNG IDAT decompression and exact PNG row-filter reversal; 8-bit RGB noninterlaced. Original files unmodified.",
+  "regionXYXY": [
+    916,
+    1607,
+    966,
+    1687
+  ],
+  "coordinateSystem": "original PNG pixels; origin top left; right/bottom exclusive",
+  "reference": "F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+  "comparisons": [
+    {
+      "image": "F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+      "regionSHA256": "5010af9f6226b2252a63a70599ac86993ab2654f03abaccf77837a7f697185b2",
+      "equalToFirst": true,
+      "differentChannelValues": 0,
+      "maxChannelDifference": 0,
+      "meanAbsoluteChannelDifference": 0.0
+    },
+    {
+      "image": "03F2B191-C966-4397-A63A-5F779F35C744.png",
+      "regionSHA256": "5010af9f6226b2252a63a70599ac86993ab2654f03abaccf77837a7f697185b2",
+      "equalToFirst": true,
+      "differentChannelValues": 0,
+      "maxChannelDifference": 0,
+      "meanAbsoluteChannelDifference": 0.0
+    },
+    {
+      "image": "840F1B1E-5BF3-4BBB-BCB1-6F7BACC34956.png",
+      "regionSHA256": "5010af9f6226b2252a63a70599ac86993ab2654f03abaccf77837a7f697185b2",
+      "equalToFirst": true,
+      "differentChannelValues": 0,
+      "maxChannelDifference": 0,
+      "meanAbsoluteChannelDifference": 0.0
+    }
+  ]
+}

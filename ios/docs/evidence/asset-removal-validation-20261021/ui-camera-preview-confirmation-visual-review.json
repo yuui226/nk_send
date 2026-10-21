@@ -1,0 +1,101 @@
+{
+  "reviewDate": "2026-10-21",
+  "reviewer": "remove_logo_controls",
+  "result": "passed within observed scope",
+  "device": {
+    "architecture": "arm64",
+    "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+    "modelName": "iPhone 17",
+    "osBuildNumber": "23F77",
+    "osVersion": "26.5",
+    "platform": "iOS Simulator"
+  },
+  "language": "English",
+  "theme": "light",
+  "testIdentifier": "PremiumRecoveryUITests/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices()",
+  "summary": {
+    "path": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-summary.json",
+    "sha256": "a99f1764c98fc15050094d613ef34c2dc4b1a03e057dd0f70c21508281b2b160",
+    "totalTests": 1,
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "result": "Passed"
+  },
+  "manifest": {
+    "path": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/manifest.json",
+    "sha256": "257c9c0794f1a8662f1b1ad6175a336676a455783242ad22aa13f2953fdb3b60"
+  },
+  "uiTestSource": {
+    "path": "/Users/orys/code/nk_send/ios/StoreKitUITests/PremiumRecoveryUITests.swift",
+    "sha256": "e6b1e77a66416cd83afc6417727375ad7ec5ccda26d380fed715abffd4302bce"
+  },
+  "screenshots": [
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/FF701EAE-7123-48D5-ABF3-B2F2BF6EAB86.png",
+      "name": "camera-brand-off-no-graphic-option_0_2C66A90A-6854-4AF3-8CCC-7723B605229D.png",
+      "timestamp": 1792570050.492,
+      "sha256": "cb1eaaa6f96419dd0650d03c3d1dc7f4ccd3cdfbfcd32a7513098d1b23304881",
+      "visuallyReviewed": true,
+      "observation": "First cycle: Brand control gray/off; actual preview identity row contains only Z 233 and no Nikon text. Model remains active. Brand/Model/Lens row aligns and labels are not clipped."
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/61F3E5B0-F250-41EC-88EB-3354D12AC220.png",
+      "name": "camera-brand-text-no-graphic-option_0_F7BD0B9B-7CEE-43D6-A7B7-00D23CA7E012.png",
+      "timestamp": 1792570058.985,
+      "sha256": "a38c53629166082b5fe5fc5835d5b46d75093954a22b3ed43a7a615da20ee7e6",
+      "visuallyReviewed": true,
+      "observation": "First cycle: Brand · Text is orange/active; preview identity row contains ordinary italic Nikon text and Z 233. No graphical brand option is visible. Layout matches the off state."
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/70CDB270-F2D6-4D7F-B2E5-0E04D4E11A06.png",
+      "name": "free-camera-effects-locked_0_C8698465-7138-4EF0-AC34-DCA1C95C0491.png",
+      "timestamp": 1792570109.293,
+      "sha256": "330b9d3d6ff4d01329aca273ab3743155e6318326d09723b66a90a0eaf2b7a0b",
+      "visuallyReviewed": true,
+      "observation": "Before relaunch: Dusk Ember 80% and Cinema remain selected. Full preview shows Nikon Z 233. Free watermark controls remain disabled and the intentional Available in Pro only toast is visible."
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/E36607AC-1CC6-4506-B6C1-461BBBABDE67.png",
+      "name": "camera-brand-off-no-graphic-option_0_6C376D8A-D8E3-4831-BAF7-54592167F8FF.png",
+      "timestamp": 1792570156.594,
+      "sha256": "9a55183e8fe599accf7774c0feb475b2383cedc2285066a378d461a4f8788e7d",
+      "visuallyReviewed": true,
+      "observation": "After relaunch, second cycle: Brand is gray/off; actual preview contains only Z 233 and no Nikon text. Model remains active and the three-column metadata grid remains aligned."
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/5DF54189-D4B9-4552-9A2D-62B2E2DB738E.png",
+      "name": "camera-brand-text-no-graphic-option_0_84783EB0-ED19-482E-82BC-2E94A03051F5.png",
+      "timestamp": 1792570164.849,
+      "sha256": "0232043e7220f2f7ad058e5578e3195132226c1a4cbb03d3333c0d70df341662",
+      "visuallyReviewed": true,
+      "observation": "After relaunch, second cycle: Brand · Text is orange/active; actual preview again contains ordinary Nikon text and Z 233. Label and metadata-grid layout are intact."
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation-attachments/DB56D0D1-7D63-4EC3-9F10-A6A1876C8FC7.png",
+      "name": "free-camera-effects-after-relaunch_0_1630BCF6-B846-4CD4-8D6F-FD67672DE721.png",
+      "timestamp": 1792570227.031,
+      "sha256": "18986b213575312bb2d8cf8b47872b49a22835e76dd17c4bd461b9f14427770c",
+      "visuallyReviewed": true,
+      "observation": "After relaunch: Dusk Ember 80%, Cinema and disabled watermark settings remain visible. Full preview contains Nikon Z 233. Intentional Pro-only toast is present. This image does not establish paid custom-image watermark coverage."
+    }
+  ],
+  "observations": [
+    "All six exported original screenshots were independently opened and visually reviewed. Originals were not altered.",
+    "Both off/text cycles show the expected final preview pixels: off retains Z 233 and removes Nikon; text restores Nikon next to Z 233. This closes the earlier unverified off-preview observation for this specific flow.",
+    "Controls and preview agree before and after relaunch. Brand has off/text states; the graphical-brand mode is absent from the checked interaction.",
+    "The checked controls remain legible and aligned. Dusk Ember 80%, Cinema and free watermark locking persist. The lower watermark toast is intentional and does not establish all lower controls in one unobstructed image.",
+    "This follow-up strengthened test synchronization to wait for rendered preview text. No production fix was made for this follow-up. Earlier screenshots were captured before the asynchronous preview had completed.",
+    "Previous four UI reports and original screenshots remain historical records and have not been overwritten."
+  ],
+  "history": {
+    "originalCameraReview": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/visual-review.json",
+    "investigation": "/tmp/ztransfer-removal-validation-20261021/camera-brand-off-investigation.md"
+  },
+  "limits": [
+    "One iPhone 17 simulator on iOS 26.5, English, light theme and the named free-camera-effects flow.",
+    "This review is not real-camera hardware validation, real Apple sandbox validation, all device/theme/language coverage, paid image-watermark coverage or photo-export verification.",
+    "The provided summary establishes one UI test passed; this review did not independently re-read prepare/cleanup logs for the follow-up run."
+  ]
+}

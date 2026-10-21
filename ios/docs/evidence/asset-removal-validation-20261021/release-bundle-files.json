@@ -1,0 +1,24 @@
+{
+  "path": "/tmp/ztransfer-removal-derived-20261021/Build/Products/Release-iphoneos/ZTransfer.app",
+  "files": {
+    "AOSP-shadow-NOTICE.txt": "6a449d413c787946a3ac1d7fd26807bbfb55ceb3ca450d0289035ca1ec3f3276",
+    "AndroidX-color-NOTICE.txt": "5fb968371ad080452e9605f23c6f4d92d6e7b1960c01792ef57e6e187573f9a9",
+    "AndroidX-motion-NOTICE.txt": "4c89659e723f80aa169b6e7a9d1f44c47f3618e28774875929b7387044a9971e",
+    "Apache-2.0.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "AppIcon60x60@2x.png": "63ebb4085e323675a87309918a44f43461b7eb7f6c85f270ee0fe1392b5e4e15",
+    "AppIcon76x76@2x~ipad.png": "2571f2bca1315f48bdb6569720b8511cb7a2892c2fc72c8cddbd330ec81428be",
+    "Assets.car": "772f7f6102e75d273bdd302c47009c64d918b4a432486b829a05e8262d323124",
+    "Info.plist": "81873080eaefcf52ca81b4e37689d382018181ab06b199bcf99efee986e3f6bd",
+    "PkgInfo": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+    "PrivacyInfo.xcprivacy": "ab519f9d53b9ff3977bd4d58a75e8ae509c038e098c446716284a975c341f86a",
+    "Skia-BSD.txt": "5f787c1dee3c56547f09ccc2906ab5f5293c4d8dd6c8654e573216c38e908dbd",
+    "ThirdPartyNotices.txt": "a404fae5a063bc9a39f6a41d2c53eb9b4dcce60c7be44a1062818733de7b62b5",
+    "ZTransfer": "9a46272d58f5c9006fe6b8d6fde379dac66c2beee53fb1643d56d5b86b38e52c",
+    "bebas_neue_regular.ttf": "939fea723dad24504f40faadc34eeffadfbbee558754f70c3c736e13786b0ab6",
+    "cormorant_garamond_medium_italic.ttf": "14efb9443652199ade5bc6ba8637b4084acce40a58368a3808f84f55667e3e90",
+    "en.lproj/Localizable.strings": "1bd9806b57b08e8e72bb45e80f0b86437c7fe6e42cf5d65b7cf5fc764d0f0345",
+    "great_vibes_regular.ttf": "9d76b8c67f5289c310114c935c5c3831fc3c25bc2bb888a28210c1659d701b9e",
+    "zh-Hans.lproj/Localizable.strings": "868527561328c8bc73828f766335c905f751ee81a935adc5e2aa6b5cf8408026",
+    "zh-Hant.lproj/Localizable.strings": "76d8e9e7a65aa471107e9f2b295acd0c3adcf5531e89816c2e80d00f831988e7"
+  }
+}

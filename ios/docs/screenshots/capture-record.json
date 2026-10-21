@@ -78,6 +78,116 @@
       "failedTests": 0,
       "manifest": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13-images/manifest.json",
       "manifestSHA256": "0d668c7c22cde12dc633038ee6ba26951ac8f766f5024d5fb6ba77290cbafb8b"
+    },
+    {
+      "group": "iphone-medium",
+      "log": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium.log",
+      "logSHA256": "2bc144c76b54e6a2fd4d1fca80c9db936327b79d46cb0c069b3f1a29180fff00",
+      "resultBundle": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium.xcresult",
+      "result": "TEST FAILED",
+      "exitCode": 65,
+      "tests": 2,
+      "failedTests": 1,
+      "captureTests": 1,
+      "methods": [
+        "testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese",
+        "testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease"
+      ],
+      "methodResults": {
+        "testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese": {
+          "result": "passed",
+          "durationSeconds": 176.413
+        },
+        "testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease": {
+          "result": "failed",
+          "durationSeconds": 106.267
+        }
+      },
+      "manifest": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium-images/manifest.json",
+      "manifestSHA256": "b9fd3d0b6b2126c6e662c72569471a41a937c177980cb6865cd9e3a47b23a959",
+      "releaseReference": "settingsPublishedLegalRefresh.release",
+      "captureMethodReference": "settingsPublishedLegalRefresh.captureMethod",
+      "runnerSource": "original snapshot",
+      "resumeResultReference": null
+    },
+    {
+      "group": "iphone-medium",
+      "runLabel": "legal-navigation-retry",
+      "log": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/legal-navigation-retry.log",
+      "logSHA256": "5e348a9f2ae08d696cd9795d70128e9cefffee9deb1397759d8e10f50f7ca866",
+      "resultBundle": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/legal-navigation-retry.xcresult",
+      "result": "TEST SUCCEEDED",
+      "exitCode": 0,
+      "tests": 1,
+      "failedTests": 0,
+      "captureTests": 0,
+      "methods": [
+        "testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease"
+      ],
+      "methodResults": {
+        "testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease": {
+          "result": "passed",
+          "durationSeconds": 135.265
+        }
+      },
+      "manifest": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/legal-navigation-retry-images/manifest.json",
+      "manifestSHA256": "6995ce3bedcb2ad1402d521d47c5fe0a5eb35f11256a9caf303c9014bb4d54ee",
+      "releaseReference": "settingsPublishedLegalRefresh.release",
+      "captureMethodReference": "settingsPublishedLegalRefresh.resumeCaptureMethod",
+      "runnerSource": "v2 Safari-helper extension",
+      "resumeResultReference": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-results.json#legal-navigation-retry"
+    },
+    {
+      "group": "iphone-large",
+      "log": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-large.log",
+      "logSHA256": "b82e9e8296f778a34f40466b685e45f8a84c5f0e1645555d4f94058003488a8f",
+      "resultBundle": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-large.xcresult",
+      "result": "TEST EXECUTE SUCCEEDED",
+      "exitCode": 0,
+      "tests": 1,
+      "failedTests": 0,
+      "captureTests": 1,
+      "methods": [
+        "testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese"
+      ],
+      "methodResults": {
+        "testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese": {
+          "result": "passed",
+          "durationSeconds": 96.568
+        }
+      },
+      "manifest": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-large-images/manifest.json",
+      "manifestSHA256": "887411c2c15ecf6bf475b11db678dbf2447f50324cab378ed3264570d635bf81",
+      "releaseReference": "settingsPublishedLegalRefresh.release",
+      "captureMethodReference": "settingsPublishedLegalRefresh.resumeCaptureMethod",
+      "runnerSource": "v2 Safari-helper extension",
+      "resumeResultReference": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-results.json#iphone-large"
+    },
+    {
+      "group": "ipad-13",
+      "log": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/ipad-13.log",
+      "logSHA256": "701001945dd50b8849c1d3b20ca630727ca5d3c03e37e9010cf94a9e6155d62b",
+      "resultBundle": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/ipad-13.xcresult",
+      "result": "TEST EXECUTE SUCCEEDED",
+      "exitCode": 0,
+      "tests": 1,
+      "failedTests": 0,
+      "captureTests": 1,
+      "methods": [
+        "testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese"
+      ],
+      "methodResults": {
+        "testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese": {
+          "result": "passed",
+          "durationSeconds": 106.831
+        }
+      },
+      "manifest": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/ipad-13-images/manifest.json",
+      "manifestSHA256": "02f57efca76c9274bce620532ebf8eeb8fb06a17913e9f6e332490b70428131e",
+      "releaseReference": "settingsPublishedLegalRefresh.release",
+      "captureMethodReference": "settingsPublishedLegalRefresh.resumeCaptureMethod",
+      "runnerSource": "v2 Safari-helper extension",
+      "resumeResultReference": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-results.json#ipad-13"
     }
   ],
   "images": [
@@ -125,7 +235,7 @@
     },
     {
       "file": "raw/zh-Hans/iphone-medium/settings-reference.png",
-      "status": "candidate",
+      "status": "superseded",
       "allowedForUpload": false,
       "sha256": "657859dea91ffbf29fff4ea7a20abc359d6b07e2b7f98d3716ce209d179979ea",
       "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-medium-images/42BED02B-4C36-4642-8504-5339E2CE7170.png",
@@ -163,7 +273,10 @@
         "location": "../商店文案草稿.md and current project UI/resources",
         "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
       },
-      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved."
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
+      "supersededBy": "raw/zh-Hans/iphone-medium/settings-reference-20261021-published-legal.png",
+      "supersededAt": "2026-10-21T13:45:21.267174+08:00",
+      "supersededReason": "Settings footer now includes the approved inline Privacy / Terms controls enabled by published URLs; retain original pixels and capture identity as history."
     },
     {
       "file": "raw/zh-Hans/iphone-large/01-connect.png",
@@ -209,7 +322,7 @@
     },
     {
       "file": "raw/zh-Hans/iphone-large/settings-reference.png",
-      "status": "candidate",
+      "status": "superseded",
       "allowedForUpload": false,
       "sha256": "e21bf3f5b4776fbf1a8ba37d6530de5d38304951e5ffbe14b1bb1337f3394c3e",
       "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-iphone-large-images/50E718C2-8B3B-4337-91FC-900CD5590C96.png",
@@ -247,7 +360,10 @@
         "location": "../商店文案草稿.md and current project UI/resources",
         "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
       },
-      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved."
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
+      "supersededBy": "raw/zh-Hans/iphone-large/settings-reference-20261021-published-legal.png",
+      "supersededAt": "2026-10-21T13:45:21.267174+08:00",
+      "supersededReason": "Settings footer now includes the approved inline Privacy / Terms controls enabled by published URLs; retain original pixels and capture identity as history."
     },
     {
       "file": "raw/zh-Hans/ipad-13/01-connect.png",
@@ -294,7 +410,7 @@
     },
     {
       "file": "raw/zh-Hans/ipad-13/settings-reference.png",
-      "status": "candidate",
+      "status": "superseded",
       "allowedForUpload": false,
       "sha256": "0614d82f8b4537af2ca6c6ad0bbb0014702758835ecd5d5338d255c17dc3c990",
       "sourceAttachment": "/tmp/ztransfer-prelaunch-clean-v2-ipad-13-images/3CBC4FB3-95E5-4C88-855A-5DE62386A33D.png",
@@ -333,7 +449,170 @@
         "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
       },
       "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
-      "windowScope": "Normal full portrait app frame 1032x1376 points before the separate window-resize test. This screenshot does not establish window-resize acceptance."
+      "windowScope": "Normal full portrait app frame 1032x1376 points before the separate window-resize test. This screenshot does not establish window-resize acceptance.",
+      "supersededBy": "raw/zh-Hans/ipad-13/settings-reference-20261021-published-legal.png",
+      "supersededAt": "2026-10-21T13:45:21.267174+08:00",
+      "supersededReason": "Settings footer now includes the approved inline Privacy / Terms controls enabled by published URLs; retain original pixels and capture identity as history."
+    },
+    {
+      "device": {
+        "model": "iPhone 17",
+        "udid": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "name": "ZTransfer-Prelaunch-StandardPhone",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
+      "file": "raw/zh-Hans/iphone-medium/settings-reference-20261021-published-legal.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "8b469f94a5d0b9639af7b219f22969c4043754c1fb1c814eda66c2fafec1d75d",
+      "sourceAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium-images/0DD4A18B-473C-4017-8E80-FFD53C49F70B.png",
+      "sourceSHA256": "8b469f94a5d0b9639af7b219f22969c4043754c1fb1c814eda66c2fafec1d75d",
+      "metadataAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium-images/79131F90-BEF1-4EF8-9ADC-2A432B13CFBC.txt",
+      "metadataSHA256": "06a7b8674d315f03c04a6af9396f8f0ea8eab188b721c4f4df864a916010cda7",
+      "captureMetadata": "capturedAt: 2026-10-21 05:29:46 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 402.0, 874.0)\nimagePixels: 1206x2622\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "legalStateAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium-images/DEC8E122-6BAB-4700-BD10-1BCC7D24A924.txt",
+      "legalStateSHA256": "b50c8cda7d8388a9067383b5dbbd9aca859cb1f3e0cc1869539b1414b2b8c3ce",
+      "legalStateMetadata": "privacyFrame: (214.0, 610.0, 48.0, 28.0)\ntermsFrame: (270.0, 610.0, 48.0, 28.0)\nfeedbackFrame: (326.0, 610.0, 48.0, 28.0)\nlayout: privacy then terms to the left of feedback, on the same row\nprivacyEnabled: true\ntermsEnabled: true\nnote: These are the actual enabled states from the newly built Release. Actual route checks are recorded in a separate method.",
+      "capturedAtEpoch": 1792560586.593,
+      "pixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "Original PNG dimensions/chunks/alpha independently checked with sips; byte-for-byte copy and SHA-256.",
+      "releaseReference": "settingsPublishedLegalRefresh.release",
+      "captureMethodReference": "settingsPublishedLegalRefresh.captureMethod",
+      "page": "settings-reference",
+      "pageState": "Actual normal settings, transfer directory unset; dependent transfer controls disabled; Simplified Chinese, light system appearance, large content size, liquid-glass style.",
+      "entitlementState": "Actual free state: 解锁高级版. No fixture or entitlement injection.",
+      "visuallyReviewed": true,
+      "reviewer": "release_audit and root; both viewed original exported attachment",
+      "reviewedAt": "2026-10-21T13:35:57.687727+08:00",
+      "observation": "Normal-width settings surface; complete title and close; full version and Privacy/Terms to the left of Feedback in one row, no overlap/clipping. Chinese language visible. No Debug badge, purchase overlay, loading message, keyboard or system prompt.",
+      "supersedes": "raw/zh-Hans/iphone-medium/settings-reference.png",
+      "legalURLStatus": "Both published HTTPS URLs match the final Release configuration; actual settings metadata reports both controls enabled. The separate standard-iPhone navigation method is recorded in this refresh; this screenshot alone does not establish live navigation on every device.",
+      "legalURLs": {
+        "ZTransferPrivacyPolicyURL": "https://www.ztransfer.top/ios/privacy/",
+        "ZTransferTermsOfUseURL": "https://www.ztransfer.top/ios/terms/"
+      }
+    },
+    {
+      "device": {
+        "model": "iPhone 15 Plus",
+        "udid": "FB86603E-3366-461E-A2A8-0F2CB15FE262",
+        "name": "ZTransfer-Prelaunch-15Plus",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
+      "file": "raw/zh-Hans/iphone-large/settings-reference-20261021-published-legal.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "8378c407e235b6e79fd9a5ac5a09519df62dab598a5c75d011229ca9228c9e08",
+      "sourceAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-large-images/E0E7465A-BA57-492F-AB4F-9BAD4EC45D0F.png",
+      "sourceSHA256": "8378c407e235b6e79fd9a5ac5a09519df62dab598a5c75d011229ca9228c9e08",
+      "metadataAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-large-images/4D9563FD-2DF7-4643-91D2-3D45343C8C81.txt",
+      "metadataSHA256": "70d77bb0e9c835c3c177c7cd0214ebe26b976c828c8b64e11b70a7cb3a60e36a",
+      "captureMetadata": "capturedAt: 2026-10-21 05:40:54 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 430.0, 932.0)\nimagePixels: 1290x2796\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "legalStateAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-large-images/F77E5882-5E92-4FB6-883B-6A257BB50404.txt",
+      "legalStateSHA256": "144a6e7b6dc0a03671efc49ac4a3a9245d53881b3b8f70e68af4014573d6e885",
+      "legalStateMetadata": "privacyFrame: (242.0, 607.0, 48.0, 28.0)\ntermsFrame: (298.0, 607.0, 48.0, 28.0)\nfeedbackFrame: (354.0, 607.0, 48.0, 28.0)\nlayout: privacy then terms to the left of feedback, on the same row\nprivacyEnabled: true\ntermsEnabled: true\nnote: These are the actual enabled states from the newly built Release. Actual route checks are recorded in a separate method.",
+      "capturedAtEpoch": 1792561254.586,
+      "pixels": {
+        "width": 1290,
+        "height": 2796
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "Original PNG dimensions/chunks/alpha independently checked with sips; byte-for-byte copy and SHA-256.",
+      "releaseReference": "settingsPublishedLegalRefresh.release",
+      "captureMethodReference": "settingsPublishedLegalRefresh.resumeCaptureMethod",
+      "page": "settings-reference",
+      "pageState": "Actual transfer directory unset; dependent transfer controls disabled; Simplified Chinese, light appearance, large content size, liquid-glass style.",
+      "entitlementState": "Actual free state with 解锁高级版; no simulated ownership or business data.",
+      "visuallyReviewed": true,
+      "reviewer": "release_audit and root; both viewed original exported attachment",
+      "reviewedAt": "2026-10-21T13:42:15.742023+08:00",
+      "observation": "Complete normal settings surface and close control; v1.98 and Privacy/Terms/Feedback fully visible on one row. No clipping/overlap, Debug badge, loading message, keyboard or system prompt.",
+      "supersedes": "raw/zh-Hans/iphone-large/settings-reference.png",
+      "legalURLStatus": "Both published HTTPS URLs match the final Release configuration; actual settings metadata reports both controls enabled. The separate standard-iPhone navigation method is recorded in this refresh; this screenshot alone does not establish live navigation on every device.",
+      "legalURLs": {
+        "ZTransferPrivacyPolicyURL": "https://www.ztransfer.top/ios/privacy/",
+        "ZTransferTermsOfUseURL": "https://www.ztransfer.top/ios/terms/"
+      }
+    },
+    {
+      "device": {
+        "model": "iPad Pro 13-inch (M5)",
+        "udid": "303DAFA2-48C7-4470-90E9-5763EB1CB58B",
+        "name": "ZTransfer-Prelaunch-13Pad",
+        "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+      },
+      "language": "zh-Hans",
+      "theme": "light",
+      "orientation": "portrait",
+      "rightsBasis": {
+        "location": "../商店文案草稿.md and current project UI/resources",
+        "scope": "Only existing app interface and system chrome; no imported photographic material, people, precise location, camera serial, or user-selected file content. Final public-art and brand-rights approval remains part of store-art acceptance."
+      },
+      "finalAcceptance": "Candidate preparation only; page selection and App Store Connect language/device preview remain unapproved.",
+      "file": "raw/zh-Hans/ipad-13/settings-reference-20261021-published-legal.png",
+      "status": "candidate",
+      "allowedForUpload": false,
+      "sha256": "48dfb57c2d52b2e54318ec790c1e568028675ace041fdcd67e4d6df69327df6b",
+      "sourceAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/ipad-13-images/275C8747-4329-43B2-A461-1871EA68A23C.png",
+      "sourceSHA256": "48dfb57c2d52b2e54318ec790c1e568028675ace041fdcd67e4d6df69327df6b",
+      "metadataAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/ipad-13-images/E21FB36E-12FD-47D2-A687-092F3B2160F1.txt",
+      "metadataSHA256": "aa6e06c52d5ae8ffd47094819ced001dc84ad68f3990f4d34ee88652a8eea1ea",
+      "captureMetadata": "capturedAt: 2026-10-21 05:43:48 +0000\nbundleIdentifier: com.ztransfer.ios\nlaunchArguments: []\nlaunchEnvironment: [:]\nlanguageSelectedThroughUI: zh-Hans / 简体中文\nappFrame: (0.0, 0.0, 1032.0, 1376.0)\nimagePixels: 2064x2752\napHelpHittable: true\nstaHelpHittable: false\nnote: The actual wireless preference was retained. This capture does not prove a fresh-install default, camera connectivity, App Store signing, or final store-art acceptance.",
+      "legalStateAttachment": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/ipad-13-images/1AB728FB-4571-40E2-9672-8382453C2F45.txt",
+      "legalStateSHA256": "478c2b211d8250f1f38b26c37b0f1e358061263349d78e97543d1a65cdb5eaff",
+      "legalStateMetadata": "privacyFrame: (844.0, 580.5, 48.0, 28.0)\ntermsFrame: (900.0, 580.5, 48.0, 28.0)\nfeedbackFrame: (956.0, 580.5, 48.0, 28.0)\nlayout: privacy then terms to the left of feedback, on the same row\nprivacyEnabled: true\ntermsEnabled: true\nnote: These are the actual enabled states from the newly built Release. Actual route checks are recorded in a separate method.",
+      "capturedAtEpoch": 1792561428.671,
+      "pixels": {
+        "width": 2064,
+        "height": 2752
+      },
+      "format": "PNG",
+      "bitDepth": 8,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "technicalCheck": "Original PNG dimensions/chunks/alpha independently checked with sips; byte-for-byte copy and SHA-256.",
+      "releaseReference": "settingsPublishedLegalRefresh.release",
+      "captureMethodReference": "settingsPublishedLegalRefresh.resumeCaptureMethod",
+      "page": "settings-reference",
+      "pageState": "Actual transfer directory unset and dependent controls disabled; Simplified Chinese, light appearance, large content size, liquid-glass style.",
+      "entitlementState": "Actual free state with 解锁高级版; no simulated ownership.",
+      "visuallyReviewed": true,
+      "reviewer": "release_audit and root; both viewed original exported attachment",
+      "reviewedAt": "2026-10-21T13:44:59.183483+08:00",
+      "observation": "Complete normal portrait settings surface; full title/close, v1.98 and Privacy/Terms to the left of Feedback on one row. No clipped content, overlapping controls, Debug badge, loading message, keyboard or prompt.",
+      "supersedes": "raw/zh-Hans/ipad-13/settings-reference.png",
+      "legalURLStatus": "Both published HTTPS URLs match the final Release configuration; actual settings metadata reports both controls enabled. The separate standard-iPhone navigation method is recorded in this refresh; this screenshot alone does not establish live navigation on every device.",
+      "legalURLs": {
+        "ZTransferPrivacyPolicyURL": "https://www.ztransfer.top/ios/privacy/",
+        "ZTransferTermsOfUseURL": "https://www.ztransfer.top/ios/terms/"
+      },
+      "windowScope": "Observed 2064x2752 portrait full-size app canvas with system resize handle at bottom-right. No window drag or rotation performed; this capture and one successful open/close do not validate every window size or resolve prior intermittent close failure."
     }
   ],
   "remaining": [
@@ -345,8 +624,191 @@
   "recordedAt": "2026-10-21T01:55:46.293898+08:00",
   "counts": {
     "capturedGroups": 3,
+    "totalArchivedImages": 9,
     "candidateImages": 6,
+    "supersededImages": 3,
     "readyImages": 0
   },
-  "curationConclusion": "All six native PNG originals (three device groups × connection home/settings reference) were actually opened and visually reviewed, with exact expected dimensions and no alpha. Copied hashes match original attachments. Three capture methods each passed 1/1; historical initial medium fixture failure is retained. This is two scenes across three devices, not six core scenes or a ready-to-upload set."
+  "curationConclusion": "Three newly reviewed settings originals include the approved inline legal footer with both published links enabled; the original three settings images remain superseded history. The current six candidates comprise three earlier home images and three new settings images from different frozen Release builds. Both platform strict submission-configuration checks passed. The first standard-iPhone run remains 2 tests with 1 passed capture and 1 failed navigation; the navigation-only retry passed 1/1, and the remaining two captures each passed 1/1 using v2 with an unchanged capture body. No complete core-feature set or ready-to-upload art is claimed.",
+  "settingsPublishedLegalRefresh": {
+    "recordedAt": "2026-10-21T13:45:21.267174+08:00",
+    "reason": "Published legal URLs enable the approved inline settings controls; refresh only the affected three settings references.",
+    "release": {
+      "evidence": "../evidence/prepayment-ready-recheck-20261021.json",
+      "rawReport": "/private/tmp/ztransfer-prepayment-ready-recheck-20261021/report.json",
+      "rawReportSHA256": "84d4c6847a337fa4fdf7b87b5ad2be3ff5462e6493577b3fb76f4710666436a1",
+      "configuration": "Release",
+      "product": "/tmp/ztransfer-prepayment-release-audit-20261021/DerivedData/Build/Products/Release-iphonesimulator/ZTransfer.app",
+      "bundleIdentifier": "com.ztransfer.ios",
+      "version": "1.98",
+      "build": "1",
+      "executableSHA256": "daadc209c90721a87aacdb4e09741b0d8a85c2270720aa24c4c9b82c3a864056",
+      "sourceCommitAtCuration": "9605625dad6c137b60de3b4aab8b435bef6c8dd2",
+      "uncommittedChanges": "Build identity is the frozen input map, not HEAD alone; the commit above was read during curation.",
+      "sourceInputsFile": "/private/tmp/ztransfer-prepayment-ready-recheck-20261021/inputs-before.json",
+      "sourceInputsFileSHA256": "fc55057a51d886871126ccda7863010bd070466d5abe3597de5916646e0d097a",
+      "legalURLs": {
+        "ZTransferPrivacyPolicyURL": "https://www.ztransfer.top/ios/privacy/",
+        "ZTransferTermsOfUseURL": "https://www.ztransfer.top/ios/terms/"
+      },
+      "strictSubmissionConfiguration": {
+        "simulator": "passed",
+        "device": "passed"
+      },
+      "scope": "Unsigned simulator Release, with both platform strict submission-configuration checks passed. Runtime route evidence is separate from image review; no signed Archive, real Apple sandbox or upload is claimed."
+    },
+    "captureMethod": {
+      "script": "/tmp/ztransfer-prepayment-ready-ui.sh",
+      "scriptSHA256": "496ec0ac3a8648c97f1e2c48295db883ccd989456d050ab4698ef40c9ea5130e",
+      "temporaryUITest": "/tmp/ztransfer-prepayment-ready-ui.swift",
+      "temporaryUITestSHA256": "6a1e57eecafef25c558ba619b67703e645893dafc957031cf03201353e3fcf1e",
+      "captureMethodBodySHA256": "f0fa73f5e0545f8b09f49977f055885d39c39254076792a05bc5cc92dd290ece",
+      "appliesTo": [
+        "iphone-medium"
+      ],
+      "method": "PrelaunchLayoutUITests/testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese()",
+      "launchArguments": [],
+      "launchEnvironment": {},
+      "languageSelection": "Real Settings language wheel selected and reopened to verify Simplified Chinese; no defaults injection.",
+      "systemAppearance": "light",
+      "systemContentSize": "large",
+      "modeSelection": "Actual AP/STA preference retained; no connection/business fixture.",
+      "systemAppearanceRestoration": "Serial script restores initial appearance/content size and initial boot/shutdown state."
+    },
+    "resumeCaptureMethod": {
+      "script": "/tmp/ztransfer-prepayment-ready-ui-resume.py",
+      "scriptSHA256": "a6accd43ee3ad8d5246e349fe4d2aa90bdb14de084fc0874e542d134b94452cb",
+      "temporaryUITest": "/tmp/ztransfer-prepayment-ready-ui-v2.swift",
+      "temporaryUITestSHA256": "57fdb5cfb6f41cd986c6c64c5e2f373a4879090e0c6e7b7a0432bdb3e2c3500d",
+      "captureMethodBodySHA256": "f0fa73f5e0545f8b09f49977f055885d39c39254076792a05bc5cc92dd290ece",
+      "captureMethodBodyUnchanged": true,
+      "method": "PrelaunchLayoutUITests/testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese()",
+      "appliesTo": [
+        "iphone-large",
+        "ipad-13"
+      ],
+      "navigationMethod": "PrelaunchLayoutUITests/testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease()",
+      "navigationRun": "legal-navigation-retry",
+      "launchArguments": [],
+      "launchEnvironment": {},
+      "scope": "The settings capture method body is byte-for-byte unchanged. The v2 extension handles the observed Safari first-run tip; it is used for the independent navigation retry and the two remaining captures."
+    },
+    "separateNavigationTest": {
+      "group": "iphone-medium",
+      "method": "PrelaunchLayoutUITests/testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease()",
+      "initialResult": "failed",
+      "retryResult": "passed",
+      "retryRun": "legal-navigation-retry",
+      "scope": "The first navigation method failed after the standard-iPhone capture had passed. A distinct 1/1 retry checks actual settings and purchase links plus website language switch, without a purchase transaction. No standard-iPhone settings recapture was performed."
+    },
+    "failureChronology": [
+      {
+        "stage": "original standard-iPhone run",
+        "result": "TEST FAILED",
+        "exitCode": 65,
+        "tests": 2,
+        "passedTests": 1,
+        "failedTests": 1,
+        "captureMethod": "testCaptureCleanReleaseSettingsWithInlineLegalFooterInSimplifiedChinese",
+        "captureResult": "passed",
+        "captureSeconds": 176.413,
+        "navigationMethod": "testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease",
+        "navigationResult": "failed",
+        "log": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium.log",
+        "logSHA256": "2bc144c76b54e6a2fd4d1fca80c9db936327b79d46cb0c069b3f1a29180fff00",
+        "resultBundle": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium.xcresult",
+        "failureDiagnostic": "Safari address field is unavailable",
+        "observedCause": "Safari address field is unavailable while observed first-run menu tip overlays the bar.",
+        "observedCauseSource": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-context.json#originalFailedRun",
+        "attachments": [
+          {
+            "name": "clean-release-capture-failure-not-store-art_0_3DEDD922-6B04-42A8-ACD8-9EF53E89B097.png",
+            "file": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium-images/DE485CEF-942D-4D25-992A-7379D7EC556A.png",
+            "sha256": "4ca53c442c690ae2b4e79326c20e967a2594c332b9ca61df90d0df1085803394",
+            "use": "Failure evidence only; not curated store art"
+          },
+          {
+            "name": "clean-release-capture-failure-diagnostic_0_C13DDDD9-BF7E-42BC-AAF2-E1F26B711D48.txt",
+            "file": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-medium-images/BFBFFE00-5803-48BB-AC24-170984288748.txt",
+            "sha256": "164444da0ad78f0e8bb229d0372b7145cd32b1ed6deeef3ecc4120ace4ec09c1",
+            "use": "Failure evidence only; not curated store art"
+          }
+        ],
+        "captureDisposition": "Retain the passed capture method original, subject to the separate actual image review and SHA-256 gate."
+      },
+      {
+        "stage": "temporary runner correction",
+        "extension": "/tmp/ztransfer-prepayment-ready-ui-v2.swift",
+        "extensionSHA256": "57fdb5cfb6f41cd986c6c64c5e2f373a4879090e0c6e7b7a0432bdb3e2c3500d",
+        "captureMethodBodyUnchanged": true,
+        "scope": "Handle the observed Safari first-run tip only; retain the original runner files and the initial failure."
+      },
+      {
+        "stage": "navigation-only retry",
+        "result": "TEST SUCCEEDED",
+        "exitCode": 0,
+        "tests": 1,
+        "passedTests": 1,
+        "failedTests": 0,
+        "captureTests": 0,
+        "log": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/legal-navigation-retry.log",
+        "logSHA256": "5e348a9f2ae08d696cd9795d70128e9cefffee9deb1397759d8e10f50f7ca866",
+        "resultBundle": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/legal-navigation-retry.xcresult",
+        "method": "testPublishedLegalLinksOpenFromSettingsAndPurchaseInCleanRelease",
+        "durationSeconds": 135.265,
+        "scope": "This independent retry does not change the first run to 2/2."
+      }
+    ],
+    "runContext": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/run-context.json",
+    "runContextSHA256": "08b033b0f4e8860f668aa813c0ea8aa15da538c05fdd65fffa1a82cf81960f61",
+    "resumeContext": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-context.json",
+    "resumeContextSHA256": "717e67b3e69def044abdd1eb35f5063908d25aeb0363fb5830ac4ec17d10e5d3",
+    "resumeResults": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-results.json",
+    "resumeResultsSHA256": "93ec206a68992d19f1b4e264c6af8b902b76e58bbefa0ce35bf2a4369a47078d",
+    "orchestrationMarkerCorrection": {
+      "originalResumeResultsPreserved": true,
+      "affectedRuns": [
+        {
+          "group": "iphone-large",
+          "originalTestSucceededMarker": false,
+          "originalFieldReference": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-results.json#iphone-large.testSucceededMarker",
+          "commandAction": "test-without-building",
+          "exitCode": 0,
+          "actualLogMarker": "TEST EXECUTE SUCCEEDED",
+          "log": "/tmp/ztransfer-prepayment-ready-ui-20261021/iphone-large.log",
+          "logSHA256": "b82e9e8296f778a34f40466b685e45f8a84c5f0e1645555d4f94058003488a8f",
+          "interpretation": "The original runner matched only TEST SUCCEEDED and missed TEST EXECUTE SUCCEEDED. Actual test success is verified from the unchanged log, exit code, method outcome and test totals; the stored false field is not rewritten."
+        },
+        {
+          "group": "ipad-13",
+          "originalTestSucceededMarker": false,
+          "originalFieldReference": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/resume-results.json#ipad-13.testSucceededMarker",
+          "commandAction": "test-without-building",
+          "exitCode": 0,
+          "actualLogMarker": "TEST EXECUTE SUCCEEDED",
+          "log": "/tmp/ztransfer-prepayment-ready-ui-20261021/ipad-13.log",
+          "logSHA256": "701001945dd50b8849c1d3b20ca630727ca5d3c03e37e9010cf94a9e6155d62b",
+          "interpretation": "The original runner matched only TEST SUCCEEDED and missed TEST EXECUTE SUCCEEDED. Actual test success is verified from the unchanged log, exit code, method outcome and test totals; the stored false field is not rewritten."
+        }
+      ],
+      "explanation": "The frozen resume runner checks only TEST SUCCEEDED, whereas test-without-building may emit TEST EXECUTE SUCCEEDED. A stored false is accepted only for that command action with the exact alternate success marker, exit0, the expected passed method and zero-failure test totals. The original JSON fields remain unchanged; this is a runner marker correction, not an App failure or reason to rerun.",
+      "outerRunnerExitScope": "The resume script may return 1 solely from its final check of these stored false booleans. Per-action exit codes and actual log outcomes are verified independently here."
+    },
+    "inputComparisonAfter": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/input-comparison-after.json",
+    "actualReviewFile": "/private/tmp/ztransfer-prepayment-ready-ui-20261021/actual-review.json",
+    "actualReviewFileSHA256": "345e6ffaf56b7085385706cb1e5d719e013302289218645456770ddbecb9bc7f",
+    "scope": "Three settings references only; prior home images retain their original release identity and historical settings files remain available."
+  },
+  "curationHistory": [
+    {
+      "recordedAt": "2026-10-21T01:55:46.293898+08:00",
+      "counts": {
+        "capturedGroups": 3,
+        "candidateImages": 6,
+        "readyImages": 0
+      },
+      "curationConclusion": "All six native PNG originals (three device groups × connection home/settings reference) were actually opened and visually reviewed, with exact expected dimensions and no alpha. Copied hashes match original attachments. Three capture methods each passed 1/1; historical initial medium fixture failure is retained. This is two scenes across three devices, not six core scenes or a ready-to-upload set."
+    }
+  ],
+  "updatedAt": "2026-10-21T13:45:21.267174+08:00"
 }

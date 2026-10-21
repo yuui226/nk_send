@@ -681,15 +681,11 @@ struct SettingsView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 8) {
-            VersionPlaque(text: versionPlaqueText)
-                #if DEBUG
-                .contentShape(Rectangle())
-                .onTapGesture(perform: handleVersionTap)
-                #endif
-            Spacer()
-            SettingsFooterButton(AppLocalized.resource("feedback")) { UIPasteboard.general.string = "953000922"; feedbackHint = true }
+        ViewThatFits(in: .horizontal) {
+            footerRow(compact: false)
+            footerRow(compact: true)
         }
+        .frame(minWidth: 0, maxWidth: .infinity)
         #if DEBUG
         .overlay(alignment: .bottom) {
             if revertedHintVisible {
@@ -708,6 +704,26 @@ struct SettingsView: View {
         }
         #endif
         .alert(AppLocalized.formattedResource("feedback_qq_copied", ["%1$s": "953000922"]), isPresented: $feedbackHint) { Button(AppLocalized.resource("cd_close"), role: .cancel) {} }
+    }
+
+    private func footerRow(compact: Bool) -> some View {
+        HStack(spacing: compact ? 2 : 8) {
+            VersionPlaque(text: versionPlaqueText, horizontalPadding: compact ? 4 : 8)
+                .fixedSize(horizontal: true, vertical: false)
+                #if DEBUG
+                .contentShape(Rectangle())
+                .onTapGesture(perform: handleVersionTap)
+                #endif
+            Spacer(minLength: 0)
+            // User-approved iOS addition (2026-10-21): always one row to the
+            // left of feedback. Narrow layouts reduce gaps/padding, not text.
+            AppLegalLinks(compactLabels: true, compactSpacing: compact)
+                .fixedSize(horizontal: true, vertical: false)
+            SettingsFooterButton(AppLocalized.resource("feedback")) {
+                UIPasteboard.general.string = "953000922"; feedbackHint = true
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
     }
 
     #if DEBUG
@@ -909,6 +925,7 @@ private struct SettingsFooterButton: View {
 
 private struct VersionPlaque: View {
     let text: String
+    var horizontalPadding: CGFloat = 8
     var body: some View {
         HStack(spacing: 5) {
             Circle().fill(ZTransferColors.secondaryText.opacity(0.42)).frame(width: 3, height: 3)
@@ -917,7 +934,7 @@ private struct VersionPlaque: View {
                 .lineLimit(1)
             Circle().fill(ZTransferColors.secondaryText.opacity(0.42)).frame(width: 3, height: 3)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, horizontalPadding)
         .padding(.vertical, 5)
         .background(ZTransferColors.primaryText.opacity(0.035), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(ZTransferColors.primaryText.opacity(0.10), lineWidth: 1))

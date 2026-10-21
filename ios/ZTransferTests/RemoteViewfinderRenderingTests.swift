@@ -4,6 +4,61 @@ import XCTest
 
 @MainActor
 final class RemoteViewfinderRenderingTests: XCTestCase {
+    func testViewfinderBorderIsOneConnectedInsetContourAtBothDisplayScales() throws {
+        for size in [CGSize(width: 320, height: 213), CGSize(width: 390, height: 110)] {
+            for scale: CGFloat in [2, 3] {
+                for dark in [false, true] {
+                    for recording in [false, true] {
+                        let renderer = ImageRenderer(content: Color.black
+                            .frame(width: size.width, height: size.height)
+                            .modifier(RemoteViewfinderSurface(recording: recording))
+                            .environment(\.colorScheme, dark ? .dark : .light))
+                        renderer.scale = scale
+                        let image = try XCTUnwrap(renderer.cgImage)
+                        let width = image.width, height = image.height
+                        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+                        let context = try XCTUnwrap(CGContext(data: &bytes, width: width, height: height,
+                            bitsPerComponent: 8, bytesPerRow: width * 4,
+                            space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                        var border = [Bool](repeating: false, count: width * height)
+                        for i in border.indices {
+                            let r = Int(bytes[i * 4]), g = Int(bytes[i * 4 + 1]), b = Int(bytes[i * 4 + 2])
+                            border[i] = recording ? r > 200 && g < 120 && b < 135
+                                : r > 60 && r < 220 && abs(r - g) < 3 && abs(g - b) < 3
+                        }
+                        let total = border.filter { $0 }.count
+                        XCTAssertGreaterThan(total, 2 * (width + height))
+                        let start = try XCTUnwrap(border.firstIndex(of: true))
+                        var pending = [start], cursor = 0
+                        border[start] = false
+                        while cursor < pending.count {
+                            let value = pending[cursor]; cursor += 1
+                            let x = value % width, y = value / width
+                            for dy in -1...1 { for dx in -1...1 {
+                                let nx = x + dx, ny = y + dy
+                                guard nx >= 0, nx < width, ny >= 0, ny < height else { continue }
+                                let index = ny * width + nx
+                                if border[index] { border[index] = false; pending.append(index) }
+                            } }
+                        }
+                        XCTAssertEqual(pending.count, total, "The corner/edge stroke must form one continuous ring")
+                        XCTAssertEqual(bytes[3], 0, "The outside corner stays clipped")
+                        let center = ((height / 2) * width + width / 2) * 4
+                        XCTAssertEqual(bytes[center], 0, "Stroke must not cover the live image")
+                        XCTAssertEqual(bytes[center + 3], 255)
+                        if scale == 3 && !dark {
+                            let attachment = XCTAttachment(image: UIImage(cgImage: image))
+                            attachment.name = "viewfinder-border-\(Int(size.height))-\(recording)"
+                            attachment.lifetime = .keepAlways; add(attachment)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private final class Desqueeze: ObservableObject {
         @Published var multiplier: CGFloat = 1
     }

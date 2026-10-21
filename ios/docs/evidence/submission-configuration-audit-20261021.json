@@ -1,0 +1,164 @@
+{
+  "date": "2026-10-21",
+  "scope": "Read-only retained release inspection and synthetic URL-configuration fixtures. No build, public URL availability, in-app navigation, code signing or App Store validation performed.",
+  "script": "/Users/orys/code/nk_send/ios/scripts/verify-release-bundle.py",
+  "checks": [
+    {
+      "name": "retained-device-release-packaging",
+      "exitCode": 0,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": true,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: missing URL",
+        "ZTransferTermsOfUseURL: missing URL"
+      ]
+    },
+    {
+      "name": "retained-device-release-submission-rejects-missing-links",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: missing URL",
+        "ZTransferTermsOfUseURL: missing URL"
+      ]
+    },
+    {
+      "name": "synthetic-valid-shape-only-no-network-check",
+      "exitCode": 0,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": true,
+      "selectedChecksPassed": true,
+      "errors": [],
+      "legalURLConfigurationErrors": []
+    },
+    {
+      "name": "synthetic-reject-http",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: requires a public HTTPS URL without credentials"
+      ]
+    },
+    {
+      "name": "synthetic-reject-credentials",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: requires a public HTTPS URL without credentials"
+      ]
+    },
+    {
+      "name": "synthetic-reject-placeholder",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: URL contains whitespace or an unresolved placeholder"
+      ]
+    },
+    {
+      "name": "synthetic-reject-encoded-placeholder",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: URL contains whitespace or an unresolved placeholder"
+      ]
+    },
+    {
+      "name": "synthetic-reject-example-host",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: local or example host is not a published policy site"
+      ]
+    },
+    {
+      "name": "synthetic-reject-private-address",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: private or reserved IP is not a public policy site"
+      ]
+    },
+    {
+      "name": "synthetic-reject-bad-port",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: Port could not be cast to integer value as 'abc'"
+      ]
+    },
+    {
+      "name": "synthetic-reject-missing-terms",
+      "exitCode": 1,
+      "packagingChecksPassed": true,
+      "legalURLConfigurationPassed": false,
+      "selectedChecksPassed": false,
+      "errors": [],
+      "legalURLConfigurationErrors": [
+        "ZTransferTermsOfUseURL: missing URL"
+      ]
+    }
+  ],
+  "afterNoticeCorrection": {
+    "exitCode": 1,
+    "report": {
+      "bundle": "/private/tmp/ztransfer-prelaunch-release-current/Build/Products/Release-iphoneos/ZTransfer.app",
+      "version": "1.98",
+      "build": "1",
+      "minimumOS": "16.0",
+      "deviceFamilies": [
+        1,
+        2
+      ],
+      "packagingChecksPassed": false,
+      "errors": [
+        "Missing or outdated third-party notice: ThirdPartyNotices.txt"
+      ],
+      "validationMode": "packaging-and-submission-configuration",
+      "selectedChecksPassed": false,
+      "legalURLs": {
+        "ZTransferPrivacyPolicyURL": null,
+        "ZTransferTermsOfUseURL": null
+      },
+      "legalURLConfigurationPassed": false,
+      "legalURLConfigurationErrors": [
+        "ZTransferPrivacyPolicyURL: missing URL",
+        "ZTransferTermsOfUseURL: missing URL"
+      ],
+      "notCovered": [
+        "Code signing, device Archive validation and App Store upload",
+        "Live legal URLs, policy content, in-app link reachability and all submission metadata",
+        "Runtime behavior, permissions, hardware, UI and real Apple sandbox",
+        "Complete data-flow, encryption classification and intellectual-property review"
+      ]
+    },
+    "reason": "One source notice sentence now correctly points to the OFL text included in the same file. The retained package still contains the old sentence and is intentionally rejected as outdated. A new package is deferred until ongoing product changes stabilize."
+  },
+  "scriptSHA256": "d1652cfc9b913768580d04f672a9297b46f66aaaf302a480b9f572d7fe1dd06a"
+}

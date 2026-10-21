@@ -3,15 +3,19 @@ import Foundation
 /// Android LandscapeMonitorLayout.kt: the viewport has already had its safe
 /// insets applied. Keep the Float arithmetic and choose the larger image, not a
 /// fixed-width control rail. Desqueeze participates in the image aspect.
+/// 2026-10-21 user adjustment: navigation stays at the viewport's top-right;
+/// bottom controls have no second header, and capture/utility rows are disjoint.
 struct RemoteLandscapeLayout: Equatable {
     let image: CGRect
     let controls: CGRect
+    let navigation: CGRect
     let columns: Int
     let shutterSize: CGFloat
     let bottomControls: Bool
     let photoReview: Bool
 
-    var footerHeight: CGFloat { max(36, shutterSize) + (photoReview ? 52 : 40) }
+    var footerHeight: CGFloat { max(photoReview ? 48 : 36, shutterSize) + 8 + 36 }
+    var controlsTopInset: CGFloat { bottomControls ? 0 : 40 }
     var captureLift: CGFloat {
         !bottomControls && columns == 2
             ? min(48, max(0, (controls.height - 36 - 8 - footerHeight - 98) / 3)) : 0
@@ -29,13 +33,16 @@ struct RemoteLandscapeLayout: Equatable {
         let shutter = min(64, max(48, h * 0.18))
         let fullWidth = min(max(0, w - 8), max(0, h - 8) * aspect)
         let sideWidth = min(fullWidth, max(0, w - (photoReview ? 128 : 116) - 16))
-        let bottomHeight = 40 + max(46 * 2 + 4, max(36, shutter) + (photoReview ? 52 : 40))
-        let bottomWidth = w >= 360 && h >= bottomHeight + 16
-            ? min(fullWidth, (h - bottomHeight - 16) * aspect) : -1
+        // Top navigation: y=8, height=36, then an 8pt gap to the image.
+        // The same header used to consume 40pt inside the bottom controls.
+        let imageTop: Float = 52
+        let bottomHeight = max(46 * 2 + 4, max(36, shutter) + 8 + 36)
+        let bottomWidth = w >= 360 && h >= imageTop + bottomHeight + 12
+            ? min(fullWidth, (h - imageTop - bottomHeight - 12) * aspect) : -1
         bottomControls = bottomWidth > sideWidth + 0.01
         let iw = bottomControls ? bottomWidth : sideWidth
         let ih = iw / aspect
-        let iy = bottomControls ? max(4, min((h - ih) / 2, h - bottomHeight - 12 - ih)) : (h - ih) / 2
+        let iy = bottomControls ? max(imageTop, min((h - ih) / 2, h - bottomHeight - 12 - ih)) : (h - ih) / 2
         image = CGRect(x: CGFloat(min(4, w)), y: CGFloat(iy), width: CGFloat(iw), height: CGFloat(ih))
         let cw: Float
         if bottomControls {
@@ -46,6 +53,10 @@ struct RemoteLandscapeLayout: Equatable {
             cw = max(0, w - x - 4)
             controls = CGRect(x: CGFloat(x), y: CGFloat(min(8, h)), width: CGFloat(cw), height: CGFloat(max(0, h - 12)))
         }
+        navigation = CGRect(x: bottomControls ? CGFloat(min(4, w)) : controls.minX,
+                            y: CGFloat(min(8, h)),
+                            width: bottomControls ? CGFloat(max(0, w - 8)) : controls.width,
+                            height: CGFloat(min(36, max(0, h - 8))))
         columns = bottomControls || cw >= 176 ? 2 : 1
         shutterSize = CGFloat(bottomControls ? shutter : min(74, max(48, cw - 56)))
     }

@@ -2,11 +2,13 @@ import Foundation
 import Combine
 
 enum PictureControlPresetChoice: Identifiable, Sendable {
-    case builtIn(BuiltInPictureControl), document(PresetFile)
-    var id: String { switch self { case .builtIn(let value): value.id; case .document(let value): value.identifier } }
+    case document(PresetFile)
+    var id: String { switch self { case .document(let value): value.identifier } }
 }
 
 /// Business state for Android RemotePictureControlPanel. A destination is always explicit.
+/// iOS difference approved 2026-10-21: only user-selected NP3 documents are offered;
+/// camera activation, backup, verified writes and rollback retain the Android flow.
 @MainActor
 final class PictureControlPanelModel: ObservableObject {
     enum Action: Sendable { case write(Int, PictureControlPresetChoice), activate(Int), clear(Int)
@@ -21,8 +23,6 @@ final class PictureControlPanelModel: ObservableObject {
     @Published var editingSlot: Int?
     @Published private(set) var closeRequested = false
     @Published var interactionAllowed = true
-    @Published private(set) var presets: [BuiltInPictureControl] = []
-    @Published private(set) var presetsFailed = false
     @Published private(set) var report = ""
     let folders: PictureControlFolderState
     var notice: (String) -> Void = { _ in }
@@ -60,12 +60,7 @@ final class PictureControlPanelModel: ObservableObject {
         #endif
         task = Task { [self] in
             defer { initialLoadFinished = true; task = nil }
-            let result = await Task.detached { Result { try builtInPictureControls() } }.value
             guard !Task.isCancelled, !closed else { return }
-            switch result {
-            case .success(let entries): if presets != entries { presets = entries }
-            case .failure: if !presetsFailed { presetsFailed = true }
-            }
             #if DEBUG
             let saved = await Task.detached { (try? PictureControlReportJournal.latestByKind()) ?? [:] }.value
             reports.restore(saved)
@@ -158,7 +153,6 @@ final class PictureControlPanelModel: ObservableObject {
                 case .write(_, let choice):
                     let file: NikonPictureControlFile
                     switch choice {
-                    case .builtIn(let preset): file = try await Task.detached { try preset.read() }.value
                     case .document(let item): file = try await folders.read(item)
                     }
                     try Task.checkCancellation()

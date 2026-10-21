@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "status": "scoped-tests-passed-real-published-destinations-pending",
+  "scope": "设置底部常驻法律入口、共享 URL 配置与路由、三语短标签及简中小屏底部可达性；不代表完整上架验收。",
+  "implementation": {
+    "files": {
+      "ios/ZTransfer/UI/PremiumPurchaseView.swift": "5523eebb0b1dd8e29cf78dc26ccfa90f1bd058b380a0dda86982844c1243edb9",
+      "ios/ZTransfer/UI/SettingsView.swift": "4fddb92510b4f4f22ac69a8f7662c39253f56d887238b10fda3e3a43f492146e",
+      "ios/ZTransfer/App/IOSLocalization.swift": "788a4ee209ad872fad9f63d65ef94c844ce37ef35842568b1d77974038f78286",
+      "ios/ZTransferTests/PremiumBusinessTests.swift": "7223917e3a1bac0661b9dee8b079a0359a20c0d476d05f99cacfcb539436023d",
+      "ios/PopupUITests/PrelaunchLayoutUITests.swift": "2e639538d25cc06b91e4ed536ba81551d50a0a5791f6945958713a05481ec202"
+    },
+    "behavior": [
+      "设置固定显示共用法律入口；设置短标签为隐私/条款、隱私/條款、Privacy/Terms，购买页保留完整标签。",
+      "从 Info.plist 两个键分别读取 HTTPS 目标；无配置或格式无效时保持可见并禁用，open 不触发任何目标。",
+      "设置 footer 和共享法律组件/配置中未设权益条件；这一点来自代码检查。"
+    ],
+    "entitlementLimit": "没有分别在免费、年订阅、永久权益三种真实 UI 状态重复运行，本记录不声称完成该覆盖。",
+    "configurationAtAudit": {
+      "file": "ios/ZTransfer/Info.plist",
+      "sha256": "5a4c4740a3d72810448d71aa0fb439d3385fdabc6d1d0d7860736f6db59f1eea",
+      "absentKeys": [
+        "ZTransferPrivacyPolicyURL",
+        "ZTransferTermsOfUseURL"
+      ]
+    },
+    "testSourceScope": "列出的测试 SHA 为标签定位修正后的当前文件。1150 项输入清单不包含测试；不能用其证明历史失败与修正后测试文件完全一致。",
+    "fixedTemporaryRunnerSource": {
+      "path": "/tmp/ztransfer-prelaunch-layout-v2-fdtv2nsu/PrelaunchLayoutUITests.swift",
+      "sha256": "2e639538d25cc06b91e4ed536ba81551d50a0a5791f6945958713a05481ec202",
+      "matchesCurrentUITestFile": true
+    }
+  },
+  "productionInputStability": {
+    "before": {
+      "path": "/tmp/ztransfer-prepayment-legal-hd-inputs-before.json",
+      "sha256": "c511311ff53af3852990b8ed77a7c6fb88956bc3004fdbedb1a223eceb197f77"
+    },
+    "after": {
+      "path": "/tmp/ztransfer-prepayment-legal-hd-inputs-after.json",
+      "sha256": "c511311ff53af3852990b8ed77a7c6fb88956bc3004fdbedb1a223eceb197f77"
+    },
+    "pathCount": 1150,
+    "mapsEqual": true,
+    "currentFilesRehashed": 1150,
+    "currentDifferences": [],
+    "scope": "两个已保存清单明确列出的 1150 项生产/随包/工程输入；本次只读重新计算全部路径。不是整个工作区、测试源码或完整工具链快照。"
+  },
+  "unitRun": {
+    "path": "/tmp/ztransfer-prepayment-legal-hd-baseline.log",
+    "sha256": "b4f9f061bb1852327e82e26a594a46f827a50b4dabde40e63a4f1673186ea967",
+    "xcresult": "/tmp/ztransfer-prepayment-legal-hd-baseline.xcresult",
+    "xcresultExists": true,
+    "result": "TEST SUCCEEDED",
+    "exitCode": 0,
+    "exitCodeSource": "root observed process completion",
+    "legalTests": {
+      "executed": 3,
+      "passed": 3,
+      "failed": 0
+    },
+    "wholeBatch": {
+      "executed": 4,
+      "passed": 4,
+      "failed": 0,
+      "otherTest": "RemoteFramePresentationTests.testProductionMonitorKeepsChangingPixelsWithStableLayoutInNormalAndHDScopes"
+    },
+    "methods": [
+      {
+        "name": "AppLegalLinksTests.testConfiguredHTTPSDestinationsRouteThroughOpenURLWithoutPurchase",
+        "coverage": "用注入的 OpenURLAction 捕获示例 HTTPS URL；两个文档分别正确路由，保留 query/fragment；单项配置缺失不误开另一文档。"
+      },
+      {
+        "name": "AppLegalLinksTests.testMissingAndInvalidDestinationsRemainUnavailableAndNeverOpen",
+        "coverage": "缺失、空串、相对路径、无 host、非 HTTPS、空白字符、用户名密码、非字符串等输入不产生目标且不调用 OpenURLAction。"
+      },
+      {
+        "name": "AppLegalLinksTests.testSettingsShortLabelsPreserveCompletePurchaseLabelsInEverySupportedLanguage",
+        "coverage": "简中、繁中、英文的设置短标签和购买页完整标签逐值符合预期。"
+      }
+    ],
+    "exampleDestinations": [
+      "https://example.com/ztransfer/privacy/?language=zh#collection",
+      "https://example.com/ztransfer/terms/"
+    ],
+    "routeLimit": "仅测试配置解析与注入的 OpenURLAction 调用；未访问 example.com 或真实政策网址、未启动 Safari、未通过实际 UI 点击法律链接。"
+  },
+  "historicalUIFailure": {
+    "path": "/tmp/ztransfer-prepayment-legal-footer-ui.log",
+    "sha256": "3c8976f1df5f70fb51dcc67299fa8299eb5588f6a8b5b800d4c8785ec7b42acf",
+    "xcresult": "/tmp/ztransfer-prepayment-legal-footer-ui.xcresult",
+    "xcresultExists": true,
+    "result": "TEST FAILED",
+    "exitCode": 65,
+    "exitCodeSource": "root observed process completion",
+    "executed": 1,
+    "failed": 1,
+    "method": "PrelaunchLayoutUITests.testCompactHelpAndSettingsFooterRemainReachable",
+    "failure": "原生玻璃样式外层 accessibility wrapper 的 label 为空，XCTAssertEqual(privacy.label, \"隐私\") 失败。",
+    "diagnosticScreenshot": {
+      "path": "/tmp/ztransfer-prepayment-legal-footer-failure.png",
+      "sha256": "b415e868b047802e964fe5cdf5dc1e2eb973ed23b2685a3b82ddfbecf2ef65d5",
+      "visuallyReviewedBy": "root",
+      "reportedObservation": "短标签实际可见。"
+    },
+    "testCorrection": {
+      "description": "root 报告仅把标签断言改为匹配 wrapper 内部的原生 button；未放宽 frame、不重叠或关闭断言。当前代码仍保留这些几何/关闭断言。",
+      "historicalSourceDiffIndependentlyVerified": false
+    },
+    "retained": true
+  },
+  "fixedUIRun": {
+    "path": "/tmp/ztransfer-prepayment-legal-footer-ui-fixed.log",
+    "sha256": "9952f374727460904d126585dd3d4524a4a1500f5def4943be00a03f15f3bd25",
+    "xcresult": "/tmp/ztransfer-prepayment-legal-footer-ui-fixed.xcresult",
+    "xcresultExists": true,
+    "result": "TEST SUCCEEDED",
+    "exitCode": 0,
+    "exitCodeSource": "root observed process completion",
+    "executed": 1,
+    "passed": 1,
+    "failed": 0,
+    "durationSeconds": 27.7,
+    "method": "PrelaunchLayoutUITests.testCompactHelpAndSettingsFooterRemainReachable",
+    "device": {
+      "name": "ZTransfer-Pro-Compact",
+      "id": "13EB3240-0CC7-4910-8724-1A527489099B",
+      "formFactor": "iPhone SE simulator (root identified)",
+      "language": "zh-Hans"
+    },
+    "coverage": [
+      "实际连接页 STA/AP 帮助可滚至最后一段，并能通过原灯泡入口关闭。",
+      "实际设置底部可滚到反馈、版本、隐私与条款；后两者内部 button 的中文短标签存在。",
+      "四个底部元素的 frame 均在 panel 与 app 边界内（原断言允许 1 pt 取整边界）；法律入口互不重叠且位于反馈下方。",
+      "无需出现购买弹窗即可显示法律入口；关闭设置后原入口可操作。"
+    ],
+    "limits": [
+      "法律 URL 未配置，入口可见且禁用；此次实际 UI 没有点击或访问任何法律页面。",
+      "仅简中小屏这一实际 UI 路径；三语标签由单元测试覆盖，不等于三语布局或全部权益状态 UI 覆盖。",
+      "没有触发反馈、剪贴板、交易或联网流程。"
+    ],
+    "attachmentManifest": {
+      "path": "/tmp/ztransfer-prepayment-legal-footer-ui-fixed-images/manifest.json",
+      "sha256": "5ecf1bda1008de0fa32c9fedfc7e4048965588eecb0b9ff6ca968d18711073d8"
+    },
+    "screenshots": [
+      {
+        "path": "/tmp/ztransfer-prepayment-legal-footer-ui-fixed-images/AA0D43A7-9226-46BF-B2F1-CAE02A76E8DC.png",
+        "sha256": "8d1ea1fdde36a890119bb9bfa5ee9dab57bbd1d4c276ea1504b0d5efd889bc14",
+        "attachmentName": "L07-settings-footer-reachable_0_956B7312-94B7-4387-9CC9-142C50C7A000.png",
+        "width": 750,
+        "height": 1334,
+        "visuallyReviewed": true,
+        "reviewer": "preview_review",
+        "observation": "设置底部“隐私 / 条款”完整可见，位于反馈下方；两者互不重叠且在面板和屏幕内。呈禁用灰色，无购买弹窗。画面含 v1.98-D，仅为验证截图，不是商店交付素材。"
+      },
+      {
+        "path": "/tmp/ztransfer-prepayment-legal-footer-ui-fixed-images/9F55280A-36EB-4394-9FF8-F4B5A33888FC.png",
+        "sha256": "1876d08826051ade4219f7bfc994658ea4245d6a4e24741aa99f2f05f268d86e",
+        "attachmentName": "L02-AP-help-last-paragraph_0_F224A56D-8866-4E27-843B-131257D74295.png",
+        "width": 750,
+        "height": 1334,
+        "visuallyReviewed": true,
+        "reviewer": "preview_review",
+        "observation": "AP 帮助末段菜单路径完整可见且在帮助面板内；上方灯泡入口可见。"
+      },
+      {
+        "path": "/tmp/ztransfer-prepayment-legal-footer-ui-fixed-images/49DAA7C6-1124-41FD-812E-0D7EF8AC3BC7.png",
+        "sha256": "0108a1b3301fc3de6a97d3388db1e4d8be4e97120ff6e7a96a294f1e00682f09",
+        "attachmentName": "L02-STA-help-last-paragraph_0_636E647B-8B49-4DB4-8EA7-4881C8D97F4D.png",
+        "width": 750,
+        "height": 1334,
+        "visuallyReviewed": true,
+        "reviewer": "preview_review",
+        "observation": "STA 帮助滚动到底部后，末段菜单路径完整可见；灯泡入口可见。顶部标题处于滚动边界，本图不证明整篇帮助同时完整显示。"
+      }
+    ],
+    "allThreeScreenshotsActuallyReviewed": true
+  },
+  "evidenceMethod": "从已完成日志读取各 suite/method 终态，结合当前源码、保存的输入指纹、已导出附件和逐张目视核查。未通过本次记录启动构建、测试、模拟器或网络访问；未把 xcresult 的存在当作额外运行结果。",
+  "remaining": [
+    "补齐并实际发布公开 HTTPS 隐私政策、使用条款页面，填入两项正式配置。",
+    "配置后验证设置和购买页各入口实际打开对应完整页面；检查公开可访问性、中文/英文同站路径及最终页面内容。",
+    "本证据不证明真实网页部署、实际 Safari 打开、Apple 审核通过或全部设备/权益组合覆盖。"
+  ]
+}

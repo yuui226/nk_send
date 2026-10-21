@@ -1,0 +1,17 @@
+{
+  "label": "ui-camera-preview-confirmation",
+  "command": [
+    "env",
+    "ZTRANSFER_TEST_DERIVED_DATA=/tmp/ztransfer-removal-derived-20261021",
+    "bash",
+    "ios/StoreKit/test-recovery-ui.sh",
+    "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices"
+  ],
+  "startedAt": "2026-10-21T16:06:22.490052+08:00",
+  "finishedAt": "2026-10-21T16:10:53.651417+08:00",
+  "exitCode": 0,
+  "log": "/tmp/ztransfer-removal-validation-20261021/ui-camera-preview-confirmation.log",
+  "sha256": "7af156531c21b550b2e3f17c314b8fee6c0ff514667b398636b9ad517a804581",
+  "markers": []
+}

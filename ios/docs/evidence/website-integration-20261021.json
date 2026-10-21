@@ -1,0 +1,278 @@
+{
+  "date": "2026-10-21",
+  "scope": "Authorized local integration only; domain filing completion is owner-confirmed. No push, deployment, Pages/DNS/certificate mutation, API migration or iOS build.",
+  "ownerDecision": "Continue GitHub Pages for the existing website and iOS policy pages; integrate locally now, publish only after final content is ready.",
+  "readOnlyPagesSnapshot": {
+    "repository": "yuui226/ztransfer-site",
+    "source": {
+      "branch": "master",
+      "path": "/"
+    },
+    "cname": "www.ztransfer.top",
+    "status": "built",
+    "html_url": "http://www.ztransfer.top/",
+    "https_enforced": false,
+    "https_certificate": null
+  },
+  "remoteAndLocalGitBlobsMatch": {
+    "index.html": "d91159562abce5c77fff3c9a03d69d2738ce11b2",
+    "CNAME": "68d4aa8862c13394526c49b0a9adba70169417d9",
+    "icon-320.png": "bbd14dd58aa44ddbc8aade80762c99a73facaca2"
+  },
+  "networkLimit": "The current environment encountered TLS hostname mismatch when opening the apex root and three iOS paths; local DNS returned proxy-range addresses, so those addresses are not recorded as authoritative public DNS. www and apex web-tool fetches also failed. No public availability claim.",
+  "buildChecks": {
+    "standalonePreviewUnchanged": true,
+    "sourceSiteUnchanged": true,
+    "siteSourceSHA256": {
+      "index.html": "319bc08f82d0d97c2ede5681e30699c5cb5b7a69e56f122bda9046c59d3a94fd",
+      "icon-320.png": "3e2d954c048cd04dfe11727094d2157ce8c354a818411721a74bd57691acc476",
+      "CNAME": "fc815a1cb552481a07ac310e86913b01c500a408ce11dcac49f9686688fd1f35"
+    },
+    "integratedPreviewSHA256": {
+      "index.html": "0639d8d9deb1a7574d3155ff408a0c3792e00e93558f67e529e50cf1612e8dbe",
+      "icon-320.png": "3e2d954c048cd04dfe11727094d2157ce8c354a818411721a74bd57691acc476",
+      "CNAME": "fc815a1cb552481a07ac310e86913b01c500a408ce11dcac49f9686688fd1f35",
+      ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "ios/privacy/index.html": "bba66e2c1496a207a6dafe1469ec558469b07f15d98ca0715d35bb761cb4c785",
+      "ios/terms/index.html": "ace3d7e9d32149a5ab331fcbac803338059da3bafc7a12b2f6f39351d8f232ff",
+      "ios/support/index.html": "9e935023000dc96fe7f3ecf17769e180fb8789b09d4aaaa0a05b87a96dfb907d",
+      "ios/en/privacy/index.html": "21810c06452d866fa25280628019abbee7afba34f7672a1a63ab7a2657a7b216",
+      "ios/en/terms/index.html": "1dc4dfd620a476660ed326762f2660c5903044cdc24649aace956b4aaa00482f",
+      "ios/en/support/index.html": "b1628b5dfe99aa29d580b7299ee8fd4f2ab0e0fb37edb41a660d1664eca9375d",
+      "ios/assets/style.css": "054d1f26a3bbfcf623126183b453d93875613f3284a31a441d39a131d75ededc"
+    },
+    "websiteReleaseExitCode": 1,
+    "websiteReleaseBlockedMarkers": 14,
+    "websiteDistCreated": false,
+    "previewAndReportPreservedOnReleaseFailure": true,
+    "finalDisclosureUpdate": {
+      "changedStandaloneFiles": [
+        "ios/en/privacy/index.html",
+        "ios/privacy/index.html"
+      ],
+      "reason": "Document the existing home page local animation scripts in both privacy languages; no new tracking or processing.",
+      "integratedPreviewSHA256": {
+        "index.html": "0639d8d9deb1a7574d3155ff408a0c3792e00e93558f67e529e50cf1612e8dbe",
+        "icon-320.png": "3e2d954c048cd04dfe11727094d2157ce8c354a818411721a74bd57691acc476",
+        "CNAME": "fc815a1cb552481a07ac310e86913b01c500a408ce11dcac49f9686688fd1f35",
+        ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "ios/privacy/index.html": "70ba77ef9c5d363434e74b0f9b6d4b88dfcb5a35cf9f0af71e8de398a1d11387",
+        "ios/terms/index.html": "ace3d7e9d32149a5ab331fcbac803338059da3bafc7a12b2f6f39351d8f232ff",
+        "ios/support/index.html": "9e935023000dc96fe7f3ecf17769e180fb8789b09d4aaaa0a05b87a96dfb907d",
+        "ios/en/privacy/index.html": "b162609383e47122d51eb423ecc6901c13ea53d579acffda6db93d7ddbdf4dd5",
+        "ios/en/terms/index.html": "1dc4dfd620a476660ed326762f2660c5903044cdc24649aace956b4aaa00482f",
+        "ios/en/support/index.html": "b1628b5dfe99aa29d580b7299ee8fd4f2ab0e0fb37edb41a660d1664eca9375d",
+        "ios/assets/style.css": "054d1f26a3bbfcf623126183b453d93875613f3284a31a441d39a131d75ededc"
+      },
+      "sourceSiteUnchanged": true,
+      "originalMainSectionPreserved": true,
+      "CNAMEAndIconPreserved": true,
+      "websiteReleaseExitCode": 1,
+      "blockedMarkers": 14,
+      "websiteDistCreated": false,
+      "previewAndReportPreserved": true
+    }
+  },
+  "linkChecks": {
+    "htmlPages": 7,
+    "mounts": [
+      "/",
+      "/ztransfer-site/"
+    ],
+    "localReferenceResolutions": 114,
+    "anchorResolutions": 22,
+    "externalOrMailReferences": 23,
+    "errors": []
+  },
+  "browser": {
+    "origin": "http://127.0.0.1:52439",
+    "localOnly": true,
+    "checks": [
+      {
+        "route": "",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/privacy/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/terms/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/support/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/en/privacy/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/en/terms/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/en/support/",
+        "scheme": "light",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/privacy/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/terms/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/support/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/en/privacy/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/en/terms/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      },
+      {
+        "route": "ios/en/support/",
+        "scheme": "dark",
+        "width": 375,
+        "scrollWidth": 375,
+        "robots": "noindex,nofollow",
+        "styleSheets": 1,
+        "hasDraft": true
+      }
+    ],
+    "flows": [
+      "home → Chinese privacy → English privacy → original home"
+    ],
+    "pageErrors": [],
+    "screenshots": [
+      "home-footer-mobile.png",
+      "home-footer-desktop.png",
+      "privacy-zh-mobile.png",
+      "privacy-en-dark-mobile.png"
+    ],
+    "scope": "Local Chromium HTTP preview, mobile light/dark layouts and link flow. No public hosting, mobile Safari, DNS or App build."
+  },
+  "images": [
+    {
+      "path": "website-integration-20261021/home-footer-mobile.png",
+      "sha256": "46de675f96905f05057314abad7ed7dbe53ed082ee47aa1fcadfbf6c738ca591",
+      "visuallyReviewed": true,
+      "review": "Root opened actual pixels; footer links fit mobile/desktop, Chinese light and English dark policy headers are readable and explicitly show draft status."
+    },
+    {
+      "path": "website-integration-20261021/home-footer-desktop.png",
+      "sha256": "3e42022905790af5ffe6cbacdede388de8b487d6370aba6f89c486c7382b4754",
+      "visuallyReviewed": true,
+      "review": "Root opened actual pixels; footer links fit mobile/desktop, Chinese light and English dark policy headers are readable and explicitly show draft status."
+    },
+    {
+      "path": "website-integration-20261021/privacy-zh-mobile.png",
+      "sha256": "816ecc51cf87cc79c9a198b47e8192bdfe313e395740e919783737d127d52b63",
+      "visuallyReviewed": true,
+      "review": "Root opened actual pixels; footer links fit mobile/desktop, Chinese light and English dark policy headers are readable and explicitly show draft status."
+    },
+    {
+      "path": "website-integration-20261021/privacy-en-dark-mobile.png",
+      "sha256": "5b57019f504eb78b3735a1ae1b4a2b192734725a8e376035588c98306c03ebcf",
+      "visuallyReviewed": true,
+      "review": "Root opened actual pixels; footer links fit mobile/desktop, Chinese light and English dark policy headers are readable and explicitly show draft status."
+    }
+  ],
+  "remaining": [
+    "Resolve 14 duplicated publication markers and confirm final policy facts.",
+    "Verify actual public HTTPS page access at publication, using the existing website/backend separation and configured domain setup.",
+    "After final content and access checks, publish the approved output and connect actual URLs in iOS; neither is done now."
+  ],
+  "currentInputsSHA256": {
+    "ios/docs/site/build.mjs": "9b7899c7de7d37362be404f5f654280d24b486425f374b25677d62b7af0103f8",
+    "ios/docs/site/package.json": "faabda93b40fc364f9ff6e718b4d98fe391780c9946cf31e351c92c994da382a",
+    "ios/docs/site/style.css": "054d1f26a3bbfcf623126183b453d93875613f3284a31a441d39a131d75ededc",
+    "ios/docs/site/.gitignore": "59eb39d5c05687a501898f64a8deed647134df73225122a56c90b7e5d3c07d37",
+    "site/index.html": "319bc08f82d0d97c2ede5681e30699c5cb5b7a69e56f122bda9046c59d3a94fd",
+    "site/CNAME": "fc815a1cb552481a07ac310e86913b01c500a408ce11dcac49f9686688fd1f35",
+    "site/icon-320.png": "3e2d954c048cd04dfe11727094d2157ce8c354a818411721a74bd57691acc476"
+  },
+  "subsequentOwnerClarification": {
+    "date": "2026-10-21",
+    "websiteAndBackendAlreadySeparate": true,
+    "backendHostname": "api.ztransfer.top",
+    "backendPointingConfigured": true,
+    "basis": "Explicit owner statement; not a new endpoint/security test.",
+    "scope": "Preserve existing DNS/backend setup; add iOS website pages only. Earlier Pages snapshot remains historical."
+  }
+}

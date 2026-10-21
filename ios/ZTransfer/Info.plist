@@ -24,6 +24,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photography</string>
+	<key>ZTransferPrivacyPolicyURL</key>
+	<string>https://www.ztransfer.top/ios/privacy/</string>
+	<key>ZTransferTermsOfUseURL</key>
+	<string>https://www.ztransfer.top/ios/terms/</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用于连接 Nikon GPS 设备</string>
 	<key>NSBonjourServices</key>

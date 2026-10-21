@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-21",
+  "scope": "Fresh normal TLS GET of the six published policy/support routes; no deployment or DNS mutation.",
+  "baseURL": "https://www.ztransfer.top/",
+  "liveResults": [
+    {
+      "route": "ios/privacy/",
+      "status": 200,
+      "matchesPublishedSource": true
+    },
+    {
+      "route": "ios/terms/",
+      "status": 200,
+      "matchesPublishedSource": true
+    },
+    {
+      "route": "ios/support/",
+      "status": 200,
+      "matchesPublishedSource": true
+    },
+    {
+      "route": "ios/en/privacy/",
+      "status": 200,
+      "matchesPublishedSource": true
+    },
+    {
+      "route": "ios/en/terms/",
+      "status": 200,
+      "matchesPublishedSource": true
+    },
+    {
+      "route": "ios/en/support/",
+      "status": 200,
+      "matchesPublishedSource": true
+    }
+  ],
+  "retainedSourceComparison": [
+    {
+      "path": "ios/docs/site/website-dist/ios/privacy/index.html",
+      "matchesPublication": true
+    },
+    {
+      "path": "ios/docs/site/website-dist/ios/terms/index.html",
+      "matchesPublication": true
+    },
+    {
+      "path": "ios/docs/site/website-dist/ios/support/index.html",
+      "matchesPublication": true
+    },
+    {
+      "path": "ios/docs/site/website-dist/ios/en/privacy/index.html",
+      "matchesPublication": true
+    },
+    {
+      "path": "ios/docs/site/website-dist/ios/en/terms/index.html",
+      "matchesPublication": true
+    },
+    {
+      "path": "ios/docs/site/website-dist/ios/en/support/index.html",
+      "matchesPublication": true
+    }
+  ],
+  "publicationCommit": "3d138907edde01603e2ae57bf19a87ec37bc143d",
+  "notCovered": [
+    "All geographical networks",
+    "In-app navigation (separate runtime evidence)",
+    "App Store submission"
+  ]
+}

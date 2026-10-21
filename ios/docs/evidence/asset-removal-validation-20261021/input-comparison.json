@@ -1,0 +1,19 @@
+{
+  "production": {
+    "beforeCount": 1102,
+    "afterCount": 1102,
+    "changed": [],
+    "added": [],
+    "removed": []
+  },
+  "tests": {
+    "trackedInputCount": 175,
+    "changed": {
+      "ios/StoreKitUITests/PremiumRecoveryUITests.swift": {
+        "before": "fd91abc12b633cba649a06ffe09226bb2700daa34e62d55e2600969b4db6258e",
+        "after": "e6b1e77a66416cd83afc6417727375ad7ec5ccda26d380fed715abffd4302bce"
+      }
+    },
+    "meaning": "Before snapshot includes initial brand-control and NP3 component additions; delta here is only the later preview OCR readiness enhancement."
+  }
+}

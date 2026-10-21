@@ -1,0 +1,98 @@
+{
+  "reviewDate": "2026-10-21",
+  "reviewer": "remove_logo_controls",
+  "result": "UI control and persistence checks passed; brand-off preview pixel visibility is not established by these screenshots",
+  "device": "ZTransfer-Prelaunch-StandardPhone",
+  "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+  "language": "English",
+  "theme": "light",
+  "testIdentifier": "PremiumRecoveryUITests/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices()",
+  "logs": [
+    {
+      "stage": "prepare",
+      "path": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/prepare-testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.log",
+      "sha256": "2c1b6837999b23c1b7bfd7ae11a5c9c6b79abc3dac8e8cdfa2967ab441fe4ec0",
+      "tests": 1,
+      "failures": 0,
+      "marker": "TEST SUCCEEDED"
+    },
+    {
+      "stage": "ui",
+      "path": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/testFreeCameraEffectsKeepWatermarkLockedAndSaveFreeChoices.log",
+      "sha256": "f00744f0963c86d718b36cfdda5cdf58c9c3254e322844d4320688acccc892cf",
+      "tests": 1,
+      "failures": 0,
+      "marker": "TEST SUCCEEDED"
+    },
+    {
+      "stage": "cleanup",
+      "path": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.rIfWQr/cleanup.log",
+      "sha256": "20277ec643137dac7df6dd79cddedbb6d9af6e0dc6b48dc872ff7b1c4ab0e522",
+      "tests": 1,
+      "failures": 0,
+      "marker": "TEST SUCCEEDED"
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/584C91A0-CCEE-4D98-9FE9-E12AEE2B9AC9.png",
+      "name": "camera-brand-off-no-graphic-option_0_8C553818-05BE-4F84-8392-C617A81E602E.png",
+      "timestamp": 1792569128.318,
+      "sha256": "68e0af8f3ece16fa26a0a52c6537cf5483ed5cd497b118d1ed6c2ffdd3e7a4ca",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/F0ECFC01-0975-4924-A2D6-64FFEB9436C3.png",
+      "name": "camera-brand-text-no-graphic-option_0_BA176FA7-B218-4159-BD68-C42963333376.png",
+      "timestamp": 1792569133.065,
+      "sha256": "665117a53d537a21526a1700302a96a972682fae608482bcacccc13823373ad1",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/8EA248E2-E224-4001-9E36-8E1934280C17.png",
+      "name": "free-camera-effects-locked_0_44CFD778-F030-4C68-9D54-3D822BE6CB77.png",
+      "timestamp": 1792569189.713,
+      "sha256": "3079f593c6d1b19b85094d7e2110f65ad08be07705e60b9ef8b08a7d9ee2b791",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/6741224F-3E51-4682-B21F-8B00EF0CD021.png",
+      "name": "camera-brand-off-no-graphic-option_0_D5964B3D-A880-4B00-9B11-3F5C2F3D298C.png",
+      "timestamp": 1792569232.037,
+      "sha256": "b67459f6368e6239ad7a5bb16e91c9a1fadd9a7fd9b99f608d23326b211c6acc",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/16BD6D1D-A2FF-43CB-BAAE-6C91DE7F8E21.png",
+      "name": "camera-brand-text-no-graphic-option_0_81CA6531-D45F-4A12-9C37-FDF415BAD895.png",
+      "timestamp": 1792569236.782,
+      "sha256": "be1e8e7644f8feb78bfd88632f6fec46803daff43ba401d744b3a01355352304",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "/tmp/ztransfer-removal-validation-20261021/ui-free-camera-attachments/66DB524A-E5C2-4F25-BB24-C4777829F547.png",
+      "name": "free-camera-effects-after-relaunch_0_67D14223-8F7C-45B0-B74E-B962708AD838.png",
+      "timestamp": 1792569292.35,
+      "sha256": "84917196ce5e740e85c3ab1d456f9c3edee1221707852d6d2d73a10a91d435ca",
+      "visuallyReviewed": true
+    }
+  ],
+  "observations": [
+    "All six unmodified exported screenshots were opened and visually inspected.",
+    "Before and after relaunch, Brand appears gray when off; Brand · Text appears orange when enabled. Both labels fit the buttons and align with Model and Lens. The focal/exposure/location and date/time rows remain aligned. No graphical brand option is shown.",
+    "The phone-image filter Forest Verdure at 80% and frame Mist are visible before and after relaunch.",
+    "Free watermark controls remain disabled with Text / ZTransfer; the intentional Available in Pro only toast is visible in both watermark screenshots.",
+    "The camera preview contains ordinary Nikon Z 233 text, with no graphical brand emblem. Both brand-off screenshots still show this text, so these snapshots do not establish that the completed preview reacts to hiding the brand. The UI test waits for the control label but has no pixel-ready assertion. This observation was reported to the root agent."
+  ],
+  "limits": [
+    "Do not claim brand-off preview or photo export pixel correctness from this test. The unchanged preview could be an in-flight frame or another presentation behavior; its cause is not established by this read-only review.",
+    "Only this simulator, language, theme, free state and flow were reviewed.",
+    "User-image watermark import and camera NP3 folder behavior belong to separate tests."
+  ],
+  "followUp": {
+    "investigation": "/tmp/ztransfer-removal-validation-20261021/camera-brand-off-investigation.md",
+    "originalImageOCR": "/tmp/ztransfer-removal-validation-20261021/ocr-original-camera-brand-host.jsonl",
+    "cpuROIOCR": "/tmp/ztransfer-removal-validation-20261021/ocr-camera-brand-roi-cpu.jsonl",
+    "finding": "All four original off/text captures recognize Nikon Z233 at confidence 1.0; raw sample photos contain no such border text. A stricter UI wait was prepared but not run by this reviewer."
+  }
+}

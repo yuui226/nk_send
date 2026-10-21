@@ -13,7 +13,10 @@ final class RemoteLandscapeLayoutTests: XCTestCase {
                 for aspect: CGFloat in [1.5, 2.35, 3.56] {
                     let layout = RemoteLandscapeLayout(width: width, height: height, imageAspect: aspect, photoReview: true)
                     XCTAssertGreaterThanOrEqual(layout.controls.width, 128)
-                    XCTAssertGreaterThanOrEqual(layout.footerHeight - layout.shutterSize, 52)
+                    XCTAssertEqual(layout.navigation.minY, 8, accuracy: 0.001)
+                    XCTAssertEqual(layout.navigation.maxX, width - 4, accuracy: 0.001)
+                    XCTAssertFalse(layout.navigation.intersects(layout.image))
+                    XCTAssertGreaterThanOrEqual(layout.footerHeight - layout.shutterSize, 44)
                     XCTAssertLessThanOrEqual(layout.controls.maxY, height + 0.001)
                     XCTAssertTrue(layout.bottomControls ? layout.controls.minY >= layout.image.maxY : layout.controls.minX >= layout.image.maxX)
                     let available = layout.bottomControls ? max(128, layout.shutterSize + 52) : layout.controls.width
@@ -39,7 +42,7 @@ final class RemoteLandscapeLayoutTests: XCTestCase {
                 for aspect: CGFloat in [1.5, 16 / 9, 2.35, 3.56] {
                     let layout = RemoteLandscapeLayout(width: width, height: height, imageAspect: aspect)
                     XCTAssertEqual(layout.image.width / layout.image.height, aspect, accuracy: 0.0001)
-                    for bounds in [layout.image, layout.controls] {
+                    for bounds in [layout.image, layout.controls, layout.navigation] {
                         XCTAssertGreaterThanOrEqual(bounds.minX, 0)
                         XCTAssertGreaterThanOrEqual(bounds.minY, 0)
                         XCTAssertLessThanOrEqual(bounds.maxX, width + 0.001)
@@ -48,6 +51,10 @@ final class RemoteLandscapeLayoutTests: XCTestCase {
                     XCTAssertTrue(layout.bottomControls ? layout.controls.minY >= layout.image.maxY + 7.99
                                   : layout.controls.minX >= layout.image.maxX + 7.99)
                     XCTAssertGreaterThanOrEqual(layout.controls.width, 116)
+                    XCTAssertFalse(layout.navigation.intersects(layout.image))
+                    if layout.bottomControls {
+                        XCTAssertGreaterThanOrEqual(layout.image.minY - layout.navigation.maxY, 7.99)
+                    }
                 }
             }
         }
@@ -74,7 +81,7 @@ final class RemoteLandscapeLayoutTests: XCTestCase {
         let layout = RemoteLandscapeLayout(width: 800, height: 800, imageAspect: 16 / 9)
         XCTAssertTrue(layout.bottomControls)
         XCTAssertEqual(layout.image.width, 792, accuracy: 0.001)
-        XCTAssertGreaterThanOrEqual(layout.controls.height, 40 + max(96, layout.footerHeight))
+        XCTAssertGreaterThanOrEqual(layout.controls.height, max(96, layout.footerHeight))
         XCTAssertGreaterThanOrEqual((layout.controls.width - 96 - layout.shutterSize - 16 - 6) / 2, 80)
     }
 
@@ -84,7 +91,7 @@ final class RemoteLandscapeLayoutTests: XCTestCase {
         XCTAssertTrue(wide.bottomControls)
         XCTAssertEqual(wide.image.width, 792, accuracy: 0.001)
         XCTAssertEqual(wide.image.width / wide.image.height, 16 / 9 * 2, accuracy: 0.001)
-        XCTAssertGreaterThanOrEqual(wide.controls.height, 40 + max(96, wide.footerHeight))
+        XCTAssertGreaterThanOrEqual(wide.controls.height, max(96, wide.footerHeight))
         XCTAssertGreaterThanOrEqual(wide.controls.minY, wide.image.maxY + 7.99)
     }
 
@@ -198,7 +205,7 @@ final class RemoteReviewEntryPresentationTests: XCTestCase {
             Color.clear.preference(key: Bounds.self, value: [id: proxy.frame(in: .named("review-entry-layout"))])
         })
     }
-    func testActualLandscapeCaptureRowMatchesAndroidSlots() async throws {
+    func testActualLandscapeNavigationAndCaptureTargetsRemainSeparated() async throws {
         let suite = "review-entry-layout-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defaults.set(ZTransferButtonSkin.frostedGlass.rawValue, forKey: "skin_preset")
@@ -206,9 +213,11 @@ final class RemoteReviewEntryPresentationTests: XCTestCase {
         let tools = RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in })
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let previous = scene.windows.first(where: \.isKeyWindow)
-        for width: CGFloat in [640, 1000] {
-            let height: CGFloat = 400
-            let layout = RemoteLandscapeLayout(width: width, height: height, imageAspect: 1.5, photoReview: true)
+        for (width, height, aspect): (CGFloat, CGFloat, CGFloat) in [
+            (640, 400, 1.5), (1000, 400, 1.5), (832, 430, 3),
+            (667, 320, 3.56), (800, 800, 16 / 9)
+        ] {
+            let layout = RemoteLandscapeLayout(width: width, height: height, imageAspect: aspect, photoReview: true)
             var bounds: [String: CGRect] = [:]
             var builtTools: [RemoteTool] = []
             let content = ZStack(alignment: .topLeading) {
@@ -220,12 +229,12 @@ final class RemoteReviewEntryPresentationTests: XCTestCase {
                     return AnyView(Text(tool.id))
                 }, onPanelChange: {}, onTick: {},
                     applyHidden: { _ in }, rotate: AnyView(measured(Text("R").frame(width: 36, height: 36), "rotate")),
-                    back: AnyView(Text("Back")), disp: AnyView(measured(Text("DISP").frame(width: 36, height: 36), "disp")),
+                    back: AnyView(measured(Text("Back").frame(width: 40, height: 36), "back")),
+                    disp: AnyView(measured(Text("DISP").frame(width: 36, height: 36), "disp")),
                     shutter: { size in AnyView(self.measured(Circle().fill(Color.white).frame(width: size, height: size), "shutter")) },
                     review: { scale in AnyView(self.measured(RemoteReviewEntryButton(large: false, sizeScale: scale, enabled: true, action: {}), "review")) },
                     parameter: { _, height in AnyView(Color.gray.opacity(0.08).frame(height: height)) })
-                    .frame(width: layout.controls.width, height: layout.controls.height)
-                    .offset(x: layout.controls.minX, y: layout.controls.minY)
+                    .frame(width: width, height: height, alignment: .topLeading)
             }.coordinateSpace(name: "review-entry-layout")
                 .onPreferenceChange(Bounds.self) { bounds = $0 }
                 .defaultAppStorage(defaults).environment(\.colorScheme, .light).ignoresSafeArea()
@@ -241,15 +250,29 @@ final class RemoteReviewEntryPresentationTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(shutter.minX - review.maxX, 7.99)
             XCTAssertEqual(review.midY, shutter.midY, accuracy: 0.01)
             XCTAssertEqual(shutter.minY, layout.controls.maxY - layout.footerHeight - layout.captureLift, accuracy: 0.01)
-            // Android anchors the 76pt DISP/rotation column to bottom-start;
-            // it does not move that column below the entire capture row.
-            XCTAssertEqual(try XCTUnwrap(bounds["disp"]).minY, layout.controls.maxY - 76, accuracy: 0.01)
-            XCTAssertEqual(try XCTUnwrap(bounds["rotate"]).maxY, layout.controls.maxY, accuracy: 0.01)
+            let back = try XCTUnwrap(bounds["back"])
+            let disp = try XCTUnwrap(bounds["disp"]), rotate = try XCTUnwrap(bounds["rotate"])
+            // 2026-10-21: navigation belongs to the landscape viewport even
+            // when desqueeze moves parameters below the image. Check actual
+            // view bounds; the old footer arithmetic missed review/DISP overlap.
+            XCTAssertEqual(back.minY, 8, accuracy: 0.01)
+            XCTAssertEqual(back.maxX, width - 4, accuracy: 0.01)
+            XCTAssertFalse(back.intersects(layout.image))
+            for target in [disp, rotate] {
+                XCTAssertGreaterThanOrEqual(target.minY - max(review.maxY, shutter.maxY), 7.99)
+                XCTAssertFalse(target.intersects(review))
+                XCTAssertFalse(target.intersects(shutter))
+                XCTAssertLessThanOrEqual(target.maxY, layout.controls.maxY + 0.01)
+            }
+            XCTAssertFalse(disp.intersects(rotate))
             let format = UIGraphicsImageRendererFormat(); format.scale = 1
             let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
                 window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
             }
-            try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-1018-review-entry-\(Int(width)).png"))
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "monitor-layout-\(Int(width))-\(Int(height))-\(aspect)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
         }
     }
 }

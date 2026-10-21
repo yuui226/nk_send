@@ -1,0 +1,276 @@
+{
+  "reviewedAtUTC": "2026-10-21T08:06:36.319813+00:00",
+  "reviewer": "/root/remove_bundled_presets",
+  "scope": "自定义用户图片水印；区别于已移除的内置相机品牌图形",
+  "testIdentifier": "PremiumRecoveryUITests/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch()",
+  "sourceResult": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+  "phases": {
+    "prepare": {
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/prepare-testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+      "result": "Passed",
+      "totalTestCount": 1,
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "testFailures": []
+    },
+    "ui": {
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/testPurchasedCameraImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+      "result": "Passed",
+      "totalTestCount": 1,
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "testFailures": []
+    },
+    "cleanup": {
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.tnsysU/cleanup.xcresult",
+      "result": "Passed",
+      "totalTestCount": 1,
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "testFailures": []
+    }
+  },
+  "allPhasesPassed": true,
+  "screenshotsInspected": 8,
+  "device": {
+    "architecture": "arm64",
+    "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+    "modelName": "iPhone 17",
+    "osBuildNumber": "23F77",
+    "osVersion": "26.5",
+    "platform": "iOS Simulator"
+  },
+  "visualResult": "passed-with-scope-limits",
+  "screenshots": [
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "C4C43D2D-1AB9-4FA7-9E8C-BC355107AC7E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "first-logo-picker-cancel-keeps-text_0_1C5F8B8B-6E78-4113-A583-99FC821BF455.png",
+      "timestamp": 1792569537.489,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/C4C43D2D-1AB9-4FA7-9E8C-BC355107AC7E.png",
+      "sha256": "76ae3831e5826291bba4110632889eb4f77566b732e436ddb46db7f5f55b47ae",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "首次取消选图后保持 Text / ZTransfer；size 80%、opacity 72%、Frame auto 可见。",
+        "Mist 预览中有文本水印 ZTRANSFER；品牌显示为 Nikon Z233 文字，并有样例曝光参数。",
+        "此处 Nikon 是保留的品牌文字，不是已移除的内置品牌图形资源。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "EF4ED39E-BC0A-4435-B039-ADF2037C1288.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "system-photo-picker-before-selection_0_35732BEC-5517-4FB9-8EC2-9EE7E5853EC9.png",
+      "timestamp": 1792569544.637,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/EF4ED39E-BC0A-4435-B039-ADF2037C1288.png",
+      "sha256": "80288566293dda33fb84f9b34d0a67a6cb902f77f9d5e2530886dc2843cf768a",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "系统 Photos 选图器显示照片网格、中文访问提示及关闭控件。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "4C78038F-CC96-4A6B-B65F-159BFC5392A6.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-logo-import-saved-before-dismissal_0_E1C325AE-60CF-42E3-8563-11B5C443495B.png",
+      "timestamp": 1792569588.536,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/4C78038F-CC96-4A6B-B65F-159BFC5392A6.png",
+      "sha256": "9af3101a5618d187cabb4d6feca474c55cb39a350c358ea262697041ce305087",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "选图保存后 Type Logo / Replace logo、80%、72%、Photo bottom center 可见。",
+        "预览区域是加载转圈的中间态，不能作为最终渲染成功证据；后续截图已显示照片。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "F5DC21C9-BEF4-4E72-8E80-83AA6DD88433.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-image-watermark-after-cancel_0_D9A0D1D3-ED94-499F-B195-46CC7ED54BA6.png",
+      "timestamp": 1792569610.318,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/F5DC21C9-BEF4-4E72-8E80-83AA6DD88433.png",
+      "sha256": "ad4dfdcd20dea709e2c148ba4e14b26781a53d5934af28bff4845eeb9b3f1572",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "替换选图取消后 Type Logo、Replace logo、79%、71%、Photo bottom right 保留。",
+        "预览已经显示照片，右下角能看到所选照片形成的小矩形自定义图片水印。",
+        "边框下方 Nikon Z233 与曝光参数是文字。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-logo-full-preview-after-cancel_0_C195A87B-1327-4B43-B190-D78DB02636E1.png",
+      "timestamp": 1792569615.649,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+      "sha256": "08a2eaee87a5e54786e3aba39b4486bb6a1c994362343161436a20e79230f59e",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "取消后完整预览：照片右下角可辨认小矩形图片水印。",
+        "照片与 Mist 边框完整可见；下方部分设置在滚动区域之外，不能据此认定按钮裁切缺陷。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "03F2B191-C966-4397-A63A-5F779F35C744.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-logo-full-preview-after-cancel-plus-500ms_0_B8ED8BDB-B0B0-4275-AD8D-4D224F927E13.png",
+      "timestamp": 1792569616.515,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/03F2B191-C966-4397-A63A-5F779F35C744.png",
+      "sha256": "08a2eaee87a5e54786e3aba39b4486bb6a1c994362343161436a20e79230f59e",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "取消后完整预览延迟截图保留照片、Mist 边框与右下角小矩形图片水印。",
+        "原始 PNG x916–966、y1607–1687 区域与 F1645C95 完全相同，12,000 个 RGB 通道值零差异；已排除最初缩略图判读的水印消失疑点。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "A12F186E-ACC1-40D3-A8A0-BF5F2C2B998E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-image-watermark-after-relaunch_0_018A0B0D-FE72-4B30-A93A-4575E1379402.png",
+      "timestamp": 1792569661.011,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/A12F186E-ACC1-40D3-A8A0-BF5F2C2B998E.png",
+      "sha256": "c5def816a838454fcbbdb73d1d8af0ea7e51d823af711dfbb2c6fd7354b20d61",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "重启后滚动至水印设置，On / Logo / Replace logo、79%、71%、Photo bottom right 保留。",
+        "照片右下角可见小矩形自定义图片水印。",
+        "照片上部滚出当前弹窗可视范围；这是展示下方设置的滚动截图。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "840F1B1E-5BF3-4BBB-BCB1-6F7BACC34956.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "camera-logo-full-preview-after-relaunch_0_D75B5391-0047-4F00-868C-38477410B9D0.png",
+      "timestamp": 1792569667.547,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/840F1B1E-5BF3-4BBB-BCB1-6F7BACC34956.png",
+      "sha256": "5e400be51ce75a29e23bfa82490a66fc1fb52f577869f44782b18e623eca01a6",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "重启后的完整预览仍保留照片右下角小矩形自定义图片水印。",
+        "原始 PNG x916–966、y1607–1687 区域与取消后完整预览 F1645C95 及延迟帧 03F2B191 完全一致，12,000 个 RGB 通道值零差异。",
+        "同一完整预览水印像素在取消后、延迟帧、重启后保持一致。"
+      ]
+    }
+  ],
+  "limitations": [
+    "逐张使用 view_image original 读取 xcresulttool 原始导出 PNG；显示工具可能缩放展示，未修改或重编码图片。",
+    "仅这一部 iPhone 17 / iOS 26.5 模拟器；App 英文、系统 Photos 中文；不覆盖真机、其他尺寸或全部语言。",
+    "准备、UI、清理阶段的 Passed 是 XCTest 结果；截图审查另行记录，不能由 XCTest 通过推断所有最终渲染均正确。",
+    "本审查未构建、安装、操作模拟器或改动任何项目代码。",
+    "未验证导出到相册的最终文件、真实相机传输或相机硬件操作。",
+    "Logo / Replace logo 在本上下文指用户自行导入图片水印，不是删除目标的内置品牌 Logo。"
+  ],
+  "findings": [
+    {
+      "status": "intermediate-state-only",
+      "title": "导入保存截图尚在加载",
+      "evidence": [
+        "4C78038F-CC96-4A6B-B65F-159BFC5392A6.png"
+      ],
+      "observation": "此帧显示预览 spinner；后续照片已渲染，因此单帧不证明加载故障，也不证明最终合成完成。"
+    }
+  ],
+  "resolvedObservations": [
+    {
+      "status": "reviewer-visual-misread-corrected",
+      "title": "缩略展示引起的水印不可见疑点已通过原图像素排除",
+      "evidenceFile": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-camera-attachments/watermark-region-pixel-comparison.json",
+      "observation": "初次视觉判读把后两张缩略图水印误认为不可见。主任务复核后，对 F1645C95 / 03F2B191 / 840F1B1E 原图指定水印区域解码比对，RGB 值完全一致，三者 SHA256 同为 5010af9f6226b2252a63a70599ac86993ab2654f03abaccf77837a7f697185b2，故撤回该疑点，不作为代码缺陷。"
+    }
+  ],
+  "pixelVerification": {
+    "method": "Read-only PNG IDAT decompression and exact PNG row-filter reversal; 8-bit RGB noninterlaced. Original files unmodified.",
+    "regionXYXY": [
+      916,
+      1607,
+      966,
+      1687
+    ],
+    "coordinateSystem": "original PNG pixels; origin top left; right/bottom exclusive",
+    "reference": "F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+    "comparisons": [
+      {
+        "image": "F1645C95-1CEF-4268-8DAD-7F72F27A164E.png",
+        "regionSHA256": "5010af9f6226b2252a63a70599ac86993ab2654f03abaccf77837a7f697185b2",
+        "equalToFirst": true,
+        "differentChannelValues": 0,
+        "maxChannelDifference": 0,
+        "meanAbsoluteChannelDifference": 0.0
+      },
+      {
+        "image": "03F2B191-C966-4397-A63A-5F779F35C744.png",
+        "regionSHA256": "5010af9f6226b2252a63a70599ac86993ab2654f03abaccf77837a7f697185b2",
+        "equalToFirst": true,
+        "differentChannelValues": 0,
+        "maxChannelDifference": 0,
+        "meanAbsoluteChannelDifference": 0.0
+      },
+      {
+        "image": "840F1B1E-5BF3-4BBB-BCB1-6F7BACC34956.png",
+        "regionSHA256": "5010af9f6226b2252a63a70599ac86993ab2654f03abaccf77837a7f697185b2",
+        "equalToFirst": true,
+        "differentChannelValues": 0,
+        "maxChannelDifference": 0,
+        "meanAbsoluteChannelDifference": 0.0
+      }
+    ]
+  }
+}

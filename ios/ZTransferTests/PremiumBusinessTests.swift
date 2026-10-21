@@ -7,6 +7,72 @@ import Combine
 @testable import ZTransfer
 
 @MainActor
+final class AppLegalLinksTests: XCTestCase {
+    func testConfiguredHTTPSDestinationsRouteThroughOpenURLWithoutPurchase() throws {
+        let privacy = try XCTUnwrap(URL(string: "https://example.com/ztransfer/privacy/?language=zh#collection"))
+        let terms = try XCTUnwrap(URL(string: "https://example.com/ztransfer/terms/"))
+        let configuration = AppLegalLinksConfiguration(infoDictionary: [
+            "ZTransferPrivacyPolicyURL": privacy.absoluteString,
+            "ZTransferTermsOfUseURL": terms.absoluteString,
+        ])
+        XCTAssertEqual(configuration.url(for: .privacy), privacy)
+        XCTAssertEqual(configuration.url(for: .terms), terms)
+        var opened: [URL] = []
+        let action = OpenURLAction { url in opened.append(url); return .handled }
+        configuration.open(.privacy, using: action)
+        configuration.open(.terms, using: action)
+        XCTAssertEqual(opened, [privacy, terms], "Each control routes to its own configured document")
+
+        let partial = AppLegalLinksConfiguration(infoDictionary: ["ZTransferTermsOfUseURL": terms.absoluteString])
+        partial.open(.privacy, using: action)
+        partial.open(.terms, using: action)
+        XCTAssertNil(partial.url(for: .privacy))
+        XCTAssertEqual(opened, [privacy, terms, terms], "A missing document must not disable or misroute the other one")
+    }
+
+    func testMissingAndInvalidDestinationsRemainUnavailableAndNeverOpen() {
+        var opened: [URL] = []
+        let action = OpenURLAction { url in opened.append(url); return .handled }
+        let missing = AppLegalLinksConfiguration(infoDictionary: [:])
+        for document in AppLegalDocument.allCases {
+            XCTAssertNil(missing.url(for: document))
+            missing.open(document, using: action)
+        }
+        let invalid: [Any] = [
+            "", "/privacy/", "https://", "https:///privacy/", "http://example.com/privacy/",
+            "file:///privacy.html", "javascript:alert(1)", " https://example.com/privacy/",
+            "https://example.com/pri vacy/", "https://user:password@example.com/privacy/", 42,
+        ]
+        for value in invalid {
+            let configuration = AppLegalLinksConfiguration(infoDictionary: [
+                "ZTransferPrivacyPolicyURL": value, "ZTransferTermsOfUseURL": value,
+            ])
+            for document in AppLegalDocument.allCases {
+                XCTAssertNil(configuration.url(for: document), "Invalid publication destination: \(value)")
+                configuration.open(document, using: action)
+            }
+        }
+        XCTAssertTrue(opened.isEmpty, "No fallback, malformed URL or implicit purchase route is allowed")
+    }
+
+    func testSettingsShortLabelsPreserveCompletePurchaseLabelsInEverySupportedLanguage() {
+        let labels = [
+            ("zh", ["隐私", "条款"], ["隐私政策", "使用条款"]),
+            ("en", ["Privacy", "Terms"], ["Privacy policy", "Terms of use"]),
+            ("hant", ["隱私", "條款"], ["隱私政策", "使用條款"]),
+        ]
+        for (language, short, complete) in labels {
+            XCTAssertEqual(AppLegalDocument.allCases.map {
+                AppLocalized.resource($0.titleKey(compact: true), language: language)
+            }, short)
+            XCTAssertEqual(AppLegalDocument.allCases.map {
+                AppLocalized.resource($0.titleKey(compact: false), language: language)
+            }, complete)
+        }
+    }
+}
+
+@MainActor
 final class PremiumBusinessTests: XCTestCase {
     func testCancelledPickerAndRepeatedRequestsDuringPermissionDoNotPublishOrDuplicateWork() async throws {
         let authorization = PremiumPhotoAuthorizationGate()

@@ -1,8 +1,36 @@
 # App Store 截图采集与交付
 
+2026-10-21 本次资源移除验证的 Debug UI/组件图只作测试证据，不计入商店 `ready`，也不改变旧候选的构建归属。已有新设备 Release 资源检查、183项XCTest及4个不同UI方法通过；正式截图仍须按最终提交版本采集，见[移除专项](../iOS移除品牌图标与内置预设-20261021.md)。
+
+2026-10-21 范围更新：本人已确定移除 iOS 品牌图形 Logo/对应拨轮档位及全部用于写入相机的内置 NP3 文件。包含这些旧功能的参考图只留作历史，不能直接作为此次首发截图；用户自定义图片水印继续保留。此次变更后的实际界面和候选包需对应新记录，不由此前采集成功推断新范围已验收。
+
 更新：2026-10-21。本目录用于保存真实运行截图、采集依据和最终上传图片。本轮已开始归档清洁 Release 的真实首页/设置候选图，逐张状态及原始附件见 [capture-record.json](capture-record.json)；没有生成占位图，也没有将历史诊断图改名充当商店素材。`candidate` 是准备素材，尚未经 App Store Connect 最终预览验收，不等于整套商店截图完成。
 
 商店文字沿用[中文截图文案](../商店文案草稿.md#截图文案建议)和[英文截图文案](../商店英文文案草稿.md#screenshot-captions)。整体状态回填[付费前准备执行记录](../付费前准备执行记录.md)，无需本人另建一份进度表。
+
+## 历史候选图：正式法律网址接入后、素材移除前（2026-10-21）
+
+已追加并逐张核看 **3张新设置参考图**，包含实际已启用的同排“隐私 / 条款”入口；原图尺寸、PNG透明通道与复制前后SHA-256均已核对。当前候选仍是3张首页＋3张设置，共6张；另保留3张被替代的旧设置图，归档总数9张。所有候选均为`candidate`、`allowedForUpload=false`，`ready`仍为0。
+
+| 设备组 | 首页（保留首轮原图） | 设置（本轮新图） | 原生像素 / 状态 |
+|---|---|---|---|
+| iPhone 17 / `iphone-medium` | [01-connect.png](raw/zh-Hans/iphone-medium/01-connect.png) | [settings-reference-20261021-published-legal.png](raw/zh-Hans/iphone-medium/settings-reference-20261021-published-legal.png) | 1206×2622，candidate |
+| iPhone 15 Plus / `iphone-large` | [01-connect.png](raw/zh-Hans/iphone-large/01-connect.png) | [settings-reference-20261021-published-legal.png](raw/zh-Hans/iphone-large/settings-reference-20261021-published-legal.png) | 1290×2796，candidate |
+| iPad Pro 13-inch (M5) / `ipad-13` | [01-connect.png](raw/zh-Hans/ipad-13/01-connect.png) | [settings-reference-20261021-published-legal.png](raw/zh-Hans/ipad-13/settings-reference-20261021-published-legal.png) | 2064×2752，candidate |
+
+三个首页继续绑定首轮Release；三张新设置来自本轮无签名模拟器Release `1.98 (1)`，可执行文件SHA-256为`daadc209c90721a87aacdb4e09741b0d8a85c2270720aa24c4c9b82c3a864056`。**这六张当前候选来自两次不同的冻结构建**，不能写成全部由本轮重新采集。标准iPhone首轮2项中设置采集通过（176.413秒），随后导航失败，整轮保留`TEST FAILED`、exit65；已通过的设置原图未重采。临时runner v2只补处理实际观察到的Safari首次提示，原capture方法本体逐字一致；其后导航独立重试1/1、大屏iPhone及iPad采集各1/1通过。**不能将这些分次结果写成标准iPhone同轮2/2通过。**各次来源、日志、失败经过及逐图实际观察见[capture-record.json](capture-record.json)的`settingsPublishedLegalRefresh`、追加runs和images。
+
+续跑原始记录中`iphone-large、ipad-13`的`testSucceededMarker:false`保持原样：冻结脚本只匹配`TEST SUCCEEDED`，遗漏了`test-without-building`实际输出的`TEST EXECUTE SUCCEEDED`。这里按每项exit0、实际成功标记、方法通过及零失败数量独立核验，并在`orchestrationMarkerCorrection`记录原因；这不属于App失败，也没有因此重跑。
+
+本轮正常启动参数和环境均为空，通过实际设置语言控件确认简体中文，使用系统浅色及正常`large`字号；这三张商店候选只追加设置图，没有重采首页或执行窗口缩放。新Release已配置`https://www.ztransfer.top/ios/privacy/`及`https://www.ztransfer.top/ios/terms/`，模拟器与无签名设备严格`--submission`配置检查均exit0；实际设置metadata中`privacyEnabled`及`termsEnabled`均为true。标准iPhone设置、购买页链接及网页语言切换的实际打开专项，在处理Safari首次提示后由独立导航重试通过，与三张设置图的审图记录分别追溯；不据截图推断所有设备、地区的网页可达性。iPad窗口表现按该图的`windowScope`实际记录，不从原生像素或App.frame推断窗口适配全部通过。
+
+旧`settings-reference.png`未覆盖，已在清单标为`superseded`并链接对应新图。首页与旧设置的全部原始附件、SHA-256、构建绑定和审图记录保留。核心照片、传输、监看、效果和真实商品素材仍待完成。
+
+## 首轮归档记录（历史，保留原始证据）
+
+以下保留首次采集及刷新前的原文；其中“三张待刷新”、法律网址尚待接入与旧设置图的“candidate”状态均是历史，不代表当前状态。三张旧设置已被上方新图替代，原文件、来源字段和历史记录保留。
+
+2026-10-21 后续界面变更：设置底部已按本人要求将“隐私 / 条款”放在“反馈”左侧同排。下列三张 `settings-reference.png` 保留原始来源，**已不代表当前设置底部布局**；原有六张文件和 `capture-record.json` 的来源记录均不覆盖。待正式法律网址接入、选定后续清洁 Release 后，仅刷新这三张受影响的设置参考图。中间两行版本采集与 Debug 同排诊断图不归档为商店候选，布局验证历史见[同排法律入口证据](../evidence/settings-legal-row-20261021.json)。
 
 ## 已归档的候选图（2026-10-21）
 

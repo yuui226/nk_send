@@ -1,0 +1,301 @@
+{
+  "date": "2026-10-21",
+  "scope": "Fresh read-only material/source inspection against Apple first-party pages, local site rebuild and static link/field validation; no app build, simulator, deployment or submission.",
+  "officialSources": [
+    {
+      "url": "https://developer.apple.com/app-store/review/guidelines/",
+      "checked": "2026-10-21",
+      "focus": "5.1.1 policy/recipient protection; 5.1.2(i) explicit permission before personal-data sharing with third-party AI; 3.1.2 subscriptions."
+    },
+    {
+      "url": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information/",
+      "checked": "2026-10-21",
+      "focus": "Description/promotional text/keywords/Review Notes limits; first-version What’s New unavailable; support contact requirements."
+    },
+    {
+      "url": "https://developer.apple.com/help/app-store-connect/reference/app-information/app-information/",
+      "checked": "2026-10-21",
+      "focus": "Name/subtitle limits, Privacy Policy URL, standard EULA and regional/content-rights fields."
+    },
+    {
+      "url": "https://developer.apple.com/help/app-store-connect/reference/in-app-purchases-and-subscriptions/in-app-purchase-information/",
+      "checked": "2026-10-21",
+      "focus": "IAP localization name and description limits."
+    },
+    {
+      "url": "https://developer.apple.com/help/app-review/before-submitting-for-review/complete-review",
+      "checked": "2026-10-21",
+      "focus": "Hardware interaction video and regional differences."
+    },
+    {
+      "url": "https://developer.apple.com/app-store/app-privacy-details/",
+      "checked": "2026-10-21",
+      "focus": "Collection definition and all optional-disclosure conditions; final questionnaire remains separate."
+    },
+    {
+      "url": "https://developer.apple.com/app-store/subscriptions/",
+      "checked": "2026-10-21",
+      "focus": "Subscription price/period/restore and app/metadata privacy/terms links."
+    },
+    {
+      "url": "https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/turn-on-family-sharing-for-in-app-purchases/",
+      "checked": "2026-10-21",
+      "focus": "Family Sharing production switch cannot be undone once enabled."
+    },
+    {
+      "url": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
+      "checked": "2026-10-21",
+      "focus": "Link for actual host privacy practices; no no-logging claim."
+    }
+  ],
+  "changes": [
+    "English store/policy links target English pages.",
+    "Generated body links use same-site relative paths, verified under root and GitHub project mounts.",
+    "Translation-service marker now calls for recipient protection and explicit permission before any remaining personal data is shared with third-party AI; no service/provider compliance is invented.",
+    "Monitor orientation wording explicitly scoped to live view; ordinary pages retain portrait layout.",
+    "First-release note is optional launch copy, not a required first-version What’s New field.",
+    "Review notes add regional-difference verification; support text avoids blanket assumptions about local contact requirements.",
+    "Family Sharing remains a post-membership backend fact, not a pre-payment gate.",
+    "Review template includes required video-link-or-attachment choice, core external services and a device/OS/build/scope attachment template without fabricating test results."
+  ],
+  "site": {
+    "pages": 7,
+    "unresolvedMarkers": 14,
+    "localFileReferences": 49,
+    "pageAnchors": 6,
+    "externalOrMailReferences": 23,
+    "mountResolutionChecks": 98,
+    "unsafeEmbeddingTags": 0,
+    "sameSiteAbsoluteLinksRemaining": 0,
+    "internalNotesLeak": false,
+    "visualStatus": "No new browser screenshot pass in this material-only update; prior screenshots remain historical.",
+    "markedVersion": "17.0.5"
+  },
+  "fields": {
+    "zh-Hans": {
+      "应用名称": {
+        "value": "Z传",
+        "count": 2,
+        "unit": "characters",
+        "limit": 30
+      },
+      "副标题": {
+        "value": "相机照片传输、实时监看与照片效果",
+        "count": 16,
+        "unit": "characters",
+        "limit": 30
+      },
+      "宣传文本": {
+        "value": "连接兼容相机，浏览并传输照片，使用实时监看辅助拍摄，再通过滤镜、LUT、边框和水印整理照片效果。支持能力因相机型号和连接方式而异。",
+        "count": 65,
+        "unit": "characters",
+        "limit": 170
+      },
+      "关键词": {
+        "value": "相机传输,实时监看,照片下载,摄影工具,水印边框,LUT",
+        "count": 68,
+        "unit": "UTF-8 bytes",
+        "limit": 100
+      },
+      "description": {
+        "count": 1179,
+        "unit": "characters",
+        "limit": 4000
+      }
+    },
+    "en": {
+      "Name": {
+        "value": "ZTransfer",
+        "count": 9,
+        "unit": "characters",
+        "limit": 30
+      },
+      "Subtitle": {
+        "value": "Camera Transfer & Live View",
+        "count": 27,
+        "unit": "characters",
+        "limit": 30
+      },
+      "Promotional Text": {
+        "value": "Browse and transfer photos from compatible cameras, use live view while shooting, and finish images with filters, LUTs, borders and watermarks.",
+        "count": 143,
+        "unit": "characters",
+        "limit": 170
+      },
+      "Keywords": {
+        "value": "camera,transfer,tether,liveview,photography,watermark,border,LUT",
+        "count": 64,
+        "unit": "UTF-8 bytes",
+        "limit": 100
+      },
+      "description": {
+        "count": 3074,
+        "unit": "characters",
+        "limit": 4000
+      }
+    },
+    "reviewNotes": {
+      "count": 3611,
+      "unit": "UTF-8 bytes",
+      "limit": 4000,
+      "includesUnresolvedMarkers": true,
+      "recountAfterReplacement": true
+    }
+  },
+  "inAppPurchases": [
+    {
+      "language": "zh-Hans",
+      "id": "com.ztransfer.ios.pro.annual",
+      "displayNameCharacters": 5,
+      "descriptionCharacters": 15
+    },
+    {
+      "language": "zh-Hans",
+      "id": "com.ztransfer.ios.pro.lifetime",
+      "displayNameCharacters": 5,
+      "descriptionCharacters": 17
+    },
+    {
+      "language": "en",
+      "id": "com.ztransfer.ios.pro.annual",
+      "displayNameCharacters": 10,
+      "descriptionCharacters": 30
+    },
+    {
+      "language": "en",
+      "id": "com.ztransfer.ios.pro.lifetime",
+      "displayNameCharacters": 12,
+      "descriptionCharacters": 38
+    }
+  ],
+  "releaseGate": {
+    "exitCode": 1,
+    "expectedMessage": "Publication blocked: 14 unresolved markers",
+    "existingDistPreserved": true,
+    "previewReportPreserved": true
+  },
+  "notCompleted": [
+    "Owner effective date, audience, QQ and actual translation-service/permission arrangements, EULA choice, copyright/rights, international review phone number and representative hardware evidence.",
+    "Public deployment/HTTPS reachability, production legal URLs and end-to-end access to the live policy pages.",
+    "Production products/prices/Family Sharing, real sandbox and submission-specific hardware and metadata verification after membership.",
+    "No assurance of Apple approval or all-region legal compliance."
+  ],
+  "sourceSHA256": {
+    "隐私政策草稿.md": "3a381165f1a36c328c2fdf37009fa7d6a28a27cd37ce59acb8e37ef28371d96a",
+    "使用条款草稿.md": "a6cdf97a8b3b162009b420d6b2567b5b7f2c824af1dd41252b2584a1aea52c93",
+    "英文隐私与条款草稿.md": "2201f8b42525277d761932c3050ab5b992b3fafe89c1d4f4c8ac478bb58a91ce",
+    "支持页面草稿.md": "2a254111d7603f2a0de0226480f94be1d4ed33289fd931fddcb96e7d1f7070e7",
+    "商店文案草稿.md": "d4b7416d406e1327aaf8fb6c27de8a4dbeaa435a6018681e497586aafcb5bc3f",
+    "商店英文文案草稿.md": "152d61c80ecab77be10ac3ec14a2f2b82a0ff05911f3881e6dc450cea71f81ee",
+    "审核说明草稿.md": "be78fb0111f98253d251baba7b9f5893e754a865efa726eab0356a1a84a0a87e",
+    "site/build.mjs": "4d8d6eb5c32cc1dc3ac4b45e891492a0f43757036dffc1b79af3e9ce2a4b473a",
+    "site/README.md": "8b8956e433d910d6b4166a989515fa6936b9555dc103b18da7110da4a1637ef1"
+  },
+  "syntaxCheck": {
+    "command": "node --check ios/docs/site/build.mjs",
+    "exitCode": 0
+  },
+  "markdownLocalTargetChecks": 17,
+  "internalAppendixUpdate": {
+    "date": "2026-10-21",
+    "file": "审核说明草稿.md",
+    "reason": "Only the internal appendix was updated after the implemented settings legal footer passed its three unit tests and one SE help/settings-footer UI test; it no longer says the permanent entry is awaiting implementation.",
+    "unitEvidence": "/tmp/ztransfer-prepayment-legal-hd-baseline.log",
+    "unitTests": {
+      "passed": 3,
+      "failed": 0
+    },
+    "uiEvidence": "/tmp/ztransfer-prepayment-legal-footer-ui-fixed.log",
+    "uiTests": {
+      "passed": 1,
+      "failed": 0,
+      "scope": "SE help/settings-footer reachability; screenshot visually reviewed by the root task."
+    },
+    "reviewNotesUnchanged": true,
+    "reviewNotesUTF8Bytes": 3611,
+    "reviewNotesSHA256": "19dc3e97fb98589ca5076e0113d4e9eb15b04ffec62426814f3c16250e674548",
+    "otherRecordedInputsUnchanged": 8,
+    "publicSiteInputsUnchanged": true,
+    "existingPreviewAndBuildReportUnchanged": true,
+    "generatorRun": false,
+    "appBuildRun": false,
+    "deploymentRun": false,
+    "limit": "Production legal URLs remain absent and the site is not deployed; no final submission-build, live-policy navigation or all-entitlement-state UI claim was added."
+  },
+  "websiteIntegrationUpdate": {
+    "date": "2026-10-21",
+    "evidence": "../evidence/website-integration-20261021.json",
+    "previousSourceSHA256": {
+      "隐私政策草稿.md": "a1c70fbb4d13874283595aea46cc34e02fccb5e196a7136af8c35e423ddcd21a",
+      "使用条款草稿.md": "a7f42f2249df7c00160225550d1e7c896556a599579f170c2d57a3fc5f914859",
+      "英文隐私与条款草稿.md": "b10b624ef328a55609b958a0c9438eca9d06d8ce15921d21d59296bdedf20ec2",
+      "支持页面草稿.md": "d42883b8169d40d6bdb51ea0b1daf010bfa327b8f30e76fda85e1cd08412be04",
+      "商店文案草稿.md": "c0967790cb2f24b2def45fae911aee41415e38c7d6927eecd8576147468427d5",
+      "商店英文文案草稿.md": "74f89751ae1d61a7414123defa567a0b24c0d68d5868cddcf0b5b8b6d09f52cb",
+      "审核说明草稿.md": "7246a21660e1fae77175917ac4c624824d17e39767e7076a7b134d96d1564a80",
+      "site/build.mjs": "afa5d946e05d5c0701c1b433f6d8ce47b1689e1a9beace8638d92293c1b94a15",
+      "site/README.md": "9255d08cf65588305106582d157c03c0a87d5b3accdda08f6125fdbf5d0d9c9f"
+    },
+    "changedInputs": [
+      "隐私政策草稿.md",
+      "使用条款草稿.md",
+      "英文隐私与条款草稿.md",
+      "商店文案草稿.md",
+      "审核说明草稿.md",
+      "site/build.mjs",
+      "site/README.md"
+    ],
+    "reason": "Owner-confirmed domain filing and existing GitHub Pages integration; internal identity/deployment notes updated, privacy copy accurately mentions the existing home animation scripts, and the generator adds an isolated website composition mode. Prior Apple research/field checks are not claimed to have been rerun.",
+    "standalonePreviewChange": "Only the two privacy HTML bodies changed after the animation-script clarification; the same 14 publication markers remain.",
+    "appBuildRun": false,
+    "deploymentRun": false
+  },
+  "ownerArchitectureClarification": {
+    "date": "2026-10-21",
+    "statement": "The website and backend were already separate; the owner confirms api.ztransfer.top is configured to point to the backend. Reuse the existing architecture; no new split or API DNS setup is needed for adding iOS pages.",
+    "previousSiteReadmeSHA256": "3e0c87b5c3020ce63844da773f869ba724fde84a08b003df42690aa2ac636cd0",
+    "publicPageContentsChanged": false,
+    "networkOrServiceMutation": false
+  },
+  "publicationUpdate": {
+    "date": "2026-10-21",
+    "status": "published",
+    "unresolvedPublicMarkers": 0,
+    "commit": "3d138907edde01603e2ae57bf19a87ec37bc143d",
+    "evidence": "../evidence/policy-publication-20261021.json",
+    "previousSourceSHA256": {
+      "隐私政策草稿.md": "ac0d0ff713e063a2be256e95e2c7c843d3511d47510498477ae395b16ca18e5d",
+      "使用条款草稿.md": "d9a189dc9f39cc0044ad519715100f6ae8825aa809e2e3efb2a19f47f20a31ff",
+      "英文隐私与条款草稿.md": "4f684a63f38c89a42b475b18ac69313517905b2c86f334f485cd35c7a745ede1",
+      "支持页面草稿.md": "d42883b8169d40d6bdb51ea0b1daf010bfa327b8f30e76fda85e1cd08412be04",
+      "商店文案草稿.md": "adbcc187917323d10e7803b5260c8e9a1e9d05bec6814c816913f8dbdc937e9c",
+      "商店英文文案草稿.md": "74f89751ae1d61a7414123defa567a0b24c0d68d5868cddcf0b5b8b6d09f52cb",
+      "审核说明草稿.md": "12a84744d4df934922e21cb5e0606548e63c61d48046543f148c3e5cad1a5592",
+      "site/build.mjs": "9b7899c7de7d37362be404f5f654280d24b486425f374b25677d62b7af0103f8",
+      "site/README.md": "f16bcec723361cbcea33600964a4bba2590ae1f90a0a5ffe87c3088e8bcaa82a"
+    },
+    "appBuildRun": false
+  },
+  "prepaymentRecheckUpdate": {
+    "date": "2026-10-21",
+    "scope": "Current internal handoff facts; published legal bodies and generated public pages unchanged. Fresh build/runtime evidence is separate.",
+    "currentSourceSHA256": {
+      "隐私政策草稿.md": "3a381165f1a36c328c2fdf37009fa7d6a28a27cd37ce59acb8e37ef28371d96a",
+      "使用条款草稿.md": "a6cdf97a8b3b162009b420d6b2567b5b7f2c824af1dd41252b2584a1aea52c93",
+      "英文隐私与条款草稿.md": "2201f8b42525277d761932c3050ab5b992b3fafe89c1d4f4c8ac478bb58a91ce",
+      "支持页面草稿.md": "2a254111d7603f2a0de0226480f94be1d4ed33289fd931fddcb96e7d1f7070e7",
+      "商店文案草稿.md": "63ada8c66da921e2cc44f03c26dad26e5e495680be8fd0442e45b3691c507cf9",
+      "商店英文文案草稿.md": "23da5b814de78db01a986d1a9fe31cc58584dedb8a4a63a92fd0c1120c01d21b",
+      "审核说明草稿.md": "86341be4f2289944d46b831e6d5afb1b1ce80b2157f3afaf2292130641392240",
+      "site/build.mjs": "4d8d6eb5c32cc1dc3ac4b45e891492a0f43757036dffc1b79af3e9ce2a4b473a",
+      "site/README.md": "8b8956e433d910d6b4166a989515fa6936b9555dc103b18da7110da4a1637ef1"
+    },
+    "historicalSourceSHA256Preserved": true,
+    "publicEvidence": "../evidence/prepayment-policy-recheck-20261021.json",
+    "appEvidence": "../evidence/prepayment-ready-recheck-20261021.json",
+    "handoff": "../付费前最终核对-20261021.md",
+    "reviewNotesUTF8Bytes": 3611,
+    "reviewNotesSHA256": "19dc3e97fb98589ca5076e0113d4e9eb15b04ffec62426814f3c16250e674548",
+    "websiteRedeployed": false
+  }
+}

@@ -4,7 +4,10 @@ import CoreText
 @testable import ZTransfer
 
 final class PhotoFrameBrandTests: XCTestCase {
-    func testMeasuredIdentityPaddingUsesEachRunFontAndLogoBounds() {
+    private let knownMakes = ["nikon", "fujifilm", "panasonic", "samsung", "motorola", "oneplus", "huawei",
+                              "xiaomi", "honor", "apple", "google", "nokia", "leica", "sony", "oppo", "vivo", "dji"]
+
+    func testMeasuredIdentityPaddingUsesEachTextRunFont() {
         let large = NSAttributedString(string: "Brand", attributes: [.font: UIFont.boldSystemFont(ofSize: 40)])
         let small = NSAttributedString(string: "Model", attributes: [.font: UIFont.systemFont(ofSize: 20)])
         let first = PhotoFrameTextRow(large).bounds.insetBy(dx: 0, dy: -1.4)
@@ -12,15 +15,11 @@ final class PhotoFrameBrandTests: XCTestCase {
         let row = PhotoFrameTextRow([large, small], gap: 10, includeRunInk: true, verticalPaddingRatio: 0.035)
         XCTAssertEqual(row.bounds.minY, min(first.minY, second.minY), accuracy: 0.001)
         XCTAssertEqual(row.bounds.maxY, max(first.maxY, second.maxY), accuracy: 0.001)
-        for logo in [false, true] {
-            let camera = metadata(make: "NIKON", model: "Z 8")
-            let plain = PhotoEffectsRenderer.frameIdentityRow(metadata: camera, logoEnabled: logo,
-                font: .systemFont(ofSize: 40), color: .black, trailingRuns: [], gap: 0)
-            let padded = PhotoEffectsRenderer.frameIdentityRow(metadata: camera, logoEnabled: logo,
-                font: .systemFont(ofSize: 40), color: .black, trailingRuns: [], gap: 0, verticalPaddingRatio: 0.035)
-            XCTAssertEqual(padded.bounds.height, plain.bounds.height + 2.8, accuracy: 0.001)
-            XCTAssertEqual(padded.layoutWidth, plain.layoutWidth, accuracy: 0.001)
-        }
+        let camera = metadata(make: "NIKON", model: "Z 8")
+        let plain = PhotoEffectsRenderer.frameIdentityRow(metadata: camera, font: .systemFont(ofSize: 40), color: .black, trailingRuns: [], gap: 0)
+        let padded = PhotoEffectsRenderer.frameIdentityRow(metadata: camera, font: .systemFont(ofSize: 40), color: .black, trailingRuns: [], gap: 0, verticalPaddingRatio: 0.035)
+        XCTAssertEqual(padded.bounds.height, plain.bounds.height + 2.8, accuracy: 0.001)
+        XCTAssertEqual(padded.layoutWidth, plain.layoutWidth, accuracy: 0.001)
     }
 
     func testBandSignatureReservesVerticalEffectInkBeforePreviewScaling() throws {
@@ -370,23 +369,25 @@ final class PhotoFrameBrandTests: XCTestCase {
         }
     }
 
-    func testKnownBrandUsesLogoAndKeepsModel() {
-        let identity = photoFrameBrandIdentity(make: "Nikon Corporation", model: "Z 8")
-        XCTAssertEqual(identity.brand, .nikon); XCTAssertEqual(identity.remainingModel, "Z 8")
+    func testKnownBrandTextKeepsModel() {
+        let value = metadata(make: "Nikon Corporation", model: "Z 8")
+        XCTAssertEqual(value.normalizedMake, "Nikon")
+        XCTAssertEqual(value.normalizedModel, "Z 8")
     }
-    func testUnknownMakeFallsBackToText() {
-        let identity = photoFrameBrandIdentity(make: "Acme", model: "X1")
-        XCTAssertNil(identity.brand); XCTAssertEqual(identity.remainingModel, "Acme X1")
+
+    func testUnknownMakeRemainsText() {
+        XCTAssertEqual(metadata(make: "Acme", model: "X1").identity, "Acme X1")
     }
-    func testModelDerivedBrandIsMaterializedOnlyForLogoOrHiddenModel() {
+
+    func testLegacyLogoUsesTextVisibilityAndModelDerivedBrand() {
         let source = metadata(make: nil, model: "NIKON Z 30")
         var settings = PhotoFrameMetadataSettings.defaults(for: .mist)
         settings.showBrand = true
         settings.showModel = true
         settings.brandStyle = .logo
         let logo = source.resolved(for: settings, preview: false, now: Date())
-        XCTAssertEqual(logo.make, "NIKON")
-        XCTAssertEqual(logo.identity, "Nikon Z 30")
+        XCTAssertNil(logo.make)
+        XCTAssertEqual(logo.identity, "NIKON Z 30")
         settings.brandStyle = .text
         XCTAssertNil(source.resolved(for: settings, preview: false, now: Date()).make)
         settings.showModel = false
@@ -405,52 +406,52 @@ final class PhotoFrameBrandTests: XCTestCase {
             XCTAssertEqual(metadata.normalizedModel, "Model")
         }
     }
-    func testLogoIdentityNormalizesEverySupportedMakeAndDeduplicatesModel() {
-        for brand in PhotoFrameBrand.allCases {
-            let make = brand == .nikon ? "NIKON CORPORATION" : brand == .nokia ? "Nokia Corporation" : brand.rawValue
-            let identity = photoFrameBrandIdentity(make: make, model: brand.rawValue.uppercased() + " Model")
-            XCTAssertEqual(identity.brand, brand)
-            XCTAssertEqual(identity.remainingModel, "Model")
+    func testBrandTextNormalizesKnownMakesAndDeduplicatesModel() {
+        for brand in knownMakes {
+            let make = brand == "nikon" ? "NIKON CORPORATION" : brand == "nokia" ? "Nokia Corporation" : brand
+            let value = metadata(make: make, model: brand.uppercased() + " Model")
+            XCTAssertEqual(value.normalizedMake.lowercased(), brand)
+            XCTAssertEqual(value.normalizedModel, "Model")
         }
     }
 
-    func testModelCannotRestoreHiddenOrUnsupportedBrandLogo() {
+    func testModelCannotRestoreHiddenBrandText() {
         for make: String? in [nil, "Unknown", "Canon"] {
-            let identity = photoFrameBrandIdentity(make: make, model: "NIKON Z 30")
-            XCTAssertNil(identity.brand)
-            XCTAssertTrue(identity.remainingModel.contains("NIKON Z 30"))
+            var settings = PhotoFrameMetadataSettings()
+            settings.showBrand = false
+            settings.brandStyle = .logo // Legacy input must not restore a logo or hidden Make.
+            let value = metadata(make: make, model: "NIKON Z 30")
+                .resolved(for: settings, preview: false, now: Date())
+            XCTAssertNil(value.make)
+            XCTAssertFalse(value.identity.isEmpty)
         }
     }
 
-    func testMeasuredLogoRowsDrawAllBrandsAndFitWithLongModels() {
+    func testMeasuredTextIdentityRowsFitLongModels() {
         let font = UIFont.systemFont(ofSize: 32)
         let suffix = NSAttributedString(string: String(repeating: "Long Model ", count: 8), attributes: [.font: font])
-        for brand in PhotoFrameBrand.allCases {
-            let source = metadata(make: brand.rawValue, model: "Model")
-            let logo = PhotoEffectsRenderer.frameIdentityRow(metadata: source, logoEnabled: true,
+        for brand in knownMakes {
+            let source = metadata(make: brand, model: "Model")
+            let row = PhotoEffectsRenderer.frameIdentityRow(metadata: source,
                 font: font, color: .black, trailingRuns: [suffix], gap: 12)
-            let text = PhotoEffectsRenderer.frameIdentityRow(metadata: source, logoEnabled: false,
-                font: font, color: .black, trailingRuns: [suffix], gap: 12)
-            let fitted = logo.fitting(width: 400)
+            let expected = PhotoFrameTextRow([
+                NSAttributedString(string: source.normalizedMake, attributes: [.font: font, .foregroundColor: UIColor.black]),
+                suffix
+            ], gap: 12)
+            XCTAssertEqual(row.width, expected.width, accuracy: 0.001, brand)
+            let fitted = row.fitting(width: 400)
             XCTAssertLessThanOrEqual(max(fitted.width, fitted.bounds.maxX) - min(0, fitted.bounds.minX), 400.001)
             XCTAssertGreaterThan(fitted.bounds.height, 0)
-            func render(_ row: PhotoFrameTextRow) -> Data? {
-                let format = UIGraphicsImageRendererFormat(); format.scale = 1
-                return UIGraphicsImageRenderer(size: CGSize(width: 420, height: 80), format: format).image { context in
-                    row.fitting(width: 400).draw(in: context.cgContext, x: 10, baseline: 45)
-                }.pngData()
-            }
-            XCTAssertNotEqual(render(logo), render(text), brand.rawValue)
         }
     }
 
-    func testConnectedTemplatesConsumeLogoAndRespectHiddenBrand() throws {
+    func testAllTemplatesMigrateLegacyLogoToTextAndRespectHiddenBrand() throws {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         let source = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240), format: format).image { context in
             UIColor.gray.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
         }
         for preset in PhotoFramePreset.allCases {
-            for make in PhotoFrameBrand.allCases.map(\.rawValue) + ["Canon"] {
+            for make in knownMakes + ["Canon"] {
                 var settings = PhotoEffectsSettings()
                 settings.photoFrameEnabled = true; settings.photoFramePreset = preset
                 settings.watermark.enabled = true
@@ -464,15 +465,15 @@ final class PhotoFrameBrandTests: XCTestCase {
                 }
                 let text = try render(brandVisible: true, style: .text)
                 let logo = try render(brandVisible: true, style: .logo)
-                if make == "Canon" { XCTAssertEqual(text, logo, preset.rawValue) }
-                else { XCTAssertNotEqual(text, logo, preset.rawValue) }
-                XCTAssertEqual(try render(brandVisible: false, style: .text),
-                               try render(brandVisible: false, style: .logo), preset.rawValue)
+                XCTAssertEqual(text, logo, "Legacy logo must render as text: \(preset.rawValue) \(make)")
+                let hidden = try render(brandVisible: false, style: .text)
+                XCTAssertNotEqual(text, hidden, "Brand visibility must still affect output: \(preset.rawValue) \(make)")
+                XCTAssertEqual(hidden, try render(brandVisible: false, style: .logo), preset.rawValue)
             }
         }
     }
 
-    func testFilmStripUsesMeasuredRunGapForTextAndLogo() throws {
+    func testFilmStripUsesMeasuredRunGapForTextAndLegacyLogo() throws {
         var settings = PhotoFrameMetadataSettings.defaults(for: .filmGallery)
         settings.showBrand = true
         for logo in [false, true] {
@@ -541,8 +542,7 @@ final class PhotoFrameBrandTests: XCTestCase {
         for font in [UIFont.systemFont(ofSize: 32), UIFont.systemFont(ofSize: 32, weight: .black),
                      UIFont.italicSystemFont(ofSize: 32), UIFont.monospacedSystemFont(ofSize: 32, weight: .medium)] {
             let source = metadata(make: text, model: nil)
-            let row = PhotoEffectsRenderer.frameIdentityRow(metadata: source, logoEnabled: false,
-                font: font, color: .black, trailingRuns: [], gap: 0)
+            let row = PhotoEffectsRenderer.frameIdentityRow(metadata: source, font: font, color: .black, trailingRuns: [], gap: 0)
             let reference = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
             XCTAssertEqual(row.width, CGFloat(CTLineGetTypographicBounds(reference, nil, nil, nil)), accuracy: 0.001)
             let ink = CTLineGetBoundsWithOptions(reference, .useGlyphPathBounds)
@@ -578,17 +578,14 @@ final class PhotoFrameBrandTests: XCTestCase {
     func testLongStandardIdentitySplitsWithoutShrinkingModelFont() {
         let font = UIFont.systemFont(ofSize: 24)
         let source = metadata(make: "SONY", model: String(repeating: "WWWW ", count: 20))
-        for logo in [false, true] {
-            let rows = PhotoEffectsRenderer.frameIdentityRows(metadata: source, logoEnabled: logo,
-                brandFont: font, modelFont: font, color: .black, gap: 12, width: 160)
-            XCTAssertGreaterThan(rows.count, 2)
-            let expectedModel = PhotoFrameTextRow.wrappedDescriptions(NSAttributedString(string: source.normalizedModel, attributes: [.font: font]), width: 160)
-            XCTAssertEqual(rows.count, expectedModel.count + 1)
-            for (row, text) in zip(rows.dropFirst(), expectedModel) {
-                let reference = PhotoFrameTextRow(text)
-                XCTAssertEqual(row.width, reference.width, accuracy: 0.001)
-                XCTAssertEqual(row.bounds.height, reference.bounds.height, accuracy: 0.001)
-            }
+        let rows = PhotoEffectsRenderer.frameIdentityRows(metadata: source, brandFont: font, modelFont: font, color: .black, gap: 12, width: 160)
+        XCTAssertGreaterThan(rows.count, 2)
+        let expectedModel = PhotoFrameTextRow.wrappedDescriptions(NSAttributedString(string: source.normalizedModel, attributes: [.font: font]), width: 160)
+        XCTAssertEqual(rows.count, expectedModel.count + 1)
+        for (row, text) in zip(rows.dropFirst(), expectedModel) {
+            let reference = PhotoFrameTextRow(text)
+            XCTAssertEqual(row.width, reference.width, accuracy: 0.001)
+            XCTAssertEqual(row.bounds.height, reference.bounds.height, accuracy: 0.001)
         }
     }
 
@@ -769,25 +766,21 @@ final class PhotoFrameBrandTests: XCTestCase {
         }
     }
 
-    func testFilmIdentitySeparatorIsPreservedWithLogoAndMissingFields() {
+    func testFilmIdentitySeparatorIsPreservedWithTextAndMissingFields() {
         let font = UIFont.monospacedSystemFont(ofSize: 20, weight: .bold)
-        func row(_ value: PhotoFrameMetadata, logo: Bool, separator: String) -> PhotoFrameTextRow {
-            PhotoEffectsRenderer.cameraIdentityRow(value, logoEnabled: logo, font: font, color: .black,
-                logoScale: 1.20, separator: separator)
+        func row(_ value: PhotoFrameMetadata, separator: String) -> PhotoFrameTextRow {
+            PhotoEffectsRenderer.cameraIdentityRow(value, font: font, color: .black, separator: separator)
         }
         func width(_ text: String) -> CGFloat {
             PhotoFrameTextRow(NSAttributedString(string: text, attributes: [.font: font])).width
         }
-        for logo in [false, true] {
-            let camera = metadata(make: "Nikon", model: "Z 8")
-            XCTAssertEqual(row(camera, logo: logo, separator: " · ").width - row(camera, logo: logo, separator: " ").width,
-                width(" · Z 8") - width(" Z 8"), accuracy: 0.001)
-            for value in [metadata(make: "Nikon", model: nil), metadata(make: nil, model: "Z 8"), .empty] {
-                XCTAssertEqual(row(value, logo: logo, separator: " · ").width,
-                    row(value, logo: logo, separator: " ").width, accuracy: 0.001)
-            }
+        let camera = metadata(make: "Nikon", model: "Z 8")
+        XCTAssertEqual(row(camera, separator: " · ").width - row(camera, separator: " ").width,
+            width(" · Z 8") - width(" Z 8"), accuracy: 0.001)
+        for value in [metadata(make: "Nikon", model: nil), metadata(make: nil, model: "Z 8"), .empty] {
+            XCTAssertEqual(row(value, separator: " · ").width, row(value, separator: " ").width, accuracy: 0.001)
         }
-        XCTAssertEqual(row(metadata(make: "其他", model: "型号😀"), logo: true, separator: " · ").width,
+        XCTAssertEqual(row(metadata(make: "其他", model: "型号😀"), separator: " · ").width,
             width("其他 · 型号😀"), accuracy: 0.001)
     }
 

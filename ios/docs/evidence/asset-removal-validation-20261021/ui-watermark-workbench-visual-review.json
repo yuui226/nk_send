@@ -1,0 +1,142 @@
+{
+  "reviewedAtUTC": "2026-10-21T08:06:36.304085+00:00",
+  "reviewer": "/root/remove_bundled_presets",
+  "scope": "自定义用户图片水印；区别于已移除的内置相机品牌图形",
+  "testIdentifier": "PremiumRecoveryUITests/testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch()",
+  "sourceResult": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+  "phases": {
+    "prepare": {
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/prepare-testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+      "result": "Passed",
+      "totalTestCount": 1,
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "testFailures": []
+    },
+    "ui": {
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/testPurchasedWorkbenchImportsImageWatermarkAndKeepsItAfterCancelAndRelaunch.xcresult",
+      "result": "Passed",
+      "totalTestCount": 1,
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "testFailures": []
+    },
+    "cleanup": {
+      "resultBundle": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-storekit-ui.Ds9eMs/cleanup.xcresult",
+      "result": "Passed",
+      "totalTestCount": 1,
+      "passedTests": 1,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "testFailures": []
+    }
+  },
+  "allPhasesPassed": true,
+  "screenshotsInspected": 4,
+  "device": {
+    "architecture": "arm64",
+    "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+    "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+    "modelName": "iPhone 17",
+    "osBuildNumber": "23F77",
+    "osVersion": "26.5",
+    "platform": "iOS Simulator"
+  },
+  "visualResult": "state-ui-passed-rendering-uncovered",
+  "screenshots": [
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "BCB52ED1-3810-4022-8445-1C3F0C0C3328.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "first-logo-picker-cancel-keeps-text_0_0EBD0916-BE75-439C-ADB8-A5D6B1D4D971.png",
+      "timestamp": 1792569382.117,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench-attachments/BCB52ED1-3810-4022-8445-1C3F0C0C3328.png",
+      "sha256": "ae4b79205a899fdea45bbcb79b5b19b49fc760c8096dcc56acff70f6de74dbef",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "首次取消系统选图后仍为文字水印，Type 为 Text，内容 ZTransfer；size 80%、opacity 72%、Frame auto 可见。",
+        "调色滤镜 Forest Verdure（80%）和 Mist 边框保留；无基础照片，显示选照片空态。",
+        "可见控件无异常交叠；顶部长标题使用省略号。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "8DEBB5F2-4DB4-47C2-979A-D4159638BD99.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "system-photo-picker-before-selection_0_E8001D9E-30C4-40BF-A314-8BB37AB54EFA.png",
+      "timestamp": 1792569387.633,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench-attachments/8DEBB5F2-4DB4-47C2-979A-D4159638BD99.png",
+      "sha256": "0ebc07a8338ee7c873bab3ec96b09221beb72c444f6f2fd7a590821a35a75176",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "系统 Photos 选择器显示照片网格、中文隐私访问提示、关闭与搜索控件。",
+        "这是系统用户选图流程，未显示 App 内置品牌图库。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "CF1A4FA5-362C-49F3-BBBD-408AE1E98377.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "purchased-workbench-image-watermark-after-cancel_0_2A119E7B-3D73-43B1-8B4F-FC31DE399EDC.png",
+      "timestamp": 1792569410.5,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench-attachments/CF1A4FA5-362C-49F3-BBBD-408AE1E98377.png",
+      "sha256": "dd6855293519504cbe503b7270f1e157100adea238ca469bbc6ce91543402b8c",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "替换选图取消后 Watermark On、Type Logo、Replace logo 保留。",
+        "size 79%、opacity 71%、Photo bottom right 可见；文字水印专属字体/颜色控件隐藏。",
+        "仍无基础照片，因此这张图仅证明设置界面状态，不能证明合成输出。"
+      ]
+    },
+    {
+      "configurationName": "Test Scheme Action",
+      "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+      "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+      "exportedFileName": "A846A11B-28BB-4790-AA7D-59A16D79526E.png",
+      "isAssociatedWithFailure": false,
+      "suggestedHumanReadableName": "purchased-workbench-image-watermark-after-relaunch_0_F403652D-F370-4FFC-AEC5-3A7E4AD166BF.png",
+      "timestamp": 1792569423.841,
+      "path": "/tmp/ztransfer-removal-validation-20261021/ui-watermark-workbench-attachments/A846A11B-28BB-4790-AA7D-59A16D79526E.png",
+      "sha256": "c9d17a6780ca7781c89158964faa7d805110a1bc69bf2aab6ed9ee3abf315630",
+      "originalPixels": {
+        "width": 1206,
+        "height": 2622
+      },
+      "actuallyViewed": true,
+      "observations": [
+        "重启后 Watermark On、Type Logo、Replace logo、79%、71%、Photo bottom right 与取消后截图一致。",
+        "Forest Verdure 80% / Mist 仍在；仍无基础照片，不覆盖最终水印渲染或导出。"
+      ]
+    }
+  ],
+  "limitations": [
+    "逐张使用 view_image original 读取 xcresulttool 原始导出 PNG；显示工具可能缩放展示，未修改或重编码图片。",
+    "仅这一部 iPhone 17 / iOS 26.5 模拟器；App 英文、系统 Photos 中文；不覆盖真机、其他尺寸或全部语言。",
+    "准备、UI、清理阶段的 Passed 是 XCTest 结果；截图审查另行记录，不能由 XCTest 通过推断所有最终渲染均正确。",
+    "本审查未构建、安装、操作模拟器或改动任何项目代码。",
+    "未验证导出到相册的最终文件、真实相机传输或相机硬件操作。",
+    "Logo / Replace logo 在本上下文指用户自行导入图片水印，不是删除目标的内置品牌 Logo。",
+    "四张工作台截图均未选择基础照片；只证明系统选图、取消和重启后水印设置保留，不能证明水印实际叠加输出。"
+  ],
+  "findings": []
+}

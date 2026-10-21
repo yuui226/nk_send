@@ -51,6 +51,93 @@ struct PremiumSettingsActions: View {
     }
 }
 
+enum AppLegalDocument: String, CaseIterable, Hashable, Sendable {
+    case privacy, terms
+
+    var configurationKey: String {
+        self == .privacy ? "ZTransferPrivacyPolicyURL" : "ZTransferTermsOfUseURL"
+    }
+
+    func titleKey(compact: Bool) -> String {
+        compact ? "settings_\(rawValue)" : "iap_\(rawValue)"
+    }
+}
+
+/// Both entry points use the published HTTPS destinations from the same bundle.
+/// Missing configuration remains disabled until the public pages are connected;
+/// neither membership nor the purchase panel is a prerequisite for reading them.
+struct AppLegalLinksConfiguration: Equatable, Sendable {
+    private let destinations: [AppLegalDocument: URL]
+
+    init(infoDictionary: [String: Any]) {
+        destinations = Dictionary(uniqueKeysWithValues: AppLegalDocument.allCases.compactMap { document -> (AppLegalDocument, URL)? in
+            guard let raw = infoDictionary[document.configurationKey] as? String,
+                  raw.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+                  let components = URLComponents(string: raw),
+                  components.scheme?.lowercased() == "https",
+                  let host = components.host, !host.isEmpty,
+                  components.user == nil, components.password == nil,
+                  let url = components.url else { return nil }
+            return (document, url)
+        })
+    }
+
+    func url(for document: AppLegalDocument) -> URL? { destinations[document] }
+
+    @MainActor
+    func open(_ document: AppLegalDocument, using openURL: OpenURLAction) {
+        guard let url = url(for: document) else { return }
+        openURL(url)
+    }
+}
+
+private struct AppLegalLinksConfigurationKey: EnvironmentKey {
+    static let defaultValue = AppLegalLinksConfiguration(infoDictionary: Bundle.main.infoDictionary ?? [:])
+}
+
+extension EnvironmentValues {
+    var appLegalLinksConfiguration: AppLegalLinksConfiguration {
+        get { self[AppLegalLinksConfigurationKey.self] }
+        set { self[AppLegalLinksConfigurationKey.self] = newValue }
+    }
+}
+
+struct AppLegalLinks: View {
+    @Environment(\.appLegalLinksConfiguration) private var configuration
+    @Environment(\.openURL) private var openURL
+    var compactLabels = false
+    var compactSpacing = false
+
+    var body: some View {
+        HStack(spacing: compactSpacing ? 2 : 8) {
+            ForEach(AppLegalDocument.allCases, id: \.self) { document in
+                link(document)
+                    .disabled(configuration.url(for: document) == nil)
+                    .accessibilityIdentifier("legal-link-\(document.rawValue)")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func link(_ document: AppLegalDocument) -> some View {
+        let button = Button {
+            configuration.open(document, using: openURL)
+        } label: {
+            Text(AppLocalized.resource(document.titleKey(compact: compactLabels)))
+                .font(.system(size: compactLabels ? ZTransferMetrics.caption : 11,
+                              weight: compactLabels ? .semibold : .regular))
+                .foregroundStyle(compactLabels ? ZTransferColors.primaryText : ZTransferColors.secondaryText)
+                .padding(.horizontal, compactLabels ? (compactSpacing ? 4 : 10) : 0)
+                .frame(minHeight: compactLabels ? 28 : nil)
+        }
+        if compactLabels {
+            button.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
+        } else {
+            button.buttonStyle(.plain)
+        }
+    }
+}
+
 /// LicenseDialogs.kt: comparison table, two plan cards, gold CTA, secondary
 /// actions. StoreKit replaces Android's activation/payment-server screens.
 struct PremiumPurchaseView: View {
@@ -164,7 +251,7 @@ struct PremiumPurchaseView: View {
                                 UIPasteboard.general.string = "953000922"
                                 copiedSupport = true
                             }
-                            legalLinks
+                            AppLegalLinks()
                         }
                     }
                     .padding(20)
@@ -380,23 +467,6 @@ struct PremiumPurchaseView: View {
                 .frame(maxWidth: .infinity).padding(.vertical, 10)
                 .background(ZTransferGlassSurface(cornerRadius: 12, kind: .button))
         }.buttonStyle(.plain).disabled(busy)
-    }
-    private var legalLinks: some View {
-        HStack {
-            // Publication URLs remain an explicit release configuration, not
-            // invented destinations. Their absence is tracked in the ledger.
-            if let url = legalURL("ZTransferPrivacyPolicyURL") {
-                Link(AppLocalized.resource("iap_privacy"), destination: url)
-            }
-            if let url = legalURL("ZTransferTermsOfUseURL") {
-                Link(AppLocalized.resource("iap_terms"), destination: url)
-            }
-        }.font(.system(size: 11)).foregroundStyle(ZTransferColors.secondaryText)
-    }
-    private func legalURL(_ key: String) -> URL? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String,
-              let url = URL(string: raw), url.scheme == "https", url.host != nil else { return nil }
-        return url
     }
 }
 

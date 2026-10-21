@@ -455,6 +455,16 @@ final class PhotoListViewModel: ObservableObject {
                 loadingRange: newestCaptureDaysRange(allFiles, days: photoLoadingRange.days)
             )
             guard !Task.isCancelled, generation == loadGeneration else { return }
+            // Monitor return identifies new objects by the authoritative handle
+            // delta. Give those rows the same range-independent admission as
+            // ObjectAdded; historical rows discovered by a wider scan stay scoped.
+            if preserveExisting {
+                await thumbnailFillQueue.enqueueNew(result.files.filter {
+                    result.addedHandles.contains($0.id) &&
+                        !accumulator.initialLogicalIDs.contains(PublishedPhotoIdentity($0))
+                })
+            }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             // Android returns at a loading-range boundary before pruning:
             // older files are unscanned, not confirmed absent from the camera.
             await reconcileCache(allFiles, result.handleQueriesSucceeded && result.metadataComplete && !result.stoppedAtLoadingRange)
