@@ -26,6 +26,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 internal data class FramePlace(val city: String?, val region: String?)
 
+/** Apply the same connectivity policy to the deduplication snapshot and the rendered photo. */
+internal fun PhotoFrameMetadata.withAllowedFramePlace(allowed: Boolean): PhotoFrameMetadata =
+    if (allowed) this else copy(city = null, region = null, address = null)
+
 /**
  * Address fields are not a universal province/city/county hierarchy. Only promote a known
  * Chinese municipality from adminArea; overseas subLocality may merely name a neighborhood.

@@ -54,9 +54,9 @@ internal fun PhotoEffectModuleMenu(
                     label = stringResource(when (module) {
                         PhotoEffectModule.FILTER -> R.string.photo_effect_module_filter
                         PhotoEffectModule.LUT -> R.string.photo_effect_module_lut
+                        PhotoEffectModule.GRAIN -> R.string.photo_grain
                         PhotoEffectModule.FRAME -> R.string.photo_effect_module_frame
                         PhotoEffectModule.WATERMARK -> R.string.photo_effect_module_watermark
-                        PhotoEffectModule.GRAIN -> R.string.photo_grain
                     }),
                     selected = mask.showsPhotoEffect(module),
                     onClick = {

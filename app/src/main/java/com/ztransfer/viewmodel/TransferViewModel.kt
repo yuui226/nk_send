@@ -40,6 +40,7 @@ import com.ztransfer.effects.encodePhotoFilterIntensities
 import com.ztransfer.frame.requiresCameraMetadata
 import com.ztransfer.frame.boundedForQueue
 import com.ztransfer.frame.PhotoFrameDestination
+import com.ztransfer.frame.FramePlace
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFrameLocationResolver
 import com.ztransfer.frame.PhotoFrameMetadata
@@ -56,6 +57,7 @@ import com.ztransfer.frame.DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 import com.ztransfer.frame.PHOTO_FRAME_OUTPUT_DIRECTORY
 import com.ztransfer.frame.PHOTO_FRAME_PART_PREFIX
 import com.ztransfer.frame.hasFrameFor
+import com.ztransfer.frame.withAllowedFramePlace
 import com.ztransfer.frame.isCurrentPhotoFrameTempName
 import com.ztransfer.frame.isPhotoFrameOutputName
 import com.ztransfer.frame.isShortPhotoFrameOutputName
@@ -242,7 +244,7 @@ data class TransferTask(
     /** 实际生成至保存结束的耗时，不包含排队等待。 */
     val frameGenerationElapsedMs: Long? = null,
     val frameGenerationAccumulatedMs: Long = 0L,
-    /** 本次任务因照片效果总开关关闭而跳过生成；与原片查重跳过相互独立。 */
+    /** 本次因效果已存在或总开关关闭而跳过生成；与原片查重跳过相互独立。 */
     val frameGenerationSkipped: Boolean = false,
     val cropRecipe: com.ztransfer.crop.JpegCropSelection? = null,
     val cropEffectsSkipped: Boolean = false,
@@ -3734,6 +3736,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     PhotoFrameWatermark(enabled = false)
                 }
+                val preparedMetadata = metadataResult.get()?.value?.let { metadata ->
+                    if (effectiveBorder && (metadataSettings.showCity || metadataSettings.showRegion)) {
+                        metadata.withAllowedFramePlace(PhotoFrameLocationResolver.allowed(getApplication()))
+                    } else metadata
+                }
                 if (
                     skipIfExisting &&
                     destination.hasFrameFor(
@@ -3744,6 +3751,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         metadataSettings = metadataSettings,
                         filter = filterRequested,
                         grain = grainRequested,
+                        renderedPlace = preparedMetadata?.let { FramePlace(it.city, it.region) },
                     )
                 ) {
                     FrameExportOutcome.AlreadyExists
@@ -3773,7 +3781,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         filter = filterRequested,
                         grain = grainRequested,
                         probeSessionId = probeSession,
-                        metadataSnapshot = metadataResult.get()?.value,
+                        metadataSnapshot = preparedMetadata,
                         allowLocalMetadataRead = false,
                         placeAlreadyPrepared = true,
                     ).fold(
@@ -3812,7 +3820,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}"
                     }
                     updateTask(taskId) { task ->
-                        task.copy(
+                        task.skipFrameGeneration().copy(
                             status = TransferStatus.COMPLETED,
                             skipped = true,
                             error = null,

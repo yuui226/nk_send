@@ -901,18 +901,20 @@ private fun TransferTaskCardContent(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 TransferInfoPill(
-                    text = if (task.frameGenerationSkipped) stringResource(R.string.status_skipped) else effectText,
+                    text = effectText,
                     tone = TransferCardPillTone.EFFECT,
                     respond = animateGenerationPills && generationDuration != null,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 TransferPillVisibility(
-                    visible = generationWaiting || generationDuration != null,
+                    visible = task.frameGenerationSkipped || generationWaiting || generationDuration != null,
                     delayMillis = 80,
                 ) {
                     TransferInfoPill(
-                        text = generationDuration.orEmpty(),
-                        tone = TransferCardPillTone.GENERATION_DURATION,
+                        text = if (task.frameGenerationSkipped) stringResource(R.string.status_skipped)
+                            else generationDuration.orEmpty(),
+                        tone = if (task.frameGenerationSkipped) TransferCardPillTone.SKIPPED
+                            else TransferCardPillTone.GENERATION_DURATION,
                         waiting = generationWaiting,
                     )
                 }

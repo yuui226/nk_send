@@ -1,8 +1,8 @@
 package com.ztransfer.effects
 
-/** Visibility is independent of effect selection. At least one editor remains accessible. */
+/** Declaration order matches the editors; explicit bits keep persisted visibility stable. */
 enum class PhotoEffectModule(val bit: Int) {
-    FILTER(1), LUT(2), FRAME(4), WATERMARK(8), GRAIN(16);
+    FILTER(1), LUT(2), GRAIN(16), FRAME(4), WATERMARK(8);
 }
 const val ALL_PHOTO_EFFECT_MODULES = 31
 fun normalizePhotoEffectModules(mask: Int): Int =

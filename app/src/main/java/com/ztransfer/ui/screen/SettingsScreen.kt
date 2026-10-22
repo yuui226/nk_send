@@ -170,6 +170,7 @@ import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.photoFrameDatePatternExample
 import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
+import com.ztransfer.frame.usesUniformPhotoFrameBorder
 import com.ztransfer.grain.PhotoGrainSettings
 import com.ztransfer.grain.PhotoGrainStyle
 import com.ztransfer.grain.photoGrainSeed
@@ -3063,9 +3064,12 @@ internal fun PhotoEffectsRenderedPreview(
     var previewFailed by remember(sourceRenderIdentity) { mutableStateOf(false) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var showUnfiltered by remember(source) { mutableStateOf(false) }
-    val requestedFrameLayout = remember(borderEnabled, preset) {
-        PhotoEffectsPreviewFrameLayout(
-            preset = preset.takeIf { borderEnabled },
+    val requestedFrameLayout = remember(borderEnabled, preset, metadataSettings, watermark) {
+        PhotoEffectsPreviewFrameLayout.from(
+            borderEnabled = borderEnabled,
+            preset = preset,
+            metadataSettings = metadataSettings,
+            watermark = watermark,
         )
     }
     val normalizedGrain = grain.normalized()
@@ -3563,10 +3567,27 @@ internal suspend fun <T> Flow<T>.collectPhotoEffectsPreviewTransitions(transitio
     conflate().collect { transition(it) }
 }
 
-/** 只有真正改变输出画布的边框样式才走完整淡出淡入；无边框时忽略保留的预设草稿。 */
-private data class PhotoEffectsPreviewFrameLayout(
+/**
+ * Removing/restoring the information band changes the canvas even within one preset. Never
+ * crossfade those two fitted images: the old band's uncovered strip would linger underneath.
+ * Other parameter changes retain their usual transition; hidden border drafts are ignored.
+ */
+internal data class PhotoEffectsPreviewFrameLayout(
     val preset: PhotoFramePreset?,
-)
+    val uniformBorder: Boolean,
+) {
+    companion object {
+        fun from(
+            borderEnabled: Boolean,
+            preset: PhotoFramePreset,
+            metadataSettings: PhotoFrameMetadataSettings,
+            watermark: PhotoFrameWatermark,
+        ): PhotoEffectsPreviewFrameLayout = PhotoEffectsPreviewFrameLayout(
+            preset = preset.takeIf { borderEnabled },
+            uniformBorder = borderEnabled && usesUniformPhotoFrameBorder(preset, metadataSettings, watermark),
+        )
+    }
+}
 
 internal data class PhotoEffectsPreviewCacheKey(
     val filterId: String?,
