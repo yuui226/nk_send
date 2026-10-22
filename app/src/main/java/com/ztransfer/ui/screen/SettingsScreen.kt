@@ -187,6 +187,7 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.PROGRESSIVE_HOLD_HAPTIC_DURATION_MS
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.ui.util.LocalHapticsEnabled
 import com.ztransfer.util.formatDegreesMinutesCoordinates
 import com.ztransfer.util.formatDegreesMinutesLatitude
 import com.ztransfer.util.formatDegreesMinutesLongitude
@@ -3046,6 +3047,7 @@ internal fun PhotoEffectsRenderedPreview(
     prefetchFilters: List<PhotoFilterSelection> = emptyList(),
     onOpen: ((Bitmap, Rect, () -> Bitmap?) -> Unit)?,
 ) {
+    val comparisonHaptics = rememberHaptics(LocalHapticsEnabled.current)
     val colors = AppTheme.colors
     val context = LocalContext.current
     val placeLookupAllowed by remember(context) {
@@ -3383,7 +3385,7 @@ internal fun PhotoEffectsRenderedPreview(
                 // 横图和竖图各用稳定视口；边框成片在内部 Fit，完整呈现对应方向的留白与铭牌。
                 .aspectRatio(viewportAspectRatio)
                 .onGloballyPositioned { previewBounds = it.boundsInRoot() }
-                .pointerInput(previewForGesture, boundsForGesture, onRotate != null) {
+                .pointerInput(previewForGesture, boundsForGesture, onRotate != null, comparisonHaptics) {
                     if (previewForGesture == null || boundsForGesture == null) return@pointerInput
                     detectTapGestures(
                         onPress = {
@@ -3403,6 +3405,7 @@ internal fun PhotoEffectsRenderedPreview(
                         onLongPress = {
                             if (previewForGesture.unfilteredBitmap != null) {
                                 showUnfiltered = true
+                                comparisonHaptics.longPress()
                             }
                         },
                     )

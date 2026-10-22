@@ -124,6 +124,7 @@ import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.ui.util.LocalHapticsEnabled
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.ActiveTransferProgress
@@ -2653,6 +2654,7 @@ private fun ZoomablePreviewViewport(
         animationSpec = tween(220),
         label = "previewRotation",
     )
+    val comparisonHaptics = if (comparisonEnabled) rememberHaptics(LocalHapticsEnabled.current) else null
     val latestOnComparisonChange by rememberUpdatedState(onComparisonChange)
     val localState=remember(stateKey) { PreviewViewportState() }
     val viewportState=externalState ?: localState
@@ -2821,13 +2823,13 @@ private fun ZoomablePreviewViewport(
                     } while (event.changes.any { it.pressed })
                 }
             }
-            .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom, comparisonEnabled) {
+            .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom, comparisonEnabled, comparisonHaptics) {
                 val containerWidth = size.width.toFloat()
                 val containerHeight = size.height.toFloat()
                 detectTapGestures(
                     onPress = {
                         try {
-                            // Image gestures stay silent, including the press before a pinch or pan.
+                            // No press-start feedback: a pending pinch or pan must stay silent.
                             tryAwaitRelease()
                         } finally {
                             latestOnComparisonChange(false)
@@ -2835,6 +2837,7 @@ private fun ZoomablePreviewViewport(
                     },
                     onLongPress = if (comparisonEnabled) ({
                         latestOnComparisonChange(true)
+                        comparisonHaptics?.longPress()
                     }) else null,
                     onTap = { if (scale <= 1.01f || tapWhenZoomed) onTap() },
                     onDoubleTap = { tap ->
