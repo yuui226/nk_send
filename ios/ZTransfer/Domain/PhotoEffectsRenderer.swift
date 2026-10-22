@@ -171,7 +171,7 @@ func photoEffectsFilterTileRows(sourceWidth: Int) -> Int {
 }
 
 /// Native renderer following PhotoFrameExporter.kt's ordered pipeline.
-/// Source -> NP3 filter -> frame backdrop/photo -> metadata/watermark.
+/// Source -> color filter -> grain on the photo -> frame/metadata/watermark.
 enum PhotoEffectsRenderer {
     // CIContext owns its command queue and compiled kernels. Apple's CIContext
     // contract permits concurrent renders; reuse one for image conversion and
@@ -182,19 +182,21 @@ enum PhotoEffectsRenderer {
                                         metadata: PhotoFrameMetadata?, placeResolver: PhotoFramePlaceResolver,
                                         placeAllowed: @escaping @Sendable () async -> Bool = { false },
                                         previewPlaceholders: Bool = false, backdropSource: UIImage? = nil,
-                                        previewLongEdge: CGFloat? = nil) async throws -> UIImage {
+                                        previewLongEdge: CGFloat? = nil, sourceName: String = "") async throws -> UIImage {
         try Task.checkCancellation()
         let enriched: PhotoFrameMetadata?
         if let metadata { enriched = await placeResolver.enriching(metadata, settings: settings.metadata, allowed: placeAllowed) } else { enriched = nil }
         try Task.checkCancellation()
         return try render(image, settings: settings, metadata: enriched,
                           previewPlaceholders: previewPlaceholders, backdropSource: backdropSource,
-                          previewLongEdge: previewLongEdge)
+                          previewLongEdge: previewLongEdge, sourceName: sourceName)
     }
     private struct Layout {
         var canvas: CGSize
         var photo: CGRect
         var metadataTop: CGFloat
+        var uniformBorder = false
+        var decorationBandHeight: CGFloat?
         var parameterPosterPortrait = false
         var standardPlan: MetadataRowsPlan?
         var standardReferenceWidth: CGFloat?
@@ -218,6 +220,7 @@ enum PhotoEffectsRenderer {
                                height: max(1, (layout.canvas.height * scale).rounded()))
         result.photo = layout.photo.applying(CGAffineTransform(scaleX: scale, y: scale))
         result.metadataTop *= scale
+        result.decorationBandHeight = layout.decorationBandHeight.map { $0 * scale }
         result.standardPlan = layout.standardPlan?.scaled(by: scale)
         result.standardReferenceWidth = layout.standardReferenceWidth.map { $0 * scale }
         result.photoWatermarkReference = layout.photoWatermarkReference.map { $0 * scale }
@@ -234,6 +237,7 @@ enum PhotoEffectsRenderer {
                        previewPlaceholders: Bool = false,
                        backdropSource: UIImage? = nil,
                        previewLongEdge: CGFloat? = nil,
+                       sourceName: String = "",
                        filterExecution: PhotoFilterExecution = .original,
                        availableMemory: () -> Int64 = PhotoAllocationBudget.availableMemory) throws -> UIImage {
         try Task.checkCancellation()
@@ -246,9 +250,16 @@ enum PhotoEffectsRenderer {
         let visibleMetadata = presentedPhotoFrameMetadata(metadata, settings: settings.metadata, preview: previewPlaceholders)
         let sourceSize = imagePixelSize(orientedSource)
         let baseLayout = makeLayout(sourceSize, preset: settings.photoFramePreset, widthPercent: settings.metadata.widthPercent)
-        var preparedLayout = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
+        var preparedLayout = settings.photoFrameEnabled && settings.photoFrameBorderEnabled && !settings.usesUniformFrameBorder
             ? expandedStandardLayout(baseLayout, metadata: visibleMetadata, settings: settings) : baseLayout
-        if settings.photoFrameEnabled && settings.photoFrameBorderEnabled {
+        if settings.usesUniformFrameBorder {
+            let uniform = try PhotoFrameUniformGeometry(width: Int(sourceSize.width), height: Int(sourceSize.height),
+                preset: settings.photoFramePreset, percent: settings.metadata.widthPercent)
+            preparedLayout = Layout(canvas: uniform.canvas, photo: uniform.photo, metadataTop: uniform.photo.maxY)
+            preparedLayout.uniformBorder = true
+            preparedLayout.decorationBandHeight = uniform.decorationBandHeight
+            preparedLayout.photoWatermarkReference = min(uniform.designSize.width, uniform.designSize.height)
+        } else if settings.photoFrameEnabled && settings.photoFrameBorderEnabled {
             let reference = makeLayout(CGSize(width: 1000, height: max(1, (sourceSize.height / sourceSize.width * 1000).rounded())),
                                        preset: settings.photoFramePreset, widthPercent: 100)
             preparedLayout.photoWatermarkReference = min(reference.canvas.width, reference.canvas.height) * sourceSize.width / 1000
@@ -285,9 +296,10 @@ enum PhotoEffectsRenderer {
             let canvasBytes = PhotoAllocationBudget.bytes(
                 width: PhotoAllocationBudget.dimension(canvas.width),
                 height: PhotoAllocationBudget.dimension(canvas.height), copies: 2)
-            let rows = max(1, (4 * 1024 * 1024) / width)
-            let scratch = settings.photoFilterEnabled && settings.selectedFilter != nil
-                ? PhotoAllocationBudget.bytes(width: width, height: min(height, rows), copies: 2) : 0
+            let hasFilter = settings.photoFilterEnabled && settings.selectedFilter != nil
+            let rows = max(1, (hasFilter ? 4 * 1024 * 1024 : 512 * 1024) / width)
+            let scratch = hasFilter || settings.photoGrain.isEnabled
+                ? PhotoAllocationBudget.bytes(width: width, height: min(height, rows), copies: hasFilter && settings.photoGrain.isEnabled ? 3 : 2) : 0
             let backdropEdge = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
                 ? photoFrameBackdropPreviewLongEdge(settings.photoFramePreset, blurPercent: settings.metadata.backgroundBlurPercent) : 192
             // Android also reserves the larger low-blur proxy and its temporary copy.
@@ -300,33 +312,28 @@ enum PhotoEffectsRenderer {
                 throw PhotoAllocationRejected(required: required, available: available)
             }
         }
-        var output = orientedSource
-        let tiledFrameFilter: PhotoFilterSelection? =
-            settings.photoFrameEnabled && settings.photoFrameBorderEnabled &&
-            settings.photoFilterEnabled
-                ? settings.selectedFilter : nil
-        if settings.photoFilterEnabled, let filter = settings.selectedFilter,
-           tiledFrameFilter == nil {
-            if filterExecution == .original {
-                let watermark = settings.photoFrameEnabled && settings.watermark.enabled ? settings.watermark : nil
-                return try drawFlatPhoto(output, filter: filter, watermark: watermark)
-            }
-            output = try applyFilter(output, selection: filter, execution: filterExecution)
-        }
-        if settings.photoFrameEnabled {
-            if !settings.photoFrameBorderEnabled {
-                if settings.watermark.enabled { output = try drawFlatPhoto(output, filter: nil, watermark: settings.watermark) }
-                try Task.checkCancellation()
-                return output
-            }
-            // Android builds the frame backdrop from the original photo, then
-            // applies the selected filter only to the photo layer. Keep both
-            // inputs so a filter never recolors the surrounding blur/gradient.
-            output = try drawDecoration(output, backdropImage: orientedBackdrop,
-                                        settings: settings, metadata: visibleMetadata,
-                                        previewPlaceholders: previewPlaceholders,
-                                        tiledFilter: tiledFrameFilter,
-                                        previewLongEdge: previewLongEdge, preparedLayout: preparedLayout)
+        let filter = settings.photoFilterEnabled ? settings.selectedFilter : nil
+        let grain = settings.photoGrain
+        let seed = photoGrainSeed(sourceName)
+        let output: UIImage
+        if settings.photoFrameEnabled && settings.photoFrameBorderEnabled {
+            // Palette reads filtered, ungrained pixels; backdrop reads original.
+            output = try drawDecoration(orientedSource, backdropImage: orientedBackdrop,
+                settings: settings, metadata: visibleMetadata, previewPlaceholders: previewPlaceholders,
+                tiledFilter: filter, grain: grain, grainSeed: seed,
+                execution: previewLongEdge == nil ? filterExecution : .preview,
+                previewLongEdge: previewLongEdge, preparedLayout: preparedLayout)
+        } else if filterExecution == .preview, !grain.isEnabled,
+                  !(settings.photoFrameEnabled && settings.watermark.enabled), let filter {
+            // Preserve the filter-only intermediate fast path: no second canvas
+            // or copy when warming/reusing color pixels for a grain preview.
+            output = try applyFilter(orientedSource, selection: filter, execution: .preview)
+        } else if filter != nil || grain.isEnabled || (settings.photoFrameEnabled && settings.watermark.enabled) {
+            output = try drawFlatPhoto(orientedSource, filter: filter, grain: grain, grainSeed: seed,
+                watermark: settings.photoFrameEnabled && settings.watermark.enabled ? settings.watermark : nil,
+                execution: filterExecution)
+        } else {
+            output = orientedSource
         }
         try Task.checkCancellation()
         return output
@@ -393,12 +400,14 @@ enum PhotoEffectsRenderer {
                                        metadata: PhotoFrameMetadata?,
                                        previewPlaceholders: Bool,
                                        tiledFilter: PhotoFilterSelection?,
+                                       grain: PhotoGrainSettings, grainSeed: Int32,
+                                       execution: PhotoFilterExecution,
                                        previewLongEdge: CGFloat?, preparedLayout: Layout) throws -> UIImage {
         let sourceSize = imagePixelSize(image)
         let layout = preparedLayout
         let basePhotoLayout = makeLayout(sourceSize, preset: settings.photoFramePreset, widthPercent: settings.metadata.widthPercent)
-        let photoDecorationBandHeight = (basePhotoLayout.canvas.height - basePhotoLayout.metadataTop)
-            * layout.photo.width / basePhotoLayout.photo.width
+        let photoDecorationBandHeight = layout.decorationBandHeight ?? ((basePhotoLayout.canvas.height - basePhotoLayout.metadataTop)
+            * layout.photo.width / basePhotoLayout.photo.width)
         let decorationImage = try settings.photoFramePreset == .colorArchive
             ? filteredPalettePreview(image, selection: tiledFilter) : image
         let format = UIGraphicsImageRendererFormat()
@@ -435,7 +444,8 @@ enum PhotoEffectsRenderer {
                     try drawPhoto(cg, image: image, rect: layout.photo,
                                   preset: settings.photoFramePreset,
                                   metadataBandHeight: photoDecorationBandHeight,
-                                  canvasSize: layout.canvas, filter: tiledFilter)
+                                  canvasSize: layout.canvas, filter: tiledFilter, grain: grain, grainSeed: grainSeed,
+                                  execution: execution)
                 } catch {
                     renderError = error
                     return
@@ -472,15 +482,16 @@ enum PhotoEffectsRenderer {
     /// Android's watermark-only path preserves the source dimensions and does
     /// not create a hidden frame/backdrop when the border switch is off.
     private static func drawFlatPhoto(_ image: UIImage, filter: PhotoFilterSelection?,
-                                      watermark: PhotoFrameWatermark?) throws -> UIImage {
+                                      grain: PhotoGrainSettings, grainSeed: Int32,
+                                      watermark: PhotoFrameWatermark?, execution: PhotoFilterExecution) throws -> UIImage {
         let size = image.size
         let format = UIGraphicsImageRendererFormat(); format.scale = image.scale; format.opaque = false
         var renderError: Error?
         let output = UIGraphicsImageRenderer(size: size, format: format).image { renderer in
             let photo = CGRect(origin: .zero, size: size)
             do {
-                if let filter {
-                    try drawFilteredPhotoTiles(renderer.cgContext, image: image, rect: photo, selection: filter)
+                if filter != nil || grain.isEnabled {
+                    try drawPhotoEffectTiles(renderer.cgContext, image: image, rect: photo, selection: filter, grain: grain, grainSeed: grainSeed, execution: execution)
                 } else {
                     image.draw(in: photo)
                 }
@@ -699,7 +710,8 @@ enum PhotoEffectsRenderer {
     private static func drawPhoto(_ cg: CGContext, image: UIImage, rect: CGRect,
                                   preset: PhotoFramePreset, metadataBandHeight: CGFloat,
                                   canvasSize: CGSize,
-                                  filter: PhotoFilterSelection?) throws {
+                                  filter: PhotoFilterSelection?, grain: PhotoGrainSettings, grainSeed: Int32,
+                                  execution: PhotoFilterExecution) throws {
         let radius: CGFloat = switch preset {
         case .colorArchive: rect.width * 0.012
         case .brandInset, .brandGallery: rect.width * 0.014
@@ -716,8 +728,9 @@ enum PhotoEffectsRenderer {
         cg.saveGState()
         cg.addPath(path)
         cg.clip()
-        if let filter {
-            try drawFilteredPhotoTiles(cg, image: image, rect: rect, selection: filter)
+        if filter != nil || grain.isEnabled {
+            try drawPhotoEffectTiles(cg, image: image, rect: rect, selection: filter, grain: grain, grainSeed: grainSeed,
+                                     execution: execution)
         } else {
             image.draw(in: rect)
         }
@@ -743,17 +756,23 @@ enum PhotoEffectsRenderer {
     /// compressed provider, so crop each horizontal band and release its
     /// mutable filter buffer before moving to the next band instead of holding
     /// a second full-resolution filtered bitmap beside the output canvas.
-    private static func drawFilteredPhotoTiles(
+    private static func drawPhotoEffectTiles(
         _ context: CGContext, image: UIImage, rect: CGRect,
-        selection: PhotoFilterSelection
+        selection: PhotoFilterSelection?, grain: PhotoGrainSettings, grainSeed: Int32,
+        execution: PhotoFilterExecution = .original
     ) throws {
         let sourceWidth = Int(imagePixelSize(image).width.rounded())
         let sourceHeight = Int(imagePixelSize(image).height.rounded())
         guard sourceWidth > 0, sourceHeight > 0 else {
             throw PhotoEffectsRenderError.invalidBitmap
         }
-        let rowsPerTile = photoEffectsFilterTileRows(sourceWidth: sourceWidth)
-        context.interpolationQuality = .none
+        // Android previews grain their already downsampled photo, then smoothly
+        // scale it once. Scaling separate bands with interpolation disabled made
+        // grain previews jagged; enabling it per band would leave edge seams.
+        // Original exports retain bounded tiles and exact source-pixel placement.
+        let rowsPerTile = execution == .preview ? sourceHeight
+            : (selection == nil ? max(1, 512 * 1024 / sourceWidth) : photoEffectsFilterTileRows(sourceWidth: sourceWidth))
+        context.interpolationQuality = execution == .preview ? .default : .none
         var top = 0
         while top < sourceHeight {
             try Task.checkCancellation()
@@ -776,10 +795,14 @@ enum PhotoEffectsRenderer {
                     region = nil
                 }
                 guard let region else { throw PhotoEffectsRenderError.invalidBitmap }
-                let filtered = try applyFilter(
-                    UIImage(cgImage: region, scale: 1, orientation: .up),
-                    selection: selection
-                )
+                let source = UIImage(cgImage: region, scale: 1, orientation: .up)
+                let filtered = try selection.map { try applyFilter(source, selection: $0, execution: execution) } ?? source
+                let finished: UIImage
+                if grain.isEnabled {
+                    guard let pixels = filtered.cgImage else { throw PhotoEffectsRenderError.invalidBitmap }
+                    finished = UIImage(cgImage: try PhotoGrainRenderer.apply(pixels, settings: grain, seed: grainSeed,
+                        fullWidth: sourceWidth, fullHeight: sourceHeight, originY: top))
+                } else { finished = filtered }
                 let scaleY = rect.height / CGFloat(sourceHeight)
                 let destination = CGRect(
                     x: rect.minX,
@@ -787,7 +810,7 @@ enum PhotoEffectsRenderer {
                     width: rect.width,
                     height: CGFloat(bottom - top) * scaleY
                 )
-                filtered.draw(in: destination)
+                finished.draw(in: destination)
             }
             top = bottom
         }
@@ -1234,18 +1257,21 @@ enum PhotoEffectsRenderer {
     private static func drawStandardMetadata(_ cg: CGContext, layout: Layout, preset: PhotoFramePreset, metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark, settings: PhotoFrameMetadataSettings) throws {
         let area = preset == .frosted ? frostedMetadataPanelBounds(layout) :
             CGRect(x: 0, y: layout.photo.maxY, width: layout.canvas.width, height: layout.canvas.height - layout.photo.maxY)
-        if preset == .frosted {
+        if preset == .frosted && !layout.uniformBorder {
             drawFrostedMetadataPanel(cg, panel: area, canvas: layout.canvas,
                                      metadataBandHeight: layout.canvas.height - layout.metadataTop)
         }
-        drawAndroidMetadata(cg, area: area, canvasWidth: layout.standardReferenceWidth ?? layout.canvas.width, preset: preset, metadata: metadata, watermark: watermark, settings: settings,
-                            lightText: preset == .mist || preset == .cinema, preparedPlan: layout.standardPlan)
+        if !layout.uniformBorder {
+            drawAndroidMetadata(cg, area: area, canvasWidth: layout.standardReferenceWidth ?? layout.canvas.width, preset: preset, metadata: metadata, watermark: watermark, settings: settings,
+                                lightText: preset == .mist || preset == .cinema, preparedPlan: layout.standardPlan)
+        }
         var photoWatermark = watermark
         if !photoPlacement(photoWatermark.position) && photoWatermark.content == .image { photoWatermark.position = .photoBottomCenter }
         // Text watermarks on a frame side are already one of the metadata rows;
         // only photo-anchored text and image logos need a second draw pass.
         if photoPlacement(photoWatermark.position) || photoWatermark.content == .image {
-            try drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: preset, metadataBand: area, referenceShortEdge: layout.photoWatermarkReference)
+            try drawWatermark(cg, watermark: photoWatermark, photo: layout.photo, canvas: layout.canvas, preset: preset, metadataBand: area, referenceShortEdge: layout.photoWatermarkReference,
+                photoCornerRadius: layout.decorationBandHeight.map { max(1, $0 * 0.26) })
         }
     }
 
@@ -1541,14 +1567,7 @@ enum PhotoEffectsRenderer {
     }
 
     private static func brandPhotoWatermark(_ watermark: PhotoFrameWatermark, preset: PhotoFramePreset) -> PhotoFrameWatermark {
-        var result = watermark
-        if !photoPlacement(result.position) {
-            result.position = preset == .brandGallery ? .photoBottomRight : brandPhotoPosition(result.position)
-        }
-        if preset == .brandGallery && watermark.content == .text && !photoPlacement(watermark.position) && watermark.position != .auto {
-            result.enabled = false
-        }
-        return result
+        watermark.forBrandPhoto(preset)
     }
 
     /// Android measureBrandPhotoText measures once at photo width 1000.
@@ -2197,13 +2216,13 @@ enum PhotoEffectsRenderer {
         return (rows, identityGap)
     }
 
-    private static func drawWatermark(_ cg: CGContext, watermark: PhotoFrameWatermark, photo: CGRect, canvas: CGSize, preset: PhotoFramePreset, metadataBand: CGRect, referenceShortEdge: CGFloat? = nil) throws {
+    private static func drawWatermark(_ cg: CGContext, watermark: PhotoFrameWatermark, photo: CGRect, canvas: CGSize, preset: PhotoFramePreset, metadataBand: CGRect, referenceShortEdge: CGFloat? = nil, photoCornerRadius: CGFloat? = nil) throws {
         guard watermark.enabled else { return }
         if photoPlacement(watermark.position) {
             let radius: CGFloat = switch preset {
             case .colorArchive: photo.width * 0.012
             case .brandInset, .brandGallery: photo.width * 0.014
-            case .mist, .cinema, .minimal, .frosted: max(1, metadataBand.height * 0.26)
+            case .mist, .cinema, .minimal, .frosted: photoCornerRadius ?? max(1, metadataBand.height * 0.26)
             case .parameterPoster: min(photo.width, photo.height) * 0.018
             default: 0
             }
@@ -2303,28 +2322,10 @@ enum PhotoEffectsRenderer {
     }
 
     private static func photoPlacement(_ position: PhotoFrameWatermarkPosition) -> Bool {
-        switch position { case .photoTopLeft, .photoTopCenter, .photoTopRight, .photoCenter, .photoBottomLeft, .photoBottomCenter, .photoBottomRight: return true; default: return false }
-    }
-    private static func brandPhotoPosition(_ position: PhotoFrameWatermarkPosition) -> PhotoFrameWatermarkPosition {
-        switch position { case .left: return .photoBottomLeft; case .center: return .photoBottomCenter; default: return .photoBottomRight }
+        position.isPhotoPlacement
     }
     private static func editorialPhotoWatermark(_ value: PhotoFrameWatermark, preset: PhotoFramePreset) -> PhotoFrameWatermark {
-        if photoPlacement(value.position) { return value }
-        let mapped: PhotoFrameWatermarkPosition = switch value.position {
-        case .left: .photoBottomLeft
-        case .center: .photoBottomCenter
-        case .right: .photoBottomRight
-        case .auto: [.galleryMat, .filmGallery].contains(preset) ? .photoBottomCenter : .photoBottomRight
-        default: .photoBottomRight
-        }
-        let usesPhoto: Bool = switch preset {
-        case .classicSignature: value.position == .auto || value.content == .image
-        case .colorArchive, .filmEdge, .parameterPoster: true
-        case .filmNegative: value.content == .image
-        case .galleryMat, .filmGallery: value.content == .image
-        default: false
-        }
-        return usesPhoto ? value.withPosition(mapped) : value.copy(enabled: false)
+        value.forEditorialPhoto(preset)
     }
     private static func textSizeFraction(_ value: Int) -> CGFloat {
         let p = CGFloat(min(max(value, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound) + 49)

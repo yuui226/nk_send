@@ -4631,7 +4631,7 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertEqual(TransferQueueCardText(item: item).errorText, AppLocalized.resource("transfer_failed"))
         item.status = .completed
         item.frameGenerationSkipped = true
-        XCTAssertEqual(TransferQueueCardText(item: item).effectText, AppLocalized.resource("status_skipped"))
+        XCTAssertEqual(TransferQueueCardText(item: item).effectText, AppLocalized.resource("photo_frame_watermark_short"))
         item.effects = nil
         XCTAssertNil(TransferQueueCardText(item: item).effectText)
         item.error = "stale transfer error"

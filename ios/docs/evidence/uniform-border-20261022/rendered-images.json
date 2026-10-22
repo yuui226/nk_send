@@ -1,0 +1,57 @@
+[
+  {
+    "file": "uniform-CLASSIC_SIGNATURE.png",
+    "test": "PhotoFrameUniformBorderTests/testRendererAndFHDUseTheUniformCanvasAndKeepBrandPhotoInformation()",
+    "sha256": "cdfb393da7e8082d0e3906848f49bbdc85a9cb096b21d12a104c2971e4848d1a"
+  },
+  {
+    "file": "uniform-BRAND_GALLERY.png",
+    "test": "PhotoFrameUniformBorderTests/testRendererAndFHDUseTheUniformCanvasAndKeepBrandPhotoInformation()",
+    "sha256": "9b383dd23573500d916fd68bf8a0c87632bdb0edea156170cd819648e0b2be35"
+  },
+  {
+    "file": "uniform-FROSTED.png",
+    "test": "PhotoFrameUniformBorderTests/testRendererAndFHDUseTheUniformCanvasAndKeepBrandPhotoInformation()",
+    "sha256": "0a97327fa66057c504af817e87f876a3725e660096179f10ee40013ee6dbdfb4"
+  },
+  {
+    "file": "uniform-MINIMAL.png",
+    "test": "PhotoFrameUniformBorderTests/testRendererAndFHDUseTheUniformCanvasAndKeepBrandPhotoInformation()",
+    "sha256": "fa333b10069f6455d9350ea84c013ccaa063d1ed5e84ae678de023a813785459"
+  },
+  {
+    "file": "uniform-CINEMA.png",
+    "test": "PhotoFrameUniformBorderTests/testRendererAndFHDUseTheUniformCanvasAndKeepBrandPhotoInformation()",
+    "sha256": "3877b33a3f9376ce0469a7b1cf55ce326606c837afb6b9ccdd79f98b212e25de"
+  },
+  {
+    "file": "uniform-MIST.png",
+    "test": "PhotoFrameUniformBorderTests/testRendererAndFHDUseTheUniformCanvasAndKeepBrandPhotoInformation()",
+    "sha256": "0330776ef14b9b22b55a583f9d36a92cc81268ded471dc1b0c722d4143a3ab84"
+  },
+  {
+    "file": "fixed-queue-confirmation.png",
+    "test": "QueueConfirmationLayoutTests/testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry()",
+    "sha256": "3fe9b8151d009aae4efc361ba37a31344806b75ea460970abf0e1d763cb75a1d"
+  },
+  {
+    "file": "Hint-landscape-overflow.png",
+    "test": "RemoteMonitorHintPresentationTests/testProductionBubbleUsesContentWidthAndInsetsInside280PointCap()",
+    "sha256": "2366618327bf6bc8d2a27ee2833fd1b4bcbb02e51884fbe3b522c215906bc9e0"
+  },
+  {
+    "file": "Hint-landscape-short.png",
+    "test": "RemoteMonitorHintPresentationTests/testProductionBubbleUsesContentWidthAndInsetsInside280PointCap()",
+    "sha256": "b83aa504524341321c486c52270bd5b0e32742f7eecfa0befabe3d79a63dfd7e"
+  },
+  {
+    "file": "Hint-portrait-overflow.png",
+    "test": "RemoteMonitorHintPresentationTests/testProductionBubbleUsesContentWidthAndInsetsInside280PointCap()",
+    "sha256": "7e6a004b927615c1313c2784ad0187975b04581f7a91890332ce65fdc08536c1"
+  },
+  {
+    "file": "Hint-portrait-short.png",
+    "test": "RemoteMonitorHintPresentationTests/testProductionBubbleUsesContentWidthAndInsetsInside280PointCap()",
+    "sha256": "cb574aafa74656bb86e5e876a38ed3933976c51a3552978413d4a9eabe186454"
+  }
+]

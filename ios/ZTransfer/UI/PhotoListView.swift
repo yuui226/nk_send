@@ -367,6 +367,7 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var admissionHint = PhotoListHintState()
     @State private var effectPreviewSource: UIImage?
     @State private var effectPreviewExif: PhotoExif?
+    @State private var effectPreviewSourceName = ""
     @State private var effectPreviewGeneration = 0
     @State private var effectPreviewRequested = false
     @State private var effectPreviewFileKey: String?
@@ -984,7 +985,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     anchor: anchor,
                     requestTransferDirectoryAttention: transferDirectoryAttention,
                     effectPreviewSource: effectPreviewSource,
-                    effectPreviewExif: effectPreviewExif,
+                    effectPreviewExif: effectPreviewExif, effectPreviewSourceName: effectPreviewSourceName,
                     onEffectPreviewRequested: requestEffectPreview,
                     onPhotoLoadingRangeChanged: model.setPhotoLoadingRange
                 )
@@ -1310,6 +1311,7 @@ private struct PhotoListSessionTaskID: Equatable {
                 }
                 await MainActor.run {
                     guard generation == effectPreviewGeneration else { return }
+                    effectPreviewSourceName = file.fileName
                     effectPreviewSource = image
                 }
             }
@@ -1347,6 +1349,7 @@ private struct PhotoListSessionTaskID: Equatable {
                 guard generation == effectPreviewGeneration else { return }
                 effectPreviewLoadingKey = nil
                 effectPreviewFileKey = key
+                effectPreviewSourceName = file.fileName
                 effectPreviewExif = result.1
                 effectPreviewSource = UIImage(data: previewData)
             }
@@ -1363,7 +1366,7 @@ private struct PhotoListSessionTaskID: Equatable {
                     .foregroundStyle(ZTransferColors.primaryText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background(.regularMaterial, in: Capsule())
+                    .background(ZTransferHintSurface())
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             RemoteEntryButton(expanded: remoteExpanded, intro: remoteIntro.expanded,

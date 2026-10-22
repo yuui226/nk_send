@@ -634,3 +634,11 @@
 "picture_control_clear_confirm" = "清除 C%d？";
 "picture_control_cancel" = "取消";
 "picture_control_confirm" = "確定";
+
+// Android film grain (1f804ab8).
+"photo_grain" = "膠片顆粒";
+"photo_grain_fine" = "細顆粒";
+"photo_grain_medium" = "中顆粒";
+"photo_grain_coarse" = "粗顆粒";
+"photo_grain_intensity_summary" = "%1$s %2$d%%";
+"photo_grain_hint" = "選擇顆粒粗細，再調整強度；各檔強度分別儲存。";

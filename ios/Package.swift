@@ -14,7 +14,7 @@ let package = Package(
     ] : [
         .target(name: "ZTransferProtocol", path: "ZTransfer/Transport/PTP"),
         .target(name: "ZTransferGPS", path: "ZTransfer/Domain", sources: ["GPSProtocol.swift"]),
-        .target(name: "ZTransferEffects", path: "ZTransfer/Domain", sources: ["PhotoEffects.swift", "PhotoEffectsBatch.swift", "PhotoFrameTextLayout.swift", "Np3FilterEngine.swift", "Np3FilterCatalog.swift", "Np3BitmapFilter.swift"]),
+        .target(name: "ZTransferEffects", path: "ZTransfer/Domain", sources: ["PhotoGrain.swift", "PhotoFrameUniformBorder.swift", "PhotoEffects.swift", "PhotoEffectsBatch.swift", "PhotoFrameTextLayout.swift", "Np3FilterEngine.swift", "Np3FilterCatalog.swift", "Np3BitmapFilter.swift"]),
         .target(name: "ZTransferRemote", path: "ZTransfer/Domain", sources: ["RemoteState.swift", "RemoteFrameParser.swift", "RemoteProperty.swift", "RemoteExposureParameters.swift", "RemoteDisplayOptions.swift", "RemoteMovieRecording.swift"]),
         .testTarget(name: "ProtocolTests", dependencies: ["ZTransferProtocol"], path: "ProtocolTests"),
         .testTarget(name: "GPSTests", dependencies: ["ZTransferGPS"], path: "GPSTests"),

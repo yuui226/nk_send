@@ -60,6 +60,7 @@ struct PreviewPhotoEffectsEditor: View {
     @Binding var isPresented: Bool
     let store: PhotoEffectsStore
     let directory: DirectoryAccessStore
+    var sourceName: String = ""
     let source: UIImage?
     let exif: PhotoExif?
     let rotation: Int
@@ -69,7 +70,7 @@ struct PreviewPhotoEffectsEditor: View {
     var body: some View {
         SettingsPopupOverlay(isPresented: $isPresented, showPhotoEffectsEntry: true,
             effectsStore: store, directory: directory, anchor: anchor,
-            effectPreviewSource: source, effectPreviewExif: exif,
+            effectPreviewSource: source, effectPreviewExif: exif, effectPreviewSourceName: sourceName,
             effectsOnly: true, effectPreviewInitialRotationQuarterTurns: rotation, onDismissed: onDismissed)
     }
 }

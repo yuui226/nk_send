@@ -833,7 +833,7 @@ struct PhotoPreviewView: View {
             if let anchor, let store = effectsStore, let directory = effectsDirectory, let file = effectsFile {
                 Color.clear.allowsHitTesting(false).preference(key: PreviewPhotoEffectsPresentationKey.self,
                     value: PreviewPhotoEffectsEditor(isPresented: $effectsPresented, store: store, directory: directory,
-                    source: highResolutionImages[file.id] ?? displayedImages[file.id],
+                    sourceName: file.fileName, source: highResolutionImages[file.id] ?? displayedImages[file.id],
                     exif: exifByFile[file.id], rotation: effectsRotation, anchor: anchor,
                     onDismissed: { if !effectsPresented { effectsFile = nil } }))
             }

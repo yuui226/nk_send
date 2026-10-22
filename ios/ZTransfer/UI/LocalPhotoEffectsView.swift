@@ -351,6 +351,7 @@ private struct LocalEffectPreview: View {
     @State private var expandedSnapshot: PhotoEffectsExpandedPreviewSnapshot?
     @State private var expanded = false
     @State private var geometry = PhotoEffectsGeometrySnapshot()
+    @State private var sourceName = ""
     @State private var source: UIImage?
     @State private var metadata: PhotoFrameMetadata?
     @State private var images: LocalPhotoPreviewImages?
@@ -394,7 +395,7 @@ private struct LocalEffectPreview: View {
                     ),
                     requestedCanvasKey: photoEffectsPreviewCanvasKey(settings),
                     showComparison: comparing,
-                    restoreRevision: previewRestoreRevision
+                    restoreRevision: previewRestoreRevision, failed: failed
                 )
                 .overlay(alignment: .bottom) {
                     if failed { previewUnavailableBadge }
@@ -454,17 +455,18 @@ private struct LocalEffectPreview: View {
                     let decoded = try await LocalPhotoOutput.decodePreview(item: item)
                     image = decoded.image
                     metadata = decoded.metadata
+                    sourceName = decoded.sourceName
                     try Task.checkCancellation()
                     source = image
                 }
                 await previewCache.configure(image: image, settings: settings, metadata: metadata,
-                                             prefetchEnabled: allowsFilterPrefetch)
+                                             prefetchEnabled: allowsFilterPrefetch, sourceName: sourceName)
                 let next = try await previewCache.render(image: image, settings: settings, metadata: metadata)
                 try Task.checkCancellation()
                 renderedCanvasKey = photoEffectsPreviewCanvasKey(settings)
                 images = next
                 failed = false
-                if settings.photoFilterEnabled {
+                if settings.photoFilterEnabled || settings.photoGrain.isEnabled {
                     // The comparison belongs to each composed page. Filter
                     // prefetch is a separate task below because Android only
                     // warms the currently settled page while not generating.
@@ -488,9 +490,12 @@ private struct LocalEffectPreview: View {
         )) {
             guard images != nil, let source else { return }
             await previewCache.configure(image: source, settings: settings, metadata: metadata,
-                                         prefetchEnabled: allowsFilterPrefetch)
+                                         prefetchEnabled: allowsFilterPrefetch, sourceName: sourceName)
             guard allowsFilterPrefetch, settings.photoFilterEnabled, !Task.isCancelled else { return }
             do {
+                if settings.photoGrain.isEnabled && !nextPhotoFilterSelections(for: settings).isEmpty {
+                    try await Task.sleep(for: .milliseconds(600))
+                }
                 for selection in nextPhotoFilterSelections(for: settings) {
                     try Task.checkCancellation()
                     var next = settings

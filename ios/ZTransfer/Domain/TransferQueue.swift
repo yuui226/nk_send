@@ -575,6 +575,8 @@ actor TransferQueue {
     private let generationNow: @Sendable () -> Int64
     private let renderCrop: CropRenderer
     private let renderFrame: FrameRenderer
+    private let placeResolver: PhotoFramePlaceResolver
+    private let placeAllowed: @Sendable () async -> Bool
     private var session: (any TransferDownloading)?
     /// Immutable publication locations survive changes to the current picker.
     /// Retain URLs, not an open scope; each retry acquires its own root lease.
@@ -613,12 +615,12 @@ actor TransferQueue {
          generationNow: @escaping @Sendable () -> Int64 = PhotoGenerationClock.now,
          metadataHeaderStore: PhotoMetadataHeaderStore = PhotoMetadataHeaderStore(),
          parseMetadata: MetadataParser? = nil,
+         placeResolver: PhotoFramePlaceResolver = .shared,
+         placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
          renderCrop: @escaping CropRenderer = { task, source, directory in
              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory)
          },
-         renderFrame: @escaping FrameRenderer = { source, settings, directory, metadata in
-             try await TransferQueue.renderFrameFile(source: source, settings: settings, directory: directory, metadata: metadata)
-         }) {
+         renderFrame: FrameRenderer? = nil) {
         self.photoEffectsEnabled = defaults.object(forKey: "photo_effects_enabled") as? Bool ?? true
         self.preparationCapacity = generationCapacity
         self.generationNow = generationNow
@@ -630,7 +632,12 @@ actor TransferQueue {
         self.accessOperations = accessOperations
         self.directoryPreparation = directoryPreparation
         self.renderCrop = renderCrop
-        self.renderFrame = renderFrame
+        self.renderFrame = renderFrame ?? { source, settings, directory, metadata in
+            try await TransferQueue.renderFrameFile(source: source, settings: settings, directory: directory,
+                metadata: metadata, placeAllowed: placeAllowed, placeAlreadyPrepared: true)
+        }
+        self.placeResolver = placeResolver
+        self.placeAllowed = placeAllowed
         self.premiumAccess = premiumAccess
         self.freeUsage = freeUsage
         // Android TransferState.tasks is in-memory only. Discard the earlier
@@ -694,7 +701,7 @@ actor TransferQueue {
         let item = TransferQueueItem(
             id: UUID(), file: file,
             destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
-            effects: effects
+            effects: Self.effectsForFile(effects, file: file)
         )
         items.append(item); pending.append(item.id); publish(); return item.id
     }
@@ -712,7 +719,7 @@ actor TransferQueue {
         let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
         let item = TransferQueueItem(id: UUID(), file: file,
             destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
-            effects: effects, cropSelection: selection)
+            effects: Self.effectsForFile(effects, file: file), cropSelection: selection)
         items.append(item); pending.append(item.id); publish(); return item.id
     }
 
@@ -723,7 +730,7 @@ actor TransferQueue {
         let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
         let item = TransferQueueItem(id: UUID(), file: file,
                                      destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
-                                     effects: effects, cropTask: task)
+                                     effects: Self.effectsForFile(effects, file: file), cropTask: task)
         items.append(item); pending.append(item.id); publish(); return item.id
     }
 
@@ -746,7 +753,7 @@ actor TransferQueue {
                               destinationFolderName: transferStorageFolderName(
                                 file: file, mode: storageMode, fallback: queuedAt
                               ),
-                              effects: effects)
+                              effects: Self.effectsForFile(effects, file: file))
         }
         guard !additions.isEmpty else { return [] }
         items.append(contentsOf: additions)
@@ -1589,7 +1596,9 @@ actor TransferQueue {
         // after crop publication inside the generation worker.
         let hasCrop = items.first(where: { $0.id == id })?.hasCrop == true
         let existing: URL?
-        if hasCrop { existing = nil }
+        // A place identity requires the prepared, policy-filtered text. Only
+        // recipes without location can take the cheap pre-metadata shortcut.
+        if hasCrop || settings.usesRenderedPlaceIdentity { existing = nil }
         else {
             existing = await Task.detached(priority: .utility) {
                 Self.existingFrameURL(source: source, settings: settings, in: directory)
@@ -1597,6 +1606,7 @@ actor TransferQueue {
         }
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         if let existing {
+            items[index].skipFrameGeneration()
             items[index].frameURL = existing
             items[index].skipped = true
             items[index].frameError = nil
@@ -1680,16 +1690,23 @@ actor TransferQueue {
                 if !photoEffectsEnabled || !job.settings.hasEffect { return }
                 if frameJobs[job.id]?.metadataReady != true { deferForMetadata = true; return }
             }
-            let metadata = frameJobs[job.id]?.metadata ?? job.metadata
+            var metadata = frameJobs[job.id]?.metadata ?? job.metadata
+            if job.settings.usesRenderedPlaceIdentity, let sourceMetadata = metadata {
+                metadata = await placeResolver.enriching(sourceMetadata, settings: job.settings.metadata, allowed: placeAllowed)
+                metadata = metadata?.withAllowedFramePlace(await placeAllowed())
+            }
+            try Task.checkCancellation()
+            let preparedMetadata = metadata
             // Recheck when a worker becomes available: an earlier identical
             // export may have completed while this job was waiting.
             let preparedSource = effectSource
             let existing = await Task.detached(priority: .utility) {
-                Self.existingFrameURL(source: preparedSource, settings: job.settings, in: job.directory)
+                Self.existingFrameURL(source: preparedSource, settings: job.settings, in: job.directory, renderedPlace: preparedMetadata?.renderedPlace)
             }.value
             try Task.checkCancellation()
             if let existing {
                 if let index = items.firstIndex(where: { $0.id == job.id }) {
+                    items[index].skipFrameGeneration()
                     items[index].frameURL = existing
                     items[index].skipped = true
                     items[index].error = nil
@@ -1718,10 +1735,13 @@ actor TransferQueue {
     nonisolated static func renderFrameFile(source: URL, settings: PhotoEffectsSettings, directory: URL, metadata: PhotoFrameMetadata?,
                                           availableMemory: @escaping @Sendable () -> Int64 = PhotoAllocationBudget.availableMemory,
                                           placeResolver: PhotoFramePlaceResolver = .shared,
-                                          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed }) async throws -> URL {
+                                          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+                                          placeAlreadyPrepared: Bool = false) async throws -> URL {
         let resolvedMetadata: PhotoFrameMetadata?
         if settings.photoFrameEnabled && settings.photoFrameBorderEnabled, let metadata {
-            resolvedMetadata = await placeResolver.enriching(metadata, settings: settings.metadata, allowed: placeAllowed)
+            resolvedMetadata = placeAlreadyPrepared
+                ? metadata.withAllowedFramePlace(await placeAllowed())
+                : await placeResolver.enriching(metadata, settings: settings.metadata, allowed: placeAllowed)
         } else { resolvedMetadata = metadata }
         try Task.checkCancellation()
         let task = Task.detached(priority: .utility) {
@@ -1731,10 +1751,13 @@ actor TransferQueue {
                 // with allowLocalMetadataRead=false. Decode the saved image without
                 // allocating another full Data buffer or rereading local EXIF.
                 let image = try PhotoAllocationBudget.loadOriginalImage(source, availableMemory: availableMemory)
-                let rendered = try PhotoEffectsRenderer.render(image, settings: settings, metadata: resolvedMetadata, availableMemory: availableMemory)
+                let rendered = try PhotoEffectsRenderer.render(image, settings: settings, metadata: resolvedMetadata, sourceName: source.lastPathComponent, availableMemory: availableMemory)
                 try Task.checkCancellation()
-                guard let encoded = PhotoEffectsJPEGEncoder.encode(
+                guard let jpeg = PhotoEffectsJPEGEncoder.encode(
                     rendered, copyingMetadataFrom: source, cameraMetadata: metadata
+                ), let encoded = PhotoEffectIdentityJPEG.inserting(
+                    photoEffectOutputIdentity(sourceName: source.lastPathComponent, settings: settings,
+                        renderedPlace: resolvedMetadata?.renderedPlace), into: jpeg
                 ) else { throw CocoaError(.fileWriteUnknown) }
                 let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
                 try FileManager.default.createDirectory(at: framesDirectory, withIntermediateDirectories: true)
@@ -1756,6 +1779,13 @@ actor TransferQueue {
         } onCancel: { task.cancel() }
     }
 
+    private nonisolated static func effectsForFile(_ settings: PhotoEffectsSettings?, file: CameraFile) -> PhotoEffectsSettings? {
+        guard var settings else { return nil }
+        // Android snapshots grain only for supported photo outputs, never RAW/video.
+        settings.photoGrain = supportsRenderedOutput(file.fileExtension) ? settings.photoGrain.normalized : .off
+        return settings
+    }
+
     private nonisolated static func needsCameraMetadata(_ settings: PhotoEffectsSettings?, file: CameraFile) -> Bool {
         needsCameraMetadata(settings, name: file.fileName)
     }
@@ -1765,11 +1795,8 @@ actor TransferQueue {
         return ["jpg", "jpeg"].contains((name as NSString).pathExtension.lowercased())
     }
 
-    nonisolated static func existingFrameURL(source: URL, settings: PhotoEffectsSettings, in directory: URL) -> URL? {
-        // Android PhotoFrameDestination.hasFrameFor: the name records selected
-        // fields, but cannot prove that an earlier offline lookup succeeded.
-        if settings.photoFrameEnabled && settings.photoFrameBorderEnabled &&
-            (settings.metadata.showCity || settings.metadata.showRegion) { return nil }
+    nonisolated static func existingFrameURL(source: URL, settings: PhotoEffectsSettings, in directory: URL,
+                                            renderedPlace: PhotoFramePlace? = nil) -> URL? {
         let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
         let preferred = frameURL(source: source, settings: settings, framesDirectory: framesDirectory)
         guard let entries = try? FileManager.default.contentsOfDirectory(
@@ -1777,20 +1804,30 @@ actor TransferQueue {
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return nil }
-        let stem = preferred.deletingPathExtension().lastPathComponent
-        let ext = preferred.pathExtension
-        let pattern = #"^\#(NSRegularExpression.escapedPattern(for: stem))(?: \(\d+\)|_\d+)?\.\#(NSRegularExpression.escapedPattern(for: ext))$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let legacyName = androidPhotoFrameOutputName(sourceName: source.lastPathComponent, settings: settings)
+        let identity = photoEffectOutputIdentity(sourceName: source.lastPathComponent, settings: settings, renderedPlace: renderedPlace)
+        func pattern(for name: String) -> NSRegularExpression? {
+            let url = URL(fileURLWithPath: name)
+            let stem = NSRegularExpression.escapedPattern(for: url.deletingPathExtension().lastPathComponent)
+            let ext = NSRegularExpression.escapedPattern(for: url.pathExtension)
+            return try? NSRegularExpression(pattern: "^" + stem + #"(?: \(\d+\)|_\d+)?\."# + ext + "$", options: .caseInsensitive)
+        }
+        let shortPattern = pattern(for: preferred.lastPathComponent)
+        let legacyPattern = settings.photoGrain.isEnabled || settings.usesRenderedPlaceIdentity ? nil : pattern(for: legacyName)
+        func matches(_ name: String, _ regex: NSRegularExpression?) -> Bool {
+            regex?.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
+        }
         return entries.first { candidate in
             guard (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return false }
-            let range = NSRange(candidate.lastPathComponent.startIndex..., in: candidate.lastPathComponent)
-            return regex.firstMatch(in: candidate.lastPathComponent, options: [], range: range) != nil
+            if matches(candidate.lastPathComponent, legacyPattern) { return true }
+            return matches(candidate.lastPathComponent, shortPattern)
+                && PhotoEffectIdentityJPEG.read(from: candidate) == identity
         }
     }
 
     private nonisolated static func frameURL(source: URL, settings: PhotoEffectsSettings, framesDirectory: URL) -> URL {
         framesDirectory.appendingPathComponent(
-            androidPhotoFrameOutputName(sourceName: source.lastPathComponent, settings: settings)
+            photoEffectOutputName(sourceName: source.lastPathComponent, settings: settings)
         )
     }
 

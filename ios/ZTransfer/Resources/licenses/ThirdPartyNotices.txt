@@ -540,3 +540,11 @@ TO DO
 =====
 
 Please send bug reports, offers of help, etc. to jpeg-info@jpegclub.org.
+
+
+FastNoiseLite 1.1.1 (film grain)
+==============================
+Copyright(c) 2020 Jordan Peck (jordan.me2@gmail.com)
+Copyright(c) 2020 Contributors
+Licensed under the MIT License; see FastNoiseLite-MIT.txt in this app bundle.
+Upstream: https://github.com/Auburn/FastNoiseLite/tree/v1.1.1

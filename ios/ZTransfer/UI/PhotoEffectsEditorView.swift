@@ -133,6 +133,7 @@ final class PhotoEffectsFocusedFieldVisibilityProbe: UIView {
 /// shared by transfer settings and LocalPhotoEffectsPage. The caller owns the
 /// draft, persistence scope, keyboard focus, and image picker lifecycle.
 struct PhotoEffectsControls: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     @State private var premiumHint: PhotoEffectsHint?
     @Binding var draft: PhotoEffectsSettings
@@ -210,9 +211,13 @@ struct PhotoEffectsControls: View {
                 PhotoLUTChooser(editor: photoLUTEditor, draft: $draft)
                     .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
             }
+            if photoEffectModuleIsVisible(visibleModules, .grain) {
+                grainCard.transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
+            }
             frameCard
         }
         .animation(ZTransferMotion.inlineExpansion, value: colorEditorVisibility)
+        .animation(ZTransferMotion.inlineExpansion, value: visibleModules)
         .onChange(of: colorEditorVisibility) { visibility in
             // Cancel immediately when a module leaves, before its 240ms exit
             // transition disposes the retained content.
@@ -286,6 +291,43 @@ struct PhotoEffectsControls: View {
             }
             .opacity(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter) ? 1 : 0.45)
             .disabled(!photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter))
+    }
+
+    private var grainCard: some View {
+        // Android PhotoGrainEditor: muted olive, two compact wheels, 3:2.
+        let accent = colorScheme == .dark
+            ? Color(red: 227 / 255, green: 238 / 255, blue: 187 / 255)
+            : Color(red: 89 / 255, green: 104 / 255, blue: 45 / 255)
+        let style = draft.photoGrain.style
+        return PhotoEffectsCard(accent: accent) {
+            PhotoEffectControlRow(primaryWeight: 3, secondaryWeight: 2) {
+                DetentWheel(label: AppLocalized.resource("photo_grain"),
+                    options: [nil] + PhotoGrainStyle.allCases.map(Optional.some),
+                    selected: draft.photoGrain.enabled ? style : nil,
+                    optionLabel: { AppLocalized.resource($0?.localizationKey ?? "setting_off") },
+                    onCommit: { selected in
+                        var value = draft
+                        value.photoGrain = value.photoGrain.selecting(selected, memories: value.grainIntensities)
+                        value.grainIntensities[value.photoGrain.style.rawValue] = value.photoGrain.normalizedIntensity
+                        draft = value
+                    }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, accentColor: accent)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("photo-grain-style")
+                DetentWheel(label: AppLocalized.resource("photo_filter_intensity"),
+                    options: Array(stride(from: 100, through: 0, by: -1)), selected: draft.photoGrain.normalizedIntensity,
+                    optionLabel: { "\($0)%" }, onCommit: { intensity in
+                        guard draft.photoGrain.enabled, draft.photoGrain.style == style else { return }
+                        var value = draft
+                        value.photoGrain = value.photoGrain.changingIntensity(intensity, for: style)
+                        value.grainIntensities[style.rawValue] = value.photoGrain.normalizedIntensity
+                        draft = value
+                    }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
+                    enabled: draft.photoGrain.enabled, accentColor: accent)
+                    .id(style)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("photo-grain-intensity")
+            }
+        }
     }
 
     @ViewBuilder private var frameCard: some View {
@@ -603,6 +645,7 @@ struct PhotoEffectsAnimatedImage: View {
     // Tests can present a real system cover at the otherwise one-frame-wide
     // cancellation boundary. Nil in ordinary builds; never used for rendering.
     var crossfadePrepared: (() async -> Void)?
+    var visibilityStarted: ((Bool) -> Void)?
     #endif
 
     @State private var visible: PhotoEffectsPreviewFrame
@@ -644,6 +687,9 @@ struct PhotoEffectsAnimatedImage: View {
         self.restoreRevision = restoreRevision
         self.failed = failed
         _visible = State(initialValue: frame)
+        // An old in-flight canvas cannot flash as the first frame after a
+        // remount; a failed replacement may deliberately reveal that last image.
+        _replacementOpacity = State(initialValue: frame.canvasKey == requestedCanvasKey || failed ? 1 : 0)
     }
 
     private var frameKey: PhotoEffectsPreviewFrameKey {
@@ -723,9 +769,18 @@ struct PhotoEffectsAnimatedImage: View {
             guard !Task.isCancelled else { return }
             let current = latest()
             let show = visible.canvasKey == current.canvas || current.failed
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: show ? 0.19 : 0.11)) {
+            guard replacementOpacity != (show ? 1 : 0) else { return }
+            if show { await Task.yield() }
+            guard !Task.isCancelled else { return }
+            #if DEBUG
+            visibilityStarted?(show)
+            #endif
+            // Android's collector awaits both legs. A newer effect may replace
+            // the pending frame, but cannot interrupt this accepted canvas fade.
+            withAnimation(show ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.19) : .linear(duration: 0.11)) {
                 replacementOpacity = show ? 1 : 0
             }
+            do { try await Task.sleep(for: .milliseconds(show ? 190 : 110)) } catch { return }
         }
     }
 }
@@ -734,7 +789,7 @@ func photoEffectsPreviewCanvasKey(_ settings: PhotoEffectsSettings, rotationQuar
     let border = settings.photoFrameEnabled && settings.photoFrameBorderEnabled
         ? settings.photoFramePreset.rawValue
         : "none"
-    return "rotation:\(rotationQuarterTurns)|frame:\(border)"
+    return "rotation:\(rotationQuarterTurns)|frame:\(border)|uniform:\(settings.usesUniformFrameBorder)"
 }
 
 /// Local view state (comparison, transitions, layout) must not serialize the
@@ -746,13 +801,15 @@ final class PhotoEffectsPreviewIdentityCache {
     private var source: UIImage?
     private var metadata: PhotoFrameMetadata?
     private var identity: String?
-    func key(settings: PhotoEffectsSettings, source: UIImage?, metadata: PhotoFrameMetadata?,
-             build: (PhotoEffectsSettings, UIImage?, PhotoFrameMetadata?) -> String = {
-                 PhotoEffectsSettingsPreview.makeRenderKey(settings: $0, source: $1, metadata: $2)
-             }) -> String {
+    private var grainSeed: Int32?
+    func key(settings: PhotoEffectsSettings, source: UIImage?, metadata: PhotoFrameMetadata?, sourceName: String = "",
+             build: ((PhotoEffectsSettings, UIImage?, PhotoFrameMetadata?) -> String)? = nil) -> String {
         let pixels = photoEffectsPreviewPixelSettings(settings)
-        if let identity, self.settings == pixels, self.source === source, self.metadata == metadata { return identity }
-        let key = build(pixels, source, metadata)
+        let seed = pixels.photoGrain.isEnabled ? photoGrainSeed(sourceName) : nil
+        if let identity, self.settings == pixels, self.source === source, self.metadata == metadata, grainSeed == seed { return identity }
+        let key = build?(pixels, source, metadata)
+            ?? PhotoEffectsSettingsPreview.makeRenderKey(settings: pixels, source: source, metadata: metadata, sourceName: sourceName)
+        grainSeed = seed
         self.settings = pixels; self.source = source; self.metadata = metadata; identity = key
         return key
     }
@@ -803,11 +860,13 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var geometry = PhotoEffectsGeometrySnapshot()
     @State private var expandedSnapshot: PhotoEffectsExpandedPreviewSnapshot?
 
+    let sourceName: String
     let showSourceWhileRendering: Bool
     init(source: UIImage?, metadata: PhotoFrameMetadata?, settings: PhotoEffectsSettings,
          onRequest: @escaping () -> Void, initialRotationQuarterTurns: Int = 0,
-         showSourceWhileRendering: Bool = false) {
+         showSourceWhileRendering: Bool = false, sourceName: String = "") {
         self.source = source; self.metadata = metadata; self.settings = settings; self.onRequest = onRequest
+        self.sourceName = sourceName
         self.showSourceWhileRendering = showSourceWhileRendering
         _rotationQuarterTurns = State(initialValue: ((initialRotationQuarterTurns % 4) + 4) % 4)
     }
@@ -818,13 +877,13 @@ struct PhotoEffectsSettingsPreview: View {
     }
 
     private var renderKey: String {
-        identityCache.key(settings: settings, source: source, metadata: metadata)
+        identityCache.key(settings: settings, source: source, metadata: metadata, sourceName: sourceName)
     }
 
     static func makeRenderKey(
         settings: PhotoEffectsSettings,
         source: UIImage?,
-        metadata: PhotoFrameMetadata?,
+        metadata: PhotoFrameMetadata?, sourceName: String = "",
     ) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -838,6 +897,7 @@ struct PhotoEffectsSettingsPreview: View {
         }
         let metadataKey = Self.metadataKey(metadata)
         return settingsKey + "|" + sourceKey + "|" + metadataKey
+            + (settings.photoGrain.isEnabled ? "|grainSeed:\(photoGrainSeed(sourceName))" : "")
     }
 
     private static func metadataKey(_ metadata: PhotoFrameMetadata?) -> String {
@@ -918,13 +978,14 @@ struct PhotoEffectsSettingsPreview: View {
         image: UIImage, sourceIdentity: UIImage, settings: PhotoEffectsSettings,
         metadata: PhotoFrameMetadata?, originalMetadata: PhotoFrameMetadata?, rotation: Int,
         placeContext: String, cache: PhotoEffectsPreviewCachePool<UIImage>,
-        intermediate: PhotoEffectsPreviewCachePool<UIImage>?, comparison: Bool = false
+        intermediate: PhotoEffectsPreviewCachePool<UIImage>?, comparison: Bool = false, sourceName: String
     ) async throws -> UIImage {
         var decoration = settings
         decoration.photoFilterEnabled = false; decoration.selectedFilter = nil
-        let context = makeRenderKey(settings: decoration, source: sourceIdentity, metadata: originalMetadata)
+        if comparison { decoration.photoGrain = .off }
+        let context = makeRenderKey(settings: decoration, source: sourceIdentity, metadata: originalMetadata, sourceName: sourceName)
             + "|rotation:\(rotation)|\(placeContext)"
-        let key = comparison ? context : makeRenderKey(settings: settings, source: sourceIdentity, metadata: originalMetadata)
+        let key = comparison ? context : makeRenderKey(settings: settings, source: sourceIdentity, metadata: originalMetadata, sourceName: sourceName)
         let decorationSettings = decoration
         let filterContext = makeSourceContextKey(source: sourceIdentity, metadata: nil, rotationQuarterTurns: rotation)
         return try await cache.value(key: key, context: context) { cancelled in
@@ -942,14 +1003,14 @@ struct PhotoEffectsSettingsPreview: View {
             } else { filtered = nil }
             if cancelled() { throw CancellationError() }
             if comparison { return try await LocalPhotoOutput.unfilteredPreview(image: image, settings: decorationSettings, metadata: metadata) }
-            return try await LocalPhotoOutput.preview(image: image, settings: settings, metadata: metadata, filteredSource: filtered).filtered
+            return try await LocalPhotoOutput.preview(image: image, settings: settings, metadata: metadata, filteredSource: filtered, sourceName: sourceName).filtered
         }
     }
 
     private static func prefetchedPreviews(
         image: UIImage, sourceIdentity: UIImage, settings: PhotoEffectsSettings,
         metadata: PhotoFrameMetadata?, rotationQuarterTurns: Int, placeContextKey: String,
-        cache: PhotoEffectsPreviewCachePool<UIImage>
+        cache: PhotoEffectsPreviewCachePool<UIImage>, sourceName: String
     ) async {
         let resolvedMetadata = await resolvedPreviewMetadata(metadata, settings: settings)
         do {
@@ -960,7 +1021,7 @@ struct PhotoEffectsSettingsPreview: View {
                 next.selectedFilter = selection
                 _ = try await cachedPreview(image: image, sourceIdentity: sourceIdentity,
                     settings: next, metadata: resolvedMetadata, originalMetadata: metadata,
-                    rotation: rotationQuarterTurns, placeContext: placeContextKey, cache: cache, intermediate: nil)
+                    rotation: rotationQuarterTurns, placeContext: placeContextKey, cache: cache, intermediate: nil, sourceName: sourceName)
             }
         } catch {}
     }
@@ -1079,10 +1140,10 @@ struct PhotoEffectsSettingsPreview: View {
             #endif
         }
         .task(id: renderKeyWithRotation) {
-            var demanded = [Self.makeRenderKey(settings: settings, source: source, metadata: metadata)]
+            var demanded = [Self.makeRenderKey(settings: settings, source: source, metadata: metadata, sourceName: sourceName)]
             for selection in nextPhotoFilterSelections(for: settings) {
                 var next = settings; next.photoFilterEnabled = true; next.selectedFilter = selection
-                demanded.append(Self.makeRenderKey(settings: next, source: source, metadata: metadata))
+                demanded.append(Self.makeRenderKey(settings: next, source: source, metadata: metadata, sourceName: sourceName))
             }
             completeCache.request(Set(demanded))
             let pixelSettings = photoEffectsPreviewPixelSettings(settings)
@@ -1139,7 +1200,7 @@ struct PhotoEffectsSettingsPreview: View {
             let result = try? await Self.cachedPreview(image: rotatedSource, sourceIdentity: source,
                 settings: settings, metadata: metadata, originalMetadata: self.metadata,
                 rotation: rotationQuarterTurns, placeContext: placeContextKey,
-                cache: completeCache, intermediate: intermediateCache)
+                cache: completeCache, intermediate: intermediateCache, sourceName: sourceName)
             guard !Task.isCancelled else { return }
             guard let result else {
                 previewFailed = true
@@ -1154,7 +1215,7 @@ struct PhotoEffectsSettingsPreview: View {
             #endif
             renderedRequestKey = renderKeyWithRotation
             previewFailed = false
-            guard settings.photoFilterEnabled, settings.selectedFilter != nil else { return }
+            guard (settings.photoFilterEnabled && settings.selectedFilter != nil) || settings.photoGrain.isEnabled else { return }
 
             // The comparison starts as soon as the current image is visible.
             // Neighbor warming is a separate task below so a favorite-order
@@ -1164,19 +1225,22 @@ struct PhotoEffectsSettingsPreview: View {
             let comparison = try? await Self.cachedPreview(image: rotatedSource, sourceIdentity: source,
                 settings: settings, metadata: metadata, originalMetadata: self.metadata,
                 rotation: rotationQuarterTurns, placeContext: placeContextKey,
-                cache: comparisonCache, intermediate: nil, comparison: true)
+                cache: comparisonCache, intermediate: nil, comparison: true, sourceName: sourceName)
             if let comparison, !Task.isCancelled {
                 unfiltered = comparison
             }
         }
         .task(id: prefetchRequest) {
             guard prefetchRequest.enabled, let source else { return }
+            if settings.photoGrain.isEnabled && !nextPhotoFilterSelections(for: settings).isEmpty {
+                do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+            }
             let rotation = rotationQuarterTurns
             guard let rotatedSource = try? await rotatedSourceCache.image(source, quarterTurns: rotation),
                   !Task.isCancelled else { return }
             await Self.prefetchedPreviews(
                 image: rotatedSource, sourceIdentity: source, settings: settings,
-                metadata: metadata, rotationQuarterTurns: rotation, placeContextKey: placeContextKey, cache: completeCache
+                metadata: metadata, rotationQuarterTurns: rotation, placeContextKey: placeContextKey, cache: completeCache, sourceName: sourceName
             )
 
         }
@@ -1384,12 +1448,13 @@ struct PhotoEffectControlRow: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count == 3 else { return }
-        let available = max(0, bounds.width - PhotoEffectControlMetrics.height - 2 * PhotoEffectControlMetrics.gap)
+        guard subviews.count == 2 || subviews.count == 3 else { return }
+        let favoriteWidth = subviews.count == 3 ? PhotoEffectControlMetrics.height : 0
+        let gaps = CGFloat(subviews.count - 1) * PhotoEffectControlMetrics.gap
+        let available = max(0, bounds.width - favoriteWidth - gaps)
         let totalWeight = primaryWeight + secondaryWeight
         let widths = [available * primaryWeight / totalWeight,
-                      available * secondaryWeight / totalWeight,
-                      PhotoEffectControlMetrics.height]
+                      available * secondaryWeight / totalWeight] + (subviews.count == 3 ? [favoriteWidth] : [])
         var x = bounds.minX
         for index in subviews.indices {
             subviews[index].place(at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
@@ -1501,8 +1566,7 @@ private struct PhotoEffectsHintModifier: ViewModifier {
                     .foregroundStyle(ZTransferColors.primaryText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20).padding(.vertical, 10)
-                    .background(ZTransferGlassSurface(cornerRadius: 18, kind: .panel))
-                    .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
+                    .background(ZTransferHintSurface(cornerRadius: 18))
                     .background(GeometryReader { proxy in
                         Color.clear.onAppear { height = proxy.size.height }
                     })
@@ -1620,6 +1684,7 @@ extension PhotoEffectModule {
         case .lut: "photo_effect_module_lut"
         case .frame: "photo_effect_module_frame"
         case .watermark: "photo_effect_module_watermark"
+        case .grain: "photo_grain"
         }
     }
 }

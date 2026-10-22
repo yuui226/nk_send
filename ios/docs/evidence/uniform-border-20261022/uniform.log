@@ -1,0 +1,194 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=B6B4E291-173A-4BFE-BB9C-2D1F62643C49" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath /tmp/ztransfer-uniform-20261022.xcresult "-only-testing:ZTransferTests/PhotoFrameUniformBorderTests" "-only-testing:ZTransferTests/PhotoFramePlaceOutputReuseTests" "-only-testing:ZTransferTests/PhotoFramePlaceGatingTests" "-only-testing:ZTransferTests/PhotoFrameMetadataOutputIdentityTests" "-only-testing:ZTransferTests/PhotoEffectModulesTests" "-only-testing:ZTransferTests/ExpandedEffectsInteractionTests" CODE_SIGN_IDENTITY=- test
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = -
+
+Writing result bundle at path:
+	/tmp/ztransfer-uniform-20261022.xcresult
+
+note: Using codesigning identity override: -
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (2 targets)
+    Target 'ZTransferTests' in project 'ZTransfer'
+        ➜ Explicit dependency on target 'ZTransfer' in project 'ZTransfer'
+    Target 'ZTransfer' in project 'ZTransfer' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/orys/code/nk_send/ios/ZTransfer/Resources/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: 0e5d38c0dec3c6504623a4ffe4d2cb7b
+Build description path: /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/XCBuildData/0e5d38c0dec3c6504623a4ffe4d2cb7b.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache
+    cd /Users/orys/code/nk_send/ios/ZTransfer.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -o /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.LinkFileList (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.LinkFileList
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-OutputFileMap.json (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-OutputFileMap.json
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftConstValuesFileList (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftFileList (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftFileList
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftConstValuesFileList (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.LinkFileList (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.LinkFileList
+
+WriteAuxiliaryFile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer-OutputFileMap.json (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    write-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer-OutputFileMap.json
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist /Users/orys/code/nk_send/ios/ZTransfer/Info.plist (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /Users/orys/code/nk_send/ios/ZTransfer/Info.plist -producttype com.apple.product-type.application -genpkginfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/assetcatalog_generated_info.plist -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist
+
+SwiftDriver ZTransfer normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransfer -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftFileList -DDEBUG -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64 -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/orys/code/nk_send/ios/ThirdParty/libjpeg-8bit/src -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+SwiftCompile normal arm64 Compiling\ PhotoEffectsRenderer.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffectsRenderer.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffectsRenderer.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoEffectsRenderer.swift
+
+SwiftCompile normal arm64 Compiling\ PhotoFrameUniformBorder.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFrameUniformBorder.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFrameUniformBorder.swift:117:17: error: no exact matches in call to initializer 
+115 |         let scale = Float(width) / 1000
+116 |         canvas = CGSize(width: canvasWidth, height: canvasHeight)
+117 |         photo = CGRect(x: margin, y: margin, width: width, height: height)
+    |                 |- error: no exact matches in call to initializer 
+    |                 |- note: candidate has partially matching parameter list (x: Double, y: Double, width: Double, height: Double)
+    |                 `- note: candidate has partially matching parameter list (x: Int, y: Int, width: Int, height: Int)
+118 |         designSize = CGSize(width: CGFloat(reference.width * scale), height: CGFloat(Float(height) + (reference.height - 667) * scale))
+119 |         designMetadataTop = CGFloat(Float(height) + (reference.metadata - 667) * scale)
+Failed frontend command:
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c -filelist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/sources-1 -primary-file /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFrameUniformBorder.swift -emit-dependencies-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/PhotoFrameUniformBorder.d -emit-const-values-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/PhotoFrameUniformBorder.swiftconstvalues -emit-reference-dependencies-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/PhotoFrameUniformBorder.swiftdeps -serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/PhotoFrameUniformBorder.dia -emit-localized-strings -emit-localized-strings-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64 -target arm64-apple-ios16.0-simulator -module-can-import-version DeveloperToolsSupport 24.0.24 24.0.24 -module-can-import-version SwiftUI 8.0.85.29 8.0.85 -module-can-import-version UIKit 9127.0.85.32 9127.0.85 -disable-cross-import-overlay-search -swift-module-cross-import Contacts /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/Contacts.framework/Modules/Contacts.swiftcrossimport/AppIntents.swiftoverlay -swift-module-cross-import Contacts /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/System/Library/Frameworks/Contacts.framework/Modules/Contacts.swiftcrossimport/AppIntents.swiftoverlay -swift-module-cross-import Darwin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/usr/include/Darwin.swiftcrossimport/xlocale.swiftoverlay -swift-module-cross-import Photos /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/Photos.framework/Modules/Photos.swiftcrossimport/AppIntents.swiftoverlay -swift-module-cross-import Photos /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/System/Library/Frameworks/Photos.framework/Modules/Photos.swiftcrossimport/AppIntents.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay -swift-module-cross-import StoreKit /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/StoreKit.framework/Modules/StoreKit.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import StoreKit /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/System/Library/Frameworks/StoreKit.framework/Modules/StoreKit.swiftcrossimport/SwiftUI.swiftoverlay -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#FoundationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#ObservationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libPreviewsMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#PreviewsMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftUIMacros -disable-implicit-swift-modules -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps -explicit-swift-module-map-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer-dependencies-1.json -Xllvm -aarch64-use-tbi -enable-objc-interop -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format\=dwarf -dwarf-version\=4 -swift-version 6 -Onone -D DEBUG -serialize-debugging-options -enable-experimental-feature DebugDescriptionMacro -empty-abi-descriptor -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /Users/orys/code/nk_send/ios -enable-anonymous-context-mangled-names -file-compilation-dir /Users/orys/code/nk_send/ios -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/orys/code/nk_send/ios/ThirdParty/libjpeg-8bit/src -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/DerivedSources -Xcc -DDEBUG\=1 -no-auto-bridging-header-chaining -module-name ZTransfer -const-gather-protocols-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer_const_extract_protocols.json -disable-clang-spi -clang-target arm64-apple-ios27.1-simulator -target-sdk-version 27.1 -target-sdk-name iphonesimulator27.1 -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -o /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/PhotoFrameUniformBorder.o -debug-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule -index-unit-output-path /ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/Objects-normal/arm64/PhotoFrameUniformBorder.o -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -index-system-modules
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFrameUniformBorder.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoFrameUniformBorder.swift
+
+SwiftCompile normal arm64 Compiling\ TransferQueueView.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/TransferQueueView.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/UI/TransferQueueView.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile TransferQueueView.swift
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ ZTransfer (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+
+SwiftCompile normal arm64 Compiling\ LocalPhotoBatchViewModel.swift,\ PhotoEffectOutputIdentity.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/LocalPhotoBatchViewModel.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffectOutputIdentity.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/LocalPhotoBatchViewModel.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile LocalPhotoBatchViewModel.swift
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffectOutputIdentity.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoEffectOutputIdentity.swift
+
+SwiftCompile normal arm64 Compiling\ PhotoEffectsExpandedImage.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/PhotoEffectsExpandedImage.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/PhotoEffectsExpandedImage.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoEffectsExpandedImage.swift
+
+SwiftCompile normal arm64 Compiling\ TransferQueue.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:619:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 617 |          parseMetadata: MetadataParser? = nil,
+ 618 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 619 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 620 |          renderCrop: @escaping CropRenderer = { task, source, directory in
+ 621 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory)
+
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile TransferQueue.swift
+
+SwiftCompile normal arm64 Compiling\ PhotoEffects.swift,\ PhotoEffectsEditorView.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffects.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/PhotoEffectsEditorView.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoEffects.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoEffects.swift
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/UI/PhotoEffectsEditorView.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoEffectsEditorView.swift
+
+SwiftCompile normal arm64 Compiling\ PhotoFramePlace.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFramePlace.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFramePlace.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoFramePlace.swift
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-uniform-20261022.xcresult
+
+Testing failed:
+	No exact matches in call to initializer 
+	Testing cancelled because the build failed.
+
+** TEST FAILED **
+
+
+The following build commands failed:
+	SwiftCompile normal arm64 Compiling\ PhotoFrameUniformBorder.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFrameUniformBorder.swift (in target 'ZTransfer' from project 'ZTransfer')
+	SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/PhotoFrameUniformBorder.swift (in target 'ZTransfer' from project 'ZTransfer')
+	Testing project ZTransfer with scheme ZTransfer
+(3 failures)

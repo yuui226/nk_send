@@ -11,6 +11,7 @@ struct SettingsPopupOverlay: View {
     let requestTransferDirectoryAttention: Bool
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
+    let effectPreviewSourceName: String
     let onEffectPreviewRequested: () -> Void
     let onPhotoLoadingRangeChanged: (PhotoLoadingRange) -> Void
 
@@ -21,7 +22,7 @@ struct SettingsPopupOverlay: View {
     init(isPresented: Binding<Bool>, showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore,
          directory: DirectoryAccessStore, anchor: Anchor<CGRect>,
          requestTransferDirectoryAttention: Bool = false, effectPreviewSource: UIImage? = nil,
-         effectPreviewExif: PhotoExif? = nil, onEffectPreviewRequested: @escaping () -> Void = {},
+         effectPreviewExif: PhotoExif? = nil, effectPreviewSourceName: String = "", onEffectPreviewRequested: @escaping () -> Void = {},
          onPhotoLoadingRangeChanged: @escaping (PhotoLoadingRange) -> Void = { _ in },
          effectsOnly: Bool = false, effectPreviewInitialRotationQuarterTurns: Int = 0,
          onDismissed: @escaping () -> Void = {}) {
@@ -33,6 +34,7 @@ struct SettingsPopupOverlay: View {
         self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
+        self.effectPreviewSourceName = effectPreviewSourceName
         self.onEffectPreviewRequested = onEffectPreviewRequested
         self.onPhotoLoadingRangeChanged = onPhotoLoadingRangeChanged
         self.onDismissed = onDismissed
@@ -104,7 +106,7 @@ struct SettingsPopupOverlay: View {
                         effectPreviewInitialRotationQuarterTurns: effectPreviewInitialRotationQuarterTurns,
                         requestTransferDirectoryAttention: requestTransferDirectoryAttention,
                         effectPreviewSource: effectPreviewSource,
-                        effectPreviewExif: effectPreviewExif,
+                        effectPreviewExif: effectPreviewExif, effectPreviewSourceName: effectPreviewSourceName,
                         onEffectPreviewRequested: onEffectPreviewRequested,
                         onPhotoLoadingRangeChanged: onPhotoLoadingRangeChanged,
                         onContentHeightChange: { height in

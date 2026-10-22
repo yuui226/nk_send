@@ -1,0 +1,392 @@
+{
+  "date": "2026-10-21",
+  "scope": "User-requested second solo functional and performance audit of film grain; Android 1f804ab8, iOS base 7b9680ec",
+  "tasks": {
+    "GR01": "Android models/preferences/seed/native/queue lifecycle review complete",
+    "GR02": "Preview scaling regression reproduced and fixed; filter/EXIF/alpha/cache checks complete",
+    "GR03": "Buffered JPEG fingerprint reads, malformed headers and hard limit complete",
+    "GR04": "39 targeted XCTest passes and native ASan/UBSan validation complete"
+  },
+  "fixes": [
+    {
+      "problem": "Grain preview reused original tiles with interpolation disabled; magnified photo had hard scaling and could not match the prepared-photo composition.",
+      "resolution": "Preview applies effects to the already downsampled photo as one surface then uses the normal smooth scaling. Full originals keep bounded tiles, memory budget and batch cancellation. Filtered palette and original backdrop remain independent."
+    },
+    {
+      "problem": "JPEG identity lookup read every marker byte from FileHandle; repeated lookups incurred unnecessary I/O.",
+      "resolution": "8 KiB bounded buffer; skip unrelated payloads without copying, support partial reads and cancellation, retain 4 MiB hard limit. A malformed matching identity returns nil as on Android."
+    }
+  ],
+  "testRuns": [
+    {
+      "kind": "baseline",
+      "log": "/tmp/ztransfer-grain-audit-baseline-20261021.log",
+      "xcresult": "/tmp/ztransfer-grain-audit-baseline-20261021.xcresult",
+      "sha256": "434f81ede99b54c39e7a9a1d1947f22623e29f2df1810c1ec6d967fa3eb5375a",
+      "exitCode": 65,
+      "tests": [
+        {
+          "class": "PhotoGrainTests",
+          "method": "testCombinedFilterGrainCrossesTilesAndPreservesEveryEXIFOrientation",
+          "status": "passed",
+          "seconds": 20.422
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testGrainCacheReusesFramesAndInvalidatesSourceSeedAndRecipe",
+          "status": "passed",
+          "seconds": 0.393
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testGrainPreviewUsesSmoothPhotoScalingWithoutTileSeams",
+          "status": "failed",
+          "seconds": 1.721
+        }
+      ],
+      "count": 3,
+      "passed": 2
+    },
+    {
+      "kind": "fixed",
+      "log": "/tmp/ztransfer-grain-audit-fixed-20261021.log",
+      "xcresult": "/tmp/ztransfer-grain-audit-fixed-20261021.xcresult",
+      "sha256": "95789afc1b82a1272fb474b96fcd8a77b25460d06408433841c2fa89c5eb8a3d",
+      "exitCode": 0,
+      "tests": [
+        {
+          "class": "LocalPhotoPreviewCacheTests",
+          "method": "testRealFramesReuseAndSourceChangesInvalidate",
+          "status": "passed",
+          "seconds": 0.727
+        },
+        {
+          "class": "LocalPhotoPreviewCacheTests",
+          "method": "testReopeningSameSourceAfterCloseRebuildsWithoutInvalidatingOpeningSnapshot",
+          "status": "passed",
+          "seconds": 0.009
+        },
+        {
+          "class": "LocalPhotoPreviewCacheTests",
+          "method": "testScrollingKeepsLatestEventCoordinatesWithoutRebuildingEditor",
+          "status": "passed",
+          "seconds": 0.23
+        },
+        {
+          "class": "PhotoEffectsPreviewCacheTests",
+          "method": "testCancellingAwaiterPreservesSharedWorkAndCompletedResult",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "class": "PhotoEffectsPreviewCacheTests",
+          "method": "testClosingIntermediateReleasesGlobalGateForNextFrame",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "class": "PhotoEffectsPreviewCacheTests",
+          "method": "testIdentityMemoAvoidsRepeatedEncodingAndTracksAllMetadata",
+          "status": "passed",
+          "seconds": 0.009
+        },
+        {
+          "class": "PhotoEffectsPreviewCacheTests",
+          "method": "testNewAwaiterRetriesCancelledOldDependencies",
+          "status": "passed",
+          "seconds": 0.028
+        },
+        {
+          "class": "PhotoEffectsPreviewCacheTests",
+          "method": "testPoolReusesThreeTargetsEvictsOldestAndInvalidatesContext",
+          "status": "passed",
+          "seconds": 0.006
+        },
+        {
+          "class": "PhotoEffectsPreviewCacheTests",
+          "method": "testProductionRenderIdentityIsStableAndIgnoresNonPixelPreferences",
+          "status": "passed",
+          "seconds": 0.006
+        },
+        {
+          "class": "PhotoEffectsPreviewCacheTests",
+          "method": "testUnrelatedCancellationIsNotRetriedButLaterRequestCanRecover",
+          "status": "passed",
+          "seconds": 0.004
+        },
+        {
+          "class": "PhotoFramePublicationTests",
+          "method": "testConcurrentRealJPEGExportsKeepExistingOutputAndSource",
+          "status": "passed",
+          "seconds": 0.055
+        },
+        {
+          "class": "PhotoFramePublicationTests",
+          "method": "testOverlappingReservationsAndFailureReleasePreserveExistingFiles",
+          "status": "passed",
+          "seconds": 0.007
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testActualCameraPreviewPublishesGrainForNamedSource",
+          "status": "passed",
+          "seconds": 0.164
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testCameraDraftMemoriesDoNotCommitRecipeOrResetOnHide",
+          "status": "passed",
+          "seconds": 0.024
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testCancellationStopsPixelWork",
+          "status": "passed",
+          "seconds": 0.071
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testCodableQueueSnapshotAndZeroPixelIdentity",
+          "status": "passed",
+          "seconds": 0.006
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testCombinedFilterGrainCrossesTilesAndPreservesEveryEXIFOrientation",
+          "status": "passed",
+          "seconds": 22.361
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testFrameBackdropAndDecorationStayClean",
+          "status": "passed",
+          "seconds": 0.413
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testGrainCacheReusesFramesAndInvalidatesSourceSeedAndRecipe",
+          "status": "passed",
+          "seconds": 0.362
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testGrainOffReturnsSameCGImageAndHonorsAlphaAndColorHeadroom",
+          "status": "passed",
+          "seconds": 0.351
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testGrainOnlyPreviewHasCleanComparison",
+          "status": "passed",
+          "seconds": 0.032
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testGrainOnlyRealExportDedupAndChangedStyle",
+          "status": "passed",
+          "seconds": 0.032
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testGrainPreviewUsesSmoothPhotoScalingWithoutTileSeams",
+          "status": "passed",
+          "seconds": 0.583
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testJPEGIdentityBufferedReadsAreBoundedAndHandlePartialStreams",
+          "status": "passed",
+          "seconds": 0.323
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testJPEGIdentityRoundTripRejectsWrongAndMalformedHeaders",
+          "status": "passed",
+          "seconds": 0.01
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testModuleUpgradeRunsOnceAndLocalScopeIsIndependent",
+          "status": "passed",
+          "seconds": 0.019
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testPreferenceLegacyMigrationCorruptTypesAndNamespaces",
+          "status": "passed",
+          "seconds": 0.005
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testQueueCapturesGrainAndRejectsRawVideo",
+          "status": "passed",
+          "seconds": 0.033
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testRepeatedGrainPreviewEditsReleaseObsoleteImagesAndMeasureCost",
+          "status": "passed",
+          "seconds": 4.776
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testSeedUsesLeafNameCaseAndExtension",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testShortNamesAndRecipeIdentityPreserveOffButSeparateStyles",
+          "status": "passed",
+          "seconds": 0.002
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testStyleMemoryOffZeroAndLateRelease",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testTiledOriginalMatchesWholeNoiseFieldAcrossBoundaries",
+          "status": "passed",
+          "seconds": 2.122
+        },
+        {
+          "class": "PhotoGrainTests",
+          "method": "testTwentyFourMegapixelGrainBudgetAndRenderCost",
+          "status": "passed",
+          "seconds": 1.06
+        },
+        {
+          "class": "PhotoOriginalTiledCompositionTests",
+          "method": "testCubeAndNP3PreserveAllOrientationsAndTransparentPixels",
+          "status": "passed",
+          "seconds": 0.059
+        },
+        {
+          "class": "PhotoOriginalTiledCompositionTests",
+          "method": "testCubeMatchesPrefilteredCompositionAcrossTileBoundary",
+          "status": "passed",
+          "seconds": 26.933
+        },
+        {
+          "class": "PhotoOriginalTiledCompositionTests",
+          "method": "testFlatWatermarkAndImmersiveMatchPrefilteredCompositionAcrossTileBoundary",
+          "status": "passed",
+          "seconds": 10.698
+        },
+        {
+          "class": "PhotoOriginalTiledCompositionTests",
+          "method": "testProductionBudgetRejectsThenRetriesWithoutChangingResolution",
+          "status": "passed",
+          "seconds": 0.009
+        },
+        {
+          "class": "PhotoOriginalTiledCompositionTests",
+          "method": "testTwelveMegapixelFrameRejectsLowBudgetThenPreservesPhotoPixels",
+          "status": "passed",
+          "seconds": 0.055
+        }
+      ],
+      "count": 39,
+      "passed": 39
+    }
+  ],
+  "baselineFailure": "testGrainPreviewUsesSmoothPhotoScalingWithoutTileSeams exposed a production defect; same expected-composition assertion passes after the fix.",
+  "newCases": 6,
+  "simulator": "iPhone 17 / iOS 26.5, B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+  "configuration": "Debug, C++ kernel remains explicitly -O2",
+  "performanceObservations": [
+    "GRAIN_AUDIT preview18 ms=[312, 306, 147, 304, 402, 142, 318, 318, 133, 276, 316, 146, 308, 313, 132, 277, 272, 123] footprintBytes initial=61737360 peak=66701736 closed=66668944",
+    "GRAIN_AUDIT 24MP duration=1.026904042 seconds footprintBytes before=62507456 output=158861856"
+  ],
+  "performanceInterpretation": [
+    "18 sequential 1280x853 source previews, 1920-long-edge minimal frame: 123–402 ms; old image weak references all released after close and render-gate pending count zero. Footprint samples are taken after each render, not an instrumented transient peak.",
+    "24MP single coarse-grain full render 1.0269s; output memory sample includes final bitmap. Rendering only, excludes JPEG encoding and Photos save.",
+    "Cancellation, low-memory rejection, real export fingerprint/dedup, snapshot/retry, all eight orientations and combined filter/LUT paths covered. No whole-app idle/thermal or physical-camera conclusion."
+  ],
+  "nativeSanitizers": {
+    "command": "xcrun clang++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -ffp-contract=off -fno-fast-math -fwrapv -I ios/ThirdParty/PhotoGrain ios/NativeTests/photo_grain_bridge.cpp ios/ThirdParty/PhotoGrain/PhotoGrainBridge.cpp -o /tmp/ztransfer-grain-sanitized && /tmp/ztransfer-grain-sanitized",
+    "exitCode": 0,
+    "log": "/tmp/ztransfer-grain-audit-sanitized-20261021.log",
+    "sha256": "a6538a0c3f8bc340533c7e3814118d66d08874976c66573d3e1275c2faf138bd",
+    "output": "RGBA bridge: all three styles, signed seed, alpha 0...255 and reversed batch boundaries match Android kernel\n"
+  },
+  "sourceSHA256": {
+    "ios/ZTransfer/Domain/PhotoGrain.swift": "2845b4e506aebeb7d432670d4074ae6eddc309767e40f56f296fb44e8ba1962b",
+    "ios/ZTransfer/Domain/PhotoGrainRenderer.swift": "e3862595b5da7b7a65b7898a272ee748ec0d986eca2e3576ddd08ebe3574616c",
+    "ios/ZTransfer/Domain/PhotoEffectOutputIdentity.swift": "685fcb6b5cabd49e8e3374ba2b7313f050825f1b7e8274422c49546f37f86e98",
+    "ios/ZTransfer/Domain/PhotoEffects.swift": "8965394df61bc902545788059f27285585fd8107e7e5329963b6de441ed36aa7",
+    "ios/ZTransfer/Domain/PhotoEffectsRenderer.swift": "46c149b8ed89fa55343ca479d80470495026d5e5c9ccbd9ff8f6e98d1de150b3",
+    "ios/ZTransfer/Domain/LocalPhotoBatchViewModel.swift": "1323770aeea3453eff1096336360362319d2b27770bf58e89a7dfa9544fd140c",
+    "ios/ZTransfer/Domain/TransferQueue.swift": "fd64ea057cea9bd83171ac42422b3705edc0248c877dad79d30fdc17c652bd93",
+    "ios/ZTransfer/UI/PhotoEffectsEditorView.swift": "1e4b5f61a43573ede6b8f513add15d950d2b39e36562e0c15568808c9832aaf3",
+    "ios/ZTransfer/UI/LocalPhotoEffectsView.swift": "1c1721fd23ee134699ca4b00758e2d4b5e682fa207995a04f57015642b82fa3d",
+    "ios/ThirdParty/PhotoGrain/PhotoGrainBridge.cpp": "6f019644720f208dd85993cce43f7a08ee4d8212e56d0a3f4aa5fb668299c764",
+    "ios/ThirdParty/PhotoGrain/photo_grain_kernel.h": "09e84bc3f201c8dbd5b9d6e5aaace453e60d8f0705a01e0fa685583d5daf1c37",
+    "ios/ThirdParty/PhotoGrain/vendor/fastnoise-lite-1.1.1/FastNoiseLite.h": "47a29750dfe13d15651febd235f3c26b1cc57af7c6e26583b838fd7ab5215dc2",
+    "ios/ZTransferTests/PhotoGrainTests.swift": "7df38af459f7686cb61f81b29e32716ede97ed8b352a93657b0b8b882ad7d940"
+  },
+  "androidKernelAndVendorByteIdentical": true,
+  "limitations": [
+    "Not an entire app regression or Release/Archive build",
+    "No physical iPhone/camera install or thermal benchmark",
+    "System Photos provider filename stability across separate loads remains a device validation item",
+    "No new commit or push"
+  ],
+  "simulatorCleanup": "Dedicated B6 already Shutdown when cleanup ran (simctl state 405); FC8 untouched.",
+  "officialSummary": {
+    "path": "/tmp/ztransfer-grain-audit-fixed-summary-20261021.json",
+    "sha256": "9f086117362d1a5596c409f641cf2de72ee825745ee7803c539f4757602f5d42",
+    "result": {
+      "devicesAndConfigurations": [
+        {
+          "device": {
+            "architecture": "arm64",
+            "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+            "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+            "modelName": "iPhone 17",
+            "osBuildNumber": "23F77",
+            "osVersion": "26.5",
+            "platform": "iOS Simulator"
+          },
+          "expectedFailures": 0,
+          "failedTests": 0,
+          "passedTests": 39,
+          "skippedTests": 0,
+          "testPlanConfiguration": {
+            "configurationId": "1",
+            "configurationName": "Test Scheme Action"
+          }
+        }
+      ],
+      "environmentDescription": "ZTransfer · Built with macOS 27.0.1",
+      "expectedFailures": 0,
+      "failedTests": 0,
+      "finishTime": 1792581996.898,
+      "passedTests": 39,
+      "result": "Passed",
+      "runtimeWarnings": [],
+      "skippedTests": 0,
+      "startTime": 1792581857.909,
+      "statistics": [],
+      "testFailures": [],
+      "title": "Test - ZTransfer",
+      "topInsights": [
+        {
+          "category": "Longest Test Runs",
+          "impact": "68% of duration",
+          "text": "2 longest test runs with outlier durations exceeding 18.74s (three standard deviations)"
+        }
+      ],
+      "totalTestCount": 39
+    }
+  },
+  "checks": {
+    "gitDiffCheck": "passed",
+    "projectPlist": "passed",
+    "androidWorkingTree": "clean",
+    "xcresultSummaryFirstAttempt": "sandbox denied TestReport cache write; same read rerun with host access succeeded"
+  }
+}

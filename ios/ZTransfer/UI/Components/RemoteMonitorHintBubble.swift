@@ -127,8 +127,7 @@ struct RemoteMonitorHintBubble: View {
         RemoteMonitorHintText(text: text, style: .init(compact: compact),
             color: compact ? ZTransferColors.primaryText : .white.opacity(0.95))
             .padding(.horizontal, compact ? 8 : 12).padding(.vertical, 5)
-            .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .circular))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .circular).strokeBorder(border, lineWidth: 0.5))
+            .background(ZTransferHintSurface(cornerRadius: 12, fill: fill, border: border, borderWidth: 0.5))
             .background(RemoteMonitorHintTouchShield())
             .frame(maxWidth: 280)
     }

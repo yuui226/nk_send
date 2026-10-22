@@ -1,0 +1,27 @@
+{
+  "head": "7690172b1c4253aa52d0431ce635749e5ffdc5b2",
+  "baseline": "1f804ab8",
+  "userApprovedWorkingTree": true,
+  "sha256": {
+    "app/src/main/java/com/ztransfer/MainActivity.kt": "35ce836fefa4291927f8afb2ef9e960125bd6df32a391982a902ac2c411c1ded",
+    "app/src/main/java/com/ztransfer/effects/PhotoEffectModules.kt": "c94f4c536193d6a3bd64b3cab0ac6cae878fc60f98294eb21e9c1b66f3096d4b",
+    "app/src/main/java/com/ztransfer/frame/PhotoFrameExporter.kt": "72f6c8cc8ff5c8822f4f5a27f7e3058cd4b7c3ace4b86f1983facd66910e7b44",
+    "app/src/main/java/com/ztransfer/frame/PhotoFrameLocationResolver.kt": "9793feda72fa2da53e5391313267b99f07159ffd566bc6ee17362942a3cca861",
+    "app/src/main/java/com/ztransfer/frame/PhotoFrameWidth.kt": "2827dcce9f6aa6d7765a263ea820faad3a0cc630f7aaba22708d0434954c0090",
+    "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt": "1183ad7783aabe5620f1f1c36d91aa7bd2a28a47ac9dfb1410cb1999506e9bcc",
+    "app/src/main/java/com/ztransfer/ui/screen/GlassHintSurface.kt": "27ae3b8a34f8922377baa9fd0475dca033d90c621374f9e60e14f3027ddbb3da",
+    "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt": "149656db1e2d64e289f42147b8fc8550ee7cd2d22d1ba0c1643e45a5dc615488",
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoEffectModuleMenu.kt": "5a6dd5d384025b915a6e7b946f75105a6702dfb37aaf5f8280257406cde04a0f",
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt": "ff74692c116912525a4d2b14dbe3566d8e188da4368dcf80341226f3f8af4010",
+    "app/src/main/java/com/ztransfer/ui/screen/RecControlBar.kt": "11daeedba3ba6bfc21ed3db363f0ce2585b9ff4b713383e9f7ed97981ddb6a46",
+    "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt": "28926165d49c44885f1b0db15524d418c94caa8d6e715e2929341b97c7e66344",
+    "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt": "eb61dc175f98d1ca4714b26f17902fb38f209a98a5f2678d8fa13912f6b249bf",
+    "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt": "a513c530d5f88ceb443c42a3a5fb6567d5d7597222ea6763dd7f9358265d66e0",
+    "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt": "ce09dda4095bd04c1232d0f6895b0f70ea97032cc40166078ed768b82fc5c494",
+    "app/src/test/java/com/ztransfer/frame/PhotoFramePlaceIdentityTest.kt": "8ef9c2c864da651aec8870e4c48b89e5b9bd2f648e9a753da93b12c5db91cbc2",
+    "app/src/test/java/com/ztransfer/frame/PhotoFrameUniformBorderIdentityTest.kt": "007521a58d9f77201837e14e8b3ef9ed6542656ba088b815a35bab14f20065ef",
+    "app/src/test/java/com/ztransfer/frame/PhotoFrameUniformBorderTest.kt": "897a73f095689df39444fc95cf1df76b8fcfb074c534137267347583fc1e61af",
+    "app/src/test/java/com/ztransfer/frame/PhotoFrameWatermarkPositionIdentityTest.kt": "b2304ee2619dfc7de1457483a3b73889e85a468ac6cfd9e491a5fcbd8cbc9ae6",
+    "app/src/test/java/com/ztransfer/ui/screen/PhotoEffectsUniformBorderTransitionTest.kt": "e2e0a34d45c32a8da496d43a911129c0346e3d4aa9873362a202053bf5dab17f"
+  }
+}

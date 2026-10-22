@@ -557,7 +557,7 @@ enum TipGuides {
         return [.init(id: "photo_effects_help_use", items: hints.map { .init(textKey: $0) } + [
             item("help_preview_label", local ? "local_photo_effects_gesture_hint" : "photo_effects_gesture_hint")]),
             .init(id: "photo_effects_help_color", items: [item("photo_effect_module_filter", "photo_effects_help_filters"),
-                item("lut_folder", "photo_lut_help"), item("photo_lut_settings", "photo_effects_help_lut_settings")]),
+                item("lut_folder", "photo_lut_help"), item("photo_lut_settings", "photo_effects_help_lut_settings"), item("photo_grain", "photo_grain_hint")]),
             .init(id: "photo_effects_help_decoration", items: [item("photo_frame_style_short", "photo_effects_help_frame"),
                 item("photo_frame_watermark_short", "photo_effects_help_watermark")]),
             .init(id: "photo_effects_help_shortcuts", items: [item("photo_effect_modules", "photo_effects_help_modules"),

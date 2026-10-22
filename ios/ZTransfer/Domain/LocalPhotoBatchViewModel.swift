@@ -11,6 +11,7 @@ import CoreTransferable
 /// remain valid. Callers own and remove the returned private temporary file.
 struct PhotoPickerTemporaryFile: Transferable, Sendable {
     let url: URL
+    var sourceName: String = ""
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .image) { received in
@@ -37,7 +38,7 @@ struct PhotoPickerTemporaryFile: Transferable, Sendable {
                     try Task.checkCancellation()
                     try copy(source, destination)
                     try Task.checkCancellation()
-                    return Self(url: destination)
+                    return Self(url: destination, sourceName: source.lastPathComponent)
                 } catch {
                     try? manager.removeItem(at: destination)
                     throw error
@@ -187,15 +188,18 @@ enum LocalPhotoOutput {
     static func generate(item: PhotosPickerItem, settings: PhotoEffectsSettings) async throws {
         var stage = "prepare"
         do {
-            let sourceURL = try await stagedSource(item: item)
+            let staged = try await stagedSource(item: item)
+            let sourceURL = staged.url
             defer { try? FileManager.default.removeItem(at: sourceURL) }
             stage = "render"
-            let output = try await render(sourceURL: sourceURL, settings: settings)
+            let output = try await render(sourceURL: sourceURL, settings: settings, sourceName: staged.sourceName)
             try Task.checkCancellation()
             stage = "save"
             try await PHPhotoLibrary.shared().performChanges {
                 let request = PHAssetCreationRequest.forAsset()
-                request.addResource(with: .photo, data: output, options: nil)
+                let options = PHAssetResourceCreationOptions()
+                options.originalFilename = photoEffectOutputName(sourceName: staged.sourceName, settings: settings)
+                request.addResource(with: .photo, data: output, options: options)
             }
             // Photos writes already accepted by the system cannot be rolled back by
             // task cancellation. The runner suppresses any late UI progress.
@@ -209,7 +213,7 @@ enum LocalPhotoOutput {
 
     /// Shared file-to-JPEG path; the caller owns the staged source and decides
     /// where to save the result. No entitlement reads occur during rendering.
-    static func render(sourceURL: URL, settings: PhotoEffectsSettings,
+    static func render(sourceURL: URL, settings: PhotoEffectsSettings, sourceName: String? = nil,
                        availableMemory: @escaping @Sendable () -> Int64 = PhotoAllocationBudget.availableMemory) async throws -> Data {
         try Task.checkCancellation()
         let renderer = Task.detached(priority: .userInitiated) {
@@ -219,12 +223,14 @@ enum LocalPhotoOutput {
                 // not retain the entire compressed source beside bitmaps.
                 let image = try PhotoAllocationBudget.loadOriginalImage(sourceURL, availableMemory: availableMemory)
                 let metadata = PhotoExifParser.parse(sourceURL).map(PhotoFrameMetadata.init)
-                let output = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata, availableMemory: availableMemory)
+                let output = try PhotoEffectsRenderer.render(image, settings: settings, metadata: metadata, sourceName: sourceName ?? sourceURL.lastPathComponent, availableMemory: availableMemory)
                 try Task.checkCancellation()
                 // Match Android's JPEG output; retain only compressed data while
                 // waiting for the photo-library write to settle.
-                guard let encoded = PhotoEffectsJPEGEncoder.encode(
+                guard let jpeg = PhotoEffectsJPEGEncoder.encode(
                     output, copyingMetadataFrom: sourceURL
+                ), let encoded = PhotoEffectIdentityJPEG.inserting(
+                    photoEffectOutputIdentity(sourceName: sourceName ?? sourceURL.lastPathComponent, settings: settings, renderedPlace: metadata?.renderedPlace), into: jpeg
                 ) else {
                     throw CocoaError(.fileWriteUnknown)
                 }
@@ -236,7 +242,7 @@ enum LocalPhotoOutput {
         } onCancel: { renderer.cancel() }
     }
 
-    private static func stagedSource(item: PhotosPickerItem) async throws -> URL {
+    private static func stagedSource(item: PhotosPickerItem) async throws -> PhotoPickerTemporaryFile {
         guard let file = try await item.loadTransferable(type: PhotoPickerTemporaryFile.self) else {
             throw CocoaError(.fileReadCorruptFile)
         }
@@ -246,11 +252,12 @@ enum LocalPhotoOutput {
             try? FileManager.default.removeItem(at: file.url)
             throw error
         }
-        return file.url
+        return file
     }
 
     static func decodePreview(item: PhotosPickerItem) async throws -> LocalPhotoDecodedSource {
-        let sourceURL = try await stagedSource(item: item)
+        let staged = try await stagedSource(item: item)
+        let sourceURL = staged.url
         defer { try? FileManager.default.removeItem(at: sourceURL) }
         try Task.checkCancellation()
         let metadata = PhotoExifParser.parse(sourceURL).map(PhotoFrameMetadata.init)
@@ -264,7 +271,7 @@ enum LocalPhotoOutput {
                         kCGImageSourceThumbnailMaxPixelSize: 1280,
                         kCGImageSourceShouldCacheImmediately: true,
                       ] as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
-                return LocalPhotoDecodedSource(image: UIImage(cgImage: cgImage), metadata: metadata)
+                return LocalPhotoDecodedSource(image: UIImage(cgImage: cgImage), metadata: metadata, sourceName: staged.sourceName)
             }
         }
         return try await withTaskCancellationHandler {
@@ -297,7 +304,7 @@ enum LocalPhotoOutput {
     }
 
     static func preview(image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata? = nil,
-                        filteredSource: UIImage? = nil) async throws -> LocalPhotoPreviewImages {
+                        filteredSource: UIImage? = nil, sourceName: String = "") async throws -> LocalPhotoPreviewImages {
         let renderer = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             return try await PhotoEffectsPreviewRenderGate.shared.withPermit {
@@ -311,7 +318,7 @@ enum LocalPhotoOutput {
                     let filtered = try PhotoEffectsRenderer.render(
                         filteredInput, settings: decorationOnly, metadata: metadata,
                         previewPlaceholders: true, backdropSource: image,
-                        previewLongEdge: 1_920
+                        previewLongEdge: 1_920, sourceName: sourceName, filterExecution: .preview
                     )
                     try Task.checkCancellation()
                     // The comparison frame is deliberately deferred by the view
@@ -337,6 +344,7 @@ enum LocalPhotoOutput {
                 try autoreleasepool {
                     var comparison = settings
                     comparison.photoFilterEnabled = false
+                    comparison.photoGrain = .off
                     let output = try PhotoEffectsRenderer.render(
                         image, settings: comparison, metadata: metadata,
                         previewPlaceholders: true, previewLongEdge: 1_920
@@ -357,6 +365,7 @@ enum LocalPhotoOutput {
 struct LocalPhotoDecodedSource: Sendable {
     let image: UIImage
     let metadata: PhotoFrameMetadata?
+    var sourceName: String = ""
 }
 
 struct LocalPhotoPreviewImages: Sendable {
@@ -376,38 +385,51 @@ actor PhotoPreviewFrameCache<Value: Sendable> {
     private var requested = true
 
     func getOrRender(_ render: @escaping @Sendable () async throws -> Value) async throws -> Value {
-        try Task.checkCancellation()
-        guard !closed else { throw CancellationError() }
-        guard requested else { throw PhotoPreviewObsolete() }
-        if let completed { return completed }
-        let waiterID = UUID()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                guard !Task.isCancelled, !closed else {
-                    continuation.resume(throwing: CancellationError())
-                    return
+        while true {
+            try Task.checkCancellation()
+            guard !closed else { throw CancellationError() }
+            guard requested else { throw PhotoPreviewObsolete() }
+            if let completed { return completed }
+            let createdForThisRequest = running == nil
+            let waiterID = UUID()
+            do {
+                return try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { continuation in
+                        guard !Task.isCancelled, !closed else {
+                            continuation.resume(throwing: CancellationError())
+                            return
+                        }
+                        guard requested else {
+                            continuation.resume(throwing: PhotoPreviewObsolete())
+                            return
+                        }
+                        waiters[waiterID] = continuation
+                        guard running == nil else { return }
+                        let id = UUID()
+                        let task = Task.detached { [weak self] in
+                            let result: Result<Value, Error>
+                            do {
+                                try Task.checkCancellation()
+                                let value = try await render()
+                                try Task.checkCancellation()
+                                result = .success(value)
+                            } catch { result = .failure(error) }
+                            await self?.finish(id: id, result: result)
+                        }
+                        running = (id, task)
+                    }
+                } onCancel: {
+                    Task { await self.cancelWaiter(waiterID) }
                 }
-                guard requested else {
-                    continuation.resume(throwing: PhotoPreviewObsolete())
-                    return
-                }
-                waiters[waiterID] = continuation
-                guard running == nil else { return }
-                let id = UUID()
-                let task = Task.detached { [weak self] in
-                    let result: Result<Value, Error>
-                    do {
-                        try Task.checkCancellation()
-                        let value = try await render()
-                        try Task.checkCancellation()
-                        result = .success(value)
-                    } catch { result = .failure(error) }
-                    await self?.finish(id: id, result: result)
-                }
-                running = (id, task)
+            } catch {
+                try Task.checkCancellation()
+                guard !closed else { throw CancellationError() }
+                // Android retries with the new caller's dependencies when it
+                // joined old work whose intermediate filter has since closed.
+                // A fresh render's unrelated cancellation must still propagate.
+                if !createdForThisRequest, requested, error is CancellationError { continue }
+                throw error
             }
-        } onCancel: {
-            Task { await self.cancelWaiter(waiterID) }
         }
     }
 
@@ -525,13 +547,20 @@ actor PhotoPreviewCacheSet<Key: Hashable & Sendable, Value: Sendable> {
 /// Page-owned preview cache. Source/decoration changes replace the entire scope;
 /// filter changes share the three recent frames and their in-flight work.
 @MainActor final class LocalPhotoPreviewCache: ObservableObject {
+    typealias FilterRenderer = @Sendable (UIImage, PhotoFilterSelection) async throws -> UIImage
+    private let filterRenderer: FilterRenderer
     private var frames = PhotoPreviewCacheSet<String, LocalPhotoPreviewImages>()
     private var source: UIImage?
+    private var sourceName = ""
     private var metadata: PhotoFrameMetadata?
     private var decoration: PhotoEffectsSettings?
     private var generation = UUID()
     private var currentFilter: PhotoFilterSelection?
-    private var filtered: (selection: PhotoFilterSelection, image: UIImage)?
+    private var filtered: PhotoEffectsPreviewCache<UIImage>?
+
+    init(filterRenderer: @escaping FilterRenderer = LocalPhotoOutput.filteredSource) {
+        self.filterRenderer = filterRenderer
+    }
 
     private static func decorationSettings(_ settings: PhotoEffectsSettings) -> PhotoEffectsSettings {
         var value = photoEffectsPreviewPixelSettings(settings)
@@ -547,21 +576,29 @@ actor PhotoPreviewCacheSet<Key: Hashable & Sendable, Value: Sendable> {
     }
 
     func configure(image: UIImage, settings: PhotoEffectsSettings, metadata: PhotoFrameMetadata?,
-                   prefetchEnabled: Bool = true) async {
+                   prefetchEnabled: Bool = true, sourceName: String = "") async {
         guard !Task.isCancelled else { return }
         let nextDecoration = Self.decorationSettings(settings)
-        if source !== image || self.metadata != metadata || decoration != nextDecoration {
+        let nextFilter = settings.photoFilterEnabled ? settings.selectedFilter : nil
+        // Android owns the filtered source independently of complete previews.
+        // Grain/frame/name edits may cancel their waiter, never the shared
+        // pixel work. Source/filter replacement and leaving the page do close it.
+        if source !== image || currentFilter != nextFilter {
+            let old = filtered
+            filtered = nextFilter == nil ? nil : PhotoEffectsPreviewCache()
+            currentFilter = nextFilter
+            Task { await old?.close() }
+        }
+        if source !== image || self.sourceName != sourceName || self.metadata != metadata || decoration != nextDecoration {
             let old = frames
             frames = PhotoPreviewCacheSet()
             generation = UUID()
-            if source !== image { filtered = nil }
             source = image
+            self.sourceName = sourceName
             self.metadata = metadata
             decoration = nextDecoration
             Task { await old.close() }
         }
-        currentFilter = settings.photoFilterEnabled ? settings.selectedFilter : nil
-        if currentFilter == nil { filtered = nil }
         var wanted = [settings]
         if prefetchEnabled, settings.photoFilterEnabled {
             wanted += nextPhotoFilterSelections(for: settings).map { selection in
@@ -580,33 +617,31 @@ actor PhotoPreviewCacheSet<Key: Hashable & Sendable, Value: Sendable> {
         guard source === image, self.metadata == metadata,
               decoration == Self.decorationSettings(settings) else { throw CancellationError() }
         let token = generation
+        let sourceName = self.sourceName
         let selection = settings.photoFilterEnabled ? settings.selectedFilter : nil
-        let cachedSource = filtered.flatMap { $0.selection == selection ? $0.image : nil }
-        let value = try await frames.getOrRender(key: Self.key(settings)) { [weak self] in
+        let filteredCache = selection == currentFilter ? filtered : nil
+        let filterRenderer = self.filterRenderer
+        let value = try await frames.getOrRender(key: Self.key(settings)) {
             let prepared: UIImage?
             if let selection {
-                if let cachedSource { prepared = cachedSource }
-                else { prepared = try await LocalPhotoOutput.filteredSource(image: image, selection: selection) }
+                if let filteredCache {
+                    prepared = try await filteredCache.getOrRender(serialize: false) { _ in
+                        try await filterRenderer(image, selection)
+                    }
+                } else { prepared = try await filterRenderer(image, selection) }
             } else { prepared = nil }
             try Task.checkCancellation()
-            if let selection, let prepared {
-                await self?.remember(prepared, selection: selection, generation: token)
-            }
             return try await LocalPhotoOutput.preview(image: image, settings: settings,
-                metadata: metadata, filteredSource: prepared)
+                metadata: metadata, filteredSource: prepared, sourceName: sourceName)
         }
         try Task.checkCancellation()
         guard generation == token else { throw CancellationError() }
         return value
     }
 
-    private func remember(_ image: UIImage, selection: PhotoFilterSelection, generation: UUID) {
-        guard self.generation == generation, currentFilter == selection else { return }
-        filtered = (selection, image)
-    }
-
     func close() {
         let old = frames
+        let oldFiltered = filtered
         frames = PhotoPreviewCacheSet()
         generation = UUID()
         source = nil
@@ -614,6 +649,6 @@ actor PhotoPreviewCacheSet<Key: Hashable & Sendable, Value: Sendable> {
         decoration = nil
         currentFilter = nil
         filtered = nil
-        Task { await old.close() }
+        Task { await old.close(); await oldFiltered?.close() }
     }
 }

@@ -1,0 +1,144 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=B6B4E291-173A-4BFE-BB9C-2D1F62643C49" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath /tmp/ztransfer-uniform-adjacent-20261022.xcresult "-only-testing:ZTransferTests/PhotoEffectsVisibleFrameTests" "-only-testing:ZTransferTests/ConflatedPreviewUpdatesTests" "-only-testing:ZTransferTests/DomainModelTests/testAndroidPhotoFrameOutputNameUsesVersionedRenderingIdentity" "-only-testing:ZTransferTests/DomainModelTests/testImageWatermarkOutputIdentityUsesItsRenderedPhotoPosition" "-only-testing:ZTransferTests/DomainModelTests/testWatermarkOnlyOutputIdentityIgnoresHiddenFrameMetadata" "-only-testing:ZTransferTests/PhotoFrameBrandTests/testAllTemplatesCombineFullMetadataAndMaximumWatermarkAcrossAspectRatios" "-only-testing:ZTransferTests/PhotoFrameBrandTests/testPhotoWatermarkInkSizeDoesNotChangeWithFrameWidth" "-only-testing:ZTransferTests/PhotoFrameBrandTests/testBrandGalleryWatermarkSizeChangesOutputAndPreservesPreview" "-only-testing:ZTransferTests/PhotoFrameBrandTests/testWatermarkAutoEffectMatchesExplicitEffectInRenderedTemplates" "-only-testing:ZTransferTests/PhotoFrameBrandTests/testFrostedKeepsPhotoWidthAndRejectsUnbreakableColumnOverflow" "-only-testing:ZTransferTests/TransferQueueScenarioTests/testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel" CODE_SIGN_IDENTITY=- test
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = -
+
+Writing result bundle at path:
+	/tmp/ztransfer-uniform-adjacent-20261022.xcresult
+
+note: Using codesigning identity override: -
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (2 targets)
+    Target 'ZTransferTests' in project 'ZTransfer'
+        ➜ Explicit dependency on target 'ZTransfer' in project 'ZTransfer'
+    Target 'ZTransfer' in project 'ZTransfer' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/orys/code/nk_send/ios/ZTransfer/Resources/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: 49d6d90ad0ab43aa6ba892643d458456
+Build description path: /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/XCBuildData/49d6d90ad0ab43aa6ba892643d458456.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache
+    cd /Users/orys/code/nk_send/ios/ZTransfer.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -o /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist /Users/orys/code/nk_send/ios/ZTransfer/Info.plist (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /Users/orys/code/nk_send/ios/ZTransfer/Info.plist -producttype com.apple.product-type.application -genpkginfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/assetcatalog_generated_info.plist -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+2026-10-22 12:02:43.532 xcodebuild[28771:27603233] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+IOSurfaceClientSetSurfaceNotify failed e00002c7
+2026-10-22 12:03:06.469687+0800 ZTransfer[28973:27605688] [General] Failed to send CA Event for app launch measurements for ca_event_type: 0 event_name: com.apple.app_launch_measurement.FirstFramePresentationMetric
+2026-10-22 12:03:06.716123+0800 ZTransfer[28973:27605679] [General] Failed to send CA Event for app launch measurements for ca_event_type: 1 event_name: com.apple.app_launch_measurement.ExtendedLaunchMetrics
+Test Suite 'Selected tests' started at 2026-10-22 12:03:07.012.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-22 12:03:07.013.
+Test Suite 'ConflatedPreviewUpdatesTests' started at 2026-10-22 12:03:07.013.
+Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testAcceptedTransitionCompletesAndOnlyLatestPendingIsConsumed]' started.
+Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testAcceptedTransitionCompletesAndOnlyLatestPendingIsConsumed]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testCoverInterruptingPreparedCrossfadeRestoresVisibleIncomingFrame]' started.
+2026-10-22 12:03:07.698366+0800 ZTransfer[28973:27605679] [connection] nw_socket_handle_socket_event [C1:1] Socket SO_ERROR [61: Connection refused]
+2026-10-22 12:03:07.698826+0800 ZTransfer[28973:27605679] [connection] nw_endpoint_flow_failed_with_error [C1 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testCoverInterruptingPreparedCrossfadeRestoresVisibleIncomingFrame]' passed (1.982 seconds).
+Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testLeavingCancelsCurrentAndDropsPendingButReentryWorks]' started.
+Test Case '-[ZTransferTests.ConflatedPreviewUpdatesTests testLeavingCancelsCurrentAndDropsPendingButReentryWorks]' passed (0.010 seconds).
+Test Suite 'ConflatedPreviewUpdatesTests' passed at 2026-10-22 12:03:09.012.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 1.997 (1.999) seconds
+Test Suite 'DomainModelTests' started at 2026-10-22 12:03:09.013.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPhotoFrameOutputNameUsesVersionedRenderingIdentity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPhotoFrameOutputNameUsesVersionedRenderingIdentity]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testImageWatermarkOutputIdentityUsesItsRenderedPhotoPosition]' started.
+Test Case '-[ZTransferTests.DomainModelTests testImageWatermarkOutputIdentityUsesItsRenderedPhotoPosition]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkOnlyOutputIdentityIgnoresHiddenFrameMetadata]' started.
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkOnlyOutputIdentityIgnoresHiddenFrameMetadata]' passed (0.001 seconds).
+Test Suite 'DomainModelTests' passed at 2026-10-22 12:03:09.019.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+Test Suite 'PhotoEffectsVisibleFrameTests' started at 2026-10-22 12:03:09.019.
+Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleAfterFullScreenCoverDismissal]' started.
+2026-10-22 12:03:09.662884+0800 ZTransfer[28973:27605685] [connection] [C1 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleAfterFullScreenCoverDismissal]' passed (2.305 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleWithoutLeavingScreen]' started.
+2026-10-22 12:03:12.345245+0800 ZTransfer[28973:27605827] [connection] nw_socket_handle_socket_event [C3:1] Socket SO_ERROR [61: Connection refused]
+2026-10-22 12:03:12.345421+0800 ZTransfer[28973:27605827] [connection] nw_endpoint_flow_failed_with_error [C3 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.PhotoEffectsVisibleFrameTests testNewFrameBecomesVisibleWithoutLeavingScreen]' passed (1.999 seconds).
+Test Suite 'PhotoEffectsVisibleFrameTests' passed at 2026-10-22 12:03:13.324.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 4.304 (4.305) seconds
+Test Suite 'PhotoFrameBrandTests' started at 2026-10-22 12:03:13.324.
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testAllTemplatesCombineFullMetadataAndMaximumWatermarkAcrossAspectRatios]' started.
+2026-10-22 12:03:14.504656+0800 ZTransfer[28973:27605682] [connection] [C3 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testAllTemplatesCombineFullMetadataAndMaximumWatermarkAcrossAspectRatios]' passed (18.807 seconds).
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testBrandGalleryWatermarkSizeChangesOutputAndPreservesPreview]' started.
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testBrandGalleryWatermarkSizeChangesOutputAndPreservesPreview]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testFrostedKeepsPhotoWidthAndRejectsUnbreakableColumnOverflow]' started.
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testFrostedKeepsPhotoWidthAndRejectsUnbreakableColumnOverflow]' passed (1.067 seconds).
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testPhotoWatermarkInkSizeDoesNotChangeWithFrameWidth]' started.
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testPhotoWatermarkInkSizeDoesNotChangeWithFrameWidth]' passed (9.788 seconds).
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testWatermarkAutoEffectMatchesExplicitEffectInRenderedTemplates]' started.
+Test Case '-[ZTransferTests.PhotoFrameBrandTests testWatermarkAutoEffectMatchesExplicitEffectInRenderedTemplates]' passed (1.763 seconds).
+Test Suite 'PhotoFrameBrandTests' passed at 2026-10-22 12:03:44.764.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 31.437 (31.439) seconds
+Test Suite 'TransferQueueScenarioTests' started at 2026-10-22 12:03:44.764.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' passed (0.022 seconds).
+Test Suite 'TransferQueueScenarioTests' passed at 2026-10-22 12:03:44.786.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.022 (0.022) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-22 12:03:44.786.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 37.765 (37.773) seconds
+Test Suite 'Selected tests' passed at 2026-10-22 12:03:44.786.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 37.765 (37.774) seconds
+2026-10-22 12:03:45.100 xcodebuild[28771:27603233] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-22 12:03:45.123 xcodebuild[28771:27603233] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-22 12:03:45.489 xcodebuild[28771:27603233] [MT] IDETestOperationsObserverDebug: 64.657 elapsed -- Testing started completed.
+2026-10-22 12:03:45.489 xcodebuild[28771:27603233] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-22 12:03:45.489 xcodebuild[28771:27603233] [MT] IDETestOperationsObserverDebug: 64.657 sec, +64.657 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-uniform-adjacent-20261022.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

@@ -626,7 +626,6 @@ private struct QueueConfirmationCard: View {
     let action: TransferQueueView.QueueConfirmation
     let onConfirm: () -> Void
     let onDismiss: () -> Void
-    @Environment(\.colorScheme) private var scheme
 
     private var title: String {
         switch action {
@@ -669,10 +668,7 @@ private struct QueueConfirmationCard: View {
             }
         }
         .padding(16)
-        .background(ZTransferColors.surface.opacity(scheme == .dark ? 0.92 : 0.95),
-                    in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(tint.opacity(0.4), lineWidth: 1))
-        .background { AndroidShadowView(cornerRadius: 16, elevation: 8).allowsHitTesting(false) }
+        .background(ZTransferHintSurface(cornerRadius: 16, border: tint.opacity(0.4)))
         .foregroundStyle(ZTransferColors.primaryText)
         .contentShape(RoundedRectangle(cornerRadius: 16))
         .onTapGesture { } // ConfirmCard consumes its blank area instead of dismissing the scrim.
@@ -1042,9 +1038,10 @@ struct QueueItemView: View {
                                 let presentation = TransferQueueCardText(item: item)
                                 let elapsed = item.frameGenerationSkipped ? nil :
                                     item.displayedFrameGenerationElapsedMs(now: PhotoGenerationClock.now())
-                                QueuePillVisibility(visible: presentation.generationWaiting || elapsed != nil, delay: 80) {
-                                    TransferInfoPill(text: elapsed.map { formatDuration($0) } ?? "",
-                                        color: ZTransferColors.accentYellow, waiting: presentation.generationWaiting)
+                                QueuePillVisibility(visible: item.frameGenerationSkipped || presentation.generationWaiting || elapsed != nil, delay: 80) {
+                                    TransferInfoPill(text: item.frameGenerationSkipped ? AppLocalized.resource("status_skipped") : elapsed.map { formatDuration($0) } ?? "",
+                                        color: item.frameGenerationSkipped ? ZTransferColors.secondaryText : ZTransferColors.accentYellow,
+                                        waiting: presentation.generationWaiting)
                                 }
                             }
                         }
@@ -1191,7 +1188,7 @@ struct TransferQueueCardText {
         if item.hasCrop { parts.append(AppLocalized.resource("crop_title")) }
         if item.cropEffectsSkipped {
             parts.append(AppLocalized.resource("crop_effects_skipped"))
-            return item.frameGenerationSkipped ? AppLocalized.resource("status_skipped") : parts.joined(separator: " · ")
+            return parts.joined(separator: " · ")
         }
         if let preset = item.effects?.photoFramePreset, item.effects?.photoFrameEnabled == true,
            let label = frameLabel(preset) {
@@ -1204,8 +1201,13 @@ struct TransferQueueCardText {
             } ?? filter.preset.name
             parts.append("\(name) \(filter.normalizedIntensityPercent)%")
         }
+        if let grain = item.effects?.photoGrain, grain.isEnabled {
+            parts.append(AppLocalized.formattedResource("photo_grain_intensity_summary", [
+                "%1$s": AppLocalized.resource(grain.style.localizationKey), "%2$d": String(grain.normalizedIntensity)
+            ]).replacingOccurrences(of: "%%", with: "%"))
+        }
         guard !parts.isEmpty else { return nil }
-        return item.frameGenerationSkipped ? AppLocalized.resource("status_skipped") : parts.joined(separator: " · ")
+        return parts.joined(separator: " · ")
     }
 
     private func frameLabel(_ preset: PhotoFramePreset) -> String? {

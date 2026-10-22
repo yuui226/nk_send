@@ -115,6 +115,7 @@ struct SettingsView: View {
     let effectPreviewInitialRotationQuarterTurns: Int
     let effectPreviewSource: UIImage?
     let effectPreviewExif: PhotoExif?
+    let effectPreviewSourceName: String
     let onEffectPreviewRequested: () -> Void
     let onContentHeightChange: (CGFloat) -> Void
     let onShowPremium: () -> Void
@@ -151,7 +152,7 @@ struct SettingsView: View {
          popupMotionPaused: Bool = false, effectsOnly: Bool = false,
          effectPreviewInitialRotationQuarterTurns: Int = 0,
          requestTransferDirectoryAttention: Bool = false,
-         effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil,
+         effectPreviewSource: UIImage? = nil, effectPreviewExif: PhotoExif? = nil, effectPreviewSourceName: String = "",
          onEffectPreviewRequested: @escaping () -> Void = {},
          onPhotoLoadingRangeChanged: @escaping (PhotoLoadingRange) -> Void = { _ in },
          onContentHeightChange: @escaping (CGFloat) -> Void = { _ in },
@@ -173,6 +174,7 @@ struct SettingsView: View {
         self.requestTransferDirectoryAttention = requestTransferDirectoryAttention
         self.effectPreviewSource = effectPreviewSource
         self.effectPreviewExif = effectPreviewExif
+        self.effectPreviewSourceName = effectPreviewSourceName
         self.onEffectPreviewRequested = onEffectPreviewRequested
         self.onPhotoLoadingRangeChanged = onPhotoLoadingRangeChanged
         self.onContentHeightChange = onContentHeightChange
@@ -211,7 +213,7 @@ struct SettingsView: View {
                                 settings: effectivePhotoEffectsSettings(effectsDraft, isPro: entitlements.access.isPro),
                                 onRequest: onEffectPreviewRequested,
                                 initialRotationQuarterTurns: effectPreviewInitialRotationQuarterTurns,
-                                showSourceWhileRendering: effectsOnly)
+                                showSourceWhileRendering: effectsOnly, sourceName: effectPreviewSourceName)
                                 .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
                             PhotoEffectsControls(draft: $effectsDraft,
                                 showingWatermarkPicker: $showingWatermarkPicker,
@@ -649,7 +651,9 @@ struct SettingsView: View {
                 PhotoEffectsSummaryTile(
                     accent: ZTransferColors.accentOrange,
                     title: AppLocalized.resource("photo_filter"),
-                    values: [filterName] + (filterIntensity.map { [$0] } ?? [])
+                    values: [filterName] + (filterIntensity.map { [$0] } ?? []) + (settings.photoGrain.isEnabled ? [
+                        AppLocalized.formattedResource("photo_grain_intensity_summary", ["%1$s": AppLocalized.resource(settings.photoGrain.style.localizationKey), "%2$d": String(settings.photoGrain.normalizedIntensity)]).replacingOccurrences(of: "%%", with: "%")
+                    ] : [])
                 )
                 PhotoEffectsSummaryTile(
                     accent: ZTransferColors.accentBlue,
@@ -692,7 +696,7 @@ struct SettingsView: View {
                 Text(AppLocalized.resource("revert_free"))
                     .font(.system(size: 12, weight: .medium))
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
+                    .background(ZTransferHintSurface(cornerRadius: 18))
                     .allowsHitTesting(false)
             }
         }

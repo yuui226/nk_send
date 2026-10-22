@@ -120,12 +120,11 @@ private struct PhotoListHintHeight: PreferenceKey {
 }
 
 /// Shared bottom hint host, mounted above the preview by PhotoListView.
-/// Surface elevation uses the shared Android shadow; parent fade includes it once.
+/// Android GlassHintSurface has no elevation; the parent owns the fade/slide.
 struct PhotoListHint: View {
     @ObservedObject var state: PhotoListHintState
     @State private var animator = PhotoListHintAnimator()
     @State private var height: CGFloat = 0
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -134,15 +133,10 @@ struct PhotoListHint: View {
                 .zTransferTypography(.labelLarge)
                 .foregroundStyle(ZTransferColors.primaryText)
                 .padding(.horizontal, 20).padding(.vertical, 10)
-                .background(colorScheme == .dark
-                    ? Color(white: 30 / 255).opacity(0.92) : Color.white.opacity(0.95),
-                    in: RoundedRectangle(cornerRadius: 22, style: .circular))
-                .overlay(RoundedRectangle(cornerRadius: 22, style: .circular)
-                    .strokeBorder(colorScheme == .dark ? .white.opacity(0.15) : .black.opacity(0.10), lineWidth: 1))
+                .background(ZTransferHintSurface())
                 .background(GeometryReader { proxy in
                     Color.clear.preference(key: PhotoListHintHeight.self, value: proxy.size.height)
                 })
-                .background(AndroidShadowView(cornerRadius: 22, elevation: 6))
                 .accessibilityIdentifier("photo-list-hint")
         }
         .onPreferenceChange(PhotoListHintHeight.self) { next in
@@ -160,7 +154,7 @@ struct PhotoListHint: View {
     }
 }
 
-/// Keep text, measurement and shadow content stable while only the fade/slide
+/// Keep text, measurement and surface content stable while only the fade/slide
 /// placement consumes display frames. Entry still mounts before measurement.
 struct PhotoListHintPresentation<Content: View>: View {
     let visible: Bool

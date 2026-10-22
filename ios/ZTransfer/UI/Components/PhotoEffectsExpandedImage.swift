@@ -197,8 +197,8 @@ struct PhotoEffectsImageInput: UIViewRepresentable {
     }
     static func dismantleUIView(_ view: InputView, coordinator: ()) { view.cancel() }
 
+    // Android 8f64f803: only a confirmed comparison hold vibrates; press/pan/pinch remain silent.
     final class SingleFingerHold: UILongPressGestureRecognizer {
-        let feedback = ZTransferLongPressFeedback()
         private var contacts: Set<UITouch> = []
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
             contacts.formUnion(touches)
@@ -206,10 +206,9 @@ struct PhotoEffectsImageInput: UIViewRepresentable {
                 state = state == .possible ? .failed : .cancelled
                 return
             }
-            feedback.begin(durationMilliseconds: 500)
             super.touchesBegan(touches, with: event)
         }
-        override func reset() { super.reset(); contacts.removeAll(); feedback.end() }
+        override func reset() { super.reset(); contacts.removeAll() }
     }
 
     final class InputView: UIView, UIGestureRecognizerDelegate {
@@ -219,6 +218,7 @@ struct PhotoEffectsImageInput: UIViewRepresentable {
         var onComparison: ((Bool) -> Void)?
         var onTap: ((CGPoint) -> Void)?
         var onDoubleTap: ((CGPoint) -> Void)?
+        var haptics = ZTransferHaptics.shared
         private(set) var comparing = false
 
         override init(frame: CGRect) {
@@ -251,6 +251,7 @@ struct PhotoEffectsImageInput: UIViewRepresentable {
             guard comparing != active else { return }
             comparing = active
             onComparison?(active)
+            if active { haptics.play(.holdConfirmed) }
         }
         @objc func cancel() {
             for recognizer in [singleTap, doubleTap, hold] {
@@ -267,7 +268,7 @@ struct PhotoEffectsImageInput: UIViewRepresentable {
             if recognizer.state == .ended { onDoubleTap?(recognizer.location(in: window)) }
         }
         @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
-            if recognizer.state == .began { hold.feedback.trigger { setComparing(true) } }
+            if recognizer.state == .began { setComparing(true) }
             else if recognizer.state != .changed { setComparing(false) }
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,

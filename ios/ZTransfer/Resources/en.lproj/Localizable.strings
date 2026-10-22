@@ -634,3 +634,11 @@
 "picture_control_clear_confirm" = "Clear C%d?";
 "picture_control_cancel" = "Cancel";
 "picture_control_confirm" = "OK";
+
+// Android film grain (1f804ab8).
+"photo_grain" = "Film grain";
+"photo_grain_fine" = "Fine grain";
+"photo_grain_medium" = "Medium grain";
+"photo_grain_coarse" = "Coarse grain";
+"photo_grain_intensity_summary" = "%1$s %2$d%%";
+"photo_grain_hint" = "Choose a grain size and adjust its strength. Each size remembers its own strength.";

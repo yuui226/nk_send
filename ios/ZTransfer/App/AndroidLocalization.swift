@@ -554,6 +554,12 @@ enum AndroidLocalization {
     ]
     /// Resource-name lookup preserves Android distinctions when two resources share a Chinese value.
     static let byResource: [String: [String: String]] = [
+        "photo_grain": ["zh": "胶片颗粒", "en": "Film grain", "hant": "膠片顆粒"],
+        "photo_grain_fine": ["zh": "细颗粒", "en": "Fine grain", "hant": "細顆粒"],
+        "photo_grain_medium": ["zh": "中颗粒", "en": "Medium grain", "hant": "中顆粒"],
+        "photo_grain_coarse": ["zh": "粗颗粒", "en": "Coarse grain", "hant": "粗顆粒"],
+        "photo_grain_intensity_summary": ["zh": "%1$s %2$d%%", "en": "%1$s %2$d%%", "hant": "%1$s %2$d%%"],
+        "photo_grain_hint": ["zh": "选择颗粒粗细，再调节强度；各档强度分别保存。", "en": "Choose a grain size and adjust its strength. Each size remembers its own strength.", "hant": "選擇顆粒粗細，再調整強度；各檔強度分別儲存。"],
         "remote_grid_169": ["en": "16:9", "zh": "16:9", "hant": "16:9"],
         "remote_grid_235": ["en": "2.35:1", "zh": "2.35:1", "hant": "2.35:1"],
         "remote_grid_43": ["en": "4:3", "zh": "4:3", "hant": "4:3"],

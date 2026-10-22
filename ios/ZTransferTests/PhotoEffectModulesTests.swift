@@ -6,8 +6,8 @@ import UIKit
 final class PhotoEffectModulesTests: XCTestCase {
     func testNormalizeRejectsEmptyAndUnknownBits() {
         XCTAssertEqual(normalizePhotoEffectModules(0), allPhotoEffectModules)
-        XCTAssertEqual(normalizePhotoEffectModules(16), allPhotoEffectModules)
-        XCTAssertEqual(normalizePhotoEffectModules(17), 1)
+        XCTAssertEqual(normalizePhotoEffectModules(32), allPhotoEffectModules)
+        XCTAssertEqual(normalizePhotoEffectModules(33), 1)
     }
 
     func testFreeEditionBindsFrameAndWatermarkVisibility() {

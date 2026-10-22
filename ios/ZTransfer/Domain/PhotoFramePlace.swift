@@ -2,6 +2,19 @@ import Foundation
 
 struct PhotoFramePlace: Equatable, Sendable { let city: String?; let region: String? }
 
+extension PhotoFrameMetadata {
+    var renderedPlace: PhotoFramePlace { .init(city: city, region: region) }
+
+    /// Android withAllowedFramePlace: recheck the current connection policy
+    /// before deduplication and rendering without discarding camera EXIF/GPS.
+    func withAllowedFramePlace(_ allowed: Bool) -> Self {
+        guard !allowed else { return self }
+        return Self(make: make, model: model, lensModel: lensModel, focalLength: focalLength,
+            aperture: aperture, shutter: shutter, iso: iso, exposureCompensation: exposureCompensation,
+            dateTime: dateTime, latitude: latitude, longitude: longitude, altitude: altitude)
+    }
+}
+
 func photoFramePlace(city: String?, district: String?, subAdmin: String?, admin: String?, countryCode: String? = nil) -> PhotoFramePlace {
     func clean(_ value: String?) -> String? { value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
     let locality = clean(city), district = clean(district), subdivision = clean(subAdmin), administration = clean(admin)

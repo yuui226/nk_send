@@ -1,14 +1,19 @@
 import Foundation
 
 enum PhotoEffectModule: Int, CaseIterable, Sendable {
-    case filter = 1, lut = 2, frame = 4, watermark = 8
+    case filter = 1, lut = 2, grain = 16, frame = 4, watermark = 8
 }
 
-let allPhotoEffectModules = 15
+let allPhotoEffectModules = 31
 
 func normalizePhotoEffectModules(_ mask: Int) -> Int {
     let value = mask & allPhotoEffectModules
     return value == 0 ? allPhotoEffectModules : value
+}
+
+/// Add the new editor once; an explicitly hidden grain module stays hidden.
+func restorePhotoEffectModules(_ mask: Int, grainIntroduced: Bool) -> Int {
+    normalizePhotoEffectModules(mask) | (grainIntroduced ? 0 : PhotoEffectModule.grain.rawValue)
 }
 
 func effectivePhotoEffectModules(_ mask: Int, isPro: Bool) -> Int {
@@ -541,6 +546,8 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     /// Android keeps metadata overrides per frame preset. The legacy `metadata`
     /// value remains as the migration/default value for older iOS preferences.
     var metadataByPreset: [String: PhotoFrameMetadataSettings] = [:]
+    var photoGrain = PhotoGrainSettings.off
+    var grainIntensities = normalizedPhotoGrainIntensities([:])
     var photoFilterEnabled = false
     var selectedFilter: PhotoFilterSelection? {
         willSet {
@@ -569,7 +576,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     }
 
     var hasEffect: Bool {
-        photoFrameEnabled || (photoFilterEnabled && selectedFilter != nil)
+        photoFrameEnabled || (photoFilterEnabled && selectedFilter != nil) || photoGrain.isEnabled
     }
 
     init() {}
@@ -623,6 +630,9 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     mutating func applyModuleVisibility(_ mask: Int, isPro: Bool = true) {
         photoEffectModules = effectivePhotoEffectModules(mask, isPro: isPro)
         if !photoEffectModuleIsVisible(photoEffectModules, colorEffectModule) { photoFilterEnabled = false }
+        if !photoEffectModuleIsVisible(photoEffectModules, .grain) {
+            photoGrain.enabled = false
+        }
         if !photoEffectModuleIsVisible(photoEffectModules, .frame) { photoFrameBorderEnabled = false }
         if !photoEffectModuleIsVisible(photoEffectModules, .watermark) { watermark.enabled = false }
         photoFrameEnabled = photoFrameEnabled && (photoFrameBorderEnabled || (isPro && watermark.enabled))
@@ -633,9 +643,13 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     func persistingEditorPreferences(from draft: Self) -> Self {
         var result = self
         result.filterIntensities = draft.filterIntensities
+        result.grainIntensities = draft.grainIntensities
         result.favoriteFilterIDs = draft.favoriteFilterIDs
         result.favoriteFrameEffects = draft.favoriteFrameEffects
         result.favoriteFramePresets = draft.favoriteFramePresets
+        if !photoEffectModuleIsVisible(draft.photoEffectModules, .grain) {
+            result.photoGrain.intensityPercent = result.grainIntensities[result.photoGrain.style.rawValue] ?? result.photoGrain.normalizedIntensity
+        }
         result.applyModuleVisibility(draft.photoEffectModules)
         result.metadataByPreset = draft.metadataByPreset
         result.metadata = result.metadataByPreset[result.photoFramePreset.rawValue]
@@ -646,7 +660,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case photoFrameEnabled, photoFrameBorderEnabled, photoEffectModules, photoFramePreset, watermark,
              metadata, metadataByPreset, photoFilterEnabled, selectedFilter, rememberedBuiltinFilter, filterIntensities, favoriteFilterIDs,
-             favoriteFramePresets, favoriteFrameEffects
+             favoriteFramePresets, favoriteFrameEffects, photoGrain, grainIntensities
     }
 
     init(from decoder: Decoder) throws {
@@ -658,6 +672,8 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         watermark = try c.decodeIfPresent(PhotoFrameWatermark.self, forKey: .watermark) ?? PhotoFrameWatermark()
         metadata = try c.decodeIfPresent(PhotoFrameMetadataSettings.self, forKey: .metadata) ?? PhotoFrameMetadataSettings()
         metadataByPreset = try c.decodeIfPresent([String: PhotoFrameMetadataSettings].self, forKey: .metadataByPreset) ?? [:]
+        photoGrain = (try c.decodeIfPresent(PhotoGrainSettings.self, forKey: .photoGrain) ?? .off).normalized
+        grainIntensities = normalizedPhotoGrainIntensities(try c.decodeIfPresent([String: Int].self, forKey: .grainIntensities) ?? [:])
         photoFilterEnabled = try c.decodeIfPresent(Bool.self, forKey: .photoFilterEnabled) ?? false
         selectedFilter = try c.decodeIfPresent(PhotoFilterSelection.self, forKey: .selectedFilter)
         rememberedBuiltinFilter = try c.decodeIfPresent(PhotoFilterSelection.self, forKey: .rememberedBuiltinFilter)
@@ -690,6 +706,8 @@ func photoEffectsPreviewPixelSettings(_ settings: PhotoEffectsSettings) -> Photo
     var result = settings
     result.rememberedBuiltinFilter = nil
     result.filterIntensities = [:]
+    result.grainIntensities = [:]
+    result.photoGrain = result.photoGrain.isEnabled ? result.photoGrain.normalized : .off
     result.favoriteFilterIDs = []
     result.favoriteFramePresets = []
     result.favoriteFrameEffects = []
@@ -715,7 +733,7 @@ func photoEffectsPreviewPixelSettings(_ settings: PhotoEffectsSettings) -> Photo
 
 // MARK: Android-compatible rendered-output identity
 
-/// Returns the exact derived-image filename used by PhotoFrameExporter.kt.
+/// Android legacy recipe name, retained for compatible old-output lookup.
 /// The identity deliberately contains only rendering inputs and version
 /// tokens, never the full Codable description of a Swift value.
 func androidPhotoFrameOutputName(sourceName: String, settings: PhotoEffectsSettings) -> String {
@@ -728,14 +746,13 @@ func androidPhotoFrameOutputName(sourceName: String, settings: PhotoEffectsSetti
         ? settings.watermark
         : PhotoFrameWatermark(enabled: false)
     let renderedWatermark = androidWatermarkForBorderMode(watermarkPreference, borderEnabled: borderEnabled)
-    let metadata = borderEnabled
-        ? (settings.metadataByPreset[preset.rawValue]
-            ?? PhotoFrameMetadataSettings.defaults(for: preset))
-        : PhotoFrameMetadataSettings.defaults(for: preset)
+    // Match the renderer's captured active recipe. Per-preset editor memory
+    // can contain an older draft and must not claim different pixels match.
+    let metadata = borderEnabled ? settings.metadata : PhotoFrameMetadataSettings.defaults(for: preset)
     let filter = settings.photoFilterEnabled ? settings.selectedFilter : nil
     let watermarkSuffix: String
     if borderEnabled || renderedWatermark.enabled {
-        watermarkSuffix = "_w\(androidWatermarkFingerprint(renderedWatermark, preset: preset, metadata: metadata))"
+        watermarkSuffix = "_w\(androidWatermarkFingerprint(renderedWatermark, preset: preset, metadata: metadata, borderEnabled: borderEnabled))"
     } else {
         watermarkSuffix = ""
     }
@@ -796,8 +813,10 @@ struct PhotoColorEffectEditorVisibility: Equatable {
 
 func effectivePhotoEffectsSettings(_ preference: PhotoEffectsSettings, isPro: Bool) -> PhotoEffectsSettings {
     var value = preference
+    value.photoGrain = preference.photoGrain.normalized
     let modules = effectivePhotoEffectModules(preference.photoEffectModules, isPro: isPro)
     value.photoEffectModules = modules
+    if !photoEffectModuleIsVisible(modules, .grain) { value.photoGrain.enabled = false }
     value.photoFilterEnabled = preference.photoFilterEnabled && photoEffectModuleIsVisible(modules, preference.colorEffectModule)
     value.photoFrameBorderEnabled = preference.photoFrameBorderEnabled && photoEffectModuleIsVisible(modules, .frame)
     value.watermark = preference.photoFrameEnabled
@@ -925,7 +944,7 @@ private func androidMetadataFingerprintToken(_ preset: PhotoFramePreset, _ metad
 
 }
 
-private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, preset: PhotoFramePreset, metadata: PhotoFrameMetadataSettings) -> String {
+private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, preset: PhotoFramePreset, metadata: PhotoFrameMetadataSettings, borderEnabled: Bool) -> String {
     var base: [String]
     if watermark.enabled {
         let resolved = androidResolvedWatermarkPosition(preset, watermark.position)
@@ -969,6 +988,12 @@ private func androidWatermarkFingerprint(_ watermark: PhotoFrameWatermark, prese
     if preset != .immersive {
         base.append("measured-layout-v=6")
         if preset == .frosted { base.append("glass-panel-v=2") }
+        if borderEnabled && usesUniformPhotoFrameBorder(preset: preset, metadata: metadata, watermark: watermark) {
+            base.append("equal-border-v=1")
+        }
+    }
+    if borderEnabled && watermark.hasAmbiguousLegacyPosition(preset: preset) {
+        base.append("watermark-position-v=2:\(watermark.position.rawValue.uppercased())")
     }
     return androidSHA256Hex(base.joined(separator: "\u{0}"), bytes: 6)
 }
@@ -1029,7 +1054,10 @@ final class PhotoEffectsStore: ObservableObject {
             settings = restored
             Self.persistAndroidLocalSettings(restored, defaults: self.defaults)
         } else if let data = self.defaults.data(forKey: key), let value = try? JSONDecoder().decode(PhotoEffectsSettings.self, from: data) {
-            settings = Self.normalized(value, scope: scope)
+            var migrated = value
+            let flag = scope == .cameraTransfer ? "photo_effect_grain_introduced" : "grain_introduced"
+            migrated.photoEffectModules = restorePhotoEffectModules(value.photoEffectModules, grainIntroduced: resolvedDefaults.bool(forKey: flag))
+            settings = Self.normalized(migrated, scope: scope)
         } else if scope == .localPhotos,
                   let value = Self.migrateLegacyLocalFavorites(
                     from: legacyDefaults ?? (defaults === UserDefaults.standard ? .standard : defaults)
@@ -1077,7 +1105,10 @@ final class PhotoEffectsStore: ObservableObject {
     }
 
     func update(_ value: PhotoEffectsSettings) {
-        let normalized = Self.normalized(value, scope: scope)
+        var normalized = Self.normalized(value, scope: scope)
+        if value.photoGrain != settings.photoGrain || scope == .localPhotos {
+            normalized.grainIntensities[normalized.photoGrain.style.rawValue] = normalized.photoGrain.normalizedIntensity
+        }
         if settings != normalized { settings = normalized }
         // Persistence remains explicit even for equal values: first-save and
         // legacy/shared defaults can still need writing. Only UI publication
@@ -1299,6 +1330,9 @@ final class PhotoEffectsStore: ObservableObject {
 
     private static func normalized(_ value: PhotoEffectsSettings, scope: Scope) -> PhotoEffectsSettings {
         var result = value
+        result.photoGrain = value.photoGrain.normalized
+        result.grainIntensities = normalizedPhotoGrainIntensities(value.grainIntensities)
+        if scope == .localPhotos { result.grainIntensities[result.photoGrain.style.rawValue] = result.photoGrain.normalizedIntensity }
         if let remembered = value.rememberedBuiltinFilter {
             result.rememberedBuiltinFilter = PhotoFilterCatalog.resolve(remembered.preset.id).map {
                 PhotoFilterSelection(preset: $0, intensityPercent: remembered.normalizedIntensityPercent)
@@ -1434,10 +1468,17 @@ final class PhotoEffectsStore: ObservableObject {
             "photo_filter_enabled", "photo_filter_selected_id", "photo_filter_intensity",
             "photo_filter_intensities_v1", "favorite_photo_filters_v1",
             "favorite_frame_effects_v1", "photo_effect_modules",
+            "photo_grain_style", "photo_grain_enabled", "photo_grain_intensity",
+            "photo_grain_intensity_fine", "photo_grain_intensity_medium", "photo_grain_intensity_coarse",
         ]
         guard markerKeys.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
         var value = PhotoEffectsSettings()
-        value.photoEffectModules = normalizePhotoEffectModules(defaults.object(forKey: "photo_effect_modules") as? Int ?? allPhotoEffectModules)
+        value.photoEffectModules = restorePhotoEffectModules(defaults.object(forKey: "photo_effect_modules") as? Int ?? allPhotoEffectModules,
+            grainIntroduced: defaults.bool(forKey: "photo_effect_grain_introduced"))
+        if let grain = PhotoGrainPreferences.restore(defaults, prefix: "photo_grain", allowEnabled: photoEffectModuleIsVisible(value.photoEffectModules, .grain)) {
+            value.photoGrain = grain.settings
+            value.grainIntensities = grain.intensities
+        }
         value.photoFrameEnabled = defaults.object(forKey: "photo_frame_enabled") as? Bool ?? false
         value.photoFrameBorderEnabled = defaults.object(forKey: "photo_frame_border_enabled") as? Bool ?? true
         value.photoFramePreset = PhotoFramePreset(rawValue: defaults.string(forKey: "photo_frame_preset") ?? "MIST") ?? .mist
@@ -1490,6 +1531,8 @@ final class PhotoEffectsStore: ObservableObject {
     }
 
     private static func persistAndroidTransferSettings(_ value: PhotoEffectsSettings, defaults: UserDefaults) {
+        PhotoGrainPreferences.persist(value.photoGrain, intensities: value.grainIntensities, defaults: defaults, prefix: "photo_grain")
+        defaults.set(true, forKey: "photo_effect_grain_introduced")
         defaults.set(value.photoEffectModules, forKey: "photo_effect_modules")
         defaults.set(value.photoFrameEnabled, forKey: "photo_frame_enabled")
         defaults.set(value.photoFrameBorderEnabled, forKey: "photo_frame_border_enabled")
@@ -1516,10 +1559,17 @@ final class PhotoEffectsStore: ObservableObject {
     }
 
     private static func restoreAndroidLocalSettings(defaults: UserDefaults) -> PhotoEffectsSettings? {
-        guard defaults.object(forKey: "settings_version") != nil || defaults.object(forKey: "frame_preset") != nil else { return nil }
+        let markers = ["settings_version", "frame_preset", "visible_modules", "grain_style", "grain_enabled", "grain_intensity"]
+            + PhotoGrainStyle.allCases.map { "grain_intensity_\($0.rawValue)" }
+        guard markers.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
         var value = PhotoEffectsSettings()
         value.photoFrameEnabled = defaults.object(forKey: "decoration_enabled") as? Bool ?? false
-        value.photoEffectModules = normalizePhotoEffectModules(defaults.object(forKey: "photo_effect_modules") as? Int ?? allPhotoEffectModules)
+        value.photoEffectModules = restorePhotoEffectModules(defaults.object(forKey: "visible_modules") as? Int ?? defaults.object(forKey: "photo_effect_modules") as? Int ?? allPhotoEffectModules,
+            grainIntroduced: defaults.bool(forKey: "grain_introduced"))
+        if let grain = PhotoGrainPreferences.restore(defaults, prefix: "grain", allowEnabled: photoEffectModuleIsVisible(value.photoEffectModules, .grain)) {
+            value.photoGrain = grain.settings
+            value.grainIntensities = grain.intensities
+        }
         value.photoFrameBorderEnabled = defaults.object(forKey: "border_enabled") as? Bool ?? true
         value.photoFramePreset = PhotoFramePreset(rawValue: defaults.string(forKey: "frame_preset") ?? "MIST") ?? .mist
         value.metadataByPreset = decodeAndroidMetadata(defaults.string(forKey: "frame_metadata_settings_v1"))
@@ -1549,9 +1599,12 @@ final class PhotoEffectsStore: ObservableObject {
     }
 
     private static func persistAndroidLocalSettings(_ value: PhotoEffectsSettings, defaults: UserDefaults) {
+        PhotoGrainPreferences.persist(value.photoGrain, intensities: value.grainIntensities, defaults: defaults, prefix: "grain")
+        defaults.set(true, forKey: "grain_introduced")
         defaults.set(3, forKey: "settings_version")
         defaults.set(value.photoFrameEnabled, forKey: "decoration_enabled")
         defaults.set(value.photoEffectModules, forKey: "photo_effect_modules")
+        defaults.set(value.photoEffectModules, forKey: "visible_modules")
         defaults.set(value.photoFrameBorderEnabled, forKey: "border_enabled")
         defaults.set(value.photoFramePreset.rawValue, forKey: "frame_preset")
         defaults.set(encodeAndroidMetadata(value.metadataByPreset), forKey: "frame_metadata_settings_v1")
