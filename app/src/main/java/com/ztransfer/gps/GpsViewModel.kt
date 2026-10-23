@@ -23,6 +23,7 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences(PREFERENCES, 0)
     private val _state = NikonGpsRuntime.state
     val state: StateFlow<GpsState> = _state.asStateFlow()
+    val wifiWakeState: StateFlow<CameraWifiWakeState> = NikonGpsRuntime.wifiWakeState.asStateFlow()
     private val _updateFrequency = MutableStateFlow(readUpdateFrequency())
     val updateFrequency: StateFlow<GpsUpdateFrequency> = _updateFrequency.asStateFlow()
     private val _connectionHelpViewed = MutableStateFlow(
@@ -130,7 +131,20 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
     fun hasPairedDevice(): Boolean =
         preferences.contains(KEY_DEVICE_ID) && preferences.contains(KEY_NONCE)
 
+    fun wakeCameraWifi() {
+        if (wifiWakeState.value.isBusy) return
+        NikonGpsRuntime.wifiWakeState.value = CameraWifiWakeState(CameraWifiWakeStatus.CONNECTING)
+        NikonGpsService.wakeCameraWifi(getApplication())
+    }
+
+    fun cancelWifiWake() = NikonGpsService.cancelWifiWake(getApplication())
+
+    fun clearWifiWakeResult() {
+        if (!wifiWakeState.value.isBusy) NikonGpsRuntime.wifiWakeState.value = CameraWifiWakeState()
+    }
+
     fun clearPairing() {
+        cancelWifiWake()
         preferences.edit()
             .remove(KEY_DEVICE_ID)
             .remove(KEY_NONCE)

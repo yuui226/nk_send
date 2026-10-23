@@ -1,9 +1,14 @@
 package com.ztransfer.ui.screen
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
@@ -34,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -81,7 +87,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.content.ContextCompat
 import com.ztransfer.R
+import com.ztransfer.gps.CameraWifiWakeError
+import com.ztransfer.gps.CameraWifiWakeStatus
 import com.ztransfer.gps.NikonGpsService
 import com.ztransfer.gps.GpsViewModel
 import com.ztransfer.license.LicenseManager
@@ -172,6 +181,7 @@ fun HomeScreen(
     transferViewModel: TransferViewModel,
     onConnectionCelebrationFinished: () -> Unit,
     onOpenLocalPhotoEffects: () -> Unit,
+    connectionPageActive: Boolean,
     localPhotoEffectsEnabled: Boolean = true,
 ) {
     val state by remember(viewModel) {
@@ -182,6 +192,8 @@ fun HomeScreen(
     val transferState by transferViewModel.state.collectAsState()
     val gpsViewModel: GpsViewModel = viewModel()
     val gpsState by gpsViewModel.state.collectAsState()
+    val wifiWakeState by gpsViewModel.wifiWakeState.collectAsState()
+    var wifiWakePermissionDenied by remember { mutableStateOf(false) }
     val haptics = rememberHaptics(transferState.hapticsEnabled)
     val currentHaptics by rememberUpdatedState(haptics)
     val context = LocalContext.current
@@ -226,6 +238,52 @@ fun HomeScreen(
         colors.accentOrange
     }
     val connected = state.isConnectedToCamera
+    val wifiWakeAllowed = connectionPageActive && !connected && !gpsState.enabled &&
+        state.connectionType != CameraConnectionType.USB && state.wirelessMode == WirelessMode.AP
+    val currentWifiWakeAllowed by rememberUpdatedState(wifiWakeAllowed)
+    val wifiWakePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (currentWifiWakeAllowed) {
+            wifiWakePermissionDenied = !granted
+            if (granted) gpsViewModel.wakeCameraWifi()
+        }
+    }
+    fun requestWifiWake() {
+        if (!wifiWakeAllowed) return
+        wifiWakePermissionDenied = false
+        gpsViewModel.clearWifiWakeResult()
+        // A saved-address reconnect needs CONNECT only; do not request GPS or start a scan.
+        if (gpsViewModel.hasPairedDevice() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            wifiWakePermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            gpsViewModel.wakeCameraWifi()
+        }
+    }
+    LaunchedEffect(wifiWakeAllowed) {
+        if (!wifiWakeAllowed) {
+            wifiWakePermissionDenied = false
+            gpsViewModel.cancelWifiWake()
+            gpsViewModel.clearWifiWakeResult()
+        }
+    }
+    DisposableEffect(gpsViewModel) {
+        onDispose {
+            gpsViewModel.cancelWifiWake()
+            gpsViewModel.clearWifiWakeResult()
+        }
+    }
+    // Once the Wi-Fi watcher makes new progress, its actual connection result takes over.
+    // Do not key this effect on the wake result: an old Wi-Fi error must not erase new guidance.
+    LaunchedEffect(state.wifiConnectionStatus) {
+        if (state.wifiConnectionStatus != WifiConnectionStatus.IDLE) {
+            wifiWakePermissionDenied = false
+            gpsViewModel.clearWifiWakeResult()
+        }
+    }
     val gpsBlockedByAp = connected &&
         state.connectionType == CameraConnectionType.WIFI &&
         !state.isStaConnection
@@ -356,6 +414,38 @@ fun HomeScreen(
             busy = true
         )
         WifiConnectionStatus.IDLE -> null
+    }
+    val wifiWakeError = if (wifiWakePermissionDenied) {
+        CameraWifiWakeError.PERMISSION_REQUIRED
+    } else if (wifiWakeState.status == CameraWifiWakeStatus.ERROR) {
+        wifiWakeState.error ?: CameraWifiWakeError.CONNECTION_FAILED
+    } else null
+    val wifiWakeFeedback = if (!wifiWakeAllowed) null else when {
+        wifiWakeError != null -> ConnectionCardFeedback(
+            title = stringResource(wifiWakeError.messageRes),
+            body = if (wifiWakeError == CameraWifiWakeError.NOT_PAIRED) {
+                stringResource(R.string.wifi_wake_pair_first)
+            } else null,
+            accent = colors.accentOrange,
+        )
+        wifiWakeState.status == CameraWifiWakeStatus.CONNECTING -> ConnectionCardFeedback(
+            title = stringResource(R.string.wifi_wake_connecting),
+            body = null,
+            accent = colors.accentBlue,
+            busy = true,
+        )
+        wifiWakeState.status == CameraWifiWakeStatus.SENDING -> ConnectionCardFeedback(
+            title = stringResource(R.string.wifi_wake_sending),
+            body = null,
+            accent = colors.accentBlue,
+            busy = true,
+        )
+        wifiWakeState.status == CameraWifiWakeStatus.REQUEST_SENT -> ConnectionCardFeedback(
+            title = stringResource(R.string.wifi_wake_request_sent),
+            body = stringResource(R.string.wifi_wake_connect_hotspot),
+            accent = colors.accentBlue,
+        )
+        else -> null
     }
     val staBusy = state.staConnectionStatus == StaConnectionStatus.DISCOVERING ||
         state.staConnectionStatus == StaConnectionStatus.PAIRING ||
@@ -608,7 +698,7 @@ fun HomeScreen(
                                 selectedMode = state.wirelessMode,
                                 enabled = !connected &&
                                     state.connectionType != CameraConnectionType.USB &&
-                                    !gpsBlocksConnection,
+                                    !gpsBlocksConnection && !wifiWakeState.isBusy,
                                 onSelectAp = {
                                     tipsPopupAnchor = null
                                     viewModel.selectApMode()
@@ -629,13 +719,51 @@ fun HomeScreen(
                         dimmed = gpsBlocksConnection,
                         onCardClick = if (gpsBlocksConnection) ::showGpsConnectionBlockedHint else null,
                         feedback = if (state.wirelessMode == WirelessMode.AP) {
-                            wifiFeedback
+                            wifiWakeFeedback ?: wifiFeedback
                         } else {
                             staFeedback
                         },
                         feedbackFollowsModeSelector = true,
                         footer = {
                             if (state.wirelessMode == WirelessMode.AP) {
+                                GlassButton(
+                                    onClick = {
+                                        if (wifiWakeState.isBusy) gpsViewModel.cancelWifiWake()
+                                        else requestWifiWake()
+                                    },
+                                    enabled = wifiWakeAllowed,
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                    modifier = Modifier.fillMaxWidth().height(36.dp),
+                                ) {
+                                    if (wifiWakeState.isBusy) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            color = wifiSettingsTextColor,
+                                            strokeWidth = 1.5.dp,
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Bluetooth,
+                                            contentDescription = null,
+                                            tint = wifiSettingsTextColor,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        stringResource(
+                                            if (wifiWakeState.isBusy) R.string.wifi_wake_cancel
+                                            else R.string.wifi_wake_action,
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = wifiSettingsTextColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -656,12 +784,14 @@ fun HomeScreen(
                                     )
                                     GlassButton(
                                         onClick = {
+                                            wifiWakePermissionDenied = false
+                                            gpsViewModel.clearWifiWakeResult()
                                             try {
                                                 context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
                                             } catch (_: Exception) {}
                                         },
                                         shape = RoundedCornerShape(12.dp),
-                                        enabled = !gpsBlocksConnection,
+                                        enabled = !gpsBlocksConnection && !wifiWakeState.isBusy,
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                         textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
                                         modifier = Modifier
@@ -844,7 +974,10 @@ fun HomeScreen(
 
                 // 工作台在空间关系上位于连接页下方，入口贴近屏幕底部提示下滑方向。
                 GlassButton(
-                    onClick = onOpenLocalPhotoEffects,
+                    onClick = {
+                        gpsViewModel.cancelWifiWake()
+                        onOpenLocalPhotoEffects()
+                    },
                     enabled = localPhotoEffectsEnabled,
                     shape = RoundedCornerShape(16.dp),
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
