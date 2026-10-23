@@ -607,6 +607,7 @@
     <string name="gps_place_unavailable">暂时无法获取地点名称，请稍后重试</string>
     <string name="gps_altitude_value">海拔：%1$d 米</string>
     <string name="gps_update_frequency_label">频率</string>
+    <string name="gps_sync_now">立即同步</string>
     <string name="gps_frequency_30_seconds">30秒</string>
     <string name="gps_frequency_1_minute">1分钟</string>
     <string name="gps_frequency_2_minutes">2分钟</string>

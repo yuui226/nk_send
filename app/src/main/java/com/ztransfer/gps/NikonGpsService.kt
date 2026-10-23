@@ -165,6 +165,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestStartId = startId
+        if (intent?.action == ACTION_SYNC_NOW) {
+            syncLocationNow()
+            // A late tap must never enable GPS or interrupt a hotspot wake that took over.
+            if (!enabled && wifiWakeAttempt == null) stopSelf(startId)
+            return if (enabled) START_STICKY else START_NOT_STICKY
+        }
         if (intent?.action == ACTION_WAKE_WIFI) {
             startWifiWake(startId)
             return if (enabled) START_STICKY else START_NOT_STICKY
@@ -881,6 +887,20 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         if (startLocationUpdates()) startGeoWriteTicker()
     }
 
+    private fun syncLocationNow() {
+        // READY can be retained during reconnect, so the UI status alone is not sufficient.
+        if (!enabled || !preferences.getBoolean(KEY_ENABLED, false) || !cameraReady ||
+            apModeBlocked || wifiWakeAttempt != null || geoWriteInFlight || !bleClient.isRunning()
+        ) return
+        val location = latestLocation?.let(::Location) ?: return
+        // The periodic path can retain an older fix while waiting for its interval. A manual
+        // sync uses the latest one and must not queue a second forced/altitude write in flight.
+        latestLocationDuringWrite = null
+        GpsDiagnostics.record("manual GEO sync requested")
+        maybeSend(location, force = true)
+        // Only onGeoWritten(success=true) updates lastSentAtMs and re-anchors the ticker.
+    }
+
     private fun maybeSend(location: Location, force: Boolean = false) {
         if (!enabled) return
         if (geoWriteInFlight) {
@@ -1115,6 +1135,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         private const val WIFI_WAKE_TIMEOUT_MS = 30_000L
         private const val ACTION_WAKE_WIFI = "com.ztransfer.gps.WAKE_WIFI"
         private const val ACTION_CANCEL_WIFI_WAKE = "com.ztransfer.gps.CANCEL_WIFI_WAKE"
+        private const val ACTION_SYNC_NOW = "com.ztransfer.gps.SYNC_NOW"
         private const val CACHED_LOCATION_MAX_AGE_MS = 2 * 60_000L
         private const val GEO_WRITE_TIMEOUT_MS = 10_000L
         const val ACTION_ENABLE = "com.ztransfer.gps.ENABLE"
@@ -1157,6 +1178,15 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         fun setEnabled(context: Context, enabled: Boolean) {
             val intent = Intent(context, NikonGpsService::class.java).setAction(if (enabled) ACTION_ENABLE else ACTION_DISABLE)
             if (enabled) ContextCompat.startForegroundService(context, intent) else context.startService(intent)
+        }
+
+        fun syncNow(context: Context) {
+            if (!NikonGpsRuntime.state.value.canSyncNow) return
+            runCatching {
+                context.startService(Intent(context, NikonGpsService::class.java).setAction(ACTION_SYNC_NOW))
+            }.onFailure {
+                GpsDiagnostics.record("manual GEO sync unavailable: ${it.javaClass.simpleName}")
+            }
         }
 
         fun setApModeBlocked(context: Context, blocked: Boolean) {

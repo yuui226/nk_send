@@ -935,6 +935,19 @@ fun FileListScreen(
                 )
         }
         if (normalized != filterStorageSlot || normalizedExts != filterExts) {
+            // 清除/编辑可能已经更新 ViewModel，但尚未触发本层重组；不能用旧快照
+            // 归一化后把日期、星级等条件写回。此检查到提交之间没有挂起点。
+            val current = transferViewModel.state.value
+            if (current.filterExtensions != filterExts ||
+                current.filterProtectedOnly != transferState.filterProtectedOnly ||
+                current.filterRatingEnabled != filterRatingEnabled ||
+                current.filterRating != filterRating ||
+                current.filterRatingDays != filterRatingDays ||
+                current.filterBurstOnly != filterBurst ||
+                current.filterUntransferredOnly != filterUntransferred ||
+                current.filterStorageSlot != filterStorageSlot ||
+                current.filterDateRange != filterDateRange
+            ) return@LaunchedEffect
             transferViewModel.setFilters(criteriaForPersistence(filterCriteria.copy(
                 storageSlot = normalized,
                 extensions = normalizedExts,
@@ -1599,50 +1612,6 @@ fun FileListScreen(
                 }
             }
 
-            // 筛选后无匹配：给出指认原因的空态（原始列表非空，只是被筛掉了）。
-            if (filterActive && groups.isEmpty() && state.hasCompletedFileScan &&
-                !cameraRemovalReflowActive
-            ) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // 空态缓慢呼吸（与其余空态同参数）。
-                        val breathe = rememberInfiniteTransition(label = "emptyFilter")
-                        val breatheAlpha by breathe.animateFloat(
-                            initialValue = 0.35f, targetValue = 0.6f,
-                            animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
-                            label = "emptyFilterAlpha"
-                        )
-                        FilterMark(
-                            modifier = Modifier.size(44.dp),
-                            color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        if (!(filterRatingEnabled && filterRating != null && ratingScan.loading)) {
-                            Text(stringResource(R.string.no_photos_match_filter),
-                                color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp),
-                                textAlign = TextAlign.Center)
-                        }
-                        Spacer(modifier = Modifier.height(18.dp))
-                        GlassButton(
-                            onClick = {
-                                // 直接恢复整套默认筛选，不能只清当前可见项；同时丢弃可能
-                                // 仍存活的筛选面板草稿，避免旧日期范围随后被再次提交。
-                                showFilter = false
-                                openedFilterAnchor = null
-                                transferViewModel.clearFilters()
-                            }
-                        ) {
-                            Text(
-                                text = stringResource(R.string.clear_filters),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Medium,
-                                color = colors.onBackground,
-                            )
-                        }
-                    }
-                }
-            }
-
             ThumbnailGrid(
                 groups = groups,
                 tasks = transferState.tasks,
@@ -1687,6 +1656,51 @@ fun FileListScreen(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+
+            // 空态放在网格之后：空网格仍会命中滚动手势，不能盖住“清除筛选”。
+            // 保持网格挂载，保留滚动及列表动画状态；其他浮层仍显示在空态之上。
+            if (filterActive && groups.isEmpty() && state.hasCompletedFileScan &&
+                !cameraRemovalReflowActive
+            ) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // 空态缓慢呼吸（与其余空态同参数）。
+                        val breathe = rememberInfiniteTransition(label = "emptyFilter")
+                        val breatheAlpha by breathe.animateFloat(
+                            initialValue = 0.35f, targetValue = 0.6f,
+                            animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+                            label = "emptyFilterAlpha"
+                        )
+                        FilterMark(
+                            modifier = Modifier.size(44.dp),
+                            color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (!(filterRatingEnabled && filterRating != null && ratingScan.loading)) {
+                            Text(stringResource(R.string.no_photos_match_filter),
+                                color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp),
+                                textAlign = TextAlign.Center)
+                        }
+                        Spacer(modifier = Modifier.height(18.dp))
+                        GlassButton(
+                            onClick = {
+                                // 直接恢复整套默认筛选，不能只清当前可见项；同时丢弃可能
+                                // 仍存活的筛选面板草稿，避免旧日期范围随后被再次提交。
+                                showFilter = false
+                                openedFilterAnchor = null
+                                transferViewModel.clearFilters()
+                            }
+                        ) {
+                            Text(
+                                text = stringResource(R.string.clear_filters),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onBackground,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // ---------- 监看入口（左下角毛玻璃相机钮） ----------

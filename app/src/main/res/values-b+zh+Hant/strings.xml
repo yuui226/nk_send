@@ -603,6 +603,7 @@
     <string name="gps_place_unavailable">暫時無法取得地點名稱，請稍後重試</string>
     <string name="gps_altitude_value">海拔：%1$d 公尺</string>
     <string name="gps_update_frequency_label">頻率</string>
+    <string name="gps_sync_now">立即同步</string>
     <string name="gps_frequency_30_seconds">30 秒</string>
     <string name="gps_frequency_1_minute">1 分鐘</string>
     <string name="gps_frequency_2_minutes">2 分鐘</string>

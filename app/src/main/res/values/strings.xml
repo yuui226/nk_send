@@ -610,6 +610,7 @@
     <string name="gps_place_unavailable">Couldn’t find a place name. Try again later.</string>
     <string name="gps_altitude_value">Altitude: %1$d m</string>
     <string name="gps_update_frequency_label">Update frequency</string>
+    <string name="gps_sync_now">Sync now</string>
     <string name="gps_frequency_30_seconds">30 sec</string>
     <string name="gps_frequency_1_minute">1 min</string>
     <string name="gps_frequency_2_minutes">2 min</string>

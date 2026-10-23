@@ -725,6 +725,14 @@ fun HomeScreen(
                         },
                         feedbackFollowsModeSelector = true,
                         footer = {
+                            DebugBleControlProbeButton(
+                                allowed = connectionPageActive && !connected && !staBusy &&
+                                    state.wifiConnectionStatus != WifiConnectionStatus.PROBING &&
+                                    state.wifiConnectionStatus != WifiConnectionStatus.RECONNECTING &&
+                                    !gpsState.enabled && !wifiWakeState.isBusy &&
+                                    state.connectionType != CameraConnectionType.USB,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                             if (state.wirelessMode == WirelessMode.AP) {
                                 GlassButton(
                                     onClick = {

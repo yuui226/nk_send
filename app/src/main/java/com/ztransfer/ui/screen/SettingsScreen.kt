@@ -199,6 +199,7 @@ import com.ztransfer.gps.GpsPlaceLookupState
 import com.ztransfer.gps.GpsPlaceLookupStatus
 import com.ztransfer.gps.GpsUpdateFrequency
 import com.ztransfer.gps.GpsViewModel
+import com.ztransfer.gps.canSyncNow
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
 import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
@@ -4542,6 +4543,8 @@ internal fun GpsConnectionControl(
                     GpsUpdateFrequencyWheel(
                         selected = gpsUpdateFrequency,
                         onValueCommitted = gpsViewModel::setUpdateFrequency,
+                        onSyncNow = gpsViewModel::syncNow,
+                        canSyncNow = gpsState.canSyncNow,
                         enabled = gpsConfigurationEnabled,
                         emphasized = !gpsConfigurationEnabled,
                         showFrequency = !gpsState.enabled,
@@ -5006,6 +5009,8 @@ private fun GpsLastUpdatedWheel(
 private fun GpsUpdateFrequencyWheel(
     selected: GpsUpdateFrequency,
     onValueCommitted: (GpsUpdateFrequency) -> Unit,
+    onSyncNow: () -> Unit,
+    canSyncNow: Boolean,
     emphasized: Boolean,
     showFrequency: Boolean,
     showCountdown: Boolean,
@@ -5079,11 +5084,13 @@ private fun GpsUpdateFrequencyWheel(
                 remainingSeconds == null -> "--:--"
                 else -> gpsCountdownText(remainingSeconds)
             }
+            val syncNowLabel = stringResource(R.string.gps_sync_now)
             ReleaseCommitWheel(
                 options = listOf(countdownText),
                 selected = countdownText,
                 optionLabel = { it },
                 onValueCommitted = {},
+                onActivated = onSyncNow,
                 label = null,
                 wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
                 cornerRadius = 14.dp,
@@ -5092,10 +5099,13 @@ private fun GpsUpdateFrequencyWheel(
                 showDragHint = false,
                 accentColor = colors.statusConnected,
                 enabled = true,
-                readOnly = true,
+                readOnly = !canSyncNow || !showCountdown,
                 emphasized = true,
                 burstProgress = updateBurst.value,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().semantics {
+                    role = Role.Button
+                    contentDescription = syncNowLabel
+                },
             )
             }
             GpsUpdateControlMode.FREQUENCY -> {

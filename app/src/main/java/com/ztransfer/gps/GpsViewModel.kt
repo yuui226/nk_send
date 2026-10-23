@@ -51,6 +51,11 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         NikonGpsService.setEnabled(getApplication(), true)
     }
 
+    fun syncNow() {
+        if (!state.value.canSyncNow) return
+        NikonGpsService.syncNow(getApplication())
+    }
+
     fun setUpdateFrequency(frequency: GpsUpdateFrequency) {
         if (_updateFrequency.value == frequency) return
         preferences.edit()

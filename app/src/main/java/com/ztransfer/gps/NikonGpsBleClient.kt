@@ -21,6 +21,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
+import com.ztransfer.BuildConfig
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.Locale
@@ -48,6 +49,11 @@ internal class NikonGpsBleClient(
         fun onNeedsPairing()
         fun onError(message: String)
         fun onWifiWakeWritten(success: Boolean) {}
+        // Debug probes reuse authentication; production listeners never access raw GATT.
+        fun onDebugRead(uuid: UUID, value: ByteArray, status: Int) {}
+        fun onDebugWrite(uuid: UUID, status: Int) {}
+        fun onDebugDescriptorWrite(uuid: UUID, status: Int) {}
+        fun onDebugNotification(uuid: UUID, value: ByteArray) {}
     }
 
     private var scanner: BluetoothLeScanner? = null
@@ -156,6 +162,9 @@ internal class NikonGpsBleClient(
     /** True while a scan, GATT session, or Classic pairing flow owns this client. */
     fun isRunning(): Boolean =
         gatt != null || scanCallback != null || classicReceiver != null
+
+    internal fun debugAuthenticatedGatt(): BluetoothGatt? =
+        if (BuildConfig.DEBUG && wifiOnly && ready) gatt else null
 
     fun stop() {
         scanTimeout?.cancel()
@@ -352,6 +361,10 @@ internal class NikonGpsBleClient(
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (gatt !== g) return
+            if (BuildConfig.DEBUG && ready && descriptor.characteristic.uuid !in listOf(PAIR_UUID, NOT1_UUID)) {
+                listener.onDebugDescriptorWrite(descriptor.characteristic.uuid, status)
+                return
+            }
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 runCatching { g.disconnect() }
                 listener.onError("Bluetooth setup failed")
@@ -363,16 +376,37 @@ internal class NikonGpsBleClient(
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             if (gatt !== g) return
             handleCharacteristic(characteristic.uuid, value)
+            if (BuildConfig.DEBUG && ready && characteristic.uuid != PAIR_UUID) {
+                listener.onDebugNotification(characteristic.uuid, value.copyOf())
+            }
         }
 
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             if (gatt !== g) return
             handleCharacteristic(characteristic.uuid, characteristic.value)
+            if (BuildConfig.DEBUG && ready && characteristic.uuid != PAIR_UUID) {
+                listener.onDebugNotification(characteristic.uuid, characteristic.value?.copyOf() ?: byteArrayOf())
+            }
+        }
+
+        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            if (BuildConfig.DEBUG && gatt === g && ready) listener.onDebugRead(characteristic.uuid, value.copyOf(), status)
+        }
+
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (BuildConfig.DEBUG && gatt === g && ready) {
+                listener.onDebugRead(characteristic.uuid, characteristic.value?.copyOf() ?: byteArrayOf(), status)
+            }
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             if (gatt !== g) return
+            if (BuildConfig.DEBUG && ready && characteristic.uuid !in listOf(PAIR_UUID, ID_UUID, GEO_UUID, WIFI_UUID)) {
+                listener.onDebugWrite(characteristic.uuid, status)
+                return
+            }
             GpsDiagnostics.record("GATT write uuid=${characteristic.uuid} status=$status")
             writeInFlight = false
             writeInFlightUuid = null
