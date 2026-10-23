@@ -2,6 +2,7 @@ package com.ztransfer.crop
 
 import androidx.annotation.Keep
 import androidx.exifinterface.media.ExifInterface
+import com.ztransfer.util.readPhotoCaptureExif
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -42,7 +43,7 @@ internal object LosslessJpeg {
             currentCoroutineContext().ensureActive()
             val from = ExifInterface(input)
             val to = ExifInterface(output)
-            for (tag in copiedTags) from.getAttribute(tag)?.let { to.setAttribute(tag, it) }
+            for ((tag, value) in readPhotoCaptureExif(from)) to.setAttribute(tag, value)
             // Pixels are not rotated/re-encoded; EXIF describes their display orientation.
             to.setAttribute(ExifInterface.TAG_ORIENTATION, actual.orientation.toString())
             to.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, r.width.toString())
@@ -77,21 +78,4 @@ internal object LosslessJpeg {
 
     private external fun nativeCrop(input: String, output: String, width: Int, height: Int,
         mcuWidth: Int, mcuHeight: Int, x: Int, y: Int, cropWidth: Int, cropHeight: Int)
-
-    private val copiedTags = arrayOf(
-        ExifInterface.TAG_MAKE, ExifInterface.TAG_MODEL, ExifInterface.TAG_SOFTWARE,
-        ExifInterface.TAG_DATETIME, ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED,
-        ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
-        ExifInterface.TAG_EXPOSURE_TIME, ExifInterface.TAG_F_NUMBER, ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
-        ExifInterface.TAG_FOCAL_LENGTH, ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-        ExifInterface.TAG_LENS_MAKE, ExifInterface.TAG_LENS_MODEL, ExifInterface.TAG_EXPOSURE_PROGRAM,
-        ExifInterface.TAG_EXPOSURE_BIAS_VALUE, ExifInterface.TAG_METERING_MODE, ExifInterface.TAG_FLASH,
-        ExifInterface.TAG_WHITE_BALANCE, ExifInterface.TAG_COLOR_SPACE,
-        ExifInterface.TAG_GPS_VERSION_ID, ExifInterface.TAG_GPS_LATITUDE_REF, ExifInterface.TAG_GPS_LATITUDE,
-        ExifInterface.TAG_GPS_LONGITUDE_REF, ExifInterface.TAG_GPS_LONGITUDE,
-        ExifInterface.TAG_GPS_ALTITUDE_REF, ExifInterface.TAG_GPS_ALTITUDE,
-        ExifInterface.TAG_GPS_TIMESTAMP, ExifInterface.TAG_GPS_DATESTAMP,
-        ExifInterface.TAG_GPS_PROCESSING_METHOD, ExifInterface.TAG_GPS_SPEED_REF, ExifInterface.TAG_GPS_SPEED,
-        ExifInterface.TAG_GPS_TRACK_REF, ExifInterface.TAG_GPS_TRACK,
-    )
 }

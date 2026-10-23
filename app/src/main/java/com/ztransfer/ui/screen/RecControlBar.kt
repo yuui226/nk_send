@@ -360,11 +360,10 @@ fun RecControlBar(
                     translationY = -size.height - 5.dp.toPx()
                 }
         ) {
-            Surface(
+            GlassHintSurface(
                 shape = RoundedCornerShape(12.dp),
                 color = colors.glassSurfaceHeavy.copy(alpha = 0.72f),
                 border = BorderStroke(0.5.dp, colors.glassPanelBorder.copy(alpha = 0.65f)),
-                shadowElevation = 3.dp
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -412,11 +411,8 @@ fun RecControlBar(
                     translationY = -size.height - 6.dp.toPx()
                 }
         ) {
-            Surface(
+            GlassHintSurface(
                 shape = RoundedCornerShape(18.dp),
-                color = colors.glassSurfaceHeavy,
-                border = BorderStroke(1.dp, colors.glassPanelBorder),
-                shadowElevation = 6.dp
             ) {
                 Text(
                     text = lockedHintText,

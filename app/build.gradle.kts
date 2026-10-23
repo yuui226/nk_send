@@ -125,7 +125,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    // 1.4 fixes exposure-time precision loss when copying EXIF rational values.
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
 
     // 二维码生成:把虎皮椒手机端支付链接画成码,自己排版 + 存相册,不塞它的页面。
     // 只用 core（纯 Java 编码器,约 500KB,不含安卓摄像头扫码那套）。

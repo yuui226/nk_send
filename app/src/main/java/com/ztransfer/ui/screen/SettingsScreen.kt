@@ -586,11 +586,8 @@ fun SettingsOverlay(
                     .navigationBarsPadding()
                     .padding(bottom = 28.dp)
             ) {
-                Surface(
+                GlassHintSurface(
                     shape = RoundedCornerShape(18.dp),
-                    color = colors.glassSurfaceHeavy,
-                    shadowElevation = 6.dp,
-                    border = BorderStroke(1.dp, colors.glassPanelBorder)
                 ) {
                     Text(
                         text = footerHintText,

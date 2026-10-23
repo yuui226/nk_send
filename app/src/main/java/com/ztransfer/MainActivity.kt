@@ -30,9 +30,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.updateTransition
 import com.ztransfer.ui.theme.Motion
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -353,11 +351,8 @@ internal fun shouldShowFirstLaunchNotificationHint(
 @Composable
 private fun FirstLaunchNotificationHint() {
     val colors = AppTheme.colors
-    Surface(
+    GlassHintSurface(
         modifier = Modifier.widthIn(max = 380.dp),
-        shape = RoundedCornerShape(22.dp),
-        color = colors.glassSurfaceHeavy,
-        border = BorderStroke(1.dp, colors.glassPanelBorder)
     ) {
         Text(
             text = stringResource(R.string.notification_permission_first_launch_hint),
@@ -377,11 +372,8 @@ private fun BottomGlassHint(
     verticalPadding: Dp = 10.dp,
 ) {
     val colors = AppTheme.colors
-    Surface(
+    GlassHintSurface(
         modifier = modifier.widthIn(max = 340.dp),
-        shape = RoundedCornerShape(22.dp),
-        color = colors.glassSurfaceHeavy,
-        border = BorderStroke(1.dp, colors.glassPanelBorder),
     ) {
         Text(
             text = text,

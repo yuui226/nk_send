@@ -16,7 +16,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -27,7 +26,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -595,11 +593,8 @@ fun LocalPhotoEffectsPage(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 28.dp),
             ) {
-                Surface(
+                GlassHintSurface(
                     shape = RoundedCornerShape(18.dp),
-                    color = colors.glassSurfaceHeavy,
-                    shadowElevation = 6.dp,
-                    border = BorderStroke(1.dp, colors.glassPanelBorder),
                 ) {
                     Text(
                         text = hintText,

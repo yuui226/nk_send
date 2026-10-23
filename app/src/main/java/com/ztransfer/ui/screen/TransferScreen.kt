@@ -1188,11 +1188,9 @@ private fun ConfirmCard(
     onDismiss: () -> Unit,
     subtitle: String? = null
 ) {
-    Surface(
+    GlassHintSurface(
         shape = RoundedCornerShape(16.dp),
         // 与设置面板/提示条同一"重毛玻璃"面板语言，深浅主题下观感统一。
-        color = AppTheme.colors.glassSurfaceHeavy,
-        shadowElevation = 8.dp,
         border = BorderStroke(1.dp, confirmColor.copy(alpha = 0.4f)),
         // 消费卡片区域的点击，避免穿透到背后的全屏遮罩而被误关闭。
         modifier = Modifier

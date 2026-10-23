@@ -2244,12 +2244,7 @@ fun FileListScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 28.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder)
-            ) {
+            GlassHintSurface {
                 Text(
                     hintText,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),

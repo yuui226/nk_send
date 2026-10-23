@@ -4873,7 +4873,7 @@ private fun ShutterButton(
 private fun MonitorHintBubble(visible: Boolean, text: String, compact: Boolean) {
     val colors = AppTheme.colors
     AnimatedVisibility(visible, enter = fadeIn(tween(160)), exit = fadeOut(tween(200))) {
-        Surface(
+        GlassHintSurface(
             shape = RoundedCornerShape(12.dp),
             color = if (compact) colors.glassSurfaceHeavy.copy(alpha = .60f) else Color.Black.copy(alpha = .42f),
             border = BorderStroke(.5.dp, if (compact) colors.glassPanelBorder else Color.White.copy(alpha = .15f)),

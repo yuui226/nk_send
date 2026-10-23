@@ -41,6 +41,7 @@ import com.ztransfer.grain.PhotoGrainStyle
 import com.ztransfer.grain.photoGrainSeed
 import com.ztransfer.util.applyExifOrientation
 import com.ztransfer.util.formatDegreesMinutesCoordinates
+import com.ztransfer.util.readPhotoCaptureExif
 import java.io.ByteArrayInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -616,44 +617,6 @@ object PhotoFrameExporter {
     // 派生图是原片的高品质版本，不允许静默缩成分享图。JPEG 仍必须重新编码，但使用
     // Android 编码器的最高质量档，照片主体的像素尺寸由原图完整保留。
     private const val COPY_BUFFER_BYTES = 256 * 1024
-    // Preserve photographic/capture metadata, including the GPS written by the camera. The
-    // source orientation is intentionally not copied because the pixels are normalized during
-    // decode.
-    private val COPIED_EXIF_TAGS = arrayOf(
-        ExifInterface.TAG_MAKE,
-        ExifInterface.TAG_MODEL,
-        ExifInterface.TAG_SOFTWARE,
-        ExifInterface.TAG_DATETIME,
-        ExifInterface.TAG_DATETIME_ORIGINAL,
-        ExifInterface.TAG_DATETIME_DIGITIZED,
-        ExifInterface.TAG_EXPOSURE_TIME,
-        ExifInterface.TAG_F_NUMBER,
-        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
-        ExifInterface.TAG_FOCAL_LENGTH,
-        ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-        ExifInterface.TAG_LENS_MAKE,
-        ExifInterface.TAG_LENS_MODEL,
-        ExifInterface.TAG_EXPOSURE_PROGRAM,
-        ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
-        ExifInterface.TAG_METERING_MODE,
-        ExifInterface.TAG_FLASH,
-        ExifInterface.TAG_WHITE_BALANCE,
-        ExifInterface.TAG_COLOR_SPACE,
-        ExifInterface.TAG_GPS_VERSION_ID,
-        ExifInterface.TAG_GPS_LATITUDE_REF,
-        ExifInterface.TAG_GPS_LATITUDE,
-        ExifInterface.TAG_GPS_LONGITUDE_REF,
-        ExifInterface.TAG_GPS_LONGITUDE,
-        ExifInterface.TAG_GPS_ALTITUDE_REF,
-        ExifInterface.TAG_GPS_ALTITUDE,
-        ExifInterface.TAG_GPS_TIMESTAMP,
-        ExifInterface.TAG_GPS_DATESTAMP,
-        ExifInterface.TAG_GPS_PROCESSING_METHOD,
-        ExifInterface.TAG_GPS_SPEED_REF,
-        ExifInterface.TAG_GPS_SPEED,
-        ExifInterface.TAG_GPS_TRACK_REF,
-        ExifInterface.TAG_GPS_TRACK,
-    )
     private val EMPTY_METADATA =
         PhotoFrameMetadata(null, null, null, null, null, null)
     private val bundledTypefaceCache = mutableMapOf<PhotoFrameWatermarkFont, Typeface>()
@@ -3419,18 +3382,14 @@ object PhotoFrameExporter {
         val attributes = runCatching {
             resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
                 val source = ExifInterface(descriptor.fileDescriptor)
-                COPIED_EXIF_TAGS.mapNotNull { tag ->
-                    source.getAttribute(tag)?.let { value -> tag to value }
-                }
+                readPhotoCaptureExif(source)
             }
         }.getOrNull()?.takeIf { it.isNotEmpty() }
             ?: runCatching {
                 resolver.openInputStream(sourceUri)?.use { input ->
                     BufferedInputStream(input).use { buffered ->
                         val source = ExifInterface(buffered)
-                        COPIED_EXIF_TAGS.mapNotNull { tag ->
-                            source.getAttribute(tag)?.let { value -> tag to value }
-                        }
+                        readPhotoCaptureExif(source)
                     }
                 }
             }.getOrNull()
