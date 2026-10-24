@@ -3086,6 +3086,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         destinationUri: Uri,
         recipe: com.ztransfer.crop.JpegCropSelection,
         savedCropOutput: SavedCropOutput?,
+        metadata: PhotoFrameMetadata?,
     ): SavedCropOutput {
         savedCropOutput?.takeIf { saved ->
             saved.parent == destinationUri && runCatching {
@@ -3099,8 +3100,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             val source = java.io.File(directory, "source.jpg")
             val cropped = java.io.File(directory, "cropped.jpg")
             val context = currentCoroutineContext()
+            // Effects already prepare a same-photo camera snapshot. Reuse its coordinates if
+            // the saved source's provider does not expose GPS; never overwrite readable GPS.
+            val locationFallback = com.ztransfer.util.PhotoCaptureLocation.from(
+                metadata?.latitude, metadata?.longitude, metadata?.altitudeMeters,
+            )
             com.ztransfer.crop.withCropSource(contentResolver, sourceUri, source) { input ->
-                com.ztransfer.crop.LosslessJpeg.crop(input, cropped, recipe)
+                val trace: ((String) -> Unit)? = if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) { detail ->
+                    com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(sourceName, "crop", detail)
+                } else null
+                com.ztransfer.crop.LosslessJpeg.crop(input, cropped, recipe, locationFallback, trace)
             }
             context.ensureActive()
             val index = getDirectoryIndex(treeUri, destinationUri)
@@ -3112,6 +3121,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val uri = publishCroppedJpeg(cropped, destinationUri, name)
                     val savedName = displayNameOf(uri) ?: name
                     index.addFile(savedName, cropped.length(), uri)
+                    if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+                        val publishedGps = runCatching {
+                            contentResolver.openInputStream(uri)?.use {
+                                com.ztransfer.util.PhotoCaptureLocation.read(androidx.exifinterface.media.ExifInterface(it)) != null
+                            }
+                        }
+                        com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(sourceName, "crop-published",
+                            "gps=${publishedGps.getOrNull()} readError=${publishedGps.exceptionOrNull()?.javaClass?.simpleName ?: "none"}")
+                    }
                     SavedCropOutput(uri, destinationUri, savedName).also { saved ->
                         updateTask(taskId) { it.copy(savedCropOutput = saved) }
                     }
@@ -3687,7 +3705,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             var effectSourceName = sourceName
             if (cropRecipe != null) {
                 val saved = activeCropOutput ?: generateCrop(taskId, sourceUri, sourceName, treeUri,
-                    destinationParentUri, cropRecipe, savedCropOutput).also { activeCropOutput = it }
+                    destinationParentUri, cropRecipe, savedCropOutput, metadataResult.get()?.value)
+                    .also { activeCropOutput = it }
                 currentCoroutineContext().ensureActive()
                 effectSourceUri = saved.uri
                 effectSourceName = saved.name
@@ -3887,7 +3906,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 finishPreparation(result)
                 return
             }
-            val enqueuedAt = android.os.SystemClock.elapsedRealtime()
             var prepared = metadata
             activePhotoMetadataPreparations.incrementAndGet()
             val completed: (Throwable?) -> Unit = {
@@ -3899,11 +3917,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
             val admission = photoPlacePreparation.submit(taskId, execute = {
                 if (_state.value.tasks.any { it.taskId == taskId && it.isGeneratingFrame }) {
-                    val budget = (1_000L - (android.os.SystemClock.elapsedRealtime() - enqueuedAt))
-                        .coerceAtLeast(0L)
-                    // Cache hits remain useful even after queue waiting used the network budget.
-                    prepared = PhotoFrameLocationResolver.resolve(getApplication(), metadata,
-                        metadataSettings, timeoutMillis = budget)
+                    // Every admitted lookup gets its own bounded backend time after queueing.
+                    val trace: ((String) -> Unit)? = if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) { detail ->
+                        com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(sourceName, "export", detail)
+                    } else null
+                    prepared = PhotoFrameLocationResolver.resolve(getApplication(), metadata, metadataSettings, trace)
                 }
             }, complete = completed)
             if (admission != PhotoGenerationQueue.Admission.ACCEPTED) completed(null)
@@ -3940,6 +3958,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     complete = { result ->
                         try {
                             val retained = result.copy(value = result.value ?: taskSnapshot.sourceMetadataSnapshot)
+                            if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+                                com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(sourceName, "camera-header",
+                                    "state=${result.state} gps=${com.ztransfer.frame.validFrameCoordinates(retained.value?.latitude, retained.value?.longitude)}")
+                            }
                             updateTask(taskId) { it.copy(
                                 sourceMetadataSnapshot = retained.value,
                                 sourceMetadataPrepared = result.state != PreparedPhotoMetadata.State.FAILED,

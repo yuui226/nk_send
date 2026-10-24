@@ -4579,7 +4579,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     suspend fun loadExif(file: NikonCamera.FileInfo): PhotoExif? {
         val key = exifKey(file)
         // containsKey 区分"未尝试"与"已尝试但为 null（负缓存）"——?.let 无法区分。
-        if (key in exifCache) return exifCache[key]
+        if (key in exifCache) return exifCache[key].also { metadata ->
+            if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+                com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(file.fileName, "preview-exif",
+                    "cached=true parsed=${metadata != null} gps=${com.ztransfer.frame.validFrameCoordinates(metadata?.latitude, metadata?.longitude)}")
+            }
+        }
         // 非图片格式（视频、音频等）不包含 JPEG EXIF，直接负缓存避免浪费 PTP 请求。
         val ext = file.extension
         if (ext !in EXIF_SUPPORTED_EXTENSIONS) {
@@ -4592,10 +4597,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val maxSize = if (ext in LARGE_EXIF_HEADER_EXTENSIONS) 2048 * 1024 else 128 * 1024
         val bytes = cam.readExifHeader(file.handle, maxSize) ?: run {
             exifCache[key] = null
+            if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+                com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(file.fileName, "preview-exif", "header=unavailable")
+            }
             return null
         }
-        return parseExif(bytes)?.also { exifCache[key] = it }
-            ?: run { exifCache[key] = null; null }
+        val metadata = parseExif(bytes)
+        exifCache[key] = metadata
+        if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+            com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(file.fileName, "preview-exif",
+                "headerBytes=${bytes.size} parsed=${metadata != null} gps=${com.ztransfer.frame.validFrameCoordinates(metadata?.latitude, metadata?.longitude)}")
+        }
+        return metadata
     }
 
     /**

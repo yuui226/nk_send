@@ -48,12 +48,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ztransfer.diagnostics.PhotoLocationDiagnostics
 import com.ztransfer.diagnostics.RatingDiagnostics
 import com.ztransfer.diagnostics.ThumbnailDiagnostics
 import kotlinx.coroutines.launch
 import com.ztransfer.ui.theme.AppTheme
 
-/** Debug 照片页的缩略图、评级与保护诊断窗口；Release 有同名空实现。 */
+/** Debug 照片页的缩略图、评级、保护与位置诊断窗口；Release 有同名空实现。 */
 @Composable
 internal fun DebugPhotoGenerationProbePanel(
     modifier: Modifier = Modifier,
@@ -162,6 +163,7 @@ internal fun DebugPhotoGenerationProbePanel(
                             onClick = {
                                 RatingDiagnostics.clear()
                                 ThumbnailDiagnostics.clear()
+                                PhotoLocationDiagnostics.clear()
                                 logVersion++
                             },
                             contentPadding = PaddingValues(8.dp),
@@ -291,4 +293,5 @@ internal fun DebugPhotoGenerationProbePanel(
 }
 
 private fun photoDiagnosticReport(): String =
-    ThumbnailDiagnostics.snapshot() + "\n\n" + RatingDiagnostics.snapshot()
+    ThumbnailDiagnostics.snapshot() + "\n\n" + RatingDiagnostics.snapshot() +
+        "\n\n" + PhotoLocationDiagnostics.report()

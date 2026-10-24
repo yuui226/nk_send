@@ -3166,6 +3166,9 @@ internal fun PhotoEffectsRenderedPreview(
                     source = input,
                     metadata = if (borderEnabled) com.ztransfer.frame.PhotoFrameLocationResolver.resolve(
                         context, metadata, metadataSettings,
+                        trace = if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) { detail ->
+                            com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(sourceName, "preview", detail)
+                        } else null,
                     ) else metadata,
                     preset = preset,
                     watermark = watermark,

@@ -47,6 +47,33 @@ class PhotoFramePlaceTest {
         assertEquals(source, resolveFramePlace(source, settings, { true }) { _, _ -> null })
     }
 
+    @Test fun skippedRequestsExplainTheGateWithoutLoggingCoordinates() = runBlocking {
+        val trace = mutableListOf<String>()
+        val unused: suspend (Double, Double) -> FramePlace? = { _, _ ->
+            fail("Skipped requests must not reach the backend")
+            null
+        }
+        resolveFramePlace(source, settings, { false }, trace::add, unused)
+        resolveFramePlace(source.copy(latitude = null), settings, { true }, trace::add, unused)
+        resolveFramePlace(source, settings.copy(showCity = false, showRegion = false),
+            { true }, trace::add, unused)
+        assertEquals(listOf("placeLookup=network-blocked", "placeLookup=no-valid-gps",
+            "placeLookup=fields-disabled"), trace)
+        assertTrue(trace.none { it.contains("30.25") || it.contains("120.15") })
+    }
+
+    @Test fun connectivityChangeHasADistinctTraceAndStillDropsThePlace() = runBlocking {
+        val trace = mutableListOf<String>()
+        var online = true
+        val result = resolveFramePlace(source, settings, { online }, trace::add) { _, _ ->
+            online = false
+            FramePlace("杭州市", "西湖区")
+        }
+        assertNull(result.city)
+        assertNull(result.region)
+        assertEquals(listOf("placeLookup=network-changed"), trace)
+    }
+
     @Test fun cityAndDistrictAreIndependentAndPlaceholdersArePreviewOnly() {
         val data = source.copy(city = "杭州市", region = "西湖区")
         assertEquals(listOf("杭州市 · 西湖区", "N 30°15.000', E 120°09.000'  520m"), frameLocationRows(data))
@@ -74,6 +101,39 @@ class PhotoFramePlaceTest {
         assertEquals(FramePlace(null, null), framePlace(null, "广西壮族自治区", null, "广西壮族自治区", "CN"))
         assertEquals(FramePlace(null, "Santa Clara County"), framePlace(null, null, "Santa Clara County", "California", "US"))
         assertEquals(FramePlace(null, "Santa Clara County"), framePlace("Santa Clara County", null, null, "California", "US"))
+    }
+
+    @Test fun autonomousPrefecturesAndCountyCitiesKeepBothLevels() {
+        assertEquals(FramePlace("大理白族自治州", "大理市"),
+            framePlace("大理市", "下关街道", "大理白族自治州", "云南省", "CN"))
+        assertEquals(FramePlace("大理白族自治州", "大理市"),
+            framePlace(null, "大理市", "大理白族自治州", "云南省", "CN"))
+        assertEquals(FramePlace("大理白族自治州", null),
+            framePlace(null, null, "大理白族自治州", "云南省", "CN"))
+        assertEquals(FramePlace("大理白族自治州", "漾濞彝族自治县"),
+            framePlace("漾濞彝族自治县", null, "大理白族自治州", "云南省", "CN"))
+        assertEquals(FramePlace("大理白族自治州", "大理市"),
+            framePlace("大理白族自治州", "大理市", null, "云南省", "CN"))
+        assertEquals(FramePlace("大理白族自治州", null),
+            framePlace("大理白族自治州", "大理白族自治州", null, "云南省", "CN"))
+        assertEquals(FramePlace("大理白族自治州", "大理市"),
+            framePlace("大理市", null, "大理白族自治州", "雲南省", "CN"))
+    }
+
+    @Test fun prefecturesLeaguesAndTranslatedChineseNamesAreNotDistricts() {
+        assertEquals(FramePlace("大兴安岭地区", "漠河市"),
+            framePlace("漠河市", null, "大兴安岭地区", "黑龙江省", "CN"))
+        assertEquals(FramePlace("阿里地區", "噶爾縣"),
+            framePlace("噶爾縣", null, "阿里地區", "西藏自治區", "CN"))
+        assertEquals(FramePlace("锡林郭勒盟", "锡林浩特市"),
+            framePlace("锡林浩特市", null, "锡林郭勒盟", "内蒙古自治区", "CN"))
+        assertEquals(FramePlace("Dali Bai Autonomous Prefecture", "Dali City"),
+            framePlace("Dali City", null, "Dali Bai Autonomous Prefecture", "Yunnan", "CN"))
+        // An overseas state/county name is not promoted using Chinese suffix rules.
+        assertEquals(FramePlace(null, "Example Prefecture"),
+            framePlace(null, null, "Example Prefecture", "Example State", "US"))
+        assertEquals(FramePlace(null, null), framePlace("贵州", null, null, "贵州", "CN"))
+        assertEquals(FramePlace("杭州市", null), framePlace("杭州市", null, "杭州", "浙江省", "CN"))
     }
 
     @Test fun neighborhoodsAndDevelopmentZonesAreNotDistrictFallbacks() {
