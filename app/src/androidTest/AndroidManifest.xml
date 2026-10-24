@@ -39,4 +39,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.util.PhotoCaptureExifInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.gps.GpsLifecycleInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>

@@ -56,6 +56,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var geoWriteTimeoutJob: Job? = null
     /** Periodically replays the latest fix so the 60 s cadence is independent of provider callbacks. */
     private var periodicGeoWriteJob: Job? = null
+    private var locationWarmupJob: Job? = null
     private var latestLocation: Location? = null
     private var pendingAltitudeRefresh = false
     private var altitudeUnavailableLogged = false
@@ -218,7 +219,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             updateState(GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用")
             return START_STICKY
         }
-        startGpsIfPermitted()
+        startGpsIfPermitted(prewarmLocation = intent?.action == ACTION_ENABLE)
         return START_STICKY
     }
 
@@ -335,6 +336,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         cameraReady = true
         cameraVerified = wasReadyBeforeReconnect
         preserveReadyDuringReconnect = false
+        // Every authenticated camera session needs its own first GEO write. Error recovery
+        // closes GATT silently, so onDisconnected() does not always reset the old cadence.
+        lastSentAt = 0L
         // A successful ID write completes the LE identity handshake. Location acquisition and
         // GEO delivery happen after the camera is already connected and must not keep the UI in
         // its connecting state.
@@ -553,7 +557,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
     }
 
-    private fun startGpsIfPermitted() {
+    private fun startGpsIfPermitted(prewarmLocation: Boolean = false) {
         if (apModeBlocked) {
             updateState(GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用")
             return
@@ -582,10 +586,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             return
         }
         updateState(GpsStatus.STARTING)
-        startBle()
+        startBle(prewarmLocation)
     }
 
-    private fun startBle() {
+    private fun startBle(prewarmLocation: Boolean = false) {
         if (apModeBlocked) {
             updateState(GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用")
             return
@@ -632,26 +636,51 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             savedNonce = savedNonce,
             savedBleAddress = savedBleAddress,
         )
+        // Only the user's explicit enable attempt may prewarm. Background retries must not
+        // repeatedly turn on phone GPS while the camera is off or out of range.
+        if (prewarmLocation && hasCompleteIdentity && !pairingConfirmationPending && bleClient.isRunning()) {
+            warmLocationForReconnect()
+        }
     }
 
     private fun hasCompleteSavedIdentity(): Boolean =
         preferences.getLong(KEY_DEVICE_ID, Long.MIN_VALUE) != Long.MIN_VALUE &&
             preferences.getLong(KEY_NONCE, Long.MIN_VALUE) != Long.MIN_VALUE
 
-    private fun startLocationUpdates(): Boolean {
+    private fun warmLocationForReconnect() {
+        if (!enabled || cameraReady || !startLocationUpdates(reportErrors = false)) return
+        // Prime Android's location cache while BLE authenticates. The listener still refuses
+        // to publish/write until cameraReady; onReady() reuses the normal fresh-cache path.
+        // No second location buffer, relaxed freshness rule, or new write path is needed.
+        GpsDiagnostics.record("location warmup started during BLE reconnect")
+        locationWarmupJob = serviceScope.launch {
+            delay(LOCATION_WARMUP_TIMEOUT_MS)
+            if (!cameraReady) {
+                locationWarmupJob = null
+                stopLocationUpdates()
+                GpsDiagnostics.record("location warmup stopped; camera still connecting")
+            }
+        }
+    }
+
+    private fun startLocationUpdates(reportErrors: Boolean = true): Boolean {
+        fun reportSetupError(message: String) {
+            if (reportErrors) updateState(GpsStatus.ERROR, message = message)
+            else GpsDiagnostics.record("location warmup unavailable: $message")
+        }
         // A retry replaces any previous subscription. In particular, do this before permission
         // and provider checks so an error cannot leave an old high-frequency listener running.
         stopLocationUpdates()
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!fine && !coarse) {
-            updateState(GpsStatus.ERROR, message = "需要定位权限")
+            reportSetupError("需要定位权限")
             return false
         }
         val gpsEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
         val networkEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
         if (!gpsEnabled && !networkEnabled) {
-            updateState(GpsStatus.ERROR, message = "请打开手机定位")
+            reportSetupError("请打开手机定位")
             return false
         }
         val frequency = configuredUpdateFrequency()
@@ -702,16 +731,21 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 }
             }
             val cached = recentCachedLocations.maxByOrNull { it.time }
+            if (cameraReady) {
+                GpsDiagnostics.record("location cache ready=${cached != null}")
+            }
             cached?.let(locationListener::onLocationChanged)
             true
         }.getOrElse {
             stopLocationUpdates()
-            updateState(GpsStatus.ERROR, message = "无法获取定位")
+            reportSetupError("无法获取定位")
             false
         }
     }
 
     private fun stopLocationUpdates() {
+        locationWarmupJob?.cancel()
+        locationWarmupJob = null
         runCatching { locationManager.removeUpdates(locationListener) }
     }
 
@@ -736,7 +770,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     private fun maybeSend(location: Location, force: Boolean = false) {
-        if (!enabled) return
+        if (!enabled || !cameraReady) return
         if (geoWriteInFlight) {
             latestLocationDuringWrite = Location(location)
             if (force) pendingAltitudeRefresh = true
@@ -967,6 +1001,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         private const val NOTIFICATION_ID = 1003
         private const val ACTION_SYNC_NOW = "com.ztransfer.gps.SYNC_NOW"
         private const val CACHED_LOCATION_MAX_AGE_MS = 2 * 60_000L
+        private const val LOCATION_WARMUP_TIMEOUT_MS = 30_000L
         private const val GEO_WRITE_TIMEOUT_MS = 10_000L
         const val ACTION_ENABLE = "com.ztransfer.gps.ENABLE"
         const val ACTION_DISABLE = "com.ztransfer.gps.DISABLE"

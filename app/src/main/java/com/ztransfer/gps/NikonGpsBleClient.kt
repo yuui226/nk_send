@@ -81,6 +81,7 @@ internal class NikonGpsBleClient(
     private var pairingTimeout: Job? = null
     private var pairingNotified = false
     private var directConnectJob: Job? = null
+    private var setupTimeout: Job? = null
     private var idWriteTimeout: Job? = null
     /** GATTs closed intentionally must not be reported as a camera disconnect. */
     private val suppressedDisconnects: MutableSet<BluetoothGatt> =
@@ -119,7 +120,7 @@ internal class NikonGpsBleClient(
             val direct = runCatching { manager?.adapter?.getRemoteDevice(savedBleAddress) }.getOrNull()
             if (direct != null) {
                 GpsDiagnostics.record("BLE direct connect address=$savedBleAddress")
-                connect(direct)
+                connect(direct, fallbackToScan = true)
                 if (gatt == null) return
                 directConnectJob = scope.launch {
                     delay(DIRECT_CONNECT_TIMEOUT_MS)
@@ -173,6 +174,7 @@ internal class NikonGpsBleClient(
 
     private fun beginScan() {
         val scanner = scanner ?: return
+        GpsDiagnostics.record("BLE scan started")
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 if (scanCallback !== this) return
@@ -220,7 +222,7 @@ internal class NikonGpsBleClient(
         }
     }
 
-    private fun connect(target: BluetoothDevice) {
+    private fun connect(target: BluetoothDevice, fallbackToScan: Boolean = false) {
         GpsDiagnostics.record("BLE connect address=${target.address}")
         // Direct reconnects do not pass through ScanCallback, so retain the target just like a
         // scanned device. The ID-write success path uses it to publish the verified connection.
@@ -232,7 +234,14 @@ internal class NikonGpsBleClient(
                 BluetoothDevice.PHY_LE_1M_MASK, Handler(Looper.getMainLooper()),
             )
             if (connection == null) {
-                listener.onError("Bluetooth connection failed")
+                if (fallbackToScan) {
+                    // A failed cached-address attempt must still discover the camera's current
+                    // address, rather than repeat the same failed direct connection after 5 s.
+                    GpsDiagnostics.record("BLE direct connect rejected; fallback scan")
+                    beginScan()
+                } else {
+                    listener.onError("Bluetooth connection failed")
+                }
             } else {
                 gatt = connection
             }
@@ -258,6 +267,8 @@ internal class NikonGpsBleClient(
             if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
                 directConnectJob?.cancel()
                 directConnectJob = null
+                startSetupTimeout(g)
+                GpsDiagnostics.record("GATT requesting MTU")
                 if (!g.requestMtu(517)) {
                     GpsDiagnostics.record("MTU request rejected; discovering services")
                     if (!g.discoverServices()) listener.onError("Camera service unavailable")
@@ -287,6 +298,7 @@ internal class NikonGpsBleClient(
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
             if (gatt !== g) return
+            GpsDiagnostics.record("GATT MTU=$mtu status=$status; discovering services")
             if (!g.discoverServices()) listener.onError("Camera service unavailable")
         }
 
@@ -319,6 +331,7 @@ internal class NikonGpsBleClient(
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (gatt !== g) return
+            GpsDiagnostics.record("GATT subscription uuid=${descriptor.characteristic.uuid} status=$status")
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 runCatching { g.disconnect() }
                 listener.onError("Bluetooth setup failed")
@@ -371,6 +384,8 @@ internal class NikonGpsBleClient(
     private fun enableNextDescriptor(g: BluetoothGatt) {
         val descriptor = descriptorQueue.removeFirstOrNull()
         if (descriptor == null) {
+            setupTimeout?.cancel()
+            setupTimeout = null
             val packet = NikonGpsPairingProtocol().newStage1(savedDeviceId, savedNonce)
             stage1 = packet
             if (savedDeviceId == null && !pairingNotified) {
@@ -414,6 +429,7 @@ internal class NikonGpsBleClient(
 
     private fun handleCharacteristic(uuid: UUID, value: ByteArray) {
         if (uuid == NOT1_UUID && value.contentEquals(byteArrayOf(0x01, 0x00))) {
+            GpsDiagnostics.record("camera ready notification received")
             queueControllerIdIfNeeded()
             return
         }
@@ -724,6 +740,12 @@ internal class NikonGpsBleClient(
     }
 
     private fun clearGattOperationState() {
+        setupTimeout?.cancel()
+        setupTimeout = null
+        // The old handshake must not expire during the service's reconnect delay and mark a
+        // valid saved identity as rejected. Keep stage1: Classic pairing still needs its data.
+        pairingTimeout?.cancel()
+        pairingTimeout = null
         pairChar = null
         idChar = null
         geoChar = null
@@ -731,6 +753,25 @@ internal class NikonGpsBleClient(
         writeQueue.clear()
         writeInFlight = false
         writeInFlightUuid = null
+    }
+
+    private fun startSetupTimeout(expectedGatt: BluetoothGatt) {
+        setupTimeout?.cancel()
+        setupTimeout = null
+        // Keep first-time pairing unchanged. Saved-identity reconnects previously had no bound
+        // between connection and the first PAIR write if an Android setup callback was lost.
+        if (savedDeviceId == null || savedNonce == null) return
+        setupTimeout = scope.launch {
+            delay(RECONNECT_SETUP_TIMEOUT_MS)
+            if (gatt === expectedGatt) {
+                GpsDiagnostics.record("GATT setup callback timeout; reconnect required")
+                setupTimeout = null
+                // Close before reporting failure: delayed callbacks must not authenticate or
+                // publish READY while the service is preparing a retry.
+                closeCurrentGatt(suppressCallback = true)
+                listener.onError("Bluetooth setup timeout")
+            }
+        }
     }
 
     private fun requestFreshClassicPairing(found: BluetoothDevice) {
@@ -861,6 +902,7 @@ internal class NikonGpsBleClient(
     companion object {
         private const val SCAN_TIMEOUT_MS = 15_000L
         private const val DIRECT_CONNECT_TIMEOUT_MS = 4_500L
+        private const val RECONNECT_SETUP_TIMEOUT_MS = 15_000L
         val SERVICE_UUID = UUID.fromString("0000de00-3dd4-4255-8d62-6dc7b9bd5561")
         val PAIR_UUID = UUID.fromString("00002000-3dd4-4255-8d62-6dc7b9bd5561")
         val NOT1_UUID = UUID.fromString("00002008-3dd4-4255-8d62-6dc7b9bd5561")
