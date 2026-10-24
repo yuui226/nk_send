@@ -21,7 +21,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
-import com.ztransfer.BuildConfig
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.Locale
@@ -48,12 +47,6 @@ internal class NikonGpsBleClient(
         fun onDisconnected()
         fun onNeedsPairing()
         fun onError(message: String)
-        fun onWifiWakeWritten(success: Boolean) {}
-        // Debug probes reuse authentication; production listeners never access raw GATT.
-        fun onDebugRead(uuid: UUID, value: ByteArray, status: Int) {}
-        fun onDebugWrite(uuid: UUID, status: Int) {}
-        fun onDebugDescriptorWrite(uuid: UUID, status: Int) {}
-        fun onDebugNotification(uuid: UUID, value: ByteArray) {}
     }
 
     private var scanner: BluetoothLeScanner? = null
@@ -64,8 +57,6 @@ internal class NikonGpsBleClient(
     private var pairChar: BluetoothGattCharacteristic? = null
     private var idChar: BluetoothGattCharacteristic? = null
     private var geoChar: BluetoothGattCharacteristic? = null
-    private var wifiChar: BluetoothGattCharacteristic? = null
-    private var wifiOnly = false
     private var descriptorQueue = ArrayDeque<BluetoothGattDescriptor>()
     private var stage1: GpsPairingPacket? = null
     private var stage3Sent = false
@@ -100,24 +91,16 @@ internal class NikonGpsBleClient(
         savedDeviceId: Long? = null,
         savedNonce: Long? = null,
         savedBleAddress: String? = null,
-        wifiOnly: Boolean = false,
     ) {
         if (gatt != null || scanCallback != null) return
         GpsDiagnostics.record("start savedIdentity=${savedDeviceId != null}")
         this.controllerName = controllerName
         this.savedDeviceId = savedDeviceId
         this.savedNonce = savedNonce
-        this.wifiOnly = wifiOnly
         directConnectJob?.cancel()
         directConnectJob = null
         idWriteTimeout?.cancel()
         idWriteTimeout = null
-        // A wake must address the already paired camera. Never scan for another Nikon or enter
-        // Classic pairing as a side effect of this one-shot action.
-        if (wifiOnly && (savedDeviceId == null || savedNonce == null || savedBleAddress == null)) {
-            listener.onError("Camera Wi-Fi requires saved pairing")
-            return
-        }
         stage1 = null
         stage3Sent = false
         idQueued = false
@@ -127,8 +110,8 @@ internal class NikonGpsBleClient(
         pairingTimeout = null
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE)
             as? android.bluetooth.BluetoothManager
-        scanner = if (wifiOnly) null else manager?.adapter?.bluetoothLeScanner
-        if (manager?.adapter == null || (!wifiOnly && scanner == null)) {
+        scanner = manager?.adapter?.bluetoothLeScanner
+        if (scanner == null) {
             listener.onError("Bluetooth unavailable")
             return
         }
@@ -139,32 +122,26 @@ internal class NikonGpsBleClient(
                 connect(direct)
                 if (gatt == null) return
                 directConnectJob = scope.launch {
-                    // GPS falls back to scanning quickly. A one-shot wake has no scan
-                    // fallback, so allow a sleeping camera longer to answer its saved address.
-                    delay(if (wifiOnly) WIFI_DIRECT_CONNECT_TIMEOUT_MS else DIRECT_CONNECT_TIMEOUT_MS)
+                    delay(DIRECT_CONNECT_TIMEOUT_MS)
                     // Once the camera has accepted stage 2 and we sent stage 3, the
                     // handshake can legitimately outlive the short direct-connect
                     // window. Do not tear down an active ID/GPS confirmation write.
                     if (gatt != null && scanCallback == null && !ready && !stage3Sent) {
-                        GpsDiagnostics.record("BLE direct connect timeout wifiOnly=$wifiOnly")
+                        GpsDiagnostics.record("BLE direct connect timeout; fallback scan")
                         directConnectJob = null
                         closeCurrentGatt(suppressCallback = true)
-                        if (this@NikonGpsBleClient.wifiOnly) listener.onError("Camera not found")
-                        else beginScan()
+                        beginScan()
                     }
                 }
                 return
             }
         }
-        if (wifiOnly) listener.onError("Camera not found") else beginScan()
+        beginScan()
     }
 
     /** True while a scan, GATT session, or Classic pairing flow owns this client. */
     fun isRunning(): Boolean =
         gatt != null || scanCallback != null || classicReceiver != null
-
-    internal fun debugAuthenticatedGatt(): BluetoothGatt? =
-        if (BuildConfig.DEBUG && wifiOnly && ready) gatt else null
 
     fun stop() {
         scanTimeout?.cancel()
@@ -185,7 +162,6 @@ internal class NikonGpsBleClient(
     }
 
     fun writeGeo(bytes: ByteArray) {
-        if (wifiOnly) return
         val gatt = gatt
         val characteristic = geoChar
         if (gatt == null || characteristic == null) {
@@ -193,17 +169,6 @@ internal class NikonGpsBleClient(
             return
         }
         writeCharacteristic(gatt, characteristic, bytes)
-    }
-
-    /** Nikon CONNECTION_ESTABLISHMENT: 0x01 requests the camera's AP, not STA or power-on. */
-    fun requestWifiWake(): Boolean {
-        val current = gatt ?: return false
-        val characteristic = wifiChar ?: return false
-        if (!ready || !wifiOnly ||
-            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE == 0
-        ) return false
-        writeCharacteristic(current, characteristic, byteArrayOf(0x01))
-        return true
     }
 
     private fun beginScan() {
@@ -280,7 +245,7 @@ internal class NikonGpsBleClient(
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             GpsDiagnostics.record("GATT state=$newState status=$status")
             // Cancel/retry may already have installed a new connection. Old callbacks must
-            // not cancel its ID timeout, trigger a scan, or fail a new Wi-Fi/GPS request.
+            // not cancel its ID timeout, trigger a scan, or fail the current GPS session.
             if (gatt !== g) {
                 if (newState == BluetoothProfile.STATE_DISCONNECTED) suppressedDisconnects.remove(g)
                 else {
@@ -311,7 +276,7 @@ internal class NikonGpsBleClient(
                 if (directConnectJob != null && !ready) {
                     directConnectJob?.cancel()
                     directConnectJob = null
-                    if (wifiOnly) listener.onError("Camera not found") else beginScan()
+                    beginScan()
                     return
                 }
                 listener.onDisconnected()
@@ -336,17 +301,10 @@ internal class NikonGpsBleClient(
             pairChar = service?.getCharacteristic(PAIR_UUID)
             idChar = service?.getCharacteristic(ID_UUID)
             geoChar = service?.getCharacteristic(GEO_UUID)
-            wifiChar = service?.getCharacteristic(WIFI_UUID)
             val pair = pairChar
             val not1 = service?.getCharacteristic(NOT1_UUID)
-            if (pair == null || not1 == null || idChar == null || (!wifiOnly && geoChar == null)) {
+            if (pair == null || not1 == null || idChar == null || geoChar == null) {
                 listener.onError("Camera GPS service unavailable")
-                return
-            }
-            if (wifiOnly &&
-                (wifiChar?.properties ?: 0) and BluetoothGattCharacteristic.PROPERTY_WRITE == 0
-            ) {
-                listener.onError("Camera Wi-Fi service unavailable")
                 return
             }
             val pairCccd = pair.getDescriptor(CCCD_UUID)
@@ -361,10 +319,6 @@ internal class NikonGpsBleClient(
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (gatt !== g) return
-            if (BuildConfig.DEBUG && ready && descriptor.characteristic.uuid !in listOf(PAIR_UUID, NOT1_UUID)) {
-                listener.onDebugDescriptorWrite(descriptor.characteristic.uuid, status)
-                return
-            }
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 runCatching { g.disconnect() }
                 listener.onError("Bluetooth setup failed")
@@ -376,42 +330,20 @@ internal class NikonGpsBleClient(
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             if (gatt !== g) return
             handleCharacteristic(characteristic.uuid, value)
-            if (BuildConfig.DEBUG && ready && characteristic.uuid != PAIR_UUID) {
-                listener.onDebugNotification(characteristic.uuid, value.copyOf())
-            }
         }
 
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             if (gatt !== g) return
             handleCharacteristic(characteristic.uuid, characteristic.value)
-            if (BuildConfig.DEBUG && ready && characteristic.uuid != PAIR_UUID) {
-                listener.onDebugNotification(characteristic.uuid, characteristic.value?.copyOf() ?: byteArrayOf())
-            }
-        }
-
-        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
-            if (BuildConfig.DEBUG && gatt === g && ready) listener.onDebugRead(characteristic.uuid, value.copyOf(), status)
-        }
-
-        @Suppress("DEPRECATION")
-        override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            if (BuildConfig.DEBUG && gatt === g && ready) {
-                listener.onDebugRead(characteristic.uuid, characteristic.value?.copyOf() ?: byteArrayOf(), status)
-            }
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             if (gatt !== g) return
-            if (BuildConfig.DEBUG && ready && characteristic.uuid !in listOf(PAIR_UUID, ID_UUID, GEO_UUID, WIFI_UUID)) {
-                listener.onDebugWrite(characteristic.uuid, status)
-                return
-            }
             GpsDiagnostics.record("GATT write uuid=${characteristic.uuid} status=$status")
             writeInFlight = false
             writeInFlightUuid = null
             when (characteristic.uuid) {
-                WIFI_UUID -> listener.onWifiWakeWritten(status == BluetoothGatt.GATT_SUCCESS)
                 GEO_UUID -> listener.onGeoWritten(status == BluetoothGatt.GATT_SUCCESS)
                 ID_UUID -> if (status == BluetoothGatt.GATT_SUCCESS) {
                     idWriteTimeout?.cancel()
@@ -795,7 +727,6 @@ internal class NikonGpsBleClient(
         pairChar = null
         idChar = null
         geoChar = null
-        wifiChar = null
         descriptorQueue.clear()
         writeQueue.clear()
         writeInFlight = false
@@ -919,8 +850,7 @@ internal class NikonGpsBleClient(
     }
 
     private fun onWriteRejected(characteristic: BluetoothGattCharacteristic) {
-        if (characteristic.uuid == WIFI_UUID) listener.onWifiWakeWritten(false)
-        else if (characteristic.uuid == GEO_UUID) listener.onGeoWritten(false)
+        if (characteristic.uuid == GEO_UUID) listener.onGeoWritten(false)
         else if (characteristic.uuid == ID_UUID) {
             idWriteTimeout?.cancel()
             idWriteTimeout = null
@@ -931,14 +861,11 @@ internal class NikonGpsBleClient(
     companion object {
         private const val SCAN_TIMEOUT_MS = 15_000L
         private const val DIRECT_CONNECT_TIMEOUT_MS = 4_500L
-        private const val WIFI_DIRECT_CONNECT_TIMEOUT_MS = 15_000L
         val SERVICE_UUID = UUID.fromString("0000de00-3dd4-4255-8d62-6dc7b9bd5561")
         val PAIR_UUID = UUID.fromString("00002000-3dd4-4255-8d62-6dc7b9bd5561")
         val NOT1_UUID = UUID.fromString("00002008-3dd4-4255-8d62-6dc7b9bd5561")
         val ID_UUID = UUID.fromString("00002002-3dd4-4255-8d62-6dc7b9bd5561")
         val GEO_UUID = UUID.fromString("00002007-3dd4-4255-8d62-6dc7b9bd5561")
-        // Protocol reference: ZPill, see assets/licenses/ZPill-LICENSE.txt.
-        val WIFI_UUID = UUID.fromString("00002005-3dd4-4255-8d62-6dc7b9bd5561")
         val CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 }

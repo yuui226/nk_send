@@ -265,12 +265,6 @@ fun HomeWorkspacePager(
                     }
                 },
                 localPhotoEffectsEnabled = !gpsEnabled,
-                // Home stays composed offscreen. Use the same boundary as connection discovery
-                // so gestures also cancel BLE wake and invalidate pending permission results.
-                connectionPageActive = !shouldPauseConnectionDiscovery(
-                    settledPage = pagerState.settledPage,
-                    targetPage = pagerState.targetPage,
-                ),
             )
             LOCAL_EFFECTS_PAGE -> if (releaseLocalWorkspace) {
                 Box(Modifier.fillMaxSize())

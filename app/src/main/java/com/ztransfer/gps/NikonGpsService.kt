@@ -40,7 +40,6 @@ import kotlinx.coroutines.launch
 
 internal object NikonGpsRuntime {
     val state = MutableStateFlow(GpsState())
-    val wifiWakeState = MutableStateFlow(CameraWifiWakeState())
 }
 
 @SuppressLint("MissingPermission")
@@ -50,8 +49,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private lateinit var bleClient: NikonGpsBleClient
     private lateinit var preferences: android.content.SharedPreferences
     private var reconnectJob: Job? = null
-    private var wifiWakeAttempt: CameraWifiWakeAttempt? = null
-    private var wifiWakeTimeoutJob: Job? = null
     private var latestStartId = 0
     private var lastSentAt = 0L
     private var latestLocationDuringWrite: Location? = null
@@ -167,31 +164,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         latestStartId = startId
         if (intent?.action == ACTION_SYNC_NOW) {
             syncLocationNow()
-            // A late tap must never enable GPS or interrupt a hotspot wake that took over.
-            if (!enabled && wifiWakeAttempt == null) stopSelf(startId)
-            return if (enabled) START_STICKY else START_NOT_STICKY
-        }
-        if (intent?.action == ACTION_WAKE_WIFI) {
-            startWifiWake(startId)
-            return if (enabled) START_STICKY else START_NOT_STICKY
-        }
-        if (intent?.action == ACTION_CANCEL_WIFI_WAKE) {
-            cancelWifiWakeAttempt(stopService = false)
-            // ACK/failure can arrive after the UI leaves but before this intent is delivered.
-            // Clear that late result too, without touching any GPS state.
-            if (!NikonGpsRuntime.wifiWakeState.value.isBusy) {
-                NikonGpsRuntime.wifiWakeState.value = CameraWifiWakeState()
-            }
-            // A late cancellation must never stop a GPS session that took over the client.
+            // A late tap must never enable GPS after the user turned it off.
             if (!enabled) stopSelf(startId)
             return if (enabled) START_STICKY else START_NOT_STICKY
         }
         if (intent?.action == ACTION_SET_AP_MODE) {
             apModeBlocked = intent.getBooleanExtra(EXTRA_AP_MODE, false)
-            if (wifiWakeAttempt != null) {
-                if (apModeBlocked) cancelWifiWakeAttempt()
-                return START_NOT_STICKY
-            }
             if (apModeBlocked) {
                 enabled = preferences.getBoolean(KEY_ENABLED, false)
                 stopActiveConnection()
@@ -219,13 +197,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             return START_STICKY
         }
         if (intent?.action == ACTION_DISABLE) {
-            cancelWifiWakeAttempt(stopService = false)
             stopGps()
             stopSelf(startId)
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_ENABLE) {
-            cancelWifiWakeAttempt(stopService = false)
             // An explicit tap is the only operation allowed to restart a failed pairing flow.
             awaitingPairingUserAction = false
         }
@@ -249,10 +225,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        wifiWakeAttempt?.let {
-            it.fail(CameraWifiWakeError.CONNECTION_FAILED)
-            finishWifiWake(stopService = false)
-        }
         stopGps()
         unregisterBluetoothReceiver()
         serviceScope.cancel()
@@ -285,7 +257,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }.getOrDefault(false)
 
     private fun handleBluetoothOff() {
-        if (wifiWakeAttempt != null) failWifiWake(CameraWifiWakeError.BLUETOOTH_OFF)
         if (bluetoothOff) return
         bluetoothOff = true
         reconnectJob?.cancel()
@@ -329,7 +300,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onConnecting(name: String?) {
         GpsDiagnostics.record("connecting name=${name ?: "?"}")
-        if (wifiWakeAttempt != null) return
         notificationOverride = null
         // A verified session may briefly lose GATT when the camera sleeps. Keep the
         // stable READY presentation during background reconnect; onReady() restores it
@@ -351,23 +321,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     override fun onPairing() {
-        if (wifiWakeAttempt != null) {
-            failWifiWake(CameraWifiWakeError.NOT_PAIRED)
-            return
-        }
         GpsDiagnostics.record("BLE pairing handshake")
         notificationOverride = null
         updateState(GpsStatus.PAIRING)
     }
 
     override fun onReady(name: String, device: android.bluetooth.BluetoothDevice) {
-        wifiWakeAttempt?.let { attempt ->
-            if (attempt.ready()) {
-                NikonGpsRuntime.wifiWakeState.value = attempt.state
-                if (!bleClient.requestWifiWake()) failWifiWake(CameraWifiWakeError.UNSUPPORTED)
-            }
-            return
-        }
         GpsDiagnostics.record("GPS ready camera=$name")
         notificationOverride = null
         reconnectJob?.cancel()
@@ -458,10 +417,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     override fun onPairedIdentity(device: Long, nonce: Long) {
-        if (wifiWakeAttempt != null) {
-            failWifiWake(CameraWifiWakeError.NOT_PAIRED)
-            return
-        }
         preferences.edit()
             .putLong(KEY_DEVICE_ID, device)
             .putLong(KEY_NONCE, nonce)
@@ -475,10 +430,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     override fun onDisconnected() {
-        if (wifiWakeAttempt != null) {
-            failWifiWake(CameraWifiWakeError.CONNECTION_FAILED)
-            return
-        }
         if (!enabled) return
         notificationOverride = "连接已断开，正在重连"
         refreshNotification()
@@ -527,20 +478,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     override fun onNeedsPairing() {
-        if (wifiWakeAttempt != null) {
-            failWifiWake(CameraWifiWakeError.NOT_PAIRED)
-            return
-        }
         GpsDiagnostics.record("awaiting Classic pairing")
         updateState(GpsStatus.CAMERA_CONFIRM, message = "请在相机上按 OK")
     }
 
     override fun onError(message: String) {
         GpsDiagnostics.record("error=$message")
-        if (wifiWakeAttempt != null) {
-            failWifiWake(cameraWifiWakeError(message))
-            return
-        }
         cameraReady = false
         periodicGeoWriteJob?.cancel()
         periodicGeoWriteJob = null
@@ -607,115 +550,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 delay(5_000)
                 if (isActive && enabled) startBle()
             }
-        }
-    }
-
-    /** Use the existing paired identity once, without location, scanning, or GPS reconnects. */
-    private fun startWifiWake(startId: Int) {
-        if (wifiWakeAttempt != null) return
-        val savedAddress = preferences.getString(KEY_BLE_ADDRESS, null)
-        val error = cameraWifiWakePreflight(
-            gpsEnabled = enabled || preferences.getBoolean(KEY_ENABLED, false),
-            hasSavedIdentity = hasCompleteSavedIdentity(),
-            hasSavedAddress = savedAddress != null && BluetoothAdapter.checkBluetoothAddress(savedAddress),
-            bluetoothEnabled = isBluetoothEnabled(),
-            hasConnectPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
-                PackageManager.PERMISSION_GRANTED,
-        )
-        if (error != null) {
-            NikonGpsRuntime.wifiWakeState.value = CameraWifiWakeState(CameraWifiWakeStatus.ERROR, error)
-            // A persisted GPS preference does not prove a foreground GPS service is running.
-            // Stop a rejected foreground-service start instead of leaving its deadline pending.
-            if (!enabled) stopSelf(startId)
-            return
-        }
-        val attempt = CameraWifiWakeAttempt()
-        wifiWakeAttempt = attempt
-        NikonGpsRuntime.wifiWakeState.value = attempt.state
-        if (!startWifiWakeForeground()) return
-        // GPS is off. Clear any previous shutdown work before reusing its single GATT owner.
-        reconnectJob?.cancel()
-        reconnectJob = null
-        bleClient.stop()
-        wifiWakeTimeoutJob = serviceScope.launch {
-            delay(WIFI_WAKE_TIMEOUT_MS)
-            if (wifiWakeAttempt === attempt) failWifiWake(CameraWifiWakeError.TIMEOUT)
-        }
-        GpsDiagnostics.record("Wi-Fi AP wake started")
-        bleClient.start(
-            controllerName = BuildConfig.GPS_CONTROLLER_NAME,
-            savedDeviceId = preferences.getLong(KEY_DEVICE_ID, Long.MIN_VALUE),
-            savedNonce = preferences.getLong(KEY_NONCE, Long.MIN_VALUE),
-            savedBleAddress = savedAddress,
-            wifiOnly = true,
-        )
-    }
-
-    override fun onWifiWakeWritten(success: Boolean) {
-        val attempt = wifiWakeAttempt ?: return
-        if (!attempt.written(success)) return
-        GpsDiagnostics.record("Wi-Fi AP wake write acknowledged=$success")
-        finishWifiWake()
-    }
-
-    private fun failWifiWake(error: CameraWifiWakeError) {
-        if (wifiWakeAttempt?.fail(error) != true) return
-        GpsDiagnostics.record("Wi-Fi AP wake failed=$error")
-        finishWifiWake()
-    }
-
-    private fun cancelWifiWakeAttempt(stopService: Boolean = true) {
-        val attempt = wifiWakeAttempt ?: return
-        attempt.cancel()
-        finishWifiWake(stopService)
-    }
-
-    private fun finishWifiWake(stopService: Boolean = true) {
-        val attempt = wifiWakeAttempt ?: return
-        wifiWakeAttempt = null
-        wifiWakeTimeoutJob?.cancel()
-        wifiWakeTimeoutJob = null
-        // Nikon may delay starting the AP until this BLE session is released. A write ACK
-        // confirms only the request; hotspot availability is still checked by Wi-Fi/PTP.
-        bleClient.stop()
-        NikonGpsRuntime.wifiWakeState.value = attempt.state
-        if (notificationStarted) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationStarted = false
-        }
-        // An ENABLE intent can already be queued while the last BLE callback is delivered.
-        // stopSelf(startId) preserves that newer start; an unqualified stopSelf() would not.
-        if (stopService && !enabled) stopSelf(latestStartId)
-    }
-
-    private fun startWifiWakeForeground(): Boolean {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(WIFI_WAKE_CHANNEL_ID, getString(R.string.wifi_wake_action), NotificationManager.IMPORTANCE_LOW),
-        )
-        val notification = NotificationCompat.Builder(this, WIFI_WAKE_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_transfer)
-            .setContentTitle(getString(R.string.wifi_wake_action))
-            .setContentText(getString(R.string.wifi_wake_connecting))
-            .setOngoing(true)
-            .setSilent(true)
-            .build()
-        return try {
-            // Unlike GPS, this request needs no location permission or location subscription.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-            notificationStarted = true
-            true
-        } catch (_: SecurityException) {
-            failWifiWake(CameraWifiWakeError.PERMISSION_REQUIRED)
-            false
-        } catch (_: Exception) {
-            failWifiWake(CameraWifiWakeError.CONNECTION_FAILED)
-            false
         }
     }
 
@@ -890,7 +724,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private fun syncLocationNow() {
         // READY can be retained during reconnect, so the UI status alone is not sufficient.
         if (!enabled || !preferences.getBoolean(KEY_ENABLED, false) || !cameraReady ||
-            apModeBlocked || wifiWakeAttempt != null || geoWriteInFlight || !bleClient.isRunning()
+            apModeBlocked || geoWriteInFlight || !bleClient.isRunning()
         ) return
         val location = latestLocation?.let(::Location) ?: return
         // The periodic path can retain an older fix while waiting for its interval. A manual
@@ -1130,11 +964,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     companion object {
         private const val CHANNEL_ID = "nikon_gps"
-        private const val WIFI_WAKE_CHANNEL_ID = "nikon_wifi_wake"
         private const val NOTIFICATION_ID = 1003
-        private const val WIFI_WAKE_TIMEOUT_MS = 30_000L
-        private const val ACTION_WAKE_WIFI = "com.ztransfer.gps.WAKE_WIFI"
-        private const val ACTION_CANCEL_WIFI_WAKE = "com.ztransfer.gps.CANCEL_WIFI_WAKE"
         private const val ACTION_SYNC_NOW = "com.ztransfer.gps.SYNC_NOW"
         private const val CACHED_LOCATION_MAX_AGE_MS = 2 * 60_000L
         private const val GEO_WRITE_TIMEOUT_MS = 10_000L
@@ -1149,31 +979,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         const val EXTRA_AP_MODE = "ap_mode"
         const val ACTION_SET_UPDATE_FREQUENCY = "com.ztransfer.gps.SET_UPDATE_FREQUENCY"
         const val EXTRA_UPDATE_FREQUENCY_SECONDS = "update_frequency_seconds"
-
-        fun wakeCameraWifi(context: Context) {
-            try {
-                ContextCompat.startForegroundService(
-                    context, Intent(context, NikonGpsService::class.java).setAction(ACTION_WAKE_WIFI),
-                )
-            } catch (_: SecurityException) {
-                NikonGpsRuntime.wifiWakeState.value = CameraWifiWakeState(
-                    CameraWifiWakeStatus.ERROR, CameraWifiWakeError.PERMISSION_REQUIRED,
-                )
-            } catch (_: Exception) {
-                NikonGpsRuntime.wifiWakeState.value = CameraWifiWakeState(
-                    CameraWifiWakeStatus.ERROR, CameraWifiWakeError.CONNECTION_FAILED,
-                )
-            }
-        }
-
-        fun cancelWifiWake(context: Context) {
-            if (!NikonGpsRuntime.wifiWakeState.value.isBusy) return
-            runCatching {
-                context.startService(Intent(context, NikonGpsService::class.java).setAction(ACTION_CANCEL_WIFI_WAKE))
-            }
-            // If Android refuses this cancellation while backgrounded, the bounded service
-            // timeout still releases BLE; do not falsely show an idle/success state now.
-        }
 
         fun setEnabled(context: Context, enabled: Boolean) {
             val intent = Intent(context, NikonGpsService::class.java).setAction(if (enabled) ACTION_ENABLE else ACTION_DISABLE)

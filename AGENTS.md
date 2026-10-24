@@ -2,6 +2,7 @@
 
 ## APK packaging
 
+- 有明确依据、可以稳妥推进且需要手机验证时，可主动打 Debug 包，无需逐次确认；不必为每次零散修改自动打包。始终使用下述仓库脚本。
 - “打包”默认指生成供测试、传到手机安装的 Debug APK，一律运行仓库根目录下的 `dist-debug/build-debug.bat`。
 - 只交付 `dist-debug/ZD-{MMdd-HHmmss}.apk` 中最新生成的时间戳文件。
 - 不把 `app/build/outputs/...` 下的 Gradle 标准产物作为交付文件，也不要手动改名后交付。
