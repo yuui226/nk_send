@@ -47,6 +47,7 @@ internal fun validGenieAnchor(anchor: Rect?, panel: Rect): Boolean =
 internal fun genieRow(
     progress: Float, fraction: Float, anchor: Rect, panel: Rect,
     mouthWidth: Float = anchor.height * GENIE_Z_MARK_WIDTH_DP / 36f,
+    tiltEnabled: Boolean = true,
 ): GenieRow {
     val p = genieProgress(progress)
     val v = genieProgress(fraction)
@@ -56,7 +57,7 @@ internal fun genieRow(
     if (anchor.center.x > panel.center.x) {
         val mirrored = Rect(panel.left + panel.right - anchor.right, anchor.top,
             panel.left + panel.right - anchor.left, anchor.bottom)
-        val row = genieRow(p, v, mirrored, panel, mouthWidth)
+        val row = genieRow(p, v, mirrored, panel, mouthWidth, tiltEnabled)
         return GenieRow(panel.width - row.right, panel.width - row.left, row.y, -row.tilt)
     }
     val dockX = anchor.center.x - panel.left
@@ -82,11 +83,16 @@ internal fun genieRow(
     val left = center - width / 2f + bow
     val right = center + width / 2f - bow * 0.15f
     val bentV = v + 0.4f * (1f - p) * (v * v - v)
-    // A short diagonal inlet: right endpoint meets the button's lower edge, never covers it.
-    val mouthTilt = minOf(seedWidth * 0.14f, panel.width * 0.045f) * (1f - length)
+    // A wide inline inlet can stay level so both edges meet the button together.
+    // Other popups retain the diagonal inlet and body tilt.
+    val mouthTilt = if (tiltEnabled) {
+        minOf(seedWidth * 0.14f, panel.width * 0.045f) * (1f - length)
+    } else 0f
     val y = dockY * (1f - length) + panel.height * length * bentV + mouthTilt / 2f
-    val bodyTilt = minOf((right - left) * 0.07f, panel.width * 0.035f,
-        panel.height * length * 0.12f) * envelope * v * v
+    val bodyTilt = if (tiltEnabled) {
+        minOf((right - left) * 0.07f, panel.width * 0.035f,
+            panel.height * length * 0.12f) * envelope * v * v
+    } else 0f
     val tilt = minOf(mouthTilt + bodyTilt, (right - left) * 0.14f, panel.width * 0.045f)
     return GenieRow(left, right, y, tilt)
 }

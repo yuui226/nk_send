@@ -9,6 +9,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
 /** Keeps outgoing content mounted until the shared genie animation has actually finished. */
 internal class GenieVisibilityState(val progress: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>, val mounted: State<Boolean>)
@@ -35,7 +37,9 @@ private class GenieInlineGeometry {
 
 @Composable
 internal fun GenieInlinePanel(state: GenieVisibilityState, anchor: () -> Rect?,
-    modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    modifier: Modifier = Modifier, mouthWidth: Dp = GENIE_Z_MARK_WIDTH_DP.dp,
+    tiltEnabled: Boolean = true,
+    content: @Composable () -> Unit) {
     if(!state.mounted.value) return
     val geometry=remember { GenieInlineGeometry() }
     val layer=rememberGraphicsLayer()
@@ -44,5 +48,6 @@ internal fun GenieInlinePanel(state: GenieVisibilityState, anchor: () -> Rect?,
         if(geometry.bounds?.size!=bounds.size) geometry.recorded=false
         geometry.bounds=bounds
     }.geniePopupLayer(layer,{state.progress.value},anchor,{geometry.bounds},
-        {geometry.recorded},{geometry.recorded=it},allowAboveAnchor=true)) { content() }
+        {geometry.recorded},{geometry.recorded=it},allowAboveAnchor=true,
+        mouthWidth=mouthWidth,tiltEnabled=tiltEnabled)) { content() }
 }

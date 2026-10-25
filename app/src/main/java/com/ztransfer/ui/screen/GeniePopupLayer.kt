@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -32,6 +33,8 @@ internal fun Modifier.geniePopupLayer(
     layerRecorded: () -> Boolean,
     setLayerRecorded: (Boolean) -> Unit,
     allowAboveAnchor: Boolean = false,
+    mouthWidth: Dp = GENIE_Z_MARK_WIDTH_DP.dp,
+    tiltEnabled: Boolean = true,
 ): Modifier = this
     .drawWithCache {
         val tile = Path()
@@ -78,10 +81,11 @@ internal fun Modifier.geniePopupLayer(
             // to the normal live draw.
             val renderBands = if (p > 0.82f) 6 else GENIE_RENDER_BANDS
             val source = requireNotNull(geometryOrigin)
-            val mouthWidth = GENIE_Z_MARK_WIDTH_DP.dp.toPx()
+            val mouthWidthPx = mouthWidth.toPx()
             val rows = Array(renderBands + 1) {
                 val fraction=it.toFloat()/renderBands
-                val row=genieRow(p,if(above) 1f-fraction else fraction,source,geometryBounds,mouthWidth)
+                val row=genieRow(p,if(above) 1f-fraction else fraction,source,geometryBounds,
+                    mouthWidthPx,tiltEnabled)
                 if(above) GenieRow(row.left,row.right,size.height-row.y,-row.tilt) else row
             }
             // Include the mouth above the panel's layout bounds; never clip it to y=0.

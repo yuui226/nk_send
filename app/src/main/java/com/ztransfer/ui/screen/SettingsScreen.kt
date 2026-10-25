@@ -3975,6 +3975,8 @@ private val GPS_PANEL_SHAPE = RoundedCornerShape(24.dp)
 // On the target layout the left connection column is about 155dp wide; 250dp keeps the
 // expanded detail panel close to the golden-ratio proportion without returning to the old width.
 private val GPS_DETAIL_PANEL_WIDTH = 250.dp
+// Only widen this panel's animation inlet; other genie popups retain their logo-sized opening.
+private val GPS_DETAIL_ANIMATION_MOUTH_WIDTH = 80.dp
 private val GPS_PLACE_BUBBLE_SHAPE = RoundedCornerShape(20.dp)
 private val GPS_DETAIL_ITEM_SHAPE = RoundedCornerShape(16.dp)
 private val GPS_ACTION_BUTTON_SHAPE = RoundedCornerShape(14.dp)
@@ -4345,8 +4347,13 @@ internal fun GpsConnectionControl(
             },
         )
         GpsDetailOverflowLayer(modifier = Modifier.fillMaxWidth()) {
-            GenieInlinePanel(detailVisibility,anchor={detailAnchor},
-                modifier=Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH).padding(top=6.dp)) {
+            GenieInlinePanel(
+                detailVisibility,
+                anchor = { detailAnchor },
+                modifier = Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH).padding(top = 6.dp),
+                mouthWidth = GPS_DETAIL_ANIMATION_MOUTH_WIDTH,
+                tiltEnabled = false,
+            ) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth(),
