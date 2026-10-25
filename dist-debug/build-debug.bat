@@ -41,6 +41,18 @@ if not defined DEBUG_APK (
     exit /b 1
 )
 
+rem Optional local QQ delivery; failures never invalidate the successful APK build.
+if not defined ZTRANSFER_QQ_CONFIG set "ZTRANSFER_QQ_CONFIG=%~dp0..\.build-tools\qq-debug\config.json"
+if not exist "%ZTRANSFER_QQ_CONFIG%" goto :after_qq_delivery
+where node >nul 2>nul
+if errorlevel 1 (
+    echo WARNING: Node.js was not found; skipping QQ delivery. APK is ready.
+    goto :after_qq_delivery
+)
+node "%~dp0..\tools\qq-debug\qq-apk.mjs" send "%DEBUG_APK%"
+if errorlevel 1 echo WARNING: QQ delivery failed. APK is ready; check QQ before sending again.
+
+:after_qq_delivery
 if defined SKIP_INSTALL (
     echo Build only; skipping device installation.
     goto :finish

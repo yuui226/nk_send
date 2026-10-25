@@ -37,6 +37,7 @@ dist/*.mapping.txt
 # 本地构建工具链 / 环境脚本
 .build-tools/
 env_build/
+/tools/qq-debug/node_modules/
 
 # ossutil 发布程序随项目分发，下载压缩包仍只保留在本机
 tools/ossutil/**/*.zip

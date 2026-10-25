@@ -121,6 +121,25 @@ else
   echo "You can copy the APK manually from: $DEBUG_APK" >&2
 fi
 
+# Optional local QQ delivery. A missing configuration leaves other checkouts unchanged.
+# Delivery errors must not turn a successful APK build into a failed build.
+if [[ -f "${ZTRANSFER_QQ_CONFIG:-$ROOT_DIR/.build-tools/qq-debug/config.json}" ]]; then
+  QQ_NODE="$(command -v node || true)"
+  if [[ -z "$QQ_NODE" ]]; then
+    for QQ_NODE_CANDIDATE in "$HOME/.local/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
+      if [[ -x "$QQ_NODE_CANDIDATE" ]]; then
+        QQ_NODE="$QQ_NODE_CANDIDATE"
+        break
+      fi
+    done
+  fi
+  if [[ -z "$QQ_NODE" ]]; then
+    echo "WARNING: Node.js was not found; skipping QQ delivery. APK is ready."
+  elif ! "$QQ_NODE" "$ROOT_DIR/tools/qq-debug/qq-apk.mjs" send "$DEBUG_APK"; then
+    echo "WARNING: QQ delivery failed. APK is ready; check QQ before sending again." >&2
+  fi
+fi
+
 # Match dist-debug/build-debug.bat: install and launch every authorized ADB device,
 # while allowing a disconnected-phone build to finish successfully.
 if [[ "$SKIP_INSTALL" == 1 ]]; then

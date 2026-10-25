@@ -4510,7 +4510,7 @@ internal fun GpsConnectionControl(
                         contentAlignment = Alignment.Center,
                         label = "gpsLeadingControl",
                         modifier = Modifier
-                            .weight(0.82f)
+                            .weight(if (gpsState.enabled) 0.82f else 0.60f)
                             .height(COMPACT_SETTINGS_WHEEL_HEIGHT),
                     ) { controlMode ->
                         when (controlMode) {
@@ -4546,6 +4546,7 @@ internal fun GpsConnectionControl(
                     GpsUpdateFrequencyWheel(
                         selected = gpsUpdateFrequency,
                         onValueCommitted = gpsViewModel::setUpdateFrequency,
+                        onDetent = haptics::tick,
                         onSyncNow = gpsViewModel::syncNow,
                         canSyncNow = gpsState.canSyncNow,
                         enabled = gpsConfigurationEnabled,
@@ -4554,7 +4555,7 @@ internal fun GpsConnectionControl(
                         showCountdown = timingControlsVisible,
                         lastUpdatedAtMs = gpsState.lastSentAtMs,
                         status = gpsState.status,
-                        modifier = Modifier.weight(0.86f),
+                        modifier = Modifier.weight(if (gpsState.enabled) 0.86f else 1.08f),
                     )
                     GpsStatusButton(
                         status = gpsState.status,
@@ -5012,6 +5013,7 @@ private fun GpsLastUpdatedWheel(
 private fun GpsUpdateFrequencyWheel(
     selected: GpsUpdateFrequency,
     onValueCommitted: (GpsUpdateFrequency) -> Unit,
+    onDetent: () -> Unit,
     onSyncNow: () -> Unit,
     canSyncNow: Boolean,
     emphasized: Boolean,
@@ -5117,12 +5119,13 @@ private fun GpsUpdateFrequencyWheel(
                     selected = selected,
                     optionLabel = { frequency -> frequencyLabels.getValue(frequency) },
                     onValueCommitted = onValueCommitted,
+                    onDetent = onDetent,
                     label = stringResource(R.string.gps_update_frequency_label),
                     wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
                     cornerRadius = 14.dp,
                     optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
                     optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                    showDragHint = false,
+                    showDragHint = true,
                     accentColor = colors.accentBlue,
                     enabled = enabled,
                     emphasized = emphasized,
