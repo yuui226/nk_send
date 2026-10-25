@@ -471,15 +471,14 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 40.dp
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
 
-// 主筛选与日期编辑共用固定宽度，切页时不横向重排面板。
-// 筛选内容包含五列类型按钮和三列日期波轮：手机上尽量利用横向空间，宽屏则封顶，
-// 避免固定窄面板挤压标签，也避免平板上横向铺得过散。
-// Keep the panel just wide enough for the fixed rating row: 14dp content padding on both sides,
-// the 81dp switch, its 8dp gap, and five 30dp stars with 1dp gaps. This makes the last star's
-// trailing margin identical to the right margin of the full-width “未传” chip row, without
-// changing the panel width when the rating controls crossfade.
-private val FILTER_PANEL_MAX_WIDTH = 14.dp * 2 + 81.dp + 8.dp + (30.dp * 5) + (1.dp * 4)
+// 主筛选与日期编辑共用宽度：标准内容宽 272dp，类型最多五列，标记三列。
+// 评级右侧固定容纳五颗星，左侧吸收窄屏差额；开关和切页都不改变面板宽度。
+private val FILTER_PANEL_MAX_WIDTH = 300.dp
 private val FILTER_PANEL_SCREEN_MARGIN = 12.dp
+private val FILTER_PANEL_CONTENT_PADDING = 14.dp
+private val FILTER_CONTROL_GAP = 8.dp
+private val FILTER_COMPACT_CONTROL_HEIGHT = 34.dp
+private val FILTER_RATING_CONTROLS_WIDTH = (30.dp * 5) + (1.dp * 4)
 private val DATE_FILTER_WHEEL_HEIGHT = 50.dp
 
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
@@ -4556,6 +4555,8 @@ private fun FilterOverlay(
     val panelTop = with(density) { anchorBounds.bottom.toDp() } + 8.dp
     val panelStart = ((screenWidth - panelWidth) / 2f)
         .coerceAtLeast(FILTER_PANEL_SCREEN_MARGIN)
+    val panelMaxHeight = (LocalConfiguration.current.screenHeightDp.dp - panelTop - 20.dp)
+        .coerceAtLeast(100.dp)
 
     // 外部“一键清除”发生时同步丢弃面板草稿，不能让旧日期范围继续存活。
     var working by remember(current) { mutableStateOf(current) }
@@ -4603,6 +4604,11 @@ private fun FilterOverlay(
             },
             label = "filterDateEditor",
         ) { showDateEditor ->
+            // 每一页保留独立的滚动状态；矮屏下日期页也不能超出可用高度。
+            val pageModifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = panelMaxHeight)
+                .verticalScroll(rememberScrollState())
             if (showDateEditor) {
                 DateRangeEditor(
                     current = working.dateRange,
@@ -4613,13 +4619,11 @@ private fun FilterOverlay(
                         commit(working.copy(dateRange = range))
                         editingDate = false
                     },
+                    modifier = pageModifier,
                 )
             } else {
                 Column(
-                    modifier = Modifier
-                        .heightIn(max = (LocalConfiguration.current.screenHeightDp.dp - panelTop - 20.dp).coerceAtLeast(100.dp))
-                        .verticalScroll(rememberScrollState())
-                        .padding(14.dp),
+                    modifier = pageModifier.padding(FILTER_PANEL_CONTENT_PADDING),
                 ) {
                     // ---- 类型：全部 + 各扩展名，短标签最多五列，保持原有多选语义 ----
                     val typeChips: List<Triple<String, Boolean, () -> Unit>> = buildList {
@@ -4633,9 +4637,9 @@ private fun FilterOverlay(
                         }
                     }
                     val typeColumnCount = minOf(5, typeChips.size.coerceAtLeast(1))
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                         typeChips.chunked(typeColumnCount).forEach { rowChips ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                                 rowChips.forEach { (label, selected, onClick) ->
                                     key(label) {
                                         AnimatedVisibility(
@@ -4658,7 +4662,7 @@ private fun FilterOverlay(
                     FilterSectionDivider()
 
                     // ---- 标记：保护 / 连拍 / 未传输（独立开关，与日期和类型叠加）----
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                         if (showProtectionFilter) {
                             FilterChip(
                                 label = stringResource(R.string.filter_protected),
@@ -4696,9 +4700,9 @@ private fun FilterOverlay(
                         FilterSectionLabel(
                             label = stringResource(R.string.filter_section_storage),
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(FILTER_CONTROL_GAP))
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                             storageSlots.forEach { slot ->
                                 FilterChip(
                                     label = stringResource(R.string.filter_storage_slot, slot),
@@ -4742,7 +4746,7 @@ private fun FilterOverlay(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP),
                     ) {
                         FilterChip(
                             label = when {
@@ -4759,7 +4763,7 @@ private fun FilterOverlay(
                                 ))
                             },
                             modifier = Modifier
-                                .width(81.dp)
+                                .weight(1f)
                                 .graphicsLayer {
                                     alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
                                 },
@@ -4774,17 +4778,20 @@ private fun FilterOverlay(
                         Box(
                             // Keep the five stars at a fixed compact width. A weighted slot can
                             // become narrower on small screens and clip the last star.
-                            modifier = Modifier.width(154.dp).height(34.dp),
+                            modifier = Modifier
+                                .width(FILTER_RATING_CONTROLS_WIDTH)
+                                .height(FILTER_COMPACT_CONTROL_HEIGHT),
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             Crossfade(
                                 targetState = working.ratingEnabled,
                                 animationSpec = tween(180),
+                                modifier = Modifier.fillMaxSize(),
                                 label = "ratingControlsFade",
                             ) { enabled ->
                                 if (!enabled) {
                                     Row(
-                                        modifier = Modifier.height(34.dp),
+                                        modifier = Modifier.fillMaxSize(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -4804,29 +4811,26 @@ private fun FilterOverlay(
                                             onValueCommitted = { days -> commit(working.copy(ratingDays = days)) },
                                             onDetent = haptics::tick,
                                             label = stringResource(R.string.filter_rating_range_label),
-                                            wheelHeight = 34.dp,
+                                            wheelHeight = FILTER_COMPACT_CONTROL_HEIGHT,
                                             optionFontSize = 12.sp,
                                             optionFontWeight = FontWeight.Medium,
                                             cornerRadius = 10.dp,
                                             showDragHint = false,
-                                            // Match the compact status-chip width; the remaining
-                                            // slot is reserved for the help button and star row.
-                                            modifier = Modifier.width(81.dp),
+                                            // 与星级行右缘对齐，范围拨轮占满灯泡左侧余量。
+                                            modifier = Modifier.weight(1f),
                                         )
                                         TipLightbulbButton(
                                             onClick = { showRatingTip = true },
                                             contentDescription = stringResource(R.string.filter_rating_help_title),
                                             modifier = Modifier
-                                                .size(34.dp)
+                                                .size(FILTER_COMPACT_CONTROL_HEIGHT)
                                                 .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
                                         )
                                     }
                                 } else {
                                     val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
                                     Row(
-                                        modifier = Modifier
-                                            .width(154.dp)
-                                            .height(34.dp),
+                                        modifier = Modifier.fillMaxSize(),
                                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -4854,7 +4858,10 @@ private fun FilterOverlay(
 
                     FilterSectionDivider()
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         FilterChip(
                             label = compactDateRangeLabel(working.dateRange)
                                 ?: stringResource(R.string.filter_date),
@@ -4928,7 +4935,7 @@ private fun FilterClearButton(onClick: () -> Unit) {
         onClick = onClick,
         shape = RoundedCornerShape(9.dp),
         color = colors.surfaceVariant,
-        modifier = Modifier.size(38.dp),
+        modifier = Modifier.size(FILTER_COMPACT_CONTROL_HEIGHT),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
@@ -4948,6 +4955,7 @@ private fun DateRangeEditor(
     hapticsEnabled: Boolean,
     onBack: () -> Unit,
     onApply: (PhotoDateRange?) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     val haptics = rememberHaptics(hapticsEnabled)
@@ -4972,11 +4980,11 @@ private fun DateRangeEditor(
     val years = remember(minYear, maxYear) { (minYear..maxYear).toList() }
 
     Column(
-        modifier = Modifier.padding(14.dp),
+        modifier = modifier.padding(FILTER_PANEL_CONTENT_PADDING),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(FILTER_COMPACT_CONTROL_HEIGHT)) {
                 Icon(
                     Icons.Default.ArrowBack,
                     contentDescription = stringResource(R.string.cd_back),
@@ -5009,7 +5017,7 @@ private fun DateRangeEditor(
             onDetent = haptics::tick,
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
             GlassButton(
                 onClick = { onApply(null) },
                 modifier = Modifier.weight(1f).height(40.dp),
@@ -5066,7 +5074,7 @@ private fun DateEndpointWheels(
                 color = colors.onSurfaceVariant,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
             ReleaseCommitWheel(
                 options = years,
                 selected = date.year,

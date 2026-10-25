@@ -268,8 +268,8 @@
     <string name="photo_frame_effect_shadow">阴影</string>
     <string name="photo_frame_effect_outline">描边</string>
     <string name="photo_filter">照片滤镜</string>
-    <string name="photo_effects">滤镜·LUT·边框·水印</string>
-    <string name="photo_effects_editor_title">效果</string>
+    <string name="photo_effects">照片效果</string>
+    <string name="photo_effects_editor_title">照片效果</string>
     <string name="photo_effects_open_editor">编辑照片效果</string>
     <string name="photo_effects_info_title">照片效果说明</string>
     <string name="photo_effects_info_description">仅处理 JPG/JPEG，原图保留，效果图另存；RAW 和视频不生效。调整用于后续入队照片。</string>
@@ -561,7 +561,7 @@
     <string name="update_manual_copied">请手动更新，已复制到剪贴板</string>
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">打开下载页</string>
-    <string name="local_photo_effects_entry">滤镜·LUT·边框·水印</string>
+    <string name="local_photo_effects_entry">照片效果</string>
     <string name="local_photo_effects_info_description">可多选照片，共用当前效果，效果图另存。</string>
     <string name="local_photo_effects_exif_hint">边框：截图等无 EXIF 的图片不显示拍摄参数</string>
     <string name="local_photo_effects_gesture_hint">点击放大，左右滑动换图；长按对比调色与颗粒效果。</string>
@@ -703,7 +703,7 @@
     <string name="filter_rating_help_title">评级筛选</string>
     <string name="filter_rating_range_all">全部</string>
     <string name="filter_rating_range_days">%1$d日</string>
-    <string name="filter_rating_range_label">范围</string>
+    <string name="filter_rating_range_label">评级加载范围</string>
     <string name="filter_rating_waiting">等待中</string>
     <string name="filter_rating_help_description">开启会加载范围内的评级数据，实现按评级筛选功能。重新开启可重新加载最新评级数据。</string>
     <string name="filter_rating_off">关闭</string>

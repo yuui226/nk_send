@@ -268,7 +268,7 @@
     <string name="photo_frame_effect_shadow">Shadow</string>
     <string name="photo_frame_effect_outline">Outline</string>
     <string name="photo_filter">Photo filter</string>
-    <string name="photo_effects">Filter · LUT · Frame · Watermark</string>
+    <string name="photo_effects">Effects</string>
     <string name="photo_effects_editor_title">Effects</string>
     <string name="photo_effects_open_editor">Edit photo effects</string>
     <string name="photo_effects_info_title">About photo effects</string>
@@ -564,7 +564,7 @@
     <string name="update_manual_copied">Update manually. Copied to clipboard</string>
     <string name="update_failure_manual">%1$s. %2$s</string>
     <string name="update_open_download_page">Open download page</string>
-    <string name="local_photo_effects_entry">Filter · LUT · Frame · Watermark</string>
+    <string name="local_photo_effects_entry">Effects</string>
     <string name="local_photo_effects_info_description">Select multiple photos to apply the same effects. Edited photos are saved as new copies.</string>
     <string name="local_photo_effects_exif_hint">Frame: Images without EXIF data, such as screenshots, won’t show shooting details</string>
     <string name="local_photo_effects_gesture_hint">Tap to enlarge, swipe between photos, and hold to compare color and grain effects.</string>
@@ -706,7 +706,7 @@
     <string name="filter_rating_help_title">Star rating</string>
     <string name="filter_rating_range_all">all</string>
     <string name="filter_rating_range_days">%1$d days</string>
-    <string name="filter_rating_range_label">Range</string>
+    <string name="filter_rating_range_label">Rating load range</string>
     <string name="filter_rating_waiting">Waiting</string>
     <string name="filter_rating_help_description">Enable to load ratings in the selected range and filter photos by rating. Turn it off and on again to reload the latest ratings.</string>
     <string name="filter_rating_off">Off</string>
