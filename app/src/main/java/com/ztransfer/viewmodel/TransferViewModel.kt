@@ -391,6 +391,20 @@ data class ActiveTransferProgress(
     val retainedBytesPerSecond: Long = 0L,
 )
 
+/** Complete the display snapshot even when a fast download finished before its first speed sample. */
+internal fun ActiveTransferProgress?.withCompletedDownload(
+    completedTaskId: Long,
+    downloaded: Long,
+    bytesPerSecond: Long,
+): ActiveTransferProgress? = if (this?.taskId == completedTaskId) {
+    copy(
+        fraction = 1f,
+        downloaded = downloaded,
+        bytesPerSecond = bytesPerSecond,
+        retainedBytesPerSecond = retainLastValidTransferSpeed(retainedBytesPerSecond, bytesPerSecond),
+    )
+} else this
+
 internal fun TransferTask.withActiveProgress(
     active: ActiveTransferProgress?,
 ): TransferTask = if (active?.taskId == taskId && status == TransferStatus.TRANSFERING) {
@@ -2872,10 +2886,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
                                         val elapsed = android.os.SystemClock.elapsedRealtime() -
                                             stats.startedAtElapsedMs
-                                        val endToEndMBps = endToEndBytesPerSecond(
+                                        val completedBytesPerSecond = endToEndBytesPerSecond(
                                             transferredBytes = stats.transferredBytes,
                                             elapsedMs = elapsed,
-                                        ) / (1024f * 1024f)
+                                        )
+                                        val endToEndMBps = completedBytesPerSecond / (1024f * 1024f)
+                                        // USB 小文件可能在首次速度采样前传完。补齐已落盘文件的
+                                        // 真实统计，下一张也能沿用速度；只更新显示，不等待动画。
+                                        lastValidTransferSpeed = retainLastValidTransferSpeed(
+                                            previous = lastValidTransferSpeed,
+                                            sample = completedBytesPerSecond,
+                                        )
+                                        _activeTransferProgress.update { active ->
+                                            active.withCompletedDownload(
+                                                completedTaskId = taskId,
+                                                downloaded = stats.bytes,
+                                                bytesPerSecond = completedBytesPerSecond,
+                                            )
+                                        }
                                         // 免费额度按"真正传输完成"计数(此处是唯一完成点;
                                         // 跳过/续传改名捷径都不经过这里,不计)。
                                         LicenseManager.recordTransferDone()

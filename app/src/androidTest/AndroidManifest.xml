@@ -41,4 +41,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.gps.GpsLifecycleInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.TransferFocusInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>

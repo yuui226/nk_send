@@ -112,6 +112,11 @@
     <!-- 传输队列 -->
     <string name="status_waiting">等待</string>
     <string name="queue_pill_generating">生成中</string>
+    <string name="queue_focus_waiting_transfer">等待传输</string>
+    <string name="queue_summary_idle">空闲</string>
+    <string name="queue_summary_paused">已暂停</string>
+    <string name="queue_summary_download_remaining">剩余传输 %1$d 项</string>
+    <string name="queue_summary_generation_remaining">剩余生成 %1$d 项</string>
     <string name="status_generation_duration">生成 %1$s</string>
     <string name="status_skipped">跳过</string>
     <string name="status_cancelled">已取消</string>
@@ -336,7 +341,7 @@
 
     <!-- 传输错误 -->
     <string name="error_dir_invalid">传输目录已失效，请重新选择</string>
-    <string name="error_camera_connection_lost">相机连接中断，重连后重试可续传</string>
+    <string name="error_camera_connection_lost">相机连接中断，重连后重试</string>
     <string name="error_camera_metadata_unavailable">无法读取相机照片信息，请重试</string>
     <string name="error_create_file">无法创建文件</string>
     <string name="error_open_file">无法打开文件</string>

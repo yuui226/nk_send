@@ -4811,6 +4811,9 @@ class NikonCamera(private val context: Context) {
             // FHD / EXIF 让路的时间都属于用户实际等待时间，实时速度必须使用这条时间线。
             val startTime = android.os.SystemClock.elapsedRealtime()
             var lastProgressTime = startTime
+            // USB files can finish between two UI samples. This only publishes already-read
+            // byte counters more often; it does not add PTP requests or change chunk sizes.
+            val progressIntervalMs = if (connectionType == CameraConnectionType.USB) 100L else 200L
 
             fun buildStats(): DownloadStats {
                 return DownloadStats(
@@ -4833,7 +4836,7 @@ class NikonCamera(private val context: Context) {
 
             fun emitProgress(total: Long, force: Boolean = false) {
                 val now = android.os.SystemClock.elapsedRealtime()
-                if (force || now - lastProgressTime >= 200L) {
+                if (force || now - lastProgressTime >= progressIntervalMs) {
                     onProgress?.invoke(progressSnapshot(total, now))
                     lastProgressTime = now
                 }

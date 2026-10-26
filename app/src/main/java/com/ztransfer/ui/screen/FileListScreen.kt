@@ -75,6 +75,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -431,35 +432,6 @@ internal fun queueExecutionControl(
     isTransferring -> QueueExecutionControl.PAUSE
     waitingCount > 0 -> QueueExecutionControl.START
     else -> null
-}
-
-@Composable
-private fun AnimatedQueuePillCount(
-    count: Int,
-    color: Color,
-    label: String,
-    modifier: Modifier = Modifier,
-) {
-    AnimatedContent(
-        modifier = modifier,
-        targetState = count,
-        transitionSpec = {
-            val dir = if (targetState < initialState) 1 else -1
-            (slideInVertically { it / 2 * dir } + fadeIn(tween(160)))
-                .togetherWith(
-                    slideOutVertically { -it / 2 * dir } + fadeOut(tween(120)),
-                )
-                .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
-        },
-        label = label,
-    ) { value ->
-        Text(
-            text = "$value",
-            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-            color = color,
-            fontWeight = FontWeight.Bold,
-        )
-    }
 }
 
 /** 队列入口收起为普通按钮时使用固定材质种子，保证木纹/金属微纹在重组后保持一致。 */
@@ -2340,54 +2312,43 @@ fun FileListScreen(
 internal data class QueuePillTaskSummary(
     val downloadRemaining: Int,
     val generationRemaining: Int,
-    val activeDownloadTaskId: Long?,
-    val activeProgressTaskId: Long?,
+    val activeDownloadTask: TransferTask?,
     val hasActive: Boolean,
-    val hasCancelled: Boolean,
 )
 
 /** 单次遍历生成胶囊所需的低频队列摘要；高频进度重组期间直接复用。 */
 internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSummary {
     var downloadRemaining = 0
     var generationRemaining = 0
-    var activeDownloadTaskId: Long? = null
-    var firstGeneratingTaskId: Long? = null
-    var firstWaitingTaskId: Long? = null
-    var hasCancelled = false
+    var activeDownloadTask: TransferTask? = null
 
     tasks.forEach { task ->
         when (task.status) {
             TransferStatus.WAITING -> {
-                downloadRemaining++
-                if (firstWaitingTaskId == null) firstWaitingTaskId = task.taskId
+                if (!task.isGeneratingFrame) downloadRemaining++
             }
             TransferStatus.TRANSFERING -> {
                 // Crop tasks remain TRANSFERING until crop/effects finish; the network
                 // download has already ended once their generation stage starts.
                 if (!task.isGeneratingFrame) {
                     downloadRemaining++
-                    if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
+                    if (activeDownloadTask == null) activeDownloadTask = task
                 }
             }
-            TransferStatus.CANCELLED -> hasCancelled = true
+            TransferStatus.CANCELLED,
             TransferStatus.COMPLETED,
             TransferStatus.FAILED -> Unit
         }
         if (task.isGeneratingFrame) {
             generationRemaining++
-            if (firstGeneratingTaskId == null) firstGeneratingTaskId = task.taskId
         }
     }
 
     return QueuePillTaskSummary(
         downloadRemaining = downloadRemaining,
         generationRemaining = generationRemaining,
-        activeDownloadTaskId = activeDownloadTaskId,
-        activeProgressTaskId = activeDownloadTaskId
-            ?: firstGeneratingTaskId
-            ?: firstWaitingTaskId,
-        hasActive = activeDownloadTaskId != null || generationRemaining > 0,
-        hasCancelled = hasCancelled,
+        activeDownloadTask = activeDownloadTask,
+        hasActive = activeDownloadTask != null || generationRemaining > 0,
     )
 }
 
@@ -2517,10 +2478,16 @@ fun QueuePill(
     onClick: () -> Unit,
     // 显示层押扣:飞行中的"整组包裹"承载的文件数,落袋前不计入读数
     //（数字在包裹到达时才跳上去);实际队列不受影响,仅影响本胶囊显示。
-    heldCount: Int = 0
+    heldCount: Int = 0,
+    visible: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     val liveProgress by activeProgressFlow.collectAsStateWithLifecycle()
+    val widthAnim = remember { Animatable(0f).apply { updateBounds(lowerBound = 0f) } }
+    val animateContents by remember(visible) {
+        derivedStateOf { visible || widthAnim.value > 0f }
+    }
     val taskSummary = remember(transferState.tasks) {
         summarizeQueuePillTasks(transferState.tasks)
     }
@@ -2535,9 +2502,10 @@ fun QueuePill(
     // still follows the real task state: that temporary zero uses the icon, never the Done state.
     val allDone = downloadRemaining == 0 && generationRemaining == 0
     val transferring = transferState.isTransferring
-    val activeProgress = liveProgress?.takeIf {
-        it.taskId == taskSummary.activeDownloadTaskId
-    }
+    val downloadDisplay = rememberQueueDownloadDisplay(
+        transferState.tasks, taskSummary.activeDownloadTask, liveProgress,
+        animate = animateContents,
+    )
     // Keep the last valid batch speed across the short preparation gap between two files.
     val activeSpeed = liveProgress?.retainedBytesPerSecond ?: 0L
     val activeSpeedText = activeSpeed
@@ -2559,40 +2527,33 @@ fun QueuePill(
             else -> false
         }
     }
-    // "done → 图标" 的转场只由"传输中 → 全部完成"触发。prevAllDone 初值取当前 allDone：
-    // 若进入本页时已是完成态（例如从队列页返回），不再闪 done，直接显示图标（无转场动画）。
-    var showDoneLabel by remember { mutableStateOf(false) }
-    var prevAllDone by remember { mutableStateOf(allDone) }
-    // 本轮队列是否真的下载过（用于完成震动：纯"已存在跳过"的瞬时完成不震）。
-    var sawTransfer by remember { mutableStateOf(false) }
-    var finishProgressVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(hasActive) {
-        if (hasActive) sawTransfer = true
+    // Evaluate each structural snapshot once. Committing the reducer below must not consume
+    // its event again on route, width, speed or timer recompositions. Only this batch's
+    // observed outcomes count; old failed/cancelled history cannot suppress a new success.
+    var completionState by remember { mutableStateOf(QueueCompletionState()) }
+    val completionUpdate = remember(transferState.tasks) {
+        queueCompletionUpdate(completionState, transferState.tasks)
     }
-    // 取消导致的"归零"不是完成：不闪 done、不震成功震（否则取消后出现庆祝反馈，误导）。
-    // sawTransfer 在每次归零时都复位，取消那轮的记录不能污染下一轮的完成判定。
-    val hasCancelled = taskSummary.hasCancelled
+    var showDoneLabel by remember { mutableStateOf(false) }
+    var doneNonce by remember { mutableLongStateOf(0L) }
     // Keep the active pill mounted on the very first completion frame, before the effect runs.
     // Otherwise it briefly becomes GlassButton, destroying AnimatedContent before Done appears.
-    val completionPending = allDone && !prevAllDone && !hasCancelled
-    LaunchedEffect(allDone) {
-        val justCompleted = allDone && !prevAllDone
-        // Commit the edge before suspension; a new task may cancel the Done hold at any time.
-        prevAllDone = allDone
-        if (!allDone) {
+    val completionPending = completionState != completionUpdate.nextState &&
+        completionUpdate.completion?.showDone == true
+    LaunchedEffect(transferState.tasks) {
+        completionState = completionUpdate.nextState
+        if (!allDone) showDoneLabel = false
+        completionUpdate.completion?.let { feedback ->
+            showDoneLabel = feedback.showDone
+            if (feedback.showDone) doneNonce++
+            if (feedback.celebrate) haptics.success()
+        }
+    }
+    // Unrelated terminal metadata updates must not cancel the timeout and leave Done stuck.
+    LaunchedEffect(showDoneLabel, doneNonce) {
+        if (showDoneLabel) {
+            delay(1800)
             showDoneLabel = false
-            finishProgressVisible = false
-        } else if (justCompleted) {
-            val celebrate = !hasCancelled && sawTransfer
-            sawTransfer = false
-            finishProgressVisible = celebrate
-            if (!hasCancelled) {
-                if (celebrate) haptics.success()
-                showDoneLabel = true
-                delay(1800)
-                showDoneLabel = false
-            }
-            finishProgressVisible = false
         }
     }
     // 尚无飞行卡片落袋时显示默认图标而不是数字 0；这条优先于 PAUSED，确保“选完再传”
@@ -2601,28 +2562,18 @@ fun QueuePill(
         actualRemaining = downloadRemaining,
         heldCount = heldCount,
     )
+    // A successful visible download gets its own short finish even if another task or its
+    // following generation failed. Include the frame before the display effect runs.
+    val finishingDownload = downloadDisplay.completing || queueDownloadCompletedTask(
+        downloadDisplay.task?.taskId, taskSummary.activeDownloadTask, transferState.tasks,
+    ) != null
     val collapsedToIcon = allRemainingTasksAreInFlight ||
-        (mode != PillMode.PAUSED && (
-            (allDone && !showDoneLabel && !completionPending) || (!allDone && !countingVisible)
+        (!finishingDownload && mode != PillMode.PAUSED && (
+            (allDone && !showDoneLabel && !completionPending) ||
+                // Actual work and the previous file's finish hold take effect in this frame,
+                // before the countingVisible effect; otherwise a fast handoff flashes the icon.
+                (!allDone && !countingVisible && !hasActive)
         ))
-
-    // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
-    // 完成后仍能从当前位置顺滑补满，而不是因“当前任务”瞬间消失而重建动画。
-    var retainedProgressTaskId by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(taskSummary.activeProgressTaskId) {
-        taskSummary.activeProgressTaskId?.let { retainedProgressTaskId = it }
-    }
-    val barFraction = when {
-        allDone && (finishProgressVisible || (completionPending && sawTransfer)) -> 1f
-        allDone -> 0f // 静止图标态不预热动画，避免下一轮等待阶段错误继承满格。
-        activeProgress != null -> activeProgress.fraction
-        generationRemaining > 0 -> 1f
-        else -> 0f
-    }
-    val animatedBar = rememberSmoothTransferProgress(
-        targetProgress = barFraction,
-        resetKey = taskSummary.activeProgressTaskId ?: retainedProgressTaskId,
-    )
 
     // 普通按钮与胶囊共用同一条宽度弹簧。切换材质实现时右缘仍固定，只向左平滑伸缩，
     // 不会因为图标态改用 GlassButton 而丢掉原先的胶囊变形手感。
@@ -2631,7 +2582,6 @@ fun QueuePill(
     var activeQueueMaxWidthPx by remember { mutableStateOf(0) }
     var measuredWidthKey by remember { mutableStateOf<QueuePillWidthKey?>(null) }
     val collapsedWidthPx = with(density) { 40.dp.toPx() } // 22dp 图标 + 左右各 9dp
-    val widthAnim = remember { Animatable(0f) }
     var firstMeasure by remember { mutableStateOf(true) }
     val stableContentWidthPx = if (
         mode == PillMode.COUNTING && measuredWidthKey == widthKey
@@ -2640,9 +2590,10 @@ fun QueuePill(
     } else {
         contentWidthPx
     }
-    val targetWidthPx = if (collapsedToIcon) collapsedWidthPx else stableContentWidthPx.toFloat()
-    LaunchedEffect(targetWidthPx) {
-        if (targetWidthPx > 0f) {
+    val naturalWidthPx = if (collapsedToIcon) collapsedWidthPx else stableContentWidthPx.toFloat()
+    val targetWidthPx = if (visible) naturalWidthPx else 0f
+    LaunchedEffect(targetWidthPx, visible) {
+        if (!visible || targetWidthPx > 0f) {
             if (firstMeasure) {
                 widthAnim.snapTo(targetWidthPx)
                 firstMeasure = false
@@ -2652,25 +2603,30 @@ fun QueuePill(
         }
     }
 
+    // Route changes use this same width spring, not a second visibility animation. Keep the
+    // content measured at its natural width so hidden speed/count changes are ready on return.
+    val widthModifier = if (!firstMeasure || !visible) {
+        Modifier.width(with(density) { widthAnim.value.toDp() })
+    } else Modifier
+    val pillModifier = modifier.height(36.dp).then(widthModifier).graphicsLayer {
+        // Normal data-driven changes stay opaque; only the final few pixels fade at zero.
+        alpha = if (firstMeasure && visible) 1f else
+            (widthAnim.value / with(density) { 8.dp.toPx() }).coerceIn(0f, 1f)
+    }
+
     // 图标态已经是普通入口按钮，不再沿用下方固定毛玻璃胶囊的手写 Surface。
     // 直接复用全局按钮组件后，毛玻璃、钛合金（含钢印）与随机稳定木纹都会自动生效；
     // 一旦出现 Done、速度或数量，仍回到原胶囊实现，不受按钮主题影响。
     if (collapsedToIcon) {
         GlassButton(
             onClick = onClick,
+            enabled = visible,
+            disabledAlpha = 1f,
             shape = RoundedCornerShape(22.dp),
             contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
             enforceMinimumTouchTarget = false,
             textureSeed = QUEUE_ENTRY_BUTTON_TEXTURE_SEED,
-            modifier = Modifier
-                .height(36.dp)
-                .then(
-                    if (widthAnim.value > 0f) {
-                        Modifier.width(with(density) { widthAnim.value.toDp() })
-                    } else {
-                        Modifier
-                    }
-                )
+            modifier = pillModifier,
         ) {
             Icon(
                 imageVector = Icons.Default.Checklist,
@@ -2692,27 +2648,24 @@ fun QueuePill(
     )
     Surface(
         onClick = onClick,
+        enabled = visible,
         shape = RoundedCornerShape(22.dp),
         color = colors.glassSurface,   // 毛玻璃半透明底（与 "Z传" 一致）
         shadowElevation = 4.dp,
         interactionSource = pillInteraction,
-        modifier = Modifier
-            .height(36.dp)
+        modifier = pillModifier
             .graphicsLayer {
                 scaleX = pillPressScale
                 scaleY = pillPressScale
             }
-            // 用动画宽度；首帧未测量时先按内容自适应，测到后即锁定为动画宽度。
-            .then(if (contentWidthPx > 0) Modifier.width(with(density) { widthAnim.value.toDp() }) else Modifier)
     ) {
         Box(contentAlignment = Alignment.CenterEnd) {
             // 1) 单文件进度填充（填满当前动画宽度；收起为图标后不显示）。
-            if (!allDone || finishProgressVisible || (completionPending && sawTransfer)) {
+            if (downloadDisplay.task != null && animateContents) {
                 LiquidProgressFill(
-                    progress = { animatedBar.value },
-                    waveEligible = taskSummary.activeDownloadTaskId != null ||
-                        finishProgressVisible,
-                    seedKey = taskSummary.activeProgressTaskId ?: retainedProgressTaskId,
+                    progress = { downloadDisplay.progress.value },
+                    waveEligible = animateContents,
+                    seedKey = downloadDisplay.task?.taskId,
                     color = colors.accentBlue.copy(alpha = 0.35f),
                     modifier = Modifier.matchParentSize(),
                 )
@@ -2752,20 +2705,24 @@ fun QueuePill(
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
                     AnimatedContent(
-                        targetState = Triple(mode, remaining, activeSpeedText),
-                        contentKey = { it.first },
+                        targetState = Triple(mode, remaining, activeSpeedText) to (showDoneLabel || completionPending),
+                        contentKey = { it.first.first },
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
                         // 否则容器 snap 到新宽度时，退场内容会从右对齐跳成左对齐（文字漂移）。
                         contentAlignment = Alignment.CenterEnd,
                         transitionSpec = {
-                            fadeIn(tween(220, delayMillis = 35))
-                                .togetherWith(fadeOut(tween(160)))
+                            val entering = if (animateContents) fadeIn(tween(220, delayMillis = 35))
+                                else androidx.compose.animation.EnterTransition.None
+                            val exiting = if (animateContents) fadeOut(tween(160))
+                                else androidx.compose.animation.ExitTransition.None
+                            entering.togetherWith(exiting)
                                 .using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> snap() }))
                         },
                         label = "pillContent"
-                    ) { (displayedMode, displayedCount, displayedSpeed) ->
+                    ) { (displayed, displayDoneLabel) ->
+                        val (displayedMode, displayedCount, displayedSpeed) = displayed
                         when (displayedMode) {
-                            PillMode.DONE ->
+                            PillMode.DONE -> if (displayDoneLabel) {
                                 Text(
                                     // 刻意不走字符串资源:所有语言统一显示 "Done"(短暂闪现的
                                     // 状态徽记,当装饰性标识处理,不参与本地化)。
@@ -2775,11 +2732,20 @@ fun QueuePill(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 16.dp)
                                 )
+                            } else {
+                                // Only a successful download's finish can keep this otherwise
+                                // collapsed state mounted. Preserve its width without claiming
+                                // the whole batch succeeded (e.g. another batch member failed).
+                                Spacer(Modifier.width(with(density) {
+                                    contentWidthPx.coerceAtLeast(collapsedWidthPx.toInt()).toDp()
+                                }))
+                            }
                             PillMode.PAUSED ->
                                 AnimatedQueuePillCount(
                                     count = displayedCount,
                                     color = colors.onBackground,
                                     label = "pausedCount",
+                                    animate = animateContents,
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                 )
                             PillMode.GENERATING ->
@@ -2798,6 +2764,7 @@ fun QueuePill(
                                         count = displayedCount,
                                         color = colors.onBackground,
                                         label = "generationCount",
+                                        animate = animateContents,
                                     )
                                 }
                             PillMode.COUNTING ->
@@ -2821,6 +2788,7 @@ fun QueuePill(
                                         count = displayedCount,
                                         color = colors.onBackground,
                                         label = "downloadCount",
+                                        animate = animateContents,
                                     )
                                 }
                         }

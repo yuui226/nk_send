@@ -25,6 +25,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.updateTransition
@@ -44,14 +45,20 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -83,6 +90,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -386,11 +394,11 @@ private fun BottomGlassHint(
 }
 
 /**
- * 照片列表与传输页共用同一个顶部队列控件实例。它位于 NavHost 之外，因此两页横向
- * 切换时不会随页面退场、重建并重播胶囊动画；只有点击语义随当前页面变化。
+ * 两页共用开始／暂停入口。胶囊常驻组合，只用自身宽度弹簧收起到零，保留计数与完成反馈。
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
-private fun SharedQueueControls(
+internal fun SharedQueueControls(
     route: String,
     transferViewModel: TransferViewModel,
     cameraViewModel: CameraViewModel,
@@ -416,6 +424,10 @@ private fun SharedQueueControls(
         isTransferring = transferState.isTransferring,
         waitingCount = waitingCount,
     )
+    val onFiles = route == Screen.Files.route
+    val showExecutionControl = executionControl != null && !(onFiles && filePreviewVisible)
+    val executionVisibility = remember { MutableTransitionState(showExecutionControl) }
+    executionVisibility.targetState = showExecutionControl
     var retainedExecutionControl by remember {
         mutableStateOf(executionControl ?: QueueExecutionControl.START)
     }
@@ -439,9 +451,12 @@ private fun SharedQueueControls(
     val catchScale = remember { Animatable(1f) }
     // Recreating the controls after monitor exit must not replay an old queue arrival.
     var lastAnimatedCatchNonce by remember { mutableLongStateOf(catchNonce) }
-    LaunchedEffect(catchNonce) {
-        if (catchNonce != lastAnimatedCatchNonce) {
-            lastAnimatedCatchNonce = catchNonce
+    LaunchedEffect(catchNonce, onFiles) {
+        val newArrival = catchNonce != lastAnimatedCatchNonce
+        lastAnimatedCatchNonce = catchNonce
+        if (!onFiles) {
+            catchScale.snapTo(1f)
+        } else if (newArrival) {
             catchScale.animateTo(1.18f, tween(110, easing = FastOutSlowInEasing))
             catchScale.animateTo(1f, Motion.bouncy())
         }
@@ -501,12 +516,10 @@ private fun SharedQueueControls(
                         scaleX = catchScale.value
                         scaleY = catchScale.value
                     },
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AnimatedVisibility(
-                    visible = executionControl != null &&
-                        !(route == Screen.Files.route && filePreviewVisible),
+                    visibleState = executionVisibility,
                     enter = fadeIn(tween(160)) + scaleIn(
                         initialScale = 0.72f,
                         animationSpec = Motion.bouncy(),
@@ -517,6 +530,8 @@ private fun SharedQueueControls(
                     ),
                 ) {
                     QueueExecutionButton(
+                        modifier = Modifier.testTag("shared_queue_execution")
+                            .semantics { testTagsAsResourceId = true },
                         control = retainedExecutionControl,
                         pauseRequested = transferState.pauseAfterCurrent,
                         startEnabled = cameraConnected || !waitingNeedsCamera,
@@ -539,23 +554,34 @@ private fun SharedQueueControls(
                     )
                 }
 
-                AnimatedVisibility(
-                    visible = route == Screen.Files.route || transferState.tasks.isNotEmpty(),
-                    enter = fadeIn() + scaleIn(initialScale = 0.6f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.6f),
-                ) {
-                    QueuePill(
-                        transferState = transferState,
-                        activeProgressFlow = transferViewModel.activeTransferProgress,
-                        heldCount = heldCount,
-                        haptics = haptics,
-                        onClick = {
-                            if (route == Screen.Files.route) {
-                                onNavigateToTransfer()
-                            }
+                QueuePill(
+                    visible = onFiles,
+                    modifier = Modifier.testTag("shared_queue_pill")
+                        .semantics {
+                            testTagsAsResourceId = true
+                            if (!onFiles) invisibleToUser()
+                        }
+                        .layout { measurable, constraints ->
+                            // Keep spacing until the exiting button has actually disappeared.
+                            val maxGap = if (executionVisibility.currentState || executionVisibility.targetState ||
+                                !executionVisibility.isIdle)
+                                8.dp.roundToPx() else 0
+                            val child = measurable.measure(constraints.offset(horizontal = -maxGap).copy(minWidth = 0))
+                            // The real animated capsule width drives the gap too. One spring
+                            // moves the control to the right with no final spacing jump.
+                            val gap = (maxGap * (child.width / 40.dp.toPx()).coerceIn(0f, 1f)).roundToInt()
+                            layout(child.width + gap, child.height) { child.placeRelative(gap, 0) }
                         },
-                    )
-                }
+                    transferState = transferState,
+                    activeProgressFlow = transferViewModel.activeTransferProgress,
+                    heldCount = heldCount,
+                    haptics = haptics,
+                    onClick = {
+                        if (route == Screen.Files.route) {
+                            onNavigateToTransfer()
+                        }
+                    },
+                )
             }
         }
 
@@ -677,8 +703,8 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     }.collectAsState(
         initial = transferViewModel.state.value.toMainTransferUiState()
     )
-    // 两页共用的顶部队列控件及其入队反馈。状态放在 NavHost 外，切换照片页/传输页时
-    // 胶囊保持同一实例；文件页的飞行动画继续用根坐标落点和押扣计数。
+    // 执行控件及入队反馈状态保留在 NavHost 外；胶囊只在照片页显示。
+    // 照片页的飞行动画继续使用固定根坐标落点和押扣计数。
     var queueTargetBounds by remember { mutableStateOf<Rect?>(null) }
     var queueHeldCount by remember { mutableIntStateOf(0) }
     var queueCatchNonce by remember { mutableLongStateOf(0L) }

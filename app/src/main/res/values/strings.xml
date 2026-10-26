@@ -112,6 +112,11 @@
     <!-- Transfer queue -->
     <string name="status_waiting">Waiting</string>
     <string name="queue_pill_generating">Generating</string>
+    <string name="queue_focus_waiting_transfer">Waiting to transfer</string>
+    <string name="queue_summary_idle">Idle</string>
+    <string name="queue_summary_paused">Paused</string>
+    <string name="queue_summary_download_remaining">%1$d transfer tasks remaining</string>
+    <string name="queue_summary_generation_remaining">%1$d generation tasks remaining</string>
     <string name="status_generation_duration">Generation %1$s</string>
     <string name="status_skipped">Skipped</string>
     <string name="status_cancelled">Cancelled</string>
@@ -336,7 +341,7 @@
 
     <!-- Transfer errors -->
     <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
-    <string name="error_camera_connection_lost">Camera connection lost — retry to resume after reconnecting</string>
+    <string name="error_camera_connection_lost">Camera disconnected. Reconnect and retry.</string>
     <string name="error_camera_metadata_unavailable">Could not read photo details from the camera. Please retry.</string>
     <string name="error_create_file">Couldn\'t create file</string>
     <string name="error_open_file">Couldn\'t open file</string>

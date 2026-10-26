@@ -3999,23 +3999,14 @@ private fun rememberGpsEntryAmbientAlpha(
         active -> 0.105f
         else -> 0.070f
     }
-    return if (breathing) {
-        val transition = rememberInfiniteTransition(label = "gpsEntryBreathing")
-        transition.animateFloat(
-            initialValue = if (active) 0.075f else 0.050f,
-            targetValue = if (active) 0.160f else 0.145f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(
-                    durationMillis = if (active) 2_400 else 2_800,
-                    easing = FastOutSlowInEasing,
-                ),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "gpsEntryFillAlpha",
-        )
-    } else {
-        rememberUpdatedState(restingAlpha)
-    }
+    return rememberAmbientBreathingAlpha(
+        breathing = breathing,
+        restingAlpha = restingAlpha,
+        minAlpha = if (active) 0.075f else 0.050f,
+        maxAlpha = if (active) 0.160f else 0.145f,
+        durationMillis = if (active) 2_400 else 2_800,
+        label = "gpsEntryBreathing",
+    )
 }
 
 @Composable

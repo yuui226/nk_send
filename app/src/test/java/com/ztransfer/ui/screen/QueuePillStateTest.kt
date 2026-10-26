@@ -171,14 +171,13 @@ class QueuePillStateTest {
 
         assertEquals(2, summary.downloadRemaining)
         assertEquals(1, summary.generationRemaining)
-        assertEquals(active.taskId, summary.activeDownloadTaskId)
-        assertEquals(active.taskId, summary.activeProgressTaskId)
+        assertEquals(active.taskId, summary.activeDownloadTask?.taskId)
+        assertEquals(active, summary.activeDownloadTask)
         assertEquals(true, summary.hasActive)
-        assertEquals(true, summary.hasCancelled)
     }
 
     @Test
-    fun completedTaskGeneratingAnEffectKeepsTheProgressOwnerAtFull() {
+    fun completedTaskGeneratingAnEffectDoesNotOwnDownloadProgress() {
         val generating = task(
             handle = 1,
             status = TransferStatus.COMPLETED,
@@ -189,7 +188,8 @@ class QueuePillStateTest {
 
         assertEquals(0, summary.downloadRemaining)
         assertEquals(1, summary.generationRemaining)
-        assertEquals(generating.taskId, summary.activeProgressTaskId)
+        assertEquals(null, summary.activeDownloadTask)
+        assertEquals(null, summary.activeDownloadTask?.taskId)
         assertEquals(true, summary.hasActive)
     }
     @Test
@@ -198,13 +198,47 @@ class QueuePillStateTest {
         val summary = summarizeQueuePillTasks(listOf(crop))
         assertEquals(0, summary.downloadRemaining)
         assertEquals(1, summary.generationRemaining)
-        assertEquals(null, summary.activeDownloadTaskId)
-        assertEquals(crop.taskId, summary.activeProgressTaskId)
+        assertEquals(null, summary.activeDownloadTask?.taskId)
+        assertEquals(null, summary.activeDownloadTask)
         assertEquals(PillMode.GENERATING, queuePillMode(summary.downloadRemaining, summary.generationRemaining))
         val next = task(handle = 2, status = TransferStatus.TRANSFERING)
         val concurrent = summarizeQueuePillTasks(listOf(crop, next))
         assertEquals(1, concurrent.downloadRemaining)
-        assertEquals(next.taskId, concurrent.activeDownloadTaskId)
+        assertEquals(next.taskId, concurrent.activeDownloadTask?.taskId)
+    }
+
+    @Test
+    fun pausedDownloadsStayPausedWhileGenerationChangesIdentity() {
+        val waiting = task(handle = 1, status = TransferStatus.WAITING)
+        for (handle in 2..4) {
+            val generating = task(handle, TransferStatus.COMPLETED, isGeneratingFrame = true)
+            val summary = summarizeQueuePillTasks(listOf(waiting, generating))
+            assertEquals(1, summary.downloadRemaining)
+            assertEquals(1, summary.generationRemaining)
+            assertEquals(null, summary.activeDownloadTask)
+            assertEquals(PillMode.PAUSED,
+                queuePillMode(summary.downloadRemaining, summary.generationRemaining, paused = true))
+        }
+    }
+
+    @Test
+    fun waitingGenerationDoesNotAlsoCountAsWaitingDownload() {
+        val preparing = task(handle = 1, status = TransferStatus.WAITING, isGeneratingFrame = true)
+        val summary = summarizeQueuePillTasks(listOf(preparing))
+        assertEquals(0, summary.downloadRemaining)
+        assertEquals(1, summary.generationRemaining)
+        assertEquals(null, summary.activeDownloadTask)
+    }
+
+    @Test
+    fun generationCompletionDoesNotCreateADownloadOwner() {
+        val generating = task(handle = 1, status = TransferStatus.COMPLETED, isGeneratingFrame = true)
+        val finished = generating.copy(isGeneratingFrame = false)
+        assertEquals(null, summarizeQueuePillTasks(listOf(generating)).activeDownloadTask)
+        val summary = summarizeQueuePillTasks(listOf(finished))
+        assertEquals(null, summary.activeDownloadTask)
+        assertEquals(false, summary.hasActive)
+        assertEquals(PillMode.DONE, queuePillMode(summary.downloadRemaining, summary.generationRemaining))
     }
 
 }

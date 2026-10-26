@@ -112,6 +112,11 @@
     <!-- 傳輸佇列 -->
     <string name="status_waiting">等待</string>
     <string name="queue_pill_generating">產生中</string>
+    <string name="queue_focus_waiting_transfer">等待傳輸</string>
+    <string name="queue_summary_idle">閒置</string>
+    <string name="queue_summary_paused">已暫停</string>
+    <string name="queue_summary_download_remaining">剩餘傳輸 %1$d 項</string>
+    <string name="queue_summary_generation_remaining">剩餘產生 %1$d 項</string>
     <string name="status_generation_duration">產生 %1$s</string>
     <string name="status_skipped">跳過</string>
     <string name="status_cancelled">已取消</string>
@@ -332,7 +337,7 @@
 
     <!-- 傳輸錯誤 -->
     <string name="error_dir_invalid">傳輸目錄已失效，請重新選擇</string>
-    <string name="error_camera_connection_lost">相機連線中斷，重連後重試可續傳</string>
+    <string name="error_camera_connection_lost">相機連線中斷，重連後重試</string>
     <string name="error_camera_metadata_unavailable">無法讀取相機照片資訊，請重試</string>
     <string name="error_create_file">無法建立檔案</string>
     <string name="error_open_file">無法開啟檔案</string>
