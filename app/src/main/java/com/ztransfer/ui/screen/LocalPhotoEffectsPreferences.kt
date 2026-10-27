@@ -21,7 +21,8 @@ import com.ztransfer.effects.decodePhotoFilterIntensities
 import com.ztransfer.effects.encodeFavoriteFrameEffects
 import com.ztransfer.effects.encodeFavoritePhotoFilters
 import com.ztransfer.effects.encodePhotoFilterIntensities
-import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.isCustomPhotoFilterCatalogKey
+import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.frame.PhotoFramePreset
@@ -87,17 +88,17 @@ internal fun normalizeLocalPhotoEffectsSettings(
     } ?: PhotoFrameWatermarkContent.TEXT
     val validFilterId = settings.filterId?.takeIf(availableFilterIds::contains)
     val validCatalogKeys = availableFilterIds
-        .map { filterId -> BuiltInPhotoFilters.catalogKey(filterId) ?: filterId }
+        .map { filterId -> photoFilterCatalogKey(filterId) ?: filterId }
         .toSet()
     val filterIntensities = settings.filterIntensities
         .mapNotNull { (key, intensity) ->
-            key.takeIf(validCatalogKeys::contains)
+            key.takeIf { it in validCatalogKeys || isCustomPhotoFilterCatalogKey(it) }
                 ?.let { it to normalizePhotoFilterIntensity(intensity) }
         }
         .toMap()
         .toMutableMap()
     val currentCatalogKey = validFilterId?.let { filterId ->
-        BuiltInPhotoFilters.catalogKey(filterId) ?: filterId
+        photoFilterCatalogKey(filterId) ?: filterId
     }
     val currentIntensity = currentCatalogKey
         ?.let(filterIntensities::get)
@@ -121,7 +122,7 @@ internal fun normalizeLocalPhotoEffectsSettings(
         filterIntensityPercent = currentIntensity,
         filterIntensities = filterIntensities,
         favoritePhotoFilters = settings.favoritePhotoFilters
-            .filter { it.catalogKey in validCatalogKeys }
+            .filter { it.catalogKey in validCatalogKeys || isCustomPhotoFilterCatalogKey(it.catalogKey) }
             .distinctBy { it.catalogKey },
         favoriteFrameEffects = settings.favoriteFrameEffects
             .distinctBy { it.framePreset },
@@ -196,7 +197,7 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
             .copy(grain = restoredGrain.settings, grainIntensities = restoredGrain.intensities)
         val availableFilterIdSet = availableFilterIds.toSet()
         val validCatalogKeys = availableFilterIds
-            .map { filterId -> BuiltInPhotoFilters.catalogKey(filterId) ?: filterId }
+            .map { filterId -> photoFilterCatalogKey(filterId) ?: filterId }
             .toSet()
         if (!preferences.contains(KEY_VERSION)) {
             return normalize(

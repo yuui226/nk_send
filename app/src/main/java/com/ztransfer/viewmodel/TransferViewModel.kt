@@ -76,9 +76,13 @@ import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.Np3PhotoFilterParameters
+import com.ztransfer.filter.PhotoNp3Store
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+import com.ztransfer.filter.isCustomPhotoFilterCatalogKey
 import com.ztransfer.filter.normalizePhotoFilterIntensity
+import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.supportsVideoResume
 import com.ztransfer.protocol.CameraConnectionType
@@ -1166,9 +1170,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }?.forEach { it.deleteRecursively() }
         }
         val dir = prefs.getString("transfer_dir", null)
-        val restoredPhotoFilters = BuiltInPhotoFilters.all
+        val np3Store = PhotoNp3Store(getApplication<Application>())
+        // Both editors receive their saved recipe before local preferences validate selected IDs.
+        val restoredPhotoFilters = (BuiltInPhotoFilters.all + listOfNotNull(
+            np3Store.restore("transfer"), np3Store.restore("local"),
+        )).distinctBy { it.id }
         val validPhotoFilterCatalogKeys = restoredPhotoFilters
-            .mapNotNull { BuiltInPhotoFilters.catalogKey(it.id) }
+            .mapNotNull { photoFilterCatalogKey(it.id) }
             .toSet()
         val decodedFavoritePhotoFilters = decodeFavoritePhotoFilters(
             prefs.getString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, null),
@@ -1184,7 +1192,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val restoredPhotoFilterIntensities = buildMap {
             if (prefs.contains("photo_filter_intensity")) {
                 restoredPhotoFilterId
-                    ?.let(BuiltInPhotoFilters::catalogKey)
+                    ?.let(::photoFilterCatalogKey)
                     ?.let { catalogKey ->
                         put(
                             catalogKey,
@@ -1443,7 +1451,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     prefs.getBoolean("photo_filter_enabled", false),
                 selectedPhotoFilterId = restoredPhotoFilterId,
                 photoFilterIntensityPercent = restoredPhotoFilterId
-                    ?.let(BuiltInPhotoFilters::catalogKey)
+                    ?.let(::photoFilterCatalogKey)
                     ?.let(restoredPhotoFilterIntensities::get)
                     ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
                 transferPhotoFilterIntensities = restoredPhotoFilterIntensities,
@@ -1614,6 +1622,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             snapshot.photoFilterEnabled && next.showsPhotoEffect(PhotoEffectModule.FILTER),
             snapshot.photoLut.takeIf { next.showsPhotoEffect(PhotoEffectModule.LUT) },
             com.ztransfer.lut.PhotoLutStore(getApplication()).uri("transfer"),
+            PhotoNp3Store(getApplication<Application>()).uri("transfer"),
         )
         val border = snapshot.photoFrameBorderEnabled && next.showsPhotoEffect(PhotoEffectModule.FRAME)
         val watermark = snapshot.photoFrameWatermarkEnabled && next.showsPhotoEffect(PhotoEffectModule.WATERMARK)
@@ -1763,7 +1772,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun toggleFavoritePhotoFilter(filterId: String) {
-        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId) ?: return
+        val catalogKey = photoFilterCatalogKey(filterId) ?: return
         val current = _state.value.favoritePhotoFilters
         val updated = if (current.any { it.catalogKey == catalogKey }) {
             current.filterNot { it.catalogKey == catalogKey }
@@ -1774,7 +1783,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun rememberTransferPhotoFilterIntensity(filterId: String, intensityPercent: Int) {
-        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId) ?: return
+        val catalogKey = photoFilterCatalogKey(filterId) ?: return
         val intensity = normalizePhotoFilterIntensity(intensityPercent)
         val state = _state.value
         val intensities = state.transferPhotoFilterIntensities + (catalogKey to intensity)
@@ -1844,17 +1853,36 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(favoriteFrameEffects = favorites) }
     }
 
+    /** Register a parsed recipe without changing either editor's current selection. */
+    fun registerPhotoFilter(preset: PhotoFilterPreset) {
+        val canonical = BuiltInPhotoFilters.all.firstOrNull { it.id == preset.id } ?: run {
+            val key = photoFilterCatalogKey(preset.id) ?: return
+            if (!isCustomPhotoFilterCatalogKey(key)) return
+            val parameters = preset.parameters as? Np3PhotoFilterParameters ?: return
+            preset.copy(parameters = parameters.copy(
+                colorBands = parameters.colorBands.toList(), toneCurve = parameters.toneCurve?.copyOf(),
+            ))
+        }
+        _state.update { state ->
+            if (state.photoFilters.any { it.id == canonical.id }) state
+            else state.copy(photoFilters = state.photoFilters + canonical)
+        }
+    }
+
     fun setPhotoFilterConfiguration(
         selectedId: String?,
         intensityPercent: Int,
         enabled: Boolean,
         lut: PhotoFilterSelection? = null,
         lutUri: String? = null,
+        np3Uri: String? = null,
     ) {
-        val validId = selectedId?.takeIf { id -> _state.value.photoFilters.any { it.id == id } }
+        val selectedPreset = _state.value.photoFilters.firstOrNull { it.id == selectedId }
+        val validId = selectedPreset?.id
         val intensity = normalizePhotoFilterIntensity(intensityPercent)
         val active = enabled && validId != null && lut == null
         com.ztransfer.lut.PhotoLutStore(getApplication()).save("transfer", lut, lutUri)
+        PhotoNp3Store(getApplication<Application>()).save("transfer", selectedPreset, np3Uri)
         validId?.let { rememberTransferPhotoFilterIntensity(it, intensity) }
         prefs.edit().apply {
             if (validId == null) remove("photo_filter_selected_id")

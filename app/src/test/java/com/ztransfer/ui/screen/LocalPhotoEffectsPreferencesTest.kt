@@ -4,6 +4,7 @@ import com.ztransfer.grain.PhotoGrainSettings
 import com.ztransfer.grain.PhotoGrainStyle
 import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
 import com.ztransfer.effects.PhotoEffectModule
+import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -15,6 +16,54 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LocalPhotoEffectsPreferencesTest {
+    @Test fun savedCustomSnapshotKeepsSelectionAndUsesItsStableIntensityKey() {
+        val key = "np3:${"a".repeat(64)}"
+        val id = "$key:np3-srgb-v1"
+        val settings = defaultLocalPhotoEffectsSettings(id).copy(
+            filterEnabled = true,
+            filterIntensityPercent = 80,
+            filterIntensities = mapOf(key to 43),
+            favoritePhotoFilters = listOf(FavoritePhotoFilter(key)),
+        )
+        val restored = normalizeLocalPhotoEffectsSettings(settings, setOf(id)) { false }
+        assertEquals(id, restored.filterId)
+        assertEquals(true, restored.filterEnabled)
+        assertEquals(44, restored.filterIntensityPercent)
+        assertEquals(mapOf(key to 44), restored.filterIntensities)
+        assertEquals(settings.favoritePhotoFilters, restored.favoritePhotoFilters)
+    }
+
+    @Test fun missingCustomSnapshotDisablesSelectionButKeepsItsPreferenceMemory() {
+        val key = "np3:${"b".repeat(64)}"
+        val settings = defaultLocalPhotoEffectsSettings("$key:np3-srgb-v1").copy(
+            filterEnabled = true,
+            filterIntensities = mapOf(key to 60, "missing" to 20, "np3:bad" to 30),
+            favoritePhotoFilters = listOf(FavoritePhotoFilter(key), FavoritePhotoFilter("missing"),
+                FavoritePhotoFilter("np3:bad"), FavoritePhotoFilter(key)),
+        )
+        val restored = normalizeLocalPhotoEffectsSettings(settings, setOf("forest")) { false }
+        assertNull(restored.filterId)
+        assertFalse(restored.filterEnabled)
+        assertEquals(mapOf(key to 60), restored.filterIntensities)
+        assertEquals(listOf(FavoritePhotoFilter(key)), restored.favoritePhotoFilters)
+    }
+
+    @Test fun hidingTheFilterModuleKeepsCustomMemoriesWithoutReenablingTheEffect() {
+        val key = "np3:${"c".repeat(64)}"
+        val id = "$key:np3-srgb-v1"
+        val original = defaultLocalPhotoEffectsSettings(id).copy(
+            filterEnabled = true, filterIntensities = mapOf(key to 26),
+            favoritePhotoFilters = listOf(FavoritePhotoFilter(key)),
+        )
+        val hidden = applyLocalPhotoEffectModuleVisibility(original,
+            ALL_PHOTO_EFFECT_MODULES xor PhotoEffectModule.FILTER.bit)
+        val shown = applyLocalPhotoEffectModuleVisibility(hidden, ALL_PHOTO_EFFECT_MODULES)
+        val restored = normalizeLocalPhotoEffectsSettings(shown, setOf(id)) { false }
+        assertFalse(restored.filterEnabled)
+        assertEquals(26, restored.filterIntensityPercent)
+        assertEquals(original.favoritePhotoFilters, restored.favoritePhotoFilters)
+    }
+
     @Test
     fun currentStyleAndOtherStyleMemoriesSurviveNormalizationAndModuleHiding() {
         val intensities = mapOf(PhotoGrainStyle.FINE to 30, PhotoGrainStyle.MEDIUM to 50,

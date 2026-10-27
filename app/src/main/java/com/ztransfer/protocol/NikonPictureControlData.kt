@@ -35,13 +35,13 @@ internal class NikonPictureControlData private constructor(
             require(format.supportsSize(bytes.size)) { "Unrecognized $format Picture Control dataset size: ${bytes.size}" }
             val source = bytes.copyOf()
             if (format == NikonPictureControlFormat.LEGACY_V2) return parseV2(item, source)
-            val empty = source.all { it == 0.toByte() }
-            if (empty) {
-                require(item in 201..209 && source.size == 36) { "Invalid empty Picture Control data" }
+            val base = (source[0].toInt() and 255) or ((source[1].toInt() and 255) shl 8)
+            // Z8 MTP §9.9.1 defines an unused custom slot by BasePictureControl=0.
+            // Its unused name/adjustment/curve bytes need not be zero-filled.
+            if (base == 0) {
+                require(item in NIKON_PICTURE_CONTROL_SLOTS) { "Invalid empty Picture Control data" }
                 return NikonPictureControlData(item, 0, "", true, format, null, source)
             }
-            val base = (source[0].toInt() and 255) or ((source[1].toInt() and 255) shl 8)
-            require(base != 0) { "Missing Picture Control base" }
             val name = parseName(source.copyOfRange(2, 22))
             val curve = when (source[35].toInt() and 255) {
                 0 -> { require(source.size == 36) { "Unexpected data after Picture Control header" }; null }

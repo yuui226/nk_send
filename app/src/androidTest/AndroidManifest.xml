@@ -31,7 +31,11 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.lut.LutStateInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.filter.PhotoNp3StateInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.PresetCategoryInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.PhotoNp3EditorInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.presets.PictureControlFolderInstrumentation"
         android:targetPackage="com.ztransfer.debug" />

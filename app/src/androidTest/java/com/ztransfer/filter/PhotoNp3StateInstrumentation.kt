@@ -1,0 +1,237 @@
+package com.ztransfer.filter
+
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Context
+import android.net.Uri
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.SystemClock
+import com.ztransfer.R
+import com.ztransfer.presets.PresetFile
+import com.ztransfer.presets.PresetFolderException
+import com.ztransfer.presets.PresetFolderFailure
+import com.ztransfer.presets.PresetFolderSnapshot
+import com.ztransfer.presets.PresetIoQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+
+/** Production draft + serial queue, using real Android URI/cancellation with delayed provider reads. */
+class PhotoNp3StateInstrumentation : Instrumentation() {
+    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+
+    override fun onStart() {
+        val report = Bundle()
+        val raw = targetContext.getSharedPreferences("photo_np3_state_test", Context.MODE_PRIVATE)
+        raw.edit().clear().commit()
+        val store = PhotoNp3Store(raw)
+        val source = FakeSource()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        var state: PhotoNp3EditorState? = null
+        try {
+            checkPreviewAndExportPixels()
+            val a = PresetFile(Uri.parse("content://np3-test/document/a"), "A.NP3", 100, 1)
+            val b = PresetFile(Uri.parse("content://np3-test/document/b"), "B.np3", 100, 1)
+            val original = recipe('a')
+            val other = recipe('b')
+            val changed = recipe('c')
+            val notices = mutableListOf<Int>()
+            val selections = mutableListOf<Pair<String, Boolean>>()
+            var unavailable = 0
+            var ownerEnabled = false
+            var ownerActive = true
+            source.files = listOf(a, b)
+            store.folders.replaceFolder(Uri.parse("content://np3-test/tree/folder"), false)
+            val editor = main {
+                PhotoNp3EditorState(store, source, "transfer", null, scope,
+                    onSelected = { preset, explicit ->
+                        selections += preset.id to explicit
+                        if (explicit) ownerEnabled = true
+                    },
+                    onUnavailable = { unavailable++; ownerEnabled = false },
+                    notice = { notices += it },
+                    selectionAllowed = { ownerActive },
+                ).also { state = it; it.refresh() }
+            }
+            await { !editor.loading }
+            main { editor.choose(a) }
+            source.nextRead().also { check(it.file == a) }.result.complete(Result.success(original))
+            await { !editor.loading }
+            main {
+                check(editor.selectedPreset == original.preset && editor.selectedUri == a.uri)
+                check(selections == listOf(original.preset.id to true) && ownerEnabled)
+                store.save("transfer", original.preset, a.uri.toString())
+            }
+
+            // A rejected new file never destroys the last successfully applied recipe.
+            main { editor.choose(b) }
+            source.nextRead().result.complete(Result.failure(PhotoNp3Exception(PhotoNp3Failure.INVALID, "fixture")))
+            await { !editor.loading }
+            main {
+                check(editor.selectedPreset == original.preset && editor.selectedUri == a.uri)
+                check(selections.size == 1 && notices.last() == R.string.photo_np3_invalid)
+            }
+
+            // Slow providers may ignore cancellation. Their late result must still be discarded.
+            main { editor.choose(b) }
+            val cancelled = source.nextRead()
+            main { editor.cancelPending() }
+            cancelled.result.complete(Result.success(other))
+            drain()
+            main {
+                check(editor.selectedPreset == original.preset && editor.selectedUri == a.uri)
+                check(selections.size == 1 && editor.pendingUri == null)
+            }
+
+            // Pager visibility can change before Compose runs the cancellation effect.
+            main { editor.choose(b) }
+            val offscreen = source.nextRead()
+            main { ownerActive = false }
+            offscreen.result.complete(Result.success(other))
+            drain()
+            main {
+                check(editor.selectedPreset == original.preset && editor.selectedUri == a.uri)
+                check(selections.size == 1)
+                ownerActive = true
+            }
+
+            // A complete scan failure is not evidence that the source has been removed.
+            source.scanError = PresetFolderException(PresetFolderFailure.READ)
+            main { editor.refresh() }
+            await { !editor.loading }
+            main {
+                check(editor.files == listOf(a, b) && editor.selectedPreset == original.preset)
+                check(unavailable == 0 && editor.failure == PresetFolderFailure.READ)
+            }
+            source.scanError = null
+
+            // Refresh applies changed source bytes without pretending the user enabled the filter.
+            main { ownerEnabled = false; editor.refresh() }
+            source.nextRead().also { check(it.file == a) }.result.complete(Result.success(changed))
+            await { !editor.loading }
+            main {
+                check(editor.selectedPreset == changed.preset && editor.selectedUri == a.uri)
+                check(selections.last() == (changed.preset.id to false) && !ownerEnabled)
+                check(editor.knownPresetId(a.uri) == changed.preset.id)
+            }
+            val count = main { selections.size }
+            main { editor.refresh() }
+            source.nextRead().result.complete(Result.success(changed))
+            await { !editor.loading }
+            main { check(selections.size == count && !ownerEnabled) }
+
+            // Only a successful complete directory snapshot may confirm disappearance.
+            source.files = listOf(b)
+            main { editor.refresh() }
+            await { !editor.loading }
+            main {
+                check(editor.selectedPreset == null && editor.selectedUri == null && unavailable == 1)
+                check(store.savedId("transfer") == original.preset.id && store.restore("transfer") != null)
+            }
+
+            // Off/hidden must also invalidate an in-flight explicit selection.
+            main { editor.choose(b) }
+            val hidden = source.nextRead()
+            main { editor.off() }
+            hidden.result.complete(Result.success(other))
+            drain()
+            main {
+                check(editor.selectedPreset == null && editor.selectedUri == null)
+                check(selections.size == count && !ownerEnabled)
+            }
+            report.putString("result", "PASS: preview/export pixels and restored recipe, explicit/passive choices, unchanged refresh, failure retention, cancellation/late results, inactive owner, confirmed deletion, hidden pending selection")
+            finish(Activity.RESULT_OK, report)
+        } catch (failure: Throwable) {
+            report.putString("failure", failure.stackTraceToString())
+            finish(Activity.RESULT_CANCELED, report)
+        } finally {
+            main { state?.close(); scope.cancel() }
+            raw.edit().clear().commit()
+        }
+    }
+
+    private fun checkPreviewAndExportPixels() {
+        val preset = recipe('e').preset.let { original ->
+            original.copy(parameters = (original.parameters as Np3PhotoFilterParameters).copy(
+                contrast = 18, highlights = -20, saturation = 35,
+                colorBands = PHOTO_FILTER_COLOR_BAND_CENTERS.mapIndexed { index, center ->
+                    PhotoFilterColorBand(center, index * 4 - 12, index * 6 - 15, 10 - index * 3)
+                },
+            ))
+        }
+        val restored = PhotoNp3SnapshotCodec.decode(PhotoNp3SnapshotCodec.encode(preset))
+        val pixels = IntArray(64 * 64) { i ->
+            android.graphics.Color.rgb(i * 17 % 256, i * 31 % 256, i * 43 % 256)
+        }
+        val source = android.graphics.Bitmap.createBitmap(pixels, 64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+        val export = source.copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+        var preview: android.graphics.Bitmap? = null
+        try {
+            preview = PhotoFilterRenderer.render(source, PhotoFilterSelection(preset, 72))
+            PhotoFilterRenderer.renderInPlace(export, PhotoFilterSelection(restored, 72))
+            val a = IntArray(pixels.size)
+            val b = IntArray(pixels.size)
+            preview.getPixels(a, 0, 64, 0, 0, 64, 64)
+            export.getPixels(b, 0, 64, 0, 0, 64, 64)
+            check(a.contentEquals(b)) { "Restored NP3 export differs from preview" }
+            check(!a.contentEquals(pixels)) { "Non-neutral NP3 did not change pixels" }
+        } finally {
+            preview?.recycle(); export.recycle(); source.recycle()
+        }
+    }
+
+    private fun recipe(digest: Char): ParsedPhotoNp3 {
+        val hash = digest.toString().repeat(64)
+        return ParsedPhotoNp3(hash, PhotoFilterPreset("np3:$hash:np3-srgb-v1", "Fixture $digest",
+            Np3PhotoFilterParameters(0, 0, 0, 0, 0, 0,
+                PHOTO_FILTER_COLOR_BAND_CENTERS.map { PhotoFilterColorBand(it, 0, 0, 0) })),
+            ignoredDetailControls = false)
+    }
+
+    private fun <T> main(block: () -> T): T {
+        var value: Result<T>? = null
+        runOnMainSync { value = runCatching(block) }
+        return checkNotNull(value).getOrThrow()
+    }
+
+    private fun await(condition: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + 4000
+        while (!main(condition)) {
+            check(SystemClock.uptimeMillis() < deadline) { "NP3 state did not settle" }
+            SystemClock.sleep(10)
+        }
+    }
+
+    private fun drain() {
+        val done = CountDownLatch(1)
+        main { PresetIoQueue.submit({ Unit }) { done.countDown() } }
+        check(done.await(4, TimeUnit.SECONDS)) { "NP3 IO queue did not settle" }
+    }
+
+    private class FakeSource : PhotoNp3Source {
+        data class Read(val file: PresetFile,
+            val result: CompletableDeferred<Result<ParsedPhotoNp3>> = CompletableDeferred())
+        val reads = Channel<Read>(Channel.UNLIMITED)
+        @Volatile var files = emptyList<PresetFile>()
+        @Volatile var scanError: Exception? = null
+        override suspend fun scan(uri: Uri, replacing: Boolean, signal: CancellationSignal): PresetFolderSnapshot {
+            scanError?.let { throw it }
+            return PresetFolderSnapshot(files, false)
+        }
+        override suspend fun read(file: PresetFile, signal: CancellationSignal): ParsedPhotoNp3 {
+            val pending = Read(file)
+            reads.send(pending)
+            return pending.result.await().getOrThrow()
+        }
+        override fun releaseGrant(uri: Uri) = Unit
+        fun nextRead() = runBlocking { withTimeout(4000) { reads.receive() } }
+    }
+}

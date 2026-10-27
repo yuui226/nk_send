@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="photo_filter_folder">滤镜目录</string>
+    <string name="photo_filter_folder_hint">选择含 .np3 文件的文件夹，支持一层子文件夹作为分类。可读取部分灵活色彩预设，照片效果为近似模拟，与机内效果可能不同。</string>
+    <string name="photo_filter_folder_empty">目录中没有 NP3 文件</string>
+    <string name="photo_np3_invalid">NP3 文件无效</string>
+    <string name="photo_np3_unsupported">暂不支持此 NP3 预设</string>
+    <string name="photo_np3_too_large">NP3 文件过大</string>
+    <string name="photo_np3_read_failed">无法读取预设</string>
+    <string name="photo_np3_read_timeout">读取预设超时</string>
+    <string name="photo_filter_category_all">全部</string>
+    <string name="photo_filter_category_favorites">收藏</string>
+    <string name="photo_filter_category_landscape">风景</string>
+    <string name="photo_filter_category_portrait">人像</string>
+    <string name="photo_filter_category_monochrome">黑白</string>
+    <string name="photo_filter_category_film">胶片</string>
+    <string name="photo_filter_category_cinematic">电影</string>
+    <string name="photo_filter_category_color">色彩</string>
+</resources>

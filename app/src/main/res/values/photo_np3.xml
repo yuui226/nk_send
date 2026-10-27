@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="photo_filter_folder">Filter folder</string>
+    <string name="photo_filter_folder_hint">Choose a folder containing .np3 files. One level of subfolders is used as categories. Supported Flexible Color presets are simulated on the photo; results may differ from the camera.</string>
+    <string name="photo_filter_folder_empty">No NP3 files in this folder</string>
+    <string name="photo_np3_invalid">Invalid NP3 file</string>
+    <string name="photo_np3_unsupported">This NP3 preset is not supported yet</string>
+    <string name="photo_np3_too_large">NP3 file is too large</string>
+    <string name="photo_np3_read_failed">Could not read the preset</string>
+    <string name="photo_np3_read_timeout">Preset read timed out</string>
+    <string name="photo_filter_category_all">All</string>
+    <string name="photo_filter_category_favorites">Favorites</string>
+    <string name="photo_filter_category_landscape">Landscape</string>
+    <string name="photo_filter_category_portrait">Portrait</string>
+    <string name="photo_filter_category_monochrome">Monochrome</string>
+    <string name="photo_filter_category_film">Film</string>
+    <string name="photo_filter_category_cinematic">Cinema</string>
+    <string name="photo_filter_category_color">Color</string>
+</resources>

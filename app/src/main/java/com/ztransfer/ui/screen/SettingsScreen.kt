@@ -179,6 +179,7 @@ import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterCategory
 import com.ztransfer.filter.orderForCategory
 import com.ztransfer.filter.PhotoFilterRenderer
+import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
@@ -374,8 +375,32 @@ fun SettingsOverlay(
         mutableIntStateOf(state.photoFilterIntensityPercent)
     }
     val photoLutDraft = rememberPhotoLutDraft("transfer", state.photoLut) { filterDraftEnabled = false }
+    val photoNp3Draft = rememberPhotoNp3Draft(
+        "transfer", state.photoFilters.firstOrNull { it.id == filterDraftId },
+        onSelected = { preset, explicit ->
+            viewModel.registerPhotoFilter(preset)
+            filterDraftId = preset.id
+            filterDraftIntensity = photoFilterCatalogKey(preset.id)
+                ?.let(viewModel.state.value.transferPhotoFilterIntensities::get)
+                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            // Refresh may update a saved recipe while it is switched off or a LUT is active.
+            if (explicit) {
+                photoLutDraft.off()
+                filterDraftEnabled = true
+            }
+        },
+        onUnavailable = { filterDraftEnabled = false; filterDraftId = null },
+    )
+    LaunchedEffect(filterDraftEnabled, visibleModules, photoLutDraft.selection) {
+        if (!filterDraftEnabled || !visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) || photoLutDraft.selection != null) {
+            photoNp3Draft.cancelPending()
+        }
+    }
     fun applyModuleVisibility(mask: Int) {
-        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) filterDraftEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) {
+            photoNp3Draft.cancelPending()
+            filterDraftEnabled = false
+        }
         if (!mask.showsPhotoEffect(PhotoEffectModule.GRAIN)) grainDraft = grainDraft.copy(enabled = false)
         if (!mask.showsPhotoEffect(PhotoEffectModule.LUT)) photoLutDraft.off()
         if (!mask.showsPhotoEffect(PhotoEffectModule.FRAME)) frameDraftBorderEnabled = false
@@ -463,6 +488,7 @@ fun SettingsOverlay(
             enabled = filterDraftEnabled && filterDraftId != null,
             lut = photoLutDraft.selection,
             lutUri = photoLutDraft.selectedUri?.toString(),
+            np3Uri = photoNp3Draft.sourceFor(filterDraftId),
         )
     }
     fun commitPhotoEffectsDraft() {
@@ -532,6 +558,7 @@ fun SettingsOverlay(
 
     AnchorPopup(
         anchorBounds = openingAnchorBounds,
+        onClosing = photoNp3Draft::cancelPending,
         onDismiss = {
             if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
             onDismiss()
@@ -604,6 +631,7 @@ fun SettingsOverlay(
         BackHandler(
             enabled = settingsPage != SettingsPage.MAIN && expandedEffectsPreview == null
         ) {
+            photoNp3Draft.cancelPending()
             if (effectsOnly) close()
             else {
                 if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
@@ -666,6 +694,7 @@ fun SettingsOverlay(
                     GlassBackButton(
                         onClick = {
                             focusManager.clearFocus()
+                            photoNp3Draft.cancelPending()
                             if (effectsOnly) close()
                             else {
                                 if (page == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
@@ -873,6 +902,9 @@ fun SettingsOverlay(
                 Spacer(Modifier.height(10.dp))
                 PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null) {
                     PhotoFilterEditor(
+                        np3 = photoNp3Draft,
+                        active = settingsPage == SettingsPage.EFFECTS &&
+                            visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null,
                         filters = state.photoFilters,
                         favoriteFilters = state.favoritePhotoFilters,
                         rememberedIntensities = state.transferPhotoFilterIntensities,
@@ -1241,7 +1273,7 @@ fun SettingsOverlay(
                 ?.takeIf { state.photoFilterEnabled }
                 ?.let {
                     listOf(
-                        photoFilterDisplayName(it),
+                        photoEffectFilterDisplayName(it),
                         stringResource(
                             R.string.photo_filter_intensity_summary,
                             state.photoFilterIntensityPercent,
@@ -1265,6 +1297,10 @@ fun SettingsOverlay(
                 filterDraftEnabled = state.photoFilterEnabled
                 grainDraft = state.photoGrain.normalized()
                 photoLutDraft.reset(state.photoLut, photoLutDraft.store.uri("transfer"))
+                photoNp3Draft.resetSelection(
+                    state.photoFilters.firstOrNull { it.id == filterDraftId },
+                    photoNp3Draft.store.uri("transfer"),
+                )
                 frameDraftDecorationEnabled = state.photoFrameEnabled
                 // 编辑草稿使用各子项的配置，不受照片效果总开关影响。
                 frameDraftBorderEnabled = state.photoFrameEnabled && state.photoFrameBorderEnabled
@@ -1691,189 +1727,6 @@ private fun PhotoEffectSummaryItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun PhotoFilterEditor(
-    filters: List<PhotoFilterPreset>,
-    favoriteFilters: List<FavoritePhotoFilter>,
-    rememberedIntensities: Map<String, Int>,
-    selectedId: String?,
-    enabled: Boolean,
-    intensityPercent: Int,
-    onDisabled: () -> Unit,
-    onSelected: (String) -> Unit,
-    onIntensityChanged: (String, Int) -> Unit,
-    onFavoriteToggled: (String) -> Unit,
-    hapticsEnabled: Boolean,
-) {
-    val colors = AppTheme.colors
-    val filterAccent = colors.accentBlue
-    val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
-    val haptics = rememberHaptics(hapticsEnabled)
-    var showFullChooser by rememberSaveable { mutableStateOf(false) }
-    var chooserCategory by rememberSaveable { mutableStateOf(PhotoFilterCategory.ALL.name) }
-    val selected = filters.firstOrNull { it.id == selectedId }
-    val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
-    val intensityChoices = remember { (100 downTo 2 step 2).toList() }
-    val favoriteByCatalogKey = favoriteFilters.associateBy { it.catalogKey }
-    val orderedFilters = orderWithFavorites(
-        items = filters,
-        favoriteKeys = favoriteFilters.map { it.catalogKey },
-        keyOf = { filter -> BuiltInPhotoFilters.catalogKey(filter.id) ?: filter.id },
-    )
-    val offLabel = stringResource(R.string.photo_filter_off_option)
-    val filterLabelsById = orderedFilters.associate { filter ->
-        filter.id to photoFilterDisplayName(filter)
-    }
-    val filterOptionIds: List<String?> = listOf(null) + orderedFilters.map { it.id }
-    val selectedOptionId = selectedId?.takeIf { enabled && it in filterLabelsById }
-    fun rememberedIntensity(filterId: String): Int {
-        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId)
-        return catalogKey?.let(rememberedIntensities::get)
-            ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
-    }
-    SettingsCard(
-        borderColor = filterAccent.copy(alpha = 0.24f),
-        tintColor = filterAccent,
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ReleaseCommitWheel(
-                options = filterOptionIds,
-                selected = selectedOptionId,
-                optionLabel = { filterId ->
-                    if (filterId == null) {
-                        offLabel
-                    } else {
-                        filterLabelsById[filterId].orEmpty()
-                    }
-                },
-                favoriteOption = { filterId ->
-                    filterId != null && BuiltInPhotoFilters.catalogKey(filterId)
-                        ?.let(favoriteByCatalogKey::containsKey) == true
-                },
-                favoriteIconColor = favoritePalette.activeIcon,
-                onValueCommitted = { filterId ->
-                    if (filterId == null) {
-                        onDisabled()
-                    } else {
-                        onSelected(filterId)
-                        onIntensityChanged(filterId, rememberedIntensity(filterId))
-                    }
-                },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.photo_filter),
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_COLOR_NAME_WEIGHT),
-                onLongClick = { showFullChooser = true },
-            )
-            ReleaseCommitWheel(
-                options = intensityChoices,
-                selected = normalizedIntensity,
-                optionLabel = { "$it%" },
-                onValueCommitted = { intensity ->
-                    selected?.takeIf { enabled }?.let { preset ->
-                        onIntensityChanged(preset.id, intensity)
-                    }
-                },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.photo_filter_intensity),
-                enabled = enabled && selected != null,
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
-            )
-            FavoriteToggleButton(
-                favorite = selected?.let { preset ->
-                    BuiltInPhotoFilters.catalogKey(preset.id)
-                        ?.let(favoriteByCatalogKey::containsKey)
-                } == true && enabled,
-                enabled = enabled && selected != null,
-                onClick = {
-                    selected?.let { preset ->
-                        haptics.tick()
-                        onFavoriteToggled(preset.id)
-                    }
-                },
-            )
-        }
-    }
-    if (showFullChooser) {
-        val category = PhotoFilterCategory.entries.firstOrNull { it.name == chooserCategory }
-            ?: PhotoFilterCategory.ALL
-        val favoriteKeys = favoriteFilters.map { it.catalogKey }
-        val chooserFilters = filters.orderForCategory(category, favoriteKeys) {
-            BuiltInPhotoFilters.catalogKey(it.id) ?: it.id
-        }
-        val dialogMaxHeight = (LocalConfiguration.current.screenHeightDp - 120).coerceIn(120, 440).dp
-        Dialog(onDismissRequest = { showFullChooser = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(
-                modifier = Modifier.padding(horizontal = 24.dp).width(320.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = colors.glassSurface.copy(alpha = .92f),
-                border = BorderStroke(1.dp, colors.glassPanelBorder),
-                shadowElevation = 6.dp,
-            ) {
-                Column(Modifier.padding(10.dp).heightIn(max = dialogMaxHeight)) {
-                    LutChooserHeader(off = !enabled,
-                        offLabel = stringResource(R.string.photo_filter_turn_off),
-                        onOff = { haptics.tick(); onDisabled(); showFullChooser = false })
-                    Row(Modifier.weight(1f, fill = false).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.36f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            items(PhotoFilterCategory.entries.size) { index ->
-                                val item = PhotoFilterCategory.entries[index]
-                                Surface(onClick = { chooserCategory = item.name },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (item == category) filterAccent.copy(alpha = .14f) else Color.Transparent,
-                                    modifier = Modifier.fillMaxWidth()) {
-                                    Text(item.title, style = MaterialTheme.typography.labelLarge,
-                                        color = if (item == category) filterAccent else colors.onSurfaceVariant,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp))
-                                }
-                            }
-                        }
-                        key(category) {
-                            val scroll = androidx.compose.foundation.lazy.rememberLazyListState(
-                                initialFirstVisibleItemIndex = chooserFilters.indexOfFirst {
-                                    enabled && it.id == selectedId
-                                }.coerceAtLeast(0))
-                            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.64f), state = scroll,
-                                verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                items(chooserFilters.size, key = { chooserFilters[it].id }) { index ->
-                                    val preset = chooserFilters[index]
-                                    val isSelected = enabled && preset.id == selectedId
-                                    val isFavorite = BuiltInPhotoFilters.catalogKey(preset.id) in favoriteKeys
-                                    Surface(onClick = {
-                                        haptics.tick()
-                                        onSelected(preset.id)
-                                        onIntensityChanged(preset.id, rememberedIntensity(preset.id))
-                                        showFullChooser = false
-                                    }, shape = RoundedCornerShape(8.dp),
-                                        color = if (isSelected) filterAccent.copy(alpha = .18f) else Color.Transparent,
-                                        modifier = Modifier.fillMaxWidth()) {
-                                        Text(photoFilterDisplayName(preset),
-                                            color = when {
-                                                isFavorite -> colors.accentYellow
-                                                isSelected -> filterAccent
-                                                else -> colors.onBackground
-                                            }, style = MaterialTheme.typography.labelLarge,
-                                            maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 internal fun nextPhotoFilterSelections(
     filters: List<PhotoFilterPreset>,
     favoriteCatalogKeys: List<String>,
@@ -1886,7 +1739,7 @@ internal fun nextPhotoFilterSelections(
     val ordered = orderWithFavorites(
         items = filters,
         favoriteKeys = favoriteCatalogKeys,
-        keyOf = { filter -> BuiltInPhotoFilters.catalogKey(filter.id) ?: filter.id },
+        keyOf = { filter -> photoFilterCatalogKey(filter.id) ?: filter.id },
     )
     val selectedIndex = ordered.indexOfFirst { it.id == selectedId }
     if (selectedIndex < 0 || selectedIndex == ordered.lastIndex) return emptyList()
@@ -1894,7 +1747,7 @@ internal fun nextPhotoFilterSelections(
         .drop(selectedIndex + 1)
         .take(count)
         .map { preset ->
-            val catalogKey = BuiltInPhotoFilters.catalogKey(preset.id) ?: preset.id
+            val catalogKey = photoFilterCatalogKey(preset.id) ?: preset.id
             PhotoFilterSelection(
                 preset = preset,
                 intensityPercent = rememberedIntensities[catalogKey]
@@ -1991,7 +1844,7 @@ internal fun FavoriteToggleButton(
 }
 
 @Composable
-private fun rememberPhotoEffectFavoriteButtonPalette(): PhotoEffectFavoriteButtonPalette {
+internal fun rememberPhotoEffectFavoriteButtonPalette(): PhotoEffectFavoriteButtonPalette {
     val colors = AppTheme.colors
     val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
     val buttonDark = colors.background.luminance() < 0.5f
@@ -2050,7 +1903,7 @@ private fun FittedRotatingBitmap(
 }
 
 @Composable
-private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
+internal fun photoEffectFilterDisplayName(filter: PhotoFilterPreset): String =
     BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 @Composable

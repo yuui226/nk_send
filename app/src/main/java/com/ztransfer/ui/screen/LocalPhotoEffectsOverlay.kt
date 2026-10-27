@@ -46,7 +46,8 @@ import com.ztransfer.R
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
 import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
-import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.photoFilterCatalogKey
+import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
@@ -67,7 +68,9 @@ import kotlinx.coroutines.delay
 fun LocalPhotoEffectsPage(
     viewModel: TransferViewModel,
     onNavigateUp: () -> Unit,
+    active: () -> Boolean = { true },
 ) {
+    val pageActive = active()
     val state by viewModel.state.collectAsState()
     val isPro by LicenseManager.isPro.collectAsState()
     val colors = AppTheme.colors
@@ -213,8 +216,44 @@ fun LocalPhotoEffectsPage(
     val photoLutDraft = rememberPhotoLutDraft("local", initialLut) {
         filterEnabled = false
     }
+    val photoNp3Draft = rememberPhotoNp3Draft(
+        "local", state.photoFilters.firstOrNull { it.id == filterId },
+        selectionAllowed = active,
+        onSelected = { imported, explicit ->
+            viewModel.registerPhotoFilter(imported)
+            filterId = imported.id
+            filterIntensity = photoFilterCatalogKey(imported.id)?.let(filterIntensities::get)
+                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            if (explicit && active()) {
+                photoLutDraft.off()
+                filterEnabled = true
+            }
+        },
+        onUnavailable = { filterEnabled = false; filterId = null },
+    )
+    LaunchedEffect(filterEnabled, visibleModules, photoLutDraft.selection) {
+        if (!filterEnabled || !visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) || photoLutDraft.selection != null) {
+            photoNp3Draft.cancelPending()
+        }
+    }
+    LaunchedEffect(pageActive) {
+        if (!pageActive) photoNp3Draft.cancelPending()
+    }
+    val currentNp3Preset = state.photoFilters.firstOrNull { it.id == filterId }
+    val currentNp3Uri = photoNp3Draft.sourceFor(filterId)
+    val latestNp3Preset by rememberUpdatedState(currentNp3Preset)
+    val latestNp3Uri by rememberUpdatedState(currentNp3Uri)
+    LaunchedEffect(currentNp3Preset, currentNp3Uri) {
+        photoNp3Draft.store.save("local", currentNp3Preset, currentNp3Uri)
+    }
+    DisposableEffect(photoNp3Draft) {
+        onDispose { photoNp3Draft.store.save("local", latestNp3Preset, latestNp3Uri) }
+    }
     fun applyModuleVisibility(mask: Int) {
-        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) filterEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) {
+            photoNp3Draft.cancelPending()
+            filterEnabled = false
+        }
         if (!mask.showsPhotoEffect(PhotoEffectModule.GRAIN)) grain = grain.copy(enabled = false)
         if (!mask.showsPhotoEffect(PhotoEffectModule.LUT)) photoLutDraft.off()
         if (!mask.showsPhotoEffect(PhotoEffectModule.FRAME)) borderEnabled = false
@@ -294,7 +333,7 @@ fun LocalPhotoEffectsPage(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     GlassButton(
-                        onClick = onNavigateUp,
+                        onClick = { photoNp3Draft.cancelPending(); onNavigateUp() },
                         modifier = Modifier.size(38.dp),
                         contentPadding = PaddingValues(0.dp),
                     ) {
@@ -418,6 +457,9 @@ fun LocalPhotoEffectsPage(
                 Spacer(Modifier.height(10.dp))
                 PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null) {
                     PhotoFilterEditor(
+                        np3 = photoNp3Draft,
+                        active = pageActive && visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) &&
+                            photoLutDraft.selection == null,
                         filters = state.photoFilters,
                         favoriteFilters = favoritePhotoFilters,
                         rememberedIntensities = filterIntensities,
@@ -432,12 +474,12 @@ fun LocalPhotoEffectsPage(
                         },
                         onIntensityChanged = { selectedFilterId, intensity ->
                             filterIntensity = intensity
-                            val catalogKey = BuiltInPhotoFilters.catalogKey(selectedFilterId)
+                            val catalogKey = photoFilterCatalogKey(selectedFilterId)
                                 ?: selectedFilterId
                             filterIntensities = filterIntensities + (catalogKey to intensity)
                         },
                         onFavoriteToggled = { selectedFilterId ->
-                            BuiltInPhotoFilters.catalogKey(selectedFilterId)?.let { catalogKey ->
+                            photoFilterCatalogKey(selectedFilterId)?.let { catalogKey ->
                                 favoritePhotoFilters = if (
                                     favoritePhotoFilters.any { it.catalogKey == catalogKey }
                                 ) {

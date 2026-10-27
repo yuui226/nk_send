@@ -48,6 +48,8 @@ internal fun interface PictureControlTransport {
 }
 
 internal enum class PictureControlSlotAvailability { OCCUPIED, EMPTY, UNREADABLE, UNSUPPORTED }
+private class PictureControlCommandException(val responseCode: Int, operation: Int) :
+    IllegalStateException("Picture Control op=0x%04X failed: 0x%04X".format(operation, responseCode))
 internal class PictureControlExposureModeException(program: Int, userMode: Int?) :
     IllegalStateException("Picture Control requires P/S/A/M: exposure=0x%04X userMode=%s".format(program, userMode))
 
@@ -56,10 +58,13 @@ internal data class PictureControlSlotInfo(
     val availability: PictureControlSlotAvailability,
     val name: String? = null,
     val hasOriginal: Boolean = false,
+    val selectable: Boolean = availability == PictureControlSlotAvailability.OCCUPIED,
 ) {
     val number: Int get() = slot - 200
     val readable: Boolean get() = availability == PictureControlSlotAvailability.OCCUPIED ||
         availability == PictureControlSlotAvailability.EMPTY
+    val editable: Boolean get() = readable &&
+        (availability == PictureControlSlotAvailability.EMPTY || selectable)
 }
 internal data class PictureControlOverview(
     val slots: List<PictureControlSlotInfo>, val selected: Int,
@@ -94,14 +99,16 @@ internal class NikonPictureControlAccess(
 
     private suspend fun command(code: Int, params: IntArray, data: ByteArray? = null): ByteArray? {
         val (rc, received) = pictureControlExchange(transport, sessionCheck, log, code, params, data)
-        check(rc == 0x2001) { "Picture Control op=0x%04X failed: 0x%04X".format(code, rc) }
+        if (rc != 0x2001) throw PictureControlCommandException(rc, code)
         return received
     }
 
     private suspend fun selectionDescriptor(): NikonPictureControlSelection =
         NikonPictureControlSelection.parse(requireNotNull(command(0x1014, intArrayOf(property))), property)
 
-    suspend fun prepareSelection() {
+    suspend fun prepareSelection() = prepareAccess(allowEmptyRegistration = false)
+
+    private suspend fun prepareAccess(allowEmptyRegistration: Boolean) {
         selectionPrepared = false
         writePrepared = false
         selection = null
@@ -109,7 +116,15 @@ internal class NikonPictureControlAccess(
             "Camera does not advertise Picture Control activation"
         }
         val descriptor = selectionDescriptor()
-        check(descriptor.writable && descriptor.supportsSlot(slot)) { "Camera does not expose writable C${slot - 200}" }
+        check(descriptor.writable) { "Camera does not expose writable Picture Control selection" }
+        // Newer bodies enumerate only registered custom controls. A missing choice is
+        // not proof that C1–C9 cannot be registered: confirm the exact empty slot by read.
+        // An occupied but currently unselectable slot remains protected (e.g. mode restrictions).
+        if (!descriptor.supportsSlot(slot)) {
+            check(allowEmptyRegistration && readData(slot, 0).isEmpty) {
+                "Camera does not expose selectable C${slot - 200} or a verified empty slot"
+            }
+        }
         requireAdjustableExposureMode()
         selection = descriptor
         selectionPrepared = true
@@ -132,8 +147,10 @@ internal class NikonPictureControlAccess(
 
     suspend fun prepare(dataset: ByteArray? = null) {
         writePrepared = false
+        selectionPrepared = false
+        selection = null
         check(writeOperations.all(operations::contains)) { "Camera does not advertise Picture Control editing" }
-        prepareSelection()
+        prepareAccess(allowEmptyRegistration = true)
         if (dataset != null) {
             val parsed = NikonPictureControlData.parseResponse(slot, 0x2001, dataset, format)
             check(parsed.baseItem in checkNotNull(selection).choices) { "Camera does not support this base Picture Control" }
@@ -159,21 +176,23 @@ internal class NikonPictureControlAccess(
             property, descriptor.writable, selected, descriptor.choices.joinToString()))
         val slots = NIKON_PICTURE_CONTROL_SLOTS.map { item ->
             val hasOriginal = runCatching { backup.load(cameraIdentity, item) != null }.getOrDefault(false)
-            if (!descriptor.supportsSlot(item)) {
-                log?.invoke("C${item - 200} UNSUPPORTED: absent from selection descriptor")
-                PictureControlSlotInfo(item, PictureControlSlotAvailability.UNSUPPORTED)
-            }
-            else try {
+            try {
+                // D200/D237 describe selectable items, not slot capacity. Read the
+                // documented C1–C9 IDs even when the camera omits unregistered entries.
                 val current = readData(item, 0)
-                log?.invoke("C${item - 200} ${if (current.isEmpty) "EMPTY" else "OCCUPIED name=${current.name}"}")
+                val selectable = !current.isEmpty && descriptor.supportsSlot(item)
+                log?.invoke("C${item - 200} ${if (current.isEmpty) "EMPTY" else "OCCUPIED name=${current.name}"} selectable=$selectable")
                 PictureControlSlotInfo(item,
                     if (current.isEmpty) PictureControlSlotAvailability.EMPTY else PictureControlSlotAvailability.OCCUPIED,
-                    current.name.takeUnless { current.isEmpty }, hasOriginal)
+                    current.name.takeUnless { current.isEmpty }, hasOriginal, selectable)
             } catch (error: CancellationException) { throw error }
             catch (error: IOException) { throw error } // Broken transport: do not issue eight more doomed reads.
             catch (error: Exception) {
-                log?.invoke("C${item - 200} READ_FAILED: ${error.javaClass.simpleName}: ${error.message}")
-                PictureControlSlotInfo(item, PictureControlSlotAvailability.UNREADABLE, hasOriginal = hasOriginal)
+                val unsupported = error is PictureControlCommandException &&
+                    error.responseCode in setOf(0x2005, 0x2006, 0x201D)
+                log?.invoke("C${item - 200} ${if (unsupported) "UNSUPPORTED" else "READ_FAILED"}: ${error.javaClass.simpleName}: ${error.message}")
+                PictureControlSlotInfo(item, if (unsupported) PictureControlSlotAvailability.UNSUPPORTED
+                    else PictureControlSlotAvailability.UNREADABLE, hasOriginal = hasOriginal)
             }
         }
         return PictureControlOverview(slots, selected,
@@ -233,7 +252,11 @@ internal class NikonPictureControlAccess(
     override suspend fun readSelection(): Long = readU16(property).toLong()
     override suspend fun select(value: Long) {
         check(selectionPrepared) { "Picture Control selection was not prepared" }
-        require(value in checkNotNull(selection).choices.map(Int::toLong)) { "Invalid Picture Control selection" }
+        // Registration/deletion/rollback can change the choices. Never authorize
+        // activation from the cached descriptor captured before a slot was written.
+        val descriptor = selectionDescriptor()
+        check(descriptor.writable) { "Picture Control selection is no longer writable" }
+        require(value in descriptor.choices.map(Int::toLong)) { "Invalid Picture Control selection" }
         command(0x1016, intArrayOf(property), byteArrayOf(value.toByte(), (value shr 8).toByte()))
     }
 }

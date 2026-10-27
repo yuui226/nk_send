@@ -3,7 +3,7 @@ package com.ztransfer.protocol
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** UINT16 selection descriptor; D200 verified against Z 30 V1.20 Wi-Fi probe v2. */
+/** UINT16 selectable items, not slot capacity: some bodies omit unregistered C1–C9. */
 internal data class NikonPictureControlSelection(
     val writable: Boolean,
     val current: Int,
