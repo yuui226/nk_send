@@ -315,7 +315,7 @@ class TransferQueuePresentationTest {
         val staleStartedAt = task(4, startedAt = 50L)
         val summary = transferQueuePresentation(listOf(preparing, first, staleStartedAt, second), false)
 
-        assertEquals(listOf(first, second), summary.generationTasks)
+        assertEquals(listOf(first, second, preparing), summary.generationTasks)
         assertSame(first, summary.generationTasks.firstOrNull())
         assertEquals(3, summary.generationRemaining)
         assertEquals(QueueActivityState.RUNNING, summary.generationState)
@@ -329,7 +329,7 @@ class TransferQueuePresentationTest {
         val preparing = task(4, generating = true)
         val summary = transferQueuePresentation(listOf(first, second, extra, preparing), false)
 
-        assertEquals(listOf(first, second), summary.generationTasks)
+        assertEquals(listOf(first, second, extra, preparing), summary.generationTasks)
         assertEquals(4, summary.generationRemaining)
     }
 
@@ -340,65 +340,7 @@ class TransferQueuePresentationTest {
         assertEquals(listOf(preparing), summary.generationTasks)
         assertSame(preparing, summary.generationTasks.firstOrNull())
         assertEquals(QueueActivityState.WAITING, summary.generationState)
-        assertEquals(listOf(preparing, null), stableGenerationSlots(listOf(1L, null), listOf(preparing)))
         assertNull(summary.generationTasks.single().frameGenerationStartedAtElapsedMs)
-    }
-
-    @Test
-    fun generationSlotOrderSurvivesTaskListReordering() {
-        val first = task(1, generating = true, startedAt = 100L)
-        val second = task(2, generating = true, startedAt = 150L)
-        val initial = stableGenerationSlots(emptyList(), listOf(first, second))
-        assertEquals(listOf(first, second), initial)
-        assertEquals(listOf(first, second),
-            stableGenerationSlots(initial.map { it?.taskId }, listOf(second, first)))
-    }
-
-    @Test
-    fun finishingFirstRowDoesNotMoveTheSecondJobUp() {
-        val first = task(1, generating = true, startedAt = 100L)
-        val second = task(2, generating = true, startedAt = 150L)
-        val finishedFirst = first.copy(isGeneratingFrame = false)
-        val remaining = stableGenerationSlots(listOf(1L, 2L), listOf(finishedFirst, second))
-        assertEquals(listOf(null, second), remaining)
-
-        val newcomer = task(3, generating = true, startedAt = 200L)
-        assertEquals(listOf(newcomer, second),
-            stableGenerationSlots(remaining.map { it?.taskId }, listOf(second, newcomer)))
-    }
-
-    @Test
-    fun finishingSecondRowKeepsTheFirstJobAndFillsOnlyTheFreedRow() {
-        val first = task(1, generating = true, startedAt = 100L)
-        val newcomer = task(3, generating = true, startedAt = 200L)
-        assertEquals(listOf(first, newcomer),
-            stableGenerationSlots(listOf(1L, 2L), listOf(newcomer, first)))
-    }
-
-    @Test
-    fun generationSlotsAlwaysResolveTheLatestSnapshotForTheSameIdentity() {
-        val old = task(1, generating = true, startedAt = 100L)
-        val restarted = old.copy(frameGenerationStartedAtElapsedMs = 500L, frameGenerationAccumulatedMs = 25L)
-        val slots = stableGenerationSlots(listOf(1L, null), listOf(restarted))
-        assertSame(restarted, slots[0])
-        assertNull(slots[1])
-    }
-
-    @Test
-    fun removalAndRetryNeverKeepTheOldGenerationTaskReference() {
-        val retry = task(99, generating = true, startedAt = 500L)
-        assertEquals(listOf(retry, null), stableGenerationSlots(listOf(1L, null), listOf(retry)))
-        assertEquals(listOf(null, null), stableGenerationSlots(listOf(99L, null), emptyList()))
-    }
-
-    @Test
-    fun generationSlotCapacityAndDuplicatePreviousIdsCannotDuplicateAJob() {
-        val first = task(1, generating = true, startedAt = 100L)
-        val second = task(2, generating = true, startedAt = 150L)
-        val third = task(3, generating = true, startedAt = 200L)
-        assertEquals(listOf(first, second),
-            stableGenerationSlots(listOf(1L, 1L, 3L), listOf(first, second, third)))
-        assertEquals(2, stableGenerationSlots(emptyList(), emptyList()).size)
     }
 
     @Test
@@ -408,7 +350,7 @@ class TransferQueuePresentationTest {
         val running = task(30, generating = true, startedAt = 100L)
         val summary = transferQueuePresentation(listOf(newerWaiting, olderWaiting, running), false)
 
-        assertEquals(listOf(running, olderWaiting), summary.generationTasks)
+        assertEquals(listOf(running, olderWaiting, newerWaiting), summary.generationTasks)
         assertSame(running, summary.generationTasks.firstOrNull())
         assertEquals(3, summary.generationRemaining)
         assertNull(summary.generationTasks[1].frameGenerationStartedAtElapsedMs)
@@ -421,23 +363,9 @@ class TransferQueuePresentationTest {
         val retry = task(30, generating = true)
         val summary = transferQueuePresentation(listOf(retry, second, first), false)
 
-        assertEquals(listOf(first, second), summary.generationTasks)
+        assertEquals(listOf(first, second, retry), summary.generationTasks)
         assertEquals(QueueActivityState.WAITING, summary.generationState)
         assertSame(first, summary.generationTasks.firstOrNull())
         assertEquals(3, summary.generationRemaining)
-    }
-
-    @Test
-    fun waitingJobKeepsItsRowWhenItsLatestSnapshotStartsRunning() {
-        val waiting = task(1, generating = true)
-        val alreadyRunning = task(2, generating = true, startedAt = 100L)
-        val initial = stableGenerationSlots(emptyList(), listOf(alreadyRunning, waiting))
-        val justStarted = waiting.copy(frameGenerationStartedAtElapsedMs = 200L)
-        val summary = transferQueuePresentation(listOf(justStarted, alreadyRunning), false)
-        val slots = stableGenerationSlots(initial.map { it?.taskId }, summary.generationTasks)
-
-        assertSame(alreadyRunning, slots[0])
-        assertSame(justStarted, slots[1])
-        assertEquals(200L, slots[1]?.frameGenerationStartedAtElapsedMs)
     }
 }

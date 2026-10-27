@@ -1,8 +1,13 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -19,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -33,7 +37,6 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.ui.theme.AppTheme
@@ -82,7 +85,7 @@ internal fun TransferQueueStatusGroup(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
             DownloadStatusCard(presentation, tasks, transferViewModel, cardSheen,
                 padding, headerHeight, modifier = Modifier.weight(downloadWeight).height(cardHeight))
-            GenerationStatusCard(presentation, cardSheen, padding, headerHeight, bodyHeight,
+            GenerationStatusCard(presentation, tasks, cardSheen, padding, headerHeight, bodyHeight,
                 generationRowHeight, stackedGenerationTime, modifier = Modifier.weight(generationWeight).height(cardHeight))
         }
     }
@@ -104,14 +107,10 @@ private fun DownloadStatusCard(
     val task = display.task
     // The briefly retained completion always uses its own final statistics, including the
     // first terminal frame before the display helper has entered its completion animation.
-    val progress = liveProgress?.takeIf { it.taskId == task?.taskId }
     val completed = if (display.completing) task else queueDownloadCompletedTask(
         task?.taskId, presentation.downloadTask, tasks,
     )
-    val speed = if (completed != null) {
-        completed.downloadMBps.takeIf { it > 0f }?.let { (it * 1024 * 1024).toLong() }
-            ?: completed.speed
-    } else progress?.bytesPerSecond ?: task?.speed ?: 0L
+    val speed = queueSummarySpeed(task, completed, liveProgress, presentation.downloadState)
     QueueStatusSurface(
         modifier = modifier,
         tag = "queue_download_summary",
@@ -139,15 +138,25 @@ private fun DownloadStatusCard(
                         modifier = Modifier.weight(1f, fill = false).testTag("queue_download_size"),
                         compact = true)
                 }
-                // The shell is never removed or faded. Only the shared number motion and
-                // existing width animation react to a new value; the current file starts at 0.
-                TransferInfoPill(
-                    text = if (speed > 0L) formatSpeed(speed) else "0",
-                    tone = TransferCardPillTone.SPEED,
-                    modifier = Modifier.testTag("queue_download_speed"),
-                    compact = true,
-                    animatedValue = speed,
-                )
+                // Presence only changes before the first sample or at idle/pause. Within a
+                // batch the shell survives file handoffs; digits own all numerical motion.
+                AnimatedContent(
+                    targetState = speed,
+                    contentKey = { it != null },
+                    transitionSpec = {
+                        fadeIn(tween(140)).togetherWith(fadeOut(tween(100)))
+                            .using(SizeTransform(sizeAnimationSpec = { _, _ -> snap() }))
+                    },
+                    label = "summarySpeedPresence",
+                ) { shownSpeed ->
+                    if (shownSpeed != null) TransferInfoPill(
+                        text = formatSpeed(shownSpeed),
+                        tone = TransferCardPillTone.SPEED,
+                        modifier = Modifier.testTag("queue_download_speed"),
+                        compact = true,
+                        animatedValue = shownSpeed,
+                    )
+                }
             }
         }
     }
@@ -156,6 +165,7 @@ private fun DownloadStatusCard(
 @Composable
 private fun GenerationStatusCard(
     presentation: TransferQueuePresentation,
+    tasks: List<TransferTask>,
     cardSheen: Brush,
     padding: Dp,
     headerHeight: Dp,
@@ -164,13 +174,6 @@ private fun GenerationStatusCard(
     stackedTime: Boolean,
     modifier: Modifier,
 ) {
-    var slotIds by remember { mutableStateOf<List<Long?>>(emptyList()) }
-    val slots = stableGenerationSlots(slotIds, presentation.generationTasks)
-    SideEffect {
-        val nextIds = slots.map { it?.taskId }
-        if (slotIds != nextIds) slotIds = nextIds
-    }
-    val visibleTasks = slots.filterNotNull()
     QueueStatusSurface(
         modifier = modifier,
         tag = "queue_generation_summary",
@@ -180,31 +183,20 @@ private fun GenerationStatusCard(
         cardSheen = cardSheen,
     ) {
         Row(Modifier.fillMaxSize().padding(padding), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Box(Modifier.weight(1f).height(bodyHeight).clipToBounds(), contentAlignment = Alignment.CenterStart) {
-                if (visibleTasks.isEmpty()) SummaryIdleLabel(QueueActivityState.IDLE)
-                visibleTasks.forEachIndexed { index, task ->
-                    key(task.taskId) {
-                        // One task is one centered row, never a second empty placeholder. When
-                        // a partner leaves/arrives, move the surviving row without recreating it.
-                        val targetTop = if (visibleTasks.size == 1) (bodyHeight - rowHeight) / 2
-                            else (bodyHeight - rowHeight * 2 - 6.dp) / 2 + (rowHeight + 6.dp) * index
-                        val top by animateDpAsState(targetTop, tween(180, easing = FastOutSlowInEasing),
-                            label = "generationRowPosition")
-                        // A new partner waits for the surviving row to move out of its way.
-                        // Keep this decision for its whole lifetime, including rapid replacements.
-                        val waitForPeer = remember {
-                            visibleTasks.any { it.taskId != task.taskId && it.taskId in slotIds }
-                        }
-                        val reveal = remember { Animatable(if (waitForPeer) 0f else 0.8f) }
-                        LaunchedEffect(Unit) {
-                            // Use animation time, so the handoff also respects Android's
-                            // animator-duration setting, including disabled animations.
-                            reveal.animateTo(1f, tween(120, delayMillis = if (waitForPeer) 180 else 0))
-                        }
-                        GenerationTaskRow(task, stackedTime, headerHeight,
-                            Modifier.align(Alignment.TopStart).offset { IntOffset(0, top.roundToPx()) }
-                                .graphicsLayer { alpha = reveal.value }
-                                .fillMaxWidth().height(rowHeight).testTag("queue_generation_task_${task.taskId}"))
+            AnimatedGenerationQueueRows(
+                tasks = presentation.generationTasks,
+                allTasks = tasks,
+                rowHeight = rowHeight,
+                idleHeight = headerHeight,
+                modifier = Modifier.weight(1f).height(bodyHeight),
+                idleContent = { SummaryIdleLabel(QueueActivityState.IDLE) },
+            ) { task, phase, rowModifier ->
+                val completedLabel = stringResource(R.string.done)
+                Box(rowModifier.testTag("queue_generation_task_${task.taskId}")) {
+                    Box(Modifier.fillMaxSize().then(if (phase.completed) Modifier
+                        .testTag("queue_generation_completed_${task.taskId}")
+                        .semantics { stateDescription = completedLabel } else Modifier)) {
+                        GenerationTaskRow(task, stackedTime, headerHeight, phase, Modifier.fillMaxSize())
                     }
                 }
             }
@@ -218,31 +210,38 @@ private fun GenerationStatusCard(
 }
 
 @Composable
-private fun GenerationTaskRow(task: TransferTask, stackedTime: Boolean, titleRowHeight: Dp, modifier: Modifier) {
+private fun GenerationTaskRow(task: TransferTask, stackedTime: Boolean, titleRowHeight: Dp, phase: GenerationRowPhase, modifier: Modifier) {
     val startedAt = task.frameGenerationStartedAtElapsedMs
+    val successTint by animateFloatAsState(
+        if (phase.completed) 1f else 0f,
+        tween(110), label = "generationFilenameColor",
+    )
+    // Theme foreground/background must switch together; only successful completion blends.
+    val nameColor = lerp(AppTheme.colors.onBackground, AppTheme.colors.statusConnected, successTint)
     // A separate clock follows each actual renderer, never waiting/preparation time. The
     // effect is local to this row and stops immediately when it leaves the current snapshot.
     var clock by remember(task.taskId, startedAt) { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
-    LaunchedEffect(task.taskId, startedAt) {
-        if (startedAt != null) {
+    LaunchedEffect(task.taskId, startedAt, phase.frozen) {
+        if (startedAt != null && !phase.frozen) {
             while (true) {
                 clock = android.os.SystemClock.elapsedRealtime()
                 delay(200L)
             }
         }
     }
-    val elapsed = startedAt?.let { task.frameGenerationAccumulatedMs + (clock - it).coerceAtLeast(0L) }
+    val elapsed = task.frameGenerationElapsedMs?.takeIf { phase.frozen }
+        ?: startedAt?.let { task.frameGenerationAccumulatedMs + (clock - it).coerceAtLeast(0L) }
     if (stackedTime) {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Box(Modifier.fillMaxWidth().height(titleRowHeight), contentAlignment = Alignment.CenterStart) {
-                SummaryFilename(task, Modifier.fillMaxWidth(), includeExtension = false)
+                SummaryFilename(task, Modifier.fillMaxWidth(), includeExtension = false, color = nameColor)
             }
             GenerationTime(elapsed)
         }
     } else {
         Row(modifier, verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            SummaryFilename(task, Modifier.weight(1f), includeExtension = false)
+            SummaryFilename(task, Modifier.weight(1f), includeExtension = false, color = nameColor)
             GenerationTime(elapsed)
         }
     }
@@ -259,6 +258,7 @@ private fun SummaryFilename(
     task: TransferTask,
     modifier: Modifier,
     includeExtension: Boolean = true,
+    color: Color? = null,
 ) {
     val alpha = remember { Animatable(1f) }
     var previousId by remember { mutableLongStateOf(task.taskId) }
@@ -274,7 +274,7 @@ private fun SummaryFilename(
     TransferFileTitle(displayedName, cancelled = false,
         modifier = modifier.graphicsLayer { this.alpha = alpha.value }
             .clearAndSetSemantics { text = AnnotatedString(task.file.fileName) },
-        style = MaterialTheme.typography.labelMedium)
+        style = MaterialTheme.typography.labelMedium, color = color)
 }
 
 @Composable

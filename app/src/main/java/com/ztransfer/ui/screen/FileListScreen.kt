@@ -2705,7 +2705,7 @@ fun QueuePill(
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
                     AnimatedContent(
-                        targetState = Triple(mode, remaining, activeSpeedText) to (showDoneLabel || completionPending),
+                        targetState = Triple(mode, remaining, activeSpeedText to activeSpeed) to (showDoneLabel || completionPending),
                         contentKey = { it.first.first },
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
                         // 否则容器 snap 到新宽度时，退场内容会从右对齐跳成左对齐（文字漂移）。
@@ -2720,7 +2720,8 @@ fun QueuePill(
                         },
                         label = "pillContent"
                     ) { (displayed, displayDoneLabel) ->
-                        val (displayedMode, displayedCount, displayedSpeed) = displayed
+                        val (displayedMode, displayedCount, displayedSpeedSnapshot) = displayed
+                        val (displayedSpeed, displayedSpeedValue) = displayedSpeedSnapshot
                         when (displayedMode) {
                             PillMode.DONE -> if (displayDoneLabel) {
                                 Text(
@@ -2775,11 +2776,13 @@ fun QueuePill(
                                 ) {
                                     // 速度在前（仅传输且有速度时显示）。tnum：等宽数字，位数相同则宽度恒定。
                                     if (displayedSpeed != null) {
-                                        Text(
+                                        AnimatedQueuePillValue(
                                             text = displayedSpeed,
-                                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                            value = displayedSpeedValue,
                                             color = colors.accentBlue,
-                                            fontWeight = FontWeight.Bold
+                                            label = "queueSpeed",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            animate = animateContents,
                                         )
                                     }
                                     // 数字滚动：减少（传输推进）时旧数上滑、新数自下滑入；增加（新入队）反向。

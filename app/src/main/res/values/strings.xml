@@ -131,7 +131,7 @@
     <string name="retry_failed_title">Retry failed tasks?</string>
     <string name="cd_clear_queue">Clear queue</string>
     <string name="clear_queue_title">Clear the queue?</string>
-    <string name="clear_queue_subtitle">Removes all cards; the file currently transferring is not affected</string>
+    <string name="clear_queue_subtitle">Keeps the current transfer and queued or running effects</string>
 
     <!-- Settings -->
     <string name="settings">Settings</string>

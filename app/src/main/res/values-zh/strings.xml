@@ -131,7 +131,7 @@
     <string name="retry_failed_title">重试失败任务？</string>
     <string name="cd_clear_queue">清空队列</string>
     <string name="clear_queue_title">清空队列？</string>
-    <string name="clear_queue_subtitle">移除全部卡片；正在传输的不受影响</string>
+    <string name="clear_queue_subtitle">保留正在传输及已进入生成队列的卡片</string>
 
     <!-- 设置 -->
     <string name="settings">设置</string>

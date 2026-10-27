@@ -16,7 +16,7 @@ internal data class TransferQueuePresentation(
     val downloadTask: TransferTask? = null,
     val downloadState: QueueActivityState = QueueActivityState.IDLE,
     val downloadRemaining: Int = 0,
-    /** Up to two admitted jobs: actual running work first, then waiting; not two worker claims. */
+    /** All admitted jobs: running work first, then waiting. The UI renders only a bounded window. */
     val generationTasks: List<TransferTask> = emptyList(),
     val generationState: QueueActivityState = QueueActivityState.IDLE,
     val generationRemaining: Int = 0,
@@ -31,8 +31,7 @@ internal fun transferQueuePresentation(
     var download: TransferTask? = null
     var downloadRemaining = 0
     val runningGenerations = ArrayList<TransferTask>(2)
-    var waitingGeneration: TransferTask? = null
-    var secondWaitingGeneration: TransferTask? = null
+    val waitingGenerations = ArrayList<TransferTask>()
     var generationRemaining = 0
 
     // One pass over structural/status snapshots. High-frequency byte/speed updates stay local
@@ -49,13 +48,9 @@ internal fun transferQueuePresentation(
             // generation queue; reporting them as downloads would double-count the same work.
             generationRemaining++
             if (task.frameGenerationStartedAtElapsedMs != null) {
-                if (runningGenerations.size < 2) runningGenerations.add(task)
-            } else if (waitingGeneration == null || task.taskId < waitingGeneration.taskId) {
-                // A stable preparation candidate, not a prediction of which job runs next.
-                secondWaitingGeneration = waitingGeneration
-                waitingGeneration = task
-            } else if (secondWaitingGeneration == null || task.taskId < secondWaitingGeneration.taskId) {
-                secondWaitingGeneration = task
+                runningGenerations.add(task)
+            } else {
+                waitingGenerations.add(task)
             }
         } else when (task.status) {
             TransferStatus.TRANSFERING -> {
@@ -67,6 +62,8 @@ internal fun transferQueuePresentation(
         }
     }
 
+    // Sort only admitted waiting jobs, on structural changes, never on byte/clock updates.
+    waitingGenerations.sortBy { it.taskId }
     return TransferQueuePresentation(
         downloadTask = download,
         downloadState = when {
@@ -78,42 +75,15 @@ internal fun transferQueuePresentation(
             else -> QueueActivityState.WAITING
         },
         downloadRemaining = downloadRemaining,
-        generationTasks = buildList(2) {
+        generationTasks = buildList(generationRemaining) {
             addAll(runningGenerations)
-            if (size < 2) waitingGeneration?.let(::add)
-            if (size < 2) secondWaitingGeneration?.let(::add)
+            addAll(waitingGenerations)
         },
         generationState = when {
             runningGenerations.isNotEmpty() -> QueueActivityState.RUNNING
-            waitingGeneration != null -> QueueActivityState.WAITING
+            waitingGenerations.isNotEmpty() -> QueueActivityState.WAITING
             else -> QueueActivityState.IDLE
         },
         generationRemaining = generationRemaining,
     )
-}
-
-/**
- * Keep a surviving job in its original row. The UI retains IDs only; every returned task comes
- * from the current admitted snapshot, so completion, retry and metadata changes cannot freeze an
- * old filename or stopwatch. A waiting job keeps its row when it starts; its start timestamp,
- * not its row position, determines whether the UI may run a stopwatch.
- */
-internal fun stableGenerationSlots(
-    previousSlotIds: List<Long?>,
-    generationTasks: List<TransferTask>,
-): List<TransferTask?> {
-    val available = LinkedHashMap<Long, TransferTask>()
-    for (task in generationTasks) {
-        if (task.isGeneratingFrame) {
-            available[task.taskId] = task
-        }
-    }
-    val slots = MutableList<TransferTask?>(2) { index ->
-        previousSlotIds.getOrNull(index)?.let { available.remove(it) }
-    }
-    val newcomers = available.values.iterator()
-    for (index in slots.indices) {
-        if (slots[index] == null && newcomers.hasNext()) slots[index] = newcomers.next()
-    }
-    return slots
 }

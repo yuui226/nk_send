@@ -45,7 +45,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -107,6 +106,7 @@ import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.isTransferredOriginal
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -215,10 +215,36 @@ fun TransferScreen(
     // 正在播放移除动画的任务：卡片收合完毕后才真正从队列删除。
     // 等待中的任务在标记的同时已被 withdraw（置 CANCELLED），动画期间队列不会开始传它。
     val removingTaskIds = remember { mutableStateMapOf<Long, Unit>() }
+    val removalDelays = remember { mutableStateMapOf<Long, Int>() }
     var clearAllInProgress by remember { mutableStateOf(false) }
     val clearScope = rememberCoroutineScope()
     // 队列清空后再加入任务时从顶部开始，避免沿用上一批任务的滚动位置与遮罩状态。
     val listState = key(transferState.tasks.isEmpty()) { rememberLazyListState() }
+    fun scheduleRemoval(targetIds: Set<Long>, suppressAll: Boolean = false) {
+        if (targetIds.isEmpty()) return
+        val visibleItems = listState.layoutInfo.visibleItemsInfo.mapNotNull { item ->
+            (item.key as? Long)?.let { it to item.offset }
+        }
+        val delays = queueRemovalDelays(visibleItems, targetIds, stagger = suppressAll)
+        if (suppressAll) clearAllInProgress = true
+        delays.keys.forEach { removingTaskIds[it] = Unit }
+        removalDelays.putAll(delays)
+        // 页面持有收尾，条目滚出屏幕不会中断；进入 try 后再挂起，页面退出也能执行 finally。
+        // 只动画当前可见目标，其余立即定向清理，避免整队卡片接力补进视口后再退场。
+        clearScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                transferViewModel.finishClearQueue(targetIds - delays.keys)
+                awaitQueueRemovalCleanup(delays)
+            } finally {
+                transferViewModel.finishClearQueue(targetIds)
+                delays.keys.forEach {
+                    removingTaskIds.remove(it)
+                    removalDelays.remove(it)
+                }
+                if (suppressAll) clearAllInProgress = false
+            }
+        }
+    }
     val listAtTop by remember(listState) {
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 8
@@ -232,7 +258,12 @@ fun TransferScreen(
         Brush.verticalGradient(listOf(sheen, Color.Transparent))
     }
 
-    val excludedSummaryIds = removingTaskIds.keys.toSet()
+    // A target retried during its exit is real waiting work again, even before cleanup removes
+    // the old animation marker. Its count must return immediately with its protected card.
+    val excludedSummaryIds = if (removingTaskIds.isEmpty()) emptySet() else
+        removingTaskIds.keys.toMutableSet().apply {
+            transferState.tasks.forEach { if (it.status == TransferStatus.WAITING) remove(it.taskId) }
+        }
     val summary = remember(transferState.tasks, transferState.isTransferring,
         transferState.pauseAfterCurrent, excludedSummaryIds) {
         transferQueuePresentation(transferState.tasks, transferState.isTransferring,
@@ -240,7 +271,7 @@ fun TransferScreen(
     }
 
     // 正在收合退场的任务不再参与按钮状态；特别是 WAITING 被 withdraw 成 CANCELLED 后，
-    // 不能在删除前的 280ms 内让“重试全部”闪现。
+    // 不能在退场动画期间让“重试全部”闪现。
     val actionVisibility = transferQueueActionVisibility(
         tasks = transferState.tasks,
         isTransferring = transferState.isTransferring,
@@ -373,36 +404,34 @@ fun TransferScreen(
                 // 倒序显示：最新加入队列的排在最上方（asReversed 是视图，不复制列表）。
                 items(transferState.tasks.asReversed(), key = { it.taskId }) { task ->
                     val taskId = task.taskId
-                    val removing = removingTaskIds.containsKey(taskId)
+                    val protectedTask = task.status == TransferStatus.TRANSFERING ||
+                        task.status == TransferStatus.WAITING || task.isGeneratingFrame
+                    val removing = removingTaskIds.containsKey(taskId) && !protectedTask
                     val cardActionsVisible = !removing && !clearAllInProgress
-                    // 移除动画：真实高度收合 + 淡出（collapseHeight，与列表页分组收合同款），
-                    // 收合完毕才从队列删除，下方卡片随布局逐帧上移，无跳变。
+                    // 先淡出和轻缩，再收合实际高度；只有初始可见目标短暂错开，不逐个排队。
                     val removeProgress = remember(taskId) { Animatable(1f) }
                     LaunchedEffect(removing) {
                         if (removing) {
-                            removeProgress.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
+                            removeProgress.animateTo(0f, queueRemovalAnimationSpec(removalDelays[taskId] ?: 0))
                             // 先清标记再删数据：同一照片的其它边框任务不受影响。
                             removingTaskIds.remove(taskId)
-                            if (!transferViewModel.removeTask(taskId)) {
-                                // 竞态兜底：动画期间任务已开始传输/被重试回等待，不可移除——
-                                // 卡片弹回原高继续显示（成功移除时本条目已随删除离场，走不到这）。
-                                removeProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
-                            }
+                            removalDelays.remove(taskId)
+                            transferViewModel.removeTask(taskId)
+                        } else if (removeProgress.value < 1f) {
+                            // 忙碌/重试项拒绝移除时，由取消标记后的新 effect 回弹；不能放在
+                            // 上面的旧 effect 内，否则 removing 改变会把它的回弹一起取消。
+                            removeProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
                         }
-                    }
-                    // 动画中途条目被外因移出组合（如同时点了重试）：清掉标记，
-                    // 该任务保留在队列里（安全侧），用户可再操作。
-                    DisposableEffect(taskId) {
-                        onDispose { removingTaskIds.remove(taskId) }
                     }
                     val removeLabel = stringResource(R.string.cd_remove_from_queue)
                     Box(
                         Modifier.animateItem(
                             fadeInSpec = tween(180, easing = FastOutSlowInEasing),
-                            placementSpec = Motion.itemPlacement,
+                            // 高度已连续推动下一张；退场期间不再叠一层追赶位置的弹簧。
+                            placementSpec = if (removingTaskIds.isEmpty()) Motion.itemPlacement else null,
                             fadeOutSpec = null,
                         )
-                            .collapseHeight(clip = false) { removeProgress.value }
+                            .queueCardRemoval { if (protectedTask) 1f else removeProgress.value }
                             .padding(bottom = 8.dp)
                     ) {
                         TransferTaskCard(
@@ -420,8 +449,14 @@ fun TransferScreen(
                                 removing = removing,
                                 removeLabel = removeLabel,
                                 onRemove = {
-                                    transferViewModel.withdrawTask(taskId)
-                                    removingTaskIds[taskId] = Unit
+                                    // 无障碍动作/手势结束可能晚于任务状态变化，不使用旧卡片快照。
+                                    val latest = transferViewModel.state.value.tasks.firstOrNull { it.taskId == taskId }
+                                    if (taskId !in removingTaskIds && latest != null &&
+                                        latest.status != TransferStatus.TRANSFERING && !latest.isGeneratingFrame
+                                    ) {
+                                        transferViewModel.withdrawTask(taskId)
+                                        scheduleRemoval(setOf(taskId))
+                                    }
                                 },
                             ),
                         )
@@ -537,31 +572,9 @@ fun TransferScreen(
                         },
                         onConfirm = {
                             showClearConfirm = false
-                            clearAllInProgress = true
-                            // 先把等待中的任务撤下（队列不会再开始它们），
-                            // 再给所有非传输中卡片打移除标记——可见卡片集体播放收合动画。
-                            transferViewModel.withdrawPending()
-                            transferState.tasks.forEach {
-                                if (it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame) {
-                                    removingTaskIds[it.taskId] = Unit
-                                }
-                            }
-                            // 兜底：LazyColumn 只组合可见卡片，屏幕外的卡没有条目协程替它做
-                            // "动画后移除"。等可见卡片收完（280ms）统一清掉所有已终结任务，
-                            // 并回收无主标记——否则同 handle 之后重新入队会误播移除动画。
-                            clearScope.launch {
-                                try {
-                                    delay(320)
-                                    transferViewModel.removeCleared()
-                                    val alive = transferViewModel.state.value.tasks
-                                        .mapTo(HashSet()) { it.taskId }
-                                    removingTaskIds.keys.toList().forEach {
-                                        if (it !in alive) removingTaskIds.remove(it)
-                                    }
-                                } finally {
-                                    clearAllInProgress = false
-                                }
-                            }
+                            // 用 VM 的即时快照固定目标，不能在 320ms 后重新扫全部终态任务。
+                            val clearTargetIds = transferViewModel.beginClearQueue()
+                            scheduleRemoval(clearTargetIds, suppressAll = true)
                         },
                         onDismiss = { showClearConfirm = false }
                     )
@@ -937,6 +950,8 @@ private fun TransferTaskCardContent(
                         text = it,
                         tone = TransferCardPillTone.SPEED,
                         respond = transferDuration != null,
+                        animatedValue = if (transferred) (task.downloadMBps * 1024 * 1024).toLong()
+                            else displayedSpeed,
                     )
                 }
             }
@@ -997,21 +1012,22 @@ internal fun TransferFileTitle(
     cancelled: Boolean,
     modifier: Modifier = Modifier,
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium,
+    color: Color? = null,
 ) {
     val colors = AppTheme.colors
     val measurer = rememberTextMeasurer()
     BoxWithConstraints(modifier) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
-        val title = remember(name, widthPx, style, colors, cancelled, measurer) {
+        val title = remember(name, widthPx, style, colors, cancelled, color, measurer) {
             val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
             val stem = name.substring(0, dot)
             val extension = name.substring(dot)
             fun label(value: String) = buildAnnotatedString {
                 withStyle(SpanStyle(
-                    color = if (cancelled) colors.onSurfaceVariant else colors.onBackground,
+                    color = color ?: if (cancelled) colors.onSurfaceVariant else colors.onBackground,
                     fontWeight = FontWeight.SemiBold,
                 )) { append(value) }
-                withStyle(SpanStyle(color = colors.onSurfaceVariant, fontWeight = FontWeight.Normal)) {
+                withStyle(SpanStyle(color = color ?: colors.onSurfaceVariant, fontWeight = FontWeight.Normal)) {
                     append(extension)
                 }
             }

@@ -492,6 +492,26 @@ internal fun retryableTransferTaskIds(
     }
     .mapTo(HashSet()) { it.taskId }
 
+/** Capture only this clear action's targets; active downloads and admitted effects stay owned. */
+internal fun clearQueueTargetIds(tasks: List<TransferTask>): Set<Long> = tasks.asSequence()
+    .filter { it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame }
+    .mapTo(HashSet()) { it.taskId }
+
+/** A later enqueue or a task that already started must not be withdrawn by an old UI snapshot. */
+internal fun withdrawQueueTargets(tasks: List<TransferTask>, waitingTaskIds: Set<Long>): List<TransferTask> =
+    tasks.map { task ->
+        if (task.taskId in waitingTaskIds && task.status == TransferStatus.WAITING && !task.isGeneratingFrame) {
+            task.copy(status = TransferStatus.CANCELLED, speed = 0L)
+        } else task
+    }
+
+/** Recheck ownership after the UI exit: retried WAITING and newly busy targets remain protected. */
+internal fun removeQueueTargets(tasks: List<TransferTask>, targetIds: Set<Long>): List<TransferTask> =
+    tasks.filterNot { task ->
+        task.taskId in targetIds && task.status != TransferStatus.TRANSFERING &&
+            task.status != TransferStatus.WAITING && !task.isGeneratingFrame
+    }
+
 private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
     "$fileName|$size|$captureDate"
 
@@ -3008,7 +3028,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         )
                     } catch (e: CancellationException) {
                         // 协程取消只发生在 ViewModel 销毁（App 退出）时——界面上的"停止"
-                        // 不再取消协程（正在传的文件自然传完，见 withdrawPending）。
+                        // 不再取消协程（正在传的文件自然传完，见 beginClearQueue）。
                         // Only videos retain partial files for resume; photos always restart.
                         if (!videoTransfer) {
                             deleteQuietly(fileDocUri)
@@ -4060,60 +4080,43 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * 撤下所有等待中的任务（WAITING→CANCELLED），队列协程不会再开始它们；
-     * 正在传输的文件让它自然传完——中途打断需要发 PTP/IP Cancel 包或直接断开连接，
-     * 实测两者都会让相机挂起会话甚至关闭 Wi-Fi，代价远高于传完当前文件。
-     * 队列协程发现没有 WAITING 任务后自然收尾（isTransferring 复位、前台服务停止）。
-     * "清空队列"的第一步：先撤下，UI 播完移除动画后再逐个 [removeTask]。
+     * 固定本次清理范围并撤下其中的等待下载。当前下载和已进入生成队列的任务不受影响，
+     * 也不发送 PTP Cancel 或断开相机；当前文件正常传完后，下载协程自行收尾。
+     * 返回的 ID 同时用于 UI 移除动画和 [finishClearQueue]，不能在动画后重新扩大范围。
      */
-    fun withdrawPending() {
-        val waitingTaskIds = _state.value.tasks.asSequence()
-            .filter { it.status == TransferStatus.WAITING }
+    fun beginClearQueue(): Set<Long> {
+        val snapshot = _state.value.tasks
+        val targetIds = clearQueueTargetIds(snapshot)
+        val waitingTaskIds = snapshot.asSequence()
+            .filter { it.taskId in targetIds && it.status == TransferStatus.WAITING }
             .mapTo(HashSet()) { it.taskId }
         pendingTransferQueue.withdraw(waitingTaskIds)
         _state.update { state ->
-            state.copy(
-                tasks = state.tasks.map {
-                    if (it.status == TransferStatus.WAITING) {
-                        it.copy(status = TransferStatus.CANCELLED, speed = 0)
-                    } else it
-                }
-            )
+            state.copy(tasks = withdrawQueueTargets(state.tasks, waitingTaskIds))
         }
+        return targetIds
     }
 
     /** 撤下单个等待中的任务（仅 WAITING→CANCELLED）：移除动画播放期间队列不得开始传它。 */
     fun withdrawTask(taskId: Long) {
-        if (_state.value.tasks.any {
-                it.taskId == taskId && it.status == TransferStatus.WAITING
+        if (_state.value.tasks.none {
+                it.taskId == taskId && it.status == TransferStatus.WAITING && !it.isGeneratingFrame
             }
-        ) {
-            pendingTransferQueue.withdraw(listOf(taskId))
-        }
+        ) return
+        pendingTransferQueue.withdraw(listOf(taskId))
         _state.update { state ->
-            state.copy(
-                tasks = state.tasks.map {
-                    if (it.taskId == taskId && it.status == TransferStatus.WAITING) {
-                        it.copy(status = TransferStatus.CANCELLED, speed = 0)
-                    } else it
-                }
-            )
+            state.copy(tasks = withdrawQueueTargets(state.tasks, setOf(taskId)))
         }
     }
 
     /**
-     * 清空收尾：一次性移除所有已终结的任务（CANCELLED/COMPLETED/FAILED）。
-     * "清空队列"的兜底——LazyColumn 只组合可见卡片，屏幕外的卡没有条目协程替它做
-     * "动画后移除"，由本方法在可见卡片收合动画播完后统一清掉。
-     * 与 [removeTask] 同规则：TRANSFERING/WAITING/正在生成派生图的一律保留。
+     * 清理本次已选中的终态任务，兼顾屏幕外未参与动画的卡片。
+     * 动画期间当前文件可能传完、用户可能加入新任务；它们不在 targetIds 内，始终保留。
+     * 与 [removeTask] 同规则：已重试回 WAITING 或开始下载/生成的目标也不得移除。
      */
-    fun removeCleared() {
+    fun finishClearQueue(targetIds: Set<Long>) {
         _state.update { state ->
-            val kept = state.tasks.filter {
-                it.status == TransferStatus.TRANSFERING ||
-                    it.status == TransferStatus.WAITING ||
-                    it.isGeneratingFrame
-            }
+            val kept = removeQueueTargets(state.tasks, targetIds)
             if (kept.size == state.tasks.size) {
                 state
             } else {
@@ -4131,12 +4134,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun removeTask(taskId: Long): Boolean {
         var removed = false
         _state.update { state ->
-            val kept = state.tasks.filterNot {
-                it.taskId == taskId &&
-                        it.status != TransferStatus.TRANSFERING &&
-                        it.status != TransferStatus.WAITING &&
-                        !it.isGeneratingFrame
-            }
+            val kept = removeQueueTargets(state.tasks, setOf(taskId))
             removed = kept.size != state.tasks.size
             if (removed) {
                 state.withTaskStructure(kept)

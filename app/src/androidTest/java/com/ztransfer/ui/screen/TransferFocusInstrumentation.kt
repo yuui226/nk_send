@@ -66,6 +66,7 @@ class TransferFocusInstrumentation : Instrumentation() {
         const val DOWNLOAD_SPEED = "queue_download_speed"
         const val DOWNLOAD_SIZE = "queue_download_size"
         const val GENERATION_TASK_PREFIX = "queue_generation_task_"
+        const val GENERATION_COMPLETED_PREFIX = "queue_generation_completed_"
         const val HISTORY_LIST = "queue_history_list"
         const val SHARED_EXECUTION = "shared_queue_execution"
         const val SHARED_PILL = "shared_queue_pill"
@@ -97,6 +98,7 @@ class TransferFocusInstrumentation : Instrumentation() {
             val heightOverride = mutableStateOf<Int?>(null)
             val animateDownloadProbe = mutableStateOf(true)
             val measuredPaneHeight = AtomicInteger()
+            val sharedControlsAnchorRight = AtomicInteger()
             val downloadProbe = AtomicReference<QueueDownloadDisplay>()
             val probeRevision = AtomicLong(-1)
             val probeFrames = Collections.synchronizedList(ArrayList<DownloadProbeFrame>())
@@ -125,7 +127,7 @@ class TransferFocusInstrumentation : Instrumentation() {
                                     catchNonce = 0L,
                                     filePreviewVisible = false,
                                     visibilityAlpha = { 1f },
-                                    onBoundsChanged = {},
+                                    onBoundsChanged = { sharedControlsAnchorRight.set(it.right.roundToInt()) },
                                     onNavigateToTransfer = {},
                                     onControlAction = {},
                                 )
@@ -324,8 +326,13 @@ class TransferFocusInstrumentation : Instrumentation() {
             check(!summaryText(DOWNLOAD_CARD).contains("DSC_9415.JPG")) { "Generation leaked into download summary" }
 
             // Exercise the real shared controls without clicking Start/Pause or executing work.
+            // Visibility can precede the execution button's entry spring settling. Measure the
+            // baseline only after its right edge reaches the independent fixed TopEnd anchor.
             awaitCondition("Transfer route did not retain only its execution control", stableMs = 120) {
-                tagged(SHARED_EXECUTION).size == 1 && tagged(SHARED_PILL).isEmpty()
+                val execution = tagged(SHARED_EXECUTION).singleOrNull()?.let(::bounds)
+                val anchorRight = sharedControlsAnchorRight.get()
+                execution != null && tagged(SHARED_PILL).isEmpty() && anchorRight > 0 &&
+                    abs(execution.right - anchorRight) <= 2
             }
             val transferExecutionRight = bounds(checkNotNull(tagged(SHARED_EXECUTION).singleOrNull())).right
             runOnMainSync { route.value = Screen.Files.route }
@@ -343,10 +350,21 @@ class TransferFocusInstrumentation : Instrumentation() {
             // on Transfer shares the exact TopEnd anchor without that minimum-touch expansion.
             val filesPillRight = transferExecutionRight
             runOnMainSync { route.value = Screen.Transfer.route }
-            awaitCondition("Returning to Transfer did not hide the pill and move execution to the right", stableMs = 120) {
-                val execution = tagged(SHARED_EXECUTION).singleOrNull()?.let(::bounds)
-                tagged(SHARED_PILL).isEmpty() && execution != null &&
-                    execution.right > filesExecutionRight && abs(execution.right - transferExecutionRight) <= 2
+            val returningMessage = "Returning to Transfer did not hide the pill and move execution to the right"
+            var returningDiagnostics = "No return-transition sample recorded"
+            try {
+                awaitCondition(returningMessage, stableMs = 120) {
+                    val executions = tagged(SHARED_EXECUTION)
+                    val execution = executions.singleOrNull()?.let(::bounds)
+                    val pills = tagged(SHARED_PILL)
+                    returningDiagnostics = "initialRight=$transferExecutionRight, filesRight=$filesExecutionRight, " +
+                        "currentRight=${execution?.right}, anchorRight=${sharedControlsAnchorRight.get()}, " +
+                        "executionCount=${executions.size}, pillCount=${pills.size}, executionBounds=$execution"
+                    pills.isEmpty() && execution != null && execution.right > filesExecutionRight &&
+                        abs(execution.right - transferExecutionRight) <= 2
+                }
+            } catch (error: Throwable) {
+                throw IllegalStateException("$returningMessage; $returningDiagnostics", error)
             }
 
             // Hidden is a zero-width state of the same capsule. New data must stay current
@@ -453,9 +471,12 @@ class TransferFocusInstrumentation : Instrumentation() {
             runOnMainSync { theme.value = ThemeMode.DARK }
             screenshot("queue-summary-dark.png", darkBackground = true)
 
-            // A surviving task retains its identity/row while the completed peer is replaced.
+            // A surviving task keeps its node and moves into the vacated first row; newcomers
+            // append beneath it rather than taking the old task's former position.
+            val firstRowTop = bounds(checkNotNull(tagged("${GENERATION_TASK_PREFIX}1").singleOrNull())).top
             val survivingRow = checkNotNull(tagged("${GENERATION_TASK_PREFIX}2").singleOrNull())
             val survivingTop = bounds(survivingRow).top
+            check(survivingTop > firstRowTop) { "Generation fixture does not have two distinct rows" }
             val newGeneration = task(5, "DSC_9417.JPG", TransferStatus.COMPLETED).copy(
                 isGeneratingFrame = true, frameGenerationStartedAtElapsedMs = SystemClock.elapsedRealtime(),
             )
@@ -466,25 +487,189 @@ class TransferFocusInstrumentation : Instrumentation() {
             publish(replacedFirst, true, active)
             awaitSummaries(2, 2)
             awaitGenerationRows(2, 5)
-            awaitCondition("Surviving generation task changed rows during peer replacement", stableMs = 200) {
+            awaitCondition("Surviving generation task was recreated or failed to move into the first row", stableMs = 200) {
                 tagged("${GENERATION_TASK_PREFIX}2").singleOrNull()?.let {
-                    it == survivingRow && abs(bounds(it).top - survivingTop) <= 2
+                    it == survivingRow && abs(bounds(it).top - firstRowTop) <= 2 &&
+                        bounds(it).top < survivingTop
                 } == true
             }
-            val twoRowCenter = (bounds(checkNotNull(tagged("${GENERATION_TASK_PREFIX}2").singleOrNull())).centerY() +
-                bounds(checkNotNull(tagged("${GENERATION_TASK_PREFIX}5").singleOrNull())).centerY()) / 2
+            check(bounds(checkNotNull(tagged("${GENERATION_TASK_PREFIX}5").singleOrNull())).top > firstRowTop) {
+                "New generation task did not append below the surviving first row"
+            }
             publish(listOf(runningSecond, downloading, waitingDownload) + history, true, active)
             awaitSummaries(2, 1)
             awaitGenerationRows(2)
-            awaitCondition("A single generation task did not center in the shared row area", stableMs = 200) {
+            awaitCondition("Completing the second row displaced or recreated the surviving first row", stableMs = 200) {
                 tagged("${GENERATION_TASK_PREFIX}2").singleOrNull()?.let {
-                    abs(bounds(it).centerY() - twoRowCenter) <= 3
+                    it == survivingRow && abs(bounds(it).top - firstRowTop) <= 2
                 } == true
             }
             publish(listOf(downloading, waitingDownload) + history, true, active)
             awaitSummaries(2, 0)
             awaitGenerationRows()
             awaitSummaryText(GENERATION_CARD, idle)
+
+            // Real admitted waiting work forms a two-row viewport. A completed head keeps its
+            // final time briefly, then the next waiting row moves up and another candidate enters.
+            val queuedFirst = task(80, "GEN_QUEUE_80.JPG", TransferStatus.COMPLETED).copy(
+                isGeneratingFrame = true,
+                frameGenerationStartedAtElapsedMs = SystemClock.elapsedRealtime() - 6000,
+            )
+            val queuedRest = (81L..83L).map { id ->
+                task(id, "GEN_QUEUE_$id.JPG", TransferStatus.COMPLETED).copy(isGeneratingFrame = true)
+            }
+            var queueFixture = listOf(queuedFirst) + queuedRest
+            publish(queueFixture + history, false)
+            awaitSummaries(0, 4)
+            awaitGenerationRows(80, 81)
+            val queueCardHeight = bounds(checkNotNull(tagged(GENERATION_CARD).singleOrNull())).height()
+            val queueFirstTop = bounds(checkNotNull(tagged("${GENERATION_TASK_PREFIX}80").singleOrNull())).top
+            val queuedPeer = checkNotNull(tagged("${GENERATION_TASK_PREFIX}81").singleOrNull())
+            val queueSecondTop = bounds(queuedPeer).top
+            check(queueSecondTop > queueFirstTop) { "Generation queue fixture does not have two rows" }
+            fun assertQueueHeight() {
+                check(bounds(checkNotNull(tagged(GENERATION_CARD).singleOrNull())).height() == queueCardHeight) {
+                    "Generation completion changed the fixed queue-card height"
+                }
+            }
+            fun awaitCompletedRow(id: Long, finalTime: String) {
+                // Observe the hold directly, before count/layout helpers spend its finite lifetime.
+                awaitCondition("Successful generation $id did not retain its final time and completion marker") {
+                    val root = uiAutomation.rootInActiveWindow
+                    val row = tagged("$GENERATION_TASK_PREFIX$id", root).singleOrNull()
+                    tagged("$GENERATION_COMPLETED_PREFIX$id", root).size == 1 && row != null &&
+                        accessibilityText(row).contains(finalTime)
+                }
+                assertQueueHeight()
+            }
+            fun awaitRetirementWithoutSuccess(id: Long, vararg remainingIds: Long) {
+                awaitCondition("Failed/cancelled generation $id did not retire correctly", stableMs = 150) {
+                    check(tagged("$GENERATION_COMPLETED_PREFIX$id").isEmpty()) {
+                        "Failed/cancelled generation $id was incorrectly marked successful"
+                    }
+                    assertQueueHeight()
+                    val rows = generationRows()
+                    val actualIds = rows.mapNotNull {
+                        it.viewIdResourceName?.substringAfterLast('/')
+                            ?.removePrefix(GENERATION_TASK_PREFIX)?.toLongOrNull()
+                    }
+                    rows.size == remainingIds.size && actualIds.toSet() == remainingIds.toSet()
+                }
+            }
+            queueFixture = queueFixture.map { row ->
+                if (row.taskId == 80L) row.copy(isGeneratingFrame = false,
+                    frameGenerationStartedAtElapsedMs = null, frameGenerationElapsedMs = 2400) else row
+            }
+            publish(queueFixture + history, false)
+            awaitCompletedRow(80, "2.4s")
+            screenshot("queue-summary-generation-completed.png")
+            awaitSummaries(0, 3)
+            awaitGenerationRows(81, 82)
+            awaitCondition("Completed head did not release its row for the waiting peer", stableMs = 120) {
+                tagged("${GENERATION_TASK_PREFIX}81").singleOrNull()?.let {
+                    it == queuedPeer && abs(bounds(it).top - queueFirstTop) <= 2
+                } == true && tagged("${GENERATION_COMPLETED_PREFIX}80").isEmpty() &&
+                    tagged("${GENERATION_TASK_PREFIX}82").singleOrNull()?.let {
+                        abs(bounds(it).top - queueSecondTop) <= 2
+                    } == true
+            }
+            assertQueueHeight()
+            queueFixture = queueFixture.map { row ->
+                if (row.taskId == 81L) row.copy(isGeneratingFrame = false,
+                    frameGenerationStartedAtElapsedMs = null, frameGenerationElapsedMs = 900,
+                    frameGenerationError = "Fixture generation failure") else row
+            }
+            publish(queueFixture + history, false)
+            awaitRetirementWithoutSuccess(81, 82, 83)
+            awaitSummaries(0, 2)
+            queueFixture = queueFixture.map { row ->
+                if (row.taskId == 82L) row.copy(status = TransferStatus.CANCELLED,
+                    isGeneratingFrame = false, frameGenerationStartedAtElapsedMs = null,
+                    frameGenerationElapsedMs = 700) else row
+            }
+            publish(queueFixture + history, false)
+            awaitRetirementWithoutSuccess(82, 83)
+            awaitSummaries(0, 1)
+            awaitCondition("Last waiting generation row moved into the middle instead of the first position", stableMs = 120) {
+                tagged("${GENERATION_TASK_PREFIX}83").singleOrNull()?.let {
+                    abs(bounds(it).top - queueFirstTop) <= 2
+                } == true
+            }
+            queueFixture = queueFixture.map { row ->
+                if (row.taskId == 83L) row.copy(frameGenerationStartedAtElapsedMs =
+                    SystemClock.elapsedRealtime() - 1000) else row
+            }
+            publish(queueFixture + history, false)
+            awaitCondition("Last admitted generation did not show its running clock") {
+                durationPattern.containsMatchIn(summaryText("${GENERATION_TASK_PREFIX}83"))
+            }
+            queueFixture = queueFixture.map { row ->
+                if (row.taskId == 83L) row.copy(isGeneratingFrame = false,
+                    frameGenerationStartedAtElapsedMs = null, frameGenerationElapsedMs = 5700) else row
+            }
+            publish(queueFixture + history, false)
+            awaitCompletedRow(83, "5.7s")
+            awaitSummaries(0, 0)
+            awaitGenerationRows()
+            awaitSummaryText(GENERATION_CARD, idle)
+            check(tagged("${GENERATION_COMPLETED_PREFIX}83").isEmpty()) {
+                "Last completed generation remained after the queue became idle"
+            }
+            assertQueueHeight()
+
+            // Invoke the real clear APIs against the fake VM state. No transfer worker runs:
+            // the publication between begin/finish deterministically models the 320ms race.
+            val clearingCurrent = task(8200, "CLEAR_CURRENT.JPG", TransferStatus.TRANSFERING)
+            val clearingWaiting = task(8201, "CLEAR_WAITING.JPG", TransferStatus.WAITING)
+            val clearingGeneration = task(8202, "CLEAR_GENERATING.JPG", TransferStatus.COMPLETED).copy(
+                isGeneratingFrame = true, frameGenerationStartedAtElapsedMs = SystemClock.elapsedRealtime(),
+            )
+            val clearingPrepared = task(8203, "CLEAR_PREPARED.JPG", TransferStatus.COMPLETED)
+                .copy(isGeneratingFrame = true)
+            val clearingFailed = task(8204, "CLEAR_FAILED.JPG", TransferStatus.FAILED)
+            val individualWaiting = task(8205, "REMOVE_SINGLE.JPG", TransferStatus.WAITING)
+            val clearingActive = ActiveTransferProgress(clearingCurrent.taskId, .4f,
+                bytesPerSecond = 7L * 1024 * 1024, retainedBytesPerSecond = 7L * 1024 * 1024)
+            publish(listOf(clearingCurrent, clearingWaiting, clearingGeneration, clearingPrepared,
+                clearingFailed, individualWaiting), true, clearingActive)
+            awaitSummaries(3, 2)
+            runOnMainSync {
+                check(!transfer.removeTask(clearingCurrent.taskId)) { "Single removal deleted an active download" }
+                check(!transfer.removeTask(clearingGeneration.taskId)) { "Single removal deleted running generation" }
+                check(!transfer.removeTask(clearingPrepared.taskId)) { "Single removal deleted admitted waiting generation" }
+                transfer.withdrawTask(individualWaiting.taskId)
+                check(state.value.tasks.single { it.taskId == individualWaiting.taskId }.status == TransferStatus.CANCELLED) {
+                    "Single withdrawal did not cancel its selected waiting task"
+                }
+                check(transfer.removeTask(individualWaiting.taskId)) { "Single removal did not remove its withdrawn task" }
+            }
+            awaitSummaries(2, 2)
+            var clearTargetIds = emptySet<Long>()
+            runOnMainSync { clearTargetIds = transfer.beginClearQueue() }
+            check(clearTargetIds == setOf(clearingWaiting.taskId, clearingFailed.taskId)) {
+                "Batch clear did not capture only the original eligible targets: $clearTargetIds"
+            }
+            awaitSummaries(1, 2)
+            awaitSummaryText(DOWNLOAD_CARD, "CLEAR_CURRENT.JPG")
+            awaitDownloadProgress(.4f)
+            val completedDuringClear = clearingCurrent.copy(status = TransferStatus.COMPLETED,
+                progress = 1f, elapsedMs = 80, downloadMBps = 7f)
+            val addedDuringClear = task(8206, "CLEAR_NEW_COMPLETED.JPG", TransferStatus.COMPLETED)
+                .copy(progress = 1f, elapsedMs = 20, downloadMBps = 12f)
+            publish(listOf(completedDuringClear, clearingWaiting.copy(status = TransferStatus.CANCELLED),
+                clearingGeneration, clearingPrepared, clearingFailed, addedDuringClear), false)
+            runOnMainSync { transfer.finishClearQueue(clearTargetIds) }
+            check(state.value.tasks.map { it.taskId } == listOf(8200L, 8202L, 8203L, 8206L)) {
+                "Clear cleanup removed the protected current/new task or retained an original target: " +
+                    state.value.tasks.map { it.taskId }
+            }
+            awaitSummaries(0, 2)
+            awaitGenerationRows(8202, 8203)
+            awaitSummaryText(DOWNLOAD_CARD, idle)
+            awaitDownloadProgress(null)
+            awaitCondition("Clear cleanup left a speed label after all downloads ended", stableMs = 120) {
+                tagged(DOWNLOAD_SPEED).isEmpty()
+            }
 
             runOnMainSync { heightOverride.value = 360 }
             publish(twoRunning.map { task ->
@@ -506,14 +691,14 @@ class TransferFocusInstrumentation : Instrumentation() {
                 "Active download is missing from the complete historical list"
             }
 
-            // When only generation remains, the download card stays at zero and loses old speed/name.
+            // When only generation remains, the download count is zero and its speed label is absent.
             publish(listOf(generation, pendingGeneration) + history, false, active)
             awaitSummaries(0, 2)
             awaitSummaryText(DOWNLOAD_CARD, idle)
             awaitSummaryText(GENERATION_CARD, "DSC_9415.JPG")
             awaitCondition("Idle download summary kept stale data") {
                 !summaryText(DOWNLOAD_CARD).contains("TX_03.JPG") &&
-                    !summaryText(DOWNLOAD_CARD).contains("42.0 MB/s")
+                    !summaryText(DOWNLOAD_CARD).contains("42.0 MB/s") && tagged(DOWNLOAD_SPEED).isEmpty()
             }
             awaitDownloadProgress(null)
 
@@ -532,6 +717,9 @@ class TransferFocusInstrumentation : Instrumentation() {
             publish(afterDownload, false)
             awaitSummaries(1, 2)
             awaitSummaryText(DOWNLOAD_CARD, paused)
+            awaitCondition("Paused download summary retained a speed label", stableMs = 120) {
+                tagged(DOWNLOAD_SPEED).isEmpty()
+            }
 
             // Waiting for generation never displays a running stopwatch or an active download count.
             publish(listOf(pendingGeneration) + history, false)
@@ -547,21 +735,38 @@ class TransferFocusInstrumentation : Instrumentation() {
             awaitSummaryText(DOWNLOAD_CARD, idle)
             awaitDownloadProgress(null)
 
-            // The speed shell stays mounted at the left edge. A new file starts at plain "0",
-            // even if the stream retains the previous file's speed for other queue UI.
+            // The first file has no speed label until a sample exists. Subsequent files keep
+            // the same shell and the previous sample until their own first sample arrives.
             val noSample = task(30, "TX_30.JPG", TransferStatus.TRANSFERING).copy(progress = .08f, speed = 0)
             publish(listOf(noSample) + history, true, ActiveTransferProgress(noSample.taskId, .08f,
-                bytesPerSecond = 0, retainedBytesPerSecond = 42L * 1024 * 1024))
+                bytesPerSecond = 0, retainedBytesPerSecond = 0))
             awaitSummaries(1, 0)
             awaitSummaryText(DOWNLOAD_CARD, "TX_30.JPG")
             awaitDownloadProgress(.08f)
-            awaitCondition("New download did not show a unique plain-zero speed shell") {
-                val content = summaryText(DOWNLOAD_CARD)
-                tagged(DOWNLOAD_SPEED).size == 1 && summaryText(DOWNLOAD_SPEED) == "0" &&
-                    listOf("—", "–", "-", "B/s").none(content::contains)
+            awaitCondition("First unsampled download displayed a placeholder speed", stableMs = 120) {
+                tagged(DOWNLOAD_SPEED).isEmpty() && !summaryText(DOWNLOAD_CARD).contains("B/s")
             }
-            val zeroSpeedNode = checkNotNull(tagged(DOWNLOAD_SPEED).singleOrNull())
-            val zeroSpeedLeft = bounds(zeroSpeedNode).left
+            runOnMainSync {
+                progress.value = ActiveTransferProgress(noSample.taskId, .25f,
+                    bytesPerSecond = 42L * 1024 * 1024, retainedBytesPerSecond = 42L * 1024 * 1024)
+            }
+            awaitSummaryText(DOWNLOAD_SPEED, "42.0 MB/s")
+            val retainedSpeedNode = checkNotNull(tagged(DOWNLOAD_SPEED).singleOrNull())
+            val retainedSpeedLeft = bounds(retainedSpeedNode).left
+            val nextUnsampled = task(31, "TX_31.JPG", TransferStatus.TRANSFERING).copy(progress = .08f)
+            val previousCompleted = noSample.copy(status = TransferStatus.COMPLETED, progress = 1f,
+                elapsedMs = 100, downloadMBps = 42f)
+            publish(listOf(previousCompleted, nextUnsampled) + history, true,
+                ActiveTransferProgress(nextUnsampled.taskId, .08f,
+                    bytesPerSecond = 0, retainedBytesPerSecond = 42L * 1024 * 1024))
+            awaitSummaries(1, 0)
+            awaitSummaryText(DOWNLOAD_CARD, "TX_31.JPG")
+            awaitDownloadProgress(.08f)
+            awaitCondition("New file discarded the retained speed or rebuilt its shell", stableMs = 120) {
+                val speedNode = tagged(DOWNLOAD_SPEED).singleOrNull()
+                speedNode != null && speedNode == retainedSpeedNode &&
+                    summaryText(DOWNLOAD_SPEED) == "42.0 MB/s"
+            }
             awaitCondition("Download size does not precede the speed shell") {
                 val sizeNode = tagged(DOWNLOAD_SIZE).singleOrNull()
                 val speedNode = tagged(DOWNLOAD_SPEED).singleOrNull()
@@ -570,15 +775,32 @@ class TransferFocusInstrumentation : Instrumentation() {
             // Only the high-frequency stream changes here: the summary must not depend on a
             // coincidental task-list update to reveal the first valid speed sample.
             runOnMainSync {
-                progress.value = ActiveTransferProgress(noSample.taskId, .25f,
-                    bytesPerSecond = 9L * 1024 * 1024)
+                progress.value = ActiveTransferProgress(nextUnsampled.taskId, .25f,
+                    bytesPerSecond = 9L * 1024 * 1024, retainedBytesPerSecond = 9L * 1024 * 1024)
             }
             awaitDownloadProgress(.25f)
             awaitSummaryText(DOWNLOAD_CARD, "9.0 MB/s")
             awaitCondition("Speed update replaced, duplicated or shifted its shell", stableMs = 120) {
                 val speedNode = tagged(DOWNLOAD_SPEED).singleOrNull()
-                speedNode != null && speedNode == zeroSpeedNode &&
-                    bounds(speedNode).left == zeroSpeedLeft && summaryText(DOWNLOAD_SPEED) == "9.0 MB/s"
+                speedNode != null && speedNode == retainedSpeedNode &&
+                    bounds(speedNode).left == retainedSpeedLeft && summaryText(DOWNLOAD_SPEED) == "9.0 MB/s"
+            }
+            // Decimal-place, leading-digit and unit changes all retain a single shell and
+            // expose only the latest complete value, never outgoing/incoming text duplicates.
+            for ((sample, label) in listOf(
+                (9.1 * 1024 * 1024).toLong() to "9.1 MB/s",
+                (19.1 * 1024 * 1024).toLong() to "19.1 MB/s",
+                800L * 1024 to "800.0 KB/s",
+                (1.2 * 1024 * 1024).toLong() to "1.2 MB/s",
+            )) {
+                runOnMainSync {
+                    progress.value = ActiveTransferProgress(nextUnsampled.taskId, .25f,
+                        bytesPerSecond = sample, retainedBytesPerSecond = sample)
+                }
+                awaitCondition("Numeric/unit update duplicated, rebuilt or misstated the speed shell: $label", stableMs = 120) {
+                    val speedNode = tagged(DOWNLOAD_SPEED).singleOrNull()
+                    speedNode != null && speedNode == retainedSpeedNode && summaryText(DOWNLOAD_SPEED) == label
+                }
             }
 
             // A mismatched high-frequency snapshot must never leak another file's progress or speed.
@@ -588,6 +810,9 @@ class TransferFocusInstrumentation : Instrumentation() {
             awaitDownloadProgress(.12f)
             check(!summaryText(DOWNLOAD_CARD).contains("999 B/s")) {
                 "Another task's statistics leaked into download summary"
+            }
+            awaitCondition("Mismatched sample created a speed label for an unsampled file", stableMs = 120) {
+                tagged(DOWNLOAD_SPEED).isEmpty()
             }
 
             // Fast transitions replace data in the same two cards, without accumulating outgoing cards.
@@ -616,7 +841,8 @@ class TransferFocusInstrumentation : Instrumentation() {
             awaitDownloadProgress(null)
             awaitCondition("Completed download remained in the idle summary") {
                 val content = summaryText(DOWNLOAD_CARD)
-                !content.contains("TX_69.JPG") && !content.contains("17.0 MB/s")
+                !content.contains("TX_69.JPG") && !content.contains("17.0 MB/s") &&
+                    tagged(DOWNLOAD_SPEED).isEmpty()
             }
             publish(emptyList(), false)
             awaitSummaries(0, 0)
@@ -885,8 +1111,8 @@ class TransferFocusInstrumentation : Instrumentation() {
             assertNoDoneFor("Terminal metadata replayed completion after Done expired", durationMs = 300)
             publish(emptyList(), false)
             awaitSummaries(0, 0)
-            report.putString("result", "PASS: 55:45 aligned list-header cards, scroll-away/return with intact history, independent counts/history, one/two generation rows with stable peer replacement and centered single row, waiting clocks, size-before-speed persistent shell, pause, matching IDs, shared completion/conflation helper, hidden progress without animation and correct resume, failed-batch Done suppression, fresh-success Done despite failed history and bounded expiry during metadata updates, clear, 300dp width and 360/420dp height actions; theme screenshots")
-            report.putString("screenshots", "cache/queue-summary-empty.png, cache/queue-summary-light.png, cache/queue-summary-dark.png, cache/queue-summary-compact.png, cache/queue-summary-compact-actions.png, cache/queue-summary-420-actions.png")
+            report.putString("result", "PASS: 55:45 aligned list-header cards, scroll-away/return with intact history, independent counts/history, top-aligned generation rows with stable identity and upward peer handoff, completed-row final-time hold and queued waiting-row replenishment, failure/cancellation without success markers, fixed queue height, waiting clocks, no idle/initial speed placeholder, retained speed between downloads, size-before-speed persistent shell through digit and unit changes, pause, matching IDs, shared completion/conflation helper, hidden progress without animation and correct resume, failed-batch Done suppression, fresh-success Done despite failed history and bounded expiry during metadata updates, targeted single/batch clear preserving busy work and tasks completing or added during cleanup, 300dp width and 360/420dp height actions; theme screenshots")
+            report.putString("screenshots", "cache/queue-summary-empty.png, cache/queue-summary-light.png, cache/queue-summary-dark.png, cache/queue-summary-generation-completed.png, cache/queue-summary-compact.png, cache/queue-summary-compact-actions.png, cache/queue-summary-420-actions.png")
             result = Activity.RESULT_OK
         } catch (error: Throwable) {
             report.putString("failure", error.stackTraceToString())
@@ -957,14 +1183,17 @@ class TransferFocusInstrumentation : Instrumentation() {
             "class=${node.className}, visible=${node.isVisibleToUser}, enabled=${node.isEnabled}, " +
             "clickable=${node.isClickable}, children=${node.childCount}, bounds=${bounds(node)}, raw=$node"
 
-    private fun tagged(tag: String): List<AccessibilityNodeInfo> {
+    private fun tagged(
+        tag: String,
+        root: AccessibilityNodeInfo? = uiAutomation.rootInActiveWindow,
+    ): List<AccessibilityNodeInfo> {
         val result = ArrayList<AccessibilityNodeInfo>()
         fun visit(node: AccessibilityNodeInfo) {
             val id = node.viewIdResourceName
             if (node.isVisibleToUser && (id == tag || id?.endsWith("/$tag") == true)) result += node
             for (index in 0 until node.childCount) node.getChild(index)?.let(::visit)
         }
-        uiAutomation.rootInActiveWindow?.let(::visit)
+        root?.let(::visit)
         return result
     }
 
@@ -989,7 +1218,10 @@ class TransferFocusInstrumentation : Instrumentation() {
         }
     }
 
-    private fun summaryText(tag: String): String {
+    private fun summaryText(tag: String): String =
+        tagged(tag).singleOrNull()?.let(::accessibilityText).orEmpty()
+
+    private fun accessibilityText(root: AccessibilityNodeInfo): String {
         val parts = ArrayList<String>()
         fun visit(node: AccessibilityNodeInfo) {
             if (!node.isVisibleToUser) return
@@ -997,7 +1229,7 @@ class TransferFocusInstrumentation : Instrumentation() {
             node.contentDescription?.toString()?.let(parts::add)
             for (index in 0 until node.childCount) node.getChild(index)?.let(::visit)
         }
-        tagged(tag).singleOrNull()?.let(::visit)
+        visit(root)
         return parts.joinToString("\n")
     }
 
