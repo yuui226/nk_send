@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import com.ztransfer.ui.theme.Motion
@@ -36,7 +37,6 @@ internal class QueueDownloadDisplay internal constructor(initialTask: TransferTa
 }
 
 private data class QueueDownloadInput(
-    val tasks: List<TransferTask>,
     val activeTask: TransferTask?,
     val activeProgress: ActiveTransferProgress?,
     val animate: Boolean,
@@ -80,7 +80,12 @@ internal fun rememberQueueDownloadDisplay(
     activeProgress: ActiveTransferProgress?,
     animate: Boolean = true,
 ): QueueDownloadDisplay {
-    val latest by rememberUpdatedState(QueueDownloadInput(tasks, activeTask, activeProgress, animate))
+    // History is consulted only when the visible owner changes. Keeping its immutable list
+    // snapshot separate avoids deep list equality and waking the progress collector for
+    // unrelated generation/history updates; the handoff still reads the latest terminal task.
+    var latestTasks by remember { mutableStateOf(tasks, referentialEqualityPolicy()) }
+    latestTasks = tasks
+    val latest by rememberUpdatedState(QueueDownloadInput(activeTask, activeProgress, animate))
     val display = remember { QueueDownloadDisplay(queueDownloadActiveTask(activeTask)) }
 
     LaunchedEffect(display) {
@@ -108,7 +113,7 @@ internal fun rememberQueueDownloadDisplay(
                 if (display.task?.taskId != current?.taskId) {
                     progressJob?.cancelAndJoin()
                     progressJob = null
-                    val completed = queueDownloadCompletedTask(display.task?.taskId, current, input.tasks)
+                    val completed = queueDownloadCompletedTask(display.task?.taskId, current, latestTasks)
                     if (completed != null) {
                         display.task = completed
                         display.completing = true

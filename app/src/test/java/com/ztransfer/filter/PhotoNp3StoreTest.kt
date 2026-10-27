@@ -10,6 +10,31 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PhotoNp3StoreTest {
+    @Test fun classicAndFlexibleDirectoriesAndEditorsShareHintsButKeepIndependentSnapshots() {
+        val memory = MemoryPreferences()
+        val store = PhotoNp3Store(memory.preferences)
+        val classic = PhotoFilterPreset("np3:${"c".repeat(64)}:np3-classic-srgb-v1", "Classic",
+            ClassicNp3PhotoFilterParameters(ClassicNp3Style.entries.first(), 8, 2, 4, -3,
+                0, 0, 0, 100, IntArray(257) { it * 32767 / 256 }))
+        val flexible = recipe('a', 10)
+        val uri = "content://photos/classic.NP3"
+        store.save("local", classic, uri)
+        store.save("transfer", flexible, "content://photos/flexible.NP3")
+        store.rememberSource(uri, "c".repeat(64), classic.id)
+        val restarted = PhotoNp3Store(memory.preferences)
+        val restored = requireNotNull(restarted.restore("local"))
+        assertEquals(classic.id, restored.id)
+        assertArrayEquals((classic.parameters as ClassicNp3PhotoFilterParameters).toneCurve,
+            (restored.parameters as ClassicNp3PhotoFilterParameters).toneCurve)
+        assertEquals(classic.id, restarted.knownPresetId(uri))
+        assertEquals(mapOf(uri to classic.id), restarted.knownPresetIds(listOf(uri)))
+        assertRecipe(flexible, restarted.restore("transfer"))
+        store.save("local", null, null)
+        assertEquals(classic.id, store.knownPresetId(uri))
+        memory.values["local:id"] = classic.id
+        memory.values["local:snapshot"] = memory.values.getValue("transfer:snapshot")
+        assertNull(store.restore("local"))
+    }
     @Test fun independentCurrentRecipesRestoreWithoutAnyExternalSource() {
         val memory = MemoryPreferences()
         val store = PhotoNp3Store(memory.preferences)

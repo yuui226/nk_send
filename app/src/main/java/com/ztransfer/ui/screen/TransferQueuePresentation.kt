@@ -2,6 +2,7 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
+import com.ztransfer.viewmodel.isQueuedForFrameGeneration
 
 internal enum class QueueActivityState { IDLE, WAITING, RUNNING, PAUSED }
 
@@ -46,6 +47,8 @@ internal fun transferQueuePresentation(
         if (task.isGeneratingFrame) {
             // Older crop tasks may still have TRANSFERING status. They belong solely to the
             // generation queue; reporting them as downloads would double-count the same work.
+            // Existing-output checks remain busy, but are not confirmed generation work yet.
+            if (!task.isQueuedForFrameGeneration) continue
             generationRemaining++
             if (task.frameGenerationStartedAtElapsedMs != null) {
                 runningGenerations.add(task)

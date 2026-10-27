@@ -87,13 +87,17 @@ class PhotoNp3ParserTest {
         assertFailure(PhotoNp3Failure.INVALID, changed { this[0x10100] = byteArrayOf(1, 2) })
     }
 
-    @Test fun classicAndUnrecognizedProfilesAreUnsupportedRatherThanCorrupt() {
-        assertFailure(PhotoNp3Failure.UNSUPPORTED,
-            File("src/main/assets/picture_controls/Kodak Ektar Green.NP3").readBytes())
+    @Test fun classicProfilesAreRoutedSeparatelyAndUnknownFlexibleProfilesRemainUnsupported() {
+        assertTrue(PhotoNp3Parser.parse(
+            File("src/main/assets/picture_controls/Kodak Ektar Green.NP3").readBytes(),
+        ).preset.parameters is ClassicNp3PhotoFilterParameters)
         for (version in listOf("0300", "0301", "0399", "0100")) {
             assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { this[0x0100] = version.toByteArray() })
         }
-        assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { this[0x0300] = byteArrayOf(0, 1) })
+        // A neutral 0310 container is also valid for a classic base; version alone is not the type.
+        assertTrue(PhotoNp3Parser.parse(changed { this[0x0300] = byteArrayOf(0, 1) })
+            .preset.parameters is ClassicNp3PhotoFilterParameters)
+        assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { this[0x0300] = byteArrayOf(0x7f, 0x7f) })
     }
 
     @Test fun unknownAdjustmentsAndEncodingsCannotBeSilentlyDropped() {

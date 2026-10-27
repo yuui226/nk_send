@@ -22,6 +22,83 @@ import org.junit.Test
 
 class TransferStateTest {
     @Test
+    fun onlyProvenMissingOutputsEnterVisibleWaitingQueue() {
+        fun confirmed(names: Set<String>?, busy: Boolean = false) = canConfirmPhotoGeneration(
+            "DSC_1.JPG", names, busy, cropRequested = false, hasSavedCrop = false,
+        )
+        assertEquals(false, confirmed(null))
+        assertTrue(confirmed(emptySet()))
+        assertTrue(confirmed(setOf("DSC_10_f.jpg", "DSC_2_frame_mist_abc.jpg")))
+        assertEquals(false, confirmed(emptySet(), busy = true))
+        listOf("DSC_1_f.jpg", "dsc_1_e (2).JPG", "DSC_1_frame_mist_abc.jpg",
+            "DSC_1_c_f.jpg").forEach { assertEquals(false, confirmed(setOf(it))) }
+    }
+
+    @Test
+    fun newCropIsConfirmedButReusedCropWaitsForItsOwnOutputCheck() {
+        assertTrue(canConfirmPhotoGeneration("DSC_1.JPG", null, true,
+            cropRequested = true, hasSavedCrop = false))
+        assertEquals(false, canConfirmPhotoGeneration("DSC_1.JPG", emptySet(), false,
+            cropRequested = true, hasSavedCrop = true))
+    }
+
+    @Test
+    fun duplicateOutputCheckStaysProtectedWithoutEnteringVisibleGeneration() {
+        val checking = TransferTask(file(1), status = TransferStatus.COMPLETED,
+            framePreset = PhotoFramePreset.MIST).queueFrameGeneration(pendingCheck = true)
+        assertTrue(checking.isGeneratingFrame)
+        assertEquals(false, checking.isQueuedForFrameGeneration)
+        assertEquals(false, checking.canRetry)
+        assertTrue(clearQueueTargetIds(listOf(checking)).isEmpty())
+        val skipped = checking.skipFrameGeneration()
+        assertTrue(skipped.frameGenerationSkipped)
+        assertEquals(false, skipped.frameGenerationPendingCheck)
+        assertEquals(false, skipped.isQueuedForFrameGeneration)
+        assertNull(skipped.frameGenerationElapsedMs)
+        assertEquals(skipped, skipped.finishFrameGeneration(9_000))
+        assertEquals(checking.framePreset, skipped.framePreset)
+    }
+
+    @Test
+    fun missingOutputStartsGenerationAndTimingAfterTheCheck() {
+        val checking = TransferTask(file(1), status = TransferStatus.COMPLETED)
+            .queueFrameGeneration(pendingCheck = true)
+        val running = checking.startFrameGeneration(10_000)
+        assertTrue(running.isQueuedForFrameGeneration)
+        assertEquals(false, running.frameGenerationPendingCheck)
+        val paused = running.pauseFrameGeneration(10_200)
+        assertTrue(paused.isQueuedForFrameGeneration)
+        val finished = paused.startFrameGeneration(20_000).finishFrameGeneration(20_300)
+        assertEquals(500L, finished.frameGenerationElapsedMs)
+        assertEquals(false, finished.frameGenerationPendingCheck)
+    }
+
+    @Test
+    fun failedPreflightClearsBusyStateWithoutInventingGenerationTime() {
+        val finished = TransferTask(file(1), status = TransferStatus.COMPLETED)
+            .queueFrameGeneration(pendingCheck = true)
+            .copy(frameGenerationError = "directory unavailable")
+            .finishFrameGeneration(5_000)
+        assertEquals(false, finished.isGeneratingFrame)
+        assertEquals(false, finished.frameGenerationPendingCheck)
+        assertNull(finished.frameGenerationElapsedMs)
+        assertTrue(finished.canRetry)
+    }
+
+    @Test
+    fun effectGateSkipsDisabledEffectsButStillAllowsCrop() {
+        val original = TransferTask(file(1))
+        val effect = original.copy(framePreset = PhotoFramePreset.MIST)
+        assertEquals(false, original.needsPhotoGeneration(effectsEnabled = true))
+        assertEquals(false, effect.needsPhotoGeneration(effectsEnabled = false))
+        assertTrue(effect.needsPhotoGeneration(effectsEnabled = true))
+        val crop = effect.copy(cropRecipe = com.ztransfer.crop.JpegCropSelection(
+            com.ztransfer.crop.CropBounds(0.0, 0.0, 0.8, 0.8), orientation = 1,
+        ))
+        assertTrue(crop.needsPhotoGeneration(effectsEnabled = false))
+    }
+
+    @Test
     fun grainOnlyTaskIsAnEffectAndKeepsItsQueuedRecipeOnSkipAndRetry() {
         val settings = PhotoGrainSettings(45, enabled = true, style = PhotoGrainStyle.COARSE)
         val task = createQueueTasks(
@@ -117,6 +194,8 @@ class TransferStateTest {
         assertTrue(retry.sourceMetadataPrepared)
         assertEquals("body-a", retry.metadataCameraIdentity)
         assertTrue(retry.isGeneratingFrame)
+        assertTrue(retry.frameGenerationPendingCheck)
+        assertEquals(false, retry.isQueuedForFrameGeneration)
         assertNull(retry.frameGenerationStartedAtElapsedMs)
         assertNull(retry.frameGenerationError)
         org.junit.Assert.assertFalse(retry.canRetry)

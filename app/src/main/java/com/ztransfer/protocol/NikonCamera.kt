@@ -2879,15 +2879,28 @@ class NikonCamera(private val context: Context) {
     }
 
     /**
-     * 通过 PTP GetThumb 获取缩略图 JPEG 字节。相机【确认】无缩略图（No_Thumbnail_Present /
-     * Invalid_Object_Handle）返回 null——调用方可安全负缓存、不再重试；
+     * 通过 PTP GetThumb 获取缩略图 JPEG 字节。JPG 缺图时补读有界 EXIF 内嵌缩略图；
+     * 无可用缩略图或对象不存在时返回 null。刚新增对象由调用方有界重试后才负缓存；
      * 其它非 OK 响应（如设备忙）与 IO 失败一律抛出——那是瞬时状态，负缓存会把
      * 恰好赶上相机忙碌时段的整批缩略图永久打成"无图"。与其它命令共用相机事务调度器。
      */
-    suspend fun getThumbnail(handle: Int, visible: Boolean = false): ByteArray? {
+    suspend fun getThumbnail(
+        handle: Int,
+        visible: Boolean = false,
+        file: FileInfo? = null,
+        retryNewObject: Boolean = false,
+    ): ByteArray? {
         val read: suspend () -> ByteArray? = {
             withContext(Dispatchers.IO) {
             if (staDirectObjectReadValidated) {
+                if (retryNewObject) {
+                    // A freshly created object can expose an incomplete header first. Only this
+                    // explicit bounded retry discards its old prefix; other photos keep their cache.
+                    staDirectRecentHeaders.remove(handle)
+                    staDirectNoThumbnail.remove(handle)
+                    staDirectJpegThumbnailChecked.remove(handle)
+                    staDirectJpegMpfPreviews.remove(handle)
+                }
                 if ((staDirectFiles[handle]?.extension ?: staDirectExtensionFromHandle(handle)) == ".jpg") {
                     val thumbnail = readStaDirectJpegThumbnailInternal(handle)
                     if (ThumbnailDiagnostics.enabled) {
@@ -2960,12 +2973,32 @@ class NikonCamera(private val context: Context) {
                     failure = respCode != PtpConstants.RESPONSE_OK || data == null || data.isEmpty(),
                 )
             }
-            when (respCode) {
+            val thumbnail = when (respCode) {
                 PtpConstants.RESPONSE_OK -> data
                 PtpConstants.NO_THUMBNAIL_PRESENT,
                 PtpConstants.INVALID_OBJECT_HANDLE -> null
                 else -> throw Exception("GetThumb: ${PtpConstants.translateResponse(context, respCode)}")
             }
+            val fallbackBytes = jpegThumbnailFallbackHeaderBytes(
+                respCode, thumbnail?.isNotEmpty() == true, file?.takeIf { it.handle == handle },
+            )
+            if (fallbackBytes == 0) return@withContext thumbnail
+            // Some newly captured JPEGs report NoThumbnail even though their EXIF holds one.
+            // Keep the same thumbnail request lane and parse only a bounded header. Never fetch
+            // the full JPEG or FHD preview merely to fill a grid cell.
+            val header = readStaDirectPartialInternal(handle, 0L, fallbackBytes)
+            val embedded = header?.takeIf { it.isNotEmpty() }?.let {
+                parseStaDirectExif(jpegExifEnvelope(it) ?: it, isRaw = false).thumbnail
+            }
+            if (ThumbnailDiagnostics.enabled) {
+                ThumbnailDiagnostics.note(
+                    "camera handle=0x%08X path=ptp-jpg-exif headerBytes=%d thumbnailBytes=%d".format(
+                        handle, header?.size ?: 0, embedded?.size ?: 0,
+                    ),
+                    failure = embedded == null || embedded.isEmpty(),
+                )
+            }
+            embedded ?: thumbnail
             }
         }
         return try {

@@ -10,6 +10,43 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class PhotoNp3SnapshotCodecTest {
+    @Test fun originalFlexibleSnapshotEncodingIsByteForByteStable() {
+        val hash = MessageDigest.getInstance("SHA-256").digest(PhotoNp3SnapshotCodec.encode(recipe(true)))
+            .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+        assertEquals("747d79fe0dd567a3d45899113677f12d9cc263a20425a2d99a841404060b61ec", hash)
+    }
+    @Test fun everyClassicStyleRestoresItsOwnRecipeAndDedupIdentity() {
+        for (base in ClassicNp3Style.entries) for (hasCurve in listOf(false, true)) {
+            val original = classicRecipe(base, hasCurve)
+            val restored = PhotoNp3SnapshotCodec.decode(PhotoNp3SnapshotCodec.encode(original))
+            val expected = original.parameters as ClassicNp3PhotoFilterParameters
+            val actual = restored.parameters as ClassicNp3PhotoFilterParameters
+            assertEquals(original.id, restored.id)
+            assertEquals(expected.copy(toneCurve = null), actual.copy(toneCurve = null))
+            assertArrayEquals(expected.toneCurve, actual.toneCurve)
+            assertEquals(com.ztransfer.frame.photoFilterRenderFingerprint(PhotoFilterSelection(original, 80)),
+                com.ztransfer.frame.photoFilterRenderFingerprint(PhotoFilterSelection(restored, 80)))
+            expected.toneCurve?.set(0, 100)
+            if (hasCurve) assertEquals(0, actual.toneCurve!![0])
+        }
+    }
+
+    @Test fun recipeTypesCannotBeMixedUnderTheSameRenderingId() {
+        val flexible = recipe(false)
+        val classic = classicRecipe(ClassicNp3Style.entries.first(), false)
+        for (mismatched in listOf(flexible.copy(parameters = classic.parameters),
+            classic.copy(parameters = flexible.parameters))) {
+            try { PhotoNp3SnapshotCodec.encode(mismatched); fail("Accepted mismatched recipe kind") }
+            catch (_: IllegalArgumentException) { }
+        }
+        val bytes = PhotoNp3SnapshotCodec.encode(classic)
+        val payload = bytes.copyOfRange(0, bytes.size - 32)
+        rejected(checksum(payload.copyOf().apply { this[8] = 2 }))
+        val baseOffset = 9 + 2 + classic.id.toByteArray().size + 2 + classic.name.toByteArray().size
+        rejected(checksum(payload.copyOf().apply { ByteBuffer.wrap(this).putInt(baseOffset, 0xeeee) }))
+        rejected(checksum(payload.copyOf().apply { ByteBuffer.wrap(this).putInt(baseOffset + 4, 127) }))
+    }
+
     @Test fun restoringCustomRecipesPreservesOutputDedupAndChangedStrengthDoesNotCollide() {
         val original = recipe(true)
         val restored = PhotoNp3SnapshotCodec.decode(PhotoNp3SnapshotCodec.encode(original))
@@ -72,6 +109,13 @@ class PhotoNp3SnapshotCodecTest {
     }
 
     private fun checksum(payload: ByteArray) = payload + MessageDigest.getInstance("SHA-256").digest(payload)
+
+    private fun classicRecipe(base: ClassicNp3Style, curve: Boolean) = PhotoFilterPreset(
+        "np3:${"c".repeat(64)}:np3-classic-srgb-v1", "Classic fixture",
+        ClassicNp3PhotoFilterParameters(base, -128, -6, -128, 12,
+            0, 0, 16, if (base.creative) 40 else 100,
+            if (curve) IntArray(257) { it * 32767 / 256 } else null),
+    )
 
     private fun recipe(hasCurve: Boolean) = PhotoFilterPreset(
         "np3:${"a".repeat(64)}:np3-srgb-v1", "NP3 fixture", Np3PhotoFilterParameters(

@@ -120,10 +120,10 @@ internal class ThumbnailFillQueue {
     }
 
     /** A real state change grants failed items one new attempt; it never retries them in-place. */
-    fun retryFailed() {
+    fun retryFailed(canRetry: (NikonCamera.FileInfo) -> Boolean = { true }) {
         if (failed.isEmpty()) return
-        val retry = failed.values.toList()
-        failed.clear()
+        val retry = failed.values.filter(canRetry)
+        retry.forEach { failed.remove(it.handle) }
         prioritizedThumbnailFiles(retry, range).forEach(::addLast)
     }
 

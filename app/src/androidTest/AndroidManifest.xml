@@ -41,10 +41,20 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.storage.HarmonyPublicationInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.storage.ExistingOriginalDocumentInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.util.PhotoCaptureExifInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.gps.GpsLifecycleInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.TransferFocusInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.TransferProgressInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.ThumbnailImageInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.PhotoCatalogInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.FileListSmokeInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
 </manifest>

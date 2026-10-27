@@ -48,7 +48,7 @@ internal class PhotoNp3Store internal constructor(private val preferences: Share
     /** Hints describe the last successful read; selecting a row always reads its current bytes. */
     fun rememberSource(uri: String, sourceSha256: String, presetId: String) {
         require(validSourceUri(uri) && digestPattern.matches(sourceSha256))
-        require(presetId == "np3:$sourceSha256:${PhotoNp3Parser.CONVERTER_VERSION}" ||
+        require(photoNp3SourceSha256(presetId) == sourceSha256 ||
             BuiltInPhotoFilters.catalogKey(presetId) == sourceSha256)
         preferences.edit().putString(sourceKey(uri), "$sourceSha256|$presetId").apply()
     }
@@ -72,7 +72,7 @@ internal class PhotoNp3Store internal constructor(private val preferences: Share
         if (encoded == null) return null
         val parts = encoded.split('|')
         if (parts.size != 2 || !digestPattern.matches(parts[0])) return null
-        return parts[1].takeIf { it == "np3:${parts[0]}:${PhotoNp3Parser.CONVERTER_VERSION}" ||
+        return parts[1].takeIf { photoNp3SourceSha256(it) == parts[0] ||
             BuiltInPhotoFilters.catalogKey(it) == parts[0] }
     }
 

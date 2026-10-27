@@ -103,6 +103,24 @@ class ThumbnailFillQueueTest {
     }
 
     @Test
+    fun `unrelated wakeup cannot bypass a new object thumbnail retry delay`() {
+        val queue = ThumbnailFillQueue()
+        val retries = NewObjectThumbnailRetries()
+        retries.register(1)
+        retries.failed(1, 0L)
+        queue.markFailed(file(1))
+        queue.markFailed(file(2))
+
+        queue.retryFailed { retries.canAttempt(it.handle, 100L) }
+        assertEquals(listOf(2), queue.drainHandles())
+        assertEquals(1, queue.failedCount)
+        retries.takeDue(300L)
+        queue.retryFailed { retries.canAttempt(it.handle, 300L) }
+        assertEquals(listOf(1), queue.drainHandles())
+        assertEquals(0, queue.failedCount)
+    }
+
+    @Test
     fun `cancelled work from an older scan cannot leak into the new queue`() {
         val queue = ThumbnailFillQueue()
         queue.seed(listOf(file(1)), null)

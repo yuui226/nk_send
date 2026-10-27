@@ -53,7 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.DisposableEffect
@@ -103,6 +103,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -126,12 +127,15 @@ import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.ui.util.LocalHapticsEnabled
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 // 视频扩展名：无高清封面，预览走"压暗缩略图 + 视频占位"分支。
 // 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
@@ -155,6 +159,19 @@ private data class PreviewEffectsRequest(
     val file: NikonCamera.FileInfo,
     val anchor: Rect?,
     val rotationQuarterTurns: Int,
+)
+
+/** The pager needs connectivity and camera labels, not catalog or signal-strength updates. */
+private data class PreviewCameraUiState(
+    val isConnectedToCamera: Boolean,
+    val cameraManufacturer: String?,
+    val cameraModel: String?,
+)
+
+private fun CameraState.toPreviewCameraUiState() = PreviewCameraUiState(
+    isConnectedToCamera = isConnectedToCamera,
+    cameraManufacturer = cameraManufacturer,
+    cameraModel = cameraModel,
 )
 
 internal fun showPreviewPhotoEffects(
@@ -361,6 +378,11 @@ internal fun PhotoPreviewOverlay(
     // This overlay is an ephemeral open request, not a restorable workspace page. A saveable
     // pager would restore the previous photo after visiting the queue, overriding initialIndex.
     val pagerState = remember { PagerState(initialIndex, 0f) { previewItems.size } }
+    val pagingSettled by remember(pagerState) {
+        derivedStateOf {
+            !pagerState.isScrollInProgress && abs(pagerState.currentPageOffsetFraction) < .01f
+        }
+    }
     val currentItem = previewItems.getOrNull(pagerState.currentPage)
     val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
     val currentHandle = currentFile?.handle
@@ -372,7 +394,11 @@ internal fun PhotoPreviewOverlay(
     var cropRetry by remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
     val previewScope = rememberCoroutineScope()
-    val cameraState by cameraViewModel.state.collectAsState()
+    val cameraState by remember(cameraViewModel) {
+        cameraViewModel.state.map(CameraState::toPreviewCameraUiState).distinctUntilChanged()
+    }.collectAsStateWithLifecycle(
+        initialValue = cameraViewModel.state.value.toPreviewCameraUiState(),
+    )
     val currentTransfersBusy by rememberUpdatedState(transfersBusy)
     var previousTransfersBusy by remember { mutableStateOf(transfersBusy) }
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
@@ -615,8 +641,12 @@ internal fun PhotoPreviewOverlay(
     // 不重新读取相机，也不创建列表 QueueFlight；抵达时仅触发现有胶囊视觉回弹。
     var reportedZoomed by remember { mutableStateOf(false) }
     // Photo paging reads the same state as pinch/crop restoration, without a callback delay.
-    val currentZoomed = if (currentItem is PhotoPreviewItem.Photo)
-        previewViewport.scale.floatValue > 1.01f else reportedZoomed
+    val currentZoomed by remember(currentItem, previewViewport) {
+        derivedStateOf {
+            if (currentItem is PhotoPreviewItem.Photo) previewViewport.scale.floatValue > 1.01f
+            else reportedZoomed
+        }
+    }
     var queueGestureActive by remember { mutableStateOf(false) }
     var queueAnimating by remember { mutableStateOf(false) }
     var queueOffsetY by remember { mutableFloatStateOf(0f) }
@@ -1537,17 +1567,17 @@ internal fun PhotoPreviewOverlay(
             }
         }
 
+        // Membership only changes with the pager model/current page. Do not scan a large
+        // preview snapshot again for zoom, animation, EXIF or queue-state recompositions.
+        val photoActions = remember(previewItems, pagerState.currentPage) {
+            (currentItem as? PhotoPreviewItem.Photo)?.let { photo ->
+                PreviewPhotoActions(photo, previewBurstCollectionPage(previewItems, pagerState.currentPage) != null)
+            }
+        }
         PreviewPhotoTools(
-            photoActions = (currentItem as? PhotoPreviewItem.Photo)?.let { photo ->
-                PreviewPhotoActions(
-                    photo,
-                    (previewBurstCollectionPage(previewItems, pagerState.currentPage) ?: -1) in
-                        0 until pagerState.currentPage,
-                )
-            },
+            photoActions = photoActions,
             currentHandle = currentHandle,
-            inputsEnabled = previewGesturesEnabled && !closing && !pagerState.isScrollInProgress &&
-                abs(pagerState.currentPageOffsetFraction) < .01f,
+            inputsEnabled = previewGesturesEnabled && !closing && pagingSettled,
             editEnabled = !burstTransitionBusy && !queueAnimating && !queueGestureActive,
             collapseEnabled = !queueAnimating && !queueGestureActive && queueMotionJob?.isActive != true,
             rotationEnabled = !burstTransitionBusy,

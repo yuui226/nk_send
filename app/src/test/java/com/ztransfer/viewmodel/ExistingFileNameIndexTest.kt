@@ -158,4 +158,166 @@ class ExistingFileNameIndexTest {
             }
         }
     }
+
+    @Test
+    fun verificationOnlyRunsForAnIndexedCandidateAndReusesAnUnchangedOriginal() {
+        val index = ExistingFileNameIndex<String>()
+        var checked = 0
+        val verify: (IndexedExistingFile<String>) -> IndexedExistingFile<String>? = {
+            checked++
+            it
+        }
+        assertNull(index.findVerified("DSC_0001.JPG", 100, verify) { error("No stale entry") })
+        assertEquals(0, checked)
+
+        index.add("DSC_0001.JPG", 100, "original")
+        assertEquals("original", index.findVerified("DSC_0001.JPG", 100, verify) {
+            error("Valid file must stay indexed")
+        }?.value)
+        assertEquals(1, checked)
+    }
+
+    @Test
+    fun deletedOriginalIsRemovedButAnExistingNumberedCopyCanStillSupplyIt() {
+        val index = ExistingFileNameIndex<String>().apply {
+            add("DSC_0001.JPG", 100, "deleted")
+            add("DSC_0001 (1).JPG", 100, "surviving-copy")
+        }
+        val removed = mutableListOf<String>()
+        val checked = mutableListOf<String>()
+        val found = index.findVerified("DSC_0001.JPG", 100, verify = {
+            checked += it.value
+            it.takeUnless { candidate -> candidate.value == "deleted" }
+        }, onInvalidated = { removed += it.value })
+
+        assertEquals("surviving-copy", found?.value)
+        assertEquals(listOf("deleted", "surviving-copy"), checked)
+        assertEquals(listOf("deleted"), removed)
+        assertFalse(index.containsDisplayName("DSC_0001.JPG"))
+        assertTrue(index.containsDisplayName("DSC_0001 (1).JPG"))
+    }
+
+    @Test
+    fun deletingAllOriginalCopiesLeavesEffectsAloneAndAllowsOriginalFilenameAgain() {
+        val index = ExistingFileNameIndex<String>().apply {
+            add("DSC_0001.JPG", 100, "deleted")
+            add("DSC_0001 (1).JPG", 100, "also-deleted")
+            add("DSC_0001_f_e.JPG", 100, "effect")
+        }
+        val removed = mutableListOf<String>()
+        assertNull(index.findVerified("Z30_0001.JPG", 100, verify = { null },
+            onInvalidated = { removed += it.value }))
+
+        assertEquals(setOf("deleted", "also-deleted"), removed.toSet())
+        assertEquals("effect", index.find("DSC_0001_f_e.JPG", 100)?.value)
+        assertEquals("DSC_0001.JPG", index.reserveDisplayName("DSC_0001.JPG") { _, _ ->
+            error("Deleted original name should be available")
+        })
+    }
+
+    @Test
+    fun editedFileKeepsItsNameOccupiedAndNoLongerSkipsTheOriginalSize() {
+        val index = ExistingFileNameIndex<String>().apply { add("DSC_0001.JPG", 100, "edited") }
+        val removed = mutableListOf<Long>()
+
+        assertNull(index.findVerified("DSC_0001.JPG", 100,
+            verify = { it.copy(size = 200) }, onInvalidated = { removed += it.size }))
+        assertEquals(listOf(100L), removed)
+        assertEquals(200L, index.find("DSC_0001.JPG", 200)?.size)
+        assertEquals("DSC_0001 (1).JPG", index.reserveDisplayName("DSC_0001.JPG") { _, n ->
+            "DSC_0001 ($n).JPG"
+        })
+    }
+
+    @Test
+    fun renamedFileKeepsItsActualNameAndReleasesTheOldName() {
+        val index = ExistingFileNameIndex<String>().apply { add("DSC_0001.JPG", 100, "renamed") }
+        assertNull(index.findVerified("DSC_0001.JPG", 100,
+            verify = { it.copy(displayName = "holiday.JPG") }, onInvalidated = {}))
+
+        assertFalse(index.containsDisplayName("DSC_0001.JPG"))
+        assertTrue(index.containsDisplayName("holiday.JPG"))
+        assertEquals("renamed", index.find("holiday.JPG", 100)?.value)
+    }
+
+    @Test
+    fun providerFailureDoesNotRemoveTheCandidateOrAnyOtherOriginal() {
+        val index = ExistingFileNameIndex<String>().apply {
+            add("DSC_0001.JPG", 100, "original")
+            add("DSC_0002.JPG", 200, "other")
+        }
+        val failure = SecurityException("Permission unavailable")
+        try {
+            index.findVerified("DSC_0001.JPG", 100, verify = { throw failure },
+                onInvalidated = { error("Provider failure is not proof of deletion") })
+            error("Expected provider failure")
+        } catch (actual: SecurityException) {
+            assertTrue(actual === failure)
+        }
+        assertEquals("original", index.find("DSC_0001.JPG", 100)?.value)
+        assertEquals("other", index.find("DSC_0002.JPG", 200)?.value)
+    }
+
+    @Test
+    fun delayedMissingResultCannotRemoveANewerPublicationOfTheSameName() {
+        val index = ExistingFileNameIndex<String>().apply { add("DSC_0001.JPG", 100, "old") }
+        val removed = mutableListOf<String>()
+        val found = index.findVerified("DSC_0001.JPG", 100, verify = {
+            if (it.value == "old") {
+                index.add("DSC_0001.JPG", 100, "new")
+                null
+            } else it
+        }, onInvalidated = { removed += it.value })
+
+        assertEquals("new", found?.value)
+        assertTrue(removed.isEmpty())
+    }
+
+    @Test
+    fun removingOneCaseSensitiveDocumentPreservesOtherSpellingAndActiveReservations() {
+        val index = ExistingFileNameIndex<String>()
+        val reserved = index.reserveDisplayName("DSC_0001.JPG") { name, n -> "$name ($n)" }
+        index.add("DSC_0001.JPG", 100, "upper")
+        index.add("dsc_0001.jpg", 100, "lower")
+
+        assertTrue(index.remove(IndexedExistingFile("DSC_0001.JPG", 100, "upper")))
+        assertTrue(index.containsDisplayName("DSC_0001.JPG"))
+        assertTrue(index.remove(IndexedExistingFile("dsc_0001.jpg", 100, "lower")))
+        assertTrue(index.containsDisplayName("DSC_0001.JPG"))
+        index.releaseDisplayName(reserved)
+        assertFalse(index.containsDisplayName("DSC_0001.JPG"))
+    }
+
+    @Test
+    fun exportedIndexRemovalRequiresExactUriAndPreservesOtherSizesAndDestinations() {
+        val index = ExportedOriginalIndex().apply {
+            add("DSC_0001.JPG", 100, uriString = "new")
+            add("DSC_0001.JPG", 200, uriString = "other-size")
+            add("DSC_0001.JPG", 100, "ZT2026-11-02", uriString = "other-day")
+            add("DSC_0002.JPG", 100, uriString = "other-photo")
+        }
+
+        assertFalse(index.remove("DSC_0001.JPG", 100, uriString = "old"))
+        assertTrue(index.contains(file("DSC_0001.JPG", 100)))
+        assertTrue(index.remove("Z30_0001.JPG", 100, uriString = "new"))
+        assertFalse(index.contains(file("DSC_0001.JPG", 100)))
+        assertTrue(index.contains(file("DSC_0001.JPG", 200)))
+        assertTrue(index.contains(file("DSC_0001.JPG", 100), "ZT2026-11-02"))
+        assertTrue(index.contains(file("DSC_0002.JPG", 100)))
+    }
+
+    @Test
+    fun removingLastExportEntryDoesNotMatchUnknownSizeThroughAnEmptyBucket() {
+        val index = ExportedOriginalIndex().apply {
+            add("DSC_0001.MP4", 100, uriString = "video")
+        }
+        val unknown = file("DSC_0001.MP4", PtpConstants.SIZE_UNKNOWN)
+        assertTrue(index.contains(unknown))
+
+        assertTrue(index.remove("DSC_0001.MP4", 100, uriString = "video"))
+        assertFalse(index.contains(unknown))
+        assertFalse(index.contains(file("DSC_0001.MP4", 100)))
+        assertTrue(index.add("DSC_0001.MP4", 200, uriString = "new-video"))
+        assertTrue(index.contains(unknown))
+    }
 }

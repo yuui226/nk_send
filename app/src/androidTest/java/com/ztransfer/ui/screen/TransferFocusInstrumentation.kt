@@ -176,13 +176,28 @@ class TransferFocusInstrumentation : Instrumentation() {
             val idle = host.getString(R.string.queue_summary_idle)
             val paused = host.getString(R.string.queue_summary_paused)
             val waitingGeneration = host.getString(R.string.status_waiting)
+            fun awaitIdleSummaryCentered(tag: String) {
+                awaitCondition("Idle icon is not centered in the entire $tag card", stableMs = 120) {
+                    val card = tagged(tag).singleOrNull() ?: return@awaitCondition false
+                    val icon = describedNodes(idle, card).singleOrNull() ?: return@awaitCondition false
+                    val cardBounds = bounds(card)
+                    val iconBounds = bounds(icon)
+                    val expectedIconSize = (24 * host.resources.displayMetrics.density).roundToInt()
+                    abs(iconBounds.width() - expectedIconSize) <= 1 &&
+                        abs(iconBounds.height() - expectedIconSize) <= 1 &&
+                        abs(iconBounds.centerX() - cardBounds.centerX()) <= 1 &&
+                        abs(iconBounds.centerY() - cardBounds.centerY()) <= 1
+                }
+            }
             fun awaitSummaries(downloads: Int, generations: Int) {
                 awaitCondition("Summary counts do not match $downloads downloads / $generations generations", stableMs = 120) {
                     tagged(DOWNLOAD_CARD).size == 1 && tagged(GENERATION_CARD).size == 1 &&
-                        tagged(DOWNLOAD_COUNT).singleOrNull()?.contentDescription?.toString() ==
-                            host.getString(R.string.queue_summary_download_remaining, downloads) &&
-                        tagged(GENERATION_COUNT).singleOrNull()?.contentDescription?.toString() ==
-                            host.getString(R.string.queue_summary_generation_remaining, generations)
+                        (if (downloads == 0) tagged(DOWNLOAD_COUNT).isEmpty() else
+                            tagged(DOWNLOAD_COUNT).singleOrNull()?.contentDescription?.toString() ==
+                                host.getString(R.string.queue_summary_download_remaining, downloads)) &&
+                        (if (generations == 0) tagged(GENERATION_COUNT).isEmpty() else
+                            tagged(GENERATION_COUNT).singleOrNull()?.contentDescription?.toString() ==
+                                host.getString(R.string.queue_summary_generation_remaining, generations))
                 }
                 awaitCondition("Summary cards are not aligned side by side at 55:45", stableMs = 120) {
                     val download = tagged(DOWNLOAD_CARD).singleOrNull()?.let(::bounds)
@@ -191,16 +206,29 @@ class TransferFocusInstrumentation : Instrumentation() {
                     val generationCount = tagged(GENERATION_COUNT).singleOrNull()?.let(::bounds)
                     download != null && generation != null && download.right <= generation.left &&
                         abs(download.top - generation.top) <= 2 && abs(download.bottom - generation.bottom) <= 2 &&
-                        downloadCount != null && generationCount != null &&
-                        abs(downloadCount.centerY() - generationCount.centerY()) <= 1 &&
+                        (downloads == 0 || (downloadCount != null &&
+                            abs(downloadCount.centerY() - download.centerY()) <= 1)) &&
+                        (generations == 0 || (generationCount != null &&
+                            abs(generationCount.centerY() - generation.centerY()) <= 1)) &&
+                        (downloadCount == null || generationCount == null ||
+                            abs(downloadCount.centerY() - generationCount.centerY()) <= 1) &&
                         download.width() > generation.width() &&
                         download.width().toFloat() / (download.width() + generation.width()) in 0.545f..0.555f
                 }
+                // Zero removes only the count. Existing completion holds/fades may finish
+                // naturally before the idle icon is required to occupy the whole card's center.
+                if (downloads == 0) awaitIdleSummaryCentered(DOWNLOAD_CARD)
+                if (generations == 0) awaitIdleSummaryCentered(GENERATION_CARD)
             }
-            fun awaitSummaryText(tag: String, text: String) =
-                awaitCondition("Missing $text in summary $tag") { summaryText(tag).contains(text) }
+            fun awaitSummaryText(tag: String, text: String) {
+                awaitCondition("Missing $text in summary $tag") {
+                    val card = tagged(tag).singleOrNull() ?: return@awaitCondition false
+                    if (text == idle || text == paused) describedNodes(text, card).size == 1
+                    else accessibilityText(card).contains(text)
+                }
+            }
 
-            // Both cards are present before any work exists, including two independent zero counts.
+            // Both cards remain present with centered idle icons and no zero-count badges.
             publish(emptyList(), false)
             awaitSummaries(0, 0)
             awaitSummaryText(DOWNLOAD_CARD, idle)
@@ -855,13 +883,38 @@ class TransferFocusInstrumentation : Instrumentation() {
             awaitProbe("Probe did not observe the original download at .15") {
                 it.task?.taskId == 700L && !it.completing && abs(it.progress.value - .15f) < .005f
             }
+            // History/generation metadata may change while the same progress spring is running.
+            // Those updates must not reset its owner, fill, or target. The final handoff below
+            // must nevertheless find the latest terminal statistics in the separate task snapshot.
+            probeFrames.clear()
+            val steadySample = ActiveTransferProgress(700, .65f)
+            publish(listOf(observed), true, steadySample)
+            awaitProbe("Normal progress did not start before unrelated history updates") {
+                it.task?.taskId == 700L && it.animation.isRunning
+            }
+            val unrelatedHistory = task(699, "HISTORY_699.JPG", TransferStatus.COMPLETED)
+            for (revision in 1L..4L) {
+                publish(listOf(unrelatedHistory.copy(frameGenerationElapsedMs = revision), observed),
+                    true, steadySample)
+                SystemClock.sleep(20)
+            }
+            awaitProbe("Unrelated history updates interrupted the current progress target") {
+                it.task?.taskId == 700L && !it.completing && !it.animation.isRunning &&
+                    abs(it.progress.value - .65f) < .005f
+            }
+            val steadyFrames = recordedProbeFrames()
+            check(steadyFrames.all { it.taskId == 700L && !it.completing && it.progress >= .145f } &&
+                steadyFrames.zipWithNext().all { (before, after) -> after.progress + .0001f >= before.progress }) {
+                "Unrelated history updates reset or reversed live progress: $steadyFrames"
+            }
             probeFrames.clear()
             val completedObserved = observed.copy(status = TransferStatus.COMPLETED, progress = 1f,
                 elapsedMs = 120, downloadMBps = 20f)
             var handoffTasks = listOf(completedObserved, task(701, "NEXT_701.JPG", TransferStatus.TRANSFERING))
             publish(handoffTasks, true, ActiveTransferProgress(701, .2f))
             awaitProbe("Successful observed download did not retain its identity while completing") {
-                it.task?.taskId == 700L && it.completing
+                it.task?.taskId == 700L && it.completing &&
+                    it.task?.elapsedMs == 120L && it.task?.downloadMBps == 20f
             }
             runOnMainSync {
                 check(downloadProbe.get()?.let { it.task?.taskId == 700L && it.completing } == true) {
@@ -1173,6 +1226,17 @@ class TransferFocusInstrumentation : Instrumentation() {
             for (index in 0 until node.childCount) node.getChild(index)?.let(::visit)
         }
         uiAutomation.rootInActiveWindow?.let(::visit)
+        return result
+    }
+
+    private fun describedNodes(description: String, root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val result = ArrayList<AccessibilityNodeInfo>()
+        fun visit(node: AccessibilityNodeInfo) {
+            if (!node.isVisibleToUser) return
+            if (node.contentDescription?.toString() == description) result += node
+            for (index in 0 until node.childCount) node.getChild(index)?.let(::visit)
+        }
+        visit(root)
         return result
     }
 

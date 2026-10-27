@@ -61,6 +61,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -495,6 +496,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // Number of newest actual shooting dates whose thumbnail boundary is complete.
     private val _recentThumbnailReadyDays = MutableStateFlow(0)
     val recentThumbnailReadyDays: StateFlow<Int> = _recentThumbnailReadyDays.asStateFlow()
+    private val _thumbnailReadyEvents = MutableSharedFlow<Int>(
+        extraBufferCapacity = 128,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    /** Successful cache publication only; visible missing cells can reload locally without polling. */
+    val thumbnailReadyEvents: SharedFlow<Int> = _thumbnailReadyEvents.asSharedFlow()
     private val _newMediaFiles = MutableSharedFlow<NewCameraMedia>(
         extraBufferCapacity = 32,
     )
@@ -609,6 +616,68 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var thumbnailDiskWritesBlocked = false
     private val thumbnailFillQueue = ThumbnailFillQueue()
     private val thumbnailFillWake = Channel<Unit>(Channel.CONFLATED)
+    private val newObjectThumbnailRetries = NewObjectThumbnailRetries()
+    private var newObjectThumbnailRetryJob: Job? = null
+    private var newObjectThumbnailRetryAtMs: Long? = null
+
+    private fun clearNewObjectThumbnailRetries() {
+        newObjectThumbnailRetryJob?.cancel()
+        newObjectThumbnailRetryJob = null
+        newObjectThumbnailRetryAtMs = null
+        newObjectThumbnailRetries.clear()
+    }
+
+    private fun retryFailedThumbnails() {
+        val now = SystemClock.elapsedRealtime()
+        thumbnailFillQueue.retryFailed { newObjectThumbnailRetries.canAttempt(it.handle, now) }
+    }
+
+    /** One timer for the session; delays never hold the camera gate or delay other thumbnails. */
+    private fun scheduleNewObjectThumbnailRetryWake() {
+        val next = newObjectThumbnailRetries.nextRetryAtMs()
+        if (next == newObjectThumbnailRetryAtMs && newObjectThumbnailRetryJob?.isActive == true) return
+        newObjectThumbnailRetryJob?.cancel()
+        newObjectThumbnailRetryJob = null
+        newObjectThumbnailRetryAtMs = next
+        if (next == null) return
+        val expectedCamera = camera
+        val expectedGeneration = thumbnailCacheSessionGeneration
+        newObjectThumbnailRetryJob = viewModelScope.launch {
+            delay((next - SystemClock.elapsedRealtime()).coerceAtLeast(1L))
+            newObjectThumbnailRetryJob = null
+            newObjectThumbnailRetryAtMs = null
+            if (camera !== expectedCamera || thumbnailCacheSessionGeneration != expectedGeneration) return@launch
+            if (newObjectThumbnailRetries.takeDue(SystemClock.elapsedRealtime()).isNotEmpty()) {
+                retryFailedThumbnails()
+                thumbnailFillWake.trySend(Unit)
+            }
+            scheduleNewObjectThumbnailRetryWake()
+        }
+    }
+
+    private fun deferNewObjectThumbnail(
+        file: NikonCamera.FileInfo,
+        expectedCamera: NikonCamera?,
+        expectedGeneration: Long,
+    ): Boolean {
+        if (expectedCamera == null || camera !== expectedCamera ||
+            thumbnailCacheSessionGeneration != expectedGeneration
+        ) return false
+        val retryAt = newObjectThumbnailRetries.failed(file.handle, SystemClock.elapsedRealtime()) ?: return false
+        noThumbHandles.remove(file.handle)
+        thumbnailFillQueue.markFailed(file)
+        scheduleNewObjectThumbnailRetryWake()
+        thumbnailDiagnostic(file) { "new object retry in ${(retryAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L)}ms" }
+        return true
+    }
+
+    private fun publishThumbnailReady(handle: Int) {
+        val removedDeadline = newObjectThumbnailRetries.remove(handle)
+        noThumbHandles.remove(handle)
+        thumbnailFillQueue.markSettled(handle)
+        if (removedDeadline) scheduleNewObjectThumbnailRetryWake()
+        _thumbnailReadyEvents.tryEmit(handle)
+    }
 
     private suspend fun activateThumbnailDiskCache(cam: NikonCamera) {
         if (camera !== cam) return
@@ -624,6 +693,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         inflightThumbs.clear()
         inflightPrefetches.values.forEach { it.cancel() }
         inflightPrefetches.clear()
+        clearNewObjectThumbnailRetries()
         thumbnailCacheSessionGeneration++
         thumbnailFillQueue.reset()
         activeThumbnailDiskCache = null
@@ -1132,6 +1202,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val transfersBusyFlow = MutableStateFlow(false)
     private val thumbnailPriorityRangeFlow = MutableStateFlow<PhotoDateRange?>(null)
     private val thumbnailLoadingDaysFlow = MutableStateFlow(0)
+    val appliedPhotoLoadingDays: StateFlow<Int> = thumbnailLoadingDaysFlow.asStateFlow()
     /** Set when the initial catalog stopped at the selected newest-day boundary. */
     private var photoRangeScanStopped = false
 
@@ -1309,7 +1380,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             thumbnailPriorityRangeFlow.collect { range ->
                 thumbnailFillQueue.updatePriorityRange(range)
-                thumbnailFillQueue.retryFailed()
+                retryFailedThumbnails()
                 thumbnailFillWake.trySend(Unit)
             }
         }
@@ -1327,6 +1398,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             ) { blocked, connectionAndScan -> blocked to connectionAndScan }
                 .collectLatest { (blocked, connectionAndScan) ->
                 val (connected, scanComplete) = connectionAndScan
+                if (!connected) clearNewObjectThumbnailRetries()
                 if (blocked || !connected || !scanComplete) return@collectLatest
                 val expectedCacheGeneration = thumbnailCacheSessionGeneration
                 val expectedQueueRevision = thumbnailFillQueue.revision
@@ -1335,14 +1407,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     thumbnailPriorityRangeFlow.value,
                     newestCaptureDaysRange(state.value.files, thumbnailLoadingDaysFlow.value),
                 )
-                thumbnailFillQueue.retryFailed()
+                retryFailedThumbnails()
                 log { "THUMB_FILL resume pending=${thumbnailFillQueue.pendingCount}" }
                 var loaded = 0
                 while (currentCoroutineContext().isActive) {
                     val file = thumbnailFillQueue.poll()
                     if (file == null) {
                         thumbnailFillWake.receive()
-                        thumbnailFillQueue.retryFailed()
+                        retryFailedThumbnails()
                         continue
                     }
                     if (thumbnailDiskWritesBlocked) {
@@ -1388,7 +1460,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 文件从新到旧发布，第一批通常已经包含最新照片。只观察候选身份而不是整个
             // files 列表，后续枚举批次就不会反复取消同一张照片的静置等待和 FHD 请求。
             val latestStillFlow = state
-                .map { latestEffectPreviewFile(it.files) }
+                // 电量、连接和预览状态变化时文件未变，无需重新遍历整份照片目录。
+                .map { it.files }
+                .distinctUntilChanged()
+                .map(::latestEffectPreviewFile)
                 .distinctUntilChanged { previous, next ->
                     previous?.let(::effectPreviewKey) == next?.let(::effectPreviewKey)
                 }
@@ -2824,6 +2899,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         currentHandles: Set<Int>,
     ): List<NikonCamera.FileInfo> {
         removedHandles.forEach { handle ->
+            newObjectThumbnailRetries.remove(handle)
             indexedCameraFiles.remove(handle)
             thumbnailCache.remove(handle)
             noThumbHandles.remove(handle)
@@ -2831,6 +2907,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             inflightPrefetches.remove(handle)?.cancel()
             pendingNewObjectHandles.remove(handle)
         }
+        scheduleNewObjectThumbnailRetryWake()
         thumbnailFillQueue.removeHandles(removedHandles)
         val reconciled = reconcilePublishedCameraFiles(
             publishedFiles = _state.value.files,
@@ -3059,6 +3136,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (knownHandlesCamera === cam) knownHandles += handle
         if (added && hasKnownBaseline && knownHandlesCamera === cam) {
+            // ObjectInfo can become readable before the just-written JPEG's GetThumb is ready.
+            // Register before the first suspension/auto-transfer so a transient miss is not permanent.
+            newObjectThumbnailRetries.register(handle)
+            noThumbHandles.remove(handle)
             if (isAutoTransferMedia(info)) {
                 _newMediaFiles.emit(NewCameraMedia(cam, listOf(info)))
             }
@@ -3109,6 +3190,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 新一轮枚举尚未完成时被后续暂停误复用。
         if (resumeSnapshot == null) fileScanHandleSnapshot = null
         if (!preserveExisting) {
+            clearNewObjectThumbnailRetries()
             knownHandlesCamera = null
             knownHandles.clear()
             indexedCameraFiles.clear()
@@ -3485,12 +3567,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val publishedSizeBeforeBatch = publishedFiles.size
                     val configuredDays = thumbnailLoadingDaysFlow.value
-                    val observedDates = (publishedFiles.asSequence() + batch.asSequence())
-                        .mapNotNull { it.captureDate?.take(8) }
-                        .distinct()
-                        .toList()
                     val rangeBoundaryReached = configuredDays > 0 &&
-                        observedDates.size > configuredDays
+                        (publishedFiles.asSequence() + batch.asSequence())
+                            .mapNotNull { it.captureDate?.take(8) }
+                            .distinct()
+                            .take(configuredDays + 1)
+                            .count() > configuredDays
                     val currentRange = newestCaptureDaysRange(
                         (publishedFiles.asSequence() + batch.asSequence()).asIterable(),
                         configuredDays,
@@ -3853,6 +3935,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             loadThumbnailFromDisk(file)?.let { return it }
         }
+        if (!newObjectThumbnailRetries.canAttempt(handle, SystemClock.elapsedRealtime())) return null
         // 复用进行中的请求（跳过已被取消但尚未从表中清理的条目）。
         val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled }
             ?: InflightThumb(viewModelScope.async { fetchAndDecodeThumb(file) })
@@ -3898,8 +3981,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (cached != null) {
             onCacheHit()
+            if (camera === expectedCamera && thumbnailCacheSessionGeneration == expectedCacheGeneration) {
+                publishThumbnailReady(handle)
+            }
             return true
         }
+        if (!newObjectThumbnailRetries.canAttempt(handle, SystemClock.elapsedRealtime())) return false
         // 所有格式都随当前批次取图；STA 的 NEF/视频同样走有界读取，不跳过或假报完成。
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
@@ -3923,6 +4010,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             result
         } catch (e: Throwable) {
             if (e !is CancellationException) {
+                deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)
                 thumbnailDiagnostic(file, failure = true) {
                     "background failed ${e.javaClass.simpleName}: ${e.message}"
                 }
@@ -3997,15 +4085,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (camera !== expectedCamera) return@withPermit null
             thumbnailDiagnostic(file) { "request background" }
             if (FileOrderProbe.enabled) {
-                getRemoteThumbnailProbed(expectedCamera, handle, "background")
+                getRemoteThumbnailProbed(expectedCamera, file, "background")
             } else {
-                expectedCamera.getThumbnail(handle, visible = false)
+                expectedCamera.getThumbnail(
+                    handle, visible = false, file = file,
+                    retryNewObject = newObjectThumbnailRetries.isRetry(handle),
+                )
             }
         }   // 瞬时失败会抛出，由扫描循环按单张失败处理
         if (camera !== expectedCamera ||
             thumbnailCacheSessionGeneration != expectedCacheGeneration
         ) return false
         if (bytes == null || bytes.isEmpty()) {
+            if (deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)) return false
             // 与可见格子的取图规则一致：STA RAW/视频的有界探测可能只是暂未取到，
             // 不能写入“确认无图”缓存或标记完成；保留后续补漏/可见加载的重试机会。
             if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") {
@@ -4031,22 +4123,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             thumbnailDiskWritesBlocked = true
             log { "THUMB_CACHE write failed; stop background fill for this connection" }
         }
+        if (written && camera === expectedCamera &&
+            thumbnailCacheSessionGeneration == expectedCacheGeneration &&
+            activeThumbnailDiskCache === diskCache
+        ) publishThumbnailReady(handle)
         return written
     }
 
     /** 仅包裹现有 GetThumb 事务记录实际进相机通道的顺序；Debug 不增加任何相机请求。 */
     private suspend fun getRemoteThumbnailProbed(
         cam: NikonCamera,
-        handle: Int,
+        file: NikonCamera.FileInfo,
         lane: String,
     ): ByteArray? {
+        val handle = file.handle
         val sequence = if (FileOrderProbe.enabled) {
             FileOrderProbe.beginThumbnail(handle, lane)
         } else {
             -1
         }
         return try {
-            val bytes = cam.getThumbnail(handle, visible = lane == "visible")
+            val bytes = cam.getThumbnail(
+                handle, visible = lane == "visible", file = file,
+                retryNewObject = newObjectThumbnailRetries.isRetry(handle),
+            )
             if (FileOrderProbe.enabled) {
                 FileOrderProbe.finishThumbnail(
                     sequence = sequence,
@@ -4203,27 +4303,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun fetchAndDecodeThumb(file: NikonCamera.FileInfo): ImageBitmap? {
         val handle = file.handle
+        val expectedCamera = camera
+        val expectedCacheGeneration = thumbnailCacheSessionGeneration
         return try {
             // 创建共享远程请求前已经查过一次磁盘；排队期间后台可能刚好写入，再查一次
             // 可避免一条重复的 GetThumb。
             loadThumbnailFromDisk(file)?.let { return it }
-            val expectedCamera = camera ?: return null
-            val expectedCacheGeneration = thumbnailCacheSessionGeneration
+            if (expectedCamera == null ||
+                !newObjectThumbnailRetries.canAttempt(handle, SystemClock.elapsedRealtime())
+            ) return null
             val diskCache = activeThumbnailDiskCache
             val cacheFileName = thumbnailDiskCacheFileName(file)
             val bytes = remoteThumbGate.withPermit {
                 if (camera !== expectedCamera) return@withPermit null
                 thumbnailDiagnostic(file) { "request visible" }
                 if (FileOrderProbe.enabled) {
-                    getRemoteThumbnailProbed(expectedCamera, handle, "visible")
+                    getRemoteThumbnailProbed(expectedCamera, file, "visible")
                 } else {
-                    expectedCamera.getThumbnail(handle, visible = true)
+                    expectedCamera.getThumbnail(
+                        handle, visible = true, file = file,
+                        retryNewObject = newObjectThumbnailRetries.isRetry(handle),
+                    )
                 }
             }
             if (camera !== expectedCamera ||
                 thumbnailCacheSessionGeneration != expectedCacheGeneration
             ) return null
             if (bytes == null || bytes.isEmpty()) {
+                if (deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)) return null
                 // Direct STA RAW/video only performed a bounded fallback probe. Null is not the
                 // camera's authoritative NoThumbnail response, so a later visible retry remains valid.
                 if (!(expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg")) {
@@ -4260,6 +4367,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             throw e
         } catch (e: Exception) {
             // IO 瞬时失败（掉线等）：不负缓存，重连后仍可加载
+            deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)
             thumbnailDiagnostic(file, failure = true) {
                 "visible failed ${e.javaClass.simpleName}: ${e.message}"
             }
@@ -4341,6 +4449,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             if (!fromDisk &&
                 thumbnailCacheSessionGeneration == expectedCacheGeneration &&
+                !deferNewObjectThumbnail(file, camera, expectedCacheGeneration) &&
                 !(camera?.staDirectObjectReadValidated == true && file.extension != ".jpg")
             ) {
                 noThumbHandles.add(file.handle)
@@ -4356,6 +4465,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
         thumbnailCache.put(file.handle, image)
+        publishThumbnailReady(file.handle)
         thumbnailDiagnostic(file) {
             "decoded source=${if (fromDisk) "disk" else "remote"} bytes=$encodedSize " +
                 "image=${image.width}x${image.height}"
@@ -4822,6 +4932,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
+        clearNewObjectThumbnailRetries()
         com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         super.onCleared()
         CameraSessionService.stop(getApplication())

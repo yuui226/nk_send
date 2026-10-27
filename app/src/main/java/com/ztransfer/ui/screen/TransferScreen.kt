@@ -105,6 +105,8 @@ import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.TransferState
+import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
@@ -158,6 +160,19 @@ private fun CameraState.toTransferCameraUiState(): TransferCameraUiState = Trans
     wifiRssi = wifiRssi,
 )
 
+/** Settings outside this page must not invalidate the entire queue and its lazy item provider. */
+private data class TransferQueueUiState(
+    val tasks: List<TransferTask>,
+    val isTransferring: Boolean,
+    val pauseAfterCurrent: Boolean,
+    val existingExportIndex: ExportedOriginalIndex,
+    val existingExportRevision: Long,
+)
+
+private fun TransferState.toTransferQueueUiState() = TransferQueueUiState(
+    tasks, isTransferring, pauseAfterCurrent, existingExportIndex, existingExportRevision,
+)
+
 /** 队列页固定顶栏；由工作区宿主在页面转场过半后显现，不参与正文横向位移。 */
 @Composable
 fun TransferTopControls(
@@ -169,8 +184,6 @@ fun TransferTopControls(
             .map(CameraState::toTransferCameraUiState)
             .distinctUntilChanged()
     }.collectAsState(initial = cameraViewModel.state.value.toTransferCameraUiState())
-    val colors = AppTheme.colors
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -201,7 +214,9 @@ fun TransferScreen(
     onNavigateBack: () -> Unit
 ) {
     BackHandler(enabled = backHandlerEnabled, onBack = onNavigateBack)
-    val transferState by transferViewModel.state.collectAsState()
+    val transferState by remember(transferViewModel) {
+        transferViewModel.state.map(TransferState::toTransferQueueUiState).distinctUntilChanged()
+    }.collectAsState(initial = transferViewModel.state.value.toTransferQueueUiState())
     // 响应式连接状态：断开/重连即时反映到重试按钮的可用性（getCamera() 不是快照状态，不能作 gating）。
     val connected by remember(cameraViewModel) {
         cameraViewModel.state
@@ -260,10 +275,12 @@ fun TransferScreen(
 
     // A target retried during its exit is real waiting work again, even before cleanup removes
     // the old animation marker. Its count must return immediately with its protected card.
-    val excludedSummaryIds = if (removingTaskIds.isEmpty()) emptySet() else
-        removingTaskIds.keys.toMutableSet().apply {
+    val removalSnapshot = removingTaskIds.toMap()
+    val excludedSummaryIds = remember(removalSnapshot, transferState.tasks) {
+        if (removalSnapshot.isEmpty()) emptySet() else removalSnapshot.keys.toMutableSet().apply {
             transferState.tasks.forEach { if (it.status == TransferStatus.WAITING) remove(it.taskId) }
         }
+    }
     val summary = remember(transferState.tasks, transferState.isTransferring,
         transferState.pauseAfterCurrent, excludedSummaryIds) {
         transferQueuePresentation(transferState.tasks, transferState.isTransferring,
@@ -272,21 +289,24 @@ fun TransferScreen(
 
     // 正在收合退场的任务不再参与按钮状态；特别是 WAITING 被 withdraw 成 CANCELLED 后，
     // 不能在退场动画期间让“重试全部”闪现。
-    val actionVisibility = transferQueueActionVisibility(
-        tasks = transferState.tasks,
-        isTransferring = transferState.isTransferring,
-        removingTaskIds = removingTaskIds.keys,
-        suppressAll = clearAllInProgress,
-    )
+    val actionVisibility = remember(transferState.tasks, transferState.isTransferring,
+        removalSnapshot, clearAllInProgress) {
+        transferQueueActionVisibility(
+            tasks = transferState.tasks,
+            isTransferring = transferState.isTransferring,
+            removingTaskIds = removalSnapshot.keys,
+            suppressAll = clearAllInProgress,
+        )
+    }
     val hasRetryable = actionVisibility.hasRetryable
-    val retryNeedsCamera = transferState.tasks.any {
-        it.taskId !in removingTaskIds &&
-            it.canRetry &&
-            it.savedOriginalOutput == null && !isTransferredOriginal(
-                it.file,
-                transferState.existingExportIndex,
-                it.destinationFolderName,
-            )
+    val retryNeedsCamera = remember(transferState.tasks, transferState.existingExportIndex,
+        transferState.existingExportRevision, removalSnapshot) {
+        transferState.tasks.any {
+            it.taskId !in removalSnapshot && it.canRetry &&
+                it.savedOriginalOutput == null && !isTransferredOriginal(
+                    it.file, transferState.existingExportIndex, it.destinationFolderName,
+                )
+        }
     }
     // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
     // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
@@ -329,7 +349,9 @@ fun TransferScreen(
         val listPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
-            top = 6.dp,
+            // Keep the viewport edge-to-edge. Only resting content clears the floating
+            // controls; scrolled rows must continue beneath them and the status-bar scrim.
+            top = topInset + 64.dp,
             bottom = bottomInset + when {
                 horizontalActions && fabCount > 0 -> 96.dp
                 fabCount >= 3 -> 240.dp
@@ -339,11 +361,11 @@ fun TransferScreen(
             }
         )
         // One stable first item scrolls with history; there is no separate pinned copy.
-        val emptyHeight = (maxHeight - topInset - 58.dp - summaryHeight -
+        val emptyHeight = (maxHeight - summaryHeight -
             listPadding.calculateTopPadding() - listPadding.calculateBottomPadding()).coerceAtLeast(64.dp)
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(top = topInset + 58.dp)
+            modifier = Modifier.fillMaxSize()
                 .testTag("queue_history_list").semantics { testTagsAsResourceId = true },
             contentPadding = listPadding,
             // Each row owns its bottom spacing, including its removal animation.
@@ -646,12 +668,11 @@ private fun TransferTaskCard(
             task.frameGenerationAccumulatedMs + (generationClockMs - startedAt).coerceAtLeast(0L)
         }
     } else task.frameGenerationElapsedMs
-    val cardAccent by animateColorAsState(
+    val cardAccent = animateColorAsState(
         targetValue = transferCardStateColor(task, colors),
         animationSpec = tween(300, easing = FastOutSlowInEasing),
         label = "transferCardStateAccent",
     )
-    val cardContainerColor = lerp(colors.surface, cardAccent, 0.09f)
     val cardBorder = remember(colors) {
         Brush.verticalGradient(listOf(
             colors.glassSheen.copy(alpha = 0.32f),
@@ -686,10 +707,14 @@ private fun TransferTaskCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, cardBorder),
         colors = CardDefaults.cardColors(
-            containerColor = cardContainerColor,
+            containerColor = Color.Transparent,
         )
     ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
+        // Keep the identical state tint underneath all card layers, but read its animated
+        // value in drawing. A 300ms color transition must not recompose the thumbnail/text.
+        Box(modifier = Modifier.fillMaxWidth().drawBehind {
+            drawRect(lerp(colors.surface, cardAccent.value, 0.09f))
+        }) {
             androidx.compose.animation.AnimatedVisibility(
                 visible = downloading,
                 enter = fadeIn(tween(180)),
@@ -734,7 +759,7 @@ private fun TransferTaskCard(
                         val width = 2.5.dp.toPx()
                         val markerHeight = 32.dp.toPx()
                         drawRoundRect(
-                            color = cardAccent.copy(alpha = 0.65f),
+                            color = cardAccent.value.copy(alpha = 0.65f),
                             topLeft = Offset(5.dp.toPx(), (size.height - markerHeight) / 2f),
                             size = Size(width, markerHeight),
                             cornerRadius = CornerRadius(width, width),

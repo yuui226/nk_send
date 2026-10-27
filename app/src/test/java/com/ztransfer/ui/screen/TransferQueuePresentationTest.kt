@@ -10,6 +10,39 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 
 class TransferQueuePresentationTest {
+    @Test
+    fun existingOutputChecksStayOutOfBothSummariesUntilGenerationIsConfirmed() {
+        for (status in listOf(TransferStatus.COMPLETED, TransferStatus.TRANSFERING)) {
+            val checking = task(1, status, generating = true).copy(frameGenerationPendingCheck = true)
+            assertEquals(TransferQueuePresentation(), transferQueuePresentation(listOf(checking), true))
+            val skipped = checking.copy(isGeneratingFrame = false, frameGenerationPendingCheck = false,
+                status = TransferStatus.COMPLETED, frameGenerationSkipped = true)
+            assertEquals(TransferQueuePresentation(), transferQueuePresentation(listOf(skipped), false))
+
+            val confirmed = checking.copy(frameGenerationPendingCheck = false,
+                frameGenerationStartedAtElapsedMs = 100L)
+            val running = transferQueuePresentation(listOf(confirmed), true)
+            assertEquals(listOf(confirmed), running.generationTasks)
+            assertEquals(1, running.generationRemaining)
+            assertEquals(QueueActivityState.RUNNING, running.generationState)
+            assertEquals(0, running.downloadRemaining)
+            assertNull(running.downloadTask)
+        }
+    }
+
+    @Test
+    fun hiddenChecksDoNotChangeTheRealDownloadOrGenerationQueueOrder() {
+        val checking = task(1, generating = true).copy(frameGenerationPendingCheck = true)
+        val running = task(2, generating = true, startedAt = 100L)
+        val waiting = task(3, generating = true)
+        val download = task(4, TransferStatus.TRANSFERING)
+        val summary = transferQueuePresentation(listOf(checking, waiting, download, running), true)
+        assertEquals(listOf(running, waiting), summary.generationTasks)
+        assertEquals(2, summary.generationRemaining)
+        assertEquals(1, summary.downloadRemaining)
+        assertSame(download, summary.downloadTask)
+    }
+
     private fun task(
         id: Long,
         status: TransferStatus = TransferStatus.COMPLETED,

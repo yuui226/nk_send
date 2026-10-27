@@ -76,6 +76,20 @@ internal object AlbumPreviewChecks {
             val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
             try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
         }
+        fun doubleTapImage() {
+            val display = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            val x = display.width * .5f; val y = display.height * .5f
+            display.recycle()
+            repeat(2) { tap ->
+                val down = SystemClock.uptimeMillis()
+                send(MotionEvent.ACTION_DOWN, down, x, y)
+                SystemClock.sleep(20)
+                send(MotionEvent.ACTION_UP, down, x, y)
+                if (tap == 0) SystemClock.sleep(60)
+            }
+            // The zoom tween takes 240 ms; allow its final frame before dragging again.
+            SystemClock.sleep(300)
+        }
         fun swipe(forward: Boolean) {
             val display = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
             val width = display.width; val height = display.height; display.recycle()
@@ -129,6 +143,17 @@ internal object AlbumPreviewChecks {
             checkTools(files[0], effects = true, cropping = true, imageTools = true)
             check(bounds(effect) == effectBounds) { "Effect button changed position after toggling its master switch" }
             checkFixedImageTools(histogramBounds, rotateBounds)
+
+            // The derived zoom gate must follow the live viewport: horizontal input pans an
+            // enlarged JPEG, then becomes pager input again after double-tap restoration.
+            doubleTapImage()
+            swipe(forward = true)
+            checkTools(files[0], effects = true, cropping = true, imageTools = true)
+            check(queued.get() == 0 && dismissed.get() == 0) {
+                "Zoom/pan triggered queue or dismissal"
+            }
+            checkFixedImageTools(histogramBounds, rotateBounds)
+            doubleTapImage()
 
             swipe(forward = true)
             checkTools(files[1], effects = false, cropping = false, imageTools = true)

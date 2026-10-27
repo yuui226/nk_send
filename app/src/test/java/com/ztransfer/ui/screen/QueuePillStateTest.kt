@@ -10,6 +10,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QueuePillStateTest {
+    @Test
+    fun checkingForAnExistingEffectNeverProducesGenerationCountOrDownloadProgress() {
+        for (status in listOf(TransferStatus.COMPLETED, TransferStatus.TRANSFERING)) {
+            val checking = task(1, status, isGeneratingFrame = true)
+                .copy(frameGenerationPendingCheck = true)
+            val hidden = summarizeQueuePillTasks(listOf(checking))
+            assertEquals(0, hidden.downloadRemaining)
+            assertEquals(0, hidden.generationRemaining)
+            assertEquals(null, hidden.activeDownloadTask)
+            assertFalse(hidden.hasActive)
+
+            val download = task(2, TransferStatus.TRANSFERING)
+            val concurrent = summarizeQueuePillTasks(listOf(checking, download))
+            assertEquals(1, concurrent.downloadRemaining)
+            assertEquals(0, concurrent.generationRemaining)
+            assertEquals(download, concurrent.activeDownloadTask)
+
+            val confirmed = checking.copy(frameGenerationPendingCheck = false,
+                frameGenerationStartedAtElapsedMs = 100L)
+            val admitted = summarizeQueuePillTasks(listOf(confirmed))
+            assertEquals(1, admitted.generationRemaining)
+            assertEquals(0, admitted.downloadRemaining)
+            assertTrue(admitted.hasActive)
+        }
+    }
+
     private fun task(
         handle: Int,
         status: TransferStatus,

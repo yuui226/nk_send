@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="photo_filter_folder">Filter folder</string>
-    <string name="photo_filter_folder_hint">Choose a folder containing .np3 files. One level of subfolders is used as categories. Supported Flexible Color presets are simulated on the photo; results may differ from the camera.</string>
+    <string name="photo_filter_folder_hint">Choose a folder containing .np3 files. One level of subfolders is used as categories. Classic and supported Flexible Color presets are simulated on the photo; results may differ from the camera.</string>
     <string name="photo_filter_folder_empty">No NP3 files in this folder</string>
     <string name="photo_np3_invalid">Invalid NP3 file</string>
     <string name="photo_np3_unsupported">This NP3 preset is not supported yet</string>

@@ -18,7 +18,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Downloading
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -35,7 +39,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
@@ -120,44 +123,54 @@ private fun DownloadStatusCard(
         progress = display.progress.takeIf { task != null },
         progressKey = task?.taskId,
     ) {
-        Column(Modifier.fillMaxSize().padding(padding), verticalArrangement = Arrangement.SpaceBetween) {
-            Row(Modifier.fillMaxWidth().height(headerHeight), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Box(Modifier.weight(1f)) {
-                    if (task != null) SummaryFilename(task, Modifier.fillMaxWidth())
-                    else SummaryIdleLabel(presentation.downloadState)
+        Row(Modifier.fillMaxSize().padding(padding), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            AnimatedContent(
+                targetState = task,
+                contentKey = { it != null },
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                transitionSpec = {
+                    fadeIn(tween(160)).togetherWith(fadeOut(tween(100)))
+                        .using(SizeTransform(sizeAnimationSpec = { _, _ -> snap() }))
+                },
+                label = "summaryDownloadPresence",
+            ) { shownTask ->
+                if (shownTask == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        SummaryStateIcon(presentation.downloadState, generation = false)
+                    }
+                } else Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                    Box(Modifier.fillMaxWidth().height(headerHeight), contentAlignment = Alignment.CenterStart) {
+                        SummaryFilename(shownTask, Modifier.fillMaxWidth())
+                    }
+                    // Speed keeps its natural width; the size label uses the remaining room.
+                    Row(Modifier.fillMaxWidth().height(headerHeight), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        TransferInfoPill(transferTaskFileSizeText(shownTask), TransferCardPillTone.SIZE,
+                            modifier = Modifier.weight(1f, fill = false).testTag("queue_download_size"),
+                            compact = true)
+                        // Numeric changes retain the shell; only availability fades.
+                        AnimatedContent(
+                            targetState = speed,
+                            contentKey = { it != null },
+                            transitionSpec = {
+                                fadeIn(tween(140)).togetherWith(fadeOut(tween(100)))
+                                    .using(SizeTransform(sizeAnimationSpec = { _, _ -> snap() }))
+                            },
+                            label = "summarySpeedPresence",
+                        ) { shownSpeed ->
+                            if (shownSpeed != null) TransferInfoPill(
+                                text = formatSpeed(shownSpeed),
+                                tone = TransferCardPillTone.SPEED,
+                                modifier = Modifier.testTag("queue_download_speed"),
+                                compact = true,
+                                animatedValue = shownSpeed,
+                            )
+                        }
+                    }
                 }
-                QueueRemainingBadge(presentation.downloadRemaining, generation = false)
             }
-            // Measure speed at its natural width; give size the remaining room instead of
-            // imposing two fixed fractions that can truncate text beside unused space.
-            Row(Modifier.fillMaxWidth().height(headerHeight), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                if (task != null) {
-                    TransferInfoPill(transferTaskFileSizeText(task), TransferCardPillTone.SIZE,
-                        modifier = Modifier.weight(1f, fill = false).testTag("queue_download_size"),
-                        compact = true)
-                }
-                // Presence only changes before the first sample or at idle/pause. Within a
-                // batch the shell survives file handoffs; digits own all numerical motion.
-                AnimatedContent(
-                    targetState = speed,
-                    contentKey = { it != null },
-                    transitionSpec = {
-                        fadeIn(tween(140)).togetherWith(fadeOut(tween(100)))
-                            .using(SizeTransform(sizeAnimationSpec = { _, _ -> snap() }))
-                    },
-                    label = "summarySpeedPresence",
-                ) { shownSpeed ->
-                    if (shownSpeed != null) TransferInfoPill(
-                        text = formatSpeed(shownSpeed),
-                        tone = TransferCardPillTone.SPEED,
-                        modifier = Modifier.testTag("queue_download_speed"),
-                        compact = true,
-                        animatedValue = shownSpeed,
-                    )
-                }
-            }
+            QueueRemainingBadge(presentation.downloadRemaining, generation = false)
         }
     }
 }
@@ -182,14 +195,19 @@ private fun GenerationStatusCard(
         breathing = true,
         cardSheen = cardSheen,
     ) {
-        Row(Modifier.fillMaxSize().padding(padding), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxSize().padding(padding), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             AnimatedGenerationQueueRows(
                 tasks = presentation.generationTasks,
                 allTasks = tasks,
                 rowHeight = rowHeight,
-                idleHeight = headerHeight,
+                idleHeight = bodyHeight,
                 modifier = Modifier.weight(1f).height(bodyHeight),
-                idleContent = { SummaryIdleLabel(QueueActivityState.IDLE) },
+                idleContent = {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        SummaryStateIcon(QueueActivityState.IDLE, generation = true)
+                    }
+                },
             ) { task, phase, rowModifier ->
                 val completedLabel = stringResource(R.string.done)
                 Box(rowModifier.testTag("queue_generation_task_${task.taskId}")) {
@@ -200,11 +218,8 @@ private fun GenerationStatusCard(
                     }
                 }
             }
-            // Use the same constrained row as the transfer badge, including font padding;
-            // estimating a top inset from typography alone can leave the badges misaligned.
-            Box(Modifier.height(headerHeight), contentAlignment = Alignment.Center) {
-                QueueRemainingBadge(presentation.generationRemaining, generation = true)
-            }
+            // Counts stay centered in the whole card while task rows keep their top anchor.
+            QueueRemainingBadge(presentation.generationRemaining, generation = true)
         }
     }
 }
@@ -277,19 +292,28 @@ private fun SummaryFilename(
         style = MaterialTheme.typography.labelMedium, color = color)
 }
 
+/** Decorative state only: idle has no moving spinner and is never a second action button. */
 @Composable
-private fun SummaryIdleLabel(state: QueueActivityState) {
-    val label = when (state) {
+private fun SummaryStateIcon(state: QueueActivityState, generation: Boolean) {
+    val description = stringResource(when (state) {
         QueueActivityState.PAUSED -> R.string.queue_summary_paused
         QueueActivityState.WAITING -> R.string.queue_focus_waiting_transfer
         else -> R.string.queue_summary_idle
+    })
+    val icon = when (state) {
+        QueueActivityState.PAUSED -> TransferQueuePauseIcon
+        QueueActivityState.WAITING -> Icons.Default.Schedule
+        else -> if (generation) Icons.Default.AutoAwesome else Icons.Default.Downloading
     }
-    Text(stringResource(label), style = MaterialTheme.typography.labelMedium,
-        color = AppTheme.colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Icon(icon, contentDescription = description, modifier = Modifier.size(24.dp),
+        tint = AppTheme.colors.onSurfaceVariant.copy(alpha = if (state == QueueActivityState.IDLE) 0.48f else 0.76f))
 }
 
 @Composable
 private fun QueueRemainingBadge(count: Int, generation: Boolean) {
+    // Emit no layout node at zero, so the idle content fills the whole card and centers there.
+    // Completion rows/progress keep their own lifetime; an empty count must not end them early.
+    if (count <= 0) return
     val colors = AppTheme.colors
     val accent = if (generation) colors.accentPurple else colors.accentBlue
     val description = stringResource(if (generation) R.string.queue_summary_generation_remaining
@@ -326,14 +350,16 @@ private fun QueueStatusSurface(
     val colors = AppTheme.colors
     // Theme base and foreground switch together; animate activity tint only, otherwise a
     // light-to-dark switch briefly leaves bright text on the outgoing light container.
-    val activityTint by animateFloatAsState(if (running) 0.09f else 0.035f,
+    val activityTint = animateFloatAsState(if (running) 0.09f else 0.035f,
         tween(220, easing = FastOutSlowInEasing), label = "${tag}Tint")
-    val container = lerp(colors.surface, accent, activityTint)
     val ambientAlpha = if (breathing) {
         val presence = animateFloatAsState(if (running) 1f else 0f, tween(220),
             label = "${tag}BreathingPresence")
+        val keepBreathing by remember(running, presence) {
+            derivedStateOf { running || presence.value > 0f }
+        }
         val pulse = rememberAmbientBreathingAlpha(
-            breathing = running || presence.value > 0f,
+            breathing = keepBreathing,
             restingAlpha = 0f,
             minAlpha = 0f,
             maxAlpha = 0.08f,
@@ -356,9 +382,13 @@ private fun QueueStatusSurface(
         shape = shape,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, border),
-        colors = CardDefaults.cardColors(containerColor = container),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
-        Box(Modifier.fillMaxSize().background(cardSheen).drawBehind {
+        Box(Modifier.fillMaxSize().drawBehind {
+            // Read activity color in drawing, like the progress and breathing layers. Fast
+            // task handoffs no longer recompose the card's text/layout on every tint frame.
+            drawRect(lerp(colors.surface, accent, activityTint.value))
+            drawRect(cardSheen)
             // Only the surface breathes. Filenames, timers, layout and transfer work stay still;
             // the loop ends after the exit fade or when this list item leaves composition.
             ambientAlpha?.value?.takeIf { it > 0f }?.let { drawRect(accent.copy(alpha = it)) }

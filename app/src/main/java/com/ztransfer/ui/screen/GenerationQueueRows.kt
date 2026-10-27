@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
+import com.ztransfer.viewmodel.isQueuedForFrameGeneration
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -71,7 +72,7 @@ internal fun generationRowSnapshots(
     val currentPrevious = HashMap<Long, TransferTask>()
     val queueHead = ArrayList<TransferTask>(PREPARED_GENERATION_ROWS)
     for (task in tasks) {
-        if (!task.isGeneratingFrame) continue
+        if (!task.isQueuedForFrameGeneration) continue
         if (task.taskId in previousIds) currentPrevious[task.taskId] = task
         if (queueHead.size < PREPARED_GENERATION_ROWS && queueHead.none { it.taskId == task.taskId }) {
             queueHead.add(task)

@@ -10,6 +10,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenerationQueueRowsTest {
+    @Test
+    fun duplicateCheckAndSkipNeverEnterOrExitTheVisibleGenerationRows() {
+        val checking = task(1).copy(frameGenerationPendingCheck = true)
+        val before = generationRowSnapshots(emptyList(), listOf(checking))
+        assertTrue(before.isEmpty())
+        val skipped = checking.copy(isGeneratingFrame = false, frameGenerationPendingCheck = false,
+            frameGenerationSkipped = true)
+        assertTrue(generationRowSnapshots(before, emptyList(), listOf(skipped)).isEmpty())
+
+        val genuine = task(2).copy(frameGenerationStartedAtElapsedMs = 100L)
+        val visible = generationRowSnapshots(emptyList(), listOf(genuine, checking))
+        assertEquals(listOf(GenerationRowSnapshot(genuine, 0)), visible)
+        assertEquals(visible, generationRowSnapshots(visible, listOf(genuine), listOf(genuine, skipped)))
+    }
+
+    @Test
+    fun confirmedMissingOutputEntersNormallyAndRetainsItsRealCompletionAnimation() {
+        val checking = task(1).copy(frameGenerationPendingCheck = true)
+        val initial = generationRowSnapshots(emptyList(), listOf(checking))
+        val generating = checking.copy(frameGenerationPendingCheck = false,
+            frameGenerationStartedAtElapsedMs = 100L)
+        val admitted = generationRowSnapshots(initial, listOf(generating))
+        assertEquals(listOf(GenerationRowSnapshot(generating, 0)), admitted)
+        val finished = generating.finished(250)
+        val holding = generationRowSnapshots(admitted, emptyList(), listOf(finished))
+        assertEquals(GenerationRowPhase.SUCCEEDED, holding.single().phase)
+        assertEquals(250L, holding.single().task.frameGenerationElapsedMs)
+    }
+
     private fun task(id: Long) = TransferTask(
         taskId = id,
         file = NikonCamera.FileInfo(id.toInt(), 100L, "DSC_$id.JPG", captureDate = null),

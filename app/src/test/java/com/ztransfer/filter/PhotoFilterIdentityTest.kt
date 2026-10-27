@@ -17,6 +17,9 @@ class PhotoFilterIdentityTest {
         assertEquals("np3:$source", key)
         assertTrue(isCustomPhotoFilterCatalogKey(requireNotNull(key)))
         assertNotEquals(source, key)
+        assertEquals(key, photoFilterCatalogKey("np3:$source:np3-classic-srgb-v1"))
+        assertEquals(PhotoNp3RecipeKind.CLASSIC, photoNp3RecipeKind("np3:$source:np3-classic-srgb-v1"))
+        assertEquals(PhotoNp3RecipeKind.FLEXIBLE, photoNp3RecipeKind("np3:$source:np3-srgb-v1"))
     }
 
     @Test fun unknownIdsAndMalformedCustomKeysAreNeverTrusted() {

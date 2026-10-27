@@ -21,8 +21,8 @@ internal data class ParsedPhotoNp3(
 )
 
 /**
- * Converts the verified Flexible Color 0310 profile into the same sRGB approximation as the
- * built-in photo filters. This is independent of the camera's Classic Picture Control writer.
+ * Converts supported Classic and Flexible Color NP3 profiles into sRGB photo recipes.
+ * This is independent of the camera's Classic Picture Control writer.
  *
  * Field meanings and units are checked against the MIT-licensed independent implementation:
  * https://github.com/ssssota/nikon-flexible-color-picture-control (src/base.ts, serialize.ts).
@@ -32,6 +32,7 @@ internal data class ParsedPhotoNp3(
 internal object PhotoNp3Parser {
     const val MAX_BYTES = 64 * 1024
     const val CONVERTER_VERSION = "np3-srgb-v1"
+    const val CLASSIC_CONVERTER_VERSION = "np3-classic-srgb-v1"
 
     fun read(input: InputStream, checkpoint: () -> Unit = {}): ParsedPhotoNp3 {
         val output = ByteArrayOutputStream()
@@ -70,6 +71,14 @@ internal object PhotoNp3Parser {
         // its original ID even when a newer import policy does not support every source control.
         BuiltInPhotoFilters.all.firstOrNull { BuiltInPhotoFilters.catalogKey(it.id) == digest }?.let {
             return ParsedPhotoNp3(digest, it, ignoredDetailControls = true)
+        }
+        if (!base.contentEquals(byteArrayOf(0, 0x20))) {
+            val parameters = ClassicPhotoNp3Parser.parse(fields, version)
+            return ParsedPhotoNp3(
+                digest,
+                PhotoFilterPreset("np3:$digest:$CLASSIC_CONVERTER_VERSION", name, parameters),
+                ignoredDetailControls = true,
+            )
         }
         supportedUnless(version == "0310" && base.contentEquals(byteArrayOf(0, 0x20)),
             "Unsupported NP3 version or base Picture Control")

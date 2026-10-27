@@ -79,6 +79,7 @@ object PhotoFilterRenderer {
         val np3SaturationAdjustment: Float = 0f,
         val np3ColorBands: CompiledNp3ColorBands? = null,
         val np3TonalControls: CompiledNp3TonalControls? = null,
+        val classicControls: CompiledClassicControls? = null,
     )
 
     private data class CompiledNp3ColorBands(
@@ -95,6 +96,116 @@ object PhotoFilterRenderer {
         val contrastScale: Float,
     )
 
+    private data class CompiledClassicControls(
+        val hueShift: Float,
+        val saturationAdjustment: Float,
+        val contrastScale: Float,
+        val brightness: Float,
+        val blackLift: Float,
+        val monochromeAmount: Float,
+        val redWeight: Float,
+        val greenWeight: Float,
+        val blueWeight: Float,
+        val toningHue: Float,
+        val toningSaturation: Float,
+        val binaryAmount: Float,
+        val toneCurve: FloatArray?,
+    )
+
+    private data class ClassicBaseLook(
+        val contrast: Float = 1f,
+        val saturation: Float = 1f,
+        val brightness: Float = 0f,
+        val hue: Float = 0f,
+        val blackLift: Float = 0f,
+        val toningHue: Float? = null,
+        val binaryAmount: Float = 0f,
+    )
+
+    /**
+     * NP3 names a Nikon base look but does not contain its RAW development tables. These modest
+     * sRGB mappings deliberately remain separate from the existing Flexible Color conversions.
+     * All per-recipe coefficients are compiled once; the pixel path allocates no objects.
+     */
+    private fun compileClassic(parameters: ClassicNp3PhotoFilterParameters): CompiledClassicControls {
+        val look = when (parameters.base) {
+            ClassicNp3Style.STANDARD, ClassicNp3Style.AUTO -> ClassicBaseLook()
+            ClassicNp3Style.NEUTRAL -> ClassicBaseLook(0.95f, 0.94f)
+            ClassicNp3Style.VIVID -> ClassicBaseLook(1.08f, 1.12f)
+            ClassicNp3Style.PORTRAIT -> ClassicBaseLook(1f, 0.96f, 0.012f, 1f)
+            ClassicNp3Style.LANDSCAPE -> ClassicBaseLook(1.05f, 1.10f, hue = -1.5f)
+            ClassicNp3Style.FLAT -> ClassicBaseLook(0.86f, 0.92f, blackLift = 0.012f)
+            ClassicNp3Style.MONOCHROME -> ClassicBaseLook()
+            ClassicNp3Style.FLAT_MONOCHROME -> ClassicBaseLook(contrast = 0.85f)
+            ClassicNp3Style.DEEP_TONE_MONOCHROME -> ClassicBaseLook(contrast = 1.18f)
+            ClassicNp3Style.RICH_TONE_PORTRAIT -> ClassicBaseLook(1.04f, 1.04f, 0.005f)
+            ClassicNp3Style.DREAM -> ClassicBaseLook(0.88f, 0.82f, 0.035f, blackLift = 0.025f)
+            ClassicNp3Style.MORNING -> ClassicBaseLook(0.94f, 0.90f, 0.025f, 4f)
+            ClassicNp3Style.POP -> ClassicBaseLook(1.12f, 1.20f)
+            ClassicNp3Style.SUNDAY -> ClassicBaseLook(0.98f, 1.07f, 0.020f, 2f)
+            ClassicNp3Style.SOMBER -> ClassicBaseLook(1.08f, 0.78f, -0.040f, -2f)
+            ClassicNp3Style.DRAMATIC -> ClassicBaseLook(1.25f, 0.82f, -0.010f)
+            ClassicNp3Style.SILENCE -> ClassicBaseLook(0.93f, 0.72f, hue = -3f, blackLift = 0.020f)
+            ClassicNp3Style.BLEACHED -> ClassicBaseLook(0.83f, 0.60f, 0.035f, blackLift = 0.040f)
+            ClassicNp3Style.MELANCHOLIC -> ClassicBaseLook(0.96f, 0.78f, -0.015f, -7f)
+            ClassicNp3Style.PURE -> ClassicBaseLook(0.92f, 0.94f, 0.040f)
+            ClassicNp3Style.DENIM -> ClassicBaseLook(1.04f, 0.80f, -0.010f, -10f, 0.015f)
+            ClassicNp3Style.TOY -> ClassicBaseLook(1.18f, 1.18f, -0.020f, 3f)
+            ClassicNp3Style.SEPIA -> ClassicBaseLook(contrast = 1.02f, toningHue = 35f)
+            ClassicNp3Style.BLUE -> ClassicBaseLook(contrast = 1.04f, toningHue = 220f)
+            ClassicNp3Style.RED -> ClassicBaseLook(contrast = 1.05f, toningHue = 0f)
+            ClassicNp3Style.PINK -> ClassicBaseLook(contrast = 0.94f, brightness = 0.025f, toningHue = 330f)
+            ClassicNp3Style.CHARCOAL -> ClassicBaseLook(contrast = 1.30f)
+            ClassicNp3Style.GRAPHITE -> ClassicBaseLook(contrast = 1.15f, blackLift = 0.025f)
+            ClassicNp3Style.BINARY -> ClassicBaseLook(binaryAmount = 0.85f)
+            ClassicNp3Style.CARBON -> ClassicBaseLook(contrast = 1.40f, blackLift = -0.020f)
+        }
+        val baseStrength = if (parameters.base.creative) parameters.effectLevel / 100f else 1f
+        val manualContrast = if (parameters.contrastQuarter == CLASSIC_PHOTO_FILTER_AUTO) 0f
+            else parameters.contrastQuarter / 12f
+        val manualSaturation = if (parameters.saturationQuarter == CLASSIC_PHOTO_FILTER_AUTO) 0f
+            else parameters.saturationQuarter / 12f
+        // Yellow / orange / red / green filters weight channels before monochrome conversion.
+        // Each row sums to one, preserving neutral luminance and avoiding clipped white shifts.
+        val weights = when (parameters.filterEffect) {
+            1 -> floatArrayOf(0.30f, 0.65f, 0.05f)
+            2 -> floatArrayOf(0.45f, 0.52f, 0.03f)
+            3 -> floatArrayOf(0.70f, 0.28f, 0.02f)
+            4 -> floatArrayOf(0.15f, 0.80f, 0.05f)
+            else -> floatArrayOf(0.2126f, 0.7152f, 0.0722f)
+        }
+        val tone = when (parameters.toningEffect) {
+            1 -> 35f // Sepia
+            2 -> 205f // Cyanotype
+            3 -> 0f
+            4 -> 55f
+            5 -> 120f
+            6 -> 170f
+            7 -> 230f
+            8 -> 275f
+            9 -> 325f
+            else -> look.toningHue
+        }
+        return CompiledClassicControls(
+            hueShift = look.hue * baseStrength +
+                parameters.hueQuarter / 12f * APPROXIMATE_MAX_HUE_SHIFT_DEGREES,
+            saturationAdjustment = (1f + (look.saturation - 1f) * baseStrength) *
+                (1f + manualSaturation) - 1f,
+            contrastScale = (1f + (look.contrast - 1f) * baseStrength) *
+                if (parameters.toneCurve == null) 2f.pow(manualContrast) else 1f,
+            brightness = look.brightness * baseStrength +
+                if (parameters.toneCurve == null) parameters.brightnessQuarter / 6f * 0.12f else 0f,
+            blackLift = look.blackLift * baseStrength,
+            monochromeAmount = if (parameters.base.monochrome) baseStrength else 0f,
+            redWeight = weights[0], greenWeight = weights[1], blueWeight = weights[2],
+            toningHue = tone ?: 0f,
+            // Creative fixed-color bases have no selectable toning enum; density still applies.
+            toningSaturation = if (tone == null) 0f else parameters.toningDensityQuarter / 28f * 0.42f,
+            binaryAmount = look.binaryAmount * baseStrength,
+            toneCurve = parameters.normalizedToneCurve,
+        )
+    }
+
     private fun compileFilter(
         selection: PhotoFilterSelection,
         preserveAlpha: Boolean,
@@ -102,6 +213,9 @@ object PhotoFilterRenderer {
         val preset = selection.preset
         val strength = selection.normalizedIntensityPercent / 100f
         return when (val parameters = preset.parameters) {
+            is ClassicNp3PhotoFilterParameters -> CompiledFilter(
+                preset, strength, preserveAlpha, classicControls = compileClassic(parameters),
+            )
             is CubePhotoFilterParameters -> CompiledFilter(
                 preset, strength, preserveAlpha,
                 lutAdjustments = selection.lutAdjustments.normalized(),
@@ -445,6 +559,30 @@ object PhotoFilterRenderer {
         var hue = originalHue
 
         when (val parameters = compiled.preset.parameters) {
+            is ClassicNp3PhotoFilterParameters -> {
+                val controls = checkNotNull(compiled.classicControls)
+                hue = normalizeHue(originalHue + controls.hueShift * colorAdjustmentWeight)
+                saturation *= protectedSaturationScale(controls.saturationAdjustment, colorAdjustmentWeight)
+                if (controls.monochromeAmount > 0f) {
+                    val monochrome = red * controls.redWeight + green * controls.greenWeight +
+                        blue * controls.blueWeight
+                    lightness += (monochrome - lightness) * controls.monochromeAmount
+                    saturation += (controls.toningSaturation - saturation) * controls.monochromeAmount
+                    if (controls.toningSaturation > 0f) {
+                        var hueDistance = controls.toningHue - hue
+                        if (hueDistance > 180f) hueDistance -= 360f
+                        if (hueDistance < -180f) hueDistance += 360f
+                        hue = normalizeHue(hue + hueDistance * controls.monochromeAmount)
+                    }
+                }
+                lightness = ((lightness - 0.5f) * controls.contrastScale + 0.5f).coerceIn(0f, 1f)
+                lightness += controls.brightness * 4f * lightness * (1f - lightness)
+                lightness = (controls.blackLift + lightness * (1f - controls.blackLift)).coerceIn(0f, 1f)
+                if (controls.binaryAmount > 0f) {
+                    lightness += (smoothStep(0.42f, 0.58f, lightness) - lightness) * controls.binaryAmount
+                }
+                controls.toneCurve?.let { lightness = mapPhotoFilterToneCurve(lightness, it) }
+            }
             is CubePhotoFilterParameters -> error("Cube handled before HSL conversion")
             is NcpPhotoFilterParameters -> {
                 if (compiled.ncpHueShiftDegrees != 0f) {
@@ -612,7 +750,7 @@ object PhotoFilterRenderer {
     }
 
     /**
-     * 本渲染器传入值严格位于 [-60, 390)：原始 HSL 最低 -60°，滤镜最多偏移 30°。
+     * 原始 HSL、颜色偏移和最短路径调色的输入均只会跨过一次 0° 或 360°。
      * 单次加减即可归一化，避免每个像素执行两次昂贵的浮点取模。
      */
     internal fun normalizeHue(value: Float): Float = when {

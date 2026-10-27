@@ -88,15 +88,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -151,6 +153,7 @@ import com.ztransfer.viewmodel.TransferStorageMode
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
+import com.ztransfer.viewmodel.isQueuedForFrameGeneration
 import com.ztransfer.viewmodel.latestCaptureLocalDate
 import com.ztransfer.viewmodel.storageIdsBySlot
 import kotlin.math.abs
@@ -456,10 +459,6 @@ private val DATE_FILTER_WHEEL_HEIGHT = 50.dp
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
 private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")
 
-// 无拍摄日期文件的分组键（非显示文案，显示时映射到 R.string.unknown_date）。
-// 以 "zzz" 开头保证按键降序排序时排在所有 "yyyyMMdd" 日期之前，与原行为一致。
-private const val UNKNOWN_DATE_KEY = "zzz_unknown"
-
 // 回到顶部：翻过多少条目（含分组头）才算"够深"。
 private const val BACK_TO_TOP_MIN_INDEX = 30
 
@@ -469,9 +468,6 @@ private data class CollapsingGroup(val date: String, val keep: Int)
 private const val BURST_REFLOW_DURATION_MS = 300
 private const val BURST_MEMBER_ENTER_DURATION_MS = 180
 private const val BURST_MEMBER_EXIT_DURATION_MS = 150
-private const val CAMERA_REMOVAL_REFLOW_DURATION_MS = 280
-private const val CAMERA_REMOVAL_ENTER_DURATION_MS = 180
-private const val CAMERA_REMOVAL_EXIT_DURATION_MS = 160
 
 /**
  * 手风琴收合：按 [progress]（1→0）缩减条目报告给布局的高度（内容顶部对齐、超出裁掉），
@@ -503,36 +499,6 @@ fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
     return grouped.map { (date, groupFiles) ->
         FileGroup(date = date, files = groupFiles.sortedByDescending { it.captureDate ?: "" })
     }.sortedByDescending { it.date }
-}
-
-private data class PublishedCameraFileIdentity(
-    val fileName: String,
-    val size: Long,
-    val captureDate: String?,
-)
-
-private fun NikonCamera.FileInfo.publishedIdentity() = PublishedCameraFileIdentity(
-    fileName = fileName,
-    size = size,
-    captureDate = captureDate,
-)
-
-/** Dates whose logical camera photos disappeared in the latest authoritative update. */
-internal fun publishedCameraRemovalDates(
-    previous: List<NikonCamera.FileInfo>,
-    current: List<NikonCamera.FileInfo>,
-): Set<String> {
-    if (previous.isEmpty()) return emptySet()
-    val currentHandles = current.asSequence().mapTo(HashSet(current.size)) { it.handle }
-    val missingHandles = previous.filter { it.handle !in currentHandles }
-    if (missingHandles.isEmpty()) return emptySet()
-    // A dual-card backup can keep the same logical photo under its surviving alias handle. That is
-    // a session identity switch, not a visible deletion, and must not arm a grid exit animation.
-    val currentIdentities = current.asSequence()
-        .mapTo(HashSet(current.size)) { it.publishedIdentity() }
-    return missingHandles.asSequence()
-        .filter { it.publishedIdentity() !in currentIdentities }
-        .mapTo(LinkedHashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
 }
 
 @Composable
@@ -567,6 +533,7 @@ fun FileListScreen(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
     val recentThumbnailReadyDays by cameraViewModel.recentThumbnailReadyDays.collectAsStateWithLifecycle()
+    val appliedPhotoLoadingDays by cameraViewModel.appliedPhotoLoadingDays.collectAsStateWithLifecycle()
     val gpsContext = LocalContext.current
     val gpsBlockedByAp = state.isConnectedToCamera &&
         state.connectionType == CameraConnectionType.WIFI &&
@@ -574,54 +541,14 @@ fun FileListScreen(
     LaunchedEffect(gpsBlockedByAp) {
         NikonGpsService.setApModeBlocked(gpsContext, gpsBlockedByAp)
     }
-    // CameraState publishes authoritative removals immediately. The grid keeps its previous model
-    // for one frame only, so every existing animateItem node can arm before the new derived date /
-    // burst structure is submitted. No bitmap is copied and additions remain immediate.
-    var presentedCameraFiles by remember { mutableStateOf(state.files) }
-    var cameraRemovalReflowActive by remember { mutableStateOf(false) }
-    var cameraRemovalAffectedDates by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val cameraRemovalScope = rememberCoroutineScope()
-    val cameraRemovalEndJob = remember { arrayOfNulls<Job>(1) }
-    LaunchedEffect(
-        state.files,
-        state.isConnectedToCamera,
-        state.isLoadingFiles,
-        state.hasCompletedFileScan,
-    ) {
-        val target = state.files
-        val canAnimateRemoval = state.isConnectedToCamera &&
-            state.hasCompletedFileScan && !state.isLoadingFiles
-        val removedDates = if (canAnimateRemoval) {
-            publishedCameraRemovalDates(presentedCameraFiles, target)
-        } else {
-            emptySet()
-        }
-        if (removedDates.isNotEmpty()) {
-            cameraRemovalAffectedDates = cameraRemovalAffectedDates + removedDates
-            cameraRemovalReflowActive = true
-            // A newer removal owns the animation window immediately. Cancel the previous end timer
-            // before yielding a frame so it cannot clear the flags between arming and submission.
-            cameraRemovalEndJob[0]?.cancel()
-            cameraRemovalEndJob[0] = null
-            // The old keys must observe the exit/placement specs before the model drops them.
-            withFrameNanos { }
-            presentedCameraFiles = target
-            cameraRemovalEndJob[0] = cameraRemovalScope.launch {
-                delay((CAMERA_REMOVAL_REFLOW_DURATION_MS + 48).toLong())
-                cameraRemovalReflowActive = false
-                cameraRemovalAffectedDates = emptySet()
-                cameraRemovalEndJob[0] = null
-            }
-        } else {
-            presentedCameraFiles = target
-            if (!canAnimateRemoval) {
-                cameraRemovalEndJob[0]?.cancel()
-                cameraRemovalEndJob[0] = null
-                cameraRemovalReflowActive = false
-                cameraRemovalAffectedDates = emptySet()
-            }
-        }
-    }
+    val cameraCatalog = rememberPhotoCatalogPresentation(
+        files = state.files,
+        catalogReady = state.isConnectedToCamera &&
+            state.hasCompletedFileScan && !state.isLoadingFiles,
+    )
+    val presentedCameraFiles = cameraCatalog.files
+    val cameraCatalogReflowActive = cameraCatalog.motionActive
+    val cameraCatalogAffectedDates = cameraCatalog.affectedDates
     // The catalog remains complete for transfer/rating bookkeeping, while the visible grid and
     // its rating source snapshot honor the user's newest actual-shooting-day boundary.
     val photoLoadingRange = remember(presentedCameraFiles, transferState.photoLoadingDays) {
@@ -637,7 +564,7 @@ fun FileListScreen(
     var showSettings by remember { mutableStateOf(false) }
     var transferDirectoryAttention by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
-    var zAnchor by remember { mutableStateOf<Rect?>(null) }
+    val zAnchor = remember { arrayOfNulls<Rect>(1) }
     // 高级版烟花彩蛋：设置面板里的"高级版"徽标点击时在本页放烟花（与连接页共用实现）。
     val fireworks = rememberFireworksState()
     // "整组吸入"动画：飞行中的卡片摞可并发多摞；终点、押扣和胶囊接住回弹
@@ -666,20 +593,20 @@ fun FileListScreen(
     val burstBoundsRegistry = remember { HashMap<String, Rect>() }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
-    var filterAnchor by remember { mutableStateOf<Rect?>(null) }
+    val filterAnchor = remember { arrayOfNulls<Rect>(1) }
     // 弹出时冻结点击瞬间的有效坐标；顶栏随后因信号胶囊等重排也不再拖着面板跳动。
     var openedFilterAnchor by remember { mutableStateOf<Rect?>(null) }
     // 网格滚动状态提升到页面层供回顶按钮使用，但不能跨“列表被连接流程清空”保留。
     // 用空/非空作为状态槽身份：新连接的第一批照片会自然拿到全新的 0 位置状态；
     // 普通重组、继续分批加载以及离开子页面再返回都仍复用当前状态。
-    val gridState = key(presentedCameraFiles.isEmpty() && !cameraRemovalReflowActive) {
+    val gridState = key(presentedCameraFiles.isEmpty() && !cameraCatalogReflowActive) {
         rememberLazyGridState()
     }
     val scrollScope = rememberCoroutineScope()
     val previewDensity = LocalDensity.current
     // 提升到页面层：关闭预览前需要用同一份折叠状态定位照片所在的真实 LazyGrid 下标。
     val collapsedDates = remember { mutableStateMapOf<String, Boolean>() }
-    val atTop by remember {
+    val atTop by remember(gridState) {
         derivedStateOf {
             gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset < 8
         }
@@ -831,13 +758,15 @@ fun FileListScreen(
     val photoLoadingDays = transferState.photoLoadingDays
     val ratingScan = rememberPhotoRatings(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
-        filterRatingEnabled, displayedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
+        filterRatingEnabled, state.files, paused = transferState.isTransferring || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
         staConnection = state.isStaConnection,
         listLoading = state.isLoadingFiles,
+        hasCompletedFileScan = state.hasCompletedFileScan,
         recentThumbnailReadyDays = recentThumbnailReadyDays,
         ratingDays = filterRatingDays,
-        photoLoadingDays = photoLoadingDays)
+        photoLoadingDays = photoLoadingDays,
+        appliedPhotoLoadingDays = appliedPhotoLoadingDays)
     // Nikon STA does not expose a reliable protection value. Keep the existing AP/USB
     // protection filter intact, but do not apply a stale persisted value while in STA.
     val showProtectionFilter = !state.isStaConnection
@@ -943,9 +872,6 @@ fun FileListScreen(
     val burstGroups = remember(displayedCameraFiles) {
         computeBurstGroups(displayedCameraFiles)
     }
-    val burstHandles = remember(burstGroups) {
-        burstGroups.flatMapTo(HashSet()) { group -> group.files.map { it.handle } }
-    }
     val burstIdByHandle = remember(burstGroups) {
         buildMap {
             burstGroups.forEach { group ->
@@ -953,10 +879,13 @@ fun FileListScreen(
             }
         }
     }
+    // This index is immutable after construction; its key view serves every membership check.
+    val burstHandles = remember(burstIdByHandle) { burstIdByHandle.keys }
     // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
     // “带对号却仍在未传输列表”的自相矛盾。
     val exportedHandlesForFilter: Set<Int> = remember(
         presentedCameraFiles,
+        transferState.existingExportIndex,
         transferState.existingExportRevision,
         transferState.storageMode,
         filterUntransferred,
@@ -1031,16 +960,20 @@ fun FileListScreen(
         }
     }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
-    val activeRatingValues = if (filterRating != null) ratingScan.values else emptyMap()
+    val matchingRatingHandles = remember(filterRating, ratingScan.values) {
+        if (filterRating == null) emptySet() else ratingScan.values.asSequence()
+            .filter { it.value == filterRating }
+            .mapTo(HashSet()) { it.key }
+    }
     val groups = remember(
         displayedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
-        filterRating, activeRatingValues,
+        filterRating, matchingRatingHandles,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
         val files = displayedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
-            .filter { filterRating == null || activeRatingValues[it.handle] == filterRating }
+            .filter { filterRating == null || it.handle in matchingRatingHandles }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
@@ -1433,7 +1366,7 @@ fun FileListScreen(
         }
 
         if (presentedCameraFiles.isEmpty() &&
-            !cameraRemovalReflowActive &&
+            !cameraCatalogReflowActive &&
             (!state.isConnectedToCamera || (!state.isLoadingFiles && state.hasCompletedFileScan))
         ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1505,15 +1438,15 @@ fun FileListScreen(
                     } else {
                         // 空态缓慢呼吸（与队列页空态同参数）：页面此时无其它动态，不至于死板。
                         val breathe = rememberInfiniteTransition(label = "emptyList")
-                        val breatheAlpha by breathe.animateFloat(
+                        val breatheAlpha = breathe.animateFloat(
                             initialValue = 0.35f, targetValue = 0.6f,
                             animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
                             label = "emptyListAlpha"
                         )
                         Icon(
                             Icons.Default.FolderOff, contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
+                            modifier = Modifier.size(64.dp).graphicsLayer { alpha = breatheAlpha.value },
+                            tint = colors.onSurfaceVariant.copy(alpha = 1f)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
@@ -1530,7 +1463,7 @@ fun FileListScreen(
             }
         }
 
-        if (presentedCameraFiles.isNotEmpty() || cameraRemovalReflowActive) {
+        if (presentedCameraFiles.isNotEmpty() || cameraCatalogReflowActive) {
             // 分组批量传输。gating 用响应式的 isConnectedToCamera；
             // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
             // 单文件入队见外层 enqueueSingleFile；这里仅处理日期整组。
@@ -1608,14 +1541,15 @@ fun FileListScreen(
                 burstIdByHandle = burstIdByHandle,
                 collapseBurstPhotos = transferState.collapseBurstPhotos,
                 expandedBursts = expandedBurstCollections,
+                expandedBurstIds = expandedBurstIds,
                 contentPadding = listPadding,
                 gridState = gridState,
                 filterRevealTick = filterRevealTick,
                 filterRevealWindow = filterRevealWindow,
                 exitingExportHandles = exitingExportHandles.keys,
                 exportReflowActive = exportReflowActive,
-                cameraRemovalReflowActive = cameraRemovalReflowActive,
-                cameraRemovalAffectedDates = cameraRemovalAffectedDates,
+                cameraCatalogReflowActive = cameraCatalogReflowActive,
+                cameraCatalogAffectedDates = cameraCatalogAffectedDates,
                 returnFocusHandle = previewReturnHandle,
                 returnFocusNonce = previewReturnNonce,
                 onExportExitFinished = { handle ->
@@ -1631,20 +1565,20 @@ fun FileListScreen(
             // 空态放在网格之后：空网格仍会命中滚动手势，不能盖住“清除筛选”。
             // 保持网格挂载，保留滚动及列表动画状态；其他浮层仍显示在空态之上。
             if (filterActive && groups.isEmpty() && state.hasCompletedFileScan &&
-                !cameraRemovalReflowActive
+                !cameraCatalogReflowActive
             ) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         // 空态缓慢呼吸（与其余空态同参数）。
                         val breathe = rememberInfiniteTransition(label = "emptyFilter")
-                        val breatheAlpha by breathe.animateFloat(
+                        val breatheAlpha = breathe.animateFloat(
                             initialValue = 0.35f, targetValue = 0.6f,
                             animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
                             label = "emptyFilterAlpha"
                         )
                         FilterMark(
-                            modifier = Modifier.size(44.dp),
-                            color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
+                            modifier = Modifier.size(44.dp).graphicsLayer { alpha = breatheAlpha.value },
+                            color = colors.onSurfaceVariant.copy(alpha = 1f)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         if (!(filterRatingEnabled && filterRating != null && ratingScan.loading)) {
@@ -1702,7 +1636,7 @@ fun FileListScreen(
             }
         }
         val introButtonWidth = maxOf(140.dp, introLabelWidth + 62.dp)
-        val remoteButtonWidth by animateDpAsState(
+        val remoteButtonWidth = animateDpAsState(
             targetValue = if (remoteIntroExpanded) introButtonWidth else 52.dp,
             animationSpec = if (remoteIntroExpanded) {
                 Motion.bouncy()
@@ -1745,7 +1679,12 @@ fun FileListScreen(
                 },
                 modifier = Modifier
                     .offset(x = 20.dp)
-                    .width(remoteButtonWidth)
+                    .layout { measurable, constraints ->
+                        val width = remoteButtonWidth.value.roundToPx()
+                            .coerceIn(constraints.minWidth, constraints.maxWidth)
+                        val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+                        layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
+                    }
                     .height(52.dp)
                     .graphicsLayer {
                         // 弹簧允许轻微越界；路径中段上抬，收起时带一点俏皮歪头。
@@ -1972,7 +1911,7 @@ fun FileListScreen(
                         materialContentColor = colors.accentYellow,
                         modifier = Modifier
                             .height(36.dp)
-                            .onGloballyPositioned { zAnchor = it.boundsInRoot() }
+                            .onGloballyPositioned { if (it.isAttached) zAnchor[0] = it.boundsInRoot() }
                     ) {
                         ZMark(modifier = Modifier.height(20.dp))
                     }
@@ -2023,7 +1962,7 @@ fun FileListScreen(
                                 showFilter = false
                                 openedFilterAnchor = null
                             } else {
-                                filterAnchor?.let { measuredAnchor ->
+                                filterAnchor[0]?.let { measuredAnchor ->
                                     openedFilterAnchor = measuredAnchor
                                     showFilter = true
                                 }
@@ -2042,7 +1981,7 @@ fun FileListScreen(
                             // 图标按钮统一采用 40dp 紧凑宽度；实体主题也提前给出同一测量基线，
                             // 避免不同材质的可见边缘发生偏移。
                             .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
-                            .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
+                            .onGloballyPositioned { if (it.isAttached) filterAnchor[0] = it.boundsInRoot() }
                     ) {
                         // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
                         FilterMark(
@@ -2125,7 +2064,7 @@ fun FileListScreen(
                 effectPreviewExif = state.effectPreviewExif,
                 requestTransferDirectoryAttention = transferDirectoryAttention,
                 onEffectPreviewRequested = cameraViewModel::requestEffectPreview,
-                anchorBounds = zAnchor,
+                anchorBounds = zAnchor[0],
                 onDismiss = {
                     showSettings = false
                     transferDirectoryAttention = false
@@ -2339,7 +2278,7 @@ internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSu
             TransferStatus.COMPLETED,
             TransferStatus.FAILED -> Unit
         }
-        if (task.isGeneratingFrame) {
+        if (task.isQueuedForFrameGeneration) {
             generationRemaining++
         }
     }
@@ -2542,7 +2481,8 @@ fun QueuePill(
         completionUpdate.completion?.showDone == true
     LaunchedEffect(transferState.tasks) {
         completionState = completionUpdate.nextState
-        if (!allDone) showDoneLabel = false
+        // Hidden existing-output checks are still unfinished work, even with no visible count.
+        if (completionUpdate.nextState.unresolvedTaskIds.isNotEmpty()) showDoneLabel = false
         completionUpdate.completion?.let { feedback ->
             showDoneLabel = feedback.showDone
             if (feedback.showDone) doneNonce++
@@ -2583,6 +2523,8 @@ fun QueuePill(
     var measuredWidthKey by remember { mutableStateOf<QueuePillWidthKey?>(null) }
     val collapsedWidthPx = with(density) { 40.dp.toPx() } // 22dp 图标 + 左右各 9dp
     var firstMeasure by remember { mutableStateOf(true) }
+    var lastAnimatedVisibility by remember { mutableStateOf(visible) }
+    var visibilityTransition by remember { mutableStateOf(false) }
     val stableContentWidthPx = if (
         mode == PillMode.COUNTING && measuredWidthKey == widthKey
     ) {
@@ -2593,6 +2535,10 @@ fun QueuePill(
     val naturalWidthPx = if (collapsedToIcon) collapsedWidthPx else stableContentWidthPx.toFloat()
     val targetWidthPx = if (visible) naturalWidthPx else 0f
     LaunchedEffect(targetWidthPx, visible) {
+        if (lastAnimatedVisibility != visible) {
+            visibilityTransition = true
+            lastAnimatedVisibility = visible
+        }
         if (!visible || targetWidthPx > 0f) {
             if (firstMeasure) {
                 widthAnim.snapTo(targetWidthPx)
@@ -2600,6 +2546,7 @@ fun QueuePill(
             } else {
                 widthAnim.animateTo(targetWidthPx, Motion.bouncy())
             }
+            visibilityTransition = false
         }
     }
 
@@ -2612,6 +2559,13 @@ fun QueuePill(
         // Normal data-driven changes stay opaque; only the final few pixels fade at zero.
         alpha = if (firstMeasure && visible) 1f else
             (widthAnim.value / with(density) { 8.dp.toPx() }).coerceIn(0f, 1f)
+    }.queuePillVisibilityEdgeFade {
+        // Only route visibility uses the feathered edge. Normal speed/count width changes
+        // keep their original opaque shell, and a reversed route change retraces the same fade.
+        if (!visibilityTransition || naturalWidthPx <= 0f) 0f else {
+            val fade = ((1f - widthAnim.value / naturalWidthPx) / 0.18f).coerceIn(0f, 1f)
+            fade * fade * (3f - 2f * fade)
+        }
     }
 
     // 图标态已经是普通入口按钮，不再沿用下方固定毛玻璃胶囊的手写 Surface。
@@ -2797,6 +2751,37 @@ fun QueuePill(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Erase the closing/opening right edge without painting over the page behind the pill. */
+private fun Modifier.queuePillVisibilityEdgeFade(amount: () -> Float): Modifier = drawWithCache {
+    val spill = 16.dp.toPx()
+    val bounds = Rect(-spill, -spill, size.width + spill, size.height + spill)
+    val feather = minOf(24.dp.toPx(), size.width)
+    val edge = Brush.horizontalGradient(
+        listOf(Color.Transparent, Color.Black),
+        startX = (size.width - feather).coerceAtLeast(0f),
+        endX = size.width.coerceAtLeast(1f),
+    )
+    val layerPaint = Paint()
+    onDrawWithContent {
+        val fade = amount()
+        if (fade <= 0f || size.width <= 0f) {
+            drawContent()
+        } else {
+            // Include the existing shadow; an exact-size offscreen layer would introduce a
+            // new rectangular shadow crop. The temporary layer isolates DstOut from siblings.
+            val canvas = drawContext.canvas
+            canvas.saveLayer(bounds, layerPaint)
+            try {
+                drawContent()
+                drawRect(edge, topLeft = bounds.topLeft, size = bounds.size,
+                    alpha = fade, blendMode = BlendMode.DstOut)
+            } finally {
+                canvas.restore()
             }
         }
     }
@@ -3235,7 +3220,7 @@ private fun GroupHeader(
         // 日期 + 展开箭头 + 张数合并为一颗毛玻璃"日期胶囊"，整颗可点切换收起/展开：
         // 触点比原来的小图标大得多，规格与右侧"传输"按钮同语言（28dp 高、8dp 圆角）。
         // 箭头用旋转动画（收起朝下、展开转 180°），比图标切换更顺滑。
-        val chevron by animateFloatAsState(
+        val chevron = animateFloatAsState(
             targetValue = if (collapsed) 0f else 180f,
             label = "chevron"
         )
@@ -3247,7 +3232,7 @@ private fun GroupHeader(
         ) {
             Text(
                 text = if (group.date == UNKNOWN_DATE_KEY) stringResource(R.string.unknown_date)
-                       else formatDateHeader(group.date),
+                       else remember(group.date) { formatDateHeader(group.date) },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = colors.onBackground
@@ -3258,7 +3243,7 @@ private fun GroupHeader(
                 tint = colors.accentBlue,
                 modifier = Modifier
                     .size(18.dp)
-                    .rotate(chevron)
+                    .graphicsLayer { rotationZ = chevron.value }
             )
             // 仅数字（去掉"张"），tnum 等宽，界面更简约
             AnimatedContent(
@@ -3282,9 +3267,10 @@ private fun GroupHeader(
         Spacer(modifier = Modifier.weight(1f))
         // 整组传输始终允许再次加入；任务执行时分别检查原片和边框是否已经存在。
         // 按钮在根坐标系的 bounds 供"整组吸入"动画定位起飞点。
-        var plusBounds by remember { mutableStateOf<Rect?>(null) }
+        // Bounds are consumed only by a click. Layout/scroll updates must not recompose the header.
+        val plusBounds = remember { arrayOfNulls<Rect>(1) }
         GlassButton(
-            onClick = { onTransferGroup(group.files, plusBounds) },
+            onClick = { onTransferGroup(group.files, plusBounds[0]) },
             enabled = group.files.isNotEmpty(),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
@@ -3294,7 +3280,7 @@ private fun GroupHeader(
                     // 只收有效样本，避免分离/复用瞬间的零矩形污染动画起点。
                     if (it.isAttached) {
                         val b = it.boundsInRoot()
-                        if (b.width > 0f && b.height > 0f) plusBounds = b
+                        if (b.width > 0f && b.height > 0f) plusBounds[0] = b
                     }
                 },
             contentPadding = PaddingValues(horizontal = 10.dp),
@@ -3406,6 +3392,7 @@ private fun ThumbnailGrid(
     burstIdByHandle: Map<Int, String>,
     collapseBurstPhotos: Boolean,
     expandedBursts: MutableMap<String, Boolean>,
+    expandedBurstIds: Set<String>,
     contentPadding: PaddingValues,
     gridState: LazyGridState,
     modifier: Modifier = Modifier,
@@ -3416,8 +3403,8 @@ private fun ThumbnailGrid(
     filterRevealWindow: Boolean = false,
     exitingExportHandles: Set<Int> = emptySet(),
     exportReflowActive: Boolean = false,
-    cameraRemovalReflowActive: Boolean = false,
-    cameraRemovalAffectedDates: Set<String> = emptySet(),
+    cameraCatalogReflowActive: Boolean = false,
+    cameraCatalogAffectedDates: Set<String> = emptySet(),
     returnFocusHandle: Int? = null,
     returnFocusNonce: Int = 0,
     onExportExitFinished: (Int) -> Unit = {}
@@ -3450,7 +3437,6 @@ private fun ThumbnailGrid(
 
     // 连拍展开/收起只做一次原子模型更新。成员的出现/消失与所有存量条目的重排均交给
     // Foundation 1.7 的 LazyGrid animateItem：不裁剪屏外成员、不分批、不逐排改模型。
-    val expandedBurstIds = expandedBursts.keys.toSet()
     var burstReflowActive by remember { mutableStateOf(false) }
     var activeBurstReflowId by remember { mutableStateOf<String?>(null) }
     var burstAnimationBusy by remember { mutableStateOf(false) }
@@ -3485,21 +3471,24 @@ private fun ThumbnailGrid(
 
     // “未传输”筛选的单格退场原本由 ThumbnailCell 回调完成。折叠合集里的成员不会
     // compose，必须在这里直接结算，否则它会永远滞留在过滤快照中。
-    val hiddenBurstHandles = remember(itemsByDate, expandedBurstIds) {
-        itemsByDate.values.asSequence()
+    val hasExitingExports = exitingExportHandles.isNotEmpty()
+    val hiddenBurstHandles = remember(itemsByDate, expandedBurstIds, hasExitingExports) {
+        if (!hasExitingExports) emptySet() else itemsByDate.values.asSequence()
             .flatten()
             .filterIsInstance<ThumbnailGridItem.BurstCollection>()
             .filter { it.id !in expandedBurstIds }
             .flatMap { it.files.asSequence() }
             .mapTo(HashSet()) { it.handle }
     }
-    val hiddenExitingHandles = exitingExportHandles.intersect(hiddenBurstHandles)
+    // The caller can pass live SnapshotStateMap.keys; do not memoize that mutable view.
+    val hiddenExitingHandles = if (exitingExportHandles.isEmpty()) emptySet()
+        else exitingExportHandles.intersect(hiddenBurstHandles)
     LaunchedEffect(hiddenExitingHandles) {
         hiddenExitingHandles.forEach(onExportExitFinished)
     }
 
     val toggleBurstCollection: (String) -> Unit = { burstId ->
-        if (!burstAnimationBusy && collapsing == null && !cameraRemovalReflowActive) {
+        if (!burstAnimationBusy && collapsing == null && !cameraCatalogReflowActive) {
             burstAnimationBusy = true
             burstAnimationJob = burstScope.launch {
                 try {
@@ -3514,7 +3503,7 @@ private fun ThumbnailGrid(
                     activeBurstReflowId = burstId
                     burstReflowActive = true
                     withFrameNanos { }
-                    if (expandedBursts[burstId] == true) {
+                    if (burstId in expandedBurstIds) {
                         expandedBursts.remove(burstId)
                     } else {
                         expandedBursts[burstId] = true
@@ -3544,10 +3533,10 @@ private fun ThumbnailGrid(
             val collapsed = collapsedDates[group.date] == true
             val collapsingThis = collapsing?.date == group.date
             val groupItems = itemsByDate[group.date].orEmpty()
-            // Camera-side deletion only animates the date group that actually changed. Other date
-            // groups must not acquire per-cell placement work merely because an earlier group shrank.
-            val cameraRemovalAffectsGroup = cameraRemovalReflowActive &&
-                group.date in cameraRemovalAffectedDates
+            // Only the date groups with actual camera additions/removals own item motion.
+            // Unchanged groups do not acquire per-cell placement work on every catalog update.
+            val cameraCatalogAffectsGroup = cameraCatalogReflowActive &&
+                group.date in cameraCatalogAffectedDates
             // 所有既有格位——照片、合集、日期标题——严格共享同一个 placementSpec。
             // 空闲时传 null，但 animateItem 节点始终存在，不会因临时挂载 modifier 错帧。
             val placementSpec = when {
@@ -3556,8 +3545,8 @@ private fun ThumbnailGrid(
                     durationMillis = BURST_REFLOW_DURATION_MS,
                     easing = FastOutSlowInEasing
                 )
-                cameraRemovalAffectsGroup -> tween<IntOffset>(
-                    durationMillis = CAMERA_REMOVAL_REFLOW_DURATION_MS,
+                cameraCatalogAffectsGroup -> tween<IntOffset>(
+                    durationMillis = CAMERA_CATALOG_REFLOW_DURATION_MS,
                     easing = FastOutSlowInEasing,
                 )
                 exportReflowActive -> tween<IntOffset>(
@@ -3574,14 +3563,14 @@ private fun ThumbnailGrid(
             ) {
                 Column(
                     modifier = Modifier.animateItem(
-                        fadeInSpec = if (cameraRemovalAffectsGroup) {
-                            tween(CAMERA_REMOVAL_ENTER_DURATION_MS, easing = FastOutSlowInEasing)
+                        fadeInSpec = if (cameraCatalogAffectsGroup) {
+                            tween(CAMERA_CATALOG_ENTER_DURATION_MS, easing = FastOutSlowInEasing)
                         } else {
                             null
                         },
                         placementSpec = placementSpec,
-                        fadeOutSpec = if (cameraRemovalAffectsGroup) {
-                            tween(CAMERA_REMOVAL_EXIT_DURATION_MS, easing = FastOutSlowInEasing)
+                        fadeOutSpec = if (cameraCatalogAffectsGroup) {
+                            tween(CAMERA_CATALOG_EXIT_DURATION_MS, easing = FastOutSlowInEasing)
                         } else {
                             null
                         },
@@ -3596,7 +3585,7 @@ private fun ThumbnailGrid(
                             // 日期与连拍都在改变同一网格布局，任一收合进行中都忽略再次点击，
                             // 防止两套高度动画同帧竞争。
                             if (collapsing == null && !burstAnimationBusy &&
-                                !cameraRemovalReflowActive
+                                !cameraCatalogReflowActive
                             ) {
                                 if (collapsed) {
                                     // 展开：瞬时重排 + 该组格子级联入场。
@@ -3606,13 +3595,20 @@ private fun ThumbnailGrid(
                                     recentlyExpanded = null
                                     toggleScope.launch {
                                         // 只保留当前可见的格子（+一行缓冲）参与收合动画。
-                                        val visibleKeys = gridState.layoutInfo.visibleItemsInfo
-                                            .mapTo(HashSet()) { it.key }
-                                        val lastVisible = groupItems.indexOfLast { it.key in visibleKeys }
-                                        if (lastVisible < 0) {
+                                        val visible = gridState.layoutInfo.visibleItemsInfo
+                                        val headerIndex = visible.firstOrNull {
+                                            it.key == "header_${group.date}"
+                                        }?.index
+                                        // Global lazy indices count each cell once, including spans.
+                                        // Inspect the visible window instead of scanning a large day.
+                                        val visibleCount = if (headerIndex == null) 0 else {
+                                            ((visible.maxOfOrNull { it.index } ?: headerIndex) - headerIndex)
+                                                .coerceIn(0, groupItems.size)
+                                        }
+                                        if (visibleCount == 0) {
                                             collapsedDates[group.date] = true
                                         } else {
-                                            collapsing = CollapsingGroup(group.date, lastVisible + 1 + columns)
+                                            collapsing = CollapsingGroup(group.date, visibleCount + columns)
                                             collapseProgress.snapTo(1f)
                                             collapseProgress.animateTo(0f, tween(300, easing = FastOutSlowInEasing))
                                             collapsedDates[group.date] = true
@@ -3655,9 +3651,9 @@ private fun ThumbnailGrid(
                                         BURST_MEMBER_ENTER_DURATION_MS,
                                         easing = FastOutSlowInEasing
                                     )
-                                } else if (cameraRemovalAffectsGroup) {
+                                } else if (cameraCatalogAffectsGroup) {
                                     tween(
-                                        CAMERA_REMOVAL_ENTER_DURATION_MS,
+                                        CAMERA_CATALOG_ENTER_DURATION_MS,
                                         easing = FastOutSlowInEasing,
                                     )
                                 } else {
@@ -3669,9 +3665,9 @@ private fun ThumbnailGrid(
                                         BURST_MEMBER_EXIT_DURATION_MS,
                                         easing = FastOutSlowInEasing
                                     )
-                                } else if (cameraRemovalAffectsGroup) {
+                                } else if (cameraCatalogAffectsGroup) {
                                     tween(
-                                        CAMERA_REMOVAL_EXIT_DURATION_MS,
+                                        CAMERA_CATALOG_EXIT_DURATION_MS,
                                         easing = FastOutSlowInEasing,
                                     )
                                 } else {
@@ -3690,12 +3686,13 @@ private fun ThumbnailGrid(
                     ) {
                         when (item) {
                             is ThumbnailGridItem.BurstCollection -> {
-                                val expanded = expandedBursts[item.id] == true
+                                val expanded = item.id in expandedBurstIds
                                 BurstCollectionCell(
                                     collectionId = item.id,
                                     files = item.files,
                                     expanded = expanded,
                                     transfersBusy = transfersBusy,
+                                    loadEnabled = !collapsingThis,
                                     allowRemoteThumbnails = allowRemoteThumbnails,
                                     cameraViewModel = cameraViewModel,
                                     onTransferGroup = onTransferGroup,
@@ -3734,13 +3731,14 @@ private fun ThumbnailGrid(
                                     themeBorderColor = thumbnailBorderColor,
                                     transfersBusy = transfersBusy,
                                     allowRemoteThumbnail = allowRemoteThumbnails,
+                                    loadEnabled = !collapsingThis,
                                     cameraViewModel = cameraViewModel,
                                     onTapFile = onTapFile,
                                     onPreview = onPreview,
                                     tapToPreview = tapToPreview,
                                     cellBoundsRegistry = cellBoundsRegistry,
                                     inBurst = file.handle in burstHandles,
-                                    animateBurstBadgeRemoval = cameraRemovalAffectsGroup,
+                                    animateBurstBadgeRemoval = cameraCatalogAffectsGroup,
                                     inExpandedBurstCollection =
                                         collapseBurstPhotos &&
                                             item.burstId != null &&
@@ -3748,7 +3746,11 @@ private fun ThumbnailGrid(
                                     // 连拍展开不参与缩放；这里只保留原有日期与筛选入场。
                                     reveal =
                                         group.date == recentlyExpanded || filterRevealWindow,
-                                    revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
+                                    // A few short row steps, not a long per-photo queue: cached
+                                    // dates respond immediately even with many visible columns.
+                                    revealDelayMs = if (group.date == recentlyExpanded)
+                                        ((index / columns.coerceIn(1, 4)).coerceAtMost(4) * 18).toLong()
+                                    else (index.coerceAtMost(18) * 15).toLong(),
                                     revealKey = filterRevealTick,
                                     exiting = file.handle in exitingExportHandles,
                                     returnFocusNonce = returnFocusNonce.takeIf {
@@ -3776,6 +3778,7 @@ private fun BurstCollectionCell(
     files: List<NikonCamera.FileInfo>,
     expanded: Boolean,
     transfersBusy: Boolean,
+    loadEnabled: Boolean,
     allowRemoteThumbnails: Boolean,
     cameraViewModel: CameraViewModel,
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
@@ -3797,7 +3800,7 @@ private fun BurstCollectionCell(
         // 先精确清掉旧 id 的坐标，避免普通 HashMap 留下不可见的历史项。
         onDispose { onBoundsChanged(null) }
     }
-    val chevronRotation by animateFloatAsState(
+    val chevronRotation = animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(240, easing = FastOutSlowInEasing),
         label = "burstCollectionChevron"
@@ -3838,8 +3841,8 @@ private fun BurstCollectionCell(
             // update the count without recomposing an identical old/new photo stack.
             contentKey = { current -> current.take(3).map { it.publishedIdentity() } },
             transitionSpec = {
-                fadeIn(tween(CAMERA_REMOVAL_ENTER_DURATION_MS)) togetherWith
-                    fadeOut(tween(CAMERA_REMOVAL_EXIT_DURATION_MS))
+                fadeIn(tween(CAMERA_CATALOG_ENTER_DURATION_MS)) togetherWith
+                    fadeOut(tween(CAMERA_CATALOG_EXIT_DURATION_MS))
             },
             contentAlignment = Alignment.Center,
             label = "burstCollectionFiles",
@@ -3868,6 +3871,7 @@ private fun BurstCollectionCell(
                         file = file,
                         cameraViewModel = cameraViewModel,
                         transfersBusy = transfersBusy,
+                        loadEnabled = loadEnabled,
                         allowRemoteThumbnail = allowRemoteThumbnails,
                         showPlaceholderIcon = index == last,
                         modifier = Modifier
@@ -3975,7 +3979,7 @@ private fun BurstCollectionCell(
                     tint = colors.accentBlue,
                     modifier = Modifier
                         .size(actionSize * 0.58f)
-                        .rotate(chevronRotation)
+                        .graphicsLayer { rotationZ = chevronRotation.value }
                 )
             }
         }
@@ -3998,14 +4002,15 @@ internal fun BurstStackPhoto(
     val borderColor = remember(skin, dark) {
         stackedThumbnailThemeBorderColor(skin, dark)
     }
-    var thumbnail by remember(file.handle) {
-        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
-    }
-    LaunchedEffect(file.handle, transfersBusy, loadEnabled, allowRemoteThumbnail) {
-        if (loadEnabled && thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(file, allowRemoteThumbnail)
-        }
-    }
+    val thumbnail = rememberThumbnailImagePresentation(
+        handle = file.handle,
+        transfersBusy = transfersBusy,
+        loadEnabled = loadEnabled,
+        allowRemote = allowRemoteThumbnail,
+        cachedThumbnail = { cameraViewModel.cachedThumbnail(file.handle) },
+        loadThumbnail = { allowRemote -> cameraViewModel.loadThumbnail(file, allowRemote) },
+        thumbnailReadyEvents = cameraViewModel.thumbnailReadyEvents,
+    )
     val shape = RoundedCornerShape(10.dp)
 
     Box(
@@ -4014,14 +4019,7 @@ internal fun BurstStackPhoto(
             .background(colors.thumbPlaceholder)
             .border(THUMBNAIL_THEME_BORDER_WIDTH, borderColor, shape)
     ) {
-        thumbnail?.let { image ->
-            Image(
-                bitmap = image,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } ?: if (showPlaceholderIcon) {
+        if (showPlaceholderIcon && thumbnail.showPlaceholder.value) {
             Icon(
                 imageVector = if (file.extension == ".mov" || file.extension == ".mp4") {
                     Icons.Default.Movie
@@ -4034,8 +4032,14 @@ internal fun BurstStackPhoto(
                     .size(28.dp)
                     .align(Alignment.Center)
             )
-        } else {
-            Unit
+        }
+        thumbnail.image.value?.let { image ->
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = thumbnail.alpha.value }
+            )
         }
     }
 }
@@ -4056,6 +4060,7 @@ private fun ThumbnailCell(
     tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     modifier: Modifier = Modifier,
+    loadEnabled: Boolean = true,
     inBurst: Boolean = false,
     animateBurstBadgeRemoval: Boolean = false,
     inExpandedBurstCollection: Boolean = false,
@@ -4094,19 +4099,17 @@ private fun ThumbnailCell(
             exitProgress.snapTo(1f)
         }
     }
-    // 已加载的缩略图按 handle 记住，transfersBusy 变化不会让它闪回占位。
-    var thumbnail by remember(file.handle) {
-        // 网格插入/移除大量连拍成员时，可见项可能离开再重新进入组合。直接从缓存恢复，
-        // 避免先画一帧占位图、下一帧再换回缩略图造成列表闪烁。
-        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
-    }
     // 传输中仍允许取图，远程请求排到分块间隙；大图打开后只读本地缓存，不再向相机
-    // 发 GetThumb。关闭大图时 allowRemoteThumbnail 变回 true，缺图格子自动恢复。
-    LaunchedEffect(file.handle, transfersBusy, allowRemoteThumbnail) {
-        if (thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(file, allowRemoteThumbnail)
-        }
-    }
+    // 发 GetThumb。正在收起的日期也不再启动取图；展开或关闭大图后缺图格子自动恢复。
+    val thumbnail = rememberThumbnailImagePresentation(
+        handle = file.handle,
+        transfersBusy = transfersBusy,
+        loadEnabled = loadEnabled,
+        allowRemote = allowRemoteThumbnail,
+        cachedThumbnail = { cameraViewModel.cachedThumbnail(file.handle) },
+        loadThumbnail = { allowRemote -> cameraViewModel.loadThumbnail(file, allowRemote) },
+        thumbnailReadyEvents = cameraViewModel.thumbnailReadyEvents,
+    )
     DisposableEffect(file.handle, cellBoundsRegistry) {
         onDispose {
             cellBoundsRegistry.remove(file.handle)
@@ -4183,17 +4186,7 @@ private fun ThumbnailCell(
                 }
             )
     ) {
-        val image = thumbnail
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = file.fileName,
-                // 黑边已在解码时按实际黑条精确裁除（CameraViewModel.cropLetterbox），
-                // Crop 填满格子即为刚好，无需再放大遮边。
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
+        if (thumbnail.showPlaceholder.value) {
             // 占位：类型角标底色
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
@@ -4206,6 +4199,16 @@ private fun ThumbnailCell(
                     modifier = Modifier.size(28.dp)
                 )
             }
+        }
+        thumbnail.image.value?.let { image ->
+            Image(
+                bitmap = image,
+                contentDescription = file.fileName,
+                // 黑边已在解码时按实际黑条精确裁除（CameraViewModel.cropLetterbox），
+                // Crop 填满格子即为刚好，无需再放大遮边。
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = thumbnail.alpha.value }
+            )
         }
 
         // 左上角类型角标
@@ -4238,12 +4241,12 @@ private fun ThumbnailCell(
         if (inBurst || animateBurstBadgeRemoval) {
             AnimatedVisibility(
                 visible = inBurst,
-                enter = fadeIn(tween(CAMERA_REMOVAL_ENTER_DURATION_MS)) + scaleIn(
-                    animationSpec = tween(CAMERA_REMOVAL_ENTER_DURATION_MS),
+                enter = fadeIn(tween(CAMERA_CATALOG_ENTER_DURATION_MS)) + scaleIn(
+                    animationSpec = tween(CAMERA_CATALOG_ENTER_DURATION_MS),
                     initialScale = 0.82f,
                 ),
-                exit = fadeOut(tween(CAMERA_REMOVAL_EXIT_DURATION_MS)) + scaleOut(
-                    animationSpec = tween(CAMERA_REMOVAL_EXIT_DURATION_MS),
+                exit = fadeOut(tween(CAMERA_CATALOG_EXIT_DURATION_MS)) + scaleOut(
+                    animationSpec = tween(CAMERA_CATALOG_EXIT_DURATION_MS),
                     targetScale = 0.82f,
                 ),
                 modifier = Modifier.align(Alignment.TopEnd),

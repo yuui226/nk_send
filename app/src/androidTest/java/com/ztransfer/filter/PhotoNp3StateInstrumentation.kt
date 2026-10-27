@@ -147,7 +147,7 @@ class PhotoNp3StateInstrumentation : Instrumentation() {
                 check(editor.selectedPreset == null && editor.selectedUri == null)
                 check(selections.size == count && !ownerEnabled)
             }
-            report.putString("result", "PASS: preview/export pixels and restored recipe, explicit/passive choices, unchanged refresh, failure retention, cancellation/late results, inactive owner, confirmed deletion, hidden pending selection")
+            report.putString("result", "PASS: Flexible and all Classic styles preview/export pixels, alpha and restored recipes, explicit/passive choices, unchanged refresh, failure retention, cancellation/late results, inactive owner, confirmed deletion, hidden pending selection")
             finish(Activity.RESULT_OK, report)
         } catch (failure: Throwable) {
             report.putString("failure", failure.stackTraceToString())
@@ -167,22 +167,78 @@ class PhotoNp3StateInstrumentation : Instrumentation() {
                 },
             ))
         }
+        checkRecipePixels(preset, 72, useExactMemo = true)
+
+        // Exercise both old/new recipe kinds through the same Android pixel pipeline. The full
+        // matrix uses the production low-memory path so it does not churn a 64 MB memo per case.
+        for (base in ClassicNp3Style.entries) {
+            for (curve in listOf<IntArray?>(null, IntArray(257) { i ->
+                // A non-linear monotone curve with retained black and white endpoints.
+                ((i / 256f) * (i / 256f) * 32767).toInt()
+            })) {
+                val parameters = ClassicNp3PhotoFilterParameters(
+                    base = base,
+                    contrastQuarter = 5,
+                    brightnessQuarter = -2,
+                    saturationQuarter = if (base.monochrome) 0 else 3,
+                    hueQuarter = if (base.monochrome) 0 else -1,
+                    filterEffect = if (base.monochrome) 3 else 0,
+                    toningEffect = if (base.monochrome && !base.creative) 2 else 0,
+                    toningDensityQuarter = if (base.monochrome) 21 else 0,
+                    effectLevel = if (base.creative) 60 else 100,
+                    toneCurve = curve,
+                )
+                val classic = PhotoFilterPreset(
+                    "np3:${base.id.toString(16).padStart(64, '0')}:${PhotoNp3Parser.CLASSIC_CONVERTER_VERSION}",
+                    "Classic ${base.name}", parameters,
+                )
+                for (strength in listOf(2, 74, 100)) checkRecipePixels(classic, strength)
+                if (curve == null && base in listOf(ClassicNp3Style.MONOCHROME, ClassicNp3Style.RED)) {
+                    checkRecipePixels(classic, 74, useExactMemo = true)
+                }
+                if (curve == null && !base.monochrome) {
+                    checkRecipePixels(classic.copy(parameters = parameters.copy(
+                        contrastQuarter = CLASSIC_PHOTO_FILTER_AUTO,
+                        saturationQuarter = CLASSIC_PHOTO_FILTER_AUTO,
+                    )), 74)
+                }
+            }
+        }
+    }
+
+    private fun checkRecipePixels(preset: PhotoFilterPreset, strength: Int, useExactMemo: Boolean = false) {
         val restored = PhotoNp3SnapshotCodec.decode(PhotoNp3SnapshotCodec.encode(preset))
         val pixels = IntArray(64 * 64) { i ->
-            android.graphics.Color.rgb(i * 17 % 256, i * 31 % 256, i * 43 % 256)
+            android.graphics.Color.argb(
+                when (i % 4) { 0 -> 0; 1 -> 64; 2 -> 128; else -> 255 },
+                i * 17 % 256, i * 31 % 256, i * 43 % 256,
+            )
         }
         val source = android.graphics.Bitmap.createBitmap(pixels, 64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+        // Android may quantize RGB while premultiplying translucent pixels. Compare against
+        // what the renderer actually reads, rather than the pre-bitmap fixture channels.
+        source.getPixels(pixels, 0, 64, 0, 0, 64, 64)
         val export = source.copy(android.graphics.Bitmap.Config.ARGB_8888, true)
         var preview: android.graphics.Bitmap? = null
         try {
-            preview = PhotoFilterRenderer.render(source, PhotoFilterSelection(preset, 72))
-            PhotoFilterRenderer.renderInPlace(export, PhotoFilterSelection(restored, 72))
+            preview = PhotoFilterRenderer.render(source, PhotoFilterSelection(preset, strength))
+            val selection = PhotoFilterSelection(restored, strength)
+            if (useExactMemo) {
+                PhotoFilterRenderer.renderInPlace(export, selection)
+            } else {
+                PhotoFilterRenderer.renderInPlace(export, PhotoFilterRenderer.PreparedOriginalFilter(
+                    selection, null, PhotoFilterRenderer.PreparationMode.DIRECT_FALLBACK,
+                ))
+            }
             val a = IntArray(pixels.size)
             val b = IntArray(pixels.size)
             preview.getPixels(a, 0, 64, 0, 0, 64, 64)
             export.getPixels(b, 0, 64, 0, 0, 64, 64)
-            check(a.contentEquals(b)) { "Restored NP3 export differs from preview" }
-            check(!a.contentEquals(pixels)) { "Non-neutral NP3 did not change pixels" }
+            check(a.contentEquals(b)) { "Restored ${preset.name} export differs from preview at $strength%" }
+            check(a.indices.all { (a[it] ushr 24) == (pixels[it] ushr 24) }) {
+                "${preset.name} changed photo alpha"
+            }
+            check(!a.contentEquals(pixels)) { "Non-neutral ${preset.name} did not change pixels at $strength%" }
         } finally {
             preview?.recycle(); export.recycle(); source.recycle()
         }

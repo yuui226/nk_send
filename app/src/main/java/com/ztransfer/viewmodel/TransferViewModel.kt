@@ -77,6 +77,9 @@ import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.Np3PhotoFilterParameters
+import com.ztransfer.filter.ClassicNp3PhotoFilterParameters
+import com.ztransfer.filter.PhotoNp3RecipeKind
+import com.ztransfer.filter.photoNp3RecipeKind
 import com.ztransfer.filter.PhotoNp3Store
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
@@ -93,6 +96,7 @@ import com.ztransfer.protocol.endToEndBytesPerSecond
 import com.ztransfer.service.TransferService
 import com.ztransfer.storage.HarmonyStorageCompatibility
 import com.ztransfer.storage.fingerprintHarmonyPublication
+import com.ztransfer.storage.readExistingOriginalDocument
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
@@ -203,6 +207,43 @@ internal class ExistingFileNameIndex<T> {
             ?: byBaseName[directoryLookupKey(fileName)]?.firstOrNull { sizeMatches(it.size) }
     }
 
+    /** Remove only the observed version; another publication may have replaced this name. */
+    fun remove(entry: IndexedExistingFile<T>): Boolean = synchronized(lock) {
+        if (byDisplayName[entry.displayName] != entry) return@synchronized false
+        byDisplayName.remove(entry.displayName)
+        val key = directoryLookupKey(entry.displayName)
+        byBaseName[key]?.let { bucket ->
+            bucket.removeAll { it == entry }
+            if (bucket.isEmpty()) byBaseName.remove(key)
+        }
+        if (byBaseName[key].orEmpty().none { it.displayName.equals(entry.displayName, ignoreCase = true) }) {
+            occupiedNames.remove(entry.displayName.lowercase(Locale.ROOT))
+        }
+        true
+    }
+
+    /** Validation is outside the lock and only happens on a candidate hit, never for new files. */
+    fun findVerified(
+        fileName: String,
+        fileSize: Long,
+        verify: (IndexedExistingFile<T>) -> IndexedExistingFile<T>?,
+        onInvalidated: (IndexedExistingFile<T>) -> Unit,
+    ): IndexedExistingFile<T>? {
+        while (true) {
+            val candidate = find(fileName, fileSize) ?: return null
+            val verified = verify(candidate)
+            if (verified == candidate) return candidate
+            val invalidated = synchronized(lock) {
+                if (!remove(candidate)) return@synchronized false
+                // A renamed/edited document still occupies its actual filename. Retain it so
+                // normal collision handling protects that file when a fresh original is saved.
+                verified?.let { add(it.displayName, it.size, it.value) }
+                true
+            }
+            if (invalidated) onInvalidated(candidate)
+        }
+    }
+
     fun entries(): List<IndexedExistingFile<T>> = synchronized(lock) {
         byDisplayName.values.toList()
     }
@@ -243,6 +284,8 @@ data class TransferTask(
     val elapsedMs: Long? = null,
     // 原片已成功落盘后的派生步骤；失败不改变 COMPLETED，原片始终保留。
     val isGeneratingFrame: Boolean = false,
+    /** Busy while checking existing output, but not yet admitted to the visible generation queue. */
+    val frameGenerationPendingCheck: Boolean = false,
     /** 实际取得处理名额后的单调时钟起点；排队时为空。 */
     val frameGenerationStartedAtElapsedMs: Long? = null,
     /** 实际生成至保存结束的耗时，不包含排队等待。 */
@@ -266,11 +309,35 @@ data class TransferTask(
 internal val TransferTask.hasPhotoEffects: Boolean
     get() = framePreset != null || photoFilterRequested != null || photoGrainRequested.isEnabled
 
+/** Preflight retains removal/service protection without advertising work that may be skipped. */
+internal val TransferTask.isQueuedForFrameGeneration: Boolean
+    get() = isGeneratingFrame && !frameGenerationPendingCheck
+
+internal fun TransferTask.needsPhotoGeneration(effectsEnabled: Boolean): Boolean =
+    cropRecipe != null || (effectsEnabled && hasPhotoEffects)
+
+/** Only proves missing output for display admission; exact recipe matching stays in the worker. */
+internal fun canConfirmPhotoGeneration(
+    sourceName: String,
+    knownOutputNames: Set<String>?,
+    sameSourceInProgress: Boolean,
+    cropRequested: Boolean,
+    hasSavedCrop: Boolean,
+): Boolean {
+    // A new crop is real work even when its following effects are disabled. Reused crops
+    // must check against their saved output name, so leave those to the existing worker path.
+    if (cropRequested) return !hasSavedCrop
+    if (sameSourceInProgress || knownOutputNames == null) return false
+    val prefix = java.io.File(sourceName).nameWithoutExtension + "_"
+    return knownOutputNames.none { it.startsWith(prefix, ignoreCase = true) }
+}
+
 /** Pending work retains its busy state but has no running stopwatch. */
-internal fun TransferTask.queueFrameGeneration(): TransferTask = copy(
+internal fun TransferTask.queueFrameGeneration(pendingCheck: Boolean = false): TransferTask = copy(
     frameGenerationError = null,
     frameGenerationSkipped = false,
     isGeneratingFrame = true,
+    frameGenerationPendingCheck = pendingCheck,
     frameGenerationStartedAtElapsedMs = null,
     frameGenerationElapsedMs = null,
     frameGenerationAccumulatedMs = 0L,
@@ -280,6 +347,7 @@ internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask
     frameGenerationError = null,
     frameGenerationSkipped = false,
     isGeneratingFrame = true,
+    frameGenerationPendingCheck = false,
     frameGenerationStartedAtElapsedMs = nowElapsedMs,
     frameGenerationElapsedMs = null,
 )
@@ -289,6 +357,7 @@ internal fun TransferTask.skipFrameGeneration(): TransferTask = copy(
     frameGenerationError = null,
     frameGenerationSkipped = hasPhotoEffects,
     isGeneratingFrame = false,
+    frameGenerationPendingCheck = false,
     frameGenerationStartedAtElapsedMs = null,
     frameGenerationElapsedMs = null,
 )
@@ -306,6 +375,7 @@ internal fun TransferTask.finishFrameGeneration(nowElapsedMs: Long): TransferTas
     } ?: frameGenerationAccumulatedMs.takeIf { it > 0L }
     return copy(
         isGeneratingFrame = false,
+        frameGenerationPendingCheck = false,
         frameGenerationStartedAtElapsedMs = null,
         frameGenerationElapsedMs = elapsed,
     )
@@ -368,9 +438,18 @@ class ExportedOriginalIndex internal constructor() {
         val filesBySize = filesByDestination[exportDestinationKey(destinationFolderName)]
             ?.get(directoryLookupKey(file.fileName))
             ?: return false
-        return file.size == PtpConstants.SIZE_UNKNOWN ||
-            filesBySize.keys.any { it < 0L || it == file.size }
+        return if (file.size == PtpConstants.SIZE_UNKNOWN) filesBySize.isNotEmpty()
+        else filesBySize.keys.any { it < 0L || it == file.size }
     }
+
+    internal fun remove(
+        fileName: String,
+        size: Long,
+        destinationFolderName: String? = null,
+        uriString: String,
+    ): Boolean = filesByDestination[exportDestinationKey(destinationFolderName)]
+        ?.get(directoryLookupKey(fileName))
+        ?.remove(size, uriString) == true
 
     private fun exportDestinationKey(destinationFolderName: String?): String =
         destinationFolderName?.lowercase(Locale.ROOT) ?: ROOT_EXPORT_DESTINATION
@@ -465,7 +544,7 @@ internal fun TransferTask.newAttempt(): TransferTask {
         error = null,
         cropEffectsSkipped = false,
         skipped = false,
-    ).queueFrameGeneration()
+    ).queueFrameGeneration(pendingCheck = true)
     return copy(
         taskId = transferTaskIds.incrementAndGet(),
         status = TransferStatus.WAITING,
@@ -479,6 +558,7 @@ internal fun TransferTask.newAttempt(): TransferTask {
         downloadMBps = 0f,
         elapsedMs = null,
         isGeneratingFrame = false,
+        frameGenerationPendingCheck = false,
         frameGenerationStartedAtElapsedMs = null,
         frameGenerationElapsedMs = null,
         frameGenerationError = null,
@@ -1088,8 +1168,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         fun reserveDisplayName(name: String, suffix: (String, Int) -> String): String = files.reserveDisplayName(name, suffix)
         fun releaseDisplayName(name: String) = files.releaseDisplayName(name)
 
-        fun findOriginal(file: NikonCamera.FileInfo): LocalOriginal? = files
-            .find(file.fileName, file.size)
+        fun containsOriginal(file: NikonCamera.FileInfo): Boolean =
+            files.find(file.fileName, file.size) != null
+
+        fun findOriginal(
+            file: NikonCamera.FileInfo,
+            verify: (IndexedExistingFile<Uri>) -> IndexedExistingFile<Uri>?,
+            onInvalidated: (IndexedExistingFile<Uri>) -> Unit,
+        ): LocalOriginal? = files
+            .findVerified(file.fileName, file.size, verify, onInvalidated)
             ?.let { LocalOriginal(it.displayName, it.size, it.value) }
 
         fun exportedOriginalEntries(readIdentity: (Uri) -> String?): Sequence<IndexedExistingFile<Uri>> = files.entries()
@@ -1858,10 +1945,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val canonical = BuiltInPhotoFilters.all.firstOrNull { it.id == preset.id } ?: run {
             val key = photoFilterCatalogKey(preset.id) ?: return
             if (!isCustomPhotoFilterCatalogKey(key)) return
-            val parameters = preset.parameters as? Np3PhotoFilterParameters ?: return
-            preset.copy(parameters = parameters.copy(
-                colorBands = parameters.colorBands.toList(), toneCurve = parameters.toneCurve?.copyOf(),
-            ))
+            val parameters = when (photoNp3RecipeKind(preset.id)) {
+                PhotoNp3RecipeKind.FLEXIBLE -> {
+                    val source = preset.parameters as? Np3PhotoFilterParameters ?: return
+                    source.copy(colorBands = source.colorBands.toList(), toneCurve = source.toneCurve?.copyOf())
+                }
+                PhotoNp3RecipeKind.CLASSIC -> {
+                    val source = preset.parameters as? ClassicNp3PhotoFilterParameters ?: return
+                    source.copy(toneCurve = source.toneCurve?.copyOf())
+                }
+                null -> return
+            }
+            preset.copy(parameters = parameters)
         }
         _state.update { state ->
             if (state.photoFilters.any { it.id == canonical.id }) state
@@ -2259,6 +2354,61 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private fun forgetExistingExport(
+        treeUri: Uri,
+        destinationFolderName: String?,
+        entry: IndexedExistingFile<Uri>,
+    ) {
+        val snapshot = _state.value
+        if (snapshot.transferDirUri != treeUri.toString()) return
+        if (!snapshot.existingExportIndex.remove(
+                fileName = entry.displayName,
+                size = entry.size,
+                destinationFolderName = destinationFolderName,
+                uriString = entry.value.toString(),
+            )
+        ) return
+        _state.update { state ->
+            if (state.transferDirUri == treeUri.toString() &&
+                state.existingExportIndex === snapshot.existingExportIndex
+            ) {
+                state.copy(existingExportRevision = state.existingExportRevision + 1L)
+            } else state
+        }
+    }
+
+    private suspend fun findVerifiedOriginal(
+        directoryIndex: ExistingDirectoryIndex,
+        file: NikonCamera.FileInfo,
+        treeUri: Uri,
+        destinationFolderName: String?,
+    ): LocalOriginal? {
+        // A genuinely new download retains the old in-memory fast path: no provider call or
+        // dispatcher switch. Only a candidate that would otherwise skip download is checked.
+        if (!directoryIndex.containsOriginal(file)) return null
+        return withContext(Dispatchers.IO) {
+            val context = currentCoroutineContext()
+            directoryIndex.findOriginal(
+                file = file,
+                verify = { cached ->
+                    context.ensureActive()
+                    val actual = readExistingOriginalDocument(contentResolver, cached.value)
+                    context.ensureActive()
+                    actual?.let {
+                        cached.copy(
+                            displayName = it.displayName?.takeIf(String::isNotBlank) ?: cached.displayName,
+                            size = it.size ?: cached.size,
+                        )
+                    }
+                },
+                onInvalidated = { stale ->
+                    forgetExistingExport(treeUri, destinationFolderName, stale)
+                    log { "DL_EXISTING_INVALIDATED file=${stale.displayName}" }
+                },
+            )
+        }
+    }
+
     fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?,
         cropRecipe: com.ztransfer.crop.JpegCropSelection? = null) {
         require(cropRecipe == null || (files.size == 1 && isJpegPhotoName(files.single().fileName)))
@@ -2461,7 +2611,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
 
                     // 第一查：原片存在就直接引用，不再区分“下载任务/边框任务”。
-                    val localOriginal = directoryIndex.findOriginal(task.file)
+                    val localOriginal = try {
+                        findVerifiedOriginal(directoryIndex, task.file, uri, task.destinationFolderName)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        // A provider outage/permission error is not proof that an original was
+                        // deleted. Keep its index entry and fail only this task for explicit retry.
+                        if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
+                        log { "DL_EXISTING_CHECK_FAIL file=${task.file.fileName} error=${error.javaClass.simpleName}" }
+                        updateTask(taskId) {
+                            it.copy(status = TransferStatus.FAILED, error = str(R.string.error_open_file), speed = 0)
+                        }
+                        continue
+                    }
+                    // Verification may suspend while the task is still WAITING. Honor a clear
+                    // or single-card removal before either the skip or fresh-download path.
+                    if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                     if (localOriginal != null) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
                         recordExistingExport(
@@ -2474,7 +2640,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                         val preset = task.framePreset
                         val filter = task.photoFilterRequested
-                        val needsGeneration = task.hasPhotoEffects || task.cropRecipe != null
+                        val effectsEnabled = _state.value.photoEffectsEnabled
+                        val needsGeneration = task.needsPhotoGeneration(effectsEnabled)
                         updateTask(taskId) {
                             it.copy(
                                 status = TransferStatus.COMPLETED,
@@ -2484,7 +2651,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 savedOriginalOutput = SavedOriginalOutput(localOriginal.uri.toString(), uri.toString(), destinationDirectoryUri.toString(), localOriginal.displayName),
                                 speed = 0,
                             ).let { completed ->
-                                if (needsGeneration) completed.queueFrameGeneration() else completed
+                                when {
+                                    needsGeneration -> completed.queueFrameGeneration(pendingCheck = true)
+                                    !effectsEnabled -> completed.skipFrameGeneration()
+                                    else -> completed
+                                }
                             }
                         }
                         if (needsGeneration) {
@@ -2929,7 +3100,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         val effectsEnabled = _state.value.photoEffectsEnabled
                                         val framePreset = task.framePreset
                                         val photoFilter = task.photoFilterRequested
-                                        val shouldGenerateFrame = task.hasPhotoEffects || task.cropRecipe != null
+                                        val shouldGenerateFrame = task.needsPhotoGeneration(effectsEnabled)
                                         // 起点由协议层在本文件进入下载流程时记录（包含为大图/EXIF
                                         // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
                                         val elapsed = android.os.SystemClock.elapsedRealtime() -
@@ -2964,7 +3135,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                                 elapsedMs = elapsed,
                                             ).let { completed ->
                                                 if (shouldGenerateFrame) {
-                                                    completed.queueFrameGeneration()
+                                                    completed.queueFrameGeneration(pendingCheck = true)
                                                 } else {
                                                     if (!effectsEnabled) completed.skipFrameGeneration() else completed
                                                 }
@@ -3169,6 +3340,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 contentResolver.openInputStream(saved.uri)?.use { it.read() >= 0 } == true
             }.getOrDefault(false)
         }?.let { return it }
+        startPhotoFrameWork(taskId)
         val directory = java.io.File(getApplication<Application>().cacheDir,
             "$cropSessionName/${java.util.UUID.randomUUID()}")
         check(directory.mkdirs()) { "Cannot create crop staging directory" }
@@ -3687,6 +3859,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** Begin only real crop/render work. A crop followed by effects keeps one running stopwatch. */
+    private fun startPhotoFrameWork(taskId: Long) {
+        updateTask(taskId) { task ->
+            if (task.frameGenerationStartedAtElapsedMs == null) {
+                task.startFrameGeneration(android.os.SystemClock.elapsedRealtime())
+            } else task
+        }
+    }
+
     private suspend fun launchPhotoFrameExport(
         taskId: Long,
         treeUri: Uri,
@@ -3708,6 +3889,28 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         grainRequested: PhotoGrainSettings = PhotoGrainSettings.OFF,
     ) {
         val taskSnapshot = _state.value.tasks.firstOrNull { it.taskId == taskId } ?: return
+        if (taskSnapshot.frameGenerationPendingCheck &&
+            (cropRecipe != null || (_state.value.photoEffectsEnabled && taskSnapshot.hasPhotoEffects))
+        ) {
+            val tree = treeUri.toString()
+            val parent = destinationParentUri.toString()
+            val sourceStem = java.io.File(sourceName).nameWithoutExtension
+            val sameSourceInProgress = _state.value.tasks.any { other ->
+                other.taskId != taskId && other.isGeneratingFrame &&
+                    other.savedOriginalOutput?.let { saved ->
+                        saved.tree == tree && saved.parent == parent &&
+                            java.io.File(saved.name).nameWithoutExtension.equals(sourceStem, ignoreCase = true)
+                    } == true
+            }
+            // No provider query or identity read on the transfer coroutine. A warm in-memory
+            // index can prove that an untouched source has no output; these real waiting jobs
+            // remain visible while the worker is busy. Unknown/possibly duplicated jobs wait.
+            if (canConfirmPhotoGeneration(
+                    sourceName, photoFrameDestinations["${treeUri}|${destinationParentUri}"]?.occupiedNames,
+                    sameSourceInProgress, cropRecipe != null, savedCropOutput != null,
+                )
+            ) updateTask(taskId) { it.copy(frameGenerationPendingCheck = false) }
+        }
         val needsMetadata = borderEnabled && metadataSettings.requiresCameraMetadata &&
             isJpegPhotoName(sourceName) && !taskSnapshot.sourceMetadataPrepared
         val needsPlace = borderEnabled && (metadataSettings.showCity || metadataSettings.showRegion)
@@ -3769,7 +3972,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             if (!metadataReady.get() && _state.value.photoEffectsEnabled) {
                 photoGenerationQueue.deferUntilPrepared()
             }
-            updateTask(taskId) { it.startFrameGeneration(android.os.SystemClock.elapsedRealtime()) }
             if (PhotoGenerationProbe.enabled) {
                 PhotoGenerationProbe.stage(
                     sessionId = probeSession,
@@ -3851,6 +4053,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 ) {
                     FrameExportOutcome.AlreadyExists
                 } else {
+                    // The exact same prepared metadata, effective watermark and deduplication
+                    // key have now confirmed missing output. Only real work enters the summary.
+                    startPhotoFrameWork(taskId)
                     PhotoGenerationProbe.frameNote(
                         sessionId = probeSession,
                         category = "FRAME-EXPORT",
