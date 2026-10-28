@@ -46,6 +46,7 @@ import com.ztransfer.R
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
 import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.effects.photoFilterAdjustmentsFor
 import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -121,13 +122,14 @@ fun LocalPhotoEffectsPage(
         mutableIntStateOf(initialSettings.filterIntensityPercent)
     }
     var filterIntensities by remember { mutableStateOf(initialSettings.filterIntensities) }
+    var filterAdjustments by remember { mutableStateOf(initialSettings.filterAdjustments) }
     var favoritePhotoFilters by remember {
         mutableStateOf(initialSettings.favoritePhotoFilters)
     }
     var favoriteFrameEffects by remember {
         mutableStateOf(initialSettings.favoriteFrameEffects)
     }
-    val currentSettings = LocalPhotoEffectsSettings(
+    fun currentPhotoEffectsSettings() = LocalPhotoEffectsSettings(
         decorationEnabled = decorationEnabled,
         borderEnabled = borderEnabled,
         preset = preset,
@@ -139,15 +141,18 @@ fun LocalPhotoEffectsPage(
         grain = grain,
         grainIntensities = grainIntensities,
         filterIntensities = filterIntensities,
+        filterAdjustments = filterAdjustments,
         favoritePhotoFilters = favoritePhotoFilters,
         favoriteFrameEffects = favoriteFrameEffects,
     )
-    val latestSettings by rememberUpdatedState(currentSettings)
+    val currentSettings = currentPhotoEffectsSettings()
     LaunchedEffect(currentSettings) {
-        settingsPreferences.save(currentSettings)
+        settingsPreferences.save(currentPhotoEffectsSettings())
     }
     DisposableEffect(settingsPreferences) {
-        onDispose { settingsPreferences.save(latestSettings) }
+        // A synchronous directory change may clear controls immediately before disposal,
+        // before rememberUpdatedState has received another composition.
+        onDispose { settingsPreferences.save(currentPhotoEffectsSettings()) }
     }
 
     var hintText by remember { mutableStateOf("") }
@@ -229,8 +234,33 @@ fun LocalPhotoEffectsPage(
                 filterEnabled = true
             }
         },
-        onUnavailable = { filterEnabled = false; filterId = null },
+        onUnavailable = {
+            filterEnabled = false
+            filterId = null
+            filterIntensity = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+        },
     )
+    DisposableEffect(photoNp3Draft, settingsPreferences) {
+        var previousFolder = photoNp3Draft.store.folders.folder
+        val observer = photoNp3Draft.store.observeFolderChanges {
+            val folder = photoNp3Draft.store.folders.folder
+            val replaced = previousFolder != null && previousFolder != folder
+            previousFolder = folder
+            if (replaced) {
+                // The draft's observer closes an external selection. Clear its remembered
+                // controls even when this retained pager page currently uses a built-in.
+                val cleared = clearLocalPhotoNp3DirectorySettings(currentPhotoEffectsSettings())
+                filterId = cleared.filterId
+                filterEnabled = cleared.filterEnabled
+                filterIntensity = cleared.filterIntensityPercent
+                filterIntensities = cleared.filterIntensities
+                filterAdjustments = cleared.filterAdjustments
+                favoritePhotoFilters = cleared.favoritePhotoFilters
+                settingsPreferences.clearNp3DirectorySettings()
+            }
+        }
+        onDispose { observer.close() }
+    }
     LaunchedEffect(filterEnabled, visibleModules, photoLutDraft.selection) {
         if (!filterEnabled || !visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) || photoLutDraft.selection != null) {
             photoNp3Draft.cancelPending()
@@ -241,13 +271,16 @@ fun LocalPhotoEffectsPage(
     }
     val currentNp3Preset = state.photoFilters.firstOrNull { it.id == filterId }
     val currentNp3Uri = photoNp3Draft.sourceFor(filterId)
-    val latestNp3Preset by rememberUpdatedState(currentNp3Preset)
-    val latestNp3Uri by rememberUpdatedState(currentNp3Uri)
+    fun savePhotoNp3Draft() {
+        photoNp3Draft.store.save("local",
+            viewModel.state.value.photoFilters.firstOrNull { it.id == filterId },
+            photoNp3Draft.sourceFor(filterId))
+    }
     LaunchedEffect(currentNp3Preset, currentNp3Uri) {
-        photoNp3Draft.store.save("local", currentNp3Preset, currentNp3Uri)
+        savePhotoNp3Draft()
     }
     DisposableEffect(photoNp3Draft) {
-        onDispose { photoNp3Draft.store.save("local", latestNp3Preset, latestNp3Uri) }
+        onDispose { savePhotoNp3Draft() }
     }
     fun applyModuleVisibility(mask: Int) {
         if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) {
@@ -281,7 +314,7 @@ fun LocalPhotoEffectsPage(
     val selectedFilter = photoLutDraft.selection ?: state.photoFilters
         .firstOrNull { it.id == filterId }
         ?.takeIf { filterEnabled }
-        ?.let { PhotoFilterSelection(it, filterIntensity) }
+        ?.let { PhotoFilterSelection(it, filterIntensity, photoFilterAdjustmentsFor(filterId, filterAdjustments)) }
     val editorWatermark = when {
         !decorationEnabled -> PhotoFrameWatermark(enabled = false)
         isPro -> watermarkDraft.withEditorPlacementConstraints(
@@ -376,12 +409,14 @@ fun LocalPhotoEffectsPage(
 
                 Spacer(Modifier.height(14.dp))
                 val previewFilterPrefetch = remember(
-                    state.photoFilters, favoritePhotoFilters, filterIntensities, filterId, filterEnabled, photoLutDraft.selection,
+                    state.photoFilters, favoritePhotoFilters, filterIntensities, filterAdjustments,
+                    filterId, filterEnabled, photoLutDraft.selection,
                 ) {
                     nextPhotoFilterSelections(
                         filters = state.photoFilters,
                         favoriteCatalogKeys = favoritePhotoFilters.map { it.catalogKey },
                         rememberedIntensities = filterIntensities,
+                        rememberedAdjustments = filterAdjustments,
                         selectedId = filterId,
                         enabled = filterEnabled && photoLutDraft.selection == null,
                     )
@@ -466,10 +501,13 @@ fun LocalPhotoEffectsPage(
                         selectedId = filterId,
                         enabled = filterEnabled && photoLutDraft.selection == null,
                         intensityPercent = filterIntensity,
+                        adjustments = photoFilterAdjustmentsFor(filterId, filterAdjustments),
                         onDisabled = { filterEnabled = false },
                         onSelected = {
                             photoLutDraft.off()
                             filterId = it
+                            filterIntensity = photoFilterCatalogKey(it)?.let(filterIntensities::get)
+                                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
                             filterEnabled = true
                         },
                         onIntensityChanged = { selectedFilterId, intensity ->
@@ -477,6 +515,10 @@ fun LocalPhotoEffectsPage(
                             val catalogKey = photoFilterCatalogKey(selectedFilterId)
                                 ?: selectedFilterId
                             filterIntensities = filterIntensities + (catalogKey to intensity)
+                        },
+                        onAdjustmentsChanged = { selectedFilterId, adjustments ->
+                            val catalogKey = photoFilterCatalogKey(selectedFilterId) ?: selectedFilterId
+                            filterAdjustments = filterAdjustments + (catalogKey to adjustments)
                         },
                         onFavoriteToggled = { selectedFilterId ->
                             photoFilterCatalogKey(selectedFilterId)?.let { catalogKey ->

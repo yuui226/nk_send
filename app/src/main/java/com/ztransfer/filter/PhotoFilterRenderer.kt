@@ -50,6 +50,7 @@ object PhotoFilterRenderer {
     private data class ExactRgbMemoKey(
         val preset: PhotoFilterPreset,
         val intensityPercent: Int,
+        val lutAdjustments: LutAdjustments,
     )
 
     private data class ExactRgbMemoCache(
@@ -80,7 +81,9 @@ object PhotoFilterRenderer {
         val np3ColorBands: CompiledNp3ColorBands? = null,
         val np3TonalControls: CompiledNp3TonalControls? = null,
         val classicControls: CompiledClassicControls? = null,
-    )
+    ) {
+        val hasFinishingAdjustments = !lutAdjustments.isNeutral
+    }
 
     private data class CompiledNp3ColorBands(
         val hue: IntArray,
@@ -212,19 +215,22 @@ object PhotoFilterRenderer {
     ): CompiledFilter {
         val preset = selection.preset
         val strength = selection.normalizedIntensityPercent / 100f
+        val adjustments = selection.lutAdjustments.normalized()
         return when (val parameters = preset.parameters) {
             is ClassicNp3PhotoFilterParameters -> CompiledFilter(
-                preset, strength, preserveAlpha, classicControls = compileClassic(parameters),
+                preset, strength, preserveAlpha,
+                lutAdjustments = adjustments, classicControls = compileClassic(parameters),
             )
             is CubePhotoFilterParameters -> CompiledFilter(
                 preset, strength, preserveAlpha,
-                lutAdjustments = selection.lutAdjustments.normalized(),
+                lutAdjustments = adjustments,
                 cubeMapper = parameters.mapper,
             )
             is NcpPhotoFilterParameters -> CompiledFilter(
                 preset = preset,
                 strength = strength,
                 preserveAlpha = preserveAlpha,
+                lutAdjustments = adjustments,
                 ncpHueShiftDegrees = parameters.hueStep / NCP_MAX_MANUAL_STEP *
                     APPROXIMATE_MAX_HUE_SHIFT_DEGREES,
                 ncpSaturationAdjustment = parameters.saturationStep / NCP_MAX_MANUAL_STEP,
@@ -233,6 +239,7 @@ object PhotoFilterRenderer {
                 preset = preset,
                 strength = strength,
                 preserveAlpha = preserveAlpha,
+                lutAdjustments = adjustments,
                 np3SaturationAdjustment = parameters.saturation / 100f,
                 np3ColorBands = CompiledNp3ColorBands(
                     hue = IntArray(parameters.colorBands.size) { parameters.colorBands[it].hue },
@@ -344,6 +351,7 @@ object PhotoFilterRenderer {
         val key = ExactRgbMemoKey(
             preset = selection.preset,
             intensityPercent = selection.normalizedIntensityPercent,
+            lutAdjustments = selection.lutAdjustments.normalized(),
         )
         cachedExactMemo?.takeIf { it.key == key }?.let {
             return PreparedOriginalFilter(selection, it.colors, PreparationMode.EXACT_CACHE)
@@ -648,10 +656,15 @@ object PhotoFilterRenderer {
             saturation.coerceIn(0f, 1f),
             lightness.coerceIn(0f, 1f),
         )
-        return alpha shl 24 or
+        val blended = alpha shl 24 or
             (mixChannel(originalR, filtered ushr 16 and 0xff, compiled.strength) shl 16) or
             (mixChannel(originalG, filtered ushr 8 and 0xff, compiled.strength) shl 8) or
             mixChannel(originalB, filtered and 0xff, compiled.strength)
+        // Match the LUT path: finishing applies once to the strength-blended byte result.
+        // It is independent of strength, and neutral recipes retain the original pixel path.
+        return if (compiled.hasFinishingAdjustments) {
+            LutColorPipeline.apply(blended, compiled.lutAdjustments, compiled.preserveAlpha)
+        } else blended
     }
 
     private fun applyLutAdjustmentsRange(

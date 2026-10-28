@@ -3,10 +3,12 @@ package com.ztransfer.filter
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import com.ztransfer.R
 import com.ztransfer.presets.PresetFile
 import com.ztransfer.presets.PresetFolderException
@@ -147,7 +149,8 @@ class PhotoNp3StateInstrumentation : Instrumentation() {
                 check(editor.selectedPreset == null && editor.selectedUri == null)
                 check(selections.size == count && !ownerEnabled)
             }
-            report.putString("result", "PASS: Flexible and all Classic styles preview/export pixels, alpha and restored recipes, explicit/passive choices, unchanged refresh, failure retention, cancellation/late results, inactive owner, confirmed deletion, hidden pending selection")
+            checkDirectoryReplacement(store, raw, scope)
+            report.putString("result", "PASS: Flexible and all Classic styles preview/export pixels, alpha and restored recipes, explicit/passive choices, unchanged refresh, failure retention, cancellation/late results, inactive owner, confirmed deletion, hidden pending selection; shared directory replacement clears both custom drafts/hints, same directory/failure/cancel retain, stale writes blocked, built-ins retained")
             finish(Activity.RESULT_OK, report)
         } catch (failure: Throwable) {
             report.putString("failure", failure.stackTraceToString())
@@ -155,6 +158,123 @@ class PhotoNp3StateInstrumentation : Instrumentation() {
         } finally {
             main { state?.close(); scope.cancel() }
             raw.edit().clear().commit()
+        }
+    }
+
+    private fun checkDirectoryReplacement(
+        store: PhotoNp3Store,
+        preferences: SharedPreferences,
+        scope: CoroutineScope,
+    ) {
+        val folderA = Uri.parse("content://np3-state/tree/primary%3Afilters-a")
+        val folderB = Uri.parse("content://np3-state/tree/primary%3Afilters-b")
+        val folderC = Uri.parse("content://np3-state/tree/primary%3Afilters-c")
+        fun file(folder: Uri, name: String) = PresetFile(DocumentsContract.buildDocumentUriUsingTree(
+            folder, DocumentsContract.getTreeDocumentId(folder) + "/$name"), name, 100, 1)
+        val a = file(folderA, "A.NP3")
+        val b = file(folderA, "B.NP3")
+        val c = file(folderB, "C.NP3")
+        val first = recipe('d')
+        val second = recipe('e')
+        val third = recipe('f')
+        val source = FakeSource().apply { files = listOf(a, b) }
+        val editors = mutableListOf<PhotoNp3EditorState>()
+        val unavailable = mutableListOf<String>()
+        val notices = mutableListOf<Int>()
+        fun editor(role: String) = main {
+            PhotoNp3EditorState(store, source, role, store.restore(role), scope,
+                onSelected = { _, _ -> error("An unchanged refresh should not replace the recipe") },
+                onUnavailable = { unavailable += role }, notice = { notices += it },
+            ).also { editors += it; it.refresh() }
+        }
+        try {
+            main {
+                store.folders.replaceFolder(folderA, false)
+                store.save("transfer", first.preset, a.uri.toString())
+                store.save("local", second.preset, b.uri.toString())
+                store.rememberSource(a.uri.toString(), first.sourceSha256, first.preset.id)
+                store.rememberSource(b.uri.toString(), second.sourceSha256, second.preset.id)
+            }
+            val transfer = editor("transfer")
+            source.nextRead().also { check(it.file == a) }.result.complete(Result.success(first))
+            await { !transfer.loading }
+            val local = editor("local")
+            source.nextRead().also { check(it.file == b) }.result.complete(Result.success(second))
+            await { !local.loading }
+            main { transfer.folderPicked(folderA) }
+            source.nextRead().result.complete(Result.success(first))
+            await { !transfer.loading }
+            main {
+                check(unavailable.isEmpty())
+                check(store.restore("transfer")?.id == first.preset.id)
+                check(store.knownPresetId(a.uri.toString()) == first.preset.id)
+            }
+            source.scanError = PresetFolderException(PresetFolderFailure.READ)
+            main { transfer.folderPicked(folderB) }
+            await { !transfer.loading }
+            source.scanError = null
+            main {
+                check(unavailable.isEmpty() && notices.size == 1)
+                check(store.folders.folder == folderA)
+                transfer.folderPicked(folderB)
+                transfer.cancelPending()
+            }
+            drain()
+            main {
+                check(store.folders.folder == folderA && unavailable.isEmpty())
+                check(store.restore("local")?.id == second.preset.id)
+            }
+
+            source.files = listOf(c)
+            main { transfer.folderPicked(folderB) }
+            await { !transfer.loading }
+            main {
+                check(unavailable.sorted() == listOf("local", "transfer"))
+                check(transfer.selectedPreset == null && local.selectedPreset == null)
+                check(transfer.selectedUri == null && local.selectedUri == null)
+                check(transfer.folder == folderB && local.folder == folderB)
+                check(transfer.files == listOf(c) && local.files.isEmpty())
+                check(store.restore("transfer") == null && store.restore("local") == null)
+                check(store.knownPresetId(a.uri.toString()) == null)
+                check(store.knownPresetId(b.uri.toString()) == null)
+                // A retained page's later save must not resurrect an old custom snapshot,
+                // including when its source association was already cleared by the observer.
+                store.save("transfer", first.preset, a.uri.toString())
+                store.save("local", second.preset, null)
+                check(store.restore("transfer") == null && store.restore("local") == null)
+                store.save("transfer", third.preset, c.uri.toString())
+                store.save("transfer", first.preset, a.uri.toString())
+                check(store.restore("transfer")?.id == third.preset.id)
+                // Guard snapshots left by an older build that changed only the directory key.
+                preferences.edit().putString("local:id", second.preset.id)
+                    .putString("local:uri", b.uri.toString())
+                    .putString("local:snapshot", java.util.Base64.getEncoder().encodeToString(
+                        PhotoNp3SnapshotCodec.encode(second.preset))).apply()
+                check(store.restore("local") == null && store.uri("local") == null)
+                store.save("local", second.preset, null)
+                check(store.restore("local") == null)
+            }
+
+            // Built-in identities are shared with exact source copies. Preserve their selections
+            // and parameters while dropping only the now-obsolete directory association.
+            val builtIn = BuiltInPhotoFilters.all.first()
+            main {
+                store.save("transfer", builtIn, null)
+                store.save("local", builtIn, c.uri.toString())
+                transfer.resetSelection(builtIn)
+                local.resetSelection(builtIn, c.uri.toString())
+            }
+            source.files = emptyList()
+            main { transfer.folderPicked(folderC) }
+            await { !transfer.loading }
+            main {
+                check(unavailable.size == 2)
+                check(transfer.selectedPreset == builtIn && local.selectedPreset == builtIn)
+                check(transfer.selectedUri == null && local.selectedUri == null)
+                check(store.restore("transfer") == builtIn && store.restore("local") == builtIn)
+            }
+        } finally {
+            main { editors.forEach(PhotoNp3EditorState::close) }
         }
     }
 

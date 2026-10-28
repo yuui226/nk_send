@@ -11,6 +11,9 @@ import com.ztransfer.frame.PhotoFrameWatermarkPosition
 import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.LutAdjustments
+import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.grain.PhotoGrainSettings
 import com.ztransfer.grain.PhotoGrainStyle
 import com.ztransfer.protocol.NikonCamera
@@ -21,6 +24,26 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class TransferStateTest {
+    @Test fun filterDraftMemoriesNeverChangeAppliedOrAlreadyQueuedAdjustments() {
+        val preset = BuiltInPhotoFilters.all.first()
+        val key = checkNotNull(photoFilterCatalogKey(preset.id))
+        val applied = LutAdjustments(12, 23, -34, -45)
+        val draft = LutAdjustments(-15, -25, 35, 45)
+        val state = TransferState(photoFilters = listOf(preset), selectedPhotoFilterId = preset.id,
+            photoFilterEnabled = true, photoFilterIntensityPercent = 64,
+            photoFilterAdjustments = applied, transferPhotoFilterAdjustments = mapOf(key to applied))
+        val task = createQueueTasks(listOf(file(1)), false, photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false), photoFilter = state.photoFilterSelection).single()
+        val editing = state.copy(transferPhotoFilterAdjustments = mapOf(key to draft))
+        assertEquals(applied, editing.photoFilterSelection!!.lutAdjustments)
+        assertEquals(applied, task.photoFilterRequested!!.lutAdjustments)
+        val committed = editing.copy(photoFilterAdjustments = draft)
+        assertEquals(draft, committed.photoFilterSelection!!.lutAdjustments)
+        assertEquals(applied, task.photoFilterRequested!!.lutAdjustments)
+        assertNull(committed.copy(photoFilterEnabled = false).photoFilterSelection)
+        assertEquals(draft, committed.copy(photoFilterEnabled = false).photoFilterAdjustments)
+    }
+
     @Test
     fun onlyProvenMissingOutputsEnterVisibleWaitingQueue() {
         fun confirmed(names: Set<String>?, busy: Boolean = false) = canConfirmPhotoGeneration(

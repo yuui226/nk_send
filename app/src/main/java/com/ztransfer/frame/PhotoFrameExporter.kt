@@ -6095,7 +6095,10 @@ internal fun legacyPhotoFrameOutputName(
         "$watermarkSuffix$filterSuffix.jpg"
 }
 
-/** Changes whenever filter pixels change, so an older derived image cannot mask a new render. */
+/**
+ * Finishing controls already belong to every filter's identity, not only LUTs. Keep this
+ * serialization/version unchanged: neutral recipes must continue matching existing outputs.
+ */
 internal fun photoFilterRenderFingerprint(filter: PhotoFilterSelection): String =
     MessageDigest.getInstance("SHA-256")
         .digest(

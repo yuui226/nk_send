@@ -31,6 +31,8 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.lut.LutStateInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.lut.PhotoLutRoleInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.filter.PhotoNp3StateInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.PresetCategoryInstrumentation"
@@ -50,6 +52,8 @@
     <instrumentation android:name="com.ztransfer.ui.screen.TransferFocusInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.TransferProgressInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.PhotoFilterAdjustmentsInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.ThumbnailImageInstrumentation"
         android:targetPackage="com.ztransfer.debug" />

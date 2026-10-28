@@ -181,6 +181,8 @@ import com.ztransfer.filter.orderForCategory
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.LutAdjustments
+import com.ztransfer.effects.photoFilterAdjustmentsFor
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.license.LicenseManager
@@ -374,6 +376,7 @@ fun SettingsOverlay(
     var filterDraftIntensity by remember {
         mutableIntStateOf(state.photoFilterIntensityPercent)
     }
+    var filterDraftAdjustments by remember { mutableStateOf(state.photoFilterAdjustments) }
     val photoLutDraft = rememberPhotoLutDraft("transfer", state.photoLut) { filterDraftEnabled = false }
     val photoNp3Draft = rememberPhotoNp3Draft(
         "transfer", state.photoFilters.firstOrNull { it.id == filterDraftId },
@@ -383,13 +386,21 @@ fun SettingsOverlay(
             filterDraftIntensity = photoFilterCatalogKey(preset.id)
                 ?.let(viewModel.state.value.transferPhotoFilterIntensities::get)
                 ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            filterDraftAdjustments = photoFilterAdjustmentsFor(
+                preset.id, viewModel.state.value.transferPhotoFilterAdjustments,
+            )
             // Refresh may update a saved recipe while it is switched off or a LUT is active.
             if (explicit) {
                 photoLutDraft.off()
                 filterDraftEnabled = true
             }
         },
-        onUnavailable = { filterDraftEnabled = false; filterDraftId = null },
+        onUnavailable = {
+            filterDraftEnabled = false
+            filterDraftId = null
+            filterDraftIntensity = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            filterDraftAdjustments = LutAdjustments()
+        },
     )
     LaunchedEffect(filterDraftEnabled, visibleModules, photoLutDraft.selection) {
         if (!filterDraftEnabled || !visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) || photoLutDraft.selection != null) {
@@ -489,6 +500,7 @@ fun SettingsOverlay(
             lut = photoLutDraft.selection,
             lutUri = photoLutDraft.selectedUri?.toString(),
             np3Uri = photoNp3Draft.sourceFor(filterDraftId),
+            adjustments = filterDraftAdjustments,
         )
     }
     fun commitPhotoEffectsDraft() {
@@ -796,11 +808,12 @@ fun SettingsOverlay(
                 val previewFilter = photoLutDraft.selection ?: state.photoFilters
                     .firstOrNull { it.id == filterDraftId }
                     ?.takeIf { filterDraftEnabled }
-                    ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
+                    ?.let { PhotoFilterSelection(it, filterDraftIntensity, filterDraftAdjustments) }
                 val previewFilterPrefetch = remember(
                     state.photoFilters,
                     state.favoritePhotoFilters,
                     state.transferPhotoFilterIntensities,
+                    state.transferPhotoFilterAdjustments,
                     filterDraftId,
                     filterDraftEnabled,
                     photoLutDraft.selection,
@@ -809,6 +822,7 @@ fun SettingsOverlay(
                         filters = state.photoFilters,
                         favoriteCatalogKeys = state.favoritePhotoFilters.map { it.catalogKey },
                         rememberedIntensities = state.transferPhotoFilterIntensities,
+                        rememberedAdjustments = state.transferPhotoFilterAdjustments,
                         selectedId = filterDraftId,
                         enabled = filterDraftEnabled && photoLutDraft.selection == null,
                     )
@@ -911,15 +925,26 @@ fun SettingsOverlay(
                         selectedId = filterDraftId,
                         enabled = filterDraftEnabled && photoLutDraft.selection == null,
                         intensityPercent = filterDraftIntensity,
+                        adjustments = filterDraftAdjustments,
                         onDisabled = { filterDraftEnabled = false },
                         onSelected = {
                             photoLutDraft.off()
                             filterDraftId = it
+                            filterDraftIntensity = photoFilterCatalogKey(it)
+                                ?.let(viewModel.state.value.transferPhotoFilterIntensities::get)
+                                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+                            filterDraftAdjustments = photoFilterAdjustmentsFor(
+                                it, viewModel.state.value.transferPhotoFilterAdjustments,
+                            )
                             filterDraftEnabled = true
                         },
                         onIntensityChanged = { filterId, intensity ->
                             filterDraftIntensity = intensity
                             viewModel.rememberTransferPhotoFilterIntensity(filterId, intensity)
+                        },
+                        onAdjustmentsChanged = { filterId, adjustments ->
+                            if (filterId == filterDraftId) filterDraftAdjustments = adjustments
+                            viewModel.rememberTransferPhotoFilterAdjustments(filterId, adjustments)
                         },
                         onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
                         hapticsEnabled = state.hapticsEnabled,
@@ -1294,6 +1319,7 @@ fun SettingsOverlay(
                 filterDraftId = state.selectedPhotoFilterId
                     ?: state.photoFilters.firstOrNull()?.id
                 filterDraftIntensity = state.photoFilterIntensityPercent
+                filterDraftAdjustments = state.photoFilterAdjustments
                 filterDraftEnabled = state.photoFilterEnabled
                 grainDraft = state.photoGrain.normalized()
                 photoLutDraft.reset(state.photoLut, photoLutDraft.store.uri("transfer"))
@@ -1734,6 +1760,7 @@ internal fun nextPhotoFilterSelections(
     selectedId: String?,
     enabled: Boolean,
     count: Int = PHOTO_EFFECTS_FORWARD_PREFETCH_COUNT,
+    rememberedAdjustments: Map<String, LutAdjustments> = emptyMap(),
 ): List<PhotoFilterSelection> {
     if (!enabled || selectedId == null || count <= 0) return emptyList()
     val ordered = orderWithFavorites(
@@ -1752,6 +1779,7 @@ internal fun nextPhotoFilterSelections(
                 preset = preset,
                 intensityPercent = rememberedIntensities[catalogKey]
                     ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+                lutAdjustments = photoFilterAdjustmentsFor(preset.id, rememberedAdjustments),
             )
         }
         .toList()

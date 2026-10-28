@@ -1,6 +1,9 @@
 package com.ztransfer.frame
 
 import com.ztransfer.filter.CubePhotoFilterParameters
+import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.ClassicNp3PhotoFilterParameters
+import com.ztransfer.filter.ClassicNp3Style
 import com.ztransfer.filter.LutAdjustments
 import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
@@ -311,7 +314,7 @@ class PhotoEffectOutputNamingTest {
     }
 
     @Test
-    fun changingEachLutAdjustmentChangesIdentityButKeepsShortName() {
+    fun changingEachFinishingAdjustmentChangesFilterAndLutIdentityButKeepsShortName() {
         val table = CubeLutParser.parse(
             (
                 "LUT_3D_SIZE 2\n" +
@@ -323,8 +326,12 @@ class PhotoEffectOutputNamingTest {
             PhotoFilterPreset("cube:test", "LUT", CubePhotoFilterParameters(table)),
             intensityPercent = 80,
         )
-        val name = photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, filter = lut)
-        val identity = photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, filter = lut)
+        val classic = PhotoFilterSelection(
+            PhotoFilterPreset("classic:test", "Classic", ClassicNp3PhotoFilterParameters(
+                ClassicNp3Style.VIVID, 0, 0, 0, 0, 0, 0, 16, 100,
+            )),
+            intensityPercent = 80,
+        )
         val adjustments = listOf(
             LutAdjustments(contrast = 10),
             LutAdjustments(saturation = 10),
@@ -332,13 +339,25 @@ class PhotoEffectOutputNamingTest {
             LutAdjustments(shadows = 10),
         )
 
-        adjustments.forEach { adjustment ->
-            val changed = lut.copy(lutAdjustments = adjustment)
-            assertEquals(name, photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, filter = changed))
-            assertNotEquals(
-                identity,
-                photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, filter = changed),
-            )
+        for (selection in listOf(filter, PhotoFilterSelection(BuiltInPhotoFilters.all[8], 80), classic, lut)) {
+            val name = photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, filter = selection)
+            val identity = photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, filter = selection)
+            val legacy = legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, filter = selection)
+            for (adjustment in adjustments) {
+                val changed = selection.copy(lutAdjustments = adjustment)
+                val changedIdentity = photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, filter = changed)
+                assertEquals(name, photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, filter = changed))
+                assertNotEquals(identity, changedIdentity)
+                assertFalse(isPhotoFrameOutputFor(name, "DSC.JPG", PhotoFramePreset.MIST,
+                    filter = changed, identity = identity))
+                assertFalse(isPhotoFrameOutputFor(legacy, "DSC.JPG", PhotoFramePreset.MIST, filter = changed))
+                assertTrue(isPhotoFrameOutputFor(name, "DSC.JPG", PhotoFramePreset.MIST,
+                    filter = changed, identity = changedIdentity))
+                // Returning all finishing controls to zero must still reuse the old output.
+                val restored = changed.copy(lutAdjustments = LutAdjustments())
+                assertEquals(identity, photoFrameOutputIdentity("DSC.JPG", PhotoFramePreset.MIST, filter = restored))
+                assertTrue(isPhotoFrameOutputFor(legacy, "DSC.JPG", PhotoFramePreset.MIST, filter = restored))
+            }
         }
     }
 

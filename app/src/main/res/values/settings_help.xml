@@ -31,7 +31,7 @@
     <string name="help_preview_label">Preview</string>
     <string name="help_favorites_label">Favorites</string>
     <string name="help_wheels_label">Wheels</string>
-    <string name="photo_effects_help_filters">Use a filter or a LUT, with adjustable strength. Hold the filter wheel to browse categories.</string>
+    <string name="photo_effects_help_filters">Use a filter or a LUT. Tap the button on the right to adjust the effect; hold the filter wheel to browse categories.</string>
     <string name="photo_effects_help_lut_settings">Adjust strength, contrast, saturation, highlights, and shadows.</string>
     <string name="photo_effects_help_frame">Choose a style. Open frame settings to adjust width, background, and shooting information.</string>
     <string name="photo_effects_help_watermark">Pro supports custom text or a logo, with adjustable style, position, and opacity.</string>

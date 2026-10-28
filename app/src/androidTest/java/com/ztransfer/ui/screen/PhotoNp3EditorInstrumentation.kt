@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
 import android.os.CancellationSignal
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.MainActivity
 import com.ztransfer.R
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.LutAdjustments
 import com.ztransfer.filter.Np3PhotoFilterParameters
 import com.ztransfer.filter.PHOTO_FILTER_COLOR_BAND_CENTERS
 import com.ztransfer.filter.ParsedPhotoNp3
@@ -35,6 +37,7 @@ import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoNp3EditorState
 import com.ztransfer.filter.PhotoNp3Source
 import com.ztransfer.filter.PhotoNp3Store
+import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.presets.PresetFile
 import com.ztransfer.presets.PresetFolderSnapshot
 import com.ztransfer.presets.presetFileLabels
@@ -71,6 +74,10 @@ class PhotoNp3EditorInstrumentation : Instrumentation() {
             val filters = mutableStateOf(BuiltInPhotoFilters.all)
             val enabled = mutableStateOf(true)
             val strength = mutableStateOf(60)
+            val rememberedIntensities = mutableStateOf<Map<String, Int>>(emptyMap())
+            val adjustments = mutableStateOf(LutAdjustments())
+            val adjustmentChanges = mutableListOf<Pair<String, LutAdjustments>>()
+            val strengthChanges = mutableListOf<Pair<String, Int>>()
             val dark = mutableStateOf(false)
             val narrow = mutableStateOf(false)
             val state = main {
@@ -112,11 +119,21 @@ class PhotoNp3EditorInstrumentation : Instrumentation() {
                             Surface(Modifier.fillMaxSize()) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Box(Modifier.width(if (narrow.value) 260.dp else 360.dp)) {
-                                        PhotoFilterEditor(filters.value, emptyList(), emptyMap(), selected.value,
-                                            enabled.value, strength.value,
+                                        PhotoFilterEditor(filters.value, emptyList(), rememberedIntensities.value, selected.value,
+                                            enabled.value, strength.value, adjustments.value,
                                             onDisabled = { enabled.value = false },
                                             onSelected = { selected.value = it; enabled.value = true },
-                                            onIntensityChanged = { _, value -> strength.value = value },
+                                            onIntensityChanged = { id, value ->
+                                                strengthChanges += id to value
+                                                strength.value = value
+                                                photoFilterCatalogKey(id)?.let { key ->
+                                                    rememberedIntensities.value = rememberedIntensities.value + (key to value)
+                                                }
+                                            },
+                                            onAdjustmentsChanged = { id, value ->
+                                                adjustmentChanges += id to value
+                                                adjustments.value = value
+                                            },
                                             onFavoriteToggled = {}, hapticsEnabled = false, np3 = state)
                                     }
                                 }
@@ -130,6 +147,13 @@ class PhotoNp3EditorInstrumentation : Instrumentation() {
             val all = host.getString(R.string.photo_filter_category_all)
             val rootCategory = host.getString(R.string.lut_uncategorized)
             val folderAction = host.getString(R.string.photo_filter_folder)
+            val settingsAction = host.getString(R.string.photo_filter_settings)
+            val intensityLabel = host.getString(R.string.photo_filter_intensity)
+            val contrastLabel = host.getString(R.string.photo_lut_contrast)
+            val adjustmentLabels = listOf(intensityLabel, contrastLabel,
+                host.getString(R.string.photo_lut_saturation),
+                host.getString(R.string.photo_lut_highlights),
+                host.getString(R.string.photo_lut_shadows))
             val labels = presetFileLabels(source.files, rootCategory)
             val firstBuiltInName = BuiltInPhotoFilters.nameResId(builtIn.id)?.let(host::getString)
                 ?: builtIn.name
@@ -175,13 +199,92 @@ class PhotoNp3EditorInstrumentation : Instrumentation() {
                 clickScrolled(firstBuiltInName, labels.getValue(builtInCopy.uri), AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                 await { selected.value == builtIn.id && state.selectedUri == null }
                 awaitWheelDescription(host.getString(R.string.photo_filter) + ", " + firstBuiltInName)
+
+                // Exercise the production disclosure and real wheel actions. No fake renderer or
+                // writable application preferences are involved in these UI-only adjustments.
+                awaitAdjustmentWheels(adjustmentLabels, visible = false)
+                click(settingsAction)
+                awaitAdjustmentWheels(adjustmentLabels, visible = true)
+                if (!compact) {
+                    // Valid restored controls need not land on the UI's usual five-step grid.
+                    main { adjustments.value = LutAdjustments(9, -7, 13, -24) }
+                    awaitWheelDescription("$contrastLabel, 9")
+                    awaitWheelDescription(host.getString(R.string.photo_lut_saturation) + ", -7")
+                    awaitWheelDescription(host.getString(R.string.photo_lut_highlights) + ", 13")
+                    awaitWheelDescription(host.getString(R.string.photo_lut_shadows) + ", -24")
+                    clickWheel(contrastLabel)
+                    await { adjustments.value.contrast == 10 }
+                    main { adjustments.value = LutAdjustments() }
+                    awaitWheelDescription("$contrastLabel, 0")
+                }
+                val previousAdjustments = main { adjustments.value }
+                val previousAdjustmentCount = main { adjustmentChanges.size }
+                clickWheel(contrastLabel)
+                await { adjustmentChanges.size == previousAdjustmentCount + 1 }
+                val expectedAdjustments = previousAdjustments.copy(contrast = previousAdjustments.contrast + 5)
+                main {
+                    check(adjustments.value == expectedAdjustments)
+                    check(adjustmentChanges.last() == (builtIn.id to expectedAdjustments))
+                }
+                awaitWheelDescription("$contrastLabel, ${expectedAdjustments.contrast}")
+                val previousStrength = main { strength.value }
+                val previousStrengthCount = main { strengthChanges.size }
+                clickWheel(intensityLabel)
+                await { strengthChanges.size == previousStrengthCount + 1 }
+                val expectedStrength = previousStrength - 2
+                main { check(strengthChanges.last() == (builtIn.id to expectedStrength)) }
+                awaitWheelDescription("$intensityLabel, $expectedStrength%")
+                screenshots += screenshot("photo-np3-editor-$variant-adjustments.png")
+
+                click(settingsAction)
+                awaitAdjustmentWheels(adjustmentLabels, visible = false)
+                click(settingsAction)
+                awaitAdjustmentWheels(adjustmentLabels, visible = true)
+                awaitWheelDescription("$contrastLabel, ${expectedAdjustments.contrast}")
+                awaitWheelDescription("$intensityLabel, $expectedStrength%")
+
+                // Disable through the actual chooser: its exit transition must remove every
+                // finishing wheel, while the owner's recipe remains ready for a later enable.
+                openChooser(folderAction)
+                click(host.getString(R.string.photo_filter_turn_off))
+                await { !enabled.value }
+                awaitAdjustmentWheels(adjustmentLabels, visible = false)
+                main {
+                    check(adjustments.value == expectedAdjustments)
+                    check(strength.value == expectedStrength)
+                }
+                screenshots += screenshot("photo-np3-editor-$variant-disabled.png")
+                // Re-enable the same recipe through the chooser. Its remembered strength and
+                // finishing controls must survive disabling rather than reset to defaults.
+                openChooser(folderAction)
+                click(firstBuiltInName)
+                await { enabled.value && selected.value == builtIn.id }
+                awaitAdjustmentWheels(adjustmentLabels, visible = true)
+                awaitWheelDescription("$contrastLabel, ${expectedAdjustments.contrast}")
+                awaitWheelDescription("$intensityLabel, $expectedStrength%")
+                main { adjustments.value = LutAdjustments(35, -20, 15, -40) }
+                awaitWheelDescription("$contrastLabel, 35")
+                clickWheel(host.getString(R.string.photo_color_reset))
+                await { strength.value == 80 && adjustments.value == LutAdjustments() }
+                check(main { selected.value } == builtIn.id)
+                awaitWheelDescription("$intensityLabel, 80%")
+                awaitWheelDescription("$contrastLabel, 0")
+                click(settingsAction)
+                awaitAdjustmentWheels(adjustmentLabels, visible = false)
             }
-            report.putString("result", "PASS: real long-press chooser, built-ins, root/subfolder selection, duplicate labels, same-source built-in selection, light and dark 280dp viewport")
+            report.putString("result", "PASS: real long-press chooser, built-ins, root/subfolder selection, duplicate labels, same-source built-in selection; five-wheel disclosure, real adjustment/intensity callbacks, collapse and disable retention/re-enable, icon reset of all five controls; light and dark 280dp viewport")
             report.putString("screenshots", screenshots.joinToString("\n"))
             outcome = Activity.RESULT_OK
         } catch (error: Throwable) {
             report.putString("failure", error.stackTraceToString())
             runCatching { report.putString("failure_screenshot", screenshot("photo-np3-editor-failure.png")) }
+            runCatching {
+                val dump = accessibilityDump()
+                val file = File(targetContext.cacheDir, "photo-np3-editor-failure-tree.txt")
+                file.writeText(dump)
+                report.putString("failure_accessibility_tree", file.absolutePath)
+                report.putString("failure_accessibility_excerpt", dump.take(12_000))
+            }
         } finally {
             main { editor?.close(); scope.cancel(); activity?.finish() }
             preferences.edit().clear().commit()
@@ -258,6 +361,74 @@ class PhotoNp3EditorInstrumentation : Instrumentation() {
             }
             "Unexpected selected filter source; expected wheel to contain: $expected\nVisible labels:\n$visibleLabels"
         }
+    }
+
+    private fun wheel(label: String): AccessibilityNodeInfo? {
+        // Compose can expose the descriptive semantics separately from the clickable modifier.
+        // Resolve the actual action in that wheel's subtree/ancestors, as click(text) does for
+        // ordinary controls, rather than requiring the descriptive node itself to be clickable.
+        val described = find { it.contentDescription?.toString()?.let { description -> description == label || description.contains("$label, ") } == true }
+            ?: return null
+        fun supportsClick(node: AccessibilityNodeInfo): Boolean = node.isVisibleToUser && node.isEnabled &&
+            (node.isClickable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
+        fun actionInSubtree(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (supportsClick(node)) return node
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let { child -> actionInSubtree(child)?.let { return it } }
+            }
+            return null
+        }
+        actionInSubtree(described)?.let { return it }
+        var ancestor = described.parent
+        while (ancestor != null) {
+            if (supportsClick(ancestor)) return ancestor
+            ancestor = ancestor.parent
+        }
+        return null
+    }
+
+    private fun clickWheel(label: String) {
+        val deadline = SystemClock.uptimeMillis() + 5000
+        while (wheel(label) == null && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(40)
+        val target = checkNotNull(wheel(label)) {
+            "No enabled click action associated with wheel: $label\n${accessibilityDump()}"
+        }
+        check(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            "Wheel ACTION_CLICK failed: $label; ${nodeSummary(target)}\n${accessibilityDump()}"
+        }
+    }
+
+    private fun nodeSummary(node: AccessibilityNodeInfo): String {
+        val bounds = Rect().also(node::getBoundsInScreen)
+        return "class=${node.className} text=[${node.text}] description=[${node.contentDescription}] " +
+            "visible=${node.isVisibleToUser} enabled=${node.isEnabled} clickable=${node.isClickable} " +
+            "bounds=$bounds actions=${node.actionList.map { "${it.id}:${it.label}" }}"
+    }
+
+    private fun accessibilityDump(): String {
+        if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
+        val root = uiAutomation.rootInActiveWindow ?: return "No active accessibility window"
+        return buildString {
+            var count = 0
+            fun visit(node: AccessibilityNodeInfo, path: String) {
+                if (count++ >= 512) return
+                appendLine("$path ${nodeSummary(node)}")
+                for (index in 0 until node.childCount) {
+                    node.getChild(index)?.let { visit(it, "$path/$index") }
+                }
+            }
+            visit(root, "0")
+        }
+    }
+
+    private fun awaitAdjustmentWheels(labels: List<String>, visible: Boolean) {
+        val deadline = SystemClock.uptimeMillis() + 5000
+        fun matches() = labels.all { label ->
+            val exists = find { it.contentDescription?.toString()?.startsWith("$label, ") == true } != null
+            exists == visible
+        }
+        while (!matches() && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(40)
+        check(matches()) { "Adjustment wheels did not become ${if (visible) "visible" else "hidden"}: $labels" }
     }
 
     private fun click(text: String) {

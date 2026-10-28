@@ -10,6 +10,25 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PhotoNp3StoreTest {
+    @Test fun folderObserverIgnoresOtherKeysAndRepeatedFolderAndUnregistersWhenClosed() {
+        val memory = MemoryPreferences()
+        val store = PhotoNp3Store(memory.preferences)
+        var changes = 0
+        val observer = store.observeFolderChanges { changes++ }
+        memory.preferences.edit().putString("folder", "content://photos/tree/a").apply()
+        assertEquals(1, changes)
+        memory.preferences.edit().putBoolean("owns_grant", true).apply()
+        memory.preferences.edit().putString("transfer:id", "unrelated").apply()
+        memory.preferences.edit().putString("folder", "content://photos/tree/a").apply()
+        assertEquals(1, changes)
+        memory.preferences.edit().putString("folder", "content://photos/tree/b").apply()
+        assertEquals(2, changes)
+        observer.close()
+        memory.preferences.edit().putString("folder", "content://photos/tree/c").apply()
+        assertEquals(2, changes)
+        assertEquals(0, memory.listeners.size)
+    }
+
     @Test fun classicAndFlexibleDirectoriesAndEditorsShareHintsButKeepIndependentSnapshots() {
         val memory = MemoryPreferences()
         val store = PhotoNp3Store(memory.preferences)
@@ -130,11 +149,18 @@ class PhotoNp3StoreTest {
 
     private class MemoryPreferences(val values: MutableMap<String, Any> = mutableMapOf()) {
         var reads = 0
+        val listeners = mutableSetOf<SharedPreferences.OnSharedPreferenceChangeListener>()
         val preferences = Proxy.newProxyInstance(SharedPreferences::class.java.classLoader,
-            arrayOf(SharedPreferences::class.java)) { _, method, _ ->
+            arrayOf(SharedPreferences::class.java)) { _, method, args ->
             when (method.name) {
                 "getAll" -> { reads++; values.toMap() }
                 "edit" -> editor()
+                "registerOnSharedPreferenceChangeListener" -> {
+                    listeners += args!![0] as SharedPreferences.OnSharedPreferenceChangeListener; null
+                }
+                "unregisterOnSharedPreferenceChangeListener" -> {
+                    listeners -= args!![0] as SharedPreferences.OnSharedPreferenceChangeListener; null
+                }
                 else -> error("Unexpected preference call: ${method.name}")
             }
         } as SharedPreferences
@@ -147,7 +173,9 @@ class PhotoNp3StoreTest {
                     "putString", "putBoolean" -> { pending[args!![0] as String] = args[1]; self }
                     "remove" -> { pending[args!![0] as String] = null; self }
                     "apply", "commit" -> {
+                        val changed = pending.filter { (key, value) -> values[key] != value }.keys
                         pending.forEach { (key, value) -> if (value == null) values.remove(key) else values[key] = value }
+                        changed.forEach { key -> listeners.toList().forEach { it.onSharedPreferenceChanged(preferences, key) } }
                         if (method.name == "commit") true else null
                     }
                     else -> error("Unexpected editor call: ${method.name}")

@@ -21,6 +21,11 @@ import com.ztransfer.effects.decodePhotoFilterIntensities
 import com.ztransfer.effects.encodeFavoriteFrameEffects
 import com.ztransfer.effects.encodeFavoritePhotoFilters
 import com.ztransfer.effects.encodePhotoFilterIntensities
+import com.ztransfer.effects.decodePhotoFilterAdjustments
+import com.ztransfer.effects.encodePhotoFilterAdjustments
+import com.ztransfer.effects.normalizePhotoFilterAdjustments
+import com.ztransfer.filter.LutAdjustments
+import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.isCustomPhotoFilterCatalogKey
 import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.filter.normalizePhotoFilterIntensity
@@ -55,6 +60,7 @@ internal data class LocalPhotoEffectsSettings(
     val filterEnabled: Boolean,
     val filterIntensityPercent: Int,
     val filterIntensities: Map<String, Int> = emptyMap(),
+    val filterAdjustments: Map<String, LutAdjustments> = emptyMap(),
     val favoritePhotoFilters: List<FavoritePhotoFilter> = emptyList(),
     val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
     val grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
@@ -121,6 +127,7 @@ internal fun normalizeLocalPhotoEffectsSettings(
         filterEnabled = settings.filterEnabled && validFilterId != null,
         filterIntensityPercent = currentIntensity,
         filterIntensities = filterIntensities,
+        filterAdjustments = normalizePhotoFilterAdjustments(settings.filterAdjustments, validCatalogKeys),
         favoritePhotoFilters = settings.favoritePhotoFilters
             .filter { it.catalogKey in validCatalogKeys || isCustomPhotoFilterCatalogKey(it.catalogKey) }
             .distinctBy { it.catalogKey },
@@ -156,11 +163,56 @@ internal fun applyLocalPhotoEffectModuleVisibility(
     )
 }
 
+/** Replacing the shared NP3 directory forgets external recipes, never built-in controls. */
+internal fun clearLocalPhotoNp3DirectorySettings(
+    settings: LocalPhotoEffectsSettings,
+): LocalPhotoEffectsSettings {
+    val customSelection = isCustomPhotoFilterCatalogKey(
+        settings.filterId?.let(::photoFilterCatalogKey).orEmpty(),
+    )
+    return settings.copy(
+        filterId = settings.filterId.takeUnless { customSelection },
+        filterEnabled = settings.filterEnabled && !customSelection,
+        filterIntensityPercent = if (customSelection) DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            else settings.filterIntensityPercent,
+        filterIntensities = settings.filterIntensities.filterKeys { !isCustomPhotoFilterCatalogKey(it) },
+        filterAdjustments = settings.filterAdjustments.filterKeys { !isCustomPhotoFilterCatalogKey(it) },
+        favoritePhotoFilters = settings.favoritePhotoFilters.filterNot { isCustomPhotoFilterCatalogKey(it.catalogKey) },
+    )
+}
+
 /** A separate preference file keeps phone-photo drafts independent from camera-transfer effects. */
 internal class LocalPhotoEffectsPreferences(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val grainPreferences = PhotoGrainPreferences(preferences, "grain")
+
+    /** Also called when the local editor is not composed; unrelated effect settings stay untouched. */
+    fun clearNp3DirectorySettings() {
+        val values = preferences.all
+        val builtInKeys = BuiltInPhotoFilters.all.mapNotNull { photoFilterCatalogKey(it.id) }.toSet()
+        val selectedId = values.string(KEY_FILTER_ID)
+        val customSelection = isCustomPhotoFilterCatalogKey(selectedId?.let(::photoFilterCatalogKey).orEmpty())
+        val intensities = decodePhotoFilterIntensities(values.string(KEY_FILTER_INTENSITIES), builtInKeys)
+            .filterKeys { !isCustomPhotoFilterCatalogKey(it) }
+        val adjustments = decodePhotoFilterAdjustments(values.string(KEY_FILTER_ADJUSTMENTS), builtInKeys)
+            .filterKeys { !isCustomPhotoFilterCatalogKey(it) }
+        val favorites = decodeFavoritePhotoFilters(
+            values.string(KEY_FAVORITE_PHOTO_FILTERS) ?: legacyFavoriteValue(
+                values.int(KEY_VERSION, 0), FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
+            ), builtInKeys,
+        ).filterNot { isCustomPhotoFilterCatalogKey(it.catalogKey) }
+        preferences.edit().apply {
+            if (customSelection) {
+                remove(KEY_FILTER_ID)
+                putBoolean(KEY_FILTER_ENABLED, false)
+                remove(KEY_FILTER_INTENSITY)
+            }
+            putString(KEY_FILTER_INTENSITIES, encodePhotoFilterIntensities(intensities))
+            putString(KEY_FILTER_ADJUSTMENTS, encodePhotoFilterAdjustments(adjustments))
+            putString(KEY_FAVORITE_PHOTO_FILTERS, encodeFavoritePhotoFilters(favorites))
+        }.apply()
+    }
 
     fun restoreModules(): Int {
         val introduced = preferences.getBoolean(KEY_GRAIN_INTRODUCED, false)
@@ -256,6 +308,7 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
                 values.string(KEY_FILTER_INTENSITIES),
                 validCatalogKeys,
             ),
+            filterAdjustments = decodePhotoFilterAdjustments(values.string(KEY_FILTER_ADJUSTMENTS), validCatalogKeys),
             favoritePhotoFilters = decodeFavoritePhotoFilters(
                 values.string(KEY_FAVORITE_PHOTO_FILTERS)
                     ?: legacyFavoriteValue(
@@ -306,6 +359,7 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
                 KEY_FILTER_INTENSITIES,
                 encodePhotoFilterIntensities(settings.filterIntensities),
             )
+            putString(KEY_FILTER_ADJUSTMENTS, encodePhotoFilterAdjustments(settings.filterAdjustments))
             putString(
                 KEY_FAVORITE_PHOTO_FILTERS,
                 encodeFavoritePhotoFilters(settings.favoritePhotoFilters),
@@ -365,6 +419,7 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         const val KEY_FILTER_ENABLED = "filter_enabled"
         const val KEY_FILTER_INTENSITY = "filter_intensity"
         const val KEY_FILTER_INTENSITIES = "filter_intensities_v1"
+        const val KEY_FILTER_ADJUSTMENTS = "filter_adjustments_v1"
         const val KEY_FAVORITE_PHOTO_FILTERS = "favorite_photo_filters_v1"
         const val KEY_FAVORITE_FRAME_EFFECTS = "favorite_frame_effects_v1"
     }

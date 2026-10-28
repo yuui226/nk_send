@@ -284,6 +284,8 @@
     <string name="photo_filter_off_option">无滤镜</string>
     <string name="photo_filter_intensity_summary">%1$d%%</string>
     <string name="photo_filter_intensity">强度</string>
+    <string name="photo_filter_settings">调整效果</string>
+    <string name="photo_color_reset">恢复默认</string>
     <string name="photo_filter_task_label">滤镜：%1$s · %2$d%%</string>
     <string name="photo_effect_favorite_add">收藏当前效果</string>
     <string name="photo_effect_favorite_remove">取消收藏当前效果</string>

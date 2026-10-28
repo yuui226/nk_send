@@ -284,6 +284,8 @@
     <string name="photo_filter_off_option">No filter</string>
     <string name="photo_filter_intensity_summary">%1$d%%</string>
     <string name="photo_filter_intensity">Intensity</string>
+    <string name="photo_filter_settings">Adjust</string>
+    <string name="photo_color_reset">Reset adjustments</string>
     <string name="photo_filter_task_label">Filter: %1$s · %2$d%%</string>
     <string name="photo_effect_favorite_add">Add current effect to favorites</string>
     <string name="photo_effect_favorite_remove">Remove current effect from favorites</string>

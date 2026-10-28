@@ -5,6 +5,11 @@ import com.ztransfer.grain.PhotoGrainStyle
 import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
 import com.ztransfer.effects.PhotoEffectModule
 import com.ztransfer.effects.FavoritePhotoFilter
+import com.ztransfer.effects.photoFilterAdjustmentsFor
+import com.ztransfer.filter.LutAdjustments
+import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -16,6 +21,81 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LocalPhotoEffectsPreferencesTest {
+    @Test fun directoryReplacementForgetsExternalControlsAndSelectionWithoutChangingOtherEffects() {
+        val builtIn = BuiltInPhotoFilters.all.first()
+        val builtInKey = checkNotNull(photoFilterCatalogKey(builtIn.id))
+        val customKey = "np3:${"a".repeat(64)}"
+        val customId = "$customKey:np3-srgb-v1"
+        val settings = defaultLocalPhotoEffectsSettings(customId).copy(
+            decorationEnabled = true,
+            filterEnabled = true,
+            filterIntensityPercent = 42,
+            filterIntensities = mapOf(customKey to 42, builtInKey to 64),
+            filterAdjustments = mapOf(customKey to LutAdjustments(20), builtInKey to LutAdjustments(-15)),
+            favoritePhotoFilters = listOf(FavoritePhotoFilter(customKey), FavoritePhotoFilter(builtInKey)),
+        )
+        val cleared = clearLocalPhotoNp3DirectorySettings(settings)
+        assertEquals(settings.copy(
+            filterId = null,
+            filterEnabled = false,
+            filterIntensityPercent = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+            filterIntensities = mapOf(builtInKey to 64),
+            filterAdjustments = mapOf(builtInKey to LutAdjustments(-15)),
+            favoritePhotoFilters = listOf(FavoritePhotoFilter(builtInKey)),
+        ), cleared)
+        val reselected = normalizeLocalPhotoEffectsSettings(cleared.copy(filterId = customId, filterEnabled = true),
+            setOf(builtIn.id, customId)) { false }
+        assertEquals(DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT, reselected.filterIntensityPercent)
+        assertEquals(LutAdjustments(), photoFilterAdjustmentsFor(customId, reselected.filterAdjustments))
+    }
+
+    @Test fun directoryReplacementKeepsActiveBuiltInControlsAndClearsExternalHistoryWhileHidden() {
+        val builtIn = BuiltInPhotoFilters.all.first()
+        val builtInKey = checkNotNull(photoFilterCatalogKey(builtIn.id))
+        val customKey = "np3:${"b".repeat(64)}"
+        val settings = defaultLocalPhotoEffectsSettings(builtIn.id).copy(
+            filterEnabled = true,
+            filterIntensityPercent = 56,
+            filterIntensities = mapOf(customKey to 26, builtInKey to 56),
+            filterAdjustments = mapOf(customKey to LutAdjustments(30), builtInKey to LutAdjustments(-5)),
+            favoritePhotoFilters = listOf(FavoritePhotoFilter(builtInKey), FavoritePhotoFilter(customKey)),
+        )
+        val expected = settings.copy(
+            filterIntensities = mapOf(builtInKey to 56),
+            filterAdjustments = mapOf(builtInKey to LutAdjustments(-5)),
+            favoritePhotoFilters = listOf(FavoritePhotoFilter(builtInKey)),
+        )
+        assertEquals(expected, clearLocalPhotoNp3DirectorySettings(settings))
+        assertEquals(expected.copy(filterEnabled = false),
+            clearLocalPhotoNp3DirectorySettings(settings.copy(filterEnabled = false)))
+    }
+
+    @Test fun customAdjustmentsSurviveDisablingAndMissingSourceWithoutLeakingToOtherFilters() {
+        val key = "np3:${"a".repeat(64)}"
+        val id = "$key:np3-srgb-v1"
+        val controls = LutAdjustments(17, -23, 37, -41)
+        val settings = defaultLocalPhotoEffectsSettings(id).copy(
+            filterEnabled = true,
+            filterAdjustments = mapOf(key to controls, "removed" to LutAdjustments(1)),
+        )
+        val missing = normalizeLocalPhotoEffectsSettings(settings, setOf("forest")) { false }
+        assertFalse(missing.filterEnabled)
+        assertEquals(mapOf(key to controls), missing.filterAdjustments)
+        assertEquals(LutAdjustments(), photoFilterAdjustmentsFor("forest", missing.filterAdjustments))
+        val restored = normalizeLocalPhotoEffectsSettings(missing.copy(filterId = id), setOf(id)) { false }
+        val hidden = applyLocalPhotoEffectModuleVisibility(restored,
+            ALL_PHOTO_EFFECT_MODULES xor PhotoEffectModule.FILTER.bit)
+        assertFalse(hidden.filterEnabled)
+        assertEquals(controls, photoFilterAdjustmentsFor(id, hidden.filterAdjustments))
+    }
+
+    @Test fun legacyLocalSettingsHaveNeutralControlsForEveryFilter() {
+        val restored = normalizeLocalPhotoEffectsSettings(defaultLocalPhotoEffectsSettings("forest"),
+            setOf("forest")) { false }
+        assertEquals(emptyMap<String, LutAdjustments>(), restored.filterAdjustments)
+        assertEquals(LutAdjustments(), photoFilterAdjustmentsFor(restored.filterId, restored.filterAdjustments))
+    }
+
     @Test fun savedCustomSnapshotKeepsSelectionAndUsesItsStableIntensityKey() {
         val key = "np3:${"a".repeat(64)}"
         val id = "$key:np3-srgb-v1"

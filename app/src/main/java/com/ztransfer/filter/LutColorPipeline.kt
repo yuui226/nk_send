@@ -1,7 +1,7 @@
 package com.ztransfer.filter
 
 /**
- * The canonical finishing pass for a LUT result. It deliberately stays in the existing sRGB
+ * The canonical finishing pass after filter/LUT strength blending. It stays in the existing sRGB
  * byte domain so preview, export and retry do not acquire different colour-space assumptions.
  */
 internal object LutColorPipeline {

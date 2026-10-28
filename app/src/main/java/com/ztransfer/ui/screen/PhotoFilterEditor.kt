@@ -36,6 +36,7 @@ import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.PhotoFilterCategory
+import com.ztransfer.filter.LutAdjustments
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoNp3EditorState
 import com.ztransfer.filter.category
@@ -104,9 +105,11 @@ internal fun PhotoFilterEditor(
     selectedId: String?,
     enabled: Boolean,
     intensityPercent: Int,
+    adjustments: LutAdjustments,
     onDisabled: () -> Unit,
     onSelected: (String) -> Unit,
     onIntensityChanged: (String, Int) -> Unit,
+    onAdjustmentsChanged: (String, LutAdjustments) -> Unit,
     onFavoriteToggled: (String) -> Unit,
     hapticsEnabled: Boolean,
     np3: PhotoNp3EditorState,
@@ -119,6 +122,7 @@ internal fun PhotoFilterEditor(
     val filterAccent = colors.accentBlue
     val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
+    var settingsExpanded by remember { mutableStateOf(false) }
     var showChooser by remember { mutableStateOf(false) }
     var showFolderHint by remember { mutableStateOf(false) }
     var skipPickerResume by remember { mutableStateOf(false) }
@@ -236,6 +240,12 @@ internal fun PhotoFilterEditor(
         transition.animateFloat(.04f, .14f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "photoNp3LoadingAlpha")
     } else null
     val controlsEnabled = active && enabled && selected != null && !np3.loading
+    // Exit contents are retained for the collapse animation; they must not edit a new preset
+    // or a disabled editor after their original owner has gone away.
+    val currentControlsEnabled by rememberUpdatedState(controlsEnabled && settingsExpanded)
+    val currentSelectedId by rememberUpdatedState(selected?.id)
+    val currentIntensityChanged by rememberUpdatedState(onIntensityChanged)
+    val currentAdjustmentsChanged by rememberUpdatedState(onAdjustmentsChanged)
     SettingsCard(borderColor = filterAccent.copy(alpha = .24f), tintColor = filterAccent) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ReleaseCommitWheel(
@@ -257,14 +267,10 @@ internal fun PhotoFilterEditor(
                 readOnly = !active || np3.loading,
                 ambientEffectColor = filterAccent, ambientEffectAlpha = loadingAlpha,
             )
-            ReleaseCommitWheel(
-                options = remember { (100 downTo 2 step 2).toList() },
-                selected = normalizePhotoFilterIntensity(intensityPercent),
-                optionLabel = { "$it%" },
-                onValueCommitted = { intensity -> if (controlsEnabled) selected?.let { onIntensityChanged(it.id, intensity) } },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.photo_filter_intensity), enabled = controlsEnabled,
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT, accentColor = filterAccent,
+            PhotoColorAdjustmentButton(
+                label = stringResource(R.string.photo_filter_settings), expanded = settingsExpanded,
+                enabled = controlsEnabled, accentColor = filterAccent,
+                onClick = { haptics.tick(); settingsExpanded = !settingsExpanded },
                 modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
             )
             FavoriteToggleButton(
@@ -273,6 +279,28 @@ internal fun PhotoFilterEditor(
                 onClick = { selected?.let { haptics.tick(); onFavoriteToggled(it.id) } },
             )
         }
+        PhotoColorEffectGroup(visible = settingsExpanded && enabled && selected != null, spacing = 0.dp) {
+            val presetId = selected?.id
+            key(presetId, normalizePhotoFilterIntensity(intensityPercent), adjustments) {
+                PhotoColorAdjustmentControls(
+                    intensityPercent = intensityPercent, adjustments = adjustments,
+                    intensityLabel = stringResource(R.string.photo_filter_intensity),
+                    accentColor = filterAccent, enabled = controlsEnabled,
+                    onIntensityChanged = { value ->
+                        if (currentControlsEnabled && presetId != null && currentSelectedId == presetId) {
+                            currentIntensityChanged(presetId, value)
+                        }
+                    },
+                    onAdjustmentsChanged = { value ->
+                        if (currentControlsEnabled && presetId != null && currentSelectedId == presetId) {
+                            currentAdjustmentsChanged(presetId, value)
+                        }
+                    },
+                    onDetent = haptics::tick,
+                )
+            }
+        }
+
     }
 
     if (showChooser) {

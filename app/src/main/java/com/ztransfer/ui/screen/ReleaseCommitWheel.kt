@@ -126,6 +126,7 @@ internal fun <T> ReleaseCommitWheel(
     ambientEffectColor: Color? = null,
     ambientEffectAlpha: State<Float>? = null,
     labelTextColor: Color? = null,
+    showIconLabel: Boolean = true,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -440,19 +441,21 @@ internal fun <T> ReleaseCommitWheel(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             centerIcon.invoke(textColor)
-                            Spacer(Modifier.width(5.dp))
-                            Text(
-                                text = optionLabel(options[index]),
-                                style = textStyle,
-                                fontSize = itemFontSize,
-                                lineHeight = (
-                                    itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
-                                ).sp,
-                                fontWeight = textWeight,
-                                color = textColor,
-                                maxLines = optionMaxLines,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            if (showIconLabel) {
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = optionLabel(options[index]),
+                                    style = textStyle,
+                                    fontSize = itemFontSize,
+                                    lineHeight = (
+                                        itemFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                    ).sp,
+                                    fontWeight = textWeight,
+                                    color = textColor,
+                                    maxLines = optionMaxLines,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }

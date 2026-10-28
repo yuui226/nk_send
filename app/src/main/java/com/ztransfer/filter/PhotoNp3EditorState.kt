@@ -103,6 +103,25 @@ internal class PhotoNp3EditorState internal constructor(
     private var timer: Job? = null
     private var generation = 0L
     private var closed = false
+    private val folderObserver = store.observeFolderChanges {
+        val current = store.folders.folder
+        if (!closed && folder != current) {
+            val replaced = folder != null
+            cancelPending()
+            folder = current
+            files = emptyList()
+            sourcePresetIds = emptyMap()
+            failure = null
+            if (replaced) {
+                val custom = selectedPreset?.id?.let(PhotoNp3SnapshotCodec::isCustomId) == true
+                selectedUri = null
+                if (custom) {
+                    selectedPreset = null
+                    onUnavailable()
+                }
+            }
+        }
+    }
 
     fun knownPresetId(uri: Uri): String? = sourcePresetIds[uri]
     fun sourceFor(presetId: String?): String? = selectedUri?.toString()
@@ -180,7 +199,7 @@ internal class PhotoNp3EditorState internal constructor(
                 } else if (snapshot.acquired) store.folders.markFolderGrantOwned()
                 folder = uri
                 files = snapshot.files
-                sourcePresetIds = scanned.sources
+                sourcePresetIds = if (replacing && previous != null && previous != uri) emptyMap() else scanned.sources
                 failure = null
                 val selectedSource = selectedUri
                 if (selectedSource != null) {
@@ -252,5 +271,10 @@ internal class PhotoNp3EditorState internal constructor(
         loading = false; loadingSelection = false; pendingUri = null
     }
     fun cancelPending() { generation++; ticket?.cancel(); finish() }
-    fun close() { closed = true; cancelPending() }
+    fun close() {
+        if (closed) return
+        closed = true
+        folderObserver.close()
+        cancelPending()
+    }
 }

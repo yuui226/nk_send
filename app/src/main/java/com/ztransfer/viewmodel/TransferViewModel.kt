@@ -29,6 +29,11 @@ import com.ztransfer.diagnostics.FingerprintResult
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
 import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
 import com.ztransfer.effects.PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY
+import com.ztransfer.effects.PHOTO_FILTER_ADJUSTMENTS_PREFERENCE_KEY
+import com.ztransfer.effects.PHOTO_FILTER_APPLIED_ADJUSTMENTS_PREFERENCE_KEY
+import com.ztransfer.effects.decodePhotoFilterAdjustments
+import com.ztransfer.effects.encodePhotoFilterAdjustments
+import com.ztransfer.effects.photoFilterAdjustmentsFor
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
 import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.decodeFavoriteFrameEffects
@@ -82,6 +87,7 @@ import com.ztransfer.filter.PhotoNp3RecipeKind
 import com.ztransfer.filter.photoNp3RecipeKind
 import com.ztransfer.filter.PhotoNp3Store
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.LutAdjustments
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.isCustomPhotoFilterCatalogKey
 import com.ztransfer.filter.normalizePhotoFilterIntensity
@@ -99,6 +105,7 @@ import com.ztransfer.storage.fingerprintHarmonyPublication
 import com.ztransfer.storage.readExistingOriginalDocument
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
+import com.ztransfer.ui.screen.LocalPhotoEffectsPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -697,6 +704,9 @@ data class TransferState(
     val selectedPhotoFilterId: String? = null,
     val photoFilterIntensityPercent: Int = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
     val transferPhotoFilterIntensities: Map<String, Int> = emptyMap(),
+    // Applied recipe stays independent of the per-filter detents being edited in a draft.
+    val photoFilterAdjustments: LutAdjustments = LutAdjustments(),
+    val transferPhotoFilterAdjustments: Map<String, LutAdjustments> = emptyMap(),
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
     val appLanguage: String = AppLocale.SYSTEM
 )
@@ -822,7 +832,7 @@ internal val TransferState.photoFilterSelection: PhotoFilterSelection?
         photoLut?.let { return it }
         if (!photoFilterEnabled) return null
         val preset = photoFilters.firstOrNull { it.id == selectedPhotoFilterId } ?: return null
-        return PhotoFilterSelection(preset, photoFilterIntensityPercent)
+        return PhotoFilterSelection(preset, photoFilterIntensityPercent, photoFilterAdjustments)
     }
 
 /** 免费版固定使用默认水印；高级版完整采用用户设置。预览和真正导出必须共用该入口。 */
@@ -1022,6 +1032,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     @Volatile
     private var preferHighThroughputTransfers: Boolean = false
     private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
+    private val photoPresetFolderObservers = ArrayList<AutoCloseable>(2)
     private val photoGrainPreferences = PhotoGrainPreferences(prefs, "photo_grain")
     private val contentResolver = application.contentResolver
     /**
@@ -1301,6 +1312,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
         val encodedPhotoFilterIntensities =
             encodePhotoFilterIntensities(restoredPhotoFilterIntensities)
+        val adjustmentPreferences = prefs.all
+        val restoredPhotoFilterAdjustments = decodePhotoFilterAdjustments(
+            adjustmentPreferences[PHOTO_FILTER_ADJUSTMENTS_PREFERENCE_KEY] as? String,
+            validPhotoFilterCatalogKeys,
+        )
+        val restoredAppliedPhotoFilterAdjustments = photoFilterAdjustmentsFor(
+            restoredPhotoFilterId,
+            decodePhotoFilterAdjustments(
+                adjustmentPreferences[PHOTO_FILTER_APPLIED_ADJUSTMENTS_PREFERENCE_KEY] as? String,
+                validPhotoFilterCatalogKeys,
+            ),
+        )
         if (prefs.getString(PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY, null) !=
             encodedPhotoFilterIntensities || prefs.contains("photo_filter_intensity")
         ) {
@@ -1542,9 +1565,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ?.let(restoredPhotoFilterIntensities::get)
                     ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
                 transferPhotoFilterIntensities = restoredPhotoFilterIntensities,
+                photoFilterAdjustments = restoredAppliedPhotoFilterAdjustments,
+                transferPhotoFilterAdjustments = restoredPhotoFilterAdjustments,
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
+        observePhotoPresetFolders(np3Store)
         viewModelScope.launch(Dispatchers.IO) { com.ztransfer.lut.PhotoLutStore(getApplication()).prune() }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
         if (dir != null) {
@@ -1554,6 +1580,42 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             primeDirectoryIndexScan(uri, deleteParts = true)
             viewModelScope.launch(Dispatchers.IO) {
                 refreshExistingExportFiles(uri, deleteParts = true)
+            }
+        }
+    }
+
+    /** Directory replacement is synchronous with the editor's successful folder commit. */
+    private fun observePhotoPresetFolders(np3Store: PhotoNp3Store) {
+        val lutStore = com.ztransfer.lut.PhotoLutStore(getApplication())
+        photoPresetFolderObservers += lutStore.observeFolderChanges {
+            // The store also tracks directory revisions, including a rapid A → B → A change.
+            _state.update { it.copy(photoLut = null) }
+        }
+        var previousNp3Folder = np3Store.folders.folder
+        photoPresetFolderObservers += np3Store.observeFolderChanges {
+            val folder = np3Store.folders.folder
+            val replaced = previousNp3Folder != null && previousNp3Folder != folder
+            previousNp3Folder = folder
+            if (replaced) {
+                _state.update(::clearTransferPhotoNp3DirectorySettings)
+                val cleared = _state.value
+                val appliedKey = cleared.selectedPhotoFilterId?.let(::photoFilterCatalogKey)
+                prefs.edit().apply {
+                    if (cleared.selectedPhotoFilterId == null) remove("photo_filter_selected_id")
+                    else putString("photo_filter_selected_id", cleared.selectedPhotoFilterId)
+                    putBoolean("photo_filter_enabled", cleared.photoFilterEnabled)
+                    remove("photo_filter_intensity")
+                    putString(PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY,
+                        encodePhotoFilterIntensities(cleared.transferPhotoFilterIntensities))
+                    putString(PHOTO_FILTER_ADJUSTMENTS_PREFERENCE_KEY,
+                        encodePhotoFilterAdjustments(cleared.transferPhotoFilterAdjustments))
+                    putString(PHOTO_FILTER_APPLIED_ADJUSTMENTS_PREFERENCE_KEY,
+                        encodePhotoFilterAdjustments(if (appliedKey == null) emptyMap()
+                            else mapOf(appliedKey to cleared.photoFilterAdjustments)))
+                    putString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
+                        encodeFavoritePhotoFilters(cleared.favoritePhotoFilters))
+                }.apply()
+                LocalPhotoEffectsPreferences(getApplication()).clearNp3DirectorySettings()
             }
         }
     }
@@ -1704,13 +1766,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ?: snapshot.photoGrain.intensityPercent,
             ))
         }
-        setPhotoFilterConfiguration(
-            snapshot.selectedPhotoFilterId, snapshot.photoFilterIntensityPercent,
-            snapshot.photoFilterEnabled && next.showsPhotoEffect(PhotoEffectModule.FILTER),
-            snapshot.photoLut.takeIf { next.showsPhotoEffect(PhotoEffectModule.LUT) },
-            com.ztransfer.lut.PhotoLutStore(getApplication()).uri("transfer"),
-            PhotoNp3Store(getApplication<Application>()).uri("transfer"),
-        )
+        // Visibility is only an enable/disable gate. Re-saving the applied recipe here would
+        // overwrite newer per-preset controls in an open editor, even for unrelated modules.
+        if (snapshot.photoFilterEnabled && !next.showsPhotoEffect(PhotoEffectModule.FILTER)) {
+            setPhotoFilterEnabled(false)
+        }
+        if (!next.showsPhotoEffect(PhotoEffectModule.LUT)) {
+            com.ztransfer.lut.PhotoLutStore(getApplication()).save("transfer", null, null)
+            _state.update { it.copy(photoLut = null) }
+        }
         val border = snapshot.photoFrameBorderEnabled && next.showsPhotoEffect(PhotoEffectModule.FRAME)
         val watermark = snapshot.photoFrameWatermarkEnabled && next.showsPhotoEffect(PhotoEffectModule.WATERMARK)
         val decoration = snapshot.photoFrameEnabled && (border || (LicenseManager.isPro.value && watermark))
@@ -1860,6 +1924,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     fun toggleFavoritePhotoFilter(filterId: String) {
         val catalogKey = photoFilterCatalogKey(filterId) ?: return
+        if (isCustomPhotoFilterCatalogKey(catalogKey) && _state.value.photoFilters.none { it.id == filterId }) return
         val current = _state.value.favoritePhotoFilters
         val updated = if (current.any { it.catalogKey == catalogKey }) {
             current.filterNot { it.catalogKey == catalogKey }
@@ -1871,6 +1936,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     fun rememberTransferPhotoFilterIntensity(filterId: String, intensityPercent: Int) {
         val catalogKey = photoFilterCatalogKey(filterId) ?: return
+        if (isCustomPhotoFilterCatalogKey(catalogKey) && _state.value.photoFilters.none { it.id == filterId }) return
         val intensity = normalizePhotoFilterIntensity(intensityPercent)
         val state = _state.value
         val intensities = state.transferPhotoFilterIntensities + (catalogKey to intensity)
@@ -1883,6 +1949,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(transferPhotoFilterIntensities = intensities)
         }
+    }
+
+    /** Remember editor detents without changing the committed recipe or any queued task. */
+    fun rememberTransferPhotoFilterAdjustments(filterId: String, adjustments: LutAdjustments) {
+        val catalogKey = photoFilterCatalogKey(filterId) ?: return
+        if (isCustomPhotoFilterCatalogKey(catalogKey) && _state.value.photoFilters.none { it.id == filterId }) return
+        val current = _state.value.transferPhotoFilterAdjustments
+        if (current[catalogKey] == adjustments) return
+        val remembered = current + (catalogKey to adjustments)
+        prefs.edit().putString(
+            PHOTO_FILTER_ADJUSTMENTS_PREFERENCE_KEY,
+            encodePhotoFilterAdjustments(remembered),
+        ).apply()
+        _state.update { it.copy(transferPhotoFilterAdjustments = remembered) }
     }
 
     fun toggleFavoriteFrameEffect(
@@ -1971,23 +2051,41 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         lut: PhotoFilterSelection? = null,
         lutUri: String? = null,
         np3Uri: String? = null,
+        adjustments: LutAdjustments? = null,
     ) {
-        val selectedPreset = _state.value.photoFilters.firstOrNull { it.id == selectedId }
+        val current = _state.value
+        val selectedPreset = current.photoFilters.firstOrNull { it.id == selectedId }
+        val lutStore = com.ztransfer.lut.PhotoLutStore(getApplication())
+        val np3Store = PhotoNp3Store(getApplication<Application>())
+        // Ignore a delayed outgoing editor instead of restoring an old directory's recipe
+        // or replacing a newer valid selection. Stores enforce the same boundary on disk.
+        if (!lutStore.isSelectionCurrent("transfer", lut, lutUri)) return
+        if (selectedPreset == null &&
+            isCustomPhotoFilterCatalogKey(selectedId?.let(::photoFilterCatalogKey).orEmpty())) return
+        if (!np3Store.isSelectionCurrent("transfer", selectedPreset, np3Uri)) return
         val validId = selectedPreset?.id
         val intensity = normalizePhotoFilterIntensity(intensityPercent)
+        val appliedAdjustments = if (validId == null) LutAdjustments() else adjustments ?:
+            if (validId == current.selectedPhotoFilterId) current.photoFilterAdjustments
+            else photoFilterAdjustmentsFor(validId, current.transferPhotoFilterAdjustments)
         val active = enabled && validId != null && lut == null
-        com.ztransfer.lut.PhotoLutStore(getApplication()).save("transfer", lut, lutUri)
-        PhotoNp3Store(getApplication<Application>()).save("transfer", selectedPreset, np3Uri)
+        lutStore.save("transfer", lut, lutUri)
+        np3Store.save("transfer", selectedPreset, np3Uri)
         validId?.let { rememberTransferPhotoFilterIntensity(it, intensity) }
+        if (adjustments != null) validId?.let { rememberTransferPhotoFilterAdjustments(it, appliedAdjustments) }
         prefs.edit().apply {
             if (validId == null) remove("photo_filter_selected_id")
             else putString("photo_filter_selected_id", validId)
             putBoolean("photo_filter_enabled", active)
+            val key = validId?.let(::photoFilterCatalogKey)
+            putString(PHOTO_FILTER_APPLIED_ADJUSTMENTS_PREFERENCE_KEY,
+                encodePhotoFilterAdjustments(if (key == null) emptyMap() else mapOf(key to appliedAdjustments)))
         }.apply()
         _state.update {
             it.copy(
                 selectedPhotoFilterId = validId,
                 photoFilterIntensityPercent = intensity,
+                photoFilterAdjustments = appliedAdjustments,
                 photoFilterEnabled = active,
                 photoLut = lut,
             )
@@ -4505,6 +4603,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onCleared() {
+        photoPresetFolderObservers.forEach(AutoCloseable::close)
+        photoPresetFolderObservers.clear()
         super.onCleared()
         transferJob?.cancel()
         pendingTransferQueue.clear()
