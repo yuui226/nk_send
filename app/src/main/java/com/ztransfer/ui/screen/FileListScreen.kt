@@ -108,6 +108,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -199,6 +200,12 @@ private class VisibleItemBoundsRegistry<K> {
 
     operator fun set(key: K, value: LayoutCoordinates) { coordinates[key] = value }
     operator fun get(key: K): Rect? = coordinates[key].validBoundsInRoot()
+    // Only preview needs the full square behind a partially clipped visible cell. Keep queue
+    // flights on the existing visible bounds and do this lookup only when opening a preview.
+    fun fullBounds(key: K): Rect? = coordinates[key]?.takeIf { it.isAttached }?.let { source ->
+        source.findRootCoordinates().localBoundingBoxOf(source, clipBounds = false)
+            .takeIf { it.width > 0f && it.height > 0f }
+    }
     fun remove(key: K) { coordinates.remove(key) }
 
     fun snapshot(include: (K) -> Boolean): Map<K, Rect> = buildMap {
@@ -1088,6 +1095,7 @@ fun FileListScreen(
         onDispose { latestPreviewVisibilityChanged(false) }
     }
     var previewAnchor by remember { mutableStateOf<Rect?>(null) }
+    var previewAnchorClip by remember { mutableStateOf<Rect?>(null) }
     var previewSourceAtOpen by remember { mutableStateOf<Any?>(null) }
     var previewBuildJob by remember { mutableStateOf<Job?>(null) }
     var previewReturnHandle by remember { mutableStateOf<Int?>(null) }
@@ -1166,6 +1174,7 @@ fun FileListScreen(
         }
     }
     val onPreview: (NikonCamera.FileInfo, Rect) -> Unit = { file, rect ->
+        val fullSource = cellBoundsRegistry.fullBounds(file.handle) ?: rect
         // 几千张照片时构建分页快照会产生一批临时集合；不要把这段 O(n) 工作塞在
         // 长按手势的主线程回调里，否则动画第一帧会被推迟甚至直接错过。
         haptics.longPress()
@@ -1183,7 +1192,8 @@ fun FileListScreen(
                 previewSessionId++
                 previewItems = snapshot
                 updatePreviewIndex(idx)
-                previewAnchor = rect
+                previewAnchor = fullSource
+                previewAnchorClip = rect
                 previewSourceAtOpen = sourceAtOpen
             }
         }
@@ -1209,6 +1219,7 @@ fun FileListScreen(
                     previewItems = snapshot
                     updatePreviewIndex(idx)
                     previewAnchor = rect
+                    previewAnchorClip = rect
                     previewSourceAtOpen = sourceAtOpen
                 }
             }
@@ -1295,7 +1306,7 @@ fun FileListScreen(
 
     // 关闭预览前把当前照片放回视野。很远时先在全黑预览层后无感预定位到相邻几行，
     // 再走 LazyGrid 自身的短程平滑滚动；这样不会让框架为性能做的长距离跳段暴露出来。
-    val preparePreviewDismissTarget: suspend (NikonCamera.FileInfo) -> Rect? =
+    val preparePreviewDismissTarget: suspend (NikonCamera.FileInfo) -> PreviewAnchorBounds? =
         prepare@{ file ->
             val groupsSnapshot = groups
             val stillInCurrentResults = withContext(Dispatchers.Default) {
@@ -1368,7 +1379,9 @@ fun FileListScreen(
             }
             // 等一帧让目标格子登记布局坐标，再按当前位置求边界；找不到就原地淡出。
             withFrameNanos { }
-            cellBoundsRegistry[file.handle]
+            cellBoundsRegistry[file.handle]?.let { visible ->
+                PreviewAnchorBounds(cellBoundsRegistry.fullBounds(file.handle) ?: visible, visible)
+            }
         }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
@@ -1923,6 +1936,7 @@ fun FileListScreen(
                     // 打开仍从原格子坐标展开；关闭时会重新定位当前照片并使用最新坐标，
                     // 此处的旧坐标只负责首帧，模型改变也不会再缩回错误格位。
                     anchorRect = previewAnchor.takeIf { previewSourceAtOpen === previewSourceIdentity },
+                    anchorVisibleRect = previewAnchorClip.takeIf { previewSourceAtOpen === previewSourceIdentity },
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
                     transfersBusy = transfersBusy,

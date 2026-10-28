@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -79,8 +80,8 @@ private sealed interface PhotoFilterEditorChoice {
     val key: String
     val presetId: String?
     val catalogKey: String?
-    data class Preset(val preset: PhotoFilterPreset) : PhotoFilterEditorChoice {
-        override val key = "preset:${preset.id}"
+    data class Preset(val preset: PhotoFilterPreset, val sourceUri: Uri? = null) : PhotoFilterEditorChoice {
+        override val key = sourceUri?.let { "document:$it" } ?: "preset:${preset.id}"
         override val presetId get() = preset.id
         override val catalogKey = photoFilterCatalogKey(preset.id)
     }
@@ -191,29 +192,41 @@ internal fun PhotoFilterEditor(
     val currentDocument = remember(documentsByUri, draftUri, draftPreset?.id, selectedId) {
         documentsByUri[draftUri]?.takeIf { draftPreset?.id == selectedId }
     }
-    // VM may retain previously used presets for queued exports. They are not directory entries.
-    val offlineSnapshot = remember(selected, currentDocument) {
+    val selectedSourceUri = draftUri?.takeIf { draftPreset?.id == selectedId }
+    // Keep the saved document's identity before enumeration, including NP3 copies of built-ins.
+    // A recipe's embedded name is not necessarily the filename the user selected.
+    val offlineSnapshot = remember(selected, currentDocument, selectedSourceUri) {
         selected?.takeIf { preset ->
-            BuiltInPhotoFilters.catalogKey(preset.id) == null && currentDocument == null
-        }?.let { PhotoFilterEditorChoice.Preset(it) }
+            currentDocument == null && (selectedSourceUri != null || BuiltInPhotoFilters.catalogKey(preset.id) == null)
+        }?.let { PhotoFilterEditorChoice.Preset(it, selectedSourceUri) }
     }
     val choices = remember(builtIns, documents, offlineSnapshot, favoriteRanks) {
         orderPhotoFilterChoices(builtIns + documents + listOfNotNull(offlineSnapshot), favoriteRanks)
     }
     val byKey = remember(choices) { choices.associateBy { it.key } }
+    val savedSourceLabel = np3.selectedSourceLabel
+    // Older installs lack display metadata. A static neutral value is truthful even if the
+    // provider fails or the read is cancelled; never pretend that a different filter is selected.
+    val restoredSourceFallback = stringResource(R.string.photo_np3_selected_source)
     // Labels depend on directory metadata/locale, not favorite order, strength, or loading state.
-    val labels = remember(builtInLabels, fileLabels, offlineSnapshot) {
+    val labels = remember(builtInLabels, fileLabels, offlineSnapshot, savedSourceLabel, uncategorized,
+        restoredSourceFallback) {
         buildMap {
             putAll(builtInLabels)
             fileLabels.forEach { (uri, label) -> put("document:$uri", label) }
-            offlineSnapshot?.let { put(it.key, it.preset.name) }
+            offlineSnapshot?.let {
+                put(it.key, if (it.sourceUri != null) {
+                    savedSourceLabel?.displayName(uncategorized) ?: restoredSourceFallback
+                } else it.preset.name)
+            }
         }
     }
     val pendingKey = documentsByUri[np3.pendingUri]?.key
-    val currentKey = remember(currentDocument, byKey, selectedId, enabled) {
+    val currentKey = remember(currentDocument, offlineSnapshot, byKey, selectedId, enabled) {
         // Pixel identity can be shared by a built-in and several files. Highlight the source
         // actually chosen, never whichever same-content document happens to sort first.
-        (currentDocument?.key ?: "preset:$selectedId".takeIf { it in byKey }).takeIf { enabled }
+        (currentDocument?.key ?: offlineSnapshot?.key ?: "preset:$selectedId".takeIf { it in byKey })
+            .takeIf { enabled }
     }
     val options: List<String?> = remember(choices) { listOf(null) + choices.map { it.key } }
     val fileCategories by remember(files, uncategorized) {
@@ -228,8 +241,8 @@ internal fun PhotoFilterEditor(
         when (choice) {
             is PhotoFilterEditorChoice.Document -> np3.choose(choice.file)
             is PhotoFilterEditorChoice.Preset -> {
-                if (BuiltInPhotoFilters.catalogKey(choice.preset.id) != null) np3.off()
-                np3.resetSelection(choice.preset)
+                if (choice.sourceUri == null && BuiltInPhotoFilters.catalogKey(choice.preset.id) != null) np3.off()
+                np3.resetSelection(choice.preset, choice.sourceUri?.toString())
                 onSelected(choice.preset.id)
                 onIntensityChanged(choice.preset.id, rememberedIntensity(choice.preset.id))
             }

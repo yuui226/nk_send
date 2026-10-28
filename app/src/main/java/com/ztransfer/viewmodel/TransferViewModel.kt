@@ -468,14 +468,14 @@ class ExportedOriginalIndex internal constructor() {
 }
 
 /**
- * 唯一活动下载的高频状态。它与低频 [TransferState.tasks] 分离：协议层约每 200ms 更新时
+ * 唯一活动下载的高频状态。它与低频 [TransferState.tasks] 分离：协议层每 100–200ms 更新时
  * 只替换这个常量大小对象，不再复制整个任务列表，也不会令订阅设置/筛选的页面失效。
  */
 data class ActiveTransferProgress(
     val taskId: Long,
     val fraction: Float = 0f,
     val downloaded: Long = 0L,
-    /** 当前协议采样速度；0 表示本次采样未得到有效速度。 */
+    /** 每 600ms 发布的显示速度；首个有效样本与完成统计立即发布，0 表示尚未得到有效速度。 */
     val bytesPerSecond: Long = 0L,
     /** 跨文件短间隙保留的最近有效速度，供顶部队列胶囊稳定显示。 */
     val retainedBytesPerSecond: Long = 0L,
@@ -2924,6 +2924,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         // SAF 的建文件/开流/关闭冲刷都是跨进程 Binder + 磁盘 IO，放 IO 线程，
                         // 不在主线程随每个文件抖一下（状态更新经 StateFlow.update，线程安全）。
                         val result = withContext(Dispatchers.IO) {
+                            val speedDisplaySampler = TransferSpeedDisplaySampler()
                             val downloadTo: suspend (java.io.OutputStream) -> Result<NikonCamera.DownloadStats> = { out ->
                                 camera.downloadToFile(
                                     handle, out,
@@ -2934,6 +2935,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             sample = speed,
                                         )
                                         lastValidTransferSpeed = retainedSpeed
+                                        val displayedSpeed = speedDisplaySampler.sample(
+                                            bytesPerSecond = speed,
+                                            nowMs = android.os.SystemClock.elapsedRealtime(),
+                                        )
                                         _activeTransferProgress.update { active ->
                                             if (active?.taskId != taskId) return@update active
                                             active.copy(
@@ -2945,8 +2950,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                                     0f
                                                 },
                                                 downloaded = progress.downloaded,
-                                                bytesPerSecond = speed,
-                                                retainedBytesPerSecond = retainedSpeed,
+                                                bytesPerSecond = displayedSpeed,
+                                                retainedBytesPerSecond = retainLastValidTransferSpeed(
+                                                    active.retainedBytesPerSecond,
+                                                    displayedSpeed,
+                                                ),
                                             )
                                         }
                                     },

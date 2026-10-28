@@ -881,7 +881,6 @@ fun SettingsOverlay(
                                 source = previewSource.bitmap,
                                 sourceName = effectPreviewSourceName,
                                 grain = grainDraft,
-                                showSourceWhileRendering = effectsOnly,
                                 metadata = effectPreviewMetadata,
                                 sourceRotationQuarterTurns = previewSource.quarterTurns,
                                 requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
@@ -2914,7 +2913,6 @@ internal fun PhotoEffectsRenderedPreview(
     sourceName: String = "",
     grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     resetOnSourceChange: Boolean = false,
-    showSourceWhileRendering: Boolean = false,
     metadata: PhotoFrameMetadata = EMPTY_PHOTO_EFFECTS_PREVIEW_METADATA,
     sourceRotationQuarterTurns: Int,
     requestedRotationQuarterTurns: Int,
@@ -2937,7 +2935,7 @@ internal fun PhotoEffectsRenderedPreview(
     }.collectAsState(initial = false)
 
     // 相机缩略图升级为 FHD 时保留旧效果帧；本地工作台换照片则按源重置，避免串图。
-    // 原有入口等待首张成片；从 FHD 大图直接进入时可沿用原图，避免空白。
+    // 所有入口都等待完整成片，不能先显示未经处理的 FHD，再跳成当前效果。
     val sourceRenderIdentity: Any = if (resetOnSourceChange) source else Unit
     val rendered = remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
@@ -3168,7 +3166,7 @@ internal fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
-    // 默认首张效果帧就绪前保持图片区为空；FHD 直接进入时可沿用原图。
+    // 首张完整效果帧就绪前显示加载状态；后续调参继续保留上一张完整成片。
     // 本地工作台按新照片重置，相机的高清源升级不重置。
     val replacementVisibility = remember(sourceRenderIdentity) { Animatable(1f) }
     var visibleFrame by remember(sourceRenderIdentity) {
@@ -3177,11 +3175,8 @@ internal fun PhotoEffectsRenderedPreview(
     var outgoingFrame by remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
     }
-    var initialSourceVisible by remember(sourceRenderIdentity) {
-        mutableStateOf(showSourceWhileRendering)
-    }
     val frameTransition = remember(sourceRenderIdentity) {
-        Animatable(if (showSourceWhileRendering) 0f else 1f)
+        Animatable(0f)
     }
     val previewForGesture = visibleFrame
     val boundsForGesture = previewBounds
@@ -3209,17 +3204,12 @@ internal fun PhotoEffectsRenderedPreview(
                 PhotoEffectsPreviewChange.INITIAL -> {
                     visibleFrame = next
                     outgoingFrame = null
-                    if (initialSourceVisible) {
-                        frameTransition.snapTo(0f)
-                        withFrameNanos { }
-                        frameTransition.animateTo(
-                            1f,
-                            tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                        )
-                        initialSourceVisible = false
-                    } else {
-                        frameTransition.snapTo(1f)
-                    }
+                    frameTransition.snapTo(0f)
+                    withFrameNanos { }
+                    frameTransition.animateTo(
+                        1f,
+                        tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                    )
                 }
                 PhotoEffectsPreviewChange.UPDATE -> {
                     // 对比图只补齐数据，不打断渐入或再播放一次动画。
@@ -3299,12 +3289,19 @@ internal fun PhotoEffectsRenderedPreview(
                     )
                 },
         ) {
-            if (initialSourceVisible || (visibleFrame == null && (showSourceWhileRendering || previewFailed))) {
+            if (visibleFrame == null && previewFailed) {
                 FittedRotatingBitmap(
                     image = sourceImage,
                     rotationDegrees = 0f,
-                    description = if (visibleFrame == null) stringResource(R.string.photo_frame_preview) else null,
+                    description = stringResource(R.string.photo_frame_preview),
                     modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (visibleFrame == null && !previewFailed) {
+                CircularProgressIndicator(
+                    color = colors.accentBlue.copy(alpha = 0.76f),
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(22.dp),
                 )
             }
             visibleFrame?.let { frame ->
@@ -3321,8 +3318,7 @@ internal fun PhotoEffectsRenderedPreview(
                 PhotoEffectsPreviewLayer(
                     frame = frame,
                     showUnfiltered = showUnfiltered,
-                    alpha = replacementVisibility.value *
-                        if (outgoingFrame == null && !initialSourceVisible) 1f else frameTransition.value,
+                    alpha = replacementVisibility.value * frameTransition.value,
                     description = stringResource(R.string.photo_frame_preview),
                 )
             }

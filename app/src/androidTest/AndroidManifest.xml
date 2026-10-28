@@ -61,4 +61,6 @@
         android:targetPackage="com.ztransfer.debug" />
     <instrumentation android:name="com.ztransfer.ui.screen.FileListSmokeInstrumentation"
         android:targetPackage="com.ztransfer.debug" />
+    <instrumentation android:name="com.ztransfer.ui.screen.FileListPreviewMotionInstrumentation"
+        android:targetPackage="com.ztransfer.debug" />
 </manifest>

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="photo_np3_selected_source">已选滤镜</string>
     <string name="photo_filter_folder">选择滤镜目录</string>
     <string name="photo_filter_folder_hint">选择含 .np3 文件的文件夹，支持一层子文件夹作为分类。\n\n照片效果由 App 模拟生成，与相机直出可能不同。</string>
     <string name="photo_filter_folder_empty">目录中没有 NP3 文件</string>

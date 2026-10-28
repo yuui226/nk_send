@@ -10,6 +10,81 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PhotoNp3StoreTest {
+    @Test fun sourceDisplayLabelsRestoreImmediatelyWithoutChangingEitherRecipe() {
+        val memory = MemoryPreferences()
+        val store = PhotoNp3Store(memory.preferences)
+        val transfer = recipe('a', 25)
+        val local = recipe('b', -50)
+        val transferUri = "content://photos/document/opaque-a"
+        val localUri = "content://photos/document/opaque-b"
+        store.save("transfer", transfer, transferUri)
+        store.save("local", local, localUri)
+        val label = PhotoNp3SourceLabel("我的滤镜 | 暮色", "人像\n收藏", true, 3)
+        store.rememberSourceLabel(transferUri, label)
+        store.rememberSourceLabel(localUri, PhotoNp3SourceLabel("Phone look", null, false, null))
+        val restarted = PhotoNp3Store(memory.preferences)
+        assertEquals(label, restarted.sourceLabel(transferUri))
+        assertEquals("我的滤镜 | 暮色 · 人像\n收藏 · 3", restarted.sourceLabel(transferUri)?.displayName("未分类"))
+        assertEquals("Phone look", restarted.sourceLabel(localUri)?.displayName("Uncategorized"))
+        assertRecipe(transfer, restarted.restore("transfer"))
+        assertRecipe(local, restarted.restore("local"))
+        assertEquals(transferUri, restarted.uri("transfer"))
+        assertEquals(localUri, restarted.uri("local"))
+    }
+
+    @Test fun sourceLabelsKeepUncategorizedLocalizedAndBuiltInCopiesDocumentNamed() {
+        val memory = MemoryPreferences()
+        val store = PhotoNp3Store(memory.preferences)
+        val builtIn = BuiltInPhotoFilters.all.first()
+        val uri = "content://photos/document/opaque"
+        store.save("transfer", builtIn, uri)
+        store.rememberSource(uri, checkNotNull(BuiltInPhotoFilters.catalogKey(builtIn.id)), builtIn.id)
+        store.rememberSourceLabel(uri, PhotoNp3SourceLabel("User filename", null, true, 2))
+        val label = checkNotNull(PhotoNp3Store(memory.preferences).sourceLabel(uri))
+        assertEquals("User filename · 未分类 · 2", label.displayName("未分类"))
+        assertEquals("User filename · Uncategorized · 2", label.displayName("Uncategorized"))
+        assertEquals(builtIn, store.restore("transfer"))
+        assertEquals(builtIn.id, store.knownPresetId(uri))
+        assertEquals(mapOf(uri to builtIn.id), store.knownPresetIds(listOf(uri)))
+        assertFalse(memory.values.containsKey("transfer:snapshot"))
+    }
+
+    @Test fun renamedSourceUpdatesOnlyItsDisplayHint() {
+        val memory = MemoryPreferences()
+        val store = PhotoNp3Store(memory.preferences)
+        val uri = "content://photos/document/opaque"
+        val preset = recipe('a', 10)
+        store.save("transfer", preset, uri)
+        store.rememberSource(uri, "a".repeat(64), preset.id)
+        store.rememberSourceLabel(uri, PhotoNp3SourceLabel("Old name", null, false, null))
+        val before = memory.values.filterKeys { !it.endsWith(":label") }
+        store.rememberSourceLabel(uri, PhotoNp3SourceLabel("New name", "Portraits", true, null))
+        assertEquals(before, memory.values.filterKeys { !it.endsWith(":label") })
+        assertEquals("New name · Portraits", store.sourceLabel(uri)?.displayName("Uncategorized"))
+        assertEquals(1, memory.values.keys.count { it.startsWith("source:") && it.endsWith(":label") })
+    }
+
+    @Test fun absentInvalidAndOversizedDisplayHintsNeverChangeSavedSelection() {
+        val memory = MemoryPreferences()
+        val store = PhotoNp3Store(memory.preferences)
+        val uri = "content://photos/document/opaque"
+        val preset = recipe('a', 10)
+        store.save("transfer", preset, uri)
+        assertNull(store.sourceLabel(uri)) // Older installs have recipes without display metadata.
+        store.rememberSourceLabel(uri, PhotoNp3SourceLabel("Valid", null, false, null))
+        val key = memory.values.keys.single { it.endsWith(":label") }
+        for (invalid in listOf("bad", "2|VmFsaWQ=|-|0|0", "1|***|-|0|0",
+            "1|VmFsaWQ=|-|0|1", "x".repeat(8193), 42)) {
+            memory.values[key] = invalid
+            assertNull(store.sourceLabel(uri))
+            assertRecipe(preset, store.restore("transfer"))
+            assertEquals(uri, store.uri("transfer"))
+        }
+        memory.values.remove(key)
+        store.rememberSourceLabel(uri, PhotoNp3SourceLabel("x".repeat(257), null, false, null))
+        assertNull(store.sourceLabel(uri))
+    }
+
     @Test fun folderObserverIgnoresOtherKeysAndRepeatedFolderAndUnregistersWhenClosed() {
         val memory = MemoryPreferences()
         val store = PhotoNp3Store(memory.preferences)

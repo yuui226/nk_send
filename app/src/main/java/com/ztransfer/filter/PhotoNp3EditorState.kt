@@ -98,6 +98,7 @@ internal class PhotoNp3EditorState internal constructor(
     var selectedPreset by mutableStateOf(initialPreset); private set
     var selectedUri by mutableStateOf(store.uri(role)
         ?.takeIf { initialPreset != null && store.savedId(role) == initialPreset.id }?.let(Uri::parse)); private set
+    var selectedSourceLabel by mutableStateOf(selectedUri?.let { store.sourceLabel(it.toString()) }); private set
     private var sourcePresetIds by mutableStateOf<Map<Uri, String>>(emptyMap())
     private var ticket: PresetIoTicket? = null
     private var timer: Job? = null
@@ -115,6 +116,7 @@ internal class PhotoNp3EditorState internal constructor(
             if (replaced) {
                 val custom = selectedPreset?.id?.let(PhotoNp3SnapshotCodec::isCustomId) == true
                 selectedUri = null
+                selectedSourceLabel = null
                 if (custom) {
                     selectedPreset = null
                     onUnavailable()
@@ -133,12 +135,14 @@ internal class PhotoNp3EditorState internal constructor(
         cancelPending()
         selectedPreset = preset
         selectedUri = retainedUri.takeIf { preset != null }
+        selectedSourceLabel = selectedUri?.let { store.sourceLabel(it.toString()) }
     }
 
     fun off() {
         cancelPending()
         selectedPreset = null
         selectedUri = null
+        selectedSourceLabel = null
     }
 
     fun refresh() {
@@ -154,9 +158,18 @@ internal class PhotoNp3EditorState internal constructor(
         read(file, refreshed = false)
     }
 
-    private data class ScanResult(val folder: PresetFolderSnapshot, val sources: Map<Uri, String>)
+    private data class ScanResult(
+        val folder: PresetFolderSnapshot,
+        val sources: Map<Uri, String>,
+        val selectedLabel: PhotoNp3SourceLabel?,
+    )
 
-    private suspend fun scanWithHints(uri: Uri, replacing: Boolean, signal: CancellationSignal): ScanResult {
+    private suspend fun scanWithHints(
+        uri: Uri,
+        replacing: Boolean,
+        selectedSource: Uri?,
+        signal: CancellationSignal,
+    ): ScanResult {
         val snapshot = source.scan(uri, replacing, signal)
         try {
             val hints = store.knownPresetIds(snapshot.files.map { it.uri.toString() }, signal::throwIfCanceled)
@@ -164,7 +177,9 @@ internal class PhotoNp3EditorState internal constructor(
                 signal.throwIfCanceled()
                 hints[file.uri.toString()]?.let { file.uri to it }
             }.toMap()
-            return ScanResult(snapshot, sources)
+            val label = selectedSource?.let { photoNp3SourceLabel(snapshot.files, it) }
+            signal.throwIfCanceled()
+            return ScanResult(snapshot, sources, label)
         } catch (failure: Throwable) {
             // A cancellation/error after enumeration still owns its newly acquired grant.
             // No result reaches the queue's discard callback in that case.
@@ -174,10 +189,11 @@ internal class PhotoNp3EditorState internal constructor(
     }
 
     private fun scan(uri: Uri, replacing: Boolean) {
+        val sourceToRefresh = selectedUri
         val id = begin {
             if (!replacing) failure = PresetFolderFailure.READ
         }
-        ticket = PresetIoQueue.submit({ scanWithHints(uri, replacing, it) },
+        ticket = PresetIoQueue.submit({ scanWithHints(uri, replacing, sourceToRefresh, it) },
             discard = { if (it.getOrNull()?.folder?.acquired == true) source.releaseGrant(uri) }) { result ->
             if (!valid(id)) return@submit
             finish()
@@ -209,7 +225,13 @@ internal class PhotoNp3EditorState internal constructor(
                         // and per-filter memories are intentionally left to the owning editor.
                         off()
                         onUnavailable()
-                    } else read(current, refreshed = true)
+                    } else {
+                        // A successful listing is enough to refresh the document name, even
+                        // when its new bytes cannot be parsed. It never changes the recipe.
+                        selectedSourceLabel = scanned.selectedLabel
+                        scanned.selectedLabel?.let { store.rememberSourceLabel(selectedSource.toString(), it) }
+                        read(current, refreshed = true)
+                    }
                 }
             }, onFailure = { error ->
                 val reason = (error as? PresetFolderException)?.reason ?: PresetFolderFailure.READ
@@ -220,24 +242,36 @@ internal class PhotoNp3EditorState internal constructor(
         }
     }
 
+    private data class ReadResult(val parsed: ParsedPhotoNp3, val label: PhotoNp3SourceLabel?)
+
     private fun read(file: PresetFile, refreshed: Boolean) {
+        val directorySnapshot = files
+        val listedLabel = selectedSourceLabel.takeIf { refreshed && selectedUri == file.uri }
         val id = begin()
         // A refresh validates the saved source without selecting it. In particular, returning
         // from LUT must keep an Off filter Off while its previous source is being refreshed.
         loadingSelection = !refreshed
         pendingUri = file.uri.takeUnless { refreshed }
-        ticket = PresetIoQueue.submit({ signal -> source.read(file, signal).also { signal.throwIfCanceled() } }) { result ->
+        ticket = PresetIoQueue.submit({ signal ->
+            val parsed = source.read(file, signal)
+            val label = listedLabel ?: photoNp3SourceLabel(directorySnapshot, file.uri)
+            signal.throwIfCanceled()
+            ReadResult(parsed, label)
+        }) { result ->
             if (!valid(id)) return@submit
             finish()
             // A retained pager page can become inactive before its cancellation effect runs.
             // Check the live owner before replacing either the draft or its source identity.
             if (!selectionAllowed()) return@submit
-            result.fold(onSuccess = { parsed ->
+            result.fold(onSuccess = { read ->
+                val parsed = read.parsed
                 val unchanged = selectedPreset?.id == parsed.preset.id && selectedUri == file.uri
                 store.rememberSource(file.uri.toString(), parsed.sourceSha256, parsed.preset.id)
                 sourcePresetIds = sourcePresetIds + (file.uri to parsed.preset.id)
                 if (!unchanged) selectedPreset = parsed.preset
                 selectedUri = file.uri
+                selectedSourceLabel = read.label
+                read.label?.let { store.rememberSourceLabel(file.uri.toString(), it) }
                 // Returning from the file manager must not reset an unsaved strength detent
                 // when the bytes are unchanged. A changed recipe still reaches every owner.
                 if (!refreshed || !unchanged) onSelected(checkNotNull(selectedPreset), !refreshed)

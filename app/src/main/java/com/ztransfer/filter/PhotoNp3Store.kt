@@ -3,9 +3,45 @@ package com.ztransfer.filter
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import com.ztransfer.presets.PresetFile
 import com.ztransfer.presets.presetSourceBelongsToFolder
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.Locale
+
+/** Presentation only: a document's label is independent of the NP3's embedded recipe name. */
+internal data class PhotoNp3SourceLabel(
+    val name: String,
+    val category: String?,
+    val showCategory: Boolean,
+    val ordinal: Int?,
+) {
+    fun displayName(uncategorized: String): String = if (showCategory) {
+        listOf(name, category ?: uncategorized, ordinal?.toString().orEmpty())
+            .filter(String::isNotEmpty).joinToString(" · ")
+    } else name
+}
+
+/** Match presetFileLabels without retaining the complete directory or localized UI strings. */
+internal fun photoNp3SourceLabel(files: List<PresetFile>, selectedUri: Uri): PhotoNp3SourceLabel? {
+    val selected = files.firstOrNull { it.uri == selectedUri } ?: return null
+    val group = selected.label.lowercase(Locale.ROOT)
+    var total = 0
+    var inCategory = 0
+    var ordinal = 0
+    for (file in files) {
+        if (file.label.lowercase(Locale.ROOT) != group) continue
+        total++
+        if (file.category == selected.category) inCategory++
+        if (file.uri == selectedUri) ordinal = total
+    }
+    return PhotoNp3SourceLabel(
+        name = selected.label.ifEmpty { selected.name }.take(256),
+        category = selected.category,
+        showCategory = total > 1,
+        ordinal = ordinal.takeIf { total > 1 && inCategory > 1 },
+    )
+}
 
 /** Shared source directory; transfer and phone editors save their current recipes independently. */
 internal class PhotoNp3Store internal constructor(private val preferences: SharedPreferences) {
@@ -101,6 +137,23 @@ internal class PhotoNp3Store internal constructor(private val preferences: Share
         return decodeSourceHint(preferences.all[sourceKey(uri)] as? String)
     }
 
+    /** Bounded preference metadata only; never read a document provider during composition. */
+    fun sourceLabel(uri: String): PhotoNp3SourceLabel? {
+        if (!validSourceUri(uri)) return null
+        val values = preferences.all
+        if (!sourceMatchesFolder(uri, values)) return null
+        return decodeSourceLabel(values[sourceLabelKey(uri)] as? String)
+    }
+
+    fun rememberSourceLabel(uri: String, label: PhotoNp3SourceLabel) {
+        if (!validSourceUri(uri)) return
+        val encoded = encodeSourceLabel(label) ?: return
+        val values = preferences.all
+        if (!sourceMatchesFolder(uri, values)) return
+        val key = sourceLabelKey(uri)
+        if (values[key] != encoded) preferences.edit().putString(key, encoded).apply()
+    }
+
     /** One preference snapshot for a whole directory, normally called on the preset IO worker. */
     fun knownPresetIds(uris: Iterable<String>, checkpoint: () -> Unit = {}): Map<String, String> {
         val values = preferences.all
@@ -122,6 +175,31 @@ internal class PhotoNp3Store internal constructor(private val preferences: Share
 
     private fun sourceKey(uri: String): String = "source:" + MessageDigest.getInstance("SHA-256")
         .digest(uri.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    // The existing source: cleanup also removes display hints when either editor changes folders.
+    private fun sourceLabelKey(uri: String): String = sourceKey(uri) + ":label"
+
+    private fun encodeSourceLabel(label: PhotoNp3SourceLabel): String? {
+        if (label.name.isEmpty() || label.name.length > 256 ||
+            (label.category?.length ?: 0) > 1024 ||
+            label.ordinal != null && (!label.showCategory || label.ordinal <= 0)
+        ) return null
+        fun encode(value: String) = Base64.getEncoder().encodeToString(value.toByteArray(Charsets.UTF_8))
+        return listOf("1", encode(label.name), label.category?.let(::encode) ?: "-",
+            if (label.showCategory) "1" else "0", label.ordinal?.toString() ?: "0").joinToString("|")
+    }
+
+    private fun decodeSourceLabel(encoded: String?): PhotoNp3SourceLabel? {
+        if (encoded == null || encoded.length > 8192) return null
+        val parts = encoded.split('|')
+        if (parts.size != 5 || parts[0] != "1" || parts[3] !in listOf("0", "1")) return null
+        return runCatching {
+            fun decode(value: String) = String(Base64.getDecoder().decode(value), Charsets.UTF_8)
+            val ordinal = parts[4].toInt().also { require(it >= 0) }.takeUnless { it == 0 }
+            PhotoNp3SourceLabel(decode(parts[1]), parts[2].takeUnless { it == "-" }?.let(::decode),
+                parts[3] == "1", ordinal).takeIf { encodeSourceLabel(it) != null }
+        }.getOrNull()
+    }
 
     private fun sourceMatchesFolder(uri: String?, values: Map<String, *>): Boolean {
         val folder = values["folder"] as? String ?: return true
