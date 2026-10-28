@@ -2578,7 +2578,7 @@ private fun PhotoFrameMetadataInlineSettings(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ReleaseCommitWheel(
-                    options = remember { (MIN_PHOTO_FRAME_WIDTH_PERCENT..MAX_PHOTO_FRAME_WIDTH_PERCENT step PHOTO_FRAME_WIDTH_STEP).toList() },
+                    options = remember { (MAX_PHOTO_FRAME_WIDTH_PERCENT downTo MIN_PHOTO_FRAME_WIDTH_PERCENT step PHOTO_FRAME_WIDTH_STEP).toList() },
                     selected = settings.widthPercent,
                     optionLabel = { "$it%" },
                     onValueCommitted = { onSettingsChanged(settings.copy(widthPercent = it)) },
@@ -2599,7 +2599,7 @@ private fun PhotoFrameMetadataInlineSettings(
                     // Switching presets discards any unfinished gesture belonging to the old settings.
                     key(preset) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val levels = remember { (0..200 step 10).toList() }
+                            val levels = remember { (200 downTo 0 step 10).toList() }
                             ReleaseCommitWheel(options = levels, selected = settings.backgroundBlurPercent,
                                 optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_blur),
                                 onValueCommitted = { onSettingsChanged(settings.copy(backgroundBlurPercent = it)) },

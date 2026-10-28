@@ -213,7 +213,7 @@ class PhotoNp3EditorInstrumentation : Instrumentation() {
                     awaitWheelDescription(host.getString(R.string.photo_lut_highlights) + ", 13")
                     awaitWheelDescription(host.getString(R.string.photo_lut_shadows) + ", -24")
                     clickWheel(contrastLabel)
-                    await { adjustments.value.contrast == 10 }
+                    await { adjustments.value.contrast == 5 }
                     main { adjustments.value = LutAdjustments() }
                     awaitWheelDescription("$contrastLabel, 0")
                 }
@@ -221,7 +221,7 @@ class PhotoNp3EditorInstrumentation : Instrumentation() {
                 val previousAdjustmentCount = main { adjustmentChanges.size }
                 clickWheel(contrastLabel)
                 await { adjustmentChanges.size == previousAdjustmentCount + 1 }
-                val expectedAdjustments = previousAdjustments.copy(contrast = previousAdjustments.contrast + 5)
+                val expectedAdjustments = previousAdjustments.copy(contrast = previousAdjustments.contrast - 5)
                 main {
                     check(adjustments.value == expectedAdjustments)
                     check(adjustmentChanges.last() == (builtIn.id to expectedAdjustments))

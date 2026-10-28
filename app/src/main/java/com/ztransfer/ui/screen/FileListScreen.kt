@@ -1369,98 +1369,18 @@ fun FileListScreen(
             !cameraCatalogReflowActive &&
             (!state.isConnectedToCamera || (!state.isLoadingFiles && state.hasCompletedFileScan))
         ) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(horizontal = 32.dp)
-                ) {
-                    if (!state.isConnectedToCamera) {
-                        // 首次加载失败、重连后再次掉线、进程恢复都可能进入空列表断开态。
-                        // 与顶栏使用同一套会话/恢复模式，不能把所有无线连接都当作 AP。
-                        val usbMode =
-                            disconnectedConnectionType(state.connectionType) ==
-                                CameraConnectionType.USB
-                        val presentation = disconnectedCameraPresentation(state.connectionType, state.isStaConnection)
-                        if (usbMode) {
-                            ClassicUsbIcon(
-                                tint = colors.statusError,
-                                modifier = Modifier.size(64.dp)
-                            )
-                        } else if (state.isStaConnection) {
-                            StaSignalIcon(
-                                connected = false,
-                                tint = colors.statusError,
-                                modifier = Modifier.size(64.dp),
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.WifiOff,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = colors.statusError
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            stringResource(presentation.title),
-                            color = colors.onBackground,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            stringResource(presentation.hint),
-                            color = colors.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center
-                        )
-                        presentation.actionLabel?.let { actionLabel ->
-                            Spacer(modifier = Modifier.height(20.dp))
-                            GlassButton(
-                                onClick = {
-                                    if (state.isStaConnection) {
-                                        cameraViewModel.retryStaConnection()
-                                    } else try {
-                                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                                    } catch (_: Exception) {}
-                                }
-                            ) {
-                                if (!state.isStaConnection) {
-                                    Icon(Icons.Default.WifiOff, contentDescription = null, tint = colors.statusError, modifier = Modifier.size(20.dp))
-                                }
-                                Text(
-                                    stringResource(actionLabel),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Medium,
-                                    color = colors.onBackground
-                                )
-                            }
-                        }
-                    } else {
-                        // 空态缓慢呼吸（与队列页空态同参数）：页面此时无其它动态，不至于死板。
-                        val breathe = rememberInfiniteTransition(label = "emptyList")
-                        val breatheAlpha = breathe.animateFloat(
-                            initialValue = 0.35f, targetValue = 0.6f,
-                            animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
-                            label = "emptyListAlpha"
-                        )
-                        Icon(
-                            Icons.Default.FolderOff, contentDescription = null,
-                            modifier = Modifier.size(64.dp).graphicsLayer { alpha = breatheAlpha.value },
-                            tint = colors.onSurfaceVariant.copy(alpha = 1f)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
-                        if (state.connectionType == CameraConnectionType.USB) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                stringResource(R.string.usb_turn_on_camera_hint),
-                                color = colors.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
-            }
+            FileListEmptyState(
+                connected = state.isConnectedToCamera,
+                connectionType = state.connectionType,
+                staMode = state.isStaConnection,
+                onReconnect = {
+                    if (state.isStaConnection) {
+                        cameraViewModel.retryStaConnection()
+                    } else try {
+                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                    } catch (_: Exception) {}
+                },
+            )
         }
 
         if (presentedCameraFiles.isNotEmpty() || cameraCatalogReflowActive) {
@@ -1614,37 +1534,7 @@ fun FileListScreen(
         // 传输进行中禁止进入监看：监看要独占相机通道（LV 取帧连续占锁），与下载抢锁会两败俱伤。
         // 图标压暗示意不可用，点击给出提示而非静默无响应。
         val remoteBlockedHint = stringResource(R.string.remote_blocked_transfer)
-        val remoteEntryDescription = stringResource(R.string.cd_remote_entry)
         val remoteExpanded = atTop || remoteExpandedAwayFromTop || remoteIntroExpanded
-        val remoteReveal = animateFloatAsState(
-            targetValue = if (remoteExpanded) 1f else 0f,
-            animationSpec = spring(dampingRatio = 0.58f, stiffness = 360f),
-            label = "remoteEntryReveal"
-        )
-        val remotePeekInteraction = remember { MutableInteractionSource() }
-        val density = LocalDensity.current
-        val hiddenTravelPx = with(density) { 48.dp.toPx() }
-        val playfulLiftPx = with(density) { 6.dp.toPx() }
-        val introLabel = stringResource(R.string.remote_entry_intro)
-        val introTextStyle = MaterialTheme.typography.labelMedium.copy(
-            fontSize = 13.sp, fontWeight = FontWeight.Medium,
-        )
-        val introTextMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-        val introLabelWidth = remember(introLabel, introTextStyle, density) {
-            with(density) {
-                introTextMeasurer.measure(introLabel, introTextStyle, softWrap = false).size.width.toDp()
-            }
-        }
-        val introButtonWidth = maxOf(140.dp, introLabelWidth + 62.dp)
-        val remoteButtonWidth = animateDpAsState(
-            targetValue = if (remoteIntroExpanded) introButtonWidth else 52.dp,
-            animationSpec = if (remoteIntroExpanded) {
-                Motion.bouncy()
-            } else {
-                tween(300, easing = FastOutSlowInEasing)
-            },
-            label = "remoteEntryWidth",
-        )
         val openRemote: () -> Unit = {
             // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
             // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
@@ -1658,114 +1548,28 @@ fun FileListScreen(
                 onNavigateToRemote()
             }
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .navigationBarsPadding()
-                .padding(bottom = 40.dp)
-                .size(width = introButtonWidth + 24.dp, height = 56.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            GlassButton(
-                onClick = {
-                    transferViewModel.markRemoteEntryUsed()
-                    remoteIntroExpanded = false
-                    if (remoteExpanded) {
-                        openRemote()
-                    } else {
-                        haptics.tick()
-                        remoteExpandedAwayFromTop = true
-                    }
-                },
-                modifier = Modifier
-                    .offset(x = 20.dp)
-                    .layout { measurable, constraints ->
-                        val width = remoteButtonWidth.value.roundToPx()
-                            .coerceIn(constraints.minWidth, constraints.maxWidth)
-                        val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
-                        layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
-                    }
-                    .height(52.dp)
-                    .graphicsLayer {
-                        // 弹簧允许轻微越界；路径中段上抬，收起时带一点俏皮歪头。
-                        val progress = remoteReveal.value.coerceIn(-0.12f, 1.12f)
-                        val pathProgress = progress.coerceIn(0f, 1f)
-                        val arc = sin(pathProgress * Math.PI).toFloat()
-                        translationX = -hiddenTravelPx * (1f - progress)
-                        translationY = -playfulLiftPx * arc
-                        val scale = 0.88f + 0.12f * progress
-                        scaleX = scale
-                        scaleY = scale
-                        rotationZ = -3.5f * (1f - pathProgress) + arc * 1.25f
-                        transformOrigin = TransformOrigin.Center
-                    },
-                shape = CircleShape,
-                contentPadding = PaddingValues(14.dp),
-                showSheen = false,
-                active = remoteIntroExpanded && !transfersBusyVisual,
-                activeColor = colors.accentBlue,
-                // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
-                // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
-                frostedOpacityBoost = 0.35f,
-                // 入口必须走公共按钮材质：毛玻璃、钛合金、木纹均与当前主题同步。
-                // 按压缩放由 GlassButton 统一提供，不在此重复实现。
-                shadowElevation = 6.dp
-            ) {
-                RemoteMark(
-                    modifier = Modifier
-                        .size(24.dp),
-                    color = if (transfersBusyVisual) {
-                        colors.onSurfaceVariant.copy(alpha = 0.5f)
-                    } else {
-                        colors.accentBlue
-                    },
-                    // 收起时由屏内 48dp 热区承担唯一语义，避免无障碍树出现两个同名入口。
-                    contentDescription = remoteEntryDescription.takeIf { remoteExpanded }
-                )
-                AnimatedVisibility(
-                    visible = remoteIntroExpanded,
-                    enter = fadeIn(tween(180, delayMillis = 70)) +
-                        expandHorizontally(
-                            animationSpec = tween(250, easing = FastOutSlowInEasing),
-                            expandFrom = Alignment.Start,
-                        ),
-                    exit = fadeOut(tween(120)) +
-                        shrinkHorizontally(
-                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                            shrinkTowards = Alignment.Start,
-                        ),
-                ) {
-                    Text(
-                        text = introLabel,
-                        color = if (transfersBusyVisual) colors.onSurfaceVariant else colors.onBackground,
-                        style = introTextStyle,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.clearAndSetSemantics { },
-                    )
+        FileListRemoteEntry(
+            expanded = remoteExpanded,
+            introExpanded = remoteIntroExpanded,
+            busyVisual = transfersBusyVisual,
+            onClick = {
+                transferViewModel.markRemoteEntryUsed()
+                remoteIntroExpanded = false
+                if (remoteExpanded) {
+                    openRemote()
+                } else {
+                    haptics.tick()
+                    remoteExpandedAwayFromTop = true
                 }
-            }
-            if (!remoteExpanded) {
-                // 视觉上只露出半颗，但保留 48dp 的屏内点击热区，兼顾发现性与可访问性。
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .fillMaxHeight()
-                        .width(48.dp)
-                        .semantics { contentDescription = remoteEntryDescription }
-                        .clickable(
-                            interactionSource = remotePeekInteraction,
-                            indication = null,
-                            role = Role.Button
-                        ) {
-                            transferViewModel.markRemoteEntryUsed()
-                            remoteIntroExpanded = false
-                            haptics.tick()
-                            remoteExpandedAwayFromTop = true
-                        }
-                )
-            }
-        }
+            },
+            onPeek = {
+                transferViewModel.markRemoteEntryUsed()
+                remoteIntroExpanded = false
+                haptics.tick()
+                remoteExpandedAwayFromTop = true
+            },
+            modifier = Modifier.align(Alignment.BottomStart),
+        )
 
         // ---------- 回到顶部（右下角毛玻璃圆钮）：仅在深处向顶部滚动时短暂出现 ----------
         AnimatedVisibility(
@@ -2245,6 +2049,241 @@ fun FileListScreen(
                 }
             } else null,
         )
+    }
+}
+
+/** Keep empty-state layout and its animation out of the large photo-list composition. */
+@Composable
+private fun FileListEmptyState(
+    connected: Boolean,
+    connectionType: CameraConnectionType?,
+    staMode: Boolean,
+    onReconnect: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        ) {
+            if (!connected) {
+                // 首次加载失败、重连后再次掉线、进程恢复都可能进入空列表断开态。
+                // 与顶栏使用同一套会话/恢复模式，不能把所有无线连接都当作 AP。
+                val usbMode =
+                    disconnectedConnectionType(connectionType) ==
+                        CameraConnectionType.USB
+                val presentation = disconnectedCameraPresentation(connectionType, staMode)
+                if (usbMode) {
+                    ClassicUsbIcon(
+                        tint = colors.statusError,
+                        modifier = Modifier.size(64.dp)
+                    )
+                } else if (staMode) {
+                    StaSignalIcon(
+                        connected = false,
+                        tint = colors.statusError,
+                        modifier = Modifier.size(64.dp),
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.WifiOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = colors.statusError
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    stringResource(presentation.title),
+                    color = colors.onBackground,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    stringResource(presentation.hint),
+                    color = colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                presentation.actionLabel?.let { actionLabel ->
+                    Spacer(modifier = Modifier.height(20.dp))
+                    GlassButton(
+                        onClick = onReconnect
+                    ) {
+                        if (!staMode) {
+                            Icon(Icons.Default.WifiOff, contentDescription = null, tint = colors.statusError, modifier = Modifier.size(20.dp))
+                        }
+                        Text(
+                            stringResource(actionLabel),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = colors.onBackground
+                        )
+                    }
+                }
+            } else {
+                // 空态缓慢呼吸（与队列页空态同参数）：页面此时无其它动态，不至于死板。
+                val breathe = rememberInfiniteTransition(label = "emptyList")
+                val breatheAlpha = breathe.animateFloat(
+                    initialValue = 0.35f, targetValue = 0.6f,
+                    animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+                    label = "emptyListAlpha"
+                )
+                Icon(
+                    Icons.Default.FolderOff, contentDescription = null,
+                    modifier = Modifier.size(64.dp).graphicsLayer { alpha = breatheAlpha.value },
+                    tint = colors.onSurfaceVariant.copy(alpha = 1f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
+                if (connectionType == CameraConnectionType.USB) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        stringResource(R.string.usb_turn_on_camera_hint),
+                        color = colors.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Entry measurements/animations compile separately; navigation state stays in FileListScreen. */
+@Composable
+private fun FileListRemoteEntry(
+    expanded: Boolean,
+    introExpanded: Boolean,
+    busyVisual: Boolean,
+    onClick: () -> Unit,
+    onPeek: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val remoteEntryDescription = stringResource(R.string.cd_remote_entry)
+    val remoteReveal = animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.58f, stiffness = 360f),
+        label = "remoteEntryReveal"
+    )
+    val remotePeekInteraction = remember { MutableInteractionSource() }
+    val density = LocalDensity.current
+    val hiddenTravelPx = with(density) { 48.dp.toPx() }
+    val playfulLiftPx = with(density) { 6.dp.toPx() }
+    val introLabel = stringResource(R.string.remote_entry_intro)
+    val introTextStyle = MaterialTheme.typography.labelMedium.copy(
+        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+    )
+    val introTextMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val introLabelWidth = remember(introLabel, introTextStyle, density) {
+        with(density) {
+            introTextMeasurer.measure(introLabel, introTextStyle, softWrap = false).size.width.toDp()
+        }
+    }
+    val introButtonWidth = maxOf(140.dp, introLabelWidth + 62.dp)
+    val remoteButtonWidth = animateDpAsState(
+        targetValue = if (introExpanded) introButtonWidth else 52.dp,
+        animationSpec = if (introExpanded) {
+            Motion.bouncy()
+        } else {
+            tween(300, easing = FastOutSlowInEasing)
+        },
+        label = "remoteEntryWidth",
+    )
+    Box(
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(bottom = 40.dp)
+            .size(width = introButtonWidth + 24.dp, height = 56.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        GlassButton(
+            onClick = onClick,
+            modifier = Modifier
+                .offset(x = 20.dp)
+                .layout { measurable, constraints ->
+                    val width = remoteButtonWidth.value.roundToPx()
+                        .coerceIn(constraints.minWidth, constraints.maxWidth)
+                    val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+                    layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
+                }
+                .height(52.dp)
+                .graphicsLayer {
+                    // 弹簧允许轻微越界；路径中段上抬，收起时带一点俏皮歪头。
+                    val progress = remoteReveal.value.coerceIn(-0.12f, 1.12f)
+                    val pathProgress = progress.coerceIn(0f, 1f)
+                    val arc = sin(pathProgress * Math.PI).toFloat()
+                    translationX = -hiddenTravelPx * (1f - progress)
+                    translationY = -playfulLiftPx * arc
+                    val scale = 0.88f + 0.12f * progress
+                    scaleX = scale
+                    scaleY = scale
+                    rotationZ = -3.5f * (1f - pathProgress) + arc * 1.25f
+                    transformOrigin = TransformOrigin.Center
+                },
+            shape = CircleShape,
+            contentPadding = PaddingValues(14.dp),
+            showSheen = false,
+            active = introExpanded && !busyVisual,
+            activeColor = colors.accentBlue,
+            // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
+            // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
+            frostedOpacityBoost = 0.35f,
+            // 入口必须走公共按钮材质：毛玻璃、钛合金、木纹均与当前主题同步。
+            // 按压缩放由 GlassButton 统一提供，不在此重复实现。
+            shadowElevation = 6.dp
+        ) {
+            RemoteMark(
+                modifier = Modifier
+                    .size(24.dp),
+                color = if (busyVisual) {
+                    colors.onSurfaceVariant.copy(alpha = 0.5f)
+                } else {
+                    colors.accentBlue
+                },
+                // 收起时由屏内 48dp 热区承担唯一语义，避免无障碍树出现两个同名入口。
+                contentDescription = remoteEntryDescription.takeIf { expanded }
+            )
+            AnimatedVisibility(
+                visible = introExpanded,
+                enter = fadeIn(tween(180, delayMillis = 70)) +
+                    expandHorizontally(
+                        animationSpec = tween(250, easing = FastOutSlowInEasing),
+                        expandFrom = Alignment.Start,
+                    ),
+                exit = fadeOut(tween(120)) +
+                    shrinkHorizontally(
+                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        shrinkTowards = Alignment.Start,
+                    ),
+            ) {
+                Text(
+                    text = introLabel,
+                    color = if (busyVisual) colors.onSurfaceVariant else colors.onBackground,
+                    style = introTextStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.clearAndSetSemantics { },
+                )
+            }
+        }
+        if (!expanded) {
+            // 视觉上只露出半颗，但保留 48dp 的屏内点击热区，兼顾发现性与可访问性。
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(48.dp)
+                    .semantics { contentDescription = remoteEntryDescription }
+                    .clickable(
+                        interactionSource = remotePeekInteraction,
+                        indication = null,
+                        role = Role.Button
+                    ) {
+                        onPeek()
+                    }
+            )
+        }
     }
 }
 

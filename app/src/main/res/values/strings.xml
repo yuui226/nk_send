@@ -707,7 +707,7 @@
     <string name="photo_lut_highlights">Highlights</string>
     <string name="photo_lut_shadows">Shadows</string>
     <string name="photo_lut_concentration">Concentration</string>
-    <string name="photo_lut_settings">LUT settings</string>
+    <string name="photo_lut_settings">Adjust</string>
     <string name="filter_rating_stars">%1$d stars</string>
     <string name="filter_rating_enabled">Rating filter</string>
     <string name="filter_rating_help_title">Star rating</string>

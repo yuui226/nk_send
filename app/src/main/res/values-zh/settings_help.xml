@@ -31,7 +31,7 @@
     <string name="help_preview_label">预览</string>
     <string name="help_favorites_label">收藏</string>
     <string name="help_wheels_label">拨轮</string>
-    <string name="photo_effects_help_filters">滤镜与 LUT 二选一，点右侧按钮调整效果；长按滤镜拨轮按分类选择。</string>
+    <string name="photo_effects_help_filters">滤镜与 LUT 二选一，点右侧按钮调整效果。长按滤镜拨轮，可按分类选择，或选择文件夹导入自己的 .np3 滤镜。</string>
     <string name="photo_effects_help_lut_settings">调整浓度、对比度、饱和度、高光和阴影。</string>
     <string name="photo_effects_help_frame">选择样式；点边框设置调整宽度、背景和拍摄信息。</string>
     <string name="photo_effects_help_watermark">高级版可自定义文字或 Logo，调整样式、位置和透明度。</string>

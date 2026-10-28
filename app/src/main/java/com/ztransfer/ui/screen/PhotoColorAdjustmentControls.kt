@@ -1,18 +1,13 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.Canvas
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -21,13 +16,13 @@ import com.ztransfer.filter.LutAdjustments
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 
-private val PHOTO_COLOR_ADJUSTMENT_OPTIONS = (-100..100 step 5).toList()
+private val PHOTO_COLOR_ADJUSTMENT_OPTIONS = (100 downTo -100 step 5).toList()
 
 /** Show a restored valid value exactly, even when it lies between the usual five-step detents. */
 internal fun photoColorAdjustmentOptions(selected: Int): List<Int> {
     require(selected in -100..100)
     return if (selected in PHOTO_COLOR_ADJUSTMENT_OPTIONS) PHOTO_COLOR_ADJUSTMENT_OPTIONS
-    else (PHOTO_COLOR_ADJUSTMENT_OPTIONS + selected).sorted()
+    else (PHOTO_COLOR_ADJUSTMENT_OPTIONS + selected).sortedDescending()
 }
 
 /** The same disclosure control and finishing wheels serve both photo filters and LUTs. */
@@ -119,21 +114,13 @@ internal fun PhotoColorAdjustmentControls(
     }
 }
 
-/** One local vector stroke; no icon-font or extended icon dependency. */
+/** Reuse the monitor's rounded arrow, mirrored to mean returning to defaults. */
 @Composable
 private fun PhotoColorResetIcon(color: Color) {
-    val arrow = remember {
-        Path().apply {
-            moveTo(7.05f, 2.8f)
-            lineTo(7.05f, 7.05f)
-            lineTo(11.3f, 7.05f)
-        }
-    }
-    Canvas(Modifier.size(20.dp)) {
-        scale(size.width / 24f, size.height / 24f, pivot = Offset.Zero) {
-            val stroke = Stroke(1.8f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            drawArc(color, -135f, 285f, false, Offset(5f, 5f), Size(14f, 14f), style = stroke)
-            drawPath(arrow, color, style = stroke)
-        }
-    }
+    Icon(
+        painter = painterResource(R.drawable.ic_monitor_rotate),
+        contentDescription = null,
+        tint = color,
+        modifier = Modifier.size(20.dp).scale(scaleX = -1f, scaleY = 1f),
+    )
 }
