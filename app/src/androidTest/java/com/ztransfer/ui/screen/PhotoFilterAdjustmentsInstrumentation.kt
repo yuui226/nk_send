@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModelStore
 import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
 import com.ztransfer.effects.PHOTO_FILTER_ADJUSTMENTS_PREFERENCE_KEY
 import com.ztransfer.effects.PHOTO_FILTER_APPLIED_ADJUSTMENTS_PREFERENCE_KEY
+import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
 import com.ztransfer.effects.PhotoEffectModule
 import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.photoFilterAdjustmentsFor
@@ -59,12 +60,33 @@ class PhotoFilterAdjustmentsInstrumentation : Instrumentation() {
             val applied = LutAdjustments(11, -22, 33, -44)
             val draft = LutAdjustments(-15, 25, -35, 45)
             val other = LutAdjustments(50, -40, 30, -20)
+            val legacyLocal = app.getSharedPreferences("local_photo_effects", Context.MODE_PRIVATE)
+            raw.edit().putString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, aKey).commit()
+            legacyLocal.edit().putString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, "$bKey,60;$aKey").commit()
 
             // Existing enabled presets are unchanged by the upgrade.
             raw.edit().putString("photo_filter_selected_id", a.id).putBoolean("photo_filter_enabled", true).commit()
             restart()
             check(model.state.value.photoFilterSelection?.lutAdjustments == LutAdjustments())
             check(model.state.value.transferPhotoFilterAdjustments.isEmpty())
+
+            // Existing per-entry favorites merge once. Local draft saves and restart must
+            // never restore a favorite that was removed through the shared controller.
+            check(model.state.value.favoritePhotoFilters.map { it.catalogKey } == listOf(aKey, bKey))
+            val localBeforeFavoriteChange = LocalPhotoEffectsPreferences(app)
+                .restore(model.state.value.photoFilters.map { it.id })
+            val recipeBeforeFavoriteChange = model.state.value.photoFilterSelection
+            runOnMainSync { model.toggleFavoritePhotoFilter(b.id) }
+            LocalPhotoEffectsPreferences(app).save(localBeforeFavoriteChange)
+            check(model.state.value.photoFilterSelection == recipeBeforeFavoriteChange)
+            restart()
+            check(model.state.value.favoritePhotoFilters == listOf(FavoritePhotoFilter(aKey)))
+            runOnMainSync { model.toggleFavoritePhotoFilter(a.id) }
+            restart()
+            check(model.state.value.favoritePhotoFilters.isEmpty())
+            runOnMainSync { model.toggleFavoritePhotoFilter(a.id) }
+            check(LocalPhotoEffectsPreferences(app).restore(model.state.value.photoFilters.map { it.id }) ==
+                localBeforeFavoriteChange)
 
             // Malformed entries and wrong preference types cannot crash startup.
             raw.edit().putString(PHOTO_FILTER_ADJUSTMENTS_PREFERENCE_KEY,
@@ -146,7 +168,6 @@ class PhotoFilterAdjustmentsInstrumentation : Instrumentation() {
                     filterEnabled = true, filterIntensityPercent = 48,
                     filterIntensities = mapOf(customKey to 48, aKey to 64),
                     filterAdjustments = mapOf(customKey to other, aKey to draft),
-                    favoritePhotoFilters = listOf(FavoritePhotoFilter(customKey), FavoritePhotoFilter(aKey)),
                 ))
             }
             val queuedTask = createQueueTasks(
@@ -169,7 +190,11 @@ class PhotoFilterAdjustmentsInstrumentation : Instrumentation() {
             val localCleared = LocalPhotoEffectsPreferences(app).restore(model.state.value.photoFilters.map { it.id })
             check(!localCleared.filterEnabled && customKey !in localCleared.filterAdjustments)
             check(customKey !in localCleared.filterIntensities)
-            check(localCleared.favoritePhotoFilters == listOf(FavoritePhotoFilter(aKey)))
+            check(model.state.value.favoritePhotoFilters == listOf(FavoritePhotoFilter(aKey)))
+            // Even an old local key with forgotten external favorites is no longer a source.
+            legacyLocal.edit().putString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, "$customKey;$bKey;$aKey").commit()
+            restart()
+            check(model.state.value.favoritePhotoFilters == listOf(FavoritePhotoFilter(aKey)))
             check(localCleared.filterAdjustments[aKey] == draft && localCleared.filterIntensities[aKey] == 64)
             check(queuedTask.photoFilterRequested === queuedRecipe && queuedRecipe.preset.id == custom.id)
             check(queuedRecipe.lutAdjustments == applied && queuedRecipe.normalizedIntensityPercent == 72)
@@ -288,7 +313,7 @@ class PhotoFilterAdjustmentsInstrumentation : Instrumentation() {
             check(model.state.value.photoLut == reselectedLut)
             check(queuedLutBeforeVisibility.normalizedIntensityPercent == 80 && queuedLutBeforeVisibility.lutAdjustments == applied)
 
-            report.putString("stream", "PASS legacy neutral controls, malformed preferences, committed/draft separation, restart, disabled/switch restore, NP3 snapshots, local/transfer isolation, synchronous cross-entry directory reset, immutable queue recipes, stale-draft rejection and module-visibility draft preservation\n")
+            report.putString("stream", "PASS shared favorites migration/merge/removal/restart, no stale-local resurrection, legacy neutral controls, malformed preferences, committed/draft separation, disabled/switch restore, NP3 snapshots, local/transfer parameter isolation, synchronous directory reset, immutable queue recipes, stale-draft rejection and module-visibility draft preservation\n")
             result = Activity.RESULT_OK
         } catch (error: Throwable) {
             report.putString("stream", error.stackTraceToString())

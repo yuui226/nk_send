@@ -44,7 +44,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
-import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.effects.photoFilterAdjustmentsFor
 import com.ztransfer.filter.photoFilterCatalogKey
@@ -123,9 +122,6 @@ fun LocalPhotoEffectsPage(
     }
     var filterIntensities by remember { mutableStateOf(initialSettings.filterIntensities) }
     var filterAdjustments by remember { mutableStateOf(initialSettings.filterAdjustments) }
-    var favoritePhotoFilters by remember {
-        mutableStateOf(initialSettings.favoritePhotoFilters)
-    }
     var favoriteFrameEffects by remember {
         mutableStateOf(initialSettings.favoriteFrameEffects)
     }
@@ -142,7 +138,6 @@ fun LocalPhotoEffectsPage(
         grainIntensities = grainIntensities,
         filterIntensities = filterIntensities,
         filterAdjustments = filterAdjustments,
-        favoritePhotoFilters = favoritePhotoFilters,
         favoriteFrameEffects = favoriteFrameEffects,
     )
     val currentSettings = currentPhotoEffectsSettings()
@@ -255,7 +250,6 @@ fun LocalPhotoEffectsPage(
                 filterIntensity = cleared.filterIntensityPercent
                 filterIntensities = cleared.filterIntensities
                 filterAdjustments = cleared.filterAdjustments
-                favoritePhotoFilters = cleared.favoritePhotoFilters
                 settingsPreferences.clearNp3DirectorySettings()
             }
         }
@@ -409,12 +403,12 @@ fun LocalPhotoEffectsPage(
 
                 Spacer(Modifier.height(14.dp))
                 val previewFilterPrefetch = remember(
-                    state.photoFilters, favoritePhotoFilters, filterIntensities, filterAdjustments,
+                    state.photoFilters, state.favoritePhotoFilters, filterIntensities, filterAdjustments,
                     filterId, filterEnabled, photoLutDraft.selection,
                 ) {
                     nextPhotoFilterSelections(
                         filters = state.photoFilters,
-                        favoriteCatalogKeys = favoritePhotoFilters.map { it.catalogKey },
+                        favoriteCatalogKeys = state.favoritePhotoFilters.map { it.catalogKey },
                         rememberedIntensities = filterIntensities,
                         rememberedAdjustments = filterAdjustments,
                         selectedId = filterId,
@@ -496,7 +490,7 @@ fun LocalPhotoEffectsPage(
                         active = pageActive && visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) &&
                             photoLutDraft.selection == null,
                         filters = state.photoFilters,
-                        favoriteFilters = favoritePhotoFilters,
+                        favoriteFilters = state.favoritePhotoFilters,
                         rememberedIntensities = filterIntensities,
                         selectedId = filterId,
                         enabled = filterEnabled && photoLutDraft.selection == null,
@@ -520,17 +514,7 @@ fun LocalPhotoEffectsPage(
                             val catalogKey = photoFilterCatalogKey(selectedFilterId) ?: selectedFilterId
                             filterAdjustments = filterAdjustments + (catalogKey to adjustments)
                         },
-                        onFavoriteToggled = { selectedFilterId ->
-                            photoFilterCatalogKey(selectedFilterId)?.let { catalogKey ->
-                                favoritePhotoFilters = if (
-                                    favoritePhotoFilters.any { it.catalogKey == catalogKey }
-                                ) {
-                                    favoritePhotoFilters.filterNot { it.catalogKey == catalogKey }
-                                } else {
-                                    favoritePhotoFilters + FavoritePhotoFilter(catalogKey)
-                                }
-                            }
-                        },
+                        onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
                         hapticsEnabled = state.hapticsEnabled,
                     )
                 }

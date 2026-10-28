@@ -4,7 +4,6 @@ import com.ztransfer.grain.PhotoGrainSettings
 import com.ztransfer.grain.PhotoGrainStyle
 import com.ztransfer.effects.ALL_PHOTO_EFFECT_MODULES
 import com.ztransfer.effects.PhotoEffectModule
-import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.photoFilterAdjustmentsFor
 import com.ztransfer.filter.LutAdjustments
 import com.ztransfer.filter.BuiltInPhotoFilters
@@ -32,7 +31,6 @@ class LocalPhotoEffectsPreferencesTest {
             filterIntensityPercent = 42,
             filterIntensities = mapOf(customKey to 42, builtInKey to 64),
             filterAdjustments = mapOf(customKey to LutAdjustments(20), builtInKey to LutAdjustments(-15)),
-            favoritePhotoFilters = listOf(FavoritePhotoFilter(customKey), FavoritePhotoFilter(builtInKey)),
         )
         val cleared = clearLocalPhotoNp3DirectorySettings(settings)
         assertEquals(settings.copy(
@@ -41,7 +39,6 @@ class LocalPhotoEffectsPreferencesTest {
             filterIntensityPercent = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
             filterIntensities = mapOf(builtInKey to 64),
             filterAdjustments = mapOf(builtInKey to LutAdjustments(-15)),
-            favoritePhotoFilters = listOf(FavoritePhotoFilter(builtInKey)),
         ), cleared)
         val reselected = normalizeLocalPhotoEffectsSettings(cleared.copy(filterId = customId, filterEnabled = true),
             setOf(builtIn.id, customId)) { false }
@@ -58,12 +55,10 @@ class LocalPhotoEffectsPreferencesTest {
             filterIntensityPercent = 56,
             filterIntensities = mapOf(customKey to 26, builtInKey to 56),
             filterAdjustments = mapOf(customKey to LutAdjustments(30), builtInKey to LutAdjustments(-5)),
-            favoritePhotoFilters = listOf(FavoritePhotoFilter(builtInKey), FavoritePhotoFilter(customKey)),
         )
         val expected = settings.copy(
             filterIntensities = mapOf(builtInKey to 56),
             filterAdjustments = mapOf(builtInKey to LutAdjustments(-5)),
-            favoritePhotoFilters = listOf(FavoritePhotoFilter(builtInKey)),
         )
         assertEquals(expected, clearLocalPhotoNp3DirectorySettings(settings))
         assertEquals(expected.copy(filterEnabled = false),
@@ -103,14 +98,12 @@ class LocalPhotoEffectsPreferencesTest {
             filterEnabled = true,
             filterIntensityPercent = 80,
             filterIntensities = mapOf(key to 43),
-            favoritePhotoFilters = listOf(FavoritePhotoFilter(key)),
         )
         val restored = normalizeLocalPhotoEffectsSettings(settings, setOf(id)) { false }
         assertEquals(id, restored.filterId)
         assertEquals(true, restored.filterEnabled)
         assertEquals(44, restored.filterIntensityPercent)
         assertEquals(mapOf(key to 44), restored.filterIntensities)
-        assertEquals(settings.favoritePhotoFilters, restored.favoritePhotoFilters)
     }
 
     @Test fun missingCustomSnapshotDisablesSelectionButKeepsItsPreferenceMemory() {
@@ -118,14 +111,11 @@ class LocalPhotoEffectsPreferencesTest {
         val settings = defaultLocalPhotoEffectsSettings("$key:np3-srgb-v1").copy(
             filterEnabled = true,
             filterIntensities = mapOf(key to 60, "missing" to 20, "np3:bad" to 30),
-            favoritePhotoFilters = listOf(FavoritePhotoFilter(key), FavoritePhotoFilter("missing"),
-                FavoritePhotoFilter("np3:bad"), FavoritePhotoFilter(key)),
         )
         val restored = normalizeLocalPhotoEffectsSettings(settings, setOf("forest")) { false }
         assertNull(restored.filterId)
         assertFalse(restored.filterEnabled)
         assertEquals(mapOf(key to 60), restored.filterIntensities)
-        assertEquals(listOf(FavoritePhotoFilter(key)), restored.favoritePhotoFilters)
     }
 
     @Test fun hidingTheFilterModuleKeepsCustomMemoriesWithoutReenablingTheEffect() {
@@ -133,7 +123,6 @@ class LocalPhotoEffectsPreferencesTest {
         val id = "$key:np3-srgb-v1"
         val original = defaultLocalPhotoEffectsSettings(id).copy(
             filterEnabled = true, filterIntensities = mapOf(key to 26),
-            favoritePhotoFilters = listOf(FavoritePhotoFilter(key)),
         )
         val hidden = applyLocalPhotoEffectModuleVisibility(original,
             ALL_PHOTO_EFFECT_MODULES xor PhotoEffectModule.FILTER.bit)
@@ -141,7 +130,6 @@ class LocalPhotoEffectsPreferencesTest {
         val restored = normalizeLocalPhotoEffectsSettings(shown, setOf(id)) { false }
         assertFalse(restored.filterEnabled)
         assertEquals(26, restored.filterIntensityPercent)
-        assertEquals(original.favoritePhotoFilters, restored.favoritePhotoFilters)
     }
 
     @Test

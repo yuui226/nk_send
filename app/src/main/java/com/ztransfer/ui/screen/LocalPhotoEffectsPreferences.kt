@@ -12,14 +12,10 @@ import com.ztransfer.effects.showsPhotoEffect
 
 import android.content.Context
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
-import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
-import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.decodeFavoriteFrameEffects
-import com.ztransfer.effects.decodeFavoritePhotoFilters
 import com.ztransfer.effects.decodePhotoFilterIntensities
 import com.ztransfer.effects.encodeFavoriteFrameEffects
-import com.ztransfer.effects.encodeFavoritePhotoFilters
 import com.ztransfer.effects.encodePhotoFilterIntensities
 import com.ztransfer.effects.decodePhotoFilterAdjustments
 import com.ztransfer.effects.encodePhotoFilterAdjustments
@@ -61,7 +57,6 @@ internal data class LocalPhotoEffectsSettings(
     val filterIntensityPercent: Int,
     val filterIntensities: Map<String, Int> = emptyMap(),
     val filterAdjustments: Map<String, LutAdjustments> = emptyMap(),
-    val favoritePhotoFilters: List<FavoritePhotoFilter> = emptyList(),
     val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
     val grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     val grainIntensities: Map<PhotoGrainStyle, Int> = normalizedPhotoGrainIntensities(),
@@ -78,7 +73,6 @@ internal fun defaultLocalPhotoEffectsSettings(defaultFilterId: String?) =
         filterEnabled = false,
         filterIntensityPercent = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
         filterIntensities = emptyMap(),
-        favoritePhotoFilters = emptyList(),
         favoriteFrameEffects = emptyList(),
     )
 
@@ -128,9 +122,6 @@ internal fun normalizeLocalPhotoEffectsSettings(
         filterIntensityPercent = currentIntensity,
         filterIntensities = filterIntensities,
         filterAdjustments = normalizePhotoFilterAdjustments(settings.filterAdjustments, validCatalogKeys),
-        favoritePhotoFilters = settings.favoritePhotoFilters
-            .filter { it.catalogKey in validCatalogKeys || isCustomPhotoFilterCatalogKey(it.catalogKey) }
-            .distinctBy { it.catalogKey },
         favoriteFrameEffects = settings.favoriteFrameEffects
             .distinctBy { it.framePreset },
         metadataSettings = settings.metadataSettings
@@ -177,7 +168,6 @@ internal fun clearLocalPhotoNp3DirectorySettings(
             else settings.filterIntensityPercent,
         filterIntensities = settings.filterIntensities.filterKeys { !isCustomPhotoFilterCatalogKey(it) },
         filterAdjustments = settings.filterAdjustments.filterKeys { !isCustomPhotoFilterCatalogKey(it) },
-        favoritePhotoFilters = settings.favoritePhotoFilters.filterNot { isCustomPhotoFilterCatalogKey(it.catalogKey) },
     )
 }
 
@@ -197,11 +187,6 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
             .filterKeys { !isCustomPhotoFilterCatalogKey(it) }
         val adjustments = decodePhotoFilterAdjustments(values.string(KEY_FILTER_ADJUSTMENTS), builtInKeys)
             .filterKeys { !isCustomPhotoFilterCatalogKey(it) }
-        val favorites = decodeFavoritePhotoFilters(
-            values.string(KEY_FAVORITE_PHOTO_FILTERS) ?: legacyFavoriteValue(
-                values.int(KEY_VERSION, 0), FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
-            ), builtInKeys,
-        ).filterNot { isCustomPhotoFilterCatalogKey(it.catalogKey) }
         preferences.edit().apply {
             if (customSelection) {
                 remove(KEY_FILTER_ID)
@@ -210,7 +195,6 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
             }
             putString(KEY_FILTER_INTENSITIES, encodePhotoFilterIntensities(intensities))
             putString(KEY_FILTER_ADJUSTMENTS, encodePhotoFilterAdjustments(adjustments))
-            putString(KEY_FAVORITE_PHOTO_FILTERS, encodeFavoritePhotoFilters(favorites))
         }.apply()
     }
 
@@ -254,13 +238,6 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         if (!preferences.contains(KEY_VERSION)) {
             return normalize(
                 fallback.copy(
-                    favoritePhotoFilters = decodeFavoritePhotoFilters(
-                        legacyFavoriteValue(
-                            storedVersion = 0,
-                            key = FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
-                        ),
-                        validCatalogKeys,
-                    ),
                     favoriteFrameEffects = decodeFavoriteFrameEffects(
                         legacyFavoriteValue(
                             storedVersion = 0,
@@ -309,14 +286,6 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
                 validCatalogKeys,
             ),
             filterAdjustments = decodePhotoFilterAdjustments(values.string(KEY_FILTER_ADJUSTMENTS), validCatalogKeys),
-            favoritePhotoFilters = decodeFavoritePhotoFilters(
-                values.string(KEY_FAVORITE_PHOTO_FILTERS)
-                    ?: legacyFavoriteValue(
-                        storedVersion = storedVersion,
-                        key = FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
-                    ),
-                validCatalogKeys,
-            ),
             favoriteFrameEffects = decodeFavoriteFrameEffects(
                 values.string(KEY_FAVORITE_FRAME_EFFECTS)
                     ?: legacyFavoriteValue(
@@ -361,10 +330,6 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
             )
             putString(KEY_FILTER_ADJUSTMENTS, encodePhotoFilterAdjustments(settings.filterAdjustments))
             putString(
-                KEY_FAVORITE_PHOTO_FILTERS,
-                encodeFavoritePhotoFilters(settings.favoritePhotoFilters),
-            )
-            putString(
                 KEY_FAVORITE_FRAME_EFFECTS,
                 encodeFavoriteFrameEffects(settings.favoriteFrameEffects),
             )
@@ -384,8 +349,8 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
     )
 
     /**
-     * Before v3 both editors used the transfer preference file. Seed the phone editor once so an
-     * upgrade does not discard visible stars, then save() writes an independent local copy.
+     * Before v3 frame favorites used the transfer preference file. Seed the phone editor once
+     * so an upgrade does not discard them, then save() writes an independent local copy.
      */
     private fun legacyFavoriteValue(storedVersion: Int, key: String): String? {
         if (storedVersion >= SETTINGS_VERSION) return null
@@ -420,7 +385,6 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         const val KEY_FILTER_INTENSITY = "filter_intensity"
         const val KEY_FILTER_INTENSITIES = "filter_intensities_v1"
         const val KEY_FILTER_ADJUSTMENTS = "filter_adjustments_v1"
-        const val KEY_FAVORITE_PHOTO_FILTERS = "favorite_photo_filters_v1"
         const val KEY_FAVORITE_FRAME_EFFECTS = "favorite_frame_effects_v1"
     }
 }

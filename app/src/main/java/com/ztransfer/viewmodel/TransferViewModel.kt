@@ -37,7 +37,7 @@ import com.ztransfer.effects.photoFilterAdjustmentsFor
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
 import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.decodeFavoriteFrameEffects
-import com.ztransfer.effects.decodeFavoritePhotoFilters
+import com.ztransfer.effects.restoreSharedPhotoFilterFavorites
 import com.ztransfer.effects.decodePhotoFilterIntensities
 import com.ztransfer.effects.encodeFavoriteFrameEffects
 import com.ztransfer.effects.encodeFavoritePhotoFilters
@@ -1276,9 +1276,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val validPhotoFilterCatalogKeys = restoredPhotoFilters
             .mapNotNull { photoFilterCatalogKey(it.id) }
             .toSet()
-        val decodedFavoritePhotoFilters = decodeFavoritePhotoFilters(
-            prefs.getString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, null),
-            validPhotoFilterCatalogKeys,
+        val decodedFavoritePhotoFilters = restoreSharedPhotoFilterFavorites(
+            getApplication(), validPhotoFilterCatalogKeys,
         )
         val restoredFavoriteFrameEffects = decodeFavoriteFrameEffects(
             prefs.getString(FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY, null),
@@ -1333,17 +1332,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     encodedPhotoFilterIntensities,
                 )
                 .remove("photo_filter_intensity")
-                .apply()
-        }
-        val encodedFavoritePhotoFilters = encodeFavoritePhotoFilters(decodedFavoritePhotoFilters)
-        if (prefs.getString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, null) !=
-            encodedFavoritePhotoFilters
-        ) {
-            prefs.edit()
-                .putString(
-                    FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
-                    encodedFavoritePhotoFilters,
-                )
                 .apply()
         }
         val storedSkinName = prefs.getString("skin_preset", null)
