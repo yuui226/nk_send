@@ -3940,6 +3940,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled }
             ?: InflightThumb(viewModelScope.async { fetchAndDecodeThumb(file) })
                 .also { inflightThumbs[handle] = it }
+        return awaitInflightThumbnail(handle, entry)
+    }
+
+    private suspend fun awaitInflightThumbnail(handle: Int, entry: InflightThumb): ImageBitmap? {
         entry.waiters++
         try {
             return entry.deferred.await()   // 调用方被取消时在此抛出并传播，不能吞掉
@@ -3992,8 +3996,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
         // 用户来回翻动导致的“格子请求发出又取消”绝不会让这张图两头落空。
-        if (inflightThumbs[handle]?.deferred?.isCancelled == false) {
-            return loadThumbnail(file) != null || handle in noThumbHandles
+        inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled }?.let { entry ->
+            // 直接加入已知请求；重走 loadThumbnail 的磁盘入口，会在该请求刚落盘、
+            // 尚未解码完时并发解码同一张图，并重复准备纹理与发布 ready 通知。
+            return awaitInflightThumbnail(handle, entry) != null || handle in noThumbHandles
         }
         inflightPrefetches[handle]?.let { return it.await() }
         val completion = CompletableDeferred<Boolean>()

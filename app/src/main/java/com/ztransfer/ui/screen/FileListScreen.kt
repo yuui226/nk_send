@@ -3491,6 +3491,10 @@ private fun ThumbnailGrid(
     val thumbnailBorderColor = remember(thumbnailSkin, thumbnailDark) {
         thumbnailThemeBorderColor(thumbnailSkin, thumbnailDark)
     }
+    // Cached and newly loaded first-screen cells share one entrance, without per-cell jobs or
+    // added layout/scale work. The settled state stays at 1 for scrolling and subsequent scans.
+    val firstBatchOpacity = rememberThumbnailBatchEntrance(groups.isNotEmpty())
+    val firstBatchAlpha: () -> Float = remember(firstBatchOpacity) { { firstBatchOpacity.value } }
 
     // 日期展开/收起动画（手风琴方案；不用条目位移动画——它对"被推出屏幕的条目"有框架级
     // 边缘悬停，对"从屏外移入"的条目又根本不生效，大日期组收起时什么动画都看不到）：
@@ -3780,7 +3784,7 @@ private fun ThumbnailGrid(
                                         if (coordinates == null) burstBoundsRegistry.remove(item.id)
                                         else burstBoundsRegistry[item.id] = coordinates
                                     },
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = firstBatchAlpha() }
                                 )
                             }
                             is ThumbnailGridItem.Photo -> {
@@ -3813,6 +3817,7 @@ private fun ThumbnailGrid(
                                     onPreview = onPreview,
                                     tapToPreview = tapToPreview,
                                     cellBoundsRegistry = cellBoundsRegistry,
+                                    entryAlpha = firstBatchAlpha,
                                     inBurst = file.handle in burstHandles,
                                     animateBurstBadgeRemoval = cameraCatalogAffectsGroup,
                                     inExpandedBurstCollection =
@@ -4126,6 +4131,7 @@ private fun ThumbnailCell(
     tapToPreview: Boolean,
     cellBoundsRegistry: VisibleItemBoundsRegistry<Int>,
     modifier: Modifier = Modifier,
+    entryAlpha: () -> Float = { 1f },
     loadEnabled: Boolean = true,
     inBurst: Boolean = false,
     animateBurstBadgeRemoval: Boolean = false,
@@ -4207,7 +4213,7 @@ private fun ThumbnailCell(
                 clip = true
                 val revealP = revealProgress.value
                 val exitP = exitProgress.value
-                alpha = (if (reveal) revealP else 1f) * exitP
+                alpha = entryAlpha() * (if (reveal) revealP else 1f) * exitP
                 // 只有明确处于日期/筛选 reveal 窗口的格子才允许缩放；普通网格重排
                 // 永远保持 1x，避免连拍展开让无关照片整体“缩一下再弹回”。
                 val revealScale = if (reveal) 0.94f + 0.06f * revealP else 1f

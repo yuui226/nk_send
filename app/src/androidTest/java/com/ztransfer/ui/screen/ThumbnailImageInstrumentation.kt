@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -45,6 +46,9 @@ class ThumbnailImageInstrumentation : Instrumentation() {
             val allowRemote = mutableStateOf(true)
             val busy = mutableStateOf(false)
             val visible = mutableStateOf(true)
+            val hasItems = mutableStateOf(false)
+            val entryOpacity = AtomicReference<State<Float>>()
+            val sawEntryFrame = AtomicBoolean()
             val cache = mutableMapOf<Int, ImageBitmap>(1 to image)
             val gate = AtomicReference(CompletableDeferred<ImageBitmap?>())
             val pending = AtomicReference<ThumbnailImagePresentation>()
@@ -56,6 +60,7 @@ class ThumbnailImageInstrumentation : Instrumentation() {
             val thumbnailReadyEvents = MutableSharedFlow<Int>(extraBufferCapacity = 8)
             runOnMainSync {
                 host.setContent {
+                    val entry = rememberThumbnailBatchEntrance(hasItems.value)
                     if (visible.value) {
                         val presentation = rememberThumbnailImagePresentation(
                             handle = handle.value,
@@ -76,6 +81,7 @@ class ThumbnailImageInstrumentation : Instrumentation() {
                             thumbnailReadyEvents = thumbnailReadyEvents,
                         )
                         SideEffect {
+                            entryOpacity.set(entry)
                             pending.set(presentation)
                             compositions.incrementAndGet()
                             if (presentation.image.value != null && presentation.alpha.value == 0f) {
@@ -87,7 +93,9 @@ class ThumbnailImageInstrumentation : Instrumentation() {
                             if (presentation.showPlaceholder.value) Box(Modifier.size(24.dp))
                             presentation.image.value?.let {
                                 Image(it, null, Modifier.size(96.dp).graphicsLayer {
-                                    alpha = presentation.alpha.value
+                                    val entrance = entry.value
+                                    if (entrance > 0f && entrance < 1f) sawEntryFrame.set(true)
+                                    alpha = presentation.alpha.value * entrance
                                 })
                             }
                         }
@@ -108,6 +116,19 @@ class ThumbnailImageInstrumentation : Instrumentation() {
                 pending.get()?.let { it.image.value === image && it.alpha.value == 1f && !it.showPlaceholder.value } == true
             }
             check(calls.get() == 0) { "Cache hit started another load" }
+            check(entryOpacity.get().value == 0f) { "Entrance ran before the first batch existed" }
+            val beforeEntry = compositions.get()
+            runOnMainSync { hasItems.value = true }
+            await("First cached batch did not finish its entrance") { entryOpacity.get().value == 1f }
+            check(sawEntryFrame.get()) { "Batch jumped directly to opaque without a fade frame" }
+            check(compositions.get() - beforeEntry <= 2) { "Batch opacity recomposed the cells every frame" }
+            runOnMainSync { hasItems.value = false }
+            waitForIdleSync()
+            runOnMainSync { hasItems.value = true }
+            waitForIdleSync()
+            check(entryOpacity.get().value == 1f && calls.get() == 0) {
+                "An empty/filter batch replayed the entrance or reloaded cached images"
+            }
 
             // Reused slots have independent image/opacity state, and local-only reads are preserved.
             runOnMainSync { handle.value = 2; allowRemote.value = false }

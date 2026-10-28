@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.ImageBitmap
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -30,6 +31,21 @@ internal class ThumbnailImagePresentation(
 private class FixedThumbnailState<T>(override val value: T) : State<T>
 private val cachedThumbnailAlpha: State<Float> = FixedThumbnailState(1f)
 private val cachedThumbnailPlaceholder: State<Boolean> = FixedThumbnailState(false)
+
+/** One draw-only fade for the first non-empty grid, independent of cache hits and scan batches. */
+@Composable
+internal fun rememberThumbnailBatchEntrance(hasItems: Boolean): State<Float> {
+    val opacity = remember { Animatable(0f) }
+    LaunchedEffect(hasItems) {
+        if (hasItems && opacity.value < 1f) {
+            // Mount the first cells before starting the clock; their initial composition and
+            // measurement must not consume the visible fade. Later batches never restart it.
+            withFrameNanos { }
+            opacity.animateTo(1f, tween(180))
+        }
+    }
+    return opacity.asState()
+}
 
 /**
  * Cached cells draw immediately; only a newly loaded image fades over its existing placeholder.
@@ -78,7 +94,12 @@ internal fun rememberThumbnailImagePresentation(
     }
     val ready = image.value != null
     LaunchedEffect(handle, ready) {
-        if (ready && opacity.value < 1f) opacity.animateTo(1f, tween(180))
+        if (ready && opacity.value < 1f) {
+            // Let Image join the draw tree before counting fade time. A busy first batch must
+            // not spend most of its animation composing cells, then first draw almost opaque.
+            withFrameNanos { }
+            opacity.animateTo(1f, tween(180))
+        }
     }
     // A single recomposition removes the placeholder after fading, not one per animation frame.
     val showPlaceholder = remember(handle) { derivedStateOf { opacity.value < 1f } }
