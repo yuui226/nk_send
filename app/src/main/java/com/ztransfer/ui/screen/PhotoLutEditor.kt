@@ -100,7 +100,7 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
         listOf(null) + ordered.map { it.uri } + listOfNotNull(current).filter { uri -> ordered.none { it.uri == uri } }
     }
     val empty = options.size == 1
-    val active = state.selection != null && !state.loading
+    val active = state.selection != null
     val lutSettingsLabel = stringResource(R.string.photo_lut_settings)
     SettingsCard(tintColor = lutAccent, borderColor = lutAccent.copy(alpha = .24f)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -117,34 +117,34 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
                 accentColor = lutAccent, ambientEffectColor = lutAccent, ambientEffectAlpha = loadingAlpha)
             PhotoColorAdjustmentButton(
                 label = lutSettingsLabel, expanded = lutSettingsExpanded, enabled = active,
+                readOnly = state.loading,
                 accentColor = lutAccent,
                 onClick = { haptics.tick(); lutSettingsExpanded = !lutSettingsExpanded },
                 modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
             )
             FavoriteToggleButton(current?.toString() in state.favorites, active,
-                { haptics.tick(); state.favorite() })
+                { haptics.tick(); state.favorite() }, readOnly = state.loading)
         }
         // Capture the outgoing recipe so collapsing Off does not flash neutral wheel values.
         val displayedSelection = state.selection
         PhotoColorEffectGroup(visible = lutSettingsExpanded && displayedSelection != null, spacing = 0.dp) {
             val adjustments = displayedSelection?.lutAdjustments ?: com.ztransfer.filter.LutAdjustments()
             val presetId = displayedSelection?.preset?.id
-            key(presetId, displayedSelection?.normalizedIntensityPercent, adjustments) {
-                PhotoColorAdjustmentControls(
-                    intensityPercent = displayedSelection?.normalizedIntensityPercent ?: 80,
-                    adjustments = adjustments,
-                    intensityLabel = stringResource(R.string.photo_lut_concentration),
-                    accentColor = lutAccent, enabled = active,
-                    onIntensityChanged = { if (lutSettingsExpanded && !state.loading && state.selection?.preset?.id == presetId) state.strength(it) },
-                    onAdjustmentsChanged = { if (lutSettingsExpanded && !state.loading && state.selection?.preset?.id == presetId) state.adjustments(it) },
-                    onDetent = haptics::tick,
-                )
-            }
+            PhotoColorAdjustmentControls(
+                intensityPercent = displayedSelection?.normalizedIntensityPercent ?: 80,
+                adjustments = adjustments,
+                intensityLabel = stringResource(R.string.photo_lut_concentration),
+                accentColor = lutAccent, enabled = active,
+                presetId = presetId, readOnly = state.loading,
+                onIntensityChanged = { if (lutSettingsExpanded && !state.loading && state.selection?.preset?.id == presetId) state.strength(it) },
+                onAdjustmentsChanged = { if (lutSettingsExpanded && !state.loading && state.selection?.preset?.id == presetId) state.adjustments(it) },
+                onDetent = haptics::tick,
+            )
         }
     }
 
     if (showChooser) {
-        val maxHeight = (LocalConfiguration.current.screenHeightDp - 120).coerceIn(120, 440).dp
+        val maxHeight = (LocalConfiguration.current.screenHeightDp - 120).coerceIn(120, 560).dp
         Dialog(onDismissRequest = { showChooser = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(

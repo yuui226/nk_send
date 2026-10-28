@@ -124,6 +124,15 @@ class PhotoFilterFinishingTest {
         }
 
     private fun presets(): List<PhotoFilterPreset> = BuiltInPhotoFilters.all + listOf(
+        PhotoFilterPreset("graded-np3", "Graded NP3", Np3PhotoFilterParameters(
+            13, -20, 25, 0, -5, 20,
+            PHOTO_FILTER_COLOR_BAND_CENTERS.map { PhotoFilterColorBand(it, 10, -15, 5) },
+            colorGrading = Np3ColorGrading(
+                highlights = Np3ColorGradingRegion(40, 35, 15),
+                midtones = Np3ColorGradingRegion(140, 25, -20),
+                shadows = Np3ColorGradingRegion(220, 45, 10), blending = 70, balance = -20,
+            ),
+        )),
         classic(ClassicNp3Style.VIVID),
         classic(ClassicNp3Style.MONOCHROME),
         classic(ClassicNp3Style.PORTRAIT).let { preset ->

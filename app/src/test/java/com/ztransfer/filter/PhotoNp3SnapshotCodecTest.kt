@@ -11,9 +11,78 @@ import org.junit.Test
 
 class PhotoNp3SnapshotCodecTest {
     @Test fun originalFlexibleSnapshotEncodingIsByteForByteStable() {
-        val hash = MessageDigest.getInstance("SHA-256").digest(PhotoNp3SnapshotCodec.encode(recipe(true)))
+        val bytes = PhotoNp3SnapshotCodec.encode(recipe(true))
+        val hash = MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
         assertEquals("747d79fe0dd567a3d45899113677f12d9cc263a20425a2d99a841404060b61ec", hash)
+        assertEquals(1, ByteBuffer.wrap(bytes).getInt(4))
+        assertEquals(Np3ColorGrading(),
+            (PhotoNp3SnapshotCodec.decode(bytes).parameters as Np3PhotoFilterParameters).colorGrading)
+    }
+
+    @Test fun gradingRoundTripsBothCurveFormsAndPreservesExportIdentity() {
+        for (hasCurve in listOf(false, true)) {
+            val original = gradedRecipe(hasCurve)
+            val bytes = PhotoNp3SnapshotCodec.encode(original)
+            assertEquals(3, ByteBuffer.wrap(bytes).getInt(4))
+            assertTrue(bytes.size < 2048)
+            val restored = PhotoNp3SnapshotCodec.decode(bytes)
+            val expected = original.parameters as Np3PhotoFilterParameters
+            val actual = restored.parameters as Np3PhotoFilterParameters
+            assertEquals(original.id, restored.id)
+            assertEquals(original.name, restored.name)
+            assertEquals(expected.copy(toneCurve = null), actual.copy(toneCurve = null))
+            assertArrayEquals(expected.toneCurve, actual.toneCurve)
+            assertArrayEquals(bytes, PhotoNp3SnapshotCodec.encode(restored))
+            assertEquals(com.ztransfer.frame.photoFilterRenderFingerprint(PhotoFilterSelection(original, 80)),
+                com.ztransfer.frame.photoFilterRenderFingerprint(PhotoFilterSelection(restored, 80)))
+            org.junit.Assert.assertNotEquals(
+                com.ztransfer.frame.photoFilterRenderFingerprint(PhotoFilterSelection(restored, 80)),
+                com.ztransfer.frame.photoFilterRenderFingerprint(PhotoFilterSelection(restored, 60)))
+            expected.toneCurve?.set(0, 100)
+            if (hasCurve) assertEquals(0, actual.toneCurve!![0])
+        }
+    }
+
+    @Test fun neutralGradingWithNondefaultMetadataIsRetained() {
+        val original = recipe(false).let { preset ->
+            preset.copy(parameters = (preset.parameters as Np3PhotoFilterParameters).copy(
+                colorGrading = Np3ColorGrading(
+                    highlights = Np3ColorGradingRegion(hue = 360),
+                    midtones = Np3ColorGradingRegion(hue = 120),
+                    shadows = Np3ColorGradingRegion(hue = 240),
+                    blending = 100, balance = -100,
+                ),
+            ))
+        }
+        val bytes = PhotoNp3SnapshotCodec.encode(original)
+        assertEquals(3, ByteBuffer.wrap(bytes).getInt(4))
+        assertEquals(original, PhotoNp3SnapshotCodec.decode(bytes))
+    }
+
+    @Test fun gradedSnapshotsRejectMissingInvalidAndUnexpectedFieldsEvenWithValidChecksum() {
+        val bytes = PhotoNp3SnapshotCodec.encode(gradedRecipe(true))
+        val payload = bytes.copyOfRange(0, bytes.size - 32)
+        val gradingOffset = payload.size - 11 * Int.SIZE_BYTES
+        for (region in 0..2) {
+            for ((field, value) in listOf(0 to 361, 0 to -1, 1 to 101, 1 to -101,
+                2 to 101, 2 to -101)) {
+                rejected(checksum(payload.copyOf().apply {
+                    ByteBuffer.wrap(this).putInt(gradingOffset + (region * 3 + field) * Int.SIZE_BYTES, value)
+                }))
+            }
+        }
+        for ((field, value) in listOf(9 to -1, 9 to 101, 10 to -101, 10 to 101)) {
+            rejected(checksum(payload.copyOf().apply {
+                ByteBuffer.wrap(this).putInt(gradingOffset + field * Int.SIZE_BYTES, value)
+            }))
+        }
+        rejected(checksum(payload.copyOf(gradingOffset)))
+        rejected(checksum(payload.copyOf(payload.size - Int.SIZE_BYTES)))
+        rejected(checksum(payload + ByteArray(Int.SIZE_BYTES)))
+        rejected(checksum(payload.copyOf().apply { ByteBuffer.wrap(this).putInt(4, 1) }))
+        rejected(checksum(payload.copyOf().apply { ByteBuffer.wrap(this).putInt(4, 4) }))
+        rejected(bytes.copyOf().apply { this[lastIndex] = (this[lastIndex].toInt() xor 1).toByte() })
     }
     @Test fun everyClassicStyleRestoresItsOwnRecipeAndDedupIdentity() {
         for (base in ClassicNp3Style.entries) for (hasCurve in listOf(false, true)) {
@@ -116,6 +185,17 @@ class PhotoNp3SnapshotCodecTest {
             0, 0, 16, if (base.creative) 40 else 100,
             if (curve) IntArray(257) { it * 32767 / 256 } else null),
     )
+
+    private fun gradedRecipe(hasCurve: Boolean) = recipe(hasCurve).let { preset ->
+        preset.copy(parameters = (preset.parameters as Np3PhotoFilterParameters).copy(
+            colorGrading = Np3ColorGrading(
+                highlights = Np3ColorGradingRegion(360, 100, -100),
+                midtones = Np3ColorGradingRegion(127, -27, 53),
+                shadows = Np3ColorGradingRegion(0, -100, 100),
+                blending = 71, balance = -43,
+            ),
+        ))
+    }
 
     private fun recipe(hasCurve: Boolean) = PhotoFilterPreset(
         "np3:${"a".repeat(64)}:np3-srgb-v1", "NP3 fixture", Np3PhotoFilterParameters(

@@ -127,6 +127,8 @@ internal fun <T> ReleaseCommitWheel(
     ambientEffectAlpha: State<Float>? = null,
     labelTextColor: Color? = null,
     showIconLabel: Boolean = true,
+    // Cancel a gesture owned by an outgoing preset without recreating the wheel's visuals.
+    gestureKey: Any? = null,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -225,7 +227,7 @@ internal fun <T> ReleaseCommitWheel(
                     append(optionLabel(options[selectedIndex]))
                 }
             }
-            .pointerInput(options, rowPx, enabled, readOnly) {
+            .pointerInput(options, rowPx, enabled, readOnly, gestureKey) {
                 if (!enabled || readOnly || !wheelDragEnabled(options.size)) return@pointerInput
                 var accumulatedDy = 0f
                 try {
@@ -462,7 +464,8 @@ internal fun <T> ReleaseCommitWheel(
             }
         }
 
-        if (showDragHint && enabled && !readOnly && wheelDragEnabled(options.size)) {
+        // Temporary read-only loads retain the whole face, including its drag hint.
+        if (showDragHint && enabled && wheelDragEnabled(options.size)) {
             // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
             WheelDragHint(
                 color = colors.onSurfaceVariant.copy(alpha = 0.42f),

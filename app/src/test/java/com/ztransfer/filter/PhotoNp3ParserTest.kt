@@ -104,22 +104,47 @@ class PhotoNp3ParserTest {
         assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { this[0x2100] = byteArrayOf(128.toByte(), 1) })
         assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { getValue(0x1900)[1] = 4 })
         assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { getValue(0x0800)[0] = 128.toByte() })
-        assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { getValue(0x1400)[0] = 129.toByte() })
+        assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { getValue(0x1400)[1] = 4 })
         assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { getValue(0x1F00)[24] = 2 })
         assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { getValue(0x2000)[12] = 2 })
     }
 
-    @Test fun activeColorGradingIsUnsupportedEvenIfOtherControlsAreSupported() {
-        for (offset in listOf(2, 3, 6, 7, 10, 11)) {
-            assertFailure(PhotoNp3Failure.UNSUPPORTED, changed { getValue(0x2000)[offset] = setting(1) })
+    @Test fun colorGradingReadsAllRegionsAndBlendControlsWithoutDroppingAdjustments() {
+        val expected = Np3ColorGrading(
+            highlights = Np3ColorGradingRegion(360, 100, -100),
+            midtones = Np3ColorGradingRegion(125, -33, 20),
+            shadows = Np3ColorGradingRegion(256, -100, 75),
+            blending = 0, balance = -100,
+        )
+        val bytes = changed {
+            val grading = getValue(0x2000)
+            listOf(expected.highlights, expected.midtones, expected.shadows).forEachIndexed { index, region ->
+                val offset = index * 4
+                grading[offset] = setting(region.hue shr 8)
+                grading[offset + 1] = (region.hue and 255).toByte()
+                grading[offset + 2] = setting(region.chroma)
+                grading[offset + 3] = setting(region.brightness)
+            }
+            grading[16] = setting(expected.blending)
+            grading[18] = setting(expected.balance)
         }
+        assertEquals(expected, parameters(PhotoNp3Parser.parse(bytes)).colorGrading)
+        for (offset in listOf(2, 3, 6, 7, 10, 11)) {
+            assertFalse(parameters(PhotoNp3Parser.parse(changed {
+                getValue(0x2000)[offset] = setting(1)
+            })).colorGrading.isNeutral)
+        }
+    }
+
+    @Test fun neutralColorGradingRemainsCanonicalForPreviouslySupportedRecipes() {
         // A hue or blend setting with zero chroma and brightness contributes no visible grading.
         val neutral = changed {
             getValue(0x2000)[1] = 120
             getValue(0x2000)[16] = setting(80)
             getValue(0x2000)[18] = setting(-40)
         }
-        assertEquals(controls(parameters(PhotoNp3Parser.parse(sample()))), controls(parameters(PhotoNp3Parser.parse(neutral))))
+        assertEquals(parameters(PhotoNp3Parser.parse(sample())), parameters(PhotoNp3Parser.parse(neutral)))
+        assertEquals(Np3ColorGrading(), parameters(PhotoNp3Parser.parse(neutral)).colorGrading)
     }
 
     @Test fun outOfRangeValuesAreRejectedInsteadOfClamped() {
@@ -130,12 +155,19 @@ class PhotoNp3ParserTest {
             for (offset in 0 until 24) {
                 assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x1F00)[offset] = setting(value) })
             }
+            for (offset in listOf(2, 3, 6, 7, 10, 11, 18)) {
+                assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x2000)[offset] = setting(value) })
+            }
         }
         assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x0600)[0] = setting(37) })
         assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x0700)[0] = setting(-21) })
         assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x1600)[0] = setting(21) })
         assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x2000)[16] = setting(-1) })
+        assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x2000)[16] = setting(101) })
         assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x2000)[0] = 129.toByte(); getValue(0x2000)[1] = 127 })
+        for (value in listOf(-3, 3)) {
+            assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x1400)[0] = setting(value) })
+        }
     }
 
     @Test fun detailControlsAreExplicitlyRecognizedButDoNotChangeColorParameters() {
@@ -144,6 +176,19 @@ class PhotoNp3ParserTest {
         }
         assertFalse(PhotoNp3Parser.parse(bytes).ignoredDetailControls)
         assertEquals(controls(parameters(PhotoNp3Parser.parse(sample()))), controls(parameters(PhotoNp3Parser.parse(bytes))))
+    }
+
+    @Test fun quickSharpeningAcceptsManualAutoAndUnavailableWithoutChangingColor() {
+        val baseline = fields(sample()).apply {
+            for (tag in listOf(0x0600, 0x0700, 0x1600)) getValue(tag)[0] = setting(0)
+        }
+        val expected = parameters(PhotoNp3Parser.parse(encode(baseline)))
+        for (raw in listOf(0, 126, 127, 128, 129, 130, 255)) {
+            baseline.getValue(0x1400)[0] = raw.toByte()
+            val parsed = PhotoNp3Parser.parse(encode(baseline))
+            assertEquals(expected, parameters(parsed))
+            assertEquals("quick sharp raw=$raw", raw != 128 && raw != 255, parsed.ignoredDetailControls)
+        }
     }
 
     @Test fun curveSamplesAreOwnedAndTheSourceCannotMutateAnExportSnapshot() {
@@ -165,6 +210,18 @@ class PhotoNp3ParserTest {
         assertFailure(PhotoNp3Failure.UNSUPPORTED, changed("tonecurve-noop") { getValue(2)[63] = 1 })
         assertFailure(PhotoNp3Failure.INVALID, changed { getValue(0x1900)[0] = 1 })
         assertFailure(PhotoNp3Failure.INVALID, changed("tonecurve-noop") { getValue(0x1900)[0] = 255.toByte() })
+    }
+
+    @Test fun editedCurveLevelsAndGammaDoNotRejectOrDoubleApplyTheRecordedCurve() {
+        val original = parameters(PhotoNp3Parser.parse(sample("tonecurve-noop")))
+        val modified = changed("tonecurve-noop") {
+            // I0 editor levels/gamma seen in exported Flexible Color files, independent of LUT.
+            byteArrayOf(12, -1, 5, -11, 1, 7).copyInto(getValue(2), destinationOffset = 2)
+        }
+        val actual = parameters(PhotoNp3Parser.parse(modified))
+        assertArrayEquals(original.toneCurve, actual.toneCurve)
+        assertEquals(controls(original), controls(actual))
+        assertEquals(original.copy(toneCurve = null), actual.copy(toneCurve = null))
     }
 
     @Test fun identityIsContentBasedAndRepeatReadsAreStable() {

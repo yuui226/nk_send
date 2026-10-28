@@ -1830,6 +1830,7 @@ internal fun FavoriteToggleButton(
     description: String? = null,
     compact: Boolean = false,
     compactSize: Dp = 28.dp,
+    readOnly: Boolean = false,
 ) {
     val palette = rememberPhotoEffectFavoriteButtonPalette()
     val markColor by animateColorAsState(
@@ -1839,7 +1840,8 @@ internal fun FavoriteToggleButton(
     )
     GlassButton(
         onClick = onClick,
-        enabled = enabled,
+        enabled = enabled && !readOnly,
+        disabledAlpha = if (enabled) 1f else 0.45f,
         active = favorite,
         activeColor = palette.activeMaterial,
         activeOutline = true,

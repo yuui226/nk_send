@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -57,6 +59,7 @@ internal fun PresetCategoryList(
 
 /** Caller supplies bounded height; both columns scroll independently and retain their width. */
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 internal fun <T> PresetCategoryBrowser(
     categories: List<PresetCategory<T>>, selected: String?, optionKey: (T) -> String,
     enabled: Boolean = true, modifier: Modifier = Modifier,
@@ -73,16 +76,20 @@ internal fun <T> PresetCategoryBrowser(
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         val categoryScroll = rememberLazyListState(
             initialFirstVisibleItemIndex = categories.indexOfFirst { it.key == category }.coerceAtLeast(0))
-        LazyColumn(Modifier.weight(.36f), state = categoryScroll, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            items(categories, key = { it.key }) { item ->
-                Surface(onClick = { category = item.key }, enabled = enabled,
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (category == item.key) colors.accentBlue.copy(alpha = .14f) else Color.Transparent,
-                    modifier = Modifier.fillMaxWidth()) {
-                    Text(item.label, style = MaterialTheme.typography.labelLarge,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        color = if (category == item.key) colors.accentBlue else colors.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp))
+        // Compact only the category rail; long labels can still grow to two lines.
+        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+            LazyColumn(Modifier.weight(.36f), state = categoryScroll) {
+                items(categories, key = { it.key }) { item ->
+                    Surface(onClick = { category = item.key }, enabled = enabled,
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (category == item.key) colors.accentBlue.copy(alpha = .14f) else Color.Transparent,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp)) {
+                        Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), contentAlignment = Alignment.CenterStart) {
+                            Text(item.label, style = MaterialTheme.typography.labelLarge,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                color = if (category == item.key) colors.accentBlue else colors.onSurfaceVariant)
+                        }
+                    }
                 }
             }
         }

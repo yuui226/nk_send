@@ -34,11 +34,13 @@ internal fun PhotoColorAdjustmentButton(
     accentColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
 ) {
     ReleaseCommitWheel(
         options = listOf(Unit), selected = Unit, optionLabel = { label }, onValueCommitted = {},
         onActivated = onClick, modifier = modifier, wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
         accentColor = accentColor, enabled = enabled, emphasized = expanded, showDragHint = false,
+        readOnly = readOnly,
     )
 }
 
@@ -52,7 +54,12 @@ internal fun PhotoColorAdjustmentControls(
     onIntensityChanged: (Int) -> Unit,
     onAdjustmentsChanged: (LutAdjustments) -> Unit,
     onDetent: () -> Unit,
+    presetId: String? = null,
+    readOnly: Boolean = false,
 ) {
+    // Keep every wheel mounted when values change. Only its in-flight gesture belongs to
+    // this exact parameter snapshot, so a reset/new preset cannot commit an old drag.
+    val gestureKey = remember(presetId, intensityPercent, adjustments) { Any() }
     Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ReleaseCommitWheel(
@@ -61,6 +68,7 @@ internal fun PhotoColorAdjustmentControls(
                 modifier = Modifier.weight(1f), label = intensityLabel,
                 wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
                 optionFontSize = 13.sp, accentColor = accentColor, enabled = enabled, onDetent = onDetent,
+                readOnly = readOnly, gestureKey = gestureKey,
             )
             val resetLabel = stringResource(R.string.photo_color_reset)
             ReleaseCommitWheel(
@@ -72,6 +80,7 @@ internal fun PhotoColorAdjustmentControls(
                 },
                 modifier = Modifier.width(38.dp), wheelHeight = 34.dp, cornerRadius = 10.dp,
                 showDragHint = false, enabled = enabled, accentColor = accentColor,
+                readOnly = readOnly, gestureKey = gestureKey,
                 centerIcon = { PhotoColorResetIcon(it) }, showIconLabel = false,
             )
         }
@@ -83,6 +92,7 @@ internal fun PhotoColorAdjustmentControls(
                 modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_contrast),
                 wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
                 optionFontSize = 13.sp, accentColor = accentColor, enabled = enabled, onDetent = onDetent,
+                readOnly = readOnly, gestureKey = gestureKey,
             )
             ReleaseCommitWheel(
                 remember(adjustments.saturation) { photoColorAdjustmentOptions(adjustments.saturation) },
@@ -91,6 +101,7 @@ internal fun PhotoColorAdjustmentControls(
                 modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_saturation),
                 wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
                 optionFontSize = 13.sp, accentColor = accentColor, enabled = enabled, onDetent = onDetent,
+                readOnly = readOnly, gestureKey = gestureKey,
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -101,6 +112,7 @@ internal fun PhotoColorAdjustmentControls(
                 modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_highlights),
                 wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
                 optionFontSize = 13.sp, accentColor = accentColor, enabled = enabled, onDetent = onDetent,
+                readOnly = readOnly, gestureKey = gestureKey,
             )
             ReleaseCommitWheel(
                 remember(adjustments.shadows) { photoColorAdjustmentOptions(adjustments.shadows) },
@@ -109,6 +121,7 @@ internal fun PhotoColorAdjustmentControls(
                 modifier = Modifier.weight(1f), label = stringResource(R.string.photo_lut_shadows),
                 wheelHeight = 34.dp, cornerRadius = 10.dp, optionRowHeight = 16.dp,
                 optionFontSize = 13.sp, accentColor = accentColor, enabled = enabled, onDetent = onDetent,
+                readOnly = readOnly, gestureKey = gestureKey,
             )
         }
     }

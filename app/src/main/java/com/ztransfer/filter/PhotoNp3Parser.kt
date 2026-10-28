@@ -104,11 +104,20 @@ internal object PhotoNp3Parser {
         for (tag in 0x0C00..0x0D00 step 0x100) fixed(tag, 255, 0)
         fixed(0x0E00, 255, 4)
         for (tag in 0x0F00..0x1300 step 0x100) fixed(tag, 255, 1)
-        fixed(0x1400, 128, 1)
         fixed(0x1500, 255, 10)
         fixed(0x1700, 255, 4)
         fixed(0x1800, 255, 4)
 
+        // Quick sharp controls the three detail adjustments below. Like the Classic importer,
+        // recognize manual -2..2, automatic (0), and unavailable (255) without applying a second
+        // sharpening pass to an already developed photo.
+        val quickSharp = field(0x1400, 2).let {
+            supportedUnless(it[1].unsigned() == 1, "Unsupported NP3 field encoding 0x1400")
+            it[0].unsigned().also { value ->
+                invalidUnless(value == 0 || value == 255 || value - 128 in -2..2,
+                    "NP3 quick sharpening is out of range")
+            }
+        }
         // These are quarter-step camera controls, not the photo renderer's global color controls.
         val detailControls = listOf(
             scalar(0x0600, 4, -12..36),
@@ -137,18 +146,19 @@ internal object PhotoNp3Parser {
             invalidUnless(values.all { it in -100..100 }, "NP3 color mixer value is out of range")
             PhotoFilterColorBand(center, values[0], values[1], values[2])
         }
-        validateNeutralGrading(field(0x2000, 20))
+        val grading = parseColorGrading(field(0x2000, 20))
         fields[0x10100]?.let(::validateComment)
 
         val parameters = Np3PhotoFilterParameters(
             contrast = tonal[0], highlights = tonal[1], shadows = tonal[2],
             whites = tonal[3], blacks = tonal[4], saturation = saturation,
-            colorBands = bands, toneCurve = curve,
+            colorBands = bands, toneCurve = curve, colorGrading = grading,
         )
         return ParsedPhotoNp3(
             sourceSha256 = digest,
             preset = PhotoFilterPreset("np3:$digest:$CONVERTER_VERSION", name, parameters),
-            ignoredDetailControls = detailControls.any { it != 0 },
+            ignoredDetailControls = detailControls.any { it != 0 } ||
+                (quickSharp != 128 && quickSharp != 255),
         )
     }
 
@@ -183,11 +193,13 @@ internal object PhotoNp3Parser {
 
     private fun parseToneCurve(bytes: ByteArray): IntArray {
         invalidUnless(bytes.size == 578, "Invalid NP3 tone curve length")
-        supportedUnless(bytes.copyOfRange(0, 8).contentEquals(byteArrayOf(0x49, 0x30, 0, -1, 0, -1, 1, 0)),
+        supportedUnless(bytes[0] == 0x49.toByte() && bytes[1] == 0x30.toByte(),
             "Unsupported NP3 tone curve layout")
         val points = bytes[8].unsigned()
         invalidUnless(points <= 20, "Invalid NP3 tone curve point count")
-        // Control points are editing metadata; the 257 recorded samples define the curve used.
+        // Black/white levels, gamma and control points describe the editor, not extra transforms.
+        // The 257 recorded samples already incorporate them, just as in Classic NP3 curves.
+        // Retain the reserved-byte guard instead of accepting an unknown extended layout.
         supportedUnless(bytes.copyOfRange(49, 64).all { it == 0.toByte() }, "Unsupported NP3 tone curve metadata")
         return IntArray(PHOTO_FILTER_TONE_CURVE_POINT_COUNT) { index ->
             val offset = 64 + index * 2
@@ -197,23 +209,26 @@ internal object PhotoNp3Parser {
         }
     }
 
-    private fun validateNeutralGrading(bytes: ByteArray) {
+    private fun parseColorGrading(bytes: ByteArray): Np3ColorGrading {
         supportedUnless(bytes.copyOfRange(12, 16).contentEquals(byteArrayOf(1, 1, 1, 0)) &&
             bytes[17].unsigned() == 1 && bytes[19].unsigned() == 1, "Unsupported NP3 color grading encoding")
-        var neutral = true
-        for (offset in listOf(0, 4, 8)) {
+        fun region(offset: Int): Np3ColorGradingRegion {
             supportedUnless(bytes[offset].unsigned() in 128..129, "Unsupported NP3 grading hue encoding")
             val hue = ((bytes[offset].unsigned() - 128) shl 8) or bytes[offset + 1].unsigned()
             val chroma = bytes[offset + 2].unsigned() - 128
             val brightness = bytes[offset + 3].unsigned() - 128
             invalidUnless(hue in 0..360 && chroma in -100..100 && brightness in -100..100,
                 "NP3 color grading value is out of range")
-            // Hue, blending and balance have no effect while all grading regions are neutral.
-            neutral = neutral && chroma == 0 && brightness == 0
+            return Np3ColorGradingRegion(hue, chroma, brightness)
         }
-        invalidUnless(bytes[16].unsigned() - 128 in 0..100 && bytes[18].unsigned() - 128 in -100..100,
+        val blending = bytes[16].unsigned() - 128
+        val balance = bytes[18].unsigned() - 128
+        invalidUnless(blending in 0..100 && balance in -100..100,
             "NP3 color grading blend is out of range")
-        supportedUnless(neutral, "NP3 color grading is not supported for photos")
+        val grading = Np3ColorGrading(region(0), region(4), region(8), blending, balance)
+        // Hue, blending and balance have no effect while all regions are neutral. Canonicalize
+        // them so formerly supported recipes keep their original parameters and snapshot bytes.
+        return if (grading.isNeutral) Np3ColorGrading() else grading
     }
 
     private fun validateComment(bytes: ByteArray) {

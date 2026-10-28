@@ -38,6 +38,7 @@ data class Np3PhotoFilterParameters(
     val saturation: Int,
     val colorBands: List<PhotoFilterColorBand>,
     val toneCurve: IntArray? = null,
+    val colorGrading: Np3ColorGrading = Np3ColorGrading(),
 ) : PhotoFilterParameters {
     init {
         listOf(contrast, highlights, shadows, whites, blacks, saturation).forEach {

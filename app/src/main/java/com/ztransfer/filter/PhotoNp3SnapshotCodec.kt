@@ -12,6 +12,7 @@ internal object PhotoNp3SnapshotCodec {
     private const val MAGIC = 0x4e503353
     private const val FLEXIBLE_VERSION = 1
     private const val TYPED_VERSION = 2
+    private const val GRADED_FLEXIBLE_VERSION = 3
     private const val CLASSIC_TYPE = 1
 
     fun isCustomId(id: String): Boolean = photoNp3RecipeKind(id) != null
@@ -24,11 +25,17 @@ internal object PhotoNp3SnapshotCodec {
             PhotoNp3RecipeKind.FLEXIBLE -> parameters is Np3PhotoFilterParameters
             PhotoNp3RecipeKind.CLASSIC -> parameters is ClassicNp3PhotoFilterParameters
         }) { "NP3 recipe ID does not match its parameters" }
+        val version = when {
+            kind == PhotoNp3RecipeKind.CLASSIC -> TYPED_VERSION
+            parameters is Np3PhotoFilterParameters && parameters.colorGrading != Np3ColorGrading() ->
+                GRADED_FLEXIBLE_VERSION
+            else -> FLEXIBLE_VERSION
+        }
         val payload = ByteArrayOutputStream().also { buffer ->
             DataOutputStream(buffer).use { output ->
                 output.writeInt(MAGIC)
                 // Keep Flexible v1 byte-for-byte compatible with already saved recipes.
-                output.writeInt(if (kind == PhotoNp3RecipeKind.FLEXIBLE) FLEXIBLE_VERSION else TYPED_VERSION)
+                output.writeInt(version)
                 if (kind == PhotoNp3RecipeKind.CLASSIC) output.writeByte(CLASSIC_TYPE)
                 output.writeUTF(preset.id)
                 output.writeUTF(preset.name)
@@ -42,6 +49,9 @@ internal object PhotoNp3SnapshotCodec {
                             output.writeInt(band.brightness)
                         }
                         output.writeCurve(parameters.toneCurve)
+                        if (version == GRADED_FLEXIBLE_VERSION) {
+                            output.writeGrading(parameters.colorGrading)
+                        }
                     }
                     is ClassicNp3PhotoFilterParameters -> {
                         listOf(parameters.base.id, parameters.contrastQuarter, parameters.brightnessQuarter,
@@ -63,8 +73,9 @@ internal object PhotoNp3SnapshotCodec {
         require(MessageDigest.isEqual(checksum(payload), bytes.copyOfRange(bytes.size - 32, bytes.size)))
         return DataInputStream(ByteArrayInputStream(payload)).use { input ->
             require(input.readInt() == MAGIC)
-            val kind = when (input.readInt()) {
-                FLEXIBLE_VERSION -> PhotoNp3RecipeKind.FLEXIBLE
+            val version = input.readInt()
+            val kind = when (version) {
+                FLEXIBLE_VERSION, GRADED_FLEXIBLE_VERSION -> PhotoNp3RecipeKind.FLEXIBLE
                 TYPED_VERSION -> {
                     require(input.readUnsignedByte() == CLASSIC_TYPE)
                     PhotoNp3RecipeKind.CLASSIC
@@ -81,8 +92,11 @@ internal object PhotoNp3SnapshotCodec {
                     val bands = PHOTO_FILTER_COLOR_BAND_CENTERS.map { center ->
                         PhotoFilterColorBand(center, input.readInt(), input.readInt(), input.readInt())
                     }
+                    val curve = input.readCurve()
+                    val grading = if (version == GRADED_FLEXIBLE_VERSION) input.readGrading()
+                        else Np3ColorGrading()
                     Np3PhotoFilterParameters(controls[0], controls[1], controls[2], controls[3],
-                        controls[4], controls[5], bands, input.readCurve())
+                        controls[4], controls[5], bands, curve, grading)
                 }
                 PhotoNp3RecipeKind.CLASSIC -> {
                     val baseId = input.readInt()
@@ -106,6 +120,21 @@ internal object PhotoNp3SnapshotCodec {
         val size = readInt()
         require(size == 0 || size == PHOTO_FILTER_TONE_CURVE_POINT_COUNT)
         return if (size == 0) null else IntArray(size) { readUnsignedShort() }
+    }
+
+    private fun DataOutputStream.writeGrading(grading: Np3ColorGrading) {
+        for (region in listOf(grading.highlights, grading.midtones, grading.shadows)) {
+            writeInt(region.hue)
+            writeInt(region.chroma)
+            writeInt(region.brightness)
+        }
+        writeInt(grading.blending)
+        writeInt(grading.balance)
+    }
+
+    private fun DataInputStream.readGrading(): Np3ColorGrading {
+        fun region() = Np3ColorGradingRegion(readInt(), readInt(), readInt())
+        return Np3ColorGrading(region(), region(), region(), readInt(), readInt())
     }
 
     private fun checksum(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)

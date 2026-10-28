@@ -222,8 +222,10 @@ internal class PhotoNp3EditorState internal constructor(
 
     private fun read(file: PresetFile, refreshed: Boolean) {
         val id = begin()
-        loadingSelection = true
-        pendingUri = file.uri
+        // A refresh validates the saved source without selecting it. In particular, returning
+        // from LUT must keep an Off filter Off while its previous source is being refreshed.
+        loadingSelection = !refreshed
+        pendingUri = file.uri.takeUnless { refreshed }
         ticket = PresetIoQueue.submit({ signal -> source.read(file, signal).also { signal.throwIfCanceled() } }) { result ->
             if (!valid(id)) return@submit
             finish()

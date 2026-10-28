@@ -80,6 +80,7 @@ object PhotoFilterRenderer {
         val np3SaturationAdjustment: Float = 0f,
         val np3ColorBands: CompiledNp3ColorBands? = null,
         val np3TonalControls: CompiledNp3TonalControls? = null,
+        val np3ColorGrading: CompiledNp3ColorGrading? = null,
         val classicControls: CompiledClassicControls? = null,
     ) {
         val hasFinishingAdjustments = !lutAdjustments.isNeutral
@@ -241,6 +242,7 @@ object PhotoFilterRenderer {
                 preserveAlpha = preserveAlpha,
                 lutAdjustments = adjustments,
                 np3SaturationAdjustment = parameters.saturation / 100f,
+                np3ColorGrading = CompiledNp3ColorGrading.compile(parameters.colorGrading),
                 np3ColorBands = CompiledNp3ColorBands(
                     hue = IntArray(parameters.colorBands.size) { parameters.colorBands[it].hue },
                     chroma = IntArray(parameters.colorBands.size) {
@@ -651,11 +653,12 @@ object PhotoFilterRenderer {
             }
         }
 
-        val filtered = hslToRgbPacked(
+        val colorAdjusted = hslToRgbPacked(
             hue,
             saturation.coerceIn(0f, 1f),
             lightness.coerceIn(0f, 1f),
         )
+        val filtered = compiled.np3ColorGrading?.apply(colorAdjusted) ?: colorAdjusted
         val blended = alpha shl 24 or
             (mixChannel(originalR, filtered ushr 16 and 0xff, compiled.strength) shl 16) or
             (mixChannel(originalG, filtered ushr 8 and 0xff, compiled.strength) shl 8) or

@@ -40,7 +40,6 @@ import com.ztransfer.filter.LutAdjustments
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoNp3EditorState
 import com.ztransfer.filter.category
-import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.presets.PresetFile
 import com.ztransfer.presets.PresetFolderFailure
@@ -239,10 +238,11 @@ internal fun PhotoFilterEditor(
         val transition = rememberInfiniteTransition(label = "photoNp3Loading")
         transition.animateFloat(.04f, .14f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "photoNp3LoadingAlpha")
     } else null
-    val controlsEnabled = active && enabled && selected != null && !np3.loading
+    // Loading changes interaction availability, not the appearance of the applied preset.
+    val controlsEnabled = active && enabled && selected != null
     // Exit contents are retained for the collapse animation; they must not edit a new preset
     // or a disabled editor after their original owner has gone away.
-    val currentControlsEnabled by rememberUpdatedState(controlsEnabled && settingsExpanded)
+    val currentControlsEnabled by rememberUpdatedState(controlsEnabled && !np3.loading && settingsExpanded)
     val currentSelectedId by rememberUpdatedState(selected?.id)
     val currentIntensityChanged by rememberUpdatedState(onIntensityChanged)
     val currentAdjustmentsChanged by rememberUpdatedState(onAdjustmentsChanged)
@@ -270,35 +270,36 @@ internal fun PhotoFilterEditor(
             PhotoColorAdjustmentButton(
                 label = stringResource(R.string.photo_filter_settings), expanded = settingsExpanded,
                 enabled = controlsEnabled, accentColor = filterAccent,
+                readOnly = np3.loading,
                 onClick = { haptics.tick(); settingsExpanded = !settingsExpanded },
                 modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
             )
             FavoriteToggleButton(
                 favorite = enabled && selected?.id?.let(::photoFilterCatalogKey) in favoriteSet,
                 enabled = controlsEnabled,
+                readOnly = np3.loading,
                 onClick = { selected?.let { haptics.tick(); onFavoriteToggled(it.id) } },
             )
         }
         PhotoColorEffectGroup(visible = settingsExpanded && enabled && selected != null, spacing = 0.dp) {
             val presetId = selected?.id
-            key(presetId, normalizePhotoFilterIntensity(intensityPercent), adjustments) {
-                PhotoColorAdjustmentControls(
-                    intensityPercent = intensityPercent, adjustments = adjustments,
-                    intensityLabel = stringResource(R.string.photo_filter_intensity),
-                    accentColor = filterAccent, enabled = controlsEnabled,
-                    onIntensityChanged = { value ->
-                        if (currentControlsEnabled && presetId != null && currentSelectedId == presetId) {
-                            currentIntensityChanged(presetId, value)
-                        }
-                    },
-                    onAdjustmentsChanged = { value ->
-                        if (currentControlsEnabled && presetId != null && currentSelectedId == presetId) {
-                            currentAdjustmentsChanged(presetId, value)
-                        }
-                    },
-                    onDetent = haptics::tick,
-                )
-            }
+            PhotoColorAdjustmentControls(
+                intensityPercent = intensityPercent, adjustments = adjustments,
+                intensityLabel = stringResource(R.string.photo_filter_intensity),
+                accentColor = filterAccent, enabled = controlsEnabled,
+                presetId = presetId, readOnly = np3.loading,
+                onIntensityChanged = { value ->
+                    if (currentControlsEnabled && presetId != null && currentSelectedId == presetId) {
+                        currentIntensityChanged(presetId, value)
+                    }
+                },
+                onAdjustmentsChanged = { value ->
+                    if (currentControlsEnabled && presetId != null && currentSelectedId == presetId) {
+                        currentAdjustmentsChanged(presetId, value)
+                    }
+                },
+                onDetent = haptics::tick,
+            )
         }
 
     }
@@ -323,7 +324,7 @@ internal fun PhotoFilterEditor(
                     orderPhotoFilterChoices(category.options.mapNotNull { documentsByUri[it.uri] }, favoriteRanks))
             }
         }
-        val maxHeight = (configuration.screenHeightDp - 120).coerceIn(120, 440).dp
+        val maxHeight = (configuration.screenHeightDp - 120).coerceIn(120, 560).dp
         Dialog(onDismissRequest = { showChooser = false; showFolderHint = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(

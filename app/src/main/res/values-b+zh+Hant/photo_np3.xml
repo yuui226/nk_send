@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="photo_filter_folder">選擇濾鏡目錄</string>
-    <string name="photo_filter_folder_hint">選擇含 .np3 檔案的資料夾，支援一層子資料夾作為分類。支援傳統預設及部分靈活色彩預設，照片效果為近似模擬，與機內效果可能不同。</string>
+    <string name="photo_filter_folder_hint">選擇含 .np3 檔案的資料夾，支援一層子資料夾作為分類。\n\n照片效果由 App 模擬產生，與相機直出可能不同。</string>
     <string name="photo_filter_folder_empty">目錄中沒有 NP3 檔案</string>
     <string name="photo_np3_invalid">NP3 檔案無效</string>
     <string name="photo_np3_unsupported">暫不支援此 NP3 預設</string>
