@@ -158,6 +158,95 @@ class ThumbnailFillQueueTest {
         assertEquals(listOf(4, 3, 1), queue.drainHandles())
     }
 
+    @Test
+    fun `visible completions update pending count and preserve both lane orders`() {
+        val queue = ThumbnailFillQueue()
+        val range = PhotoDateRange.between(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 2))
+        queue.seed((1..5).map { file(it) }, range)
+
+        queue.markSettled(2)
+        queue.markSettled(4)
+        queue.markSettled(4)
+
+        assertEquals(3, queue.pendingCount)
+        assertEquals(listOf(1, 5, 3), queue.drainHandles())
+        assertEquals(0, queue.pendingCount)
+        assertNull(queue.poll())
+    }
+
+    @Test
+    fun `settled entries cannot return after priority or loading range changes`() {
+        val queue = ThumbnailFillQueue()
+        queue.seed((1..5).map { file(it) }, null)
+        queue.markSettled(2)
+        queue.markSettled(4)
+
+        queue.updatePriorityRange(PhotoDateRange.between(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 2)))
+        queue.updateLoadingRange(PhotoDateRange.between(LocalDate.of(2026, 8, 2), LocalDate.of(2026, 8, 5)))
+        queue.seed((1..5).map { file(it) }, null,
+            PhotoDateRange.between(LocalDate.of(2026, 8, 2), LocalDate.of(2026, 8, 5)))
+
+        assertEquals(2, queue.pendingCount)
+        assertEquals(listOf(5, 3), queue.drainHandles())
+    }
+
+    @Test
+    fun `deleting a settled pending handle allows its replacement without reviving the old file`() {
+        val queue = ThumbnailFillQueue()
+        queue.seed((1..3).map { file(it) }, null)
+        queue.markSettled(2)
+        queue.removeHandles(setOf(2))
+        val replacement = file(2).copy(fileName = "REUSED.JPG", size = 99L)
+
+        queue.enqueueNew(replacement)
+
+        assertEquals(3, queue.pendingCount)
+        assertEquals(replacement, queue.poll())
+        assertEquals(listOf(3, 1), queue.drainHandles())
+    }
+
+    @Test
+    fun `paused work keeps its place but a concurrent visible completion prevents returning it`() {
+        val queue = ThumbnailFillQueue()
+        queue.seed((1..3).map { file(it) }, null)
+        queue.markSettled(2)
+        val paused = queue.poll()!!
+        queue.returnToFront(paused)
+        assertEquals(2, queue.pendingCount)
+        assertEquals(paused, queue.poll())
+
+        queue.markSettled(paused.handle)
+        queue.returnToFront(paused)
+
+        assertEquals(1, queue.pendingCount)
+        assertEquals(listOf(1), queue.drainHandles())
+    }
+
+    @Test
+    fun `visible completion removes a pending failure from later retries`() {
+        val queue = ThumbnailFillQueue()
+        queue.seed((1..3).map { file(it) }, null)
+        queue.markFailed(file(2))
+        queue.markSettled(2)
+        queue.retryFailed()
+
+        assertEquals(0, queue.failedCount)
+        assertEquals(2, queue.pendingCount)
+        assertEquals(listOf(3, 1), queue.drainHandles())
+    }
+
+    @Test
+    fun `all completed pending entries drain without returning any work`() {
+        val queue = ThumbnailFillQueue()
+        val files = (1..500).map { file(it, "20260801T120000") }
+        queue.seed(files, null)
+        files.forEach { queue.markSettled(it.handle) }
+
+        assertEquals(0, queue.pendingCount)
+        assertNull(queue.poll())
+        assertEquals(0, queue.pendingCount)
+    }
+
     private fun ThumbnailFillQueue.drainHandles(): List<Int> = buildList {
         while (true) add(poll()?.handle ?: break)
     }

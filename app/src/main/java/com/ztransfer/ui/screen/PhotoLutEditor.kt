@@ -58,7 +58,7 @@ internal fun rememberPhotoLutDraft(role: String, initial: PhotoFilterSelection?,
 internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean) {
     val context = LocalContext.current
     var showChooser by remember { mutableStateOf(false) }
-    var lutSettingsExpanded by remember { mutableStateOf(false) }
+    var lutSettingsExpanded by remember(state.selection != null) { mutableStateOf(false) }
     val colors = AppTheme.colors
     val lutAccent = lerp(colors.statusConnected, colors.accentBlue, .35f)
     val haptics = rememberHaptics(hapticsEnabled)
@@ -101,6 +101,8 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
     }
     val empty = options.size == 1
     val active = state.selection != null
+    // Exit animation retains old content; consult the current disclosure, not its old state.
+    val controlsInteractive by rememberUpdatedState(active && !state.loading && lutSettingsExpanded)
     val lutSettingsLabel = stringResource(R.string.photo_lut_settings)
     SettingsCard(tintColor = lutAccent, borderColor = lutAccent.copy(alpha = .24f)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -136,8 +138,8 @@ internal fun PhotoLutEditor(state: PhotoLutEditorState, hapticsEnabled: Boolean)
                 intensityLabel = stringResource(R.string.photo_lut_concentration),
                 accentColor = lutAccent, enabled = active,
                 presetId = presetId, readOnly = state.loading,
-                onIntensityChanged = { if (lutSettingsExpanded && !state.loading && state.selection?.preset?.id == presetId) state.strength(it) },
-                onAdjustmentsChanged = { if (lutSettingsExpanded && !state.loading && state.selection?.preset?.id == presetId) state.adjustments(it) },
+                onIntensityChanged = { if (controlsInteractive && state.selection?.preset?.id == presetId) state.strength(it) },
+                onAdjustmentsChanged = { if (controlsInteractive && state.selection?.preset?.id == presetId) state.adjustments(it) },
                 onDetent = haptics::tick,
             )
         }

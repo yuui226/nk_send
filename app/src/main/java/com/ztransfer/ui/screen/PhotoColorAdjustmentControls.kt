@@ -39,7 +39,7 @@ internal fun PhotoColorAdjustmentButton(
     ReleaseCommitWheel(
         options = listOf(Unit), selected = Unit, optionLabel = { label }, onValueCommitted = {},
         onActivated = onClick, modifier = modifier, wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-        accentColor = accentColor, enabled = enabled, emphasized = expanded, showDragHint = false,
+        accentColor = accentColor, enabled = enabled, emphasized = expanded && enabled, showDragHint = false,
         readOnly = readOnly,
     )
 }

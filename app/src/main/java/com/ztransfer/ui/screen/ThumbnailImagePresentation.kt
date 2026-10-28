@@ -23,7 +23,13 @@ internal class ThumbnailImagePresentation(
     val image: State<ImageBitmap?>,
     val alpha: State<Float>,
     val showPlaceholder: State<Boolean>,
+    // Fixed for this cell's lifetime: removing a layer mid-fade would change its draw structure.
+    val needsFadeLayer: Boolean = true,
 )
+
+private class FixedThumbnailState<T>(override val value: T) : State<T>
+private val cachedThumbnailAlpha: State<Float> = FixedThumbnailState(1f)
+private val cachedThumbnailPlaceholder: State<Boolean> = FixedThumbnailState(false)
 
 /**
  * Cached cells draw immediately; only a newly loaded image fades over its existing placeholder.
@@ -41,8 +47,20 @@ internal fun rememberThumbnailImagePresentation(
     loadThumbnail: suspend (allowRemote: Boolean) -> ImageBitmap?,
     thumbnailReadyEvents: Flow<Int> = emptyFlow(),
 ): ThumbnailImagePresentation {
-    val image = remember(handle) { mutableStateOf(cachedThumbnail()) }
-    val opacity = remember(handle) { Animatable(if (image.value != null) 1f else 0f) }
+    // Choose this path only when the cell first enters composition. Cache hits need neither
+    // loading coroutines nor animation state; a later cache fill must still finish its fade.
+    val cached = remember(handle) {
+        cachedThumbnail()?.let { image ->
+            ThumbnailImagePresentation(
+                FixedThumbnailState(image), cachedThumbnailAlpha, cachedThumbnailPlaceholder,
+                needsFadeLayer = false,
+            )
+        }
+    }
+    if (cached != null) return cached
+
+    val image = remember(handle) { mutableStateOf<ImageBitmap?>(null) }
+    val opacity = remember(handle) { Animatable(0f) }
     val latestLoadThumbnail by rememberUpdatedState(loadThumbnail)
     LaunchedEffect(handle, transfersBusy, loadEnabled, allowRemote, thumbnailReadyEvents) {
         if (loadEnabled && image.value == null) {

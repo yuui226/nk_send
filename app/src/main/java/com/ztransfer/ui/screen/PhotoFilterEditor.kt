@@ -121,7 +121,8 @@ internal fun PhotoFilterEditor(
     val filterAccent = colors.accentBlue
     val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
-    var settingsExpanded by remember { mutableStateOf(false) }
+    // Off clears only the disclosure state; changing presets keeps the mounted wheels intact.
+    var settingsExpanded by remember(enabled) { mutableStateOf(false) }
     var showChooser by remember { mutableStateOf(false) }
     var showFolderHint by remember { mutableStateOf(false) }
     var skipPickerResume by remember { mutableStateOf(false) }

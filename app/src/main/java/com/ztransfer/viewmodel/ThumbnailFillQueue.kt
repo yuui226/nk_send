@@ -47,10 +47,9 @@ internal class ThumbnailFillQueue {
     fun markSettled(handle: Int) {
         settledHandles += handle
         failed.remove(handle)
-        if (pendingHandles.remove(handle)) {
-            priority.removeAll { it.handle == handle }
-            regular.removeAll { it.handle == handle }
-        }
+        // A visible cell may finish ahead of background fill. Do not scan both lanes on the
+        // UI thread for every completed thumbnail; poll discards its obsolete entry lazily.
+        pendingHandles.remove(handle)
     }
 
     /** Drops camera objects that an authoritative handle catalog confirmed no longer exist. */
@@ -103,9 +102,10 @@ internal class ThumbnailFillQueue {
     }
 
     fun poll(): NikonCamera.FileInfo? {
-        val file = priority.removeFirstOrNull() ?: regular.removeFirstOrNull() ?: return null
-        pendingHandles.remove(file.handle)
-        return file
+        while (true) {
+            val file = priority.removeFirstOrNull() ?: regular.removeFirstOrNull() ?: return null
+            if (pendingHandles.remove(file.handle)) return file
+        }
     }
 
     fun returnToFront(file: NikonCamera.FileInfo, expectedRevision: Long = revision) {

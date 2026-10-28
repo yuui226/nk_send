@@ -4263,18 +4263,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val diskCache = activeThumbnailDiskCache ?: return null
         val expectedCacheGeneration = thumbnailCacheSessionGeneration
         val cacheFileName = thumbnailDiskCacheFileName(file)
-        val disk = withContext(Dispatchers.IO) {
+        val cached = withContext(Dispatchers.IO) {
             diskCache.findCachedFile(
                 cacheFileName,
                 legacyThumbnailDiskCacheFileName(file),
                 alternateThumbnailDiskCacheFileName(file),
-            )
+            )?.let { disk ->
+                // Keep file lookup and stat in one IO visit. Retain a failed stat with its file
+                // so the existing cancellation/error handling below can clean the right cache.
+                disk to runCatching {
+                    if (disk.isFile) runCatching { disk.length() }.getOrDefault(0L) else 0L
+                }
+            }
         } ?: return null
         if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
+        val disk = cached.first
         return try {
-            val encodedSize = withContext(Dispatchers.IO) {
-                if (disk.isFile) runCatching { disk.length() }.getOrDefault(0L) else 0L
-            }
+            val encodedSize = cached.second.getOrThrow()
             if (encodedSize <= 0L) {
                 withContext(Dispatchers.IO) { diskCache.remove(cacheFileName, disk) }
                 thumbnailDiagnostic(file, failure = true) { "disk empty; bad cache removed" }

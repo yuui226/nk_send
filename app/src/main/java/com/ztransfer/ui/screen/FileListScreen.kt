@@ -106,6 +106,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -162,6 +163,7 @@ import kotlin.math.sin
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
@@ -184,6 +186,27 @@ data class AutoQueueFlightRequest(
 )
 
 internal fun burstCollectionGridKey(id: String): String = "burst_collection_$id"
+
+/** Resolve only when an interaction consumes the anchor, using its current scroll/animation position. */
+private fun LayoutCoordinates?.validBoundsInRoot(): Rect? {
+    if (this == null || !isAttached || size.width <= 0 || size.height <= 0) return null
+    return boundsInRoot().takeIf { it.width > 0f && it.height > 0f }
+}
+
+/** Ordinary references: scrolling updates coordinates without allocating a root-space Rect per cell. */
+private class VisibleItemBoundsRegistry<K> {
+    private val coordinates = HashMap<K, LayoutCoordinates>()
+
+    operator fun set(key: K, value: LayoutCoordinates) { coordinates[key] = value }
+    operator fun get(key: K): Rect? = coordinates[key].validBoundsInRoot()
+    fun remove(key: K) { coordinates.remove(key) }
+
+    fun snapshot(include: (K) -> Boolean): Map<K, Rect> = buildMap {
+        coordinates.forEach { (key, value) ->
+            if (include(key)) value.validBoundsInRoot()?.let { put(key, it) }
+        }
+    }
+}
 
 /** 只从当前真实可见的普通格位或折叠合集格位选择自动入队动画起点。 */
 internal fun resolveAutoQueueFlightSource(
@@ -584,13 +607,12 @@ fun FileListScreen(
             if (abandonedCount > 0) latestQueueFlightsCancelled(abandonedCount)
         }
     }
-    // 每个格子在根坐标系的精确 bounds(格子本就为长按预览挂了 onGloballyPositioned,
-    // 顺手写进注册表,零额外监听)。普通 HashMap 而非快照状态:只在点击瞬间读取,
-    // 滚动期间的高频写入不触发任何重组；格子离开组合时主动删除，容量只随组合项数量增长。
-    val cellBoundsRegistry = remember { HashMap<Int, Rect>() }
+    // 只登记布局坐标引用，点击/预览/入队时才求根坐标，避免每帧给全部格子做坐标转换。
+    // 非快照容器不触发重组；格子离开组合时主动删除，容量只随组合项数量增长。
+    val cellBoundsRegistry = remember { VisibleItemBoundsRegistry<Int>() }
     // 折叠连拍是虚拟格位，没有单个 handle 的 ThumbnailCell；单独按稳定 burst id 记录，
     // 自动传输才能在合集确实可见时从合集本身起飞，而不是误用“屏外新增”的顶部起点。
-    val burstBoundsRegistry = remember { HashMap<String, Rect>() }
+    val burstBoundsRegistry = remember { VisibleItemBoundsRegistry<String>() }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
     val filterAnchor = remember { arrayOfNulls<Rect>(1) }
@@ -628,15 +650,19 @@ fun FileListScreen(
             remoteIntroExpanded = false
         }
     }
-    LaunchedEffect(atTop) {
-        if (atTop) remoteExpandedAwayFromTop = false
-    }
-    LaunchedEffect(atTop, gridState.isScrollInProgress) {
-        if (!atTop && gridState.isScrollInProgress) {
-            // 首次提示也必须服从真实滚动：一旦离开顶部，立即恢复贴边收起态。
-            remoteIntroExpanded = false
-            remoteExpandedAwayFromTop = false
-        }
+    LaunchedEffect(gridState) {
+        // Observe scroll starts/stops outside composition: they must not recompose the
+        // whole photo page just to update these small entry controls.
+        snapshotFlow { atTop to gridState.isScrollInProgress }
+            .collect { (isAtTop, isScrolling) ->
+                if (isAtTop) {
+                    remoteExpandedAwayFromTop = false
+                } else if (isScrolling) {
+                    // 首次提示也必须服从真实滚动：一旦离开顶部，立即恢复贴边收起态。
+                    remoteIntroExpanded = false
+                    remoteExpandedAwayFromTop = false
+                }
+            }
     }
     // 回到顶部按钮的可见性：翻得够深 + 正向顶部方向滚动才出现；往深处翻/接近顶部
     // 立即隐藏；停止滚动一段时间后自动隐藏——静止画面上没有按钮，误触窗口极小。
@@ -665,11 +691,14 @@ fun FileListScreen(
                 lastOffset = offset
             }
     }
-    LaunchedEffect(showBackTop, gridState.isScrollInProgress) {
-        if (showBackTop && !gridState.isScrollInProgress) {
-            delay(1800)
-            showBackTop = false
-        }
+    LaunchedEffect(gridState) {
+        snapshotFlow { showBackTop && !gridState.isScrollInProgress }
+            .collectLatest { shouldHideAfterIdle ->
+                if (shouldHideAfterIdle) {
+                    delay(1800)
+                    showBackTop = false
+                }
+            }
     }
 
     // 底部玻璃提示条（通用）：退出确认、"相机未连接"等复用，替代系统 Toast。
@@ -1095,8 +1124,8 @@ fun FileListScreen(
         val visibleSource = resolveAutoQueueFlightSource(
             files = request.files,
             visibleKeys = visibleKeys,
-            cellBoundsByHandle = cellBoundsRegistry,
-            burstBoundsById = burstBoundsRegistry,
+            cellBoundsByHandle = cellBoundsRegistry.snapshot { it in visibleKeys },
+            burstBoundsById = burstBoundsRegistry.snapshot { burstCollectionGridKey(it) in visibleKeys },
             burstIdByHandle = burstIdByHandle,
         )
         val root = pageBoundsRef[0] ?: return@LaunchedEffect
@@ -1337,7 +1366,7 @@ fun FileListScreen(
                 )
                 withFrameNanos { }
             }
-            // 等一帧让 onGloballyPositioned 注册最新根坐标；找不到就退化为原地淡出。
+            // 等一帧让目标格子登记布局坐标，再按当前位置求边界；找不到就原地淡出。
             withFrameNanos { }
             cellBoundsRegistry[file.handle]
         }
@@ -3307,21 +3336,15 @@ private fun GroupHeader(
         // 整组传输始终允许再次加入；任务执行时分别检查原片和边框是否已经存在。
         // 按钮在根坐标系的 bounds 供"整组吸入"动画定位起飞点。
         // Bounds are consumed only by a click. Layout/scroll updates must not recompose the header.
-        val plusBounds = remember { arrayOfNulls<Rect>(1) }
+        val plusCoordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
         GlassButton(
-            onClick = { onTransferGroup(group.files, plusBounds[0]) },
+            onClick = { onTransferGroup(group.files, plusCoordinates[0].validBoundsInRoot()) },
             enabled = group.files.isNotEmpty(),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .width(40.dp)
                 .height(28.dp)
-                .onGloballyPositioned {
-                    // 只收有效样本，避免分离/复用瞬间的零矩形污染动画起点。
-                    if (it.isAttached) {
-                        val b = it.boundsInRoot()
-                        if (b.width > 0f && b.height > 0f) plusBounds[0] = b
-                    }
-                },
+                .onGloballyPositioned { plusCoordinates[0] = it },
             contentPadding = PaddingValues(horizontal = 10.dp),
             enforceMinimumTouchTarget = false,
         ) {
@@ -3425,8 +3448,8 @@ private fun ThumbnailGrid(
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit,
     tapToPreview: Boolean,
-    cellBoundsRegistry: MutableMap<Int, Rect>,
-    burstBoundsRegistry: MutableMap<String, Rect>,
+    cellBoundsRegistry: VisibleItemBoundsRegistry<Int>,
+    burstBoundsRegistry: VisibleItemBoundsRegistry<String>,
     burstHandles: Set<Int>,
     burstIdByHandle: Map<Int, String>,
     collapseBurstPhotos: Boolean,
@@ -3739,9 +3762,9 @@ private fun ThumbnailGrid(
                                     onPreviewFirst = { rect ->
                                         onPreviewBurst(item.id, item.files, rect)
                                     },
-                                    onBoundsChanged = { bounds ->
-                                        if (bounds == null) burstBoundsRegistry.remove(item.id)
-                                        else burstBoundsRegistry[item.id] = bounds
+                                    onCoordinatesChanged = { coordinates ->
+                                        if (coordinates == null) burstBoundsRegistry.remove(item.id)
+                                        else burstBoundsRegistry[item.id] = coordinates
                                     },
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -3823,21 +3846,20 @@ private fun BurstCollectionCell(
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
     onToggle: () -> Unit,
     onPreviewFirst: (Rect) -> Unit,
-    onBoundsChanged: (Rect?) -> Unit,
+    onCoordinatesChanged: (LayoutCoordinates?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
     val a11y = stringResource(R.string.burst_collection_a11y, files.size)
-    // 两个坐标都只在点击/长按瞬间读取，使用普通容器避免列表滚动时的全局坐标变化
-    // 触发合集卡重组。合集 registry 同样是普通 Map，更新本身不使网格重组。
-    val plusBoundsRef = remember { arrayOfNulls<Rect>(1) }
-    val collectionBoundsRef = remember { arrayOfNulls<Rect>(1) }
+    // Store layout references; root bounds are needed only for a click/long press or queue flight.
+    val plusCoordinatesRef = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val collectionCoordinatesRef = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val latestOnPreviewFirst by rememberUpdatedState(onPreviewFirst)
-    val latestOnBoundsChanged by rememberUpdatedState(onBoundsChanged)
+    val latestOnCoordinatesChanged by rememberUpdatedState(onCoordinatesChanged)
     DisposableEffect(collectionId) {
         // LazyGrid 可复用同 contentType 的组合槽；以真实 id 为 key，复用到下一合集前
         // 先精确清掉旧 id 的坐标，避免普通 HashMap 留下不可见的历史项。
-        onDispose { onBoundsChanged(null) }
+        onDispose { onCoordinatesChanged(null) }
     }
     val chevronRotation = animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
@@ -3848,13 +3870,8 @@ private fun BurstCollectionCell(
     BoxWithConstraints(
         modifier = modifier
             .onGloballyPositioned {
-                if (it.isAttached) {
-                    val bounds = it.boundsInRoot()
-                    if (bounds.width > 0f && bounds.height > 0f) {
-                        collectionBoundsRef[0] = bounds
-                        latestOnBoundsChanged(bounds)
-                    }
-                }
+                collectionCoordinatesRef[0] = it
+                latestOnCoordinatesChanged(it)
             }
             .semantics { contentDescription = a11y }
     ) {
@@ -3950,7 +3967,7 @@ private fun BurstCollectionCell(
                         onLongPress = {
                             // 长按只建立“合集 + 成员”的预览快照并直达第一张；底层列表不在
                             // 预览出现前重排，从而不会短暂闪出展开成员或箭头旋转。
-                            collectionBoundsRef[0]?.let { bounds ->
+                            collectionCoordinatesRef[0].validBoundsInRoot()?.let { bounds ->
                                 latestOnPreviewFirst(bounds)
                             }
                         }
@@ -3969,7 +3986,7 @@ private fun BurstCollectionCell(
         // 用户指定的位置：左下整组入队，右下展开/收起。按钮直接复用全局 GlassButton；
         // 只有在 4 列极窄格子下按比例缩小，避免两颗触点互相覆盖。
         GlassButton(
-            onClick = { onTransferGroup(files, plusBoundsRef[0]) },
+            onClick = { onTransferGroup(files, plusCoordinatesRef[0].validBoundsInRoot()) },
             enabled = files.isNotEmpty(),
             shape = CircleShape,
             contentPadding = PaddingValues(0.dp),
@@ -3979,14 +3996,7 @@ private fun BurstCollectionCell(
                 .offset(x = actionInset, y = -actionInset)
                 .size(actionSize)
                 .drawBehind { drawCircle(actionBacking) }
-                .onGloballyPositioned {
-                    if (it.isAttached) {
-                        val bounds = it.boundsInRoot()
-                        if (bounds.width > 0f && bounds.height > 0f) {
-                            plusBoundsRef[0] = bounds
-                        }
-                    }
-                }
+                .onGloballyPositioned { plusCoordinatesRef[0] = it }
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
@@ -4077,7 +4087,10 @@ internal fun BurstStackPhoto(
                 bitmap = image,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = thumbnail.alpha.value }
+                modifier = Modifier.fillMaxSize().then(
+                    if (thumbnail.needsFadeLayer) Modifier.graphicsLayer { alpha = thumbnail.alpha.value }
+                    else Modifier
+                )
             )
         }
     }
@@ -4097,7 +4110,7 @@ private fun ThumbnailCell(
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     tapToPreview: Boolean,
-    cellBoundsRegistry: MutableMap<Int, Rect>,
+    cellBoundsRegistry: VisibleItemBoundsRegistry<Int>,
     modifier: Modifier = Modifier,
     loadEnabled: Boolean = true,
     inBurst: Boolean = false,
@@ -4197,14 +4210,8 @@ private fun ThumbnailCell(
                 shape = thumbnailShape,
             )
             .onGloballyPositioned {
-                // 同一份 bounds 双用:长按预览的放大起点 + 打包动画的灵魂起点。
-                // 只收有效样本：分离/复用瞬间的零矩形会让动画从屏幕外冒出。
-                if (it.isAttached) {
-                    val b = it.boundsInRoot()
-                    if (b.width > 0f && b.height > 0f) {
-                        cellBoundsRegistry[file.handle] = b
-                    }
-                }
+                // Bounds are resolved and validated at use, never cached at an old scroll position.
+                cellBoundsRegistry[file.handle] = it
             }
             // 只在这里交换两个既有动作的手势入口；传输校验、入队和预览逻辑保持单一来源。
             .combinedClickable(
@@ -4246,7 +4253,10 @@ private fun ThumbnailCell(
                 // 黑边已在解码时按实际黑条精确裁除（CameraViewModel.cropLetterbox），
                 // Crop 填满格子即为刚好，无需再放大遮边。
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = thumbnail.alpha.value }
+                modifier = Modifier.fillMaxSize().then(
+                    if (thumbnail.needsFadeLayer) Modifier.graphicsLayer { alpha = thumbnail.alpha.value }
+                    else Modifier
+                )
             )
         }
 
@@ -4472,20 +4482,18 @@ internal fun ClassicUsbIcon(
 @Composable
 private fun LoadingMoreRow() {
     val colors = AppTheme.colors
-    Row(
+    val loadingDescription = stringResource(R.string.loading_more)
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
+        contentAlignment = Alignment.Center,
     ) {
         CircularProgressIndicator(
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(20.dp).semantics { contentDescription = loadingDescription },
             color = colors.accentBlue,
             strokeWidth = 2.dp
         )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(stringResource(R.string.loading_more), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
     }
 }
 
