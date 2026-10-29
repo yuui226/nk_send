@@ -963,11 +963,12 @@ internal fun createQueueTasks(
     organizeTransfersByDate: Boolean,
     queuedDate: LocalDate = LocalDate.now(),
     photoGrain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    photoEffectsEnabled: Boolean = true,
 ): List<TransferTask> = createQueueTasks(
     files, photoFrameEnabled, photoFrameBorderEnabled, photoFramePreset,
     photoFrameWatermark, photoFrameMetadataSettings, photoFilter,
     if (organizeTransfersByDate) TransferStorageMode.BY_DAY else TransferStorageMode.UNIFIED,
-    queuedDate, photoGrain,
+    queuedDate, photoGrain, photoEffectsEnabled,
 )
 
 internal fun createQueueTasks(
@@ -982,22 +983,25 @@ internal fun createQueueTasks(
     storageMode: TransferStorageMode = TransferStorageMode.UNIFIED,
     queuedDate: LocalDate = LocalDate.now(),
     photoGrain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    photoEffectsEnabled: Boolean = true,
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
     .distinctBy { it.handle }
     .map { file ->
         TransferTask(
             file = file,
+            // Disabled effects remain in editor preferences, not in a newly queued recipe.
+            // This also keeps card labels and later retries consistent if the switch changes.
             framePreset = photoFramePreset.takeIf {
-                shouldGeneratePhotoFrame(photoFrameEnabled, file.extension)
+                shouldGeneratePhotoFrame(photoEffectsEnabled && photoFrameEnabled, file.extension)
             },
             frameBorderRequested = photoFrameBorderEnabled,
             frameMetadataSettings = photoFrameMetadataSettings,
             frameWatermarkRequested = photoFrameWatermark,
             photoFilterRequested = photoFilter.takeIf {
-                isSupportedPhotoFrameSourceExtension(file.extension)
+                photoEffectsEnabled && isSupportedPhotoFrameSourceExtension(file.extension)
             },
-            photoGrainRequested = if (isSupportedPhotoFrameSourceExtension(file.extension)) {
+            photoGrainRequested = if (photoEffectsEnabled && isSupportedPhotoFrameSourceExtension(file.extension)) {
                 photoGrain.normalized()
             } else PhotoGrainSettings.OFF,
             destinationFolderName = transferDestinationFolderName(
@@ -2513,6 +2517,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             photoFilter = snapshot.photoFilterSelection,
             storageMode = snapshot.storageMode,
             photoGrain = snapshot.photoGrain,
+            photoEffectsEnabled = snapshot.photoEffectsEnabled,
         )
         val admittedTasks = if (cropRecipe == null) newTasks else newTasks.map { it.copy(cropRecipe = cropRecipe) }
         if (admittedTasks.isEmpty()) return
