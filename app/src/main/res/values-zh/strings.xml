@@ -507,7 +507,7 @@
     <string name="purchase_open_link">打开支付页面</string>
     <string name="purchase_qr_expired">支付已超时</string>
     <string name="purchase_qr_refresh">重新发起支付</string>
-    <string name="renewal_needed">高级版授权已过期，请连接网络后重开 App 自动续期。</string>
+    <string name="renewal_needed">无网络</string>
     <!-- 订阅到期（设置页续费入口/弹窗 + 连接页临期标签） -->
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">续费</string>

@@ -208,6 +208,28 @@ class GenerationQueueRowsTest {
     }
 
     @Test
+    fun lastDepartureKeepsItsLayoutAndNewWorkArrivesWithoutAnIdleSnapshot() {
+        val original = task(1).copy(frameGenerationStartedAtElapsedMs = 100L)
+        val initial = generationRowSnapshots(emptyList(), listOf(original))
+        val finished = original.finished(500)
+        val holding = generationRowSnapshots(initial, emptyList(), listOf(finished))
+        val exiting = finishGenerationRowPhase(holding, 1, GenerationRowPhase.SUCCEEDED)
+
+        // The real queue is empty, but the row (and its trailing layout slot) still exists.
+        assertEquals(GenerationRowPhase.SUCCEEDED, holding.single().phase)
+        assertEquals(GenerationRowPhase.EXITING_SUCCESS, exiting.single().phase)
+        assertTrue(finishGenerationRowPhase(exiting, 1, GenerationRowPhase.EXITING_SUCCESS).isEmpty())
+
+        val next = task(2).copy(frameGenerationStartedAtElapsedMs = 600L)
+        for (departure in listOf(holding, exiting)) {
+            val arrived = generationRowSnapshots(departure, listOf(next), listOf(finished, next))
+            assertTrue(arrived.any { it.task.taskId == next.taskId && it.phase == GenerationRowPhase.ACTIVE })
+            val afterOldCallback = finishGenerationRowPhase(arrived, 1, departure.single().phase)
+            assertTrue(afterOldCallback.any { it.task.taskId == next.taskId && it.phase == GenerationRowPhase.ACTIVE })
+        }
+    }
+
+    @Test
     fun clearingQueueWithoutTerminalResultsExitsWithoutInventingCompletion() {
         val pending = (1L..6L).map(::task)
         val initial = generationRowSnapshots(emptyList(), pending)

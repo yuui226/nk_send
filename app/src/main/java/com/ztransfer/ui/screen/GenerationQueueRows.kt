@@ -6,7 +6,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -145,7 +147,10 @@ internal fun finishGenerationRowPhase(
     else -> rows
 }
 
-/** A fixed two-row viewport. The third row is prepared below the clip for continuous upward motion. */
+/**
+ * A fixed two-row viewport. The third row is prepared below the clip for continuous upward motion.
+ * Trailing content shares the rows' lifetime, including departure; idle content owns the full width.
+ */
 @Composable
 internal fun AnimatedGenerationQueueRows(
     tasks: List<TransferTask>,
@@ -155,6 +160,7 @@ internal fun AnimatedGenerationQueueRows(
     rowGap: Dp = 6.dp,
     idleHeight: Dp = rowHeight,
     idleContent: @Composable () -> Unit,
+    trailingContent: @Composable () -> Unit,
     rowContent: @Composable (task: TransferTask, phase: GenerationRowPhase, modifier: Modifier) -> Unit,
 ) {
     var retainedRows by remember { mutableStateOf<List<GenerationRowSnapshot>>(emptyList()) }
@@ -172,17 +178,28 @@ internal fun AnimatedGenerationQueueRows(
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) { idleContent() }
         }
-        rows.forEach { row ->
-            key(row.task.taskId) {
-                AnimatedGenerationRow(
-                    row = row,
-                    rowHeight = rowHeight,
-                    rowGap = rowGap,
-                    onPhaseFinished = { id, phase ->
-                        retainedRows = finishGenerationRowPhase(retainedRows, id, phase)
-                    },
-                    rowContent = rowContent,
-                )
+        if (rows.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(Modifier.weight(1f).fillMaxSize().clipToBounds()) {
+                    rows.forEach { row ->
+                        key(row.task.taskId) {
+                            AnimatedGenerationRow(
+                                row = row,
+                                rowHeight = rowHeight,
+                                rowGap = rowGap,
+                                onPhaseFinished = { id, phase ->
+                                    retainedRows = finishGenerationRowPhase(retainedRows, id, phase)
+                                },
+                                rowContent = rowContent,
+                            )
+                        }
+                    }
+                }
+                trailingContent()
             }
         }
     }

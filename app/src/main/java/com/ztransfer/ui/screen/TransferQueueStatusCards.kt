@@ -195,32 +195,49 @@ private fun GenerationStatusCard(
         breathing = true,
         cardSheen = cardSheen,
     ) {
-        Row(Modifier.fillMaxSize().padding(padding), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            AnimatedGenerationQueueRows(
-                tasks = presentation.generationTasks,
-                allTasks = tasks,
-                rowHeight = rowHeight,
-                idleHeight = bodyHeight,
-                modifier = Modifier.weight(1f).height(bodyHeight),
-                idleContent = {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        SummaryStateIcon(QueueActivityState.IDLE, generation = true)
-                    }
-                },
-            ) { task, phase, rowModifier ->
-                val completedLabel = stringResource(R.string.done)
-                Box(rowModifier.testTag("queue_generation_task_${task.taskId}")) {
-                    Box(Modifier.fillMaxSize().then(if (phase.completed) Modifier
-                        .testTag("queue_generation_completed_${task.taskId}")
-                        .semantics { stateDescription = completedLabel } else Modifier)) {
-                        GenerationTaskRow(task, stackedTime, headerHeight, phase, Modifier.fillMaxSize())
-                    }
+        AnimatedGenerationQueueRows(
+            tasks = presentation.generationTasks,
+            allTasks = tasks,
+            rowHeight = rowHeight,
+            idleHeight = bodyHeight,
+            modifier = Modifier.fillMaxSize().padding(padding),
+            idleContent = {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    SummaryStateIcon(QueueActivityState.IDLE, generation = true)
+                }
+            },
+            trailingContent = {
+                GenerationRemainingBadge(presentation.generationRemaining)
+            },
+        ) { task, phase, rowModifier ->
+            val completedLabel = stringResource(R.string.done)
+            Box(rowModifier.testTag("queue_generation_task_${task.taskId}")) {
+                Box(Modifier.fillMaxSize().then(if (phase.completed) Modifier
+                    .testTag("queue_generation_completed_${task.taskId}")
+                    .semantics { stateDescription = completedLabel } else Modifier)) {
+                    GenerationTaskRow(task, stackedTime, headerHeight, phase, Modifier.fillMaxSize())
                 }
             }
-            // Counts stay centered in the whole card while task rows keep their top anchor.
-            QueueRemainingBadge(presentation.generationRemaining, generation = true)
         }
+    }
+}
+
+/** Keep the last badge's width until the rows depart; zero is never displayed or announced. */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun GenerationRemainingBadge(count: Int) {
+    var lastPositiveCount by remember { mutableIntStateOf(count.coerceAtLeast(0)) }
+    SideEffect { if (count > 0) lastPositiveCount = count }
+    val opacity = animateFloatAsState(
+        targetValue = if (count > 0) 1f else 0f,
+        animationSpec = tween(120),
+        label = "generationRemainingPresence",
+    )
+    Box(
+        Modifier.graphicsLayer { alpha = opacity.value }
+            .then(if (count <= 0) Modifier.clearAndSetSemantics { invisibleToUser() } else Modifier),
+    ) {
+        QueueRemainingBadge(if (count > 0) count else lastPositiveCount, generation = true)
     }
 }
 

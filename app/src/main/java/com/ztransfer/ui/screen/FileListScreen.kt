@@ -562,8 +562,14 @@ fun FileListScreen(
     }.collectAsStateWithLifecycle(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
-    val recentThumbnailReadyDays by cameraViewModel.recentThumbnailReadyDays.collectAsStateWithLifecycle()
-    val appliedPhotoLoadingDays by cameraViewModel.appliedPhotoLoadingDays.collectAsStateWithLifecycle()
+    // Only the rating scan uses this readiness. Background thumbnail batches must not
+    // recompose the whole page while ratings are off; enabling collects the current values.
+    val recentThumbnailReadyDays = if (transferState.filterRatingEnabled) {
+        cameraViewModel.recentThumbnailReadyDays.collectAsStateWithLifecycle().value
+    } else cameraViewModel.recentThumbnailReadyDays.value
+    val appliedPhotoLoadingDays = if (transferState.filterRatingEnabled) {
+        cameraViewModel.appliedPhotoLoadingDays.collectAsStateWithLifecycle().value
+    } else cameraViewModel.appliedPhotoLoadingDays.value
     val gpsContext = LocalContext.current
     val gpsBlockedByAp = state.isConnectedToCamera &&
         state.connectionType == CameraConnectionType.WIFI &&
@@ -854,7 +860,7 @@ fun FileListScreen(
 
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
     val availableExts = remember(displayedCameraFiles) {
-        displayedCameraFiles.map { it.extension }.distinct().sorted()
+        displayedCameraFiles.asSequence().map { it.extension }.distinct().sorted().toList()
     }
     // 扫描途中保留当前选择；完整扫描后只有确认存在双卡才允许卡槽筛选。
     // 单卡时筛选没有意义，归回“全部”也能保证入口按钮不会卡在激活状态。
@@ -1024,6 +1030,7 @@ fun FileListScreen(
     LaunchedEffect(presentedCameraFiles) {
         // Filters temporarily hide complete date groups; that must not erase the user's collapsed
         // choices. Only camera rows actually disappearing make a remembered date stale.
+        if (collapsedDates.isEmpty()) return@LaunchedEffect
         val validDates = presentedCameraFiles
             .mapTo(HashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
         collapsedDates.keys
@@ -1036,7 +1043,9 @@ fun FileListScreen(
     // Only burst-id reconciliation reads this history; a plain holder avoids a redundant
     // recomposition after recording the latest groups.
     val previousBurstGroups = remember { arrayOf(burstGroups) }
-    val requestedExpandedBurstIds = expandedBurstCollections.keys.toSet()
+    val requestedExpandedBurstIds by remember {
+        derivedStateOf { expandedBurstCollections.keys.toSet() }
+    }
     val expandedBurstIds = remember(
         transferState.collapseBurstPhotos,
         burstGroups,
@@ -2635,7 +2644,14 @@ fun QueuePill(
     // Route changes use this same width spring, not a second visibility animation. Keep the
     // content measured at its natural width so hidden speed/count changes are ready on return.
     val widthModifier = if (!firstMeasure || !visible) {
-        Modifier.width(with(density) { widthAnim.value.toDp() })
+        // Read animated width in measurement, as the remote-entry button does. The capsule
+        // still takes real layout space, without recomposing its contents on every spring frame.
+        Modifier.layout { measurable, constraints ->
+            val width = widthAnim.value.roundToInt()
+                .coerceIn(constraints.minWidth, constraints.maxWidth)
+            val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+            layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
+        }
     } else Modifier
     val pillModifier = modifier.height(36.dp).then(widthModifier).graphicsLayer {
         // Normal data-driven changes stay opaque; only the final few pixels fade at zero.
@@ -2677,7 +2693,7 @@ fun QueuePill(
     // 按压微缩放：本胶囊是顶栏唯一手写 Surface（不经 GlassButton），手感与全局按钮对齐。
     val pillInteraction = remember { MutableInteractionSource() }
     val pillPressed by pillInteraction.collectIsPressedAsState()
-    val pillPressScale by animateFloatAsState(
+    val pillPressScale = animateFloatAsState(
         targetValue = if (pillPressed) 0.95f else 1f,
         animationSpec = if (pillPressed) tween(80) else Motion.bouncy(),
         label = "pillPress"
@@ -2691,8 +2707,8 @@ fun QueuePill(
         interactionSource = pillInteraction,
         modifier = pillModifier
             .graphicsLayer {
-                scaleX = pillPressScale
-                scaleY = pillPressScale
+                scaleX = pillPressScale.value
+                scaleY = pillPressScale.value
             }
     ) {
         Box(contentAlignment = Alignment.CenterEnd) {
@@ -3386,9 +3402,13 @@ internal fun buildThumbnailGridItems(
 
     // 先按当前筛选后的日期组收集成员。筛选可能令原本 ≥3 张的连拍只剩 1 张；
     // 单张不再画“合集”，避免用户为看一张照片还要多点一次。
-    val visibleBursts = files
-        .mapNotNull { file -> burstIdByHandle[file.handle]?.let { it to file } }
-        .groupBy({ it.first }, { it.second })
+    // Keep member order identical to the filtered list without allocating a Pair and an
+    // intermediate full-size list for every member whenever a collection is toggled.
+    val visibleBursts = HashMap<String, MutableList<NikonCamera.FileInfo>>()
+    files.forEach { file ->
+        val burstId = burstIdByHandle[file.handle] ?: return@forEach
+        visibleBursts.getOrPut(burstId) { ArrayList() }.add(file)
+    }
     val collected = HashSet<String>()
     val result = ArrayList<ThumbnailGridItem>(files.size)
 
@@ -4079,12 +4099,12 @@ internal fun BurstStackPhoto(
         loadThumbnail = { allowRemote -> cameraViewModel.loadThumbnail(file, allowRemote) },
         thumbnailReadyEvents = cameraViewModel.thumbnailReadyEvents,
     )
-    val shape = RoundedCornerShape(10.dp)
+    val cornerRadius = 10.dp
+    val shape = RoundedCornerShape(cornerRadius)
 
     Box(
         modifier = modifier
-            .clip(shape)
-            .background(colors.thumbPlaceholder)
+            .background(colors.thumbPlaceholder, shape)
             .border(THUMBNAIL_THEME_BORDER_WIDTH, borderColor, shape)
     ) {
         if (showPlaceholderIcon && thumbnail.showPlaceholder.value) {
@@ -4102,14 +4122,11 @@ internal fun BurstStackPhoto(
             )
         }
         thumbnail.image.value?.let { image ->
-            Image(
-                bitmap = image,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().then(
-                    if (thumbnail.needsFadeLayer) Modifier.graphicsLayer { alpha = thumbnail.alpha.value }
-                    else Modifier
-                )
+            BurstStackImage(
+                image = image,
+                cornerRadius = cornerRadius,
+                opacity = thumbnail.alpha,
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
@@ -4187,8 +4204,8 @@ private fun ThumbnailCell(
             cellBoundsRegistry.remove(file.handle)
         }
     }
-    LaunchedEffect(returnFocusNonce) {
-        if (returnFocusNonce != null) {
+    if (returnFocusNonce != null) {
+        LaunchedEffect(returnFocusNonce) {
             returnFocusPulse.snapTo(0f)
             repeat(2) {
                 returnFocusPulse.animateTo(1f, tween(110, easing = FastOutSlowInEasing))
@@ -4357,7 +4374,9 @@ private fun ThumbnailCell(
         val overlayTask = task?.takeIf { showsQueueStatusOverlay(it.status) }
         // lastTask 保留最后一次的任务，退场动画期间角标仍有内容可渲染。
         var lastTask by remember(file.handle) { mutableStateOf(overlayTask) }
-        LaunchedEffect(overlayTask) { if (overlayTask != null) lastTask = overlayTask }
+        if (overlayTask != null) {
+            LaunchedEffect(overlayTask) { lastTask = overlayTask }
+        }
         AnimatedVisibility(
             visible = overlayTask != null,
             enter = fadeIn(tween(150)),

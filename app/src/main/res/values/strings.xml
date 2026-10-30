@@ -507,7 +507,7 @@
     <string name="purchase_open_link">Open payment page</string>
     <string name="purchase_qr_expired">Payment timed out</string>
     <string name="purchase_qr_refresh">Start payment again</string>
-    <string name="renewal_needed">Pro license expired — connect to the internet and reopen to renew automatically.</string>
+    <string name="renewal_needed">No network</string>
     <!-- Subscription expiry (settings renewal entry/dialog + connection-page expiry tag) -->
     <string name="sub_expires_on">Expires %1$s</string>
     <string name="renew_action">Renew</string>

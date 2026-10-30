@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material3.IconButton
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -1655,6 +1656,7 @@ internal fun PhotoPreviewOverlay(
         PreviewPhotoTools(
             photoActions = photoActions,
             currentHandle = currentHandle,
+            burstTransitionInProgress = burstTransitionBusy,
             inputsEnabled = previewGesturesEnabled && !closing && pagingSettled,
             editEnabled = !burstTransitionBusy && !queueAnimating && !queueGestureActive,
             collapseEnabled = !queueAnimating && !queueGestureActive && queueMotionJob?.isActive != true,
@@ -1891,6 +1893,7 @@ private fun PreviewPhotoBadges(showBurst: Boolean, isProtected: Boolean, modifie
 private fun PreviewPhotoTools(
     photoActions: PreviewPhotoActions?,
     currentHandle: Int?,
+    burstTransitionInProgress: Boolean,
     inputsEnabled: Boolean,
     editEnabled: Boolean,
     collapseEnabled: Boolean,
@@ -1906,18 +1909,19 @@ private fun PreviewPhotoTools(
     onHistogramModeChanged: (HistogramMode) -> Unit,
     onRotate: () -> Unit,
 ) {
-    // 工具行保留到淡出结束；翻到连拍合集也不能直接卸载按钮的显隐动画。
+    // 普通翻页保留工具到淡出结束；主动归组已由外层图层完成退场，
+    // 在不可见的交接帧直接移除，避免合集淡入时把旧工具再次带出来。
     var retainedPhotoActions by remember { mutableStateOf(photoActions) }
     var effectsButtonBounds by remember { mutableStateOf<Rect?>(null) }
     SideEffect { if (photoActions != null) retainedPhotoActions = photoActions }
     AnimatedVisibility(
         visible = photoActions != null,
         enter = fadeIn(tween(180)),
-        exit = fadeOut(tween(180)),
+        exit = if (burstTransitionInProgress) ExitTransition.None else fadeOut(tween(180)),
         label = "previewPhotoTools",
         modifier = modifier,
     ) {
-        (photoActions ?: retainedPhotoActions)?.let { actions ->
+        (photoActions ?: retainedPhotoActions.takeUnless { burstTransitionInProgress })?.let { actions ->
             val item = actions.photo
             val current = item.file
             // 淡出的旧页工具只供显示，不能触发上一张照片的编辑或传输。

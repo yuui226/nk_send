@@ -2969,6 +2969,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         pendingNewObjectCamera = null
                         break
                     }
+                    // A completed batch needs no full-album handle set just to discover that
+                    // nothing is pending. Keep the post-deduplication check below as well.
+                    if (pendingNewObjectHandles.isEmpty()) {
+                        pendingNewObjectCamera = null
+                        break
+                    }
 
                     val visibleHandles = _state.value.files.asSequence()
                         .mapTo(HashSet()) { it.handle }
@@ -3117,9 +3123,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (camera !== cam) return
         val hasKnownBaseline = knownHandlesCamera === cam
         indexedCameraFiles[handle] = info
+        val newIdentity = info.logicalIdentity()
         val previousState = _state.getAndUpdate { state ->
             val duplicateIndex = state.files.indexOfFirst {
-                it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
+                it.handle == handle || it.logicalIdentity() == newIdentity
             }
             if (duplicateIndex < 0) {
                 state.copy(files = listOf(info) + state.files)
@@ -3132,7 +3139,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         val added = previousState.files.none {
-            it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
+            it.handle == handle || it.logicalIdentity() == newIdentity
         }
         if (knownHandlesCamera === cam) knownHandles += handle
         if (added && hasKnownBaseline && knownHandlesCamera === cam) {
