@@ -2064,6 +2064,9 @@ private fun TipsBubble(
     } else {
         listOf(
             TipBubbleItem(
+                text = stringResource(R.string.tip_sta_no_mobile_data),
+            ),
+            TipBubbleItem(
                 label = stringResource(R.string.tip_sta_first_connection),
                 labelColor = colors.accentOrange,
                 text = stringResource(R.string.tip_sta_step_hotspot),

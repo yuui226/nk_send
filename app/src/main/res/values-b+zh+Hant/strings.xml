@@ -20,7 +20,7 @@
     <string name="sta_camera_check_photos">記憶卡內可能沒有相片。</string>
     <string name="sta_camera_not_found">找不到相容相機，請檢查相機的網路設定與連線狀態。</string>
     <string name="sta_camera_no_media">相機記憶卡內未偵測到相片或影片，請先拍攝內容後重試。</string>
-    <string name="sta_camera_refused_repair">相機拒絕連線，請重新配對。</string>
+    <string name="sta_camera_refused_repair">相機拒絕連線，請在相機上建立新的網路設定檔並重新配對。</string>
     <string name="sta_camera_refused_retrying">相機尚未就緒，請保持開機，稍後將自動重新連線。</string>
     <string name="sta_signal_connected">STA 相機已連線</string>
     <string name="sta_signal_disconnected_reconnect">STA 相機已斷線，點擊重新連線。</string>
@@ -59,6 +59,7 @@
     <string name="tip_body">可將「Wi-Fi 連線」加入相機的 i 選單，之後按 i 鍵即可快速開啟。</string>
     <string name="tip_path">選單 → 自訂設定選單 → 控制 → 自訂 i 選單 → 選個順手的格子 → Wi-Fi 連線</string>
     <string name="tip_sta_title">STA 連線指引</string>
+    <string name="tip_sta_no_mobile_data">傳送照片不消耗行動數據。</string>
     <string name="tip_sta_first_connection">首次連線</string>
     <string name="tip_sta_quick_start">從 i 選單開啟「Wi-Fi 連線」</string>
     <string name="tip_sta_step_hotspot">1. 手機：開英文名熱點（建議 5 GHz</string>
