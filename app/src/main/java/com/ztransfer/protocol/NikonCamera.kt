@@ -552,6 +552,10 @@ internal class PairingCompletedException(val confirmation: StaPairingConfirmatio
 internal class StaPairingConfirmationMissingException(cause: Throwable? = null) :
     java.io.IOException("Nikon pairing confirmation was not received", cause)
 
+/** Preserve a STA response code for UI guidance without changing the protocol failure path. */
+internal class StaResponseException(val responseCode: Int, message: String) :
+    java.io.IOException(message)
+
 /** The post-pairing session still lacks the capabilities required to confirm it. */
 internal class PairingNotConfirmedException(cause: Throwable? = null) :
     Exception("Nikon pairing was not confirmed by the camera", cause)
@@ -2518,7 +2522,8 @@ class NikonCamera(private val context: Context) {
                 openResponse != PtpConstants.SESSION_ALREADY_OPEN
             ) {
                 return@withContext Result.failure(
-                    Exception(
+                    StaResponseException(
+                        openResponse,
                         context.getString(
                             R.string.error_open_session,
                             PtpConstants.translateResponse(context, openResponse),
@@ -5263,7 +5268,8 @@ class NikonCamera(private val context: Context) {
         val (compatibilityResponse, _) = recvRespWithPayload()
         staDiagnosticLines += "GetEventEx(0x941C)=${hexResponse(compatibilityResponse)}"
         if (compatibilityResponse != PtpConstants.RESPONSE_OK) {
-            throw java.io.IOException(
+            throw StaResponseException(
+                compatibilityResponse,
                 "Nikon STA initialization failed: 0x${compatibilityResponse.toString(16)}",
             )
         }
@@ -5338,7 +5344,12 @@ class NikonCamera(private val context: Context) {
             // stored identity/markers; this attempt still cannot activate an album session.
             staDiagnosticLines += "state=PAIRING_NOT_CONFIRMED reason=device-info-unavailable"
             onPairingStarted?.invoke()
-            throw PairingNotConfirmedException()
+            throw PairingNotConfirmedException(
+                if (deviceInfoResponse != PtpConstants.RESPONSE_OK) StaResponseException(
+                    deviceInfoResponse,
+                    "Nikon STA device info failed: 0x${deviceInfoResponse.toString(16)}",
+                ) else null,
+            )
         }
         if (isStaPairingOnlyOperationSet(operations)) {
             pairingRequiredForSession = true
@@ -5416,7 +5427,8 @@ class NikonCamera(private val context: Context) {
             }
         }
         staDiagnosticLines += "result=FULL_ALBUM_UNAVAILABLE"
-        throw java.io.IOException(
+        throw StaResponseException(
+            storageResponse,
             if (staEmptyObjectListObserved && !staObjectHandlesObserved) {
                 context.getString(R.string.sta_camera_no_media)
             } else {
@@ -5517,7 +5529,8 @@ class NikonCamera(private val context: Context) {
         staDiagnosticLines +=
             "pairing query=${hexResponse(queryResponse)} bytes=${queryData?.size ?: 0}"
         if (queryResponse != PtpConstants.RESPONSE_OK) {
-            throw java.io.IOException(
+            throw StaResponseException(
+                queryResponse,
                 "Nikon pairing query failed: 0x${queryResponse.toString(16)}",
             )
         }
@@ -5529,7 +5542,8 @@ class NikonCamera(private val context: Context) {
         val resultResponse = recvResp()
         staDiagnosticLines += "pairing result=${hexResponse(resultResponse)}"
         if (resultResponse != PtpConstants.RESPONSE_OK) {
-            throw java.io.IOException(
+            throw StaResponseException(
+                resultResponse,
                 "Nikon pairing result failed: 0x${resultResponse.toString(16)}",
             )
         }

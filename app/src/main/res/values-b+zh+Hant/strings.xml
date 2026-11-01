@@ -17,7 +17,7 @@
     <string name="sta_pairing_incomplete">配對未完成，請檢查相機後重試。</string>
     <string name="sta_status_connecting">正在連線</string>
     <string name="sta_status_connected">連線成功</string>
-    <string name="sta_camera_not_found_short">找不到相機</string>
+    <string name="sta_camera_check_photos">記憶卡內可能沒有相片。</string>
     <string name="sta_camera_not_found">找不到相容相機，請檢查相機的網路設定與連線狀態。</string>
     <string name="sta_camera_no_media">相機記憶卡內未偵測到相片或影片，請先拍攝內容後重試。</string>
     <string name="sta_camera_refused_repair">相機拒絕連線，請重新配對。</string>

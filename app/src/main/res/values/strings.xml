@@ -17,7 +17,7 @@
     <string name="sta_pairing_incomplete">Pairing incomplete. Check the camera and retry.</string>
     <string name="sta_status_connecting">Connecting</string>
     <string name="sta_status_connected">Connected</string>
-    <string name="sta_camera_not_found_short">Camera not found</string>
+    <string name="sta_camera_check_photos">The card may have no photos.</string>
     <string name="sta_camera_not_found">No compatible camera found. Check the camera network profile and connection.</string>
     <string name="sta_camera_no_media">No photos or videos were returned by the camera. Capture something to the memory card, then try again.</string>
     <string name="sta_camera_refused_repair">Camera refused the connection. Pair the camera again.</string>

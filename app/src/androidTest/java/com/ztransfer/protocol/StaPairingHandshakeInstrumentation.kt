@@ -320,6 +320,48 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
                     passed += "$liveView verifies a frame without disrupting an existing monitor"
                 }
 
+                for (enhancedReply in EnhancedFrameReply.entries) {
+                    withFixture { fixture ->
+                        FakeStaServer(listOf(
+                            SessionPlan(event = PairingEvent.FRESH_CHANGED),
+                            SessionPlan(liveView = LiveViewCase.GATED_FRAME, enhancedFrameReply = enhancedReply),
+                        )).use { server ->
+                            val receipt = obtainConfirmation(fixture)
+                            val camera = NikonCamera(fixture)
+                            try {
+                                coroutineScope {
+                                    val connection = async(Dispatchers.Default) {
+                                        camera.connectSta(
+                                            ip = LOOPBACK, forceProfilePairing = true, exploreAlbumAccess = true,
+                                            pairingConfirmation = receipt,
+                                        )
+                                    }
+                                    // The advertised enhanced operation is insufficient: even after
+                                    // fallback, no trust may be saved until a standard JPEG arrives.
+                                    server.awaitFrameRequest()
+                                    check(!camera.staPairingConfirmed)
+                                    fixture.assertNoPairingMarker(GUID_A)
+                                    val frameRequests = server.commandCodes().filter {
+                                        it == Lab.NK_GET_LIVE_VIEW_IMG_EX || it == Lab.NK_GET_LIVE_VIEW_IMG
+                                    }
+                                    val enhancedAttempts = if (enhancedReply == EnhancedFrameReply.UNSUPPORTED) 1 else 2
+                                    check(frameRequests == List(enhancedAttempts) { Lab.NK_GET_LIVE_VIEW_IMG_EX } +
+                                        Lab.NK_GET_LIVE_VIEW_IMG) {
+                                        "Unexpected enhanced fallback order: $frameRequests"
+                                    }
+                                    server.releaseFrame()
+                                    connection.await().getOrThrow()
+                                    check(camera.staPairingConfirmed && camera.staAlbumAccessValidated)
+                                    check(fixture.pairingPrefs().getBoolean(STA_PAIRING_VERIFIED_MARKER_PREFIX + GUID_A, false))
+                                    check(server.commandCodes().count { it == Lab.NK_END_LIVE_VIEW } == 1)
+                                }
+                            } finally { camera.close() }
+                            server.awaitFinished()
+                        }
+                    }
+                    passed += "enhanced $enhancedReply falls back to standard JPEG before persisting pairing"
+                }
+
                 for (cancelDuringFrame in listOf(false, true)) {
                     withFixture { fixture ->
                         FakeStaServer(listOf(
@@ -660,6 +702,7 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
     }
     private enum class CloseReply { NORMAL, SILENT, PARTIAL_PACKET }
     private enum class ObjectSizeReply { VALID, DENIED, SHORT, ZERO }
+    private enum class EnhancedFrameReply { UNSUPPORTED, INVALID_JPEG }
     private data class SessionPlan(
         val guid: String = GUID_A,
         val event: PairingEvent? = null,
@@ -671,6 +714,7 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
         val deniedObjectInfoHandle: Int? = null,
         val closeReply: CloseReply = CloseReply.NORMAL,
         val objectSizeReply: ObjectSizeReply = ObjectSizeReply.VALID,
+        val enhancedFrameReply: EnhancedFrameReply? = null,
     )
 
     private class FakeStaServer(private val plans: List<SessionPlan>) : Closeable {
@@ -767,7 +811,8 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
                     PtpConstants.GET_STORAGE_IDS -> output.response(transaction, bytes { u32(1); u32(0x00010001) })
                     PtpConstants.GET_DEVICE_INFO -> output.response(
                         transaction,
-                        deviceInfo(plan.pairingOnlyDeviceInfo, plan.liveView != LiveViewCase.UNSUPPORTED).takeIf { plan.deviceInfoResponse == PtpConstants.RESPONSE_OK },
+                        deviceInfo(plan.pairingOnlyDeviceInfo, plan.liveView != LiveViewCase.UNSUPPORTED,
+                            plan.enhancedFrameReply != null).takeIf { plan.deviceInfoResponse == PtpConstants.RESPONSE_OK },
                         plan.deviceInfoResponse,
                     )
                     PtpConstants.GET_OBJECT_HANDLES -> output.response(transaction, bytes {
@@ -817,6 +862,10 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
                         check(plan.liveView != LiveViewCase.UNSUPPORTED)
                         output.response(transaction, responseCode =
                             if (plan.liveView == LiveViewCase.BUSY_THEN_READY && readyCalls++ == 0) Lab.DEVICE_BUSY else Lab.OK)
+                    }
+                    Lab.NK_GET_LIVE_VIEW_IMG_EX -> when (checkNotNull(plan.enhancedFrameReply)) {
+                        EnhancedFrameReply.UNSUPPORTED -> output.response(transaction, responseCode = PtpConstants.OPERATION_NOT_SUPPORTED)
+                        EnhancedFrameReply.INVALID_JPEG -> output.response(transaction, byteArrayOf(1, 2, 3))
                     }
                     Lab.NK_GET_LIVE_VIEW_IMG -> {
                         check(plan.liveView != LiveViewCase.UNSUPPORTED)
@@ -942,14 +991,17 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
             packet(PtpConstants.CMD_RESPONSE, bytes { u16(responseCode); u32(transaction) })
         }
         fun event(code: Int, transaction: Int) = bytes { u16(code); u32(transaction) }
-        fun deviceInfo(pairingOnly: Boolean, liveViewSupported: Boolean) = bytes {
+        fun deviceInfo(pairingOnly: Boolean, liveViewSupported: Boolean, enhancedFrameSupported: Boolean = false) = bytes {
             u16(100); u32(10); u16(100); ptpString(""); u16(0)
             // Nikon's paired transfer profile may keep all five pairing codes plus GetVendorCodes;
             // it must not be misclassified as a new pairing merely because those codes remain.
             u16Array(listOf(PtpConstants.GET_DEVICE_INFO, PtpConstants.OPEN_SESSION, PtpConstants.CLOSE_SESSION,
                 PtpConstants.NK_PAIRING_QUERY, PtpConstants.NK_PAIRING_RESULT) +
-                if (pairingOnly) emptyList() else listOf(0x9439) +
-                    if (liveViewSupported) LIVE_VIEW_COMMANDS.toList() else emptyList())
+                if (pairingOnly) emptyList() else buildList {
+                    add(0x9439)
+                    if (liveViewSupported) addAll(LIVE_VIEW_COMMANDS)
+                    if (enhancedFrameSupported) add(Lab.NK_GET_LIVE_VIEW_IMG_EX)
+                })
             u16Array(listOf(PtpConstants.EVENT_DEVICE_INFO_CHANGED))
             u16Array(emptyList()); u16Array(emptyList()); u16Array(listOf(0x3801))
             ptpString("Nikon"); ptpString("STA fixture"); ptpString("1.00"); ptpString("fixture-serial")

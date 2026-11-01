@@ -81,6 +81,10 @@ internal suspend fun NikonCamera.verifyStaPairingLiveView(log: (String) -> Unit)
                             (rc == PtpConstants.OPERATION_NOT_SUPPORTED || ++enhancedFailures >= 2)
                         ) {
                             operation = Lab.NK_GET_LIVE_VIEW_IMG
+                            // Switching an unsupported/invalid format is not camera warm-up.
+                            // Try the standard operation immediately; its busy response, if any,
+                            // still uses the same bounded retry delay below.
+                            continue
                         } else if (rc != Lab.OK && !warmingUp && operation == Lab.NK_GET_LIVE_VIEW_IMG) {
                             throw IOException("STA Live View frame rejected: 0x${rc.toString(16)}")
                         }

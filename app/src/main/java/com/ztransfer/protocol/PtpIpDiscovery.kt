@@ -140,7 +140,7 @@ internal class PtpIpDiscovery(private val context: Context) {
         val found = ConcurrentHashMap.newKeySet<String>()
         runCatching { multicastLock.acquire() }
         try {
-            for (serviceType in MDNS_SERVICE_TYPES) {
+            for ((index, serviceType) in MDNS_SERVICE_TYPES.withIndex()) {
                 withTimeoutOrNull(MDNS_TIMEOUT_MS) {
                     var activeListener: NsdManager.DiscoveryListener? = null
                     try {
@@ -204,7 +204,7 @@ internal class PtpIpDiscovery(private val context: Context) {
                 }
                 if (found.isNotEmpty()) break
                 // Let NsdManager finish stopping before starting the next service type.
-                delay(100)
+                if (index < MDNS_SERVICE_TYPES.lastIndex) delay(100)
             }
         } catch (error: Exception) {
             Log.w(TAG, "mDNS failed: ${error.javaClass.simpleName}: ${error.message}")

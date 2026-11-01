@@ -39,6 +39,7 @@ import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PairingNotConfirmedException
 import com.ztransfer.protocol.StaPairingConfirmation
 import com.ztransfer.protocol.StaPairingConfirmationMissingException
+import com.ztransfer.protocol.StaResponseException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpCandidate
@@ -133,6 +134,24 @@ internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
     error is SocketTimeoutException ||
         error is ConnectException ||
         (error is IOException && error.message?.startsWith("STA album access unavailable") == true)
+
+/** A STA-specific suggestion, not a global translation of PTP TransactionCancelled. */
+internal fun staFailureMessageResource(error: Throwable?, candidateKnown: Boolean): Int? {
+    // Pairing recovery wraps the original rejection. Keep the actionable hint through that wrap.
+    if (generateSequence(error) { it.cause }.take(8).any {
+            it is StaResponseException && it.responseCode == 0x201F
+        }
+    ) return com.ztransfer.R.string.sta_camera_check_photos
+    return when (error) {
+        is StaPairingConfirmationMissingException -> com.ztransfer.R.string.sta_pairing_incomplete
+        is CameraRefusedException -> if (candidateKnown) {
+            com.ztransfer.R.string.sta_camera_refused_retrying
+        } else {
+            com.ztransfer.R.string.sta_camera_refused_repair
+        }
+        else -> null
+    }
+}
 
 /** STA reconnection is selected only for an established STA-origin Wi-Fi session. */
 internal fun shouldReconnectUsingSta(
@@ -2098,11 +2117,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             isConnecting = false,
                             staConnectionStatus = StaConnectionStatus.FAILED,
                             staDiscoveryProgress = null,
-                            staConnectionError = if (error is StaPairingConfirmationMissingException) {
-                                staFailureMessage(localized, error, candidateKnown = false)
-                            } else {
-                                error.message ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found)
-                            },
+                            staConnectionError = staFailureMessageResource(error, candidateKnown = false)
+                                ?.let { localized.getString(it) }
+                                ?: error.message ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found),
                         )
                     }
                     if (shouldKeepStaDiscoveryAlive(reconnect, hasReusableStaProfile(), failure = error)) {
@@ -2431,18 +2448,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         context: Context,
         error: Throwable?,
         candidateKnown: Boolean,
-    ): String? = when (error) {
-        is StaPairingConfirmationMissingException -> context.getString(
-            com.ztransfer.R.string.sta_pairing_incomplete,
-        )
-        is CameraRefusedException -> if (candidateKnown) {
-            context.getString(com.ztransfer.R.string.sta_camera_refused_retrying)
-        } else {
-            context.getString(com.ztransfer.R.string.sta_camera_refused_repair)
-        }
-        null -> null
-        else -> error.message ?: error.javaClass.simpleName
-    }
+    ): String? = staFailureMessageResource(error, candidateKnown)?.let { context.getString(it) }
+        ?: error?.let { it.message ?: it.javaClass.simpleName }
 
     private fun recordStaDiagnostic(
         diagnosticSession: Long,
