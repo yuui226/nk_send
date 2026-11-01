@@ -1612,9 +1612,9 @@ class NikonCamera(private val context: Context) {
     private var evtThread: Thread? = null
     private val ptpIpEventChannel = Channel<Pair<Int, Long>>(capacity = 64)
     internal val ptpIpEvents: Flow<Pair<Int, Long>> = ptpIpEventChannel.receiveAsFlow()
-    private val staDiagnosticLines = ArrayList<String>()
+    private val staDiagnosticLines = StaConnectionTrace()
     internal val staDiagnosticReport: String
-        get() = staDiagnosticLines.joinToString("\n")
+        get() = staDiagnosticLines.report()
     @Volatile internal var staAlbumAccessValidated = false
         private set
     @Volatile internal var staStorageProbeReached = false
@@ -2447,6 +2447,7 @@ class NikonCamera(private val context: Context) {
                 receiveBufferSize = 4 * 1024 * 1024
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
+            staDiagnosticLines += "CommandSocket=connected"
             cmdInput = java.io.BufferedInputStream(cmdSocket!!.getInputStream(), 64 * 1024)
             cmdOutput = cmdSocket!!.getOutputStream()
             cmdOutput!!.write(makeStaInitReq(identity))
@@ -2490,6 +2491,7 @@ class NikonCamera(private val context: Context) {
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
+            staDiagnosticLines += "EventSocket=connected"
             evtInput = evtSocket!!.getInputStream()
             val eventInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
                 putInt(12)
@@ -2554,6 +2556,8 @@ class NikonCamera(private val context: Context) {
                 "error=${error.javaClass.simpleName}:${error.message.orEmpty()}"
             close()
             Result.failure(error)
+        } finally {
+            staDiagnosticLines += "connection=END"
         }
     }
 
@@ -5324,7 +5328,8 @@ class NikonCamera(private val context: Context) {
             emptySet()
         }
         staDiagnosticLines +=
-            "GetDeviceInfo=${hexResponse(deviceInfoResponse)} operations=${operations.size}"
+            "GetDeviceInfo=${hexResponse(deviceInfoResponse)} operations=${operations.size} " +
+                "model=${cachedDeviceInfo?.model.orEmpty()} firmware=${cachedDeviceInfo?.deviceVersion.orEmpty()}"
         if (verifyPairingCompletion &&
             (deviceInfoResponse != PtpConstants.RESPONSE_OK ||
                 deviceInfoData == null || operations.isEmpty())
@@ -5436,7 +5441,7 @@ class NikonCamera(private val context: Context) {
         val sampleIndexes = listOf(0, handles.lastIndex / 2, handles.lastIndex).distinct()
         val responses = ArrayList<String>(sampleIndexes.size)
         var allAccessible = true
-        sampleIndexes.forEach { index ->
+        for (index in sampleIndexes) {
             val handle = handles[index]
             sendCmd(PtpConstants.GET_OBJECT_INFO, handle)
             val (response, data) = recvRespWithPayload()
@@ -5447,17 +5452,24 @@ class NikonCamera(private val context: Context) {
                 hexResponse(response),
                 data?.size ?: 0,
             )
+            // One failed sample already rejects this metadata route. Other samples cannot
+            // change that result; go straight to the same bounded direct-read fallback.
+            if (!accessible) break
         }
         staDiagnosticLines += "$label:GetObjectInfo samples=[${responses.joinToString(",")}]"
         if (!allAccessible) {
-            // Last bounded escape-hatch probe: metadata may be denied while thumbnail/partial
-            // reads are accidentally still available. Never request the full object here.
+            // Metadata can be denied while size/partial reads remain available. Both must
+            // succeed. GetThumb was diagnostic-only and never contributed to this decision.
             val handle = handles.first()
-            sendCmd(PtpConstants.GET_THUMB, handle)
-            val (thumbResponse, thumbData) = recvRespWithPayload()
-
             sendCmd(PtpConstants.NK_GET_OBJECT_SIZE, handle)
             val (sizeResponse, sizeData) = recvRespWithPayload()
+            staDiagnosticLines += "$label:GetObjectSize=${hexResponse(sizeResponse)} bytes=${sizeData?.size ?: 0}"
+            val directSize = if (sizeResponse == PtpConstants.RESPONSE_OK &&
+                sizeData != null && sizeData.size >= 8
+            ) sizeData.getLongLE(0) else 0L
+            // Partial bytes cannot validate this route without a usable size. The caller still
+            // performs its existing application-mode fallback after this negative result.
+            if (directSize <= 0L) return false
 
             sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, STA_SAMPLE_BYTES, 0)
             val (partialResponse, partialData) = recvRespWithPayload()
@@ -5467,21 +5479,15 @@ class NikonCamera(private val context: Context) {
             }.orEmpty()
             staDiagnosticLines +=
                 ("$label:direct-read handle=0x%08X " +
-                    "thumb=%s/%dB size=%s/%dB partial=%s/%dB head=%s").format(
+                    "size=%s/%dB partial=%s/%dB head=%s").format(
                         handle,
-                        hexResponse(thumbResponse),
-                        thumbData?.size ?: 0,
                         hexResponse(sizeResponse),
                         sizeData?.size ?: 0,
                         hexResponse(partialResponse),
                         partialData?.size ?: 0,
                         head,
                     )
-            val directSize = if (sizeResponse == PtpConstants.RESPONSE_OK &&
-                sizeData != null && sizeData.size >= 8
-            ) sizeData.getLongLE(0) else 0L
-            val directAccessible = directSize > 0L &&
-                partialResponse == PtpConstants.RESPONSE_OK &&
+            val directAccessible = partialResponse == PtpConstants.RESPONSE_OK &&
                 partialData != null && partialData.isNotEmpty()
             if (directAccessible) {
                 staDirectObjectReadValidated = true
@@ -5518,6 +5524,7 @@ class NikonCamera(private val context: Context) {
 
         coroutineContext.ensureActive()
         discardPendingStaPairingEvents()
+        staDiagnosticLines += "pairing pre-result queue=drained"
         sendCmd(PtpConstants.NK_PAIRING_RESULT, PtpConstants.RESPONSE_OK)
         val resultResponse = recvResp()
         staDiagnosticLines += "pairing result=${hexResponse(resultResponse)}"
@@ -5571,12 +5578,9 @@ class NikonCamera(private val context: Context) {
         if (!confirmationEventReceived) throw StaPairingConfirmationMissingException()
         coroutineContext.ensureActive()
 
-        runCatching {
-            sendCmd(PtpConstants.CLOSE_SESSION)
-            recvResp()
-            sessionOpen = false
-        }
-        coroutineContext.ensureActive()
+        // Both callers immediately throw PairingCompletedException. connectSta closes once and
+        // only then returns the receipt. Closing here as well retries on a timed-out/partial
+        // stream and can add a second full read timeout during the camera's service restart.
         return StaPairingConfirmation(cameraGuid)
     }
 

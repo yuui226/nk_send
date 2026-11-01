@@ -28,6 +28,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.diagnostics.StaConnectionDiagnostics
 import com.ztransfer.diagnostics.ThumbnailDiagnostics
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
@@ -1986,6 +1987,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val generation = ++staDiscoveryGeneration
+        val diagnosticSession = StaConnectionDiagnostics.begin()
+        StaConnectionDiagnostics.note(diagnosticSession, "discovery start reconnect=$reconnect")
         staLastFailureMessage = null
         // STA uses the phone's tether/LAN interface, not Android's client Wi-Fi Network. Keeping
         // the camera-hotspot request active can make some ROMs switch routes during the scan.
@@ -2000,8 +2003,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         staDiscoveryJob = viewModelScope.launch {
+            var diagnosticOutcome = "cancelled"
             try {
                 wirelessCleanupJob?.join()
+                StaConnectionDiagnostics.note(diagnosticSession, "previous transport cleanup complete")
                 if (generation != staDiscoveryGeneration ||
                     _state.value.wirelessMode != WirelessMode.STA
                 ) return@launch
@@ -2027,6 +2032,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 localAddress = candidate.localAddress,
                                 expectedResponderGuid = expectedResponderGuid,
                                 generation = generation,
+                                diagnosticSession = diagnosticSession,
                             )
                         ) {
                             StaCandidateConnectionResult.CONNECTED -> true
@@ -2052,6 +2058,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         localAddress = candidate.localAddress,
                         expectedResponderGuid = null,
                         generation = generation,
+                        diagnosticSession = diagnosticSession,
                     ) == StaCandidateConnectionResult.CONNECTED
                 } else {
                     false
@@ -2071,9 +2078,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         scheduleStaReconnect()
                     }
                 }
+                diagnosticOutcome = if (_state.value.isConnectedToCamera) "connected" else "not_found"
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                diagnosticOutcome = "failed:${error.javaClass.simpleName}"
                 if (generation == staDiscoveryGeneration &&
                     _state.value.wirelessMode == WirelessMode.STA
                 ) {
@@ -2101,6 +2110,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } finally {
+                StaConnectionDiagnostics.finish(diagnosticSession, diagnosticOutcome)
                 if (generation == staDiscoveryGeneration) {
                     staDiscoveryJob = null
                     staConnectingCamera = null
@@ -2147,6 +2157,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         localAddress: InetAddress?,
         expectedResponderGuid: String?,
         generation: Long,
+        diagnosticSession: Long,
     ): StaCandidateConnectionResult {
         if (generation != staDiscoveryGeneration || purchaseHold ||
             _state.value.connectionType == CameraConnectionType.USB ||
@@ -2163,6 +2174,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         var pairingFlowStarted = false
         var pairingConfirmation: StaPairingConfirmation? = null
         var confirmedResponderGuid: String? = null
+
+        suspend fun waitForStaService(reason: String, durationMs: Long) {
+            val started = SystemClock.elapsedRealtime()
+            StaConnectionDiagnostics.note(diagnosticSession, "wait start reason=$reason plannedMs=$durationMs")
+            try {
+                delay(durationMs)
+            } finally {
+                StaConnectionDiagnostics.note(
+                    diagnosticSession,
+                    "wait end reason=$reason actualMs=${SystemClock.elapsedRealtime() - started}",
+                )
+            }
+        }
 
         suspend fun tryIdentity(
             identity: StaInitiatorIdentity,
@@ -2187,6 +2211,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 val candidateCamera = NikonCamera(localizedContext)
                 staConnectingCamera = candidateCamera
+                StaConnectionDiagnostics.note(
+                    diagnosticSession,
+                    "candidate start identity=${identity.name} alternate=$alternate verify=${pairingConfirmation != null}",
+                )
                 val result = candidateCamera.connectSta(
                     ip = ip,
                     localAddress = localAddress,
@@ -2221,7 +2249,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     readinessRetryUsed -> "paired-ready-retry"
                     else -> "paired"
                 }
-                recordStaDiagnostic(ip, route, candidateCamera)
+                recordStaDiagnostic(diagnosticSession, ip, route, candidateCamera)
                 pairedReachedStorageProbe = pairedReachedStorageProbe ||
                     candidateCamera.staStorageProbeReached
                 candidateCamera.staResponderGuid?.let { responderGuid ->
@@ -2248,7 +2276,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         }
                         return StaCandidateConnectionResult.REJECTED
                     }
+                    StaConnectionDiagnostics.note(diagnosticSession, "permission verified; activating album")
                     activateStaCamera(candidateCamera, ip, identity)
+                    StaConnectionDiagnostics.note(diagnosticSession, "album activation complete")
                     return StaCandidateConnectionResult.CONNECTED
                 }
                 val error = result.exceptionOrNull()
@@ -2284,7 +2314,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         confirmedResponderGuid = error.confirmation.responderGuid
                         rememberStaCameraProfile(candidateCamera, ip, StaInitiatorIdentity.PAIRED_COMPUTER)
                         staLastFailureMessage = null
-                        delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                        waitForStaService("post_pairing_restart", STA_PAIRING_RECONNECT_DELAY_MS)
                     }
                     error is PairingNotConfirmedException -> {
                         if (pairedComputer) pairingFlowStarted = true
@@ -2295,7 +2325,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             pairingReconnectUsed = false
                             pairingConfirmation = null
                             staLastFailureMessage = null
-                            delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                            waitForStaService("pairing_recovery", STA_PAIRING_RECONNECT_DELAY_MS)
                         } else {
                             // A legacy album identity may still use its paired-computer route.
                             if (!shouldBlockStaAlbumFallback(identity, pairingFlowStarted)) {
@@ -2312,7 +2342,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         // alternate computer route gets the same bounded post-pairing retry.
                         readinessRetryUsed = true
                         staLastFailureMessage = null
-                        delay(STA_SERVICE_READY_RETRY_DELAY_MS)
+                        waitForStaService("service_ready_retry", STA_SERVICE_READY_RETRY_DELAY_MS)
                     }
                     else -> {
                         // A failed recovery handshake (including Query/Result rejection) must
@@ -2345,7 +2375,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             generation == staDiscoveryGeneration &&
             _state.value.wirelessMode == WirelessMode.STA
         ) {
-            delay(STA_EXPLORER_RECONNECT_DELAY_MS)
+            waitForStaService("alternate_identity", STA_EXPLORER_RECONNECT_DELAY_MS)
             return tryIdentity(alternateIdentity, alternate = true)
         }
 
@@ -2415,15 +2445,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun recordStaDiagnostic(
+        diagnosticSession: Long,
         ip: String,
         route: String,
         candidateCamera: NikonCamera,
     ) {
-        val report = candidateCamera.staDiagnosticReport.takeIf(String::isNotBlank) ?: return
-        val labeled = "[$ip / $route]\n$report"
-        if (PhotoGenerationProbe.enabled) {
-            PhotoGenerationProbe.note("STA", labeled)
-        }
+        if (!StaConnectionDiagnostics.enabled) return
+        StaConnectionDiagnostics.attempt(diagnosticSession, "$ip / $route", candidateCamera.staDiagnosticReport)
     }
 
     private suspend fun activateStaCamera(

@@ -1,5 +1,8 @@
 package com.ztransfer.ui.screen
 
+import android.content.ClipData
+import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -27,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,13 +52,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.ztransfer.diagnostics.PhotoLocationDiagnostics
 import com.ztransfer.diagnostics.RatingDiagnostics
+import com.ztransfer.diagnostics.StaConnectionDiagnostics
 import com.ztransfer.diagnostics.ThumbnailDiagnostics
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.ztransfer.ui.theme.AppTheme
+import java.io.File
 
-/** Debug 照片页的缩略图、评级、保护与位置诊断窗口；Release 有同名空实现。 */
+/** Debug 照片页的 STA、缩略图、评级、保护与位置诊断窗口；Release 有同名空实现。 */
 @Composable
 internal fun DebugPhotoGenerationProbePanel(
     modifier: Modifier = Modifier,
@@ -67,6 +77,7 @@ internal fun DebugPhotoGenerationProbePanel(
     val clipboard = LocalClipboardManager.current
     var open by remember { mutableStateOf(false) }
     var rawProbeRunning by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     var logVersion by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
@@ -140,9 +151,35 @@ internal fun DebugPhotoGenerationProbePanel(
                                 color = colors.onBackground,
                             )
                             Text(
-                                "遇到问题后复制日志",
+                                "遇到问题后分享日志",
                                 fontSize = 11.sp,
                                 color = colors.onSurfaceVariant,
+                            )
+                        }
+                        GlassButton(
+                            enabled = !sharing,
+                            onClick = {
+                                val report = photoDiagnosticReport()
+                                sharing = true
+                                scope.launch {
+                                    try {
+                                        sharePhotoDiagnosticReport(context, report)
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "分享失败，请重试", Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        sharing = false
+                                    }
+                                }
+                            },
+                            contentPadding = PaddingValues(8.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = "分享 Debug 日志文件",
+                                tint = colors.accentBlue,
+                                modifier = Modifier.size(16.dp),
                             )
                         }
                         GlassButton(
@@ -164,6 +201,7 @@ internal fun DebugPhotoGenerationProbePanel(
                                 RatingDiagnostics.clear()
                                 ThumbnailDiagnostics.clear()
                                 PhotoLocationDiagnostics.clear()
+                                StaConnectionDiagnostics.clear()
                                 logVersion++
                             },
                             contentPadding = PaddingValues(8.dp),
@@ -293,5 +331,24 @@ internal fun DebugPhotoGenerationProbePanel(
 }
 
 private fun photoDiagnosticReport(): String =
-    ThumbnailDiagnostics.snapshot() + "\n\n" + RatingDiagnostics.snapshot() +
+    StaConnectionDiagnostics.snapshot() + "\n\n" + ThumbnailDiagnostics.snapshot() + "\n\n" + RatingDiagnostics.snapshot() +
         "\n\n" + PhotoLocationDiagnostics.report()
+
+private suspend fun sharePhotoDiagnosticReport(context: Context, report: String) {
+    val file = withContext(Dispatchers.IO) {
+        val directory = File(context.filesDir, "picture_control_reports")
+        check(directory.isDirectory || directory.mkdirs()) { "Cannot create diagnostic report directory" }
+        // Never overwrite: the receiving app can read this URI after another connection has started.
+        File.createTempFile("Shared-PhotoDiagnostics-", ".txt", directory).apply {
+            writeText(report, Charsets.UTF_8)
+        }
+    }
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.update-files", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        clipData = ClipData.newRawUri("诊断日志", uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, "分享日志"))
+}

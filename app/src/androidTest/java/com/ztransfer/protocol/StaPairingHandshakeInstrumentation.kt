@@ -119,6 +119,144 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
                 }
                 passed += "fresh confirmation plus same-camera valid frame persists pairing"
 
+                for (closeReply in listOf(CloseReply.SILENT, CloseReply.PARTIAL_PACKET)) {
+                    withFixture { fixture ->
+                        FakeStaServer(listOf(
+                            SessionPlan(event = PairingEvent.FRESH_CHANGED, closeReply = closeReply),
+                            SessionPlan(),
+                        )).use { server ->
+                            val startedAt = System.nanoTime()
+                            val receipt = obtainConfirmation(fixture)
+                            check(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt) >= 4_500) {
+                                "$closeReply did not exercise the production CloseSession read timeout"
+                            }
+                            check(server.commandCodes().count { it == PtpConstants.CLOSE_SESSION } == 1) {
+                                "$closeReply retried CloseSession on a timed-out command stream"
+                            }
+                            fixture.assertNoPairingMarker(GUID_A)
+                            val camera = NikonCamera(fixture)
+                            try {
+                                camera.connectSta(
+                                    ip = LOOPBACK, forceProfilePairing = true, exploreAlbumAccess = true,
+                                    pairingConfirmation = receipt,
+                                ).getOrThrow()
+                                check(camera.staPairingConfirmed && camera.staAlbumAccessValidated)
+                                check(fixture.pairingPrefs().getBoolean(STA_PAIRING_VERIFIED_MARKER_PREFIX + GUID_A, false))
+                                check(Lab.NK_GET_LIVE_VIEW_IMG in server.commandCodes())
+                            } finally { camera.close() }
+                            server.awaitFinished()
+                            check(server.commandCodes().count { it == PtpConstants.CLOSE_SESSION } == 2) {
+                                "Each of the two sessions must attempt CloseSession only once"
+                            }
+                            check(server.initiators().distinct().size == 1)
+                        }
+                    }
+                    passed += "$closeReply pairing cleanup sends one CloseSession; same-body frame still required"
+                }
+
+                for (deniedSample in listOf(-1, 0, 1, 2)) {
+                    withFixture { fixture ->
+                        val handles = (0x00010001..0x00010005).toList()
+                        val samples = listOf(handles.first(), handles[2], handles.last())
+                        FakeStaServer(listOf(
+                            SessionPlan(event = PairingEvent.FRESH_CHANGED),
+                            SessionPlan(objectHandles = handles,
+                                deniedObjectInfoHandle = samples.getOrNull(deniedSample)),
+                        )).use { server ->
+                            val receipt = obtainConfirmation(fixture)
+                            val camera = NikonCamera(fixture)
+                            try {
+                                camera.connectSta(
+                                    ip = LOOPBACK, forceProfilePairing = true, exploreAlbumAccess = true,
+                                    pairingConfirmation = receipt,
+                                ).getOrThrow()
+                                check(camera.staPairingConfirmed && camera.staAlbumAccessValidated)
+                                check(camera.staDirectObjectReadValidated == (deniedSample >= 0))
+                                val codes = server.commandCodes()
+                                check(codes.count { it == PtpConstants.GET_OBJECT_INFO } ==
+                                    if (deniedSample < 0) 3 else deniedSample + 1) {
+                                    "ObjectInfo sampling must stop at the first failed sample; commands=$codes"
+                                }
+                                check(PtpConstants.GET_THUMB !in codes) {
+                                    "Album validation must not request an unused thumbnail"
+                                }
+                                check(codes.count { it == PtpConstants.NK_GET_OBJECT_SIZE } ==
+                                    if (deniedSample < 0) 0 else 1)
+                                check(codes.count { it == PtpConstants.NK_GET_PARTIAL_OBJECT_EX } ==
+                                    if (deniedSample < 0) 0 else 1)
+                                check(Lab.NK_GET_LIVE_VIEW_IMG in codes) {
+                                    "Direct object access must still require fresh-pairing monitor verification"
+                                }
+                                check(fixture.pairingPrefs().getBoolean(STA_PAIRING_VERIFIED_MARKER_PREFIX + GUID_A, false))
+                            } finally { camera.close() }
+                            server.awaitFinished()
+                        }
+                    }
+                    passed += if (deniedSample < 0) "fully readable album retains all three ObjectInfo samples"
+                        else "denied ObjectInfo sample $deniedSample skips remaining samples and unused thumbnail"
+                }
+
+                withFixture { fixture ->
+                    FakeStaServer(listOf(
+                        SessionPlan(event = PairingEvent.FRESH_CHANGED),
+                        SessionPlan(objectHandles = (0x00010001..0x00010005).toList(),
+                            deniedObjectInfoHandle = 0x00010001, liveView = LiveViewCase.START_DENIED),
+                    )).use { server ->
+                        val receipt = obtainConfirmation(fixture)
+                        val camera = NikonCamera(fixture)
+                        try {
+                            val result = camera.connectSta(
+                                ip = LOOPBACK, forceProfilePairing = true, exploreAlbumAccess = true,
+                                pairingConfirmation = receipt,
+                            )
+                            check(result.exceptionOrNull() is PairingNotConfirmedException)
+                            check(!camera.staPairingConfirmed)
+                            fixture.assertNoPairingMarker(GUID_A)
+                            val codes = server.commandCodes()
+                            check(codes.count { it == PtpConstants.GET_OBJECT_INFO } == 1)
+                            check(codes.count { it == PtpConstants.NK_GET_OBJECT_SIZE } == 1)
+                            check(codes.count { it == PtpConstants.NK_GET_PARTIAL_OBJECT_EX } == 1)
+                            check(PtpConstants.GET_THUMB !in codes)
+                            check(Lab.NK_START_LIVE_VIEW in codes)
+                        } finally { camera.close() }
+                        server.awaitFinished()
+                    }
+                }
+                passed += "direct album access cannot confirm pairing after the monitor permission check fails"
+
+                for (sizeReply in listOf(ObjectSizeReply.DENIED, ObjectSizeReply.SHORT, ObjectSizeReply.ZERO)) {
+                    withFixture { fixture ->
+                        FakeStaServer(listOf(
+                            SessionPlan(event = PairingEvent.FRESH_CHANGED),
+                            SessionPlan(deniedObjectInfoHandle = 0x00010001, objectSizeReply = sizeReply),
+                        )).use { server ->
+                            val receipt = obtainConfirmation(fixture)
+                            val camera = NikonCamera(fixture)
+                            try {
+                                val result = camera.connectSta(
+                                    ip = LOOPBACK, forceProfilePairing = true, exploreAlbumAccess = true,
+                                    pairingConfirmation = receipt,
+                                )
+                                check(result.isFailure)
+                                check(!camera.staPairingConfirmed && !camera.staAlbumAccessValidated)
+                                check(!camera.staDirectObjectReadValidated)
+                                fixture.assertNoPairingMarker(GUID_A)
+                                val codes = server.commandCodes()
+                                check(codes.count { it == PtpConstants.NK_GET_OBJECT_SIZE } == 1)
+                                check(PtpConstants.NK_GET_PARTIAL_OBJECT_EX !in codes) {
+                                    "$sizeReply size cannot be repaired by reading object bytes"
+                                }
+                                check(codes.count { it == 0x9435 } == 1) {
+                                    "Invalid direct size must preserve the application-mode compatibility attempt"
+                                }
+                                check(codes.none { it in LIVE_VIEW_COMMANDS })
+                            } finally { camera.close() }
+                            server.awaitFinished()
+                        }
+                    }
+                    passed += "$sizeReply object size skips partial read and retains compatibility fallback without trust"
+                }
+
                 for (liveView in listOf(
                     LiveViewCase.START_EOF, LiveViewCase.FRAME_EOF, LiveViewCase.START_DENIED,
                     LiveViewCase.BAD_FRAME, LiveViewCase.END_DENIED,
@@ -520,6 +658,8 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
         NORMAL, START_EOF, FRAME_EOF, START_DENIED, BAD_FRAME, END_DENIED,
         ALREADY_ACTIVE, BUSY_THEN_READY, GATED_FRAME, UNSUPPORTED,
     }
+    private enum class CloseReply { NORMAL, SILENT, PARTIAL_PACKET }
+    private enum class ObjectSizeReply { VALID, DENIED, SHORT, ZERO }
     private data class SessionPlan(
         val guid: String = GUID_A,
         val event: PairingEvent? = null,
@@ -527,6 +667,10 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
         val pairingOnlyDeviceInfo: Boolean = false,
         val deviceInfoResponse: Int = PtpConstants.RESPONSE_OK,
         val liveView: LiveViewCase = LiveViewCase.NORMAL,
+        val objectHandles: List<Int> = listOf(0x00010001),
+        val deniedObjectInfoHandle: Int? = null,
+        val closeReply: CloseReply = CloseReply.NORMAL,
+        val objectSizeReply: ObjectSizeReply = ObjectSizeReply.VALID,
     )
 
     private class FakeStaServer(private val plans: List<SessionPlan>) : Closeable {
@@ -609,16 +753,51 @@ class StaPairingHandshakeInstrumentation : Instrumentation() {
                 val transaction = request.payload.i32(6)
                 commands += code
                 when (code) {
-                    PtpConstants.OPEN_SESSION, 0x941C, PtpConstants.CLOSE_SESSION -> output.response(transaction)
+                    PtpConstants.OPEN_SESSION, 0x941C -> output.response(transaction)
+                    PtpConstants.CLOSE_SESSION -> when (plan.closeReply) {
+                        CloseReply.NORMAL -> output.response(transaction)
+                        CloseReply.SILENT -> Unit
+                        CloseReply.PARTIAL_PACKET -> {
+                            // A complete header with a partial response body must time out;
+                            // a second CloseSession must not reuse this unaligned reader.
+                            output.write(bytes { u32(14); u32(PtpConstants.CMD_RESPONSE); u16(Lab.OK) })
+                            output.flush()
+                        }
+                    }
                     PtpConstants.GET_STORAGE_IDS -> output.response(transaction, bytes { u32(1); u32(0x00010001) })
                     PtpConstants.GET_DEVICE_INFO -> output.response(
                         transaction,
                         deviceInfo(plan.pairingOnlyDeviceInfo, plan.liveView != LiveViewCase.UNSUPPORTED).takeIf { plan.deviceInfoResponse == PtpConstants.RESPONSE_OK },
                         plan.deviceInfoResponse,
                     )
-                    PtpConstants.GET_OBJECT_HANDLES -> output.response(transaction, bytes { u32(1); u32(0x00010001) })
+                    PtpConstants.GET_OBJECT_HANDLES -> output.response(transaction, bytes {
+                        u32(plan.objectHandles.size); plan.objectHandles.forEach(::u32)
+                    })
                     // The production bounded access probe checks response success and ObjectInfo size.
-                    PtpConstants.GET_OBJECT_INFO -> output.response(transaction, ByteArray(64))
+                    PtpConstants.GET_OBJECT_INFO -> {
+                        check(request.payload.size >= 14)
+                        val denied = request.payload.i32(10) == plan.deniedObjectInfoHandle
+                        output.response(transaction, ByteArray(64).takeUnless { denied },
+                            if (denied) Lab.ACCESS_DENIED else Lab.OK)
+                    }
+                    PtpConstants.NK_GET_OBJECT_SIZE -> when (plan.objectSizeReply) {
+                        ObjectSizeReply.VALID -> output.response(transaction, bytes { u32(65_536); u32(0) })
+                        ObjectSizeReply.DENIED -> output.response(transaction, responseCode = Lab.ACCESS_DENIED)
+                        ObjectSizeReply.SHORT -> output.response(transaction, bytes { u32(65_536) })
+                        ObjectSizeReply.ZERO -> output.response(transaction, ByteArray(8))
+                    }
+                    PtpConstants.NK_GET_PARTIAL_OBJECT_EX -> {
+                        check(plan.objectSizeReply == ObjectSizeReply.VALID) {
+                            "Partial object read followed an invalid size"
+                        }
+                        output.response(transaction,
+                            byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE1.toByte()))
+                    }
+                    0x9435 -> {
+                        check(plan.objectSizeReply != ObjectSizeReply.VALID)
+                        check(request.payload.size >= 14 && request.payload.i32(10) == 1)
+                        output.response(transaction, responseCode = Lab.ACCESS_DENIED)
+                    }
                     Lab.GET_DEVICE_PROP_VALUE -> {
                         check(request.payload.size >= 14 && request.payload.i32(10) == Lab.PROP_NK_LV_STATUS)
                         check(plan.liveView != LiveViewCase.UNSUPPORTED) { "Saved pairing read LV status" }
