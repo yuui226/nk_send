@@ -14,6 +14,7 @@
     <string name="sta_reset_pairing_message">将忘记此 App 已配对的所有相机，之后需要在相机中重新创建“连接到计算机”配置并重新配对。</string>
     <string name="sta_status_searching">正在寻找</string>
     <string name="sta_status_pairing">正在配对</string>
+    <string name="sta_pairing_incomplete">配对未完成，请检查相机后重试。</string>
     <string name="sta_status_connecting">正在连接</string>
     <string name="sta_status_connected">连接成功</string>
     <string name="sta_camera_not_found_short">未找到相机</string>

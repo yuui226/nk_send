@@ -2,6 +2,7 @@ package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.StaInitiatorIdentity
+import com.ztransfer.protocol.StaPairingConfirmationMissingException
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -67,6 +68,40 @@ class StaConnectionIsolationTest {
     }
 
     @Test
+    fun missingPairingConfirmationStopsAutomaticRetryEvenWithAnExistingProfile() {
+        val failure = StaPairingConfirmationMissingException()
+        listOf(false, true).forEach { reconnect ->
+            listOf(false, true).forEach { reusableProfile ->
+                assertFalse(
+                    shouldKeepStaDiscoveryAlive(
+                        reconnectRequested = reconnect,
+                        hasReusableProfile = reusableProfile,
+                        failure = failure,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun ordinaryTransportFailureStillReconnectsForExistingProfilesOrSessions() {
+        assertTrue(
+            shouldKeepStaDiscoveryAlive(
+                reconnectRequested = false,
+                hasReusableProfile = true,
+                failure = SocketTimeoutException("camera restarting"),
+            ),
+        )
+        assertTrue(
+            shouldKeepStaDiscoveryAlive(
+                reconnectRequested = true,
+                hasReusableProfile = false,
+                failure = ConnectException("temporarily unavailable"),
+            ),
+        )
+    }
+
+    @Test
     fun reconnectOverlappingPreviousDiscoveryIsDeferredInsteadOfDropped() {
         assertTrue(
             shouldScheduleStaDiscoveryRetry(
@@ -112,6 +147,40 @@ class StaConnectionIsolationTest {
                 pairingConfirmed = true,
             ),
         )
+    }
+
+    @Test
+    fun unconfirmedComputerPairingCannotEscapeThroughAlbumIdentity() {
+        assertTrue(
+            shouldBlockStaAlbumFallback(
+                preferredIdentity = StaInitiatorIdentity.PAIRED_COMPUTER,
+                pairingFlowStarted = true,
+            ),
+        )
+    }
+
+    @Test
+    fun legacyAlbumValidationCanRecoverThroughComputerIdentity() {
+        // A legacy album route may fail its DeviceInfo validation before computer pairing starts.
+        // The authoritative identity must still get its own full confirmation/reconnect attempt.
+        assertFalse(
+            shouldBlockStaAlbumFallback(
+                preferredIdentity = StaInitiatorIdentity.ALBUM_EXPLORER,
+                pairingFlowStarted = true,
+            ),
+        )
+    }
+
+    @Test
+    fun existingPairedRoutesKeepCompatibilityFallbackBeforeNewPairing() {
+        StaInitiatorIdentity.entries.forEach { identity ->
+            assertFalse(
+                shouldBlockStaAlbumFallback(
+                    preferredIdentity = identity,
+                    pairingFlowStarted = false,
+                ),
+            )
+        }
     }
 
     @Test

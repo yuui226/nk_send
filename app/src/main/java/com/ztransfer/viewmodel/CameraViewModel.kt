@@ -36,6 +36,8 @@ import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PairingNotConfirmedException
+import com.ztransfer.protocol.StaPairingConfirmation
+import com.ztransfer.protocol.StaPairingConfirmationMissingException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpCandidate
@@ -141,7 +143,9 @@ internal fun shouldReconnectUsingSta(
 internal fun shouldKeepStaDiscoveryAlive(
     reconnectRequested: Boolean,
     hasReusableProfile: Boolean,
-): Boolean = reconnectRequested || hasReusableProfile
+    failure: Throwable? = null,
+): Boolean = failure !is StaPairingConfirmationMissingException &&
+    (reconnectRequested || hasReusableProfile)
 
 /** A reconnect request that overlaps the tail of the previous scan must be retried, not dropped. */
 internal fun shouldScheduleStaDiscoveryRetry(
@@ -154,6 +158,12 @@ internal fun canActivateStaSession(
     albumAccessValidated: Boolean,
     pairingConfirmed: Boolean,
 ): Boolean = albumAccessValidated && pairingConfirmed
+
+/** A failed computer pairing cannot escape through album access; a stale album route may recover. */
+internal fun shouldBlockStaAlbumFallback(
+    preferredIdentity: StaInitiatorIdentity,
+    pairingFlowStarted: Boolean,
+): Boolean = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER && pairingFlowStarted
 
 internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
     runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
@@ -2067,17 +2077,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (generation == staDiscoveryGeneration &&
                     _state.value.wirelessMode == WirelessMode.STA
                 ) {
+                    if (error is StaPairingConfirmationMissingException) {
+                        // An overlapping reconnect request may already have queued a deferred
+                        // discovery. Stop it too; confirmation failure requires an explicit retry.
+                        staReconnectJob?.cancel()
+                        staReconnectJob = null
+                    }
                     val localized = com.ztransfer.AppLocale.wrap(getApplication())
                     _state.update {
                         it.copy(
                             isConnecting = false,
                             staConnectionStatus = StaConnectionStatus.FAILED,
                             staDiscoveryProgress = null,
-                            staConnectionError = error.message
-                                ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found),
+                            staConnectionError = if (error is StaPairingConfirmationMissingException) {
+                                staFailureMessage(localized, error, candidateKnown = false)
+                            } else {
+                                error.message ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found)
+                            },
                         )
                     }
-                    if (shouldKeepStaDiscoveryAlive(reconnect, hasReusableStaProfile())) {
+                    if (shouldKeepStaDiscoveryAlive(reconnect, hasReusableStaProfile(), failure = error)) {
                         scheduleStaReconnect()
                     }
                 }
@@ -2139,136 +2158,183 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val preferredIdentity = staProfileStore.preferredIdentityFor(ip)
         var candidateKnown = staProfileStore.isKnownCandidate(ip)
         var pairedReachedStorageProbe = false
-        var pairingReconnectUsed = false
-        var pairingRecoveryUsed = false
-        var readinessRetryUsed = false
-        while (true) {
-            if (generation != staDiscoveryGeneration || purchaseHold ||
-                _state.value.wirelessMode != WirelessMode.STA
-            ) return StaCandidateConnectionResult.REJECTED
-            _state.update { current ->
-                if (current.staConnectionStatus == StaConnectionStatus.PAIRING) {
-                    current.copy(staConnectionStatus = StaConnectionStatus.CONNECTING)
-                } else {
-                    current
+        // Once computer pairing begins, album access must not bypass its confirmation. A legacy
+        // album route can still recover through the authoritative computer identity below.
+        var pairingFlowStarted = false
+        var pairingConfirmation: StaPairingConfirmation? = null
+        var confirmedResponderGuid: String? = null
+
+        suspend fun tryIdentity(
+            identity: StaInitiatorIdentity,
+            alternate: Boolean,
+        ): StaCandidateConnectionResult {
+            val pairedComputer = identity == StaInitiatorIdentity.PAIRED_COMPUTER
+            var pairingReconnectUsed = false
+            var pairingRecoveryUsed = false
+            var readinessRetryUsed = false
+            while (true) {
+                if (generation != staDiscoveryGeneration || purchaseHold ||
+                    _state.value.connectionType == CameraConnectionType.USB ||
+                    _state.value.wirelessMode != WirelessMode.STA ||
+                    _state.value.isConnectedToCamera
+                ) return StaCandidateConnectionResult.REJECTED
+                _state.update { current ->
+                    if (current.staConnectionStatus == StaConnectionStatus.PAIRING) {
+                        current.copy(staConnectionStatus = StaConnectionStatus.CONNECTING)
+                    } else {
+                        current
+                    }
                 }
-            }
-            val candidateCamera = NikonCamera(localizedContext)
-            staConnectingCamera = candidateCamera
-            val result = candidateCamera.connectSta(
-                ip = ip,
-                localAddress = localAddress,
-                identity = preferredIdentity,
-                expectedResponderGuid = expectedResponderGuid,
-                allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                exploreAlbumAccess = true,
-                forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                verifyPairingCompletion = pairingReconnectUsed &&
-                    preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                onConnectingStarted = {
-                    publishStaConnectingStarted(generation, ip)
-                },
-                onPairingStarted = { publishStaPairingStarted(generation, ip) },
-            )
-            if (generation != staDiscoveryGeneration || purchaseHold ||
-                _state.value.connectionType == CameraConnectionType.USB
-                || _state.value.wirelessMode != WirelessMode.STA
-                || _state.value.isConnectedToCamera
-            ) {
-                candidateCamera.close()
-                return StaCandidateConnectionResult.REJECTED
-            }
-            val route = when {
-                preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER && readinessRetryUsed ->
-                    "saved-album-ready-retry"
-                preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER -> "saved-album"
-                readinessRetryUsed -> "paired-ready-retry"
-                else -> "paired"
-            }
-            recordStaDiagnostic(ip, route, candidateCamera)
-            pairedReachedStorageProbe = pairedReachedStorageProbe ||
-                candidateCamera.staStorageProbeReached
-            candidateCamera.staResponderGuid?.let { responderGuid ->
-                candidateKnown = staProfileStore.isKnownCandidate(
+                val candidateCamera = NikonCamera(localizedContext)
+                staConnectingCamera = candidateCamera
+                val result = candidateCamera.connectSta(
                     ip = ip,
-                    responderGuid = responderGuid,
+                    localAddress = localAddress,
+                    identity = identity,
+                    // A receipt belongs to this exact body, even if DHCP reuses its IP during
+                    // the camera service restart or the one bounded pairing recovery.
+                    expectedResponderGuid = confirmedResponderGuid ?: expectedResponderGuid,
+                    allowPairing = pairedComputer,
+                    exploreAlbumAccess = true,
+                    forceProfilePairing = pairedComputer,
+                    pairingConfirmation = pairingConfirmation.takeIf { pairedComputer },
+                    onConnectingStarted = {
+                        publishStaConnectingStarted(generation, ip)
+                    },
+                    onPairingStarted = {
+                        if (pairedComputer) pairingFlowStarted = true
+                        publishStaPairingStarted(generation, ip)
+                    },
                 )
-            }
-            if (result.isSuccess) {
-                if (!canActivateStaSession(
-                        albumAccessValidated = candidateCamera.staAlbumAccessValidated,
-                        pairingConfirmed = candidateCamera.staPairingConfirmed,
-                    )
+                if (generation != staDiscoveryGeneration || purchaseHold ||
+                    _state.value.connectionType == CameraConnectionType.USB ||
+                    _state.value.wirelessMode != WirelessMode.STA ||
+                    _state.value.isConnectedToCamera
                 ) {
-                    staLastFailureMessage = localizedContext.getString(
-                        com.ztransfer.R.string.sta_camera_refused_repair,
-                    )
-                    staConnectingCamera = null
                     candidateCamera.close()
-                    // A different paired body may previously have used this IP with the album
-                    // identity. Let that successful-but-unconfirmed route fall through to the
-                    // bounded paired-computer attempt instead of retrying the stale route forever.
-                    if (preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER) break
                     return StaCandidateConnectionResult.REJECTED
                 }
-                activateStaCamera(candidateCamera, ip, preferredIdentity)
-                return StaCandidateConnectionResult.CONNECTED
-            }
-            val error = result.exceptionOrNull()
-            if (error is UnexpectedStaResponderException) {
-                staConnectingCamera = null
-                candidateCamera.close()
-                return StaCandidateConnectionResult.UNEXPECTED_CAMERA
-            }
-            staLastFailureMessage = staFailureMessage(localizedContext, error, candidateKnown)
-            staConnectingCamera = null
-            candidateCamera.close()
-            when {
-                error is PairingCompletedException && !pairingReconnectUsed -> {
-                    // A first-time pairing changes the camera service; the verified trace becomes
-                    // ready again roughly 6.6 seconds later.
-                    pairingReconnectUsed = true
-                    rememberStaCameraProfile(
-                        candidateCamera,
-                        ip,
-                        StaInitiatorIdentity.PAIRED_COMPUTER,
-                    )
-                    staLastFailureMessage = null
-                    delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                val route = when {
+                    alternate -> "alternate-${identity.name.lowercase()}"
+                    !pairedComputer && readinessRetryUsed -> "saved-album-ready-retry"
+                    !pairedComputer -> "saved-album"
+                    readinessRetryUsed -> "paired-ready-retry"
+                    else -> "paired"
                 }
-                error is PairingNotConfirmedException -> {
-                    // Do not turn a camera that is still waiting on its pairing screen into a
-                    // successful session. One bounded recovery clears the stale marker and lets
-                    // the next pass run the normal pairing handshake instead of requiring the
-                    // user to disconnect and reconnect manually.
-                    if (!pairingRecoveryUsed) {
-                        pairingRecoveryUsed = true
-                        pairingReconnectUsed = false
-                        staLastFailureMessage = null
-                        delay(STA_PAIRING_RECONNECT_DELAY_MS)
-                    } else {
+                recordStaDiagnostic(ip, route, candidateCamera)
+                pairedReachedStorageProbe = pairedReachedStorageProbe ||
+                    candidateCamera.staStorageProbeReached
+                candidateCamera.staResponderGuid?.let { responderGuid ->
+                    candidateKnown = staProfileStore.isKnownCandidate(
+                        ip = ip,
+                        responderGuid = responderGuid,
+                    )
+                }
+                if (result.isSuccess) {
+                    if (!canActivateStaSession(
+                            albumAccessValidated = candidateCamera.staAlbumAccessValidated,
+                            pairingConfirmed = candidateCamera.staPairingConfirmed,
+                        )
+                    ) {
                         staLastFailureMessage = localizedContext.getString(
                             com.ztransfer.R.string.sta_camera_refused_repair,
                         )
-                        break
+                        staConnectingCamera = null
+                        candidateCamera.close()
+                        // A stale saved album route may still try the authoritative computer
+                        // identity, but a computer session cannot fall back around this gate.
+                        if (pairedComputer) {
+                            throw StaPairingConfirmationMissingException(PairingNotConfirmedException())
+                        }
+                        return StaCandidateConnectionResult.REJECTED
+                    }
+                    activateStaCamera(candidateCamera, ip, identity)
+                    return StaCandidateConnectionResult.CONNECTED
+                }
+                val error = result.exceptionOrNull()
+                staConnectingCamera = null
+                candidateCamera.close()
+                if (error is UnexpectedStaResponderException) {
+                    // Do not retry a different camera without the GUID guard after receiving
+                    // a confirmation for the first body at this address.
+                    if (confirmedResponderGuid != null) throw StaPairingConfirmationMissingException(error)
+                    return StaCandidateConnectionResult.UNEXPECTED_CAMERA
+                }
+                // Keep the authoritative computer-route error when a secondary album identity
+                // is refused. The paired-computer alternate supersedes a stale album-route error.
+                if (!alternate || pairedComputer || staLastFailureMessage == null) {
+                    staLastFailureMessage = staFailureMessage(localizedContext, error, candidateKnown)
+                }
+                when {
+                    error is StaPairingConfirmationMissingException -> {
+                        pairingFlowStarted = true
+                        staLastFailureMessage = staFailureMessage(localizedContext, error, candidateKnown)
+                        // Stop this discovery and its automatic retries, not just this identity.
+                        // The user may still be confirming this body; do not pair another camera
+                        // or resend pairing merely because a reusable route hint exists.
+                        throw error
+                    }
+                    error is PairingCompletedException -> {
+                        pairingFlowStarted = true
+                        if (!pairedComputer || pairingReconnectUsed) {
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        pairingReconnectUsed = true
+                        pairingConfirmation = error.confirmation
+                        confirmedResponderGuid = error.confirmation.responderGuid
+                        rememberStaCameraProfile(candidateCamera, ip, StaInitiatorIdentity.PAIRED_COMPUTER)
+                        staLastFailureMessage = null
+                        delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                    }
+                    error is PairingNotConfirmedException -> {
+                        if (pairedComputer) pairingFlowStarted = true
+                        // Keep the existing single recovery, discarding the old receipt but
+                        // retaining its camera GUID. Another failure must never try album access.
+                        if (!pairingRecoveryUsed) {
+                            pairingRecoveryUsed = true
+                            pairingReconnectUsed = false
+                            pairingConfirmation = null
+                            staLastFailureMessage = null
+                            delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                        } else {
+                            // A legacy album identity may still use its paired-computer route.
+                            if (!shouldBlockStaAlbumFallback(identity, pairingFlowStarted)) {
+                                return StaCandidateConnectionResult.REJECTED
+                            }
+                            // Exhausted the one pairing recovery. Stop the entire discovery,
+                            // including saved-profile auto retries, rather than looping forever.
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                    }
+                    isTransientStaServiceReadinessFailure(error) && !readinessRetryUsed &&
+                        (!alternate || pairingConfirmation != null) -> {
+                        // Preserve the preferred route's startup retry. A newly confirmed
+                        // alternate computer route gets the same bounded post-pairing retry.
+                        readinessRetryUsed = true
+                        staLastFailureMessage = null
+                        delay(STA_SERVICE_READY_RETRY_DELAY_MS)
+                    }
+                    else -> {
+                        // A failed recovery handshake (including Query/Result rejection) must
+                        // not restart indefinitely through saved-profile auto discovery either.
+                        if (pairedComputer && pairingFlowStarted) {
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        return StaCandidateConnectionResult.REJECTED
                     }
                 }
-                isTransientStaServiceReadinessFailure(error) && !readinessRetryUsed -> {
-                    // The camera may expose its saved-profile address before port 15740 is ready.
-                    // Retry this STA-only probe once so album validation is not skipped merely due
-                    // to that short startup window.
-                    readinessRetryUsed = true
-                    staLastFailureMessage = null
-                    delay(STA_SERVICE_READY_RETRY_DELAY_MS)
-                }
-                else -> break
             }
         }
 
-        // Try the one bounded compatibility identity after the preferred route fails. A known
-        // camera may have moved to a new DHCP address, so its GUID cannot be recovered when the
-        // first identity is rejected during InitCommand; the stored profiles tell us whether the
-        // alternate route is still in use, without generating or scanning identities.
+        val preferredResult = tryIdentity(preferredIdentity, alternate = false)
+        if (preferredResult != StaCandidateConnectionResult.REJECTED) return preferredResult
+        if (shouldBlockStaAlbumFallback(preferredIdentity, pairingFlowStarted)) {
+            return StaCandidateConnectionResult.REJECTED
+        }
+
+        // Preserve existing paired routes' compatibility retry, including legacy album routes
+        // whose validation failed. The alternate computer identity must use the complete bounded
+        // confirmation/reconnect flow; it cannot inherit trust from that failed album attempt.
         val alternateIdentity = when (preferredIdentity) {
             StaInitiatorIdentity.PAIRED_COMPUTER -> StaInitiatorIdentity.ALBUM_EXPLORER
             StaInitiatorIdentity.ALBUM_EXPLORER -> StaInitiatorIdentity.PAIRED_COMPUTER
@@ -2280,85 +2346,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _state.value.wirelessMode == WirelessMode.STA
         ) {
             delay(STA_EXPLORER_RECONNECT_DELAY_MS)
-            val alternateCamera = NikonCamera(localizedContext)
-            staConnectingCamera = alternateCamera
-            val alternateResult = alternateCamera.connectSta(
-                ip = ip,
-                localAddress = localAddress,
-                identity = alternateIdentity,
-                expectedResponderGuid = expectedResponderGuid,
-                allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                exploreAlbumAccess = true,
-                forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                verifyPairingCompletion = pairingReconnectUsed &&
-                    alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                onConnectingStarted = {
-                    publishStaConnectingStarted(generation, ip)
-                },
-                onPairingStarted = { publishStaPairingStarted(generation, ip) },
-            )
-            recordStaDiagnostic(
-                ip,
-                "alternate-${alternateIdentity.name.lowercase()}",
-                alternateCamera,
-            )
-            alternateCamera.staResponderGuid?.let { responderGuid ->
-                candidateKnown = staProfileStore.isKnownCandidate(
-                    ip = ip,
-                    responderGuid = responderGuid,
-                )
-            }
-            if (generation != staDiscoveryGeneration || purchaseHold ||
-                _state.value.connectionType == CameraConnectionType.USB ||
-                _state.value.wirelessMode != WirelessMode.STA ||
-                _state.value.isConnectedToCamera
-            ) {
-                alternateCamera.close()
-                return StaCandidateConnectionResult.REJECTED
-            }
-            if (alternateResult.isSuccess) {
-                if (!canActivateStaSession(
-                        albumAccessValidated = alternateCamera.staAlbumAccessValidated,
-                        pairingConfirmed = alternateCamera.staPairingConfirmed,
-                    )
-                ) {
-                    staLastFailureMessage = localizedContext.getString(
-                        com.ztransfer.R.string.sta_camera_refused_repair,
-                    )
-                    staConnectingCamera = null
-                    alternateCamera.close()
-                    return StaCandidateConnectionResult.REJECTED
-                }
-                activateStaCamera(alternateCamera, ip, alternateIdentity)
-                return StaCandidateConnectionResult.CONNECTED
-            }
-            if (alternateResult.exceptionOrNull() is UnexpectedStaResponderException) {
-                staConnectingCamera = null
-                alternateCamera.close()
-                return StaCandidateConnectionResult.UNEXPECTED_CAMERA
-            }
-            if (alternateResult.exceptionOrNull() is PairingCompletedException) {
-                rememberStaCameraProfile(
-                    alternateCamera,
-                    ip,
-                    StaInitiatorIdentity.PAIRED_COMPUTER,
-                )
-                staLastFailureMessage = null
-            }
-            // The paired-computer route is authoritative. Preserve its failure when the secondary
-            // album identity is intentionally rejected; replace an album-first failure when this
-            // authoritative paired route was the alternate attempt.
-            if (alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER ||
-                staLastFailureMessage == null
-            ) {
-                staLastFailureMessage = staFailureMessage(
-                    localizedContext,
-                    alternateResult.exceptionOrNull(),
-                    candidateKnown,
-                )
-            }
-            staConnectingCamera = null
-            alternateCamera.close()
+            return tryIdentity(alternateIdentity, alternate = true)
         }
 
         // A monitor-only PTP profile is not a successful photo-browser connection. Activating it
@@ -2414,6 +2402,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         error: Throwable?,
         candidateKnown: Boolean,
     ): String? = when (error) {
+        is StaPairingConfirmationMissingException -> context.getString(
+            com.ztransfer.R.string.sta_pairing_incomplete,
+        )
         is CameraRefusedException -> if (candidateKnown) {
             context.getString(com.ztransfer.R.string.sta_camera_refused_retrying)
         } else {
