@@ -48,10 +48,12 @@ if /i "%~1"=="aab" (
     set "EXT=aab"
 )
 
-echo Building %EXT% (%TASK%)...
+echo Building clean release %EXT% (%TASK%)...
 rem Use the explicit path to gradlew.bat: cmd does not search the current
 rem directory for `call` targets in some environments.
-call "%~dp0..\gradlew.bat" %TASK% --no-daemon
+rem Release always starts from fresh outputs; never restore compiled task results.
+rem Dependency downloads remain cached. Existing packages in dist are not removed.
+call "%~dp0..\gradlew.bat" :app:clean :release-apk:clean %TASK% -Pkotlin.incremental=false --no-build-cache --no-configuration-cache --no-daemon --console=plain
 if errorlevel 1 (
     echo.
     echo Build FAILED.

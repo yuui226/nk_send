@@ -109,8 +109,11 @@ if [[ -z "$VERSION_NAME" ]]; then
   exit 1
 fi
 
-printf 'Building signed release %s (%s) with %s...\n' "$KIND" "$TASK" "$JAVA_HOME"
-"$ROOT_DIR/gradlew" "$TASK" --no-daemon --console=plain
+printf 'Building clean signed release %s (%s) with %s...\n' "$KIND" "$TASK" "$JAVA_HOME"
+# Release always starts from fresh outputs; never restore compiled task results.
+# Dependency downloads remain cached. Existing packages in dist are not removed.
+"$ROOT_DIR/gradlew" :app:clean :release-apk:clean "$TASK" \
+  -Pkotlin.incremental=false --no-build-cache --no-configuration-cache --no-daemon --console=plain
 
 if [[ ! -f "$SOURCE" ]]; then
   echo "ERROR: release artifact not found: $SOURCE" >&2

@@ -41,8 +41,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 76
-        versionName = "2.03"
+        versionCode = 77
+        versionName = "2.04"
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
@@ -105,6 +105,12 @@ android {
             enableSplit = false
         }
     }
+}
+
+// KGP marks its incremental switch as internal. Track it explicitly so switching it off
+// also invalidates old task outputs/cache entries on the very next build.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    inputs.property("kotlinIncrementalEnabled", providers.gradleProperty("kotlin.incremental").orElse("true"))
 }
 
 dependencies {
