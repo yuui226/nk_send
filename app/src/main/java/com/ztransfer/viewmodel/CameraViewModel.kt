@@ -2282,13 +2282,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _state.value.wirelessMode != WirelessMode.STA ||
                     _state.value.isConnectedToCamera
                 ) return StaCandidateConnectionResult.REJECTED
-                _state.update { current ->
-                    if (current.staConnectionStatus == StaConnectionStatus.PAIRING) {
-                        current.copy(staConnectionStatus = StaConnectionStatus.CONNECTING)
-                    } else {
-                        current
-                    }
-                }
                 val candidateCamera = NikonCamera(localizedContext)
                 var pairingExchangeStarted = false
                 staConnectingCamera = candidateCamera
@@ -2312,7 +2305,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         identity, pairingConfirmation, pairingRecoveryUsed,
                     ),
                     onConnectingStarted = {
-                        publishStaConnectingStarted(generation, ip, fromProtocol = true)
+                        publishStaConnectingStarted(generation, ip)
                     },
                     onPairingStarted = {
                         pairingExchangeStarted = true
@@ -2529,14 +2522,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return StaCandidateConnectionResult.REJECTED
     }
 
-    private fun publishStaConnectingStarted(generation: Long, ip: String, fromProtocol: Boolean = false) {
+    private fun publishStaConnectingStarted(generation: Long, ip: String) {
         _state.update { current ->
             if (generation != staDiscoveryGeneration ||
                 purchaseHold ||
                 current.wirelessMode != WirelessMode.STA ||
                 current.connectionType == CameraConnectionType.USB ||
                 current.isConnectedToCamera ||
-                (current.staConnectionStatus == StaConnectionStatus.PAIRING && !fromProtocol)
+                // A pairing ACK is not completion: keep the label through reconnect, remote
+                // permission verification and recovery. Activation/failure/cancellation ends it.
+                current.staConnectionStatus == StaConnectionStatus.PAIRING
             ) {
                 current
             } else {
