@@ -543,10 +543,24 @@ internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): 
     (downloaded - resumeOffset).coerceAtLeast(0L)
 
 /** In-memory evidence from this pairing attempt; never reconstructed from album access. */
-internal data class StaPairingConfirmation(val responderGuid: String)
+internal data class StaPairingConfirmation(
+    val responderGuid: String,
+    // In-memory only: set after decoding a valid frame, never from an album or command ACK.
+    val remotePermissionVerified: Boolean = false,
+    // Monotonic and in-memory only. Connection teardown counts toward the restart interval.
+    val resultAcknowledgedAtMs: Long = 0L,
+)
 
-internal class PairingCompletedException(val confirmation: StaPairingConfirmation) :
-    Exception("Nikon pairing state changed; same-camera reconnect required")
+internal class PairingCompletedException(
+    val confirmation: StaPairingConfirmation,
+    val isRecovery: Boolean = false,
+) : Exception("Nikon pairing exchange acknowledged; same-camera verification required")
+
+/** Remote permission was proved, but the probe's session must be replaced before browsing. */
+internal class StaPairingCleanupException(
+    val confirmation: StaPairingConfirmation,
+    cause: Throwable,
+) : java.io.IOException("Nikon pairing verified; session cleanup failed", cause)
 
 /** An accepted command alone must not let the first pairing fall through to photo browsing. */
 internal class StaPairingConfirmationMissingException(cause: Throwable? = null) :
@@ -557,7 +571,11 @@ internal class StaResponseException(val responseCode: Int, message: String) :
     java.io.IOException(message)
 
 /** The post-pairing session still lacks the capabilities required to confirm it. */
-internal class PairingNotConfirmedException(cause: Throwable? = null) :
+internal class PairingNotConfirmedException(
+    cause: Throwable? = null,
+    val remoteRequestAttempted: Boolean = false,
+    val pairingOnly: Boolean = false,
+) :
     Exception("Nikon pairing was not confirmed by the camera", cause)
 
 internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
@@ -2174,6 +2192,8 @@ class NikonCamera(private val context: Context) {
     // for every new NikonCamera instance.
     @Volatile private var pairingVerifiedForSession = false
     @Volatile private var pairingRequiredForSession = false
+    // Scoped to connectSta, including its failure cleanup. Normal AP/USB/transfers are unchanged.
+    private var staHandshakeInProgress = false
     /**
      * 跨连接稳定的机身身份，用于隔离缩略图磁盘缓存。有效的 PTP DeviceInfo 序列号
      * 可统一同一机身的 Wi-Fi/USB 缓存；缺失或为占位值时再用当前链路的物理标识兜底。
@@ -2198,7 +2218,7 @@ class NikonCamera(private val context: Context) {
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
 
-    private fun cacheDeviceInfo(data: ByteArray): LabDeviceInfo =
+    internal fun cacheDeviceInfo(data: ByteArray): LabDeviceInfo =
         parseDeviceInfo(data).also { info ->
             pictureControlProtocol = null
             cachedDeviceInfo = info
@@ -2211,6 +2231,7 @@ class NikonCamera(private val context: Context) {
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
         private const val STA_HANDSHAKE_TIMEOUT_MS = 5_000
+        private const val STA_HANDLE_LIST_TIMEOUT_MS = 30_000
         private const val USB_CONNECT_TIMEOUT_MS = 5_000
         // 仅给 Android USB Host 释放接口留一个调度窗口。真机验证表明更长的固定等待
         // 不会改善首次取帧，反而让页面看起来冻结。
@@ -2240,7 +2261,6 @@ class NikonCamera(private val context: Context) {
             8 * 1024 * 1024,
             16 * 1024 * 1024,
         )
-        private const val PAIRING_EVENT_TIMEOUT_MS = 30_000L
         // 取消下载的排空安全阀：已向相机发送 Cancel 包后，在途数据只剩 ≈TCP 窗口的数 MB，
         // 排空应秒级完成；若累计排空超过该预算仍没等到响应包，说明机型不支持 Cancel、
         // 还在发整个文件——此时才断开由心跳/看护自动重连（断开会让相机侧会话挂起甚至
@@ -2400,9 +2420,11 @@ class NikonCamera(private val context: Context) {
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
         pairingConfirmation: StaPairingConfirmation? = null,
+        allowInlinePairingRecovery: Boolean = false,
         onConnectingStarted: (() -> Unit)? = null,
         onPairingStarted: (() -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        staHandshakeInProgress = true
         try {
             staSession = true
             staAlbumAccessValidated = false
@@ -2449,15 +2471,20 @@ class NikonCamera(private val context: Context) {
                 tcpNoDelay = true
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
                 receiveBufferSize = 4 * 1024 * 1024
-                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
+            // Publish the socket before blocking connect, so cancelling the candidate can
+            // interrupt it as well. A cancellation before publication is caught here.
+            coroutineContext.ensureActive()
+            cmdSocket!!.connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             staDiagnosticLines += "CommandSocket=connected"
             cmdInput = java.io.BufferedInputStream(cmdSocket!!.getInputStream(), 64 * 1024)
             cmdOutput = cmdSocket!!.getOutputStream()
             cmdOutput!!.write(makeStaInitReq(identity))
             cmdOutput!!.flush()
 
-            val commandAck = cmdReader.readPacket(cmdInput!!)
+            val commandAck = withStaHandshakeReadDeadline(cmdInput!!, cmdSocket!!) {
+                cmdReader.readPacket(it)
+            }
             staDiagnosticLines += "InitCommandAck=type${commandAck.type}"
             if (commandAck.type != PtpConstants.INIT_CMD_ACK) {
                 return@withContext Result.failure(
@@ -2493,8 +2520,9 @@ class NikonCamera(private val context: Context) {
                 "pairing confirmation=${pairingConfirmation != null} verify=$effectiveVerifyPairingCompletion"
             evtSocket = newSocket().apply {
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
-                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
+            coroutineContext.ensureActive()
+            evtSocket!!.connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             staDiagnosticLines += "EventSocket=connected"
             evtInput = evtSocket!!.getInputStream()
             val eventInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
@@ -2504,7 +2532,9 @@ class NikonCamera(private val context: Context) {
             }.array()
             evtSocket!!.getOutputStream().write(eventInit)
             evtSocket!!.getOutputStream().flush()
-            val eventAck = evtReader.readPacket(evtInput!!)
+            val eventAck = withStaHandshakeReadDeadline(evtInput!!, evtSocket!!) {
+                evtReader.readPacket(it)
+            }
             staDiagnosticLines += "InitEventAck=type${eventAck.type}"
             if (eventAck.type != PtpConstants.INIT_EVT_ACK) {
                 return@withContext Result.failure(
@@ -2533,18 +2563,26 @@ class NikonCamera(private val context: Context) {
             }
             sessionOpen = true
             resetRatingCapabilityState()
+            // Release inlines this to false; experimental sessions exist only in src/debug.
+            if (runStaProbeSession()) return@withContext Result.success(Unit)
             initializeStaBrowsingSession(
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
                 verifyPairingCompletion = effectiveVerifyPairingCompletion,
+                cleanupConfirmation = pairingConfirmation?.takeIf { it.remotePermissionVerified },
                 onConnectingStarted = onConnectingStarted,
                 onPairingStarted = onPairingStarted,
+                allowInlinePairingRecovery = allowInlinePairingRecovery && allowPairing &&
+                    identity == StaInitiatorIdentity.PAIRED_COMPUTER &&
+                    pairingConfirmation != null && !pairingConfirmation.remotePermissionVerified,
             )
             // Only a freshly completed pairing must prove remote permission with a real frame.
             // Existing trusted profiles and legacy-marker migration keep their established flow.
-            if (pairingConfirmation != null) {
+            if (pairingConfirmation != null && !pairingConfirmation.remotePermissionVerified) {
                 verifyStaPairingLiveView { staDiagnosticLines += it }
+            } else if (pairingConfirmation?.remotePermissionVerified == true) {
+                staDiagnosticLines += "pairing live-view=VERIFIED_IN_PREVIOUS_SESSION same-camera cleanup recovery"
             }
             confirmPairingIfNeeded(effectiveVerifyPairingCompletion)
             cmdSocket?.soTimeout = SO_TIMEOUT_MS
@@ -2559,9 +2597,18 @@ class NikonCamera(private val context: Context) {
             staAlbumAccessValidated = false
             staDiagnosticLines +=
                 "error=${error.javaClass.simpleName}:${error.message.orEmpty()}"
-            close()
+            if (error is PairingCompletedException) {
+                // ACK is not pairing proof. Release this temporary transport immediately;
+                // the same camera must still pass album and actual-frame verification.
+                onConnectingStarted?.invoke()
+                staDiagnosticLines += "pairing exchange complete; reconnect pending"
+            }
+            if (isStaProbeSessionActive() || error is PairingCompletedException) {
+                abortStaConnectionAttempt()
+            } else close()
             Result.failure(error)
         } finally {
+            staHandshakeInProgress = false
             staDiagnosticLines += "connection=END"
         }
     }
@@ -5202,6 +5249,16 @@ class NikonCamera(private val context: Context) {
         }
     }
 
+    /**
+     * Cancels an unpublished STA candidate without competing with its handshake reader.
+     * Initial pairing runs before the normal transaction gate owns the command channel, so
+     * sending CloseSession here could read the same PacketReader from two threads at once.
+     */
+    internal suspend fun abortStaConnectionAttempt() = withContext(NonCancellable + Dispatchers.IO) {
+        ioGate.beginShutdown("STA connection attempt cancelled")
+        closeQuietly()
+    }
+
     private fun closeQuietly() {
         sessionOpen = false
         pictureControlProtocol = null
@@ -5255,13 +5312,15 @@ class NikonCamera(private val context: Context) {
      * Keeps the Nikon PC/STA ordering. Storage access alone does not prove pairing: the camera
      * can expose photos while its new-profile wizard is still waiting for the host.
      */
-    private suspend fun initializeStaBrowsingSession(
+    internal suspend fun initializeStaBrowsingSession(
         allowPairing: Boolean,
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
         verifyPairingCompletion: Boolean,
+        cleanupConfirmation: StaPairingConfirmation?,
         onConnectingStarted: (() -> Unit)?,
         onPairingStarted: (() -> Unit)?,
+        allowInlinePairingRecovery: Boolean = false,
     ) {
         coroutineContext.ensureActive()
         sendCmd(NIKON_COMPATIBILITY_INIT)
@@ -5272,6 +5331,12 @@ class NikonCamera(private val context: Context) {
                 compatibilityResponse,
                 "Nikon STA initialization failed: 0x${compatibilityResponse.toString(16)}",
             )
+        }
+
+        // Some bodies restrict album reads while Live View is active. Finish only our own
+        // failed probe cleanup, after Nikon's compatibility init and before probing storage.
+        if (cleanupConfirmation != null) {
+            finishStaPairingLiveViewCleanup(cleanupConfirmation) { staDiagnosticLines += it }
         }
 
         sendCmd(PtpConstants.GET_STORAGE_IDS)
@@ -5343,7 +5408,6 @@ class NikonCamera(private val context: Context) {
             // A failed read is not evidence that an existing pairing was revoked. Keep the
             // stored identity/markers; this attempt still cannot activate an album session.
             staDiagnosticLines += "state=PAIRING_NOT_CONFIRMED reason=device-info-unavailable"
-            onPairingStarted?.invoke()
             throw PairingNotConfirmedException(
                 if (deviceInfoResponse != PtpConstants.RESPONSE_OK) StaResponseException(
                     deviceInfoResponse,
@@ -5361,8 +5425,14 @@ class NikonCamera(private val context: Context) {
             }
             if (verifyPairingCompletion) {
                 staDiagnosticLines += "state=PAIRING_NOT_CONFIRMED"
-                onPairingStarted?.invoke()
-                throw PairingNotConfirmedException()
+                if (allowInlinePairingRecovery) {
+                    // Z30 closes its network if StartLiveView is sent while this explicit
+                    // pairing-only state is active. Repair on the still-healthy connection.
+                    staDiagnosticLines += "pairing recovery=INLINE no monitor request before exchange"
+                    onPairingStarted?.invoke()
+                    throw PairingCompletedException(completeInitialPairing(), isRecovery = true)
+                }
+                throw PairingNotConfirmedException(pairingOnly = true)
             }
             if (allowPairing) {
                 staDiagnosticLines += "state=PAIRING_REQUIRED"
@@ -5440,7 +5510,9 @@ class NikonCamera(private val context: Context) {
     /** Validates full-card browsing with bounded samples; one AccessDenied rejects the route. */
     private fun validateStaObjectAccess(label: String, storageIds: List<Int>): Boolean {
         sendCmd(PtpConstants.GET_OBJECT_HANDLES, -1, -1, 0)
-        val (handlesResponse, handlesData) = recvRespWithPayload()
+        // A full-card handle list can arrive over several seconds on a slow link. Preserve the
+        // normal idle timeout while allowing useful data to progress within a bounded total.
+        val (handlesResponse, handlesData) = recvRespWithPayload(handshakeTimeoutMs = STA_HANDLE_LIST_TIMEOUT_MS)
         val handles = parseUInt32Array(handlesData)
         staObjectHandlesObserved = staObjectHandlesObserved || handles.isNotEmpty()
         staEmptyObjectListObserved = staEmptyObjectListObserved ||
@@ -5520,101 +5592,43 @@ class NikonCamera(private val context: Context) {
         prefetchedStaObjectHandles = PrefetchedStaObjectHandles(queryStorageId, handles)
     }
 
-    /** Requires a fresh state-change event, then leaves same-camera verification to the caller. */
+    /** ACK completes only the exchange; same-camera album and actual-frame checks prove access. */
     private suspend fun completeInitialPairing(): StaPairingConfirmation {
         coroutineContext.ensureActive()
         val cameraGuid = responderGuid ?: throw StaPairingConfirmationMissingException()
-        sendCmd(PtpConstants.NK_PAIRING_QUERY)
-        val (queryResponse, queryData) = recvRespWithPayload()
-        staDiagnosticLines +=
-            "pairing query=${hexResponse(queryResponse)} bytes=${queryData?.size ?: 0}"
-        if (queryResponse != PtpConstants.RESPONSE_OK) {
-            throw StaResponseException(
-                queryResponse,
-                "Nikon pairing query failed: 0x${queryResponse.toString(16)}",
-            )
-        }
-
-        coroutineContext.ensureActive()
-        discardPendingStaPairingEvents()
-        staDiagnosticLines += "pairing pre-result queue=drained"
-        sendCmd(PtpConstants.NK_PAIRING_RESULT, PtpConstants.RESPONSE_OK)
-        val resultResponse = recvResp()
-        staDiagnosticLines += "pairing result=${hexResponse(resultResponse)}"
-        if (resultResponse != PtpConstants.RESPONSE_OK) {
-            throw StaResponseException(
-                resultResponse,
-                "Nikon pairing result failed: 0x${resultResponse.toString(16)}",
-            )
-        }
-        // Result OK only acknowledges the command. Do not close/reconnect just because the
-        // camera can already expose photos. 0x4008 is a device-capability change, not a saved
-        // profile receipt: require it from this attempt AND verify the same body after reconnect.
-        val previousTimeout = evtSocket?.soTimeout ?: SO_TIMEOUT_MS
-        val deadlineNanos = System.nanoTime() + PAIRING_EVENT_TIMEOUT_MS * 1_000_000L
-        var confirmationEventReceived = false
         try {
-            while (System.nanoTime() < deadlineNanos) {
-                coroutineContext.ensureActive()
-                val remainingMs = ((deadlineNanos - System.nanoTime()) / 1_000_000L)
-                    .coerceAtLeast(1L)
-                evtSocket?.soTimeout = remainingMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-                val packet = evtReader.readPacket(evtInput!!)
-                if (packet.type == PtpConstants.PING) {
-                    sendPong(evtSocket?.getOutputStream())
-                    continue
-                }
-                // A complete PTP/IP event includes the code AND transaction ID. In particular,
-                // never accept a truncated two-byte 0x4008 as confirmation.
-                val eventCode = if (packet.type == PtpConstants.EVENT) {
-                    parsePtpIpEvent(packet.payload)?.first
-                } else null
-                staDiagnosticLines +=
-                    "pairing event type=${packet.type} code=${eventCode?.let(::hexResponse)} " +
-                        "bytes=${packet.payload?.size ?: 0}"
-                if (eventCode == PtpConstants.EVENT_DEVICE_INFO_CHANGED) {
-                    confirmationEventReceived = true
-                    break
-                }
+            sendCmd(PtpConstants.NK_PAIRING_QUERY)
+            val (queryResponse, queryData) = recvRespWithPayload()
+            staDiagnosticLines +=
+                "pairing query=${hexResponse(queryResponse)} bytes=${queryData?.size ?: 0}"
+            if (queryResponse != PtpConstants.RESPONSE_OK) {
+                throw StaResponseException(
+                    queryResponse,
+                    "Nikon pairing query failed: 0x${queryResponse.toString(16)}",
+                )
             }
-        } catch (error: CancellationException) {
+
+            coroutineContext.ensureActive()
+            sendCmd(PtpConstants.NK_PAIRING_RESULT, PtpConstants.RESPONSE_OK)
+            val resultResponse = recvResp()
+            val acknowledgedAt = SystemClock.elapsedRealtime()
+            staDiagnosticLines += "pairing result=${hexResponse(resultResponse)}"
+            if (resultResponse != PtpConstants.RESPONSE_OK) {
+                throw StaResponseException(
+                    resultResponse,
+                    "Nikon pairing result failed: 0x${resultResponse.toString(16)}",
+                )
+            }
+            coroutineContext.ensureActive()
+            staDiagnosticLines += "pairing exchange=ACKNOWLEDGED atMs=$acknowledgedAt; same-camera verification required"
+            // The caller throws PairingCompletedException, which closes only the sockets.
+            // No stale-event drain, 0x4008 gate or CloseSession while Nikon restarts its service.
+            return StaPairingConfirmation(cameraGuid, resultAcknowledgedAtMs = acknowledgedAt)
+        } catch (error: Exception) {
+            // A rejected or partially received exchange must not send another command on this
+            // unpublished session. In particular, no CloseSession after an EOF/partial packet.
+            abortProtocolTransport()
             throw error
-        } catch (error: Exception) {
-            // Timeout/EOF/partial packets are failure, never permission to browse. In particular,
-            // do not retry a PacketReader after a timeout: part of a packet may be consumed.
-            staDiagnosticLines += "pairing confirmation missing: ${error.javaClass.simpleName}"
-            throw StaPairingConfirmationMissingException(error)
-        } finally {
-            runCatching { evtSocket?.soTimeout = previousTimeout }
-        }
-        staDiagnosticLines +=
-            "pairing response acknowledged confirmationEvent=$confirmationEventReceived"
-        if (!confirmationEventReceived) throw StaPairingConfirmationMissingException()
-        coroutineContext.ensureActive()
-
-        // Both callers immediately throw PairingCompletedException. connectSta closes once and
-        // only then returns the receipt. Closing here as well retries on a timed-out/partial
-        // stream and can add a second full read timeout during the camera's service restart.
-        return StaPairingConfirmation(cameraGuid)
-    }
-
-    /** Discard events already queued before Result; they cannot acknowledge that command. */
-    private fun discardPendingStaPairingEvents() {
-        val input = evtInput ?: throw StaPairingConfirmationMissingException()
-        try {
-            var discarded = 0
-            while (input.available() > 0) {
-                // Keep this bounded even if a malfunctioning peer continuously sends events.
-                if (++discarded > 64) throw java.io.IOException("STA event queue did not settle")
-                val packet = evtReader.readPacket(input)
-                if (packet.type == PtpConstants.PING) sendPong(evtSocket?.getOutputStream())
-                staDiagnosticLines +=
-                    "pairing pre-result discarded type=${packet.type} " +
-                        "code=${parsePtpIpEvent(packet.payload)?.first?.let(::hexResponse)}"
-            }
-        } catch (error: Exception) {
-            // If a partial queued event times out, abort rather than resuming a misaligned stream.
-            throw StaPairingConfirmationMissingException(error)
         }
     }
 
@@ -5812,11 +5826,58 @@ class NikonCamera(private val context: Context) {
         output?.flush()
     }
 
+    /** A heartbeat or slow packet fragment cannot renew a STA handshake response's budget. */
+    private inline fun <T> withStaHandshakeReadDeadline(
+        input: java.io.InputStream,
+        socket: Socket,
+        timeoutMs: Int = socket.soTimeout.coerceAtLeast(1),
+        idleTimeoutMs: Int = timeoutMs,
+        receive: (java.io.InputStream) -> T,
+    ): T {
+        if (!staHandshakeInProgress) return receive(input)
+        val originalTimeout = socket.soTimeout
+        val bounded = StaHandshakeDeadlineInput(input, timeoutMs,
+            setReadTimeout = { socket.soTimeout = minOf(it, idleTimeoutMs.coerceAtLeast(1)) })
+        try {
+            return receive(bounded)
+        } finally {
+            runCatching { socket.soTimeout = originalTimeout }
+        }
+    }
+
+    private inline fun <T> withStaResponseDeadline(
+        handshakeTimeoutMs: Int? = null,
+        receive: (java.io.InputStream) -> T,
+    ): T {
+        val input = cmdInput ?: throw java.io.EOFException("Command channel closed")
+        if (!staHandshakeInProgress) return receive(input)
+        val socket = cmdSocket ?: throw java.io.EOFException("Command channel closed")
+        try {
+            val idleTimeoutMs = socket.soTimeout.coerceAtLeast(1)
+            return withStaHandshakeReadDeadline(
+                input,
+                socket,
+                timeoutMs = handshakeTimeoutMs ?: idleTimeoutMs,
+                idleTimeoutMs = idleTimeoutMs,
+                receive = receive,
+            )
+        } catch (error: java.net.SocketTimeoutException) {
+            staDiagnosticLines += "handshake response timed out; aborting transport"
+            // A timeout may have consumed half a packet. Do not issue CloseSession on that stream.
+            abortProtocolTransport()
+            throw error
+        }
+    }
+
     /** 等待并返回响应码。中途丢弃的数据包（如 keepalive 的 GetStorageIds 数据段）用 raw 读，不逐包分配。 */
     private fun recvResp(): Int {
         usbPtp?.let { return it.receiveResponse(tid) }
+        return withStaResponseDeadline { recvResp(it) }
+    }
+
+    private fun recvResp(input: java.io.InputStream): Int {
         while (true) {
-            val packet = cmdReader.readPacketRaw(cmdInput!!)
+            val packet = cmdReader.readPacketRaw(input)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE ->
                     return if (packet.payloadLen >= 2) packet.buffer.getUShortLE(0) else 0
@@ -5825,12 +5886,16 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    internal fun recvRespWithPayload(): Pair<Int, ByteArray?> {
+    internal fun recvRespWithPayload(handshakeTimeoutMs: Int? = null): Pair<Int, ByteArray?> {
         usbPtp?.let { return it.receiveResponseWithPayload(tid) }
+        return withStaResponseDeadline(handshakeTimeoutMs) { recvRespWithPayload(it) }
+    }
+
+    private fun recvRespWithPayload(input: java.io.InputStream): Pair<Int, ByteArray?> {
         // 用 ByteArrayOutputStream 累积多包数据，避免 responseData + data 的 O(n²) 复制。
         var buffer: java.io.ByteArrayOutputStream? = null
         while (true) {
-            val packet = cmdReader.readPacket(cmdInput!!)
+            val packet = cmdReader.readPacket(input)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE -> {
                     val respCode = packet.payload?.getUShortLE(0) ?: 0

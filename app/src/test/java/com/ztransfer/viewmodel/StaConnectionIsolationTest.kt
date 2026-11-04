@@ -1,7 +1,10 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.PairingCompletedException
+import com.ztransfer.protocol.PairingNotConfirmedException
 import com.ztransfer.protocol.StaInitiatorIdentity
+import com.ztransfer.protocol.StaPairingConfirmation
 import com.ztransfer.protocol.StaPairingConfirmationMissingException
 import java.io.IOException
 import java.net.ConnectException
@@ -180,6 +183,98 @@ class StaConnectionIsolationTest {
                     pairingFlowStarted = false,
                 ),
             )
+        }
+    }
+
+    @Test
+    fun liveViewCleanupRecoveryRequiresTheSameConfirmedBodyAndRunsOnlyOnce() {
+        val receipt = StaPairingConfirmation("camera-a")
+        val verified = receipt.copy(remotePermissionVerified = true)
+        assertTrue(canRecoverStaPairingCleanup(StaInitiatorIdentity.PAIRED_COMPUTER, receipt, verified, false))
+        assertFalse(canRecoverStaPairingCleanup(StaInitiatorIdentity.PAIRED_COMPUTER, receipt, verified, true))
+        assertFalse(canRecoverStaPairingCleanup(StaInitiatorIdentity.PAIRED_COMPUTER, receipt, receipt, false))
+        assertFalse(canRecoverStaPairingCleanup(StaInitiatorIdentity.PAIRED_COMPUTER, null, verified, false))
+        assertFalse(canRecoverStaPairingCleanup(
+            StaInitiatorIdentity.PAIRED_COMPUTER, StaPairingConfirmation("camera-b"), verified, false,
+        ))
+        assertFalse(canRecoverStaPairingCleanup(StaInitiatorIdentity.ALBUM_EXPLORER, receipt, verified, false))
+    }
+
+    @Test
+    fun aVerifiedFrameNeverFallsBackToPairingAgainWhenReconnectFails() {
+        val frameFailure = PairingNotConfirmedException(remoteRequestAttempted = true)
+        val verified = StaPairingConfirmation("camera-a", remotePermissionVerified = true)
+        assertFalse(canRetryUnconfirmedStaPairing(verified, recoveryUsed = false, failure = frameFailure))
+        assertFalse(canRetryUnconfirmedStaPairing(verified, recoveryUsed = true, failure = frameFailure))
+        // Preserve the original single recovery for a receipt whose frame was not verified yet.
+        val unconfirmed = StaPairingConfirmation("camera-a")
+        assertTrue(canRetryUnconfirmedStaPairing(unconfirmed, recoveryUsed = false, failure = frameFailure))
+        assertFalse(canRetryUnconfirmedStaPairing(unconfirmed, recoveryUsed = true, failure = frameFailure))
+        assertTrue(canRetryUnconfirmedStaPairing(null, recoveryUsed = false, failure = frameFailure))
+        assertFalse(canRetryUnconfirmedStaPairing(null, recoveryUsed = true, failure = frameFailure))
+    }
+
+    @Test
+    fun inlineAndMonitorRecoveryShareOneBudget() {
+        val pending = StaPairingConfirmation("camera-a")
+        val frameFailure = PairingNotConfirmedException(remoteRequestAttempted = true)
+        val pairingOnly = PairingNotConfirmedException(pairingOnly = true)
+        assertTrue(canUseInlineStaPairingRecovery(StaInitiatorIdentity.PAIRED_COMPUTER, pending, false))
+        // Either recovery consumes the same flag; the other must not become a second repair.
+        assertFalse(canUseInlineStaPairingRecovery(StaInitiatorIdentity.PAIRED_COMPUTER, pending, true))
+        assertFalse(canRetryUnconfirmedStaPairing(pending, true, frameFailure))
+        assertFalse(canRetryUnconfirmedStaPairing(pending, true, pairingOnly))
+        // An exhausted pairing-only state is not a transient read failure either.
+        assertFalse(canRetryStaPairingReadFailure(pairingOnly, readinessRetryUsed = false))
+    }
+
+    @Test
+    fun inlineRepairRequiresAPendingUnverifiedComputerPairing() {
+        val pending = StaPairingConfirmation("camera-a")
+        assertFalse(canUseInlineStaPairingRecovery(StaInitiatorIdentity.PAIRED_COMPUTER, null, false))
+        assertFalse(canUseInlineStaPairingRecovery(StaInitiatorIdentity.ALBUM_EXPLORER, pending, false))
+        assertFalse(canUseInlineStaPairingRecovery(
+            StaInitiatorIdentity.PAIRED_COMPUTER, pending.copy(remotePermissionVerified = true), false,
+        ))
+        // Legacy marker invalidation has no receipt yet; retain its original one-time repair.
+        assertTrue(canRetryUnconfirmedStaPairing(null, false, PairingNotConfirmedException(pairingOnly = true)))
+    }
+
+    @Test
+    fun verificationReadFailureRetriesServiceWithoutPairingAgain() {
+        val readFailure = PairingNotConfirmedException(IOException("DeviceInfo unavailable"))
+        val pending = StaPairingConfirmation("camera-a")
+        assertFalse(canRetryUnconfirmedStaPairing(pending, false, readFailure))
+        assertFalse(canRetryUnconfirmedStaPairing(null, false, readFailure))
+        assertTrue(canRetryStaPairingReadFailure(readFailure, readinessRetryUsed = false))
+        assertFalse(canRetryStaPairingReadFailure(readFailure, readinessRetryUsed = true))
+        assertFalse(canRetryStaPairingReadFailure(
+            PairingNotConfirmedException(remoteRequestAttempted = true), readinessRetryUsed = false,
+        ))
+    }
+
+    @Test
+    fun pairingRestartWaitStartsAtAcknowledgementAndIncludesConnectionCleanup() {
+        assertEquals(6_600L, remainingStaPairingRestartDelay(1_000L, 1_000L, 6_600L))
+        assertEquals(6_350L, remainingStaPairingRestartDelay(1_000L, 1_250L, 6_600L))
+        assertEquals(0L, remainingStaPairingRestartDelay(1_000L, 7_600L, 6_600L))
+        assertEquals(0L, remainingStaPairingRestartDelay(1_000L, 20_000L, 6_600L))
+        // Synthetic/legacy receipts without a timestamp retain the conservative interval.
+        assertEquals(6_600L, remainingStaPairingRestartDelay(0L, 20_000L, 6_600L))
+        assertEquals(6_600L, remainingStaPairingRestartDelay(2_000L, 1_000L, 6_600L))
+    }
+
+    @Test
+    fun failedPairingExchangeCannotUseTheOrdinaryReadinessRetry() {
+        val timeout = SocketTimeoutException("Query or Result response missing")
+        assertTrue(isTransientStaServiceReadinessFailure(timeout))
+        assertTrue(isFailedStaPairingExchange(exchangeStarted = true, failure = timeout))
+        assertFalse(isFailedStaPairingExchange(exchangeStarted = false, failure = timeout))
+        listOf(false, true).forEach { recovery ->
+            assertFalse(isFailedStaPairingExchange(
+                exchangeStarted = true,
+                failure = PairingCompletedException(StaPairingConfirmation("camera-a"), isRecovery = recovery),
+            ))
         }
     }
 

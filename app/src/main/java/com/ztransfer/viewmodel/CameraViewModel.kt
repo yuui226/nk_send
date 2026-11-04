@@ -38,6 +38,7 @@ import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PairingNotConfirmedException
 import com.ztransfer.protocol.StaPairingConfirmation
+import com.ztransfer.protocol.StaPairingCleanupException
 import com.ztransfer.protocol.StaPairingConfirmationMissingException
 import com.ztransfer.protocol.StaResponseException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
@@ -68,6 +69,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -135,6 +137,12 @@ internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
         error is ConnectException ||
         (error is IOException && error.message?.startsWith("STA album access unavailable") == true)
 
+/** A timed-out pairing exchange may already have been applied; it is not a service-ready retry. */
+internal fun isFailedStaPairingExchange(
+    exchangeStarted: Boolean,
+    failure: Throwable?,
+): Boolean = exchangeStarted && failure !is PairingCompletedException
+
 /** A STA-specific suggestion, not a global translation of PTP TransactionCancelled. */
 internal fun staFailureMessageResource(error: Throwable?, candidateKnown: Boolean): Int? {
     // Pairing recovery wraps the original rejection. Keep the actionable hint through that wrap.
@@ -184,6 +192,48 @@ internal fun shouldBlockStaAlbumFallback(
     preferredIdentity: StaInitiatorIdentity,
     pairingFlowStarted: Boolean,
 ): Boolean = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER && pairingFlowStarted
+
+/** A valid frame can survive one cleanup reconnect, but never change the confirmed camera. */
+internal fun canRecoverStaPairingCleanup(
+    identity: StaInitiatorIdentity,
+    previousConfirmation: StaPairingConfirmation?,
+    confirmation: StaPairingConfirmation,
+    recoveryUsed: Boolean,
+): Boolean = identity == StaInitiatorIdentity.PAIRED_COMPUTER && !recoveryUsed &&
+    confirmation.remotePermissionVerified && previousConfirmation != null &&
+    previousConfirmation.responderGuid == confirmation.responderGuid
+
+/** The same repair budget covers a refused monitor request and an explicit pairing-only body. */
+internal fun canRetryUnconfirmedStaPairing(
+    confirmation: StaPairingConfirmation?,
+    recoveryUsed: Boolean,
+    failure: PairingNotConfirmedException,
+): Boolean = !recoveryUsed && confirmation?.remotePermissionVerified != true &&
+    (failure.remoteRequestAttempted || failure.pairingOnly)
+
+/** Reuse the healthy pairing-only connection only while this body's one repair is still available. */
+internal fun canUseInlineStaPairingRecovery(
+    identity: StaInitiatorIdentity,
+    confirmation: StaPairingConfirmation?,
+    recoveryUsed: Boolean,
+): Boolean = identity == StaInitiatorIdentity.PAIRED_COMPUTER && !recoveryUsed &&
+    confirmation != null && !confirmation.remotePermissionVerified
+
+/** A failed read does not justify another pairing exchange or discarding the pending receipt. */
+internal fun canRetryStaPairingReadFailure(
+    failure: PairingNotConfirmedException,
+    readinessRetryUsed: Boolean,
+): Boolean = !readinessRetryUsed && !failure.remoteRequestAttempted && !failure.pairingOnly
+
+/** Connection cleanup time is part of the camera restart interval, not an extra wait before it. */
+internal fun remainingStaPairingRestartDelay(
+    resultAcknowledgedAtMs: Long,
+    nowMs: Long,
+    restartDelayMs: Long,
+): Long = if (resultAcknowledgedAtMs <= 0L) restartDelayMs else {
+    (restartDelayMs - (nowMs - resultAcknowledgedAtMs).coerceAtLeast(0L))
+        .coerceIn(0L, restartDelayMs)
+}
 
 internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
     runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
@@ -1680,6 +1730,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun abortPendingStaCamera(candidate: NikonCamera) {
+        val previousCleanup = wirelessCleanupJob
+        wirelessCleanupJob = cleanupScope.launch {
+            // A blocked handshake does not own the normal request gate yet. Close its transport
+            // directly instead of sending CloseSession concurrently with its pending response.
+            candidate.abortStaConnectionAttempt()
+            previousCleanup?.join()
+        }
+    }
+
     private fun startConnectionWatcher() {
         if (connectionDiscoveryPaused || gpsConnectionPaused || _state.value.wirelessMode != WirelessMode.AP) {
             watcherJob?.cancel()
@@ -2036,8 +2096,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     lastIp = lastIp,
                     onProgress = { ip ->
                         if (generation == staDiscoveryGeneration) {
-                            _state.update {
-                                it.copy(
+                            _state.update { current ->
+                                // Discovery progress cannot downgrade an active camera handshake.
+                                if (current.staConnectionStatus == StaConnectionStatus.PAIRING) current
+                                else current.copy(
                                     staConnectionStatus = StaConnectionStatus.DISCOVERING,
                                     staDiscoveryProgress = ip,
                                 )
@@ -2157,7 +2219,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         staDiscoveryGeneration++
         staDiscoveryJob?.cancel()
         staDiscoveryJob = null
-        staConnectingCamera?.let(::closePendingWirelessCamera)
+        staConnectingCamera?.let(::abortPendingStaCamera)
         staConnectingCamera = null
         _state.update {
             it.copy(
@@ -2212,6 +2274,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val pairedComputer = identity == StaInitiatorIdentity.PAIRED_COMPUTER
             var pairingReconnectUsed = false
             var pairingRecoveryUsed = false
+            var pairingCleanupRecoveryUsed = false
             var readinessRetryUsed = false
             while (true) {
                 if (generation != staDiscoveryGeneration || purchaseHold ||
@@ -2227,10 +2290,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
                 val candidateCamera = NikonCamera(localizedContext)
+                var pairingExchangeStarted = false
                 staConnectingCamera = candidateCamera
                 StaConnectionDiagnostics.note(
                     diagnosticSession,
-                    "candidate start identity=${identity.name} alternate=$alternate verify=${pairingConfirmation != null}",
+                    "candidate start identity=${identity.name} alternate=$alternate verify=${pairingConfirmation != null} " +
+                        "remoteVerified=${pairingConfirmation?.remotePermissionVerified == true}",
                 )
                 val result = candidateCamera.connectSta(
                     ip = ip,
@@ -2239,14 +2304,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // A receipt belongs to this exact body, even if DHCP reuses its IP during
                     // the camera service restart or the one bounded pairing recovery.
                     expectedResponderGuid = confirmedResponderGuid ?: expectedResponderGuid,
-                    allowPairing = pairedComputer,
+                    allowPairing = pairedComputer && pairingConfirmation?.remotePermissionVerified != true,
                     exploreAlbumAccess = true,
                     forceProfilePairing = pairedComputer,
                     pairingConfirmation = pairingConfirmation.takeIf { pairedComputer },
+                    allowInlinePairingRecovery = canUseInlineStaPairingRecovery(
+                        identity, pairingConfirmation, pairingRecoveryUsed,
+                    ),
                     onConnectingStarted = {
-                        publishStaConnectingStarted(generation, ip)
+                        publishStaConnectingStarted(generation, ip, fromProtocol = true)
                     },
                     onPairingStarted = {
+                        pairingExchangeStarted = true
                         if (pairedComputer) pairingFlowStarted = true
                         publishStaPairingStarted(generation, ip)
                     },
@@ -2321,9 +2390,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         // or resend pairing merely because a reusable route hint exists.
                         throw error
                     }
+                    isFailedStaPairingExchange(pairingExchangeStarted, error) -> {
+                        // Do not let Query/Result timeout reach the ordinary readiness retry and
+                        // repeat an exchange whose result is unknown, including an inline repair.
+                        throw StaPairingConfirmationMissingException(error)
+                    }
                     error is PairingCompletedException -> {
                         pairingFlowStarted = true
-                        if (!pairedComputer || pairingReconnectUsed) {
+                        if (!pairedComputer || pairingConfirmation?.remotePermissionVerified == true ||
+                            (confirmedResponderGuid != null &&
+                                confirmedResponderGuid != error.confirmation.responderGuid)
+                        ) {
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        if (error.isRecovery) {
+                            if (!canUseInlineStaPairingRecovery(identity, pairingConfirmation, pairingRecoveryUsed)) {
+                                throw StaPairingConfirmationMissingException(error)
+                            }
+                            // An inline repair and a later frame-failure repair are alternatives,
+                            // never two separate chances to send pairing again.
+                            pairingRecoveryUsed = true
+                        } else if (pairingReconnectUsed) {
                             throw StaPairingConfirmationMissingException(error)
                         }
                         pairingReconnectUsed = true
@@ -2331,19 +2418,58 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         confirmedResponderGuid = error.confirmation.responderGuid
                         rememberStaCameraProfile(candidateCamera, ip, StaInitiatorIdentity.PAIRED_COMPUTER)
                         staLastFailureMessage = null
-                        waitForStaService("post_pairing_restart", STA_PAIRING_RECONNECT_DELAY_MS)
+                        waitForStaService(
+                            if (error.isRecovery) "post_inline_pairing_restart" else "post_pairing_restart",
+                            remainingStaPairingRestartDelay(
+                                error.confirmation.resultAcknowledgedAtMs,
+                                SystemClock.elapsedRealtime(),
+                                STA_PAIRING_RECONNECT_DELAY_MS,
+                            ),
+                        )
+                    }
+                    error is StaPairingCleanupException -> {
+                        pairingFlowStarted = true
+                        if (!canRecoverStaPairingCleanup(
+                                identity, pairingConfirmation, error.confirmation, pairingCleanupRecoveryUsed,
+                            )
+                        ) {
+                            StaConnectionDiagnostics.note(diagnosticSession, "live-view cleanup recovery rejected; stopping without new pairing")
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        pairingCleanupRecoveryUsed = true
+                        pairingConfirmation = error.confirmation
+                        confirmedResponderGuid = error.confirmation.responderGuid
+                        staLastFailureMessage = null
+                        StaConnectionDiagnostics.note(diagnosticSession, "remote permission verified; reconnecting once after live-view cleanup failure")
+                        waitForStaService("pairing_cleanup_recovery", STA_SERVICE_READY_RETRY_DELAY_MS)
                     }
                     error is PairingNotConfirmedException -> {
-                        if (pairedComputer) pairingFlowStarted = true
+                        if (pairedComputer) {
+                            pairingFlowStarted = true
+                            // Legacy-marker repair may not have a receipt yet. Its next connection
+                            // must still target the body that reported the failure.
+                            confirmedResponderGuid = confirmedResponderGuid ?: candidateCamera.staResponderGuid
+                        }
                         // Keep the existing single recovery, discarding the old receipt but
                         // retaining its camera GUID. Another failure must never try album access.
-                        if (!pairingRecoveryUsed) {
+                        if (canRetryUnconfirmedStaPairing(pairingConfirmation, pairingRecoveryUsed, error)) {
                             pairingRecoveryUsed = true
                             pairingReconnectUsed = false
                             pairingConfirmation = null
                             staLastFailureMessage = null
                             waitForStaService("pairing_recovery", STA_PAIRING_RECONNECT_DELAY_MS)
+                        } else if (canRetryStaPairingReadFailure(error, readinessRetryUsed) &&
+                            (!alternate || pairingConfirmation != null)
+                        ) {
+                            readinessRetryUsed = true
+                            staLastFailureMessage = null
+                            StaConnectionDiagnostics.note(diagnosticSession, "pairing verification read failed; preserving receipt for one service retry")
+                            waitForStaService("pairing_verification_read_retry", STA_SERVICE_READY_RETRY_DELAY_MS)
                         } else {
+                            if (pairingConfirmation?.remotePermissionVerified == true) {
+                                StaConnectionDiagnostics.note(diagnosticSession, "remote-verified session could not recover; stopping without new pairing")
+                                throw StaPairingConfirmationMissingException(error)
+                            }
                             // A legacy album identity may still use its paired-computer route.
                             if (!shouldBlockStaAlbumFallback(identity, pairingFlowStarted)) {
                                 return StaCandidateConnectionResult.REJECTED
@@ -2403,14 +2529,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return StaCandidateConnectionResult.REJECTED
     }
 
-    private fun publishStaConnectingStarted(generation: Long, ip: String) {
+    private fun publishStaConnectingStarted(generation: Long, ip: String, fromProtocol: Boolean = false) {
         _state.update { current ->
             if (generation != staDiscoveryGeneration ||
                 purchaseHold ||
                 current.wirelessMode != WirelessMode.STA ||
                 current.connectionType == CameraConnectionType.USB ||
                 current.isConnectedToCamera ||
-                current.staConnectionStatus == StaConnectionStatus.PAIRING
+                (current.staConnectionStatus == StaConnectionStatus.PAIRING && !fromProtocol)
             ) {
                 current
             } else {
@@ -4986,7 +5112,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         usbPermissionJob?.cancel()
         staDiscoveryJob?.cancel()
         staReconnectJob?.cancel()
-        staConnectingCamera?.let { cleanupScope.launch { it.close() } }
+        staConnectingCamera?.let(::abortPendingStaCamera)
         apConnectingCamera?.let { cleanupScope.launch { it.close() } }
         if (wifiHeld) releaseWifiNetworkRequest()
         if (usbReceiverRegistered) {

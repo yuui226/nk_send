@@ -39,6 +39,9 @@ dist/*.mapping.txt
 env_build/
 /tools/qq-debug/node_modules/
 
+# Private one-off STA Debug probe QQ delivery configuration (never commit credentials).
+/app/src/debug/assets/sta-probe-qq.json
+
 # ossutil 发布程序随项目分发，下载压缩包仍只保留在本机
 tools/ossutil/**/*.zip
 
