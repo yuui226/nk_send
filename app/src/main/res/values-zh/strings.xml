@@ -693,6 +693,11 @@
     <string name="photo_effect_module_watermark">水印</string>
 
     <string name="remote_tool_focus_frame">对焦框</string>
+    <string name="remote_tool_self_timer">延时拍照</string>
+    <string name="remote_self_timer_seconds">%1$d秒</string>
+    <string name="remote_self_timer_focus_failed">未合焦，请重试</string>
+    <string name="remote_self_timer_capture_failed">拍摄失败，请重试</string>
+    <string name="monitor_help_tool_self_timer">开启后，按快门并松手开始倒计时，再按取消。结束后对焦拍照；手动对焦时保持原样。仅照片模式可用。</string>
     <string name="remote_focus_diagnostic_start">开始采样</string>
     <string name="remote_focus_diagnostic_stop">停止</string>
     <string name="remote_focus_diagnostic_mark">标记步骤</string>

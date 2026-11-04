@@ -22,11 +22,16 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     LUT("lut", R.string.remote_tool_lut),
     PICTURE_CONTROL("picture_control", R.string.remote_tool_picture_control),
     METER("meter", R.string.remote_tool_meter),
+    SELF_TIMER("self_timer", R.string.remote_tool_self_timer),
     LOCK("lock", R.string.remote_tool_lock, true),
     COMPUTER_CONTROL("computer_control", R.string.remote_tool_computer_control),
     ROTATE("rotate", R.string.remote_tool_rotate, true);
 
-    fun availableIn(movie: Boolean) = this != AUDIO || movie
+    fun availableIn(movie: Boolean) = when (this) {
+        AUDIO -> movie
+        SELF_TIMER -> !movie
+        else -> true
+    }
 
     companion object {
         val pinned = listOf(LOCK, ROTATE)
@@ -43,6 +48,8 @@ internal enum class ExposureAssist { OFF, ZEBRA, FALSE_COLOR;
 internal enum class WaveformMode { OFF, LUMA, RGB;
     fun next() = entries[(ordinal + 1) % entries.size]
 }
+
+internal val remoteSelfTimerOptions = listOf(0, 2, 5, 10, 20)
 
 /** Writes on the user mutation, rather than waiting for page disposal or a composition effect. */
 private class SavedToolState<T>(initial: T, private val save: (T) -> Unit) : MutableState<T> {
@@ -88,6 +95,9 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     val focusFrame = bool("remote_focus_frame", true)
     val meter = bool("remote_exposure_meter")
     val audio = bool("remote_audio_levels_visible", true)
+    val selfTimerSeconds: MutableState<Int> = SavedToolState(
+        prefs.getInt("remote_self_timer_seconds", 0).takeIf { it in remoteSelfTimerOptions } ?: 0
+    ) { prefs.edit().putInt("remote_self_timer_seconds", it).apply() }
     val desqueeze: MutableState<Float> = SavedToolState(
         prefs.getFloat("remote_desqueeze_multiplier", 1f).takeIf { it.isFinite() && it in 1f..2f } ?: 1f
     ) { prefs.edit().putFloat("remote_desqueeze_multiplier", it).apply() }
@@ -113,6 +123,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
             RemoteTool.LEVEL -> level.value = false
             RemoteTool.FOCUS_FRAME -> focusFrame.value = false
             RemoteTool.METER -> meter.value = false
+            RemoteTool.SELF_TIMER -> selfTimerSeconds.value = 0
             RemoteTool.WAVEFORM -> waveform.value = WaveformMode.OFF
             else -> Unit // Actions and camera parameters are not reset by hiding their entry.
         }

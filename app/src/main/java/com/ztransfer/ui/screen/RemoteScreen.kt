@@ -28,6 +28,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -151,6 +152,7 @@ import com.ztransfer.protocol.rcExposureMeterEv
 import com.ztransfer.protocol.rcReadExposureMeter
 import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
+import com.ztransfer.protocol.rcCaptureIfCurrent
 import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcNormalizedToFocusCoordinate
 import com.ztransfer.protocol.rcGetCameraTool
@@ -202,6 +204,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 import kotlin.math.min
@@ -620,6 +624,26 @@ private fun RemoteContent(
     val transferState by transferViewModel.state.collectAsState()
     val services = rememberRemoteScreenServices(transferState.hapticsEnabled)
     val connected = camState.isConnectedToCamera
+    val selfTimer = remember(services.scope) { RemoteSelfTimer(services.scope, SystemClock::elapsedRealtime) }
+    var selfTimerSeconds by tools.selfTimerSeconds
+    var selfTimerPanelOpen by remember { mutableStateOf(false) }
+    var selfTimerPanelCloseRequested by remember { mutableStateOf(false) }
+    var selfTimerAnchor by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val monitorLifecycle = LocalLifecycleOwner.current
+    var monitorResumed by remember(monitorLifecycle) {
+        mutableStateOf(monitorLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(monitorLifecycle, selfTimer) {
+        val observer = LifecycleEventObserver { _, _ ->
+            monitorResumed = monitorLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            if (!monitorResumed) selfTimer.cancel()
+        }
+        monitorLifecycle.lifecycle.addObserver(observer)
+        onDispose {
+            selfTimer.cancel()
+            monitorLifecycle.lifecycle.removeObserver(observer)
+        }
+    }
 
     // ---------- 会话状态 ----------
     var frame by remember { mutableStateOf<RemoteLiveFrame?>(null) }
@@ -755,6 +779,7 @@ private fun RemoteContent(
 
     val landscapeLayout = rotation != 0
     LaunchedEffect(rotation, editingTools) {
+        selfTimerPanelOpen = false
         showMonitorHelp = false
         gridPanelOpen = false
         gridPanelCloseRequested = false
@@ -1197,6 +1222,7 @@ private fun RemoteContent(
                     fps = 0f
                     liveViewStable = false
                     if (isActive) {
+                        selfTimer.cancelAndJoin()
                         runCatching { cam.labEndLiveView() }
                         subjectTrackingActive = false
                     }
@@ -1205,6 +1231,7 @@ private fun RemoteContent(
             } finally {
                 liveViewStable = false
                 withContext(NonCancellable) {
+                    selfTimer.cancelAndJoin()
                     runCatching { liveViewCamera?.labEndLiveView() }
                         .onSuccess { rc -> if (rc != null) devLog("EndLiveView resp=0x%04X".format(rc and 0xFFFF)) }
                         .onFailure { devLog("!! EndLiveView error=${it.javaClass.simpleName}: ${it.message}") }
@@ -1233,7 +1260,7 @@ private fun RemoteContent(
 
     fun setComputerControl(enabled: Boolean) {
         val cam = cameraViewModel.getCamera() ?: return
-        if (computerControl.busy || !connected || !initialLoaded) return
+        if (selfTimer.active || computerControl.busy || !connected || !initialLoaded) return
         // Remember the user's choice, not temporary PC mode used by USB recording.
         tools.computerControl.value = enabled
         computerControl.busy = true
@@ -1457,6 +1484,8 @@ private fun RemoteContent(
                     awaitCancellation()
                 } finally {
                     withContext(NonCancellable) {
+                        // Drain an already-started timer AF/capture response before releasing LV.
+                        selfTimer.cancelAndJoin()
                         // 先等调试切换完成记账，防止退页清理后才迟到地开启 PC 控制。
                         initialLoaded = false
                         computerControl.changeJob?.cancelAndJoin()
@@ -1751,6 +1780,7 @@ private fun RemoteContent(
     // 步进采用"乐观更新 + 尾值合并"：本地值立即跟手（长按连调不卡），停手 160ms 后
     // 只把最终值发给相机——逐档发送会在相机事务调度器上排队，连调十几档要追几秒。
     fun sendValue(prop: Int, value: Long, immediate: Boolean) {
+        if (selfTimer.active) return
         val p = params[prop] ?: return
         params[prop] = p.copy(current = value)
         services.haptics.tick()
@@ -1806,43 +1836,54 @@ private fun RemoteContent(
 
     // 拍摄：capturing 从触发一直保持到收到 ObjectAdded（相机确认新照片已生成）——
     // 快门键转圈即"正在等待拍摄确认"，收到确认/超时/失败即停。不读取也不展示缩略图。
-    fun shoot(waitForFocus: Job? = null) {
-        if (capturing || cameraToolWriting) return
-        val expectedCamera = cameraViewModel.getCamera() ?: return
-        // 在 launch 前同步置位，消除两次快速点按同时通过 capturing=false
-        // 而启动两个拍摄事务的小窗口。
-        capturing = true
-        services.scope.launch {
+    suspend fun capturePhoto(
+        expectedCamera: NikonCamera,
+        waitForFocus: Job? = null,
+        stillValid: () -> Boolean = { true },
+        delayed: Boolean = false,
+    ): Boolean = coroutineScope {
             try {
                 // 快速松手时 AF 可能仍在轮询 DeviceReady。先收完对焦事务，
                 // 再开始 ObjectAdded 的 12s 倒计，避免把 AF 等待时间错算进拍摄超时。
                 waitForFocus?.join()
                 // 等待期间若发生了断线/重连，绝不把旧手势意外发给新会话。
-                if (cameraViewModel.getCamera() !== expectedCamera) return@launch
+                currentCoroutineContext().ensureActive()
+                if (cameraViewModel.getCamera() !== expectedCamera || !stillValid()) return@coroutineScope false
                 val cam = expectedCamera
                 services.haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
                 // 先挂事件等待、再触发拍摄：ObjectAdded 是取走即消费的，
                 // 订阅晚于轮询取走就永远等不到了。
-                val pending = async {
+                val pending = async(start = CoroutineStart.UNDISPATCHED) {
                     withTimeoutOrNull(12_000) {
                         eventFlow.first {
                             it.first == Lab.EVT_OBJECT_ADDED || it.first == Lab.EVT_OBJECT_ADDED_SDRAM
                         }.second.toInt()
                     }
                 }
-                val rc = runCatching { cam.rcCapture() }.getOrDefault(-1)
+                val rc = if (delayed) {
+                    cam.rcCaptureIfCurrent { stillValid() && cameraViewModel.getCamera() === cam } ?: -1
+                } else runCatching { cam.rcCapture() }.getOrDefault(-1)
                 if (rc != Lab.OK) {
                     pending.cancel()
                     devLog("!! capture resp=0x%04X".format(rc and 0xFFFF))
-                    return@launch
+                    return@coroutineScope false
                 }
                 val handle = pending.await()   // 拍摄成功的确认信号
                 if (handle == null) devLog("!! capture: no ObjectAdded in 12s")
                 else devLog("shot ok: handle=0x%08X".format(handle))
+                // An event timeout does not prove failure: the camera accepted the shutter.
+                true
             } finally {
                 capturing = false
             }
-        }
+    }
+
+    fun shoot(waitForFocus: Job? = null) {
+        if (selfTimer.active || capturing || cameraToolWriting) return
+        val expectedCamera = cameraViewModel.getCamera() ?: return
+        // Reserve before launch so two quick taps never queue two captures.
+        capturing = true
+        services.scope.launch { capturePhoto(expectedCamera, waitForFocus) }
     }
 
     // 模拟半按对焦：按住快门键时在当前对焦点执行一次完整 AF，
@@ -1865,7 +1906,7 @@ private fun RemoteContent(
     // 相机帧头没有可信 AF 框时使用这里保存的应用请求点作为安全回退。
     var confirmedFocusMarker by remember { mutableStateOf<ConfirmedFocusMarker?>(null) }
     fun startFocus() {
-        if (cameraToolWriting || afHeld || tapFocusBusy || focusModeManual || afJob?.isActive == true) return
+        if (selfTimer.active || cameraToolWriting || afHeld || tapFocusBusy || focusModeManual || afJob?.isActive == true) return
         tapFocusHideJob?.cancel()
         tapFocusNonce++ // A fresh half-press must not inherit the previous tap's result colour/handoff.
         tapFocusFeedback = TapFocusFeedback.IDLE
@@ -2117,7 +2158,7 @@ private fun RemoteContent(
     val rotationResumedHint = stringResource(R.string.remote_rotation_resumed)
 
     fun focusAt(tap: ViewfinderTap) {
-        if (cameraToolWriting || !connected || capturing || tapFocusBusy || afHeld || afJob?.isActive == true) return
+        if (selfTimer.active || cameraToolWriting || !connected || capturing || tapFocusBusy || afHeld || afJob?.isActive == true) return
         if (focusModeManual) {
             devLog("!! tap AF ignored: camera focus mode is MF")
             showHint(manualFocusHint)
@@ -2345,6 +2386,7 @@ private fun RemoteContent(
     }
 
     fun setAutoIso(enabled: Boolean) {
+        if (selfTimer.active) return
         val p = autoIsoProp?.let { params[it] } ?: return
         if (!p.writable || autoIsoBusy) return
         val target = if (enabled) {
@@ -2428,6 +2470,7 @@ private fun RemoteContent(
     }
 
     fun toggleRecord(waitForFocus: Job? = null) {
+        if (selfTimer.active) { selfTimer.cancel(); return }
         if (recBusy || cameraToolWriting) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
         recBusy = true
@@ -2587,12 +2630,114 @@ private fun RemoteContent(
         }
     }
 
+    fun requestPhoto(waitForFocus: Job? = null) {
+        if (selfTimerSeconds == 0) { shoot(waitForFocus); return }
+        if (selfTimer.active || capturing || cameraToolWriting || computerControl.busy ||
+            autoIsoBusy || pendingSets.values.any { it.isActive } || tapFocusBusy || afJob?.isActive == true
+        ) return
+        val expectedCamera = cameraViewModel.getCamera() ?: return
+        val delaySeconds = selfTimerSeconds
+        val valid = {
+            monitorLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+                cameraViewModel.state.value.isConnectedToCamera && cameraViewModel.getCamera() === expectedCamera &&
+                !movieMode && !recording && !recBusy && initialLoaded && liveViewStable &&
+                !photoReview.active && !editingTools && !cameraToolWriting && !computerControl.busy &&
+                tools.selfTimerSeconds.value == delaySeconds && tools.layout(false).visible(RemoteTool.SELF_TIMER)
+        }
+        if (!valid()) return
+        selfTimerPanelOpen = false
+        listProp = null
+        cameraToolPanel = null
+        pictureControl.panel = false
+        gridPanelOpen = false
+        lutState.dismissMenu()
+        showMonitorHelp = false
+        devPanel = false
+        tapFocusHideJob?.cancel()
+        confirmedFocusMarker = null
+        tapFocusFeedback = TapFocusFeedback.IDLE
+        val started = selfTimer.start(
+            seconds = delaySeconds,
+            isValid = valid,
+            focus = {
+                // Read the current mode after the user has stepped into the frame. A physical
+                // switch may precede the regular event refresh, especially during AF.
+                val actualMovie = expectedCamera.rcGetMovieMode()
+                if (!valid() || !selfTimer.focusing) false
+                else if (actualMovie == true) {
+                    movieMode = true
+                    false
+                } else {
+                    val focus = expectedCamera.rcGetFocusMode()
+                    if (valid() && selfTimer.focusing && focus != null) {
+                        focusModeManual = focus.manual
+                        focusModeText = focus.label
+                        focusModeProp = focus.prop
+                    }
+                    if (!valid() || !selfTimer.focusing) false
+                    else if (focusModeManual) true
+                    else {
+                        subjectTrackingActive = false
+                        val result = expectedCamera.rcAfDriveAndWait()
+                        val focused = result.responseCode == Lab.OK && !result.timedOut
+                        devLog("self timer AF rc=0x%04X elapsed=%dms".format(result.responseCode, result.elapsedMs))
+                        if (valid() && selfTimer.focusing) {
+                            if (focused) confirmedFocusMarker = ConfirmedFocusMarker(
+                                fallbackPoint = focusAreaPoint,
+                                confirmedAtElapsedMs = SystemClock.elapsedRealtime(),
+                            ) else showHint(services.context.getString(R.string.remote_self_timer_focus_failed))
+                        }
+                        focused
+                    }
+                }
+            },
+            capture = {
+                val requestJob = currentCoroutineContext()[Job]
+                val canFire = { requestJob?.isActive == true && valid() }
+                // One final mode read closes the interval spent focusing. Never translate a
+                // photo countdown into a movie start after the camera's selector has moved.
+                val currentMovie = withContext(NonCancellable) { expectedCamera.rcGetMovieMode() }
+                currentCoroutineContext().ensureActive()
+                if (canFire() && currentMovie == true) movieMode = true
+                if (canFire()) {
+                    capturing = true
+                    val accepted = capturePhoto(expectedCamera, stillValid = canFire, delayed = true)
+                    if (!accepted && canFire()) showHint(services.context.getString(R.string.remote_self_timer_capture_failed))
+                }
+            },
+            onFailure = { error ->
+                devLog("!! self timer ${error.javaClass.simpleName}: ${error.message}")
+                if (valid()) {
+                    if (error is SocketTimeoutException) cameraViewModel.onCameraTransportLost(expectedCamera)
+                    showHint(services.context.getString(R.string.remote_self_timer_capture_failed))
+                }
+            },
+        )
+        if (started) services.haptics.tick()
+    }
+
+    // The timer belongs to this screen/session, not to either orientation's shutter composable.
+    LaunchedEffect(connected, cameraViewModel.getCamera(), movieMode, photoReview.active, editingTools) {
+        selfTimer.cancel()
+        selfTimerPanelOpen = false
+    }
+    val selfTimerView = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(selfTimer.active, selfTimerView) {
+        if (selfTimer.active) {
+            val wasKeptOn = selfTimerView.keepScreenOn
+            selfTimerView.keepScreenOn = true
+            onDispose { selfTimerView.keepScreenOn = wasKeptOn }
+        } else onDispose { }
+    }
+    fun leaveRemote() { selfTimer.cancel(); onNavigateBack() }
+    BackHandler(enabled = selfTimer.active) { leaveRemote() }
+
     fun finishShutterGesture(fire: Boolean) {
         val shutterFocus = endFocus()
         if (!fire) return
         val pendingFocus = shutterFocus?.takeIf { it.isActive }
             ?: tapFocusJob?.takeIf { it.isActive }
-        if (movieMode) toggleRecord(pendingFocus) else shoot(pendingFocus)
+        if (movieMode) toggleRecord(pendingFocus) else requestPhoto(pendingFocus)
     }
 
     // 录制计时（REC 徽标显示）：以本地 recording 状态起停，秒级精度足够。
@@ -2818,6 +2963,7 @@ private fun RemoteContent(
         if (!visible) {
             when (tool) {
                 RemoteTool.RECORD -> if (viewfinderRecorder != null) stopRecorder()
+                RemoteTool.SELF_TIMER -> { selfTimer.cancel(); selfTimerPanelOpen = false }
                 RemoteTool.HD -> if (hdLiveView) {
                     hdLiveView = false
                     startSession(false)
@@ -2860,14 +3006,26 @@ private fun RemoteContent(
                 RemoteTool.WAVEFORM -> showWaveform
                 RemoteTool.LOCK -> tools.locked.value
                 RemoteTool.COMPUTER_CONTROL -> computerControl.enabled
+                RemoteTool.SELF_TIMER -> selfTimerSeconds > 0
                 else -> false
             }
             val disabled = (tool?.fixed == true && editingTools) ||
+                (selfTimer.active && tool in listOf(RemoteTool.HD, RemoteTool.SELF_TIMER,
+                    RemoteTool.WHITE_BALANCE, RemoteTool.FOCUS_MODE, RemoteTool.FOCUS_AREA,
+                    RemoteTool.PICTURE_CONTROL, RemoteTool.COMPUTER_CONTROL)) ||
                 (tool == RemoteTool.ROTATE && tools.locked.value) ||
                 (tool == RemoteTool.COMPUTER_CONTROL &&
                     (!connected || !initialLoaded || computerControl.busy || capturing || recording || recBusy))
             val toolClick: () -> Unit = {
+                if (tool != RemoteTool.SELF_TIMER) selfTimerPanelOpen = false
                 when (tool) {
+                    RemoteTool.SELF_TIMER -> {
+                        lutState.dismissMenu()
+                        pictureControl.panel = false
+                        listProp = null; devPanel = false; cameraToolPanel = null; gridPanelOpen = false
+                        if (selfTimerPanelOpen) selfTimerPanelCloseRequested = true
+                        else { selfTimerPanelCloseRequested = false; selfTimerPanelOpen = true }
+                    }
                     RemoteTool.HD -> { hdLiveView = !hdLiveView; startSession(hdLiveView) }
                     RemoteTool.FPS -> toggleFpsControl()
                     RemoteTool.AUDIO -> toggleAudioLevels()
@@ -2915,6 +3073,8 @@ private fun RemoteContent(
                     RemoteTool.FOCUS_MODE -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_MODE) cameraToolCloseRequested = true else { startFocusModeReport(); cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_MODE } }
                     RemoteTool.FOCUS_AREA -> { lutState.dismissMenu(); gridPanelOpen = false; listProp = null; devPanel = false; if (cameraToolPanel == RemoteCameraTool.FOCUS_AREA) cameraToolCloseRequested = true else { cameraToolCloseRequested = false; cameraToolPanel = RemoteCameraTool.FOCUS_AREA } }
                     else -> {
+                        selfTimer.cancel()
+                        selfTimerPanelOpen = false
                         listProp = null
                         devPanel = false
                         cameraToolPanel = null
@@ -2942,6 +3102,8 @@ private fun RemoteContent(
                 lutAnchor = it
             } else if (tool == RemoteTool.GRID) Modifier.onGloballyPositioned {
                 gridAnchor = it
+            } else if (tool == RemoteTool.SELF_TIMER) Modifier.onGloballyPositioned {
+                selfTimerAnchor = it
             } else Modifier, enabled = !disabled, fixedControl = tool?.fixed == true,
                 preserveContentColors = tool == RemoteTool.PICTURE_CONTROL) {
                 if (tool == null) Icon(if (editingTools) Icons.Default.Check else Icons.Default.Settings, null, Modifier.size(19.dp))
@@ -2984,7 +3146,7 @@ private fun RemoteContent(
     val reviewVisible = !movieMode && viewfinderRecorder == null && !recFinalizing
     val renderReview: @Composable (Modifier, Boolean, Float) -> Unit = { modifier, large, sizeScale ->
             RemoteReviewButton(
-                enabled = reviewAllowed && connected && initialLoaded && liveViewStable && !capturing && !cameraToolWriting &&
+                enabled = reviewAllowed && connected && initialLoaded && liveViewStable && !selfTimer.active && !capturing && !cameraToolWriting &&
                     !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControl.busy && !photoReview.active,
                 onClick = {
                     cameraViewModel.getCamera()?.let { camera ->
@@ -3063,7 +3225,7 @@ private fun RemoteContent(
                 Box(Modifier.weight(1f).height(40.dp).padding(horizontal = 6.dp)
                     .onGloballyPositioned { updateHintAnchor(it) })
                 GlassBackButton(
-                    onClick = onNavigateBack,
+                    onClick = ::leaveRemote,
                     forward = true,
                 )
             }
@@ -3126,6 +3288,7 @@ private fun RemoteContent(
                             val hasAutoIso =
                                 prop == isoProp && autoIsoAvailable
                             ParamTile(
+                                enabled = !selfTimer.active,
                                 label = paramLabel(prop),
                                 param = params[prop],
                                 autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
@@ -3166,8 +3329,11 @@ private fun RemoteContent(
                     onFocusStart = { startFocus() },
                     onRelease = ::finishShutterGesture,
                     onQuickTap = {
-                        if (movieMode) toggleRecord() else shoot()
-                    }
+                        if (movieMode) toggleRecord() else requestPhoto()
+                    },
+                    delayedPhoto = !movieMode && selfTimerSeconds > 0,
+                    selfTimer = selfTimer,
+                    onCancel = { services.haptics.tick(); selfTimer.cancel() },
                 )
                 Spacer(Modifier.weight(1f))
             }
@@ -3283,6 +3449,7 @@ private fun RemoteContent(
                     layout = monitorLayout,
                     tools = tools.layout(movieMode).shownTools.filter { it != RemoteTool.RECORD } + RemoteTool.pinned,
                     onPanelChange = {
+                        selfTimerPanelOpen = false
                         gridPanelOpen = false
                         cameraToolPanel = null
                         lutState.dismissMenu()
@@ -3296,7 +3463,7 @@ private fun RemoteContent(
                     },
                     rotateButton = { renderTool(RemoteTool.ROTATE, 0) },
                     backButton = { enabled ->
-                        GlassBackButton(onClick = onNavigateBack, forward = true, enabled = enabled)
+                        GlassBackButton(onClick = ::leaveRemote, forward = true, enabled = enabled)
                     },
                     dispButton = {
                         TopIconToggle(false, "DISP", { dispMode = dispMode.next() }) {
@@ -3307,7 +3474,10 @@ private fun RemoteContent(
                         ShutterButton(capturing = capturing, focusing = afHeld,
                             enabled = connected && !cameraToolWriting, movie = movieMode, recording = recording,
                             onFocusStart = { startFocus() }, onRelease = ::finishShutterGesture,
-                            onQuickTap = { if (movieMode) toggleRecord() else shoot() },
+                            onQuickTap = { if (movieMode) toggleRecord() else requestPhoto() },
+                            delayedPhoto = !movieMode && selfTimerSeconds > 0,
+                            selfTimer = selfTimer,
+                            onCancel = { services.haptics.tick(); selfTimer.cancel() },
                             diameter = diameter.dp)
                     },
                     localRecorder = { renderTool(RemoteTool.RECORD, 0) },
@@ -3316,7 +3486,7 @@ private fun RemoteContent(
                         val prop = (if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS)[index]
                         val isoProp = if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
                         val hasAutoIso = prop == isoProp && autoIsoAvailable
-                        ParamTile(label = paramLabel(prop), param = params[prop],
+                        ParamTile(label = paramLabel(prop), param = params[prop], enabled = !selfTimer.active,
                             autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
                             autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
                             autoIsoBusy = hasAutoIso && autoIsoBusy,
@@ -3527,6 +3697,15 @@ private fun RemoteContent(
                 }
             }
             }
+    if (selfTimerPanelOpen && !movieMode) {
+        val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
+            selfTimerAnchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
+        }
+        RemoteSelfTimerPanel(localAnchor, selfTimerSeconds,
+            onSelect = { selfTimer.cancel(); selfTimerSeconds = it; services.haptics.tick() },
+            onDismiss = { selfTimerPanelOpen = false; selfTimerPanelCloseRequested = false },
+            landscape = rotation != 0, closeRequested = selfTimerPanelCloseRequested)
+    }
     if (lutState.menuOpen) {
         val localAnchor = toolOverlayCoordinates?.takeIf { it.isAttached }?.let { root ->
             lutAnchor?.takeIf { it.isAttached }?.let { root.localBoundingBoxOf(it, clipBounds = false) }
@@ -3561,7 +3740,7 @@ private fun RemoteContent(
         }
         key(panelCamera, panelMovie) {
             RemotePictureControlPanel(panelCamera, localAnchor, rotation != 0, pictureControl.closeRequested,
-                canWrite = connected && initialLoaded && !capturing && !recording && !recBusy &&
+                canWrite = connected && initialLoaded && !selfTimer.active && !capturing && !recording && !recBusy &&
                     !cameraToolWriting && !afHeld && !tapFocusBusy && afJob?.isActive != true && !computerControl.busy &&
                     lutResumed && !pictureControl.pickerActive,
                 movie = panelMovie, report = pictureControl.report,
@@ -3577,7 +3756,7 @@ private fun RemoteContent(
                 onDismiss = { pictureControl.panel = false; pictureControl.closeRequested = false; pictureControl.editingSlot = null },
                 onFeedback = { services.haptics.tick() },
                 onWriteBusyChanged = { busy ->
-                    if (busy && cameraToolWriting) false
+                    if (busy && (cameraToolWriting || selfTimer.active)) false
                     else { cameraToolWriting = busy; true }
                 })
         }
@@ -3597,13 +3776,13 @@ private fun RemoteContent(
             closeRequested = cameraToolCloseRequested,
             onLoadingChanged = { cameraToolLoading = it },
             onWriteBusyChanged = { busy ->
-                if (busy && cameraToolWriting) false
+                if (busy && (cameraToolWriting || selfTimer.active)) false
                 else { cameraToolWriting = busy; true }
             },
             onUnavailable = { showHint(cameraToolUnavailableHint) },
             landscape = rotation != 0,
             anchor = localAnchor,
-            canWrite = connected && initialLoaded && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
+            canWrite = connected && initialLoaded && !selfTimer.active && !capturing && !recBusy && !afHeld && !tapFocusBusy && afJob?.isActive != true,
             isCurrentCamera = { panelCamera != null && cameraViewModel.getCamera() === panelCamera && movieMode == panelMovie },
             beforeWrite = {
                 if (selectedTool != RemoteCameraTool.WHITE_BALANCE && subjectTrackingActive && panelCamera != null) {
@@ -4456,12 +4635,13 @@ private fun ParamTile(
     onStep: (Int) -> Unit,
     onOpenList: () -> Unit,
     tileHeight: androidx.compose.ui.unit.Dp = 54.dp,
+    enabled: Boolean = true,
 ) {
     val compact = tileHeight < 44.dp
     val colors = AppTheme.colors
     val density = LocalDensity.current
     val hasAutoIsoControl = autoIsoEnabled != null && onAutoIsoToggle != null
-    val valueWritable = param != null && param.values.isNotEmpty() && param.writable
+    val valueWritable = enabled && param != null && param.values.isNotEmpty() && param.writable
     val autoIsoOn = autoIsoEnabled == true
     val writable = valueWritable && !autoIsoOn
     var dragging by remember { mutableStateOf(false) }
@@ -4619,7 +4799,7 @@ private fun ParamTile(
                     .semantics { contentDescription = description }
                     .toggleable(
                         value = autoIsoOn,
-                        enabled = !autoIsoBusy,
+                        enabled = enabled && !autoIsoBusy,
                         role = Role.Switch,
                         interactionSource = interactionSource,
                         indication = null,
@@ -4760,14 +4940,28 @@ private fun ShutterButton(
     onRelease: (fire: Boolean) -> Unit,
     onQuickTap: () -> Unit,
     diameter: androidx.compose.ui.unit.Dp = 76.dp,
+    delayedPhoto: Boolean = false,
+    selfTimer: RemoteSelfTimer? = null,
+    onCancel: () -> Unit = {},
 ) {
     val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback(durationMs = 300L)
     val colors = AppTheme.colors
+    // Read the ticking value here: the viewfinder and monitor layout do not need to recompose.
+    val countdownSeconds = if (movie) 0 else selfTimer?.remainingSeconds ?: 0
+    val cancelCountdown = !movie && (countdownSeconds > 0 || selfTimer?.focusing == true)
+    val busy = capturing || (selfTimer?.active == true && !cancelCountdown)
+    // Only the timer adds this colour transition. Ordinary focus and movie gestures keep theirs.
+    val timerAccent by animateFloatAsState(
+        targetValue = if (cancelCountdown) 1f else 0f,
+        animationSpec = tween(160), label = "shutterTimerAccent",
+    )
+    val visibleTimerAccent = if (movie) 0f else timerAccent
     var heldDown by remember { mutableStateOf(false) }
     val currentFocusStart by rememberUpdatedState(onFocusStart)
     val currentRelease by rememberUpdatedState(onRelease)
     val currentQuickTap by rememberUpdatedState(onQuickTap)
     val coroutineScope = rememberCoroutineScope()
+    val cancelDescription = stringResource(R.string.cancel)
     val innerScale by animateFloatAsState(
         targetValue = if (focusing) 0.8f else 1f,
         animationSpec = tween(120),
@@ -4783,7 +4977,8 @@ private fun ShutterButton(
     val ringColor = when {
         !enabled -> colors.onBackground.copy(alpha = 0.3f)
         focusing -> colors.accentBlue
-        else -> colors.onBackground.copy(alpha = 0.9f)
+        else -> androidx.compose.ui.graphics.lerp(
+            colors.onBackground.copy(alpha = 0.9f), colors.accentBlue, visibleTimerAccent)
     }
     // 内芯形态：照片=白色大圆；录像待机=红色大圆；录制中=红色小圆角方块（通用停止
     // 语义），尺寸与圆角同步动画做圆→方块的连续变形。
@@ -4806,15 +5001,20 @@ private fun ShutterButton(
             .border(3.dp, ringColor, CircleShape)
             .then(
                 // 照片拍摄确认中禁手势；录制中保持可用——停止靠的就是再按一下。
-                if (enabled && !capturing)
-                    Modifier.pointerInput(longPressFeedback) {
+                if (enabled && cancelCountdown) {
+                    Modifier.semantics { contentDescription = cancelDescription }
+                        .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() },
+                            indication = null, onClick = onCancel)
+                } else if (enabled && !busy)
+                    Modifier.pointerInput(longPressFeedback, delayedPhoto) {
                         awaitEachGesture {
                             awaitFirstDown()
                             heldDown = true
-                            longPressFeedback.start()
+                            if (!delayedPhoto) longPressFeedback.start()
                             var timerFired = false
                             // 300ms 计时器：超时后触发半按对焦；抬起在计时结束前=快拍。
                             val timerJob = coroutineScope.launch {
+                                if (delayedPhoto) return@launch
                                 delay(300)
                                 timerFired = true
                                 longPressFeedback.trigger { currentFocusStart() }
@@ -4845,7 +5045,7 @@ private fun ShutterButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (capturing) {
+        if (busy) {
             CircularProgressIndicator(
                 modifier = Modifier.size(diameter * (52f / 76f)),
                 color = colors.onBackground,
@@ -4860,10 +5060,49 @@ private fun ShutterButton(
                         scaleY = innerScale
                     }
                     .background(
-                        innerColor.copy(alpha = if (enabled) 1f else 0.3f),
+                        androidx.compose.ui.graphics.lerp(
+                            innerColor.copy(alpha = if (enabled) 1f else 0.3f),
+                            colors.accentBlue.copy(alpha = .12f), visibleTimerAccent),
                         RoundedCornerShape(innerCorner)
-                    )
-            )
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                // A mode switch removes timer visuals immediately, before the cancellation effect runs.
+                if (!movie) AnimatedVisibility(
+                    visible = cancelCountdown,
+                    enter = fadeIn(tween(120)), exit = fadeOut(tween(100)),
+                ) {
+                    // Retain the real last face during exit; cancellation must not flash 0 or a spinner.
+                    var lastSeconds by remember { mutableIntStateOf(countdownSeconds.coerceAtLeast(1)) }
+                    var lastCounting by remember { mutableStateOf(countdownSeconds > 0) }
+                    if (cancelCountdown) SideEffect {
+                        if (countdownSeconds > 0) lastSeconds = countdownSeconds
+                        lastCounting = countdownSeconds > 0
+                    }
+                    Crossfade(
+                        targetState = if (cancelCountdown) countdownSeconds > 0 else lastCounting,
+                        animationSpec = tween(120),
+                        label = "shutterCountdownPhase",
+                    ) { counting ->
+                        Box(Modifier.size(innerSize), contentAlignment = Alignment.Center) {
+                            if (counting) {
+                                RemoteSelfTimerCountdown(
+                                    secondsRemaining = if (countdownSeconds > 0) countdownSeconds else lastSeconds,
+                                    diameter = diameter,
+                                    color = colors.accentBlue,
+                                )
+                            } else {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(diameter * (52f / 76f)),
+                                    color = colors.accentBlue,
+                                    strokeWidth = 3.dp,
+                                )
+                                Icon(Icons.Default.Close, null, Modifier.size(diameter * .24f), tint = colors.accentBlue)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -5217,6 +5456,7 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         RemoteTool.ROTATE -> RotateMark(Modifier.size(20.dp))
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)
         RemoteTool.COMPUTER_CONTROL -> Text("PC", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        RemoteTool.SELF_TIMER -> RemoteSelfTimerMark(preferences.selfTimerSeconds.value)
         RemoteTool.WHITE_BALANCE -> Text("WB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
         RemoteTool.FOCUS_MODE -> Text("MODE", fontSize = 9.sp, fontWeight = FontWeight.Bold)
         RemoteTool.FOCUS_FRAME -> FocusFrameMark()

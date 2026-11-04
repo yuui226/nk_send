@@ -96,7 +96,14 @@ class RemoteToolsInstrumentation : Instrumentation() {
         check(RemoteTool.AUDIO !in photo.order && !photo.visible(RemoteTool.AUDIO))
         check(movie.visible(RemoteTool.AUDIO) && movie.shownTools[5] == RemoteTool.PICTURE_CONTROL)
         check(movie.order.filterNot { it == RemoteTool.PICTURE_CONTROL } ==
-            RemoteTool.regular.filterNot { it == RemoteTool.PICTURE_CONTROL })
+            RemoteTool.regular.filter { it.availableIn(true) && it != RemoteTool.PICTURE_CONTROL })
+        check(p.selfTimerSeconds.value == 0 && photo.visible(RemoteTool.SELF_TIMER))
+        check(!movie.visible(RemoteTool.SELF_TIMER) && RemoteTool.SELF_TIMER !in movie.order)
+        p.selfTimerSeconds.value = 10
+        check(RemoteToolPreferences(disk).selfTimerSeconds.value == 10)
+        photo.setVisible(RemoteTool.SELF_TIMER, false)
+        check(p.selfTimerSeconds.value == 0 && RemoteToolPreferences(disk).selfTimerSeconds.value == 0)
+        photo.setVisible(RemoteTool.SELF_TIMER, true)
         val originalPhotoOrder = photo.order
         RemoteTool.pinned.forEach { fixed ->
             photo.move(fixed, 0)

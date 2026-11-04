@@ -163,7 +163,7 @@ internal fun DebugPhotoGenerationProbePanel(
                                 sharing = true
                                 scope.launch {
                                     try {
-                                        sharePhotoDiagnosticReport(context, report)
+                                        shareDebugDiagnosticReport(context, report)
                                     } catch (error: CancellationException) {
                                         throw error
                                     } catch (_: Exception) {
@@ -334,12 +334,16 @@ private fun photoDiagnosticReport(): String =
     StaConnectionDiagnostics.snapshot() + "\n\n" + ThumbnailDiagnostics.snapshot() + "\n\n" + RatingDiagnostics.snapshot() +
         "\n\n" + PhotoLocationDiagnostics.report()
 
-private suspend fun sharePhotoDiagnosticReport(context: Context, report: String) {
+internal suspend fun shareDebugDiagnosticReport(
+    context: Context,
+    report: String,
+    prefix: String = "Shared-PhotoDiagnostics-",
+) {
     val file = withContext(Dispatchers.IO) {
         val directory = File(context.filesDir, "picture_control_reports")
         check(directory.isDirectory || directory.mkdirs()) { "Cannot create diagnostic report directory" }
         // Never overwrite: the receiving app can read this URI after another connection has started.
-        File.createTempFile("Shared-PhotoDiagnostics-", ".txt", directory).apply {
+        File.createTempFile(prefix, ".txt", directory).apply {
             writeText(report, Charsets.UTF_8)
         }
     }

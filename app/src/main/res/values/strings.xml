@@ -696,6 +696,11 @@
     <string name="photo_effect_module_watermark">Watermark</string>
 
     <string name="remote_tool_focus_frame">Focus frame</string>
+    <string name="remote_tool_self_timer">Self-timer</string>
+    <string name="remote_self_timer_seconds">%1$ds</string>
+    <string name="remote_self_timer_focus_failed">Focus failed. Please try again.</string>
+    <string name="remote_self_timer_capture_failed">Capture failed. Please try again.</string>
+    <string name="monitor_help_tool_self_timer">When enabled, press and release the shutter to start the countdown; press again to cancel. The camera focuses and takes a photo when the countdown ends. Manual focus is kept as set. Photo mode only.</string>
     <string name="remote_focus_diagnostic_start">Start</string>
     <string name="remote_focus_diagnostic_stop">Stop</string>
     <string name="remote_focus_diagnostic_mark">Mark step</string>
