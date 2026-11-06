@@ -49,7 +49,7 @@ internal enum class WaveformMode { OFF, LUMA, RGB;
     fun next() = entries[(ordinal + 1) % entries.size]
 }
 
-internal val remoteSelfTimerOptions = listOf(0, 2, 5, 10, 20)
+internal val remoteSelfTimerOptions = listOf(0, 2, 3, 5, 10, 30)
 
 /** Writes on the user mutation, rather than waiting for page disposal or a composition effect. */
 private class SavedToolState<T>(initial: T, private val save: (T) -> Unit) : MutableState<T> {

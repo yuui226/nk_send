@@ -80,6 +80,7 @@
     <string name="return_again_to_exit">再次返回離開</string>
     <string name="no_photos_match_filter">沒有符合篩選的照片</string>
     <string name="clear_filters">清除篩選</string>
+    <string name="reset_filters">重設篩選</string>
     <string name="loading_more">正在載入更多…</string>
     <string name="unknown_date">未知日期</string>
     <string name="filter_all">全部</string>
@@ -90,13 +91,10 @@
     <string name="filter_title">篩選</string>
     <string name="filter_section_file_type">檔案類型</string>
     <string name="filter_section_status">狀態</string>
-    <string name="filter_section_storage">記憶卡</string>
     <string name="filter_section_date">拍攝日期</string>
     <string name="filter_date">日期</string>
     <string name="filter_storage_slot">卡 %1$d</string>
     <string name="date_range">日期範圍</string>
-    <string name="date_start">開始</string>
-    <string name="date_end">結束</string>
     <string name="date_year">年</string>
     <string name="date_month">月</string>
     <string name="date_day">日</string>

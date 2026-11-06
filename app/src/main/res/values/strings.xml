@@ -80,6 +80,7 @@
     <string name="return_again_to_exit">Go back again to exit</string>
     <string name="no_photos_match_filter">No photos match the filter</string>
     <string name="clear_filters">Clear filters</string>
+    <string name="reset_filters">Reset filters</string>
     <string name="loading_more">Loading more…</string>
     <string name="unknown_date">Unknown date</string>
     <string name="filter_all">All</string>
@@ -90,13 +91,10 @@
     <string name="filter_title">Filter</string>
     <string name="filter_section_file_type">File type</string>
     <string name="filter_section_status">Status</string>
-    <string name="filter_section_storage">Storage card</string>
     <string name="filter_section_date">Date taken</string>
     <string name="filter_date">Date</string>
     <string name="filter_storage_slot">Card %1$d</string>
     <string name="date_range">Date range</string>
-    <string name="date_start">Start</string>
-    <string name="date_end">End</string>
     <string name="date_year">Year</string>
     <string name="date_month">Month</string>
     <string name="date_day">Day</string>

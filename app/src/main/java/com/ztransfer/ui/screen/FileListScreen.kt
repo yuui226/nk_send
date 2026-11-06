@@ -156,7 +156,6 @@ import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.isQueuedForFrameGeneration
-import com.ztransfer.viewmodel.latestCaptureLocalDate
 import com.ztransfer.viewmodel.storageIdsBySlot
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -849,7 +848,8 @@ fun FileListScreen(
     // temporary STA session so switching modes does not silently erase the user's setting.
     fun criteriaForPersistence(criteria: PhotoFilterCriteria): PhotoFilterCriteria =
         if (state.isStaConnection) {
-            criteria.copy(protectedOnly = transferState.filterProtectedOnly)
+            // A reset can precede recomposition; never restore the pre-reset hidden preference.
+            criteria.copy(protectedOnly = transferViewModel.state.value.filterProtectedOnly)
         } else {
             criteria
         }
@@ -905,9 +905,6 @@ fun FileListScreen(
             delay(600)
             filterRevealWindow = false
         }
-    }
-    val latestKnownDate = remember(displayedCameraFiles) {
-        latestCaptureLocalDate(displayedCameraFiles.asSequence().map { it.captureDate })
     }
     // 连拍检测基于原始列表，只在文件列表变化时重算。角标、筛选和合集都共享这一份
     // 结果，避免三个功能对“哪些照片属于连拍”产生分歧。
@@ -1881,7 +1878,6 @@ fun FileListScreen(
                 ratingProgress = ratingScan,
                 storageSlots = visibleStorageSlots,
                 showProtectionFilter = showProtectionFilter,
-                suggestedDate = latestKnownDate,
                 hapticsEnabled = transferState.hapticsEnabled,
                 onChange = { criteria, animateList ->
                     // FilterOverlay 只在工作状态确实变化时回调；这里每次都提交。
@@ -1901,6 +1897,7 @@ fun FileListScreen(
                         ))
                     )
                 },
+                onReset = transferViewModel::clearFilters,
                 onDismiss = {
                     showFilter = false
                     openedFilterAnchor = null
@@ -4580,7 +4577,7 @@ internal fun toggleStorageSlotSelection(
 internal fun allowGridRemoteThumbnails(previewOpen: Boolean): Boolean = !previewOpen
 
 /**
- * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下同时展示开始、结束两组三波轮，
+ * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下展示两组可独立选择的日期拨轮，
  * 编辑期间只改草稿，完成时才一次提交，避免滚动波轮时反复重排列表与后台请求。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
@@ -4594,9 +4591,9 @@ private fun FilterOverlay(
     ratingProgress: PhotoRatingScan,
     storageSlots: List<Int>,
     showProtectionFilter: Boolean,
-    suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
     onChange: (PhotoFilterCriteria, Boolean) -> Unit,
+    onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -4672,7 +4669,6 @@ private fun FilterOverlay(
             if (showDateEditor) {
                 DateRangeEditor(
                     current = working.dateRange,
-                    suggestedDate = suggestedDate,
                     hapticsEnabled = hapticsEnabled,
                     onBack = { editingDate = false },
                     onApply = { range ->
@@ -4756,11 +4752,6 @@ private fun FilterOverlay(
 
                     if (storageSlots.isNotEmpty()) {
                         FilterSectionDivider()
-
-                        FilterSectionLabel(
-                            label = stringResource(R.string.filter_section_storage),
-                        )
-                        Spacer(Modifier.height(FILTER_CONTROL_GAP))
 
                         Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                             storageSlots.forEach { slot ->
@@ -4936,6 +4927,21 @@ private fun FilterOverlay(
                             )
                         }
                     }
+
+                    FilterSectionDivider()
+
+                    FilterChip(
+                        label = stringResource(R.string.reset_filters),
+                        selected = false,
+                        onClick = {
+                            working = PhotoFilterCriteria.Default
+                            // Reset all persisted conditions, including hidden STA protection.
+                            // Normal edits preserve that preference; an explicit reset must not.
+                            onReset()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = Icons.Default.Refresh,
+                    )
                 }
             }
         }
@@ -4961,19 +4967,6 @@ private fun FilterOverlay(
             )
         }
     }
-}
-
-@Composable
-private fun FilterSectionLabel(
-    label: String,
-) {
-    val colors = AppTheme.colors
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = colors.onSurfaceVariant,
-    )
 }
 
 @Composable
@@ -5011,7 +5004,6 @@ private fun FilterClearButton(onClick: () -> Unit) {
 @Composable
 private fun DateRangeEditor(
     current: PhotoDateRange?,
-    suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
     onBack: () -> Unit,
     onApply: (PhotoDateRange?) -> Unit,
@@ -5019,24 +5011,15 @@ private fun DateRangeEditor(
 ) {
     val colors = AppTheme.colors
     val haptics = rememberHaptics(hapticsEnabled)
-    val initial = current?.endInclusive ?: suggestedDate ?: LocalDate.now()
-    // 编辑页进入时快照一次；文件列表仍在渐进加载时 suggestedDate 可能变化，不能把用户
-    // 已经拨到一半的草稿重置掉。
-    var start by remember { mutableStateOf(current?.start ?: initial) }
-    var end by remember { mutableStateOf(current?.endInclusive ?: initial) }
+    // 每次进入日期页时读取手机当地的今天；已有范围照常保留。
+    // 编辑期间只保留草稿，重组或照片加载不能重置用户已经拨动的日期。
+    val today = remember { LocalDate.now() }
+    // 已有范围按照片列表习惯呈现较新日期在上；编辑时不交换、不联动两个日期。
+    var upperDate by remember { mutableStateOf(current?.endInclusive ?: today) }
+    var lowerDate by remember { mutableStateOf(current?.start ?: today) }
 
-    fun updateStart(next: LocalDate) {
-        start = next
-        if (next.isAfter(end)) end = next
-    }
-
-    fun updateEnd(next: LocalDate) {
-        end = next
-        if (next.isBefore(start)) start = next
-    }
-
-    val minYear = minOf(1990, start.year, end.year)
-    val maxYear = maxOf(LocalDate.now().year + 1, start.year, end.year)
+    val minYear = minOf(1990, upperDate.year, lowerDate.year)
+    val maxYear = maxOf(today.year + 1, upperDate.year, lowerDate.year)
     val years = remember(minYear, maxYear) { (minYear..maxYear).toList() }
 
     Column(
@@ -5062,18 +5045,16 @@ private fun DateRangeEditor(
         }
 
         DateEndpointWheels(
-            label = stringResource(R.string.date_start),
-            date = start,
+            date = upperDate,
             years = years,
-            onDateChanged = ::updateStart,
+            onDateChanged = { upperDate = it },
             onDetent = haptics::tick,
         )
 
         DateEndpointWheels(
-            label = stringResource(R.string.date_end),
-            date = end,
+            date = lowerDate,
             years = years,
-            onDateChanged = ::updateEnd,
+            onDateChanged = { lowerDate = it },
             onDetent = haptics::tick,
         )
 
@@ -5087,7 +5068,7 @@ private fun DateRangeEditor(
                 Text(stringResource(R.string.clear), color = colors.onSurfaceVariant)
             }
             GlassButton(
-                onClick = { onApply(PhotoDateRange.between(start, end)) },
+                onClick = { onApply(PhotoDateRange.between(upperDate, lowerDate)) },
                 modifier = Modifier.weight(1f).height(40.dp),
                 shape = RoundedCornerShape(11.dp),
                 active = true,
@@ -5105,7 +5086,6 @@ private fun DateRangeEditor(
 
 @Composable
 private fun DateEndpointWheels(
-    label: String,
     date: LocalDate,
     years: List<Int>,
     onDateChanged: (LocalDate) -> Unit,
@@ -5117,23 +5097,12 @@ private fun DateEndpointWheels(
         (1..YearMonth.of(date.year, date.monthValue).lengthOfMonth()).toList()
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onBackground,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                formatLocalDate(date),
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.onSurfaceVariant,
-            )
-        }
+        Text(
+            formatLocalDate(date),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.End),
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
             ReleaseCommitWheel(
                 options = years,

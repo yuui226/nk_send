@@ -37,10 +37,6 @@ data class PhotoDateRange private constructor(
     }
 }
 
-/** 只为最大值创建一个 LocalDate，避免渐进文件列表每次更新都为全部照片分配日期对象。 */
-internal fun latestCaptureLocalDate(captureDates: Sequence<String?>): LocalDate? =
-    captureDates.mapNotNull(::captureDayKey).maxOrNull()?.toLocalDate()
-
 /** Returns the range covering the newest actual shooting days, skipping empty calendar days. */
 internal fun newestCaptureDaysRange(
     files: Iterable<NikonCamera.FileInfo>,
