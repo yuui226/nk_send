@@ -5091,50 +5091,41 @@ private fun DateEndpointWheels(
     onDateChanged: (LocalDate) -> Unit,
     onDetent: () -> Unit,
 ) {
-    val colors = AppTheme.colors
     val months = remember { (1..12).toList() }
     val days = remember(date.year, date.monthValue) {
         (1..YearMonth.of(date.year, date.monthValue).lengthOfMonth()).toList()
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            formatLocalDate(date),
-            style = MaterialTheme.typography.labelSmall,
-            color = colors.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.End),
+    Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
+        ReleaseCommitWheel(
+            options = years,
+            selected = date.year,
+            optionLabel = Int::toString,
+            onValueCommitted = { onDateChanged(date.withClampedDate(year = it)) },
+            onDetent = onDetent,
+            label = stringResource(R.string.date_year),
+            wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+            modifier = Modifier.weight(1.3f),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
-            ReleaseCommitWheel(
-                options = years,
-                selected = date.year,
-                optionLabel = Int::toString,
-                onValueCommitted = { onDateChanged(date.withClampedDate(year = it)) },
-                onDetent = onDetent,
-                label = stringResource(R.string.date_year),
-                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
-                modifier = Modifier.weight(1.3f),
-            )
-            ReleaseCommitWheel(
-                options = months,
-                selected = date.monthValue,
-                optionLabel = { it.toString().padStart(2, '0') },
-                onValueCommitted = { onDateChanged(date.withClampedDate(month = it)) },
-                onDetent = onDetent,
-                label = stringResource(R.string.date_month),
-                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
-                modifier = Modifier.weight(1f),
-            )
-            ReleaseCommitWheel(
-                options = days,
-                selected = date.dayOfMonth,
-                optionLabel = { it.toString().padStart(2, '0') },
-                onValueCommitted = { onDateChanged(date.withClampedDate(day = it)) },
-                onDetent = onDetent,
-                label = stringResource(R.string.date_day),
-                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        ReleaseCommitWheel(
+            options = months,
+            selected = date.monthValue,
+            optionLabel = { it.toString().padStart(2, '0') },
+            onValueCommitted = { onDateChanged(date.withClampedDate(month = it)) },
+            onDetent = onDetent,
+            label = stringResource(R.string.date_month),
+            wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+            modifier = Modifier.weight(1f),
+        )
+        ReleaseCommitWheel(
+            options = days,
+            selected = date.dayOfMonth,
+            optionLabel = { it.toString().padStart(2, '0') },
+            onValueCommitted = { onDateChanged(date.withClampedDate(day = it)) },
+            onDetent = onDetent,
+            label = stringResource(R.string.date_day),
+            wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -5146,11 +5137,6 @@ private fun LocalDate.withClampedDate(
     val clampedDay = day.coerceAtMost(YearMonth.of(year, month).lengthOfMonth())
     return LocalDate.of(year, month, clampedDay)
 }
-
-private fun formatLocalDate(date: LocalDate): String =
-    "${(date.year % 100).twoDigits()}/${date.monthValue.twoDigits()}/${date.dayOfMonth.twoDigits()}"
-
-private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 /**
  * 筛选与边框信息共用的紧凑选择项：复用拨轮材质，仅点击，选中颜色平滑过渡。
