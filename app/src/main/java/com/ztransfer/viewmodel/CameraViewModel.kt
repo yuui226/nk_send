@@ -3327,12 +3327,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
+        // Handles and their dates belong to one PTP session. A reconnect may keep the old
+        // screen briefly, but its catalog must never seed or truncate the new shooting-day scan.
+        val preserveCatalog = preserveExisting && knownHandlesCamera === cam
+        val reusableSnapshot = resumeSnapshot?.takeIf { preserveCatalog && it.belongsTo(cam) }
         _recentThumbnailReady.value = false
         _recentThumbnailReadyDays.value = 0
-        if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
+        if (!preserveCatalog) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
         photoRangeScanStopped = false
-        if (cam.staDirectObjectReadValidated && !preserveExisting) {
+        if (cam.staDirectObjectReadValidated && !preserveCatalog) {
             staScanThumbnailDiskHits = 0
             staScanThumbnailDiskMisses = 0
         }
@@ -3342,8 +3346,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         fileLoadPending = true
         // 没有显式传入同会话恢复快照，就代表本轮要重新读取 handles；旧快照不能在
         // 新一轮枚举尚未完成时被后续暂停误复用。
-        if (resumeSnapshot == null) fileScanHandleSnapshot = null
-        if (!preserveExisting) {
+        if (reusableSnapshot == null) fileScanHandleSnapshot = null
+        if (!preserveCatalog) {
             clearNewObjectThumbnailRetries()
             knownHandlesCamera = null
             knownHandles.clear()
@@ -3362,21 +3366,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.copy(
                 isLoadingFiles = !isFileScanPaused(),
                 hasCompletedFileScan = false,
-                files = if (preserveExisting) it.files else emptyList(),
-                storageIds = if (preserveExisting) it.storageIds else emptyList(),
-                effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
-                effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
-                effectPreviewFileName = if (preserveExisting) it.effectPreviewFileName else null,
-                effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
+                files = if (preserveCatalog) it.files else emptyList(),
+                storageIds = if (preserveCatalog) it.storageIds else emptyList(),
+                effectPreviewBitmap = if (preserveCatalog) it.effectPreviewBitmap else null,
+                effectPreviewFileKey = if (preserveCatalog) it.effectPreviewFileKey else null,
+                effectPreviewFileName = if (preserveCatalog) it.effectPreviewFileName else null,
+                effectPreviewExif = if (preserveCatalog) it.effectPreviewExif else null,
             )
         }
         // 监看和交互式大图都先于列表枚举：保留待加载标记，不向相机事务调度器排队。
         if (isFileScanPaused()) return
 
         if (FileOrderProbe.enabled) {
-            if (resumeSnapshot == null) {
+            if (reusableSnapshot == null) {
                 FileOrderProbe.beginScan(
-                    "fresh preserveExisting=$preserveExisting existing=${_state.value.files.size}"
+                    "fresh preserveExisting=$preserveCatalog existing=${_state.value.files.size}"
                 )
             } else {
                 FileOrderProbe.addNote(
@@ -3386,8 +3390,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         log {
-            "FILE_SCAN start preserve=$preserveExisting snapshot=${resumeSnapshot != null} " +
-                "existing=${_state.value.files.size}"
+            "FILE_SCAN start preserve=$preserveCatalog snapshot=${reusableSnapshot != null} " +
+                "existing=${_state.value.files.size} days=${thumbnailLoadingDaysFlow.value}"
         }
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             var staScanRequiresReconnect = false
@@ -3397,11 +3401,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 check(!cam.remoteControlModeSet && !cam.remoteMovieApplicationPropSet &&
                     !cam.remoteMovieApplicationOpSet) { "Camera remote mode release is unconfirmed" }
                 var existingFiles =
-                    if (preserveExisting && camera === cam) _state.value.files else emptyList()
+                    if (preserveCatalog && camera === cam) _state.value.files else emptyList()
                 var existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
                 var newHandlesToReport: Set<Int> = emptySet()
                 val scanDiscoveredMedia = ArrayList<NikonCamera.FileInfo>()
-                val reusableSnapshot = resumeSnapshot?.takeIf { it.belongsTo(cam) }
                 val storageIds: List<Int>
                 val remainingHandleOrders: List<StorageHandleOrder>
                 val activeSnapshot: FileScanHandleSnapshot
@@ -3721,16 +3724,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val publishedSizeBeforeBatch = publishedFiles.size
                     val configuredDays = thumbnailLoadingDaysFlow.value
-                    val rangeBoundaryReached = configuredDays > 0 &&
-                        (publishedFiles.asSequence() + batch.asSequence())
-                            .mapNotNull { it.captureDate?.take(8) }
-                            .distinct()
-                            .take(configuredDays + 1)
-                            .count() > configuredDays
                     val currentRange = newestCaptureDaysRange(
                         (publishedFiles.asSequence() + batch.asSequence()).asIterable(),
                         configuredDays,
                     )
+                    val rangeBoundaryReached = crossedPhotoLoadingRange(currentRange, batch)
                     val acceptedBatch = if (rangeBoundaryReached && currentRange != null) {
                         batch.filter { file ->
                             file.captureDate == null || currentRange.containsCaptureDate(file.captureDate)
@@ -4012,8 +4010,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _state.value.wirelessMode == WirelessMode.STA &&
             (_state.value.files.isNotEmpty() || _state.value.hasCompletedFileScan)
         ) {
-            // The next STA session is a recovery of the same connected camera. Keep the visible
-            // catalog and let the new session re-enumerate handles with preserveExisting=true.
+            // Keep the old screen during recovery. Once connected, loadFiles must enumerate
+            // the new session afresh rather than reuse its predecessor's handles or date range.
             staReconnectPreserveExisting = true
         }
         fileLoadJob?.cancel()

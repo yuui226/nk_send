@@ -53,6 +53,17 @@ internal fun newestCaptureDaysRange(
     return PhotoDateRange.between(keys.last().toLocalDate(), keys.first().toLocalDate())
 }
 
+/** Old visible rows do not prove a new scan reached its limit; the current batch must cross it. */
+internal fun crossedPhotoLoadingRange(
+    range: PhotoDateRange?,
+    batch: Iterable<NikonCamera.FileInfo>,
+): Boolean {
+    val oldestIncludedDay = range?.start?.toDayKey() ?: return false
+    return batch.any { file ->
+        captureDayKey(file.captureDate)?.let { it < oldestIncludedDay } == true
+    }
+}
+
 /** 主筛选面板使用的两位年份短摘要，保证起止日期格式稳定且适合单行显示。 */
 internal fun compactDateRangeLabel(range: PhotoDateRange?): String? {
     range ?: return null
