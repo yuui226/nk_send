@@ -593,9 +593,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
-    // STA 的短暂网络抖动不应立即拆掉已建立的会话。只有连续保活失败后，才进入
-    // 统一的断线重连路径；若确实重连，则尽量沿用当前列表，避免用户看到整页重载。
-    private var staReconnectPreserveExisting = false
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
     private data class PendingNewCameraObject(
@@ -1925,7 +1922,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectApMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
-        staReconnectPreserveExisting = false
         com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         persistWirelessMode(WirelessMode.AP)
         if (current.wirelessMode == WirelessMode.AP) {
@@ -1954,7 +1950,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectStaMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
-        staReconnectPreserveExisting = false
         persistWirelessMode(WirelessMode.STA)
         if (current.wirelessMode == WirelessMode.STA) return
 
@@ -2595,8 +2590,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ) {
             "STA camera must validate album access and pairing before activation"
         }
-        val preserveExisting = staReconnectPreserveExisting
-        staReconnectPreserveExisting = false
         staConnectingCamera = null
         staReconnectAttempt = 0
         camera = candidateCamera
@@ -2615,17 +2608,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 staConnectionStatus = StaConnectionStatus.IDLE,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
-                // Publish the album's loading state atomically with the connection. Otherwise a
-                // slow reconnect can expose the previous session's completed-empty state for a
-                // frame and send the user straight to the false "no photos" screen.
+                // A new connection starts with a fresh catalog, even during recovery. Publish
+                // the empty catalog and loading state together before suspending for cache IO,
+                // so neither old photos nor a false "no photos" state flash before the scan.
                 isLoadingFiles = true,
                 hasCompletedFileScan = false,
-                files = if (preserveExisting) it.files else emptyList(),
-                storageIds = if (preserveExisting) it.storageIds else emptyList(),
-                effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
-                effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
-                effectPreviewFileName = if (preserveExisting) it.effectPreviewFileName else null,
-                effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
+                files = emptyList(),
+                storageIds = emptyList(),
+                effectPreviewBitmap = null,
+                effectPreviewFileKey = null,
+                effectPreviewFileName = null,
+                effectPreviewExif = null,
             )
         }
         CameraSessionService.start(getApplication())
@@ -2639,10 +2632,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             log { "STA thumbnail cache unavailable: ${error.javaClass.simpleName}" }
         }
         if (camera !== candidateCamera || !_state.value.isConnectedToCamera) return
-        loadFiles(
-            preserveExisting = preserveExisting,
-            detectNewHandles = preserveExisting,
-        )
+        loadFiles()
         startEventPolling()
     }
 
@@ -3327,8 +3317,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
-        // Handles and their dates belong to one PTP session. A reconnect may keep the old
-        // screen briefly, but its catalog must never seed or truncate the new shooting-day scan.
+        // Handles and their dates belong to one PTP session. Only same-session refreshes
+        // can reuse them; a reconnect must start a fresh shooting-day scan.
         val preserveCatalog = preserveExisting && knownHandlesCamera === cam
         val reusableSnapshot = resumeSnapshot?.takeIf { preserveCatalog && it.belongsTo(cam) }
         _recentThumbnailReady.value = false
@@ -4006,14 +3996,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun onCameraTransportLost(failedCamera: NikonCamera) {
         if (camera !== failedCamera) return
-        if (failedCamera.connectionType == CameraConnectionType.WIFI &&
-            _state.value.wirelessMode == WirelessMode.STA &&
-            (_state.value.files.isNotEmpty() || _state.value.hasCompletedFileScan)
-        ) {
-            // Keep the old screen during recovery. Once connected, loadFiles must enumerate
-            // the new session afresh rather than reuse its predecessor's handles or date range.
-            staReconnectPreserveExisting = true
-        }
         fileLoadJob?.cancel()
         camera = null
         keepaliveJob?.cancel()
