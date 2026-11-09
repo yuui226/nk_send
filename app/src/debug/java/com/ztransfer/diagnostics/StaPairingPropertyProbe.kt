@@ -73,7 +73,7 @@ internal object StaPairingPropertyProbe {
                 try {
                     note("STA simplified pairing flow probe v5 ${Instant.now()} app=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) Android=${Build.VERSION.SDK_INT}")
                     note("simulateUnpaired=$simulateUnpaired; explicit pairing-only state repairs on the current connection BEFORE any monitor request. Otherwise a failed remote request permits one same-camera recovery. Never synthesize a failure.")
-                    note("No pre-result event drain, no 0x4008 gate or candidate probes. Normal success keeps the ACK + 6600ms reconnect. This is an isolated Debug experiment, not the normal STA entry.")
+                    note("No pre-result event drain, no 0x4008 gate or candidate probes. Production keeps the pairing receipt and retries for 60s after ACK. This isolated Debug experiment still uses its own 6600ms interval, not the normal STA entry.")
                     note("This experiment never activates the album or persists pairing trust. A valid frame proves current remote access, not persistence across camera restart. No image content is retained.")
                     withContext(Dispatchers.Main.immediate) { prepare() }
                     withTimeout(120_000L) { runExperiment(appContext, simulateUnpaired) }

@@ -52,10 +52,13 @@ import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
 import com.ztransfer.util.applyExifOrientation
 import java.io.ByteArrayInputStream
+import java.io.EOFException
 import java.io.IOException
+import java.net.BindException
 import java.net.ConnectException
 import java.net.InetAddress
 import java.net.NoRouteToHostException
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -234,6 +237,47 @@ internal fun remainingStaPairingRestartDelay(
     (restartDelayMs - (nowMs - resultAcknowledgedAtMs).coerceAtLeast(0L))
         .coerceIn(0L, restartDelayMs)
 }
+
+/**
+ * The return window starts when the pairing command is acknowledged. Service restart and the
+ * time the user needs to confirm the camera are both inside that same window.
+ */
+internal fun staPairingReturnDeadlineMs(
+    resultAcknowledgedAtMs: Long,
+    nowMs: Long,
+    windowMs: Long,
+): Long = (if (resultAcknowledgedAtMs > 0L) resultAcknowledgedAtMs else nowMs) + windowMs
+
+/** The camera is unreachable or has dropped the link. A protocol refusal is not a disconnect. */
+internal fun isStaCameraTemporarilyOffline(error: Throwable?): Boolean {
+    if (error == null ||
+        error is StaResponseException ||
+        error is CameraRefusedException ||
+        error is UnexpectedStaResponderException ||
+        error is PairingCompletedException ||
+        error is StaPairingConfirmationMissingException ||
+        error is StaPairingCleanupException ||
+        (error is PairingNotConfirmedException && (error.pairingOnly || error.remoteRequestAttempted))
+    ) return false
+    return generateSequence(error) { it.cause }.take(8).any {
+        (it is SocketException && it !is BindException) || it is SocketTimeoutException || it is EOFException
+    }
+}
+
+/**
+ * After a successful pairing command, keep that receipt and retry the same camera until the
+ * return deadline. A dropped link must not start another pairing exchange.
+ */
+internal fun shouldRetryStaPairingReturn(
+    confirmation: StaPairingConfirmation?,
+    exchangeStarted: Boolean,
+    failure: Throwable?,
+    nowMs: Long,
+    deadlineMs: Long,
+): Boolean = confirmation != null &&
+    !exchangeStarted &&
+    deadlineMs > nowMs &&
+    isStaCameraTemporarilyOffline(failure)
 
 internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
     runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
@@ -2271,6 +2315,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             var pairingRecoveryUsed = false
             var pairingCleanupRecoveryUsed = false
             var readinessRetryUsed = false
+            var pairingReturnDeadlineMs = 0L
             while (true) {
                 if (generation != staDiscoveryGeneration || purchaseHold ||
                     _state.value.connectionType == CameraConnectionType.USB ||
@@ -2404,6 +2449,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         pairingReconnectUsed = true
                         pairingConfirmation = error.confirmation
                         confirmedResponderGuid = error.confirmation.responderGuid
+                        // Some bodies stay offline until the user presses OK after they join the
+                        // network. Later attempts reuse this receipt until the return window ends.
+                        pairingReturnDeadlineMs = staPairingReturnDeadlineMs(
+                            error.confirmation.resultAcknowledgedAtMs,
+                            SystemClock.elapsedRealtime(),
+                            STA_PAIRING_RETURN_WINDOW_MS,
+                        )
                         rememberStaCameraProfile(candidateCamera, ip, StaInitiatorIdentity.PAIRED_COMPUTER)
                         staLastFailureMessage = null
                         waitForStaService(
@@ -2430,6 +2482,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         staLastFailureMessage = null
                         StaConnectionDiagnostics.note(diagnosticSession, "remote permission verified; reconnecting once after live-view cleanup failure")
                         waitForStaService("pairing_cleanup_recovery", STA_SERVICE_READY_RETRY_DELAY_MS)
+                    }
+                    shouldRetryStaPairingReturn(
+                        confirmation = pairingConfirmation,
+                        exchangeStarted = pairingExchangeStarted,
+                        failure = error,
+                        nowMs = SystemClock.elapsedRealtime(),
+                        deadlineMs = pairingReturnDeadlineMs,
+                    ) -> {
+                        val remainingMs = (pairingReturnDeadlineMs - SystemClock.elapsedRealtime())
+                            .coerceAtLeast(0L)
+                        val delayMs = minOf(STA_PAIRING_RETURN_RETRY_DELAY_MS, remainingMs)
+                        StaConnectionDiagnostics.note(
+                            diagnosticSession,
+                            "camera offline after pairing; keeping receipt remainingMs=$remainingMs " +
+                                "delayMs=$delayMs error=${error?.javaClass?.simpleName}",
+                        )
+                        staLastFailureMessage = null
+                        waitForStaService("pairing_return", delayMs)
                     }
                     error is PairingNotConfirmedException -> {
                         if (pairedComputer) {
@@ -5122,6 +5192,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
         const val STA_PAIRING_RECONNECT_DELAY_MS = 6_600L
+        // Covers camera restart plus the on-body OK some cameras require before they return.
+        const val STA_PAIRING_RETURN_WINDOW_MS = 60_000L
+        const val STA_PAIRING_RETURN_RETRY_DELAY_MS = 1_200L
         const val STA_SERVICE_READY_RETRY_DELAY_MS = 1_200L
         const val STA_EXPLORER_RECONNECT_DELAY_MS = 900L
         const val FILE_SCAN_RETRY_DELAY_MS = 750L

@@ -1,14 +1,19 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.CameraRefusedException
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PairingNotConfirmedException
 import com.ztransfer.protocol.StaInitiatorIdentity
 import com.ztransfer.protocol.StaPairingConfirmation
 import com.ztransfer.protocol.StaPairingConfirmationMissingException
+import com.ztransfer.protocol.StaResponseException
+import java.io.EOFException
 import java.io.IOException
+import java.net.BindException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -262,6 +267,93 @@ class StaConnectionIsolationTest {
         // Synthetic/legacy receipts without a timestamp retain the conservative interval.
         assertEquals(6_600L, remainingStaPairingRestartDelay(0L, 20_000L, 6_600L))
         assertEquals(6_600L, remainingStaPairingRestartDelay(2_000L, 1_000L, 6_600L))
+    }
+
+    @Test
+    fun pairingReturnWindowStartsAtAcknowledgementAndKeepsTheReceipt() {
+        assertEquals(61_000L, staPairingReturnDeadlineMs(1_000L, 1_000L, 60_000L))
+        // A later reconnect attempt does not slide the window forward.
+        assertEquals(61_000L, staPairingReturnDeadlineMs(1_000L, 8_000L, 60_000L))
+        assertEquals(80_000L, staPairingReturnDeadlineMs(0L, 20_000L, 60_000L))
+
+        val receipt = StaPairingConfirmation("camera-a", resultAcknowledgedAtMs = 1_000L)
+        val offline = listOf(
+            ConnectException("connection refused"),
+            NoRouteToHostException("camera left the network"),
+            SocketTimeoutException("handshake timed out"),
+            SocketException("connection reset"),
+            EOFException("stream closed"),
+            PairingNotConfirmedException(EOFException("dropped during verification")),
+        )
+        offline.forEach { failure ->
+            assertTrue(failure.toString(), isStaCameraTemporarilyOffline(failure))
+            assertTrue(
+                failure.toString(),
+                shouldRetryStaPairingReturn(
+                    confirmation = receipt,
+                    exchangeStarted = false,
+                    failure = failure,
+                    nowMs = 10_000L,
+                    deadlineMs = 61_000L,
+                ),
+            )
+        }
+        // The same disconnect does not justify another pairing command, and it stops at the deadline.
+        assertFalse(
+            shouldRetryStaPairingReturn(
+                confirmation = receipt,
+                exchangeStarted = true,
+                failure = SocketTimeoutException("pairing exchange"),
+                nowMs = 10_000L,
+                deadlineMs = 61_000L,
+            ),
+        )
+        assertFalse(
+            shouldRetryStaPairingReturn(
+                confirmation = null,
+                exchangeStarted = false,
+                failure = NoRouteToHostException("offline"),
+                nowMs = 10_000L,
+                deadlineMs = 61_000L,
+            ),
+        )
+        assertFalse(
+            shouldRetryStaPairingReturn(
+                confirmation = receipt,
+                exchangeStarted = false,
+                failure = NoRouteToHostException("offline"),
+                nowMs = 61_000L,
+                deadlineMs = 61_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun protocolRefusalIsNotATemporaryDisconnectAfterPairing() {
+        val receipt = StaPairingConfirmation("camera-a", resultAcknowledgedAtMs = 1_000L)
+        val refusals = listOf(
+            PairingNotConfirmedException(pairingOnly = true),
+            PairingNotConfirmedException(remoteRequestAttempted = true),
+            PairingNotConfirmedException(IOException("DeviceInfo unavailable")),
+            StaResponseException(0x2001, "STA album access unavailable (0x2001)"),
+            CameraRefusedException("camera refused"),
+            BindException("local bind failed"),
+            IOException("unrelated IO failure"),
+            null,
+        )
+        refusals.forEach { failure ->
+            assertFalse(failure?.toString() ?: "null", isStaCameraTemporarilyOffline(failure))
+            assertFalse(
+                failure?.toString() ?: "null",
+                shouldRetryStaPairingReturn(
+                    confirmation = receipt,
+                    exchangeStarted = false,
+                    failure = failure,
+                    nowMs = 10_000L,
+                    deadlineMs = 61_000L,
+                ),
+            )
+        }
     }
 
     @Test
