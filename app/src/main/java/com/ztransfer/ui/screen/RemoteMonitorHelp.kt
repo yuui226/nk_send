@@ -51,6 +51,7 @@ internal fun RemoteMonitorHelpBubble(
         )),
         TipBubbleSection(stringResource(R.string.monitor_help_section_display), listOf(
             monitorToolHelpItem(RemoteTool.HD, R.string.monitor_help_tool_hd, tools),
+            monitorToolHelpItem(RemoteTool.MIRROR, R.string.monitor_help_tool_mirror, tools),
             monitorToolHelpItem(RemoteTool.FPS, R.string.monitor_help_tool_fps, tools),
             monitorToolHelpItem(RemoteTool.AUDIO, R.string.monitor_help_tool_audio, tools),
             monitorToolHelpItem(RemoteTool.RECORD, R.string.monitor_help_tool_record, tools),

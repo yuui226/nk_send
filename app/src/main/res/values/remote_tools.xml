@@ -72,4 +72,5 @@
     <string name="remote_af_dynamic_51">Dynamic-area AF (51 points)</string>
     <string name="remote_af_dynamic_72">Dynamic-area AF (72 points)</string>
     <string name="remote_af_dynamic_153">Dynamic-area AF (153 points)</string>
+    <string name="remote_tool_mirror">Mirror</string>
 </resources>

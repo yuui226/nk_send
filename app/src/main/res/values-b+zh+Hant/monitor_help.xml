@@ -38,4 +38,5 @@
     <string name="monitor_help_manage">管理小工具顯隱與順序，拖動排序，點按顯示或隱藏。照片、錄影分別記住版面；隱藏輔助工具會關閉其效果。鎖定和旋轉無法移動或隱藏。</string>
     <string name="monitor_help_disp_label">橫向 DISP</string>
     <string name="monitor_help_disp">切換顯示在監看畫面上的資訊。</string>
+    <string name="monitor_help_tool_mirror">左右翻轉監看畫面，不改變相機照片、影片、回看及監看錄製。</string>
 </resources>

@@ -52,6 +52,7 @@ internal fun MonitorAnalysisOverlays(
     waveformMode: WaveformMode = WaveformMode.LUMA,
     startInset: Dp = 8.dp,
     bottomInset: Dp = 26.dp,
+    mirrored: Boolean = false,
 ) {
     var lastHistogram by remember { mutableStateOf(histogram) }
     var lastHistogramMode by remember { mutableStateOf(histogramMode) }
@@ -86,7 +87,8 @@ internal fun MonitorAnalysisOverlays(
                 exit = fadeOut(tween(130)) + scaleOut(tween(160), targetScale = 0.96f)) {
                 (waveform ?: lastWaveform)?.let {
                     WaveformOverlay(it, Modifier.size(chartWidth, chartHeight).testTag("monitor-waveform"),
-                        mode = if (waveform != null) waveformMode else lastWaveformMode)
+                        mode = if (waveform != null) waveformMode else lastWaveformMode,
+                        mirrored = mirrored)
                 }
             }
         }
@@ -156,7 +158,7 @@ internal fun MonitorHistogramOverlay(histogram: LuminanceHistogram, mode: Histog
 }
 
 @Composable
-internal fun WaveformOverlay(image: ImageBitmap, modifier: Modifier = Modifier, compact: Boolean = false, mode: WaveformMode = WaveformMode.LUMA) {
+internal fun WaveformOverlay(image: ImageBitmap, modifier: Modifier = Modifier, compact: Boolean = false, mode: WaveformMode = WaveformMode.LUMA, mirrored: Boolean = false) {
     ScopeCard(if (mode == WaveformMode.RGB) "RGB" else "Y′", "0–100%", modifier) {
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
             val showLabels = !compact && maxHeight >= 34.dp
@@ -174,7 +176,7 @@ internal fun WaveformOverlay(image: ImageBitmap, modifier: Modifier = Modifier, 
                         Offset(0f, fraction * (size.height - 1)), Offset(size.width, fraction * (size.height - 1)), 0.5.dp.toPx())
                 }
                 Image(image, null, contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.Medium,
-                    modifier = Modifier.matchParentSize())
+                    modifier = Modifier.matchParentSize().graphicsLayer { scaleX = if (mirrored) -1f else 1f })
             }
         }
     }

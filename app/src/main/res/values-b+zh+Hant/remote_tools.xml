@@ -72,4 +72,5 @@
     <string name="remote_af_dynamic_51">動態區域 AF（51 點）</string>
     <string name="remote_af_dynamic_72">動態區域 AF（72 點）</string>
     <string name="remote_af_dynamic_153">動態區域 AF（153 點）</string>
+    <string name="remote_tool_mirror">鏡像</string>
 </resources>

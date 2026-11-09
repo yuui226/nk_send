@@ -23,6 +23,7 @@ internal enum class RemoteTool(val id: String, val title: Int, val fixed: Boolea
     PICTURE_CONTROL("picture_control", R.string.remote_tool_picture_control),
     METER("meter", R.string.remote_tool_meter),
     SELF_TIMER("self_timer", R.string.remote_tool_self_timer),
+    MIRROR("mirror", R.string.remote_tool_mirror),
     LOCK("lock", R.string.remote_tool_lock, true),
     COMPUTER_CONTROL("computer_control", R.string.remote_tool_computer_control),
     ROTATE("rotate", R.string.remote_tool_rotate, true);
@@ -92,6 +93,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
     val grid = enum("remote_grid", ViewfinderGrid.OFF)
     val exposure = enum("remote_exposure_assist", ExposureAssist.OFF)
     val level = bool("remote_level")
+    val mirror = bool("remote_mirror")
     val focusFrame = bool("remote_focus_frame", true)
     val meter = bool("remote_exposure_meter")
     val audio = bool("remote_audio_levels_visible", true)
@@ -121,6 +123,7 @@ internal class RemoteToolPreferences(private val prefs: SharedPreferences) {
             RemoteTool.EXPOSURE -> exposure.value = ExposureAssist.OFF
             RemoteTool.DESQUEEZE -> desqueeze.value = 1f
             RemoteTool.LEVEL -> level.value = false
+            RemoteTool.MIRROR -> mirror.value = false
             RemoteTool.FOCUS_FRAME -> focusFrame.value = false
             RemoteTool.METER -> meter.value = false
             RemoteTool.SELF_TIMER -> selfTimerSeconds.value = 0

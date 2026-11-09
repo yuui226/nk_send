@@ -747,6 +747,8 @@ private fun RemoteContent(
     var exposureAssist by tools.exposure
     val showZebra = exposureAssist == ExposureAssist.ZEBRA
     var showLevel by tools.level
+    var mirrorViewfinder by tools.mirror
+    val mirrorEnabled = mirrorViewfinder && tools.layout(movieMode).visible(RemoteTool.MIRROR)
     var showFocusFrame by tools.focusFrame
     var focusValidAfter by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(movieMode, connected, focusModeText) { focusValidAfter = SystemClock.elapsedRealtime() }
@@ -3003,6 +3005,7 @@ private fun RemoteContent(
                 RemoteTool.FOCUS_FRAME -> showFocusFrame
                 RemoteTool.METER -> showMeter
                 RemoteTool.LEVEL -> showLevel
+                RemoteTool.MIRROR -> mirrorEnabled
                 RemoteTool.WAVEFORM -> showWaveform
                 RemoteTool.LOCK -> tools.locked.value
                 RemoteTool.COMPUTER_CONTROL -> computerControl.enabled
@@ -3059,6 +3062,7 @@ private fun RemoteContent(
                     RemoteTool.FOCUS_FRAME -> showFocusFrame = !showFocusFrame
                     RemoteTool.METER -> showMeter = !showMeter
                     RemoteTool.LEVEL -> showLevel = !showLevel
+                    RemoteTool.MIRROR -> mirrorViewfinder = !mirrorViewfinder
                     RemoteTool.WAVEFORM -> waveformMode = waveformMode.next()
                     RemoteTool.LOCK -> {
                         val locked = !tools.locked.value
@@ -3265,6 +3269,7 @@ private fun RemoteContent(
                 levelRoll = levelRoll,
                 levelPitch = levelPitch,
                 desqueezeMultiplier = desqueezeMultiplier,
+                mirrored = mirrorEnabled,
                 modifier = Modifier.fillMaxSize()
             )
             },
@@ -3391,6 +3396,7 @@ private fun RemoteContent(
                     // Sit directly below STBY; navigation stays outside the image.
                     meterTopInset = landscapeMeterTop,
                     desqueezeMultiplier = desqueezeMultiplier,
+                    mirrored = mirrorEnabled,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
@@ -4040,6 +4046,7 @@ private fun RemoteViewfinderPanel(
     showEmbeddedAudioMeter: Boolean = true,
     informationBottomInset: Dp = 0.dp,
     desqueezeMultiplier: Float = 1f,
+    mirrored: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -4079,7 +4086,8 @@ private fun RemoteViewfinderPanel(
             scopeStartInset = if (soundMeterEnabled && showEmbeddedAudioMeter) 48.dp else 8.dp,
             informationBottomInset = animatedInformationInset,
             scopeBottomInset = 8.dp,
-            desqueezeMultiplier = desqueezeMultiplier
+            desqueezeMultiplier = desqueezeMultiplier,
+            mirrored = mirrored
         )
 
         if (showEmbeddedAudioMeter) {
@@ -4097,7 +4105,8 @@ private fun RemoteViewfinderPanel(
         }
 
         if (showLevel) {
-            ViewfinderLevelOverlay(rollDegrees = levelRoll, pitchDegrees = levelPitch, modifier = Modifier.matchParentSize())
+            ViewfinderLevelOverlay(rollDegrees = levelRoll, pitchDegrees = levelPitch,
+                modifier = Modifier.matchParentSize().graphicsLayer { scaleX = if (mirrored) -1f else 1f })
         }
 
         if (modeText != null || focusModeText != null) {
@@ -4364,7 +4373,8 @@ private fun ViewfinderImage(
     scopeStartInset: androidx.compose.ui.unit.Dp = 8.dp,
     scopeBottomInset: Dp = 26.dp,
     informationBottomInset: Dp = 0.dp,
-    desqueezeMultiplier: Float = 1f
+    desqueezeMultiplier: Float = 1f,
+    mirrored: Boolean = false
 ) {
     val viewport = remember { ViewfinderViewport() }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -4383,7 +4393,7 @@ private fun ViewfinderImage(
             val focusCoordinateWidth = trackingCoordinateWidth
             val focusCoordinateHeight = trackingCoordinateHeight
             val currentTapHandler by rememberUpdatedState(onTapFocus)
-            ZoomableViewfinder(viewport, displayAspectRatio, Modifier.matchParentSize()) {
+            ZoomableViewfinder(viewport, displayAspectRatio, Modifier.matchParentSize(), mirrored = mirrored) {
             Box(
                 Modifier
                     .matchParentSize()
@@ -4541,6 +4551,7 @@ private fun ViewfinderImage(
                 waveformMode = liveFrame.analysis?.waveformMode ?: WaveformMode.LUMA,
                 startInset = scopeStartInset,
                 bottomInset = scopeBottomInset,
+                mirrored = mirrored,
             )
 
         } else {
@@ -4553,7 +4564,7 @@ private fun ViewfinderImage(
             FramingGridOverlay(
                 grid = grid,
                 imageAspectRatio = DEFAULT_VIEWFINDER_ASPECT * desqueezeMultiplier,
-                modifier = Modifier.matchParentSize()
+                modifier = Modifier.matchParentSize().graphicsLayer { scaleX = if (mirrored) -1f else 1f }
             )
         }
     }
@@ -5452,6 +5463,7 @@ internal fun RemoteToolMark(tool: RemoteTool, preferences: RemoteToolPreferences
         } else Icon(Icons.Outlined.AspectRatio, null, mark)
         RemoteTool.METER -> Text("±EV", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         RemoteTool.LEVEL -> LevelMark(mark)
+        RemoteTool.MIRROR -> Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_monitor_mirror), null, mark)
         RemoteTool.RECORD -> Icon(Icons.Default.Videocam, null, mark)
         RemoteTool.ROTATE -> RotateMark(Modifier.size(20.dp))
         RemoteTool.LOCK -> Icon(if (preferences.locked.value) Icons.Default.Lock else Icons.Default.LockOpen, null, mark)

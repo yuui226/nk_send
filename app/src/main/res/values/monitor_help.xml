@@ -38,4 +38,5 @@
     <string name="monitor_help_manage">Manage tool visibility and order: drag to reorder and tap to show or hide. Photo and video layouts are remembered separately. Hiding a viewing aid disables it. Lock and rotation cannot be moved or hidden.</string>
     <string name="monitor_help_disp_label">Landscape DISP</string>
     <string name="monitor_help_disp">Switch the information shown on the monitor image.</string>
+    <string name="monitor_help_tool_mirror">Flip the monitor image left to right. Camera photos and videos, photo review and monitor recordings stay unchanged.</string>
 </resources>

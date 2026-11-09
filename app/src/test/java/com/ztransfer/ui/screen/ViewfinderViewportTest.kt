@@ -6,6 +6,47 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ViewfinderViewportTest {
+    @Test fun mirroredPinchKeepsTheCameraPointUnderTheFinger() {
+        for (aspect in listOf(3f / 2f, 16f / 9f, 16f / 9f * 1.5f)) {
+            for (size in listOf(Size(600f, 1200f), Size(1200f, 600f))) {
+                val viewport = ViewfinderViewport()
+                viewport.resize(size, aspect)
+                val tap = Offset(size.width * .65f, size.height * .45f)
+                val originalPoint = Offset(size.width - tap.x, tap.y)
+                viewport.transform(tap, Offset.Zero, 2f, aspect, mirrored = true)
+                // The mirrored display uses the same inverse mapping for AF and drawing.
+                val center = Offset(size.width / 2, size.height / 2)
+                val displayed = Offset(
+                    center.x - (originalPoint.x - center.x) * viewport.scale - viewport.offset.x,
+                    center.y + (originalPoint.y - center.y) * viewport.scale + viewport.offset.y,
+                )
+                assertEquals(tap.x, displayed.x, .001f)
+                assertEquals(tap.y, displayed.y, .001f)
+            }
+        }
+    }
+
+    @Test fun mirroredPanFollowsTheFingerAndClampsAtBothEdges() {
+        val aspect = 5f / 3f
+        for (pan in listOf(Offset(80f, -30f), Offset(10000f, -10000f), Offset(-10000f, 10000f))) {
+            val normal = ViewfinderViewport()
+            val mirrored = ViewfinderViewport()
+            for (viewport in listOf(normal, mirrored)) {
+                viewport.resize(Size(1000f, 600f), aspect)
+                viewport.transform(Offset(500f, 300f), Offset.Zero, 2f, aspect)
+            }
+            normal.transform(Offset(500f, 300f), pan, 1f, aspect)
+            mirrored.transform(Offset(500f, 300f), pan, 1f, aspect, mirrored = true)
+            assertEquals(normal.offset.x, -mirrored.offset.x, .001f)
+            assertEquals(normal.offset.y, mirrored.offset.y, .001f)
+            val normalCrop = normal.visibleRegion(aspect)
+            val mirroredCrop = mirrored.visibleRegion(aspect)
+            assertEquals(normalCrop.left, 1f - mirroredCrop.right, .001f)
+            assertEquals(normalCrop.right, 1f - mirroredCrop.left, .001f)
+            assertEquals(normalCrop.top, mirroredCrop.top, .001f)
+        }
+    }
+
     @Test fun horizonPreservesPortraitDirectionWhileSharingAlignmentTargets() {
         for (axis in listOf(-180f, -90f, 0f, 90f, 180f, 270f)) {
             assertEquals(axis, horizonDisplayRoll(axis), 0.0001f)
