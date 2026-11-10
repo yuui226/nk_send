@@ -17,6 +17,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -378,7 +379,11 @@ internal fun PhotoPreviewOverlay(
     // 会话内固定持有自己的分页快照；后台增量加载/筛选不会让正在看的页突然换内容。
     // 只有用户在合集页主动展开/收起时，才在当前页后插入/移除该组成员。
     var previewItems by remember { mutableStateOf(items) }
-    LaunchedEffect(items) { if (review != null) previewItems = items }
+    var appliedFollowRevision by remember { mutableStateOf(review?.followRevision ?: 0) }
+    var followingLatest by remember { mutableStateOf(false) }
+    var pendingFollowHandle by remember { mutableStateOf<Int?>(null) }
+    val followVisibility = remember { Animatable(1f) }
+    var followIncoming by remember { mutableStateOf(false) }
     val latestReview by rememberUpdatedState(review)
     val landscapeReview = review?.landscape == true
     val reviewTap = remember { PreviewReviewTapGuard() }
@@ -575,7 +580,7 @@ internal fun PhotoPreviewOverlay(
         }
     }
     BackHandler(enabled = !closing && effectsRequest == null) { startClose() }
-    val previewGesturesEnabled = !closing && effectsRequest == null && cropFile == null &&
+    val previewGesturesEnabled = !followingLatest && !closing && effectsRequest == null && cropFile == null &&
         !cropRestoring && cropLayoutProgress.value == 0f
     LaunchedEffect(cropFile,cropRetry,cropFile?.handle?.let(highResolutionBitmaps::get),cropFile?.handle?.let(fhdUnavailable::get),cameraState.isConnectedToCamera) {
         val file=cropFile
@@ -982,9 +987,9 @@ internal fun PhotoPreviewOverlay(
         page: Int,
         awaitExisting: Boolean = false,
         allowCameraRequest: Boolean,
+        targetFile: NikonCamera.FileInfo? = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file,
     ): Boolean {
-        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
-            ?: return false
+        val file = targetFile ?: return false
         val h = file.handle
         if (file.extension in VIDEO_EXTENSIONS) {
             fhdUnavailable[h] = true
@@ -1023,6 +1028,42 @@ internal fun PhotoPreviewOverlay(
         }
     }
 
+    LaunchedEffect(items, review?.followRevision, review?.followLatest) {
+        if (review == null) return@LaunchedEffect
+        val follow = review.followRevision != appliedFollowRevision
+        try {
+            if (follow && review.followLatest) {
+                val target = (items.firstOrNull() as? PhotoPreviewItem.Photo)?.file
+                pendingFollowHandle = target?.handle
+                if (target != null) {
+                    cameraViewModel.withInteractivePreviewPriority {
+                        loadHighResolutionPage(0, awaitExisting = true,
+                            allowCameraRequest = cameraState.isConnectedToCamera, targetFile = target)
+                    }
+                }
+                // Keep the current photo and gestures until the incoming image is decoded.
+                if (target == null || highResolutionBitmaps[target.handle] == null) return@LaunchedEffect
+                followIncoming = false
+                followingLatest = true
+                reviewTap.cancel()
+                pagerState.stopScroll(androidx.compose.foundation.MutatePriority.PreventUserInput)
+                followVisibility.animateTo(0f, tween(100, easing = FastOutSlowInEasing))
+            }
+            previewItems = items
+            if (followingLatest) {
+                // A short fade/slide has constant duration even when browsing hundreds of photos.
+                pagerState.scrollToPage(0)
+                followIncoming = true
+                followVisibility.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+            }
+            appliedFollowRevision = review.followRevision
+        } finally {
+            pendingFollowHandle = null
+            followingLatest = false
+            followVisibility.snapTo(1f)
+        }
+    }
+
     // 加载单页 EXIF（仅当前页，不预加载邻居——EXIF 只在当前页底栏显示，预加载纯浪费通道）。
     suspend fun loadExifPage(page: Int) {
         val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
@@ -1046,7 +1087,7 @@ internal fun PhotoPreviewOverlay(
         val keep = (cp - 2).coerceAtLeast(0)..(cp + 2).coerceAtMost(previewItems.lastIndex)
         val keepH = keep.mapNotNull { page ->
             (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
-        }.toSet()
+        }.toSet() + listOfNotNull(pendingFollowHandle)
         highResolutionBitmaps.keys
             .filter { it !in keepH }
             .forEach { highResolutionBitmaps.remove(it) }
@@ -1129,9 +1170,14 @@ internal fun PhotoPreviewOverlay(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     reviewTap.begin(down.position)
+                    var interrupted = followingLatest
                     do {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        reviewTap.observe(event.changes.map { it.position }, viewConfiguration.touchSlop)
+                        interrupted = interrupted || followingLatest
+                        if (interrupted) {
+                            reviewTap.cancel()
+                            event.changes.forEach { it.consume() }
+                        } else reviewTap.observe(event.changes.map { it.position }, viewConfiguration.touchSlop)
                     } while (event.changes.any { it.pressed })
                 }
             }
@@ -1272,9 +1318,11 @@ internal fun PhotoPreviewOverlay(
                     }
                     scaleX = baseScale * queueScale * burstPagerScale.value
                     scaleY = baseScale * queueScale * burstPagerScale.value
-                    translationX = baseTranslation.x + size.width * burstPagerSlide.value
+                    // Navigate toward the newest photo on the left: old exits right, new enters left.
+                    translationX = baseTranslation.x + size.width * burstPagerSlide.value +
+                        36.dp.toPx() * (1f - followVisibility.value) * (if (followIncoming) -1f else 1f)
                     translationY = baseTranslation.y + queueOffsetY
-                    alpha = baseAlpha * queueAlpha * burstPagerAlpha.value
+                    alpha = baseAlpha * queueAlpha * burstPagerAlpha.value * followVisibility.value
                 }
                 .drawWithContent {
                     val ob = overlayBounds
@@ -1314,6 +1362,7 @@ internal fun PhotoPreviewOverlay(
                         tapWhenZoomed = review != null,
                         cropProgress = cropLayoutProgress.value,
                         isLoadingFhd = highResolutionLoading.containsKey(file.handle),
+                        showLoadingSpinner = review == null,
                         allowRemoteThumbnailFallback = allowPreviewRemoteThumbnailFallback(
                             isCurrent = page == pagerState.currentPage,
                             fhdUnavailable = fhdUnavailable[file.handle] == true,
@@ -1591,15 +1640,11 @@ internal fun PhotoPreviewOverlay(
                     },
                     enabled = cameraState.isConnectedToCamera,
                     modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding()
-                        .padding(start = 12.dp, bottom = if (landscapeReview) 8.dp else 32.dp),
+                        .padding(start = 12.dp, bottom = if (landscapeReview) 60.dp else 84.dp),
                 ) {
                     Text(stringResource(if (!cameraState.isConnectedToCamera) R.string.remote_review_disconnected
                         else R.string.remote_review_retry), color = Color.White)
                 }
-            }
-            if (review.loadingMore && pagerState.currentPage == previewItems.lastIndex) {
-                CircularProgressIndicator(Modifier.align(Alignment.CenterEnd).padding(12.dp).size(20.dp),
-                    color = Color.White, strokeWidth = 2.dp)
             }
         }
 
@@ -1664,6 +1709,7 @@ internal fun PhotoPreviewOverlay(
             effectsAvailable = photoEffectsViewModel != null,
             effectsEnabled = photoEffectsEnabled,
             isReview = review != null,
+            reviewOptions = review,
             histogramMode = histogramMode,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -1901,6 +1947,7 @@ private fun PreviewPhotoTools(
     effectsAvailable: Boolean,
     effectsEnabled: Boolean,
     isReview: Boolean,
+    reviewOptions: PhotoReviewOptions?,
     histogramMode: HistogramMode,
     modifier: Modifier,
     onCollapseBurst: (String) -> Unit,
@@ -1995,6 +2042,8 @@ private fun PreviewPhotoTools(
                         label = "previewImageTools",
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) {
+                            if (reviewOptions != null) RemoteReviewFollowButton(reviewOptions,
+                                buttonSize = actionSize)
                             PreviewHistogramButton(
                                 buttonSize = actionSize,
                                 mode = histogramMode,
@@ -2581,6 +2630,7 @@ private fun PreviewPage(
     tapWhenZoomed: Boolean = false,
     cropProgress: Float = 0f,
     isLoadingFhd: Boolean,
+    showLoadingSpinner: Boolean = true,
     allowRemoteThumbnailFallback: Boolean,
     loadEnabled: Boolean,
     rotationDegrees: Float,
@@ -2731,9 +2781,9 @@ private fun PreviewPage(
 
                 }
             }
-            anyLoading -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
+            anyLoading -> if (showLoadingSpinner) CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
             noThumb -> Text(stringResource(R.string.no_preview), color = DarkOnSurfaceVariant)
-            else -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
+            else -> if (showLoadingSpinner) CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
         }
     }
 }

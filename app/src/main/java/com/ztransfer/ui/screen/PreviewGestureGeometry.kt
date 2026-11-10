@@ -9,6 +9,8 @@ internal class PreviewReviewTapGuard {
     var allowed = false
         private set
 
+    fun cancel() { allowed = false }
+
     fun begin(position: Offset) { start = position; allowed = true }
 
     fun observe(positions: List<Offset>, touchSlop: Float) {

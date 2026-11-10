@@ -92,6 +92,7 @@ internal class RemoteReviewCatalog(
     private val handlesByStorage: List<List<Int>>,
     private val readFile: suspend (Int) -> NikonCamera.FileInfo?,
 ) {
+    val handles: Set<Int> = handlesByStorage.flatten().toSet()
     private val mutex = Mutex()
     private val cursors = IntArray(handlesByStorage.size)
     private val heads = MutableList<NikonCamera.FileInfo?>(handlesByStorage.size) { null }

@@ -30,6 +30,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.view.WindowCompat
@@ -57,6 +59,9 @@ internal class PhotoReviewOptions(
     val loadingMore: Boolean = false,
     val loadMoreFailed: Boolean = false,
     val landscape: Boolean = false,
+    val followLatest: Boolean = false,
+    val followRevision: Int = 0,
+    val onFollowLatestChanged: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -199,6 +204,16 @@ internal fun RemotePhotoReview(
 ) {
     val camera = state.camera ?: return
     key(camera) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val preferences = remember(context) { context.getSharedPreferences("ztransfer", android.content.Context.MODE_PRIVATE) }
+        var followLatest by remember { mutableStateOf(preferences.getBoolean("remote_review_follow_latest", false)) }
+        var followRevision by remember { mutableIntStateOf(0) }
+        var hintVisible by remember { mutableStateOf(false) }
+        var hintRevision by remember { mutableIntStateOf(0) }
+        LaunchedEffect(hintRevision) {
+            if (hintVisible) { delay(1800); hintVisible = false }
+        }
+
         val scope = rememberCoroutineScope()
         val opacity = remember { Animatable(1f) }
         var closing by remember { mutableStateOf(false) }
@@ -217,6 +232,8 @@ internal fun RemotePhotoReview(
         val transfer by transferViewModel.state.collectAsState()
         var catalog by remember { mutableStateOf<RemoteReviewCatalog?>(null) }
         var items by remember { mutableStateOf<List<PhotoPreviewItem>>(emptyList()) }
+        var knownHandles by remember { mutableStateOf<Set<Int>>(emptySet()) }
+        var recentItems by remember { mutableStateOf<List<PhotoPreviewItem>>(emptyList()) }
         var loading by remember { mutableStateOf(true) }
         var failed by remember { mutableStateOf(false) }
         var retry by remember { mutableIntStateOf(0) }
@@ -234,6 +251,7 @@ internal fun RemotePhotoReview(
                     val files = snapshot.loadNextPage()
                     if (!stillCurrent()) return
                     catalog = snapshot
+                    knownHandles = snapshot.handles
                     items = files.map { PhotoPreviewItem.Photo(it.file,
                         pairedRawExtension = it.pairedRawExtension, reviewKey = it.key) }
                 }
@@ -262,8 +280,8 @@ internal fun RemotePhotoReview(
                 scope.launch {
                     try {
                         val files = snapshot.loadNextPage()
-                        if (stillCurrent()) items = files.map { PhotoPreviewItem.Photo(it.file,
-                            pairedRawExtension = it.pairedRawExtension, reviewKey = it.key) }
+                        if (stillCurrent()) items = (recentItems + files.map { PhotoPreviewItem.Photo(it.file,
+                            pairedRawExtension = it.pairedRawExtension, reviewKey = it.key) }).distinctBy { it.key }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { failed = true }
                     finally { loading = false }
@@ -271,6 +289,32 @@ internal fun RemotePhotoReview(
             }
         }
         LaunchedEffect(retry) { loadFirst() }
+        LaunchedEffect(catalog) {
+            if (catalog == null) return@LaunchedEffect
+            while (stillCurrent()) {
+                delay(1500)
+                if (loading || closing) continue
+                try {
+                    val fresh = cameraViewModel.openRemoteReviewCatalog(camera)
+                    if (fresh.handles.any { it !in knownHandles }) {
+                        val existingKeys = items.filterIsInstance<PhotoPreviewItem.Photo>()
+                            .associate { it.file.handle to it.reviewKey }
+                        val addedCount = fresh.handles.count { it !in knownHandles }
+                        val head = fresh.loadNextPage(pageSize = maxOf(12, addedCount)).map { photo ->
+                            PhotoPreviewItem.Photo(photo.file, pairedRawExtension = photo.pairedRawExtension,
+                                reviewKey = photo.files.firstNotNullOfOrNull { existingKeys[it.handle] } ?: photo.key)
+                        }
+                        if (!stillCurrent()) return@LaunchedEffect
+                        val newestChanged = head.firstOrNull()?.key != items.firstOrNull()?.key
+                        recentItems = (head + recentItems).distinctBy { it.key }
+                        items = (recentItems + items).distinctBy { it.key }
+                        if (newestChanged && followLatest) followRevision++
+                    }
+                    knownHandles = fresh.handles
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* A busy camera is retried on the next poll. */ }
+            }
+        }
 
         RemoteReviewSurface(rotation, Modifier.graphicsLayer { alpha = opacity.value }) {
             if (items.isNotEmpty()) {
@@ -295,6 +339,13 @@ internal fun RemotePhotoReview(
                         },
                         loadMore = loadMore, loadingMore = loading, loadMoreFailed = failed,
                         landscape = rotation != 0,
+                        followLatest = followLatest, followRevision = followRevision,
+                        onFollowLatestChanged = { enabled ->
+                            followLatest = enabled
+                            hintVisible = enabled
+                            hintRevision++
+                            preferences.edit().putBoolean("remote_review_follow_latest", enabled).apply()
+                        },
                     ),
                     onDismiss = { requestClose() },
                 )
@@ -307,6 +358,53 @@ internal fun RemotePhotoReview(
                 } else Text(stringResource(R.string.remote_review_empty),
                     modifier = Modifier.align(Alignment.Center), color = Color.White)
             }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = hintVisible,
+                enter = androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp).padding(bottom = if (rotation != 0) 64.dp else 88.dp),
+            ) {
+                GlassHintSurface {
+                    Text(stringResource(R.string.remote_review_follow_on),
+                        Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        maxLines = 1,
+                        color = AppTheme.colors.onBackground,
+                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge)
+                }
+            }
         }
+    }
+}
+
+@Composable
+internal fun RemoteReviewFollowButton(options: PhotoReviewOptions, buttonSize: androidx.compose.ui.unit.Dp = 44.dp) {
+    val label = stringResource(R.string.remote_review_follow)
+    val color = AppTheme.colors.accentBlue
+    Box(Modifier.size(buttonSize)) {
+        GlassButton(
+            onClick = {
+                val enabled = !options.followLatest
+                options.onFollowLatestChanged(enabled)
+            },
+            modifier = Modifier.fillMaxSize().semantics {
+                contentDescription = label
+                role = androidx.compose.ui.semantics.Role.Switch
+                toggleableState = androidx.compose.ui.state.ToggleableState(options.followLatest)
+            },
+            shape = androidx.compose.foundation.shape.CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            active = options.followLatest,
+        ) {
+            Text(
+                text = "NEW",
+                color = color,
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+
     }
 }
