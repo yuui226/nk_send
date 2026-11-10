@@ -1685,6 +1685,7 @@ internal fun PhotoPreviewOverlay(
                 ) {
                     ExifMetadataBar(
                         exif = displayExif,
+                        vertical = landscapeReview,
                         modifier = Modifier.weight(1f, fill = false)
                     )
                 }
@@ -2041,7 +2042,7 @@ private fun PreviewPhotoTools(
                         visible = current.extension !in VIDEO_EXTENSIONS,
                         label = "previewImageTools",
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) {
+                        val imageTools: @Composable () -> Unit = {
                             if (reviewOptions != null) RemoteReviewFollowButton(reviewOptions,
                                 buttonSize = actionSize)
                             PreviewHistogramButton(
@@ -2054,6 +2055,12 @@ private fun PreviewPhotoTools(
                             PreviewRotationButton(buttonSize = actionSize, onClick = {
                                 if (actionInputsEnabled && rotationEnabled) onRotate()
                             })
+                        }
+                        if (reviewOptions?.landscape == true) {
+                            Column(verticalArrangement = Arrangement.spacedBy(actionGap),
+                                horizontalAlignment = Alignment.CenterHorizontally) { imageTools() }
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) { imageTools() }
                         }
                     }
                 }
@@ -2466,6 +2473,7 @@ private fun BurstCollectionNavigationButton(
 @Composable
 private fun ExifMetadataBar(
     exif: PhotoExif,
+    vertical: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val parts = listOfNotNull(
@@ -2476,16 +2484,24 @@ private fun ExifMetadataBar(
         exif.focalLength,
     )
     if (parts.isEmpty()) return
-    val text = parts.joinToString("\u2009·\u2009")
-    PreviewInfoText(
-        text = text,
-        modifier = modifier,
-        overflow = TextOverflow.Ellipsis,
-        color = Color.White.copy(alpha = 0.88f),
-        textAlign = TextAlign.Start,
-        horizontalPadding = 0.dp,
-        verticalPadding = 0.dp,
-    )
+    val renderText: @Composable (String, Modifier) -> Unit = { text, textModifier ->
+        PreviewInfoText(
+            text = text,
+            modifier = textModifier,
+            overflow = TextOverflow.Ellipsis,
+            color = Color.White.copy(alpha = 0.88f),
+            textAlign = TextAlign.Start,
+            horizontalPadding = 0.dp,
+            verticalPadding = 0.dp,
+        )
+    }
+    if (vertical) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            parts.forEach { renderText(it, Modifier) }
+        }
+    } else {
+        renderText(parts.joinToString("\u2009·\u2009"), modifier)
+    }
 }
 
 /** File name and exposure share typography, alignment and responsive text sizing. */
