@@ -6,6 +6,38 @@ import UIKit
 
 final class ConnectionStateTests: XCTestCase {
     @MainActor
+    func testDisconnectedSTATapAcknowledgesActiveDiscoveryWithoutStartingAnotherAttempt() async throws {
+        let preferences = UserDefaults(suiteName: "sta_connection")!
+        let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
+        let previous = keys.map { preferences.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, previous) {
+                if let value { preferences.set(value, forKey: key) } else { preferences.removeObject(forKey: key) }
+            }
+        }
+        preferences.set("STA", forKey: "wireless_mode")
+        preferences.set(CameraPresentationMode.sta.rawValue, forKey: CameraPresentationMode.preferenceKey)
+        let service = WaitingSTAReplayService()
+        let model = ConnectionViewModel(discoverySource: WorkspaceDiscoverySource(devices: []), wifiService: service)
+        defer { model.cancelWiFiConnection() }
+        var acknowledgements = 0
+        let token = model.staReconnectRequests.sink { acknowledgements += 1 }
+        defer { token.cancel() }
+        model.retrySTAConnection()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while await service.attempts == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        model.retrySTAConnection()
+        XCTAssertEqual(acknowledgements, 2)
+        let attempts = await service.attempts
+        XCTAssertEqual(attempts, 1)
+        model.setConnectionDiscoveryPaused(true)
+        model.retrySTAConnection()
+        XCTAssertEqual(acknowledgements, 2)
+    }
+
+    @MainActor
     func testRepeatedDiscoveryKeepsCleanupButDoesNotRepublishUnchangedState() async throws {
         let service = APReplayService()
         let model = ConnectionViewModel(discoverySource: WorkspaceDiscoverySource(devices: []), wifiService: service)
@@ -437,6 +469,21 @@ final class ConnectionStateTests: XCTestCase {
         XCTAssertEqual(nextCycle.buttonScale, outward.buttonScale, accuracy: 0.000001)
     }
 
+    @MainActor
+    func testMissingSTAConfirmationKeepsFailureUntilExplicitRetryEvenWithSavedRoute() async throws {
+        let service = STARejectedReplayService()
+        let model = ConnectionViewModel(discoverySource: WorkspaceDiscoverySource(devices: []), wifiService: service)
+        model.select(wirelessMode: .sta)
+        defer { model.cancelWiFiConnection() }
+        await model.connectSelectedWiFi()
+        XCTAssertEqual(model.state.wifiPhase, .failed(AppLocalized.resource("sta_camera_check_photos")))
+        XCTAssertNil(model.cameraSession)
+        try await Task.sleep(for: .milliseconds(3_200))
+        let attempts = await service.attempts; XCTAssertEqual(attempts, 1)
+        await model.connectSelectedWiFi()
+        let retried = await service.attempts; XCTAssertEqual(retried, 2)
+    }
+
     func testAPFailureClassificationMatchesAndroid() async {
         let refusal = await MainActor.run {
             ConnectionViewModel.wifiFailureKind(for: STAConnectionError.cameraRefused)
@@ -470,6 +517,25 @@ private final class WorkspaceDiscoverySource: ConnectionUSBDiscoverySource {
     func attachedDevices() -> [USBDeviceDescriptor] { calls.append("devices"); return devices }
 }
 
+
+private actor WaitingSTAReplayService: WiFiConnectionServicing {
+    nonisolated let profiles: STAProfileStore
+    private(set) var attempts = 0
+    init() {
+        let name = "STAWaiting-\(UUID())"
+        profiles = STAProfileStore(preferences: UserDefaults(suiteName: name)!,
+            pairing: UserDefaults(suiteName: name + ".pairing")!)
+    }
+    func connectAP(host: String) async throws -> CameraRepository { throw STAConnectionError.notFound }
+    func connectSTA(discovery: PTPIPDiscoveryService,
+        onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> CameraRepository {
+        attempts += 1
+        try await Task.sleep(for: .seconds(60))
+        throw STAConnectionError.notFound
+    }
+    func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) {}
+    func disconnect() {}
+}
 
 private actor APReplayService: WiFiConnectionServicing {
     nonisolated let profiles: STAProfileStore
@@ -595,4 +661,22 @@ final class PremiumConnectionArtworkTests: XCTestCase {
         let attachment = XCTAttachment(image: sheet); attachment.name = "Premium connection stages"
         attachment.lifetime = .keepAlways; add(attachment)
     }
+}
+
+private actor STARejectedReplayService: WiFiConnectionServicing {
+    nonisolated let profiles: STAProfileStore
+    private(set) var attempts = 0
+    init() {
+        let name = "STARejected-\(UUID())"
+        profiles = STAProfileStore(preferences: UserDefaults(suiteName: name)!, pairing: UserDefaults(suiteName: name + ".pairing")!)
+        profiles.remember(guid: "00112233445566778899aabbccddeeff", ip: "192.168.1.2", identity: .pairedComputer)
+    }
+    func connectAP(host: String) async throws -> CameraRepository { throw STAConnectionError.notFound }
+    func connectSTA(discovery: PTPIPDiscoveryService, onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> CameraRepository {
+        attempts += 1
+        await onStage(.pairing)
+        throw STAConnectionFailure(cause: STAPairingConfirmationMissing(cause: PTPSessionError.responseCode(0x201F)), knownCamera: true)
+    }
+    func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) async {}
+    func disconnect() async {}
 }

@@ -1,0 +1,571 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -resultBundlePath /tmp/ztransfer-sta-20261101/ios-r1.xcresult -parallel-testing-enabled NO "-only-testing:ZTransferTests/PTPIPCodecTests" "-only-testing:ZTransferTests/PTPIPPOSIXChannelTests" "-only-testing:ZTransferTests/PTPIPTransferRecoveryTests" "-only-testing:ZTransferTests/STABrowsingSessionTests" "-only-testing:ZTransferTests/STAConnectionCoordinatorTests" "-only-testing:ZTransferTests/STAConnectionDiagnosticsTests" "-only-testing:ZTransferTests/STAMetadataTests" "-only-testing:ZTransferTests/STAPairingConfirmationTests" "-only-testing:ZTransferTests/STAPairingLiveViewTests" "-only-testing:ZTransferTests/STAProfileTests" "-only-testing:ZTransferTests/ConnectionStateTests" "-only-testing:ZTransferTests/ConnectionMethodCardLayoutTests" "-only-testing:ZTransferTests/CameraConnectionPresentationTests"
+
+Writing result bundle at path:
+	/tmp/ztransfer-sta-20261101/ios-r1.xcresult
+
+IOSurfaceClientSetSurfaceNotify failed e00002c7
+Test Suite 'Selected tests' started at 2026-11-01 15:47:14.383.
+Test Suite 'ZTransferTests.xctest' started at 2026-11-01 15:47:14.383.
+Test Suite 'CameraConnectionPresentationTests' started at 2026-11-01 15:47:14.383.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testActualTransportWinsHistoryAndUSBWinsStaleSTAFlag]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testActualTransportWinsHistoryAndUSBWinsStaleSTAFlag]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testCompactConnectionSceneReservesGPSPanelBeforeExpansion]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testCompactConnectionSceneReservesGPSPanelBeforeExpansion]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testCompactSceneReclaimsToolbarWhitespaceWithoutChangingButtonSizeOrCardClearance]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testCompactSceneReclaimsToolbarWhitespaceWithoutChangingButtonSizeOrCardClearance]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testConnectionSceneConsumesOnlyAvailableTopWhitespace]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testConnectionSceneConsumesOnlyAvailableTopWhitespace]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testEnglishCompactFootprintClearsToolbarAtPeakBreathingAndEntireWorkbench]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testEnglishCompactFootprintClearsToolbarAtPeakBreathingAndEntireWorkbench]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testEveryDisconnectedTransportKeepsItsHintAndAction]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testEveryDisconnectedTransportKeepsItsHintAndAction]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testInvalidOrAbsentHistoryFallsBackToWirelessPreference]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testInvalidOrAbsentHistoryFallsBackToWirelessPreference]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testRestorationDoesNotInventConnectedState]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testRestorationDoesNotInventConnectedState]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testRetryDoesNotChangePresentationBeforeSuccess]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testRetryDoesNotChangePresentationBeforeSuccess]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testRoomyConnectionSceneKeepsOriginalPositionAndCardDimensions]' started.
+Test Case '-[ZTransferTests.CameraConnectionPresentationTests testRoomyConnectionSceneKeepsOriginalPositionAndCardDimensions]' passed (0.001 seconds).
+Test Suite 'CameraConnectionPresentationTests' passed at 2026-11-01 15:47:14.430.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.039 (0.047) seconds
+Test Suite 'ConnectionMethodCardLayoutTests' started at 2026-11-01 15:47:14.430.
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testAPProbingDelayCancelsOnStateBackgroundAndUnmountBeforePublishing]' started.
+2026-11-01 15:47:14.578865+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:14.582842+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:14.583934+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:14.584526+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.108030+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.108882+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.109270+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.109624+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.295727+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.296331+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.296741+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.297123+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.905463+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.906355+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.906976+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:15.907539+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:16.790231+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:16.790692+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:16.791053+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:16.791343+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.236409+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.236790+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.237092+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.237365+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.950079+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.951036+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.951492+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:17.951909+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:18.099907+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:18.100573+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:18.101059+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:18.101472+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testAPProbingDelayCancelsOnStateBackgroundAndUnmountBeforePublishing]' passed (4.281 seconds).
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testEnglishAPFeedbackKeepsHeaderTabsAndHelpInsideCardThroughFailureAndRecovery]' started.
+2026-11-01 15:47:18.776698+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:18.777210+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:18.777545+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:18.777931+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:21.514691+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:21.515235+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:21.515546+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:21.515848+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:22.061430+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:22.061931+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:22.062293+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+2026-11-01 15:47:22.062614+0800 ZTransfer[57345:38452775] [Invalid Configuration] Unable to render flattened version of PlatformViewRepresentableAdaptor<ButtonStateLabel>.
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testEnglishAPFeedbackKeepsHeaderTabsAndHelpInsideCardThroughFailureAndRecovery]' passed (3.923 seconds).
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testEnglishSTAStepsAndErrorShareSlotWithoutMovingActions]' started.
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testEnglishSTAStepsAndErrorShareSlotWithoutMovingActions]' passed (5.633 seconds).
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testWirelessFeedbackKeepsAndroidPriorityTextAndBusyTreatment]' started.
+Test Case '-[ZTransferTests.ConnectionMethodCardLayoutTests testWirelessFeedbackKeepsAndroidPriorityTextAndBusyTreatment]' passed (0.011 seconds).
+Test Suite 'ConnectionMethodCardLayoutTests' passed at 2026-11-01 15:47:28.283.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 13.848 (13.852) seconds
+Test Suite 'ConnectionStateTests' started at 2026-11-01 15:47:28.283.
+Test Case '-[ZTransferTests.ConnectionStateTests testAcceptedWirelessWorkspaceIgnoresUSBWhenDisconnected]' started.
+2026-11-01 15:47:28.354789+0800 ZTransfer[57345:38452775] Unbalanced calls to begin/end appearance transitions for <_TtGC7SwiftUI19UIHostingControllerGVS_15ModifiedContentGS1_VC14ZTransferTests31ConnectionMethodCardLayoutTestsP10$111fd67b44CardGVS_30_EnvironmentKeyWritingModifierCSo14NSUserDefaults__GVS_26_PreferenceWritingModifierVS_23PreferredColorSchemeKey___: 0x12a718500>.
+Test Case '-[ZTransferTests.ConnectionStateTests testAcceptedWirelessWorkspaceIgnoresUSBWhenDisconnected]' passed (0.094 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testAPCancellationRestartsBackoffAndReconnectingStaysVisible]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testAPCancellationRestartsBackoffAndReconnectingStaysVisible]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testAPFailureClassificationMatchesAndroid]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testAPFailureClassificationMatchesAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testAPRetriesKeepFailureVisibleUntilSuccess]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testAPRetriesKeepFailureVisibleUntilSuccess]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testConnectionCelebrationUsesEstablishedIOSHandoffTiming]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testConnectionCelebrationUsesEstablishedIOSHandoffTiming]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testConnectionModeSelectionIsStable]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testConnectionModeSelectionIsStable]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testDebugPremiumPreviewIsSessionScopedAndDoesNotGrantAccess]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testDebugPremiumPreviewIsSessionScopedAndDoesNotGrantAccess]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testGrantingUSBAuthorizationAfterDenialRestoresWaitingState]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testGrantingUSBAuthorizationAfterDenialRestoresWaitingState]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testMissingSTAConfirmationKeepsFailureUntilExplicitRetryEvenWithSavedRoute]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testMissingSTAConfirmationKeepsFailureUntilExplicitRetryEvenWithSavedRoute]' passed (3.216 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testRemoteEntryIntroStopsAfterTwentyRecordedStarts]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testRemoteEntryIntroStopsAfterTwentyRecordedStarts]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testRepeatedDiscoveryKeepsCleanupButDoesNotRepublishUnchangedState]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testRepeatedDiscoveryKeepsCleanupButDoesNotRepublishUnchangedState]' passed (0.059 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testRepeatedWirelessSelectionStillPersistsItsPresentationMode]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testRepeatedWirelessSelectionStillPersistsItsPresentationMode]' passed (0.120 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUnreadTipReversesTheSameCurveRatherThanStartingANewEase]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUnreadTipReversesTheSameCurveRatherThanStartingANewEase]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUnreadTipUsesAndroidBreathingEndpoints]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUnreadTipUsesAndroidBreathingEndpoints]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBDetachDoesNotClearPersistentIOSPermissionDenial]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBDetachDoesNotClearPersistentIOSPermissionDenial]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBFrameworkFailureWithoutDescriptionUsesLocalizedFallback]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBFrameworkFailureWithoutDescriptionUsesLocalizedFallback]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBIsTheInitialConnectionMode]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBIsTheInitialConnectionMode]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBPermissionDenialKeepsActionableErrorOnCard]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBPermissionDenialKeepsActionableErrorOnCard]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBPermissionRecoveryUsesAuthorizationAcrossLanguageChanges]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBPermissionRecoveryUsesAuthorizationAcrossLanguageChanges]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBReattachDoesNotClearPersistentIOSPermissionDenial]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBReattachDoesNotClearPersistentIOSPermissionDenial]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBReducerKeepsDeviceAndSessionTransitionsPure]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBReducerKeepsDeviceAndSessionTransitionsPure]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBViewModelPreservesReducerFallbackAndPermissionError]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testUSBViewModelPreservesReducerFallbackAndPermissionError]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testWorkspacePauseAndResumePreserveAcceptedCameraSession]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testWorkspacePauseAndResumePreserveAcceptedCameraSession]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ConnectionStateTests testWorkspaceReturnDefersDiscoverySnapshotAndTransportEventsUntilSettled]' started.
+Test Case '-[ZTransferTests.ConnectionStateTests testWorkspaceReturnDefersDiscoverySnapshotAndTransportEventsUntilSettled]' passed (0.001 seconds).
+Test Suite 'ConnectionStateTests' passed at 2026-11-01 15:47:31.834.
+	 Executed 24 tests, with 0 failures (0 unexpected) in 3.544 (3.551) seconds
+Test Suite 'PTPIPCodecTests' started at 2026-11-01 15:47:31.834.
+Test Case '-[ZTransferTests.PTPIPCodecTests testBorrowedDataHasNoTransactionPrefixAndWaitsForResponse]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testBorrowedDataHasNoTransactionPrefixAndWaitsForResponse]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testBorrowedPhaseRejectsTruncatedAndMismatchedDataBeforeCallingSink]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testBorrowedPhaseRejectsTruncatedAndMismatchedDataBeforeCallingSink]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testCancelRequestContainsOnlyTheActiveTransactionID]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testCancelRequestContainsOnlyTheActiveTransactionID]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testCommandRequestWrapsStandardPTPContainer]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testCommandRequestWrapsStandardPTPContainer]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testDownloadPhaseConsumesEndDataThenCommandResponseAndRetainsDeclaration]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testDownloadPhaseConsumesEndDataThenCommandResponseAndRetainsDeclaration]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testDownloadPhaseRejectsMismatchedStartAndResponseTransaction]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testDownloadPhaseRejectsMismatchedStartAndResponseTransaction]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testDrainBudgetCountsWholePayloadsAndIgnoresPing]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testDrainBudgetCountsWholePayloadsAndIgnoresPing]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testDrainRejectsAnotherPacketAfterBudgetIsExceeded]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testDrainRejectsAnotherPacketAfterBudgetIsExceeded]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testNonnegativeDownloadDeclarationsRetainAndroidValidationBoundaries]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testNonnegativeDownloadDeclarationsRetainAndroidValidationBoundaries]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testPacketLimitAcceptsAndroidHighThroughputChunkWithFraming]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testPacketLimitAcceptsAndroidHighThroughputChunkWithFraming]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testRejectsLengthMismatchAndUnknownType]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testRejectsLengthMismatchAndUnknownType]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testResponseContainerLengthIncludesLengthAndTypeFields]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testResponseContainerLengthIncludesLengthAndTypeFields]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testSignedUnknownDownloadDeclarationsMatchAndroid]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testSignedUnknownDownloadDeclarationsMatchAndroid]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testSplitHeaderAndBodyDecodeWithoutRejoiningPacket]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testSplitHeaderAndBodyDecodeWithoutRejoiningPacket]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testSTAIdentityAndVersionMatchAndroidWhileAPStaysSeparate]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testSTAIdentityAndVersionMatchAndroidWhileAPStaysSeparate]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPCodecTests testStreamingReadWindowCoalescesHeaderAndAllowsLargeBodyChunks]' started.
+Test Case '-[ZTransferTests.PTPIPCodecTests testStreamingReadWindowCoalescesHeaderAndAllowsLargeBodyChunks]' passed (0.001 seconds).
+Test Suite 'PTPIPCodecTests' passed at 2026-11-01 15:47:31.853.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.014 (0.019) seconds
+Test Suite 'PTPIPPOSIXChannelTests' started at 2026-11-01 15:47:31.853.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testBorrowedConsumerFailurePreservesReadAheadAndReaderStorage]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testBorrowedConsumerFailurePreservesReadAheadAndReaderStorage]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testBorrowedPacketStorageIsReusedAndOwningFallbackIsIndependent]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testBorrowedPacketStorageIsReusedAndOwningFallbackIsIndependent]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testBulkEchoPreservesBytesAndConfiguresKernelBuffer]' started.
+2026-11-01 15:47:31.876129+0800 ZTransfer[57345:38452921] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:32.206421+0800 ZTransfer[57345:38452927] [connection] [C1 127.0.0.1:55573 tcp, local: 127.0.0.1:55572, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testBulkEchoPreservesBytesAndConfiguresKernelBuffer]' passed (0.341 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testCallerCancellationDoesNotCloseAcceptedSocket]' started.
+2026-11-01 15:47:32.207613+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testCallerCancellationDoesNotCloseAcceptedSocket]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testCloseWakesActiveReadAndRejectsQueuedRead]' started.
+2026-11-01 15:47:32.212067+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:32.237606+0800 ZTransfer[57345:38452921] [connection] [C3 127.0.0.1:55579 tcp, local: 127.0.0.1:55578, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testCloseWakesActiveReadAndRejectsQueuedRead]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testEventChannelKeepsAndroidDefaultSocketOptions]' started.
+2026-11-01 15:47:32.239024+0800 ZTransfer[57345:38452910] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testEventChannelKeepsAndroidDefaultSocketOptions]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testInvalidRouteDoesNotFallBackToAnotherInterface]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testInvalidRouteDoesNotFallBackToAnotherInterface]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testLargePacketReadsDirectlyIntoBodyLikeAndroidBufferedInputStream]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testLargePacketReadsDirectlyIntoBodyLikeAndroidBufferedInputStream]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderHandlesSplitHeaderBodyAndRetainedPackets]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderHandlesSplitHeaderBodyAndRetainedPackets]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderPreservesReadAheadAcrossOwnersAndReusesAfterGrowth]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderPreservesReadAheadAcrossOwnersAndReusesAfterGrowth]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderRejectsInvalidLengthsAndTruncatedBody]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderRejectsInvalidLengthsAndTruncatedBody]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderReturnsNetworkReadAheadBeforeNextOwner]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testPacketReaderReturnsNetworkReadAheadBeforeNextOwner]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testShortReadDoesNotWaitForRequestedMaximum]' started.
+2026-11-01 15:47:32.258077+0800 ZTransfer[57345:38452921] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testShortReadDoesNotWaitForRequestedMaximum]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testSocketReadTimeoutRestoresUnlimitedEventStyleRead]' started.
+2026-11-01 15:47:32.262256+0800 ZTransfer[57345:38453979] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testSocketReadTimeoutRestoresUnlimitedEventStyleRead]' passed (0.190 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testSocketTimeoutRoundsUpWithoutAccidentallyDisablingDeadline]' started.
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testSocketTimeoutRoundsUpWithoutAccidentallyDisablingDeadline]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testSTACommandDarwinACKAdaptationPreservesData]' started.
+2026-11-01 15:47:32.455516+0800 ZTransfer[57345:38452910] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testSTACommandDarwinACKAdaptationPreservesData]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testUnavailableLocalAddressFailsInsteadOfChangingRoute]' started.
+2026-11-01 15:47:32.460610+0800 ZTransfer[57345:38452910] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPPOSIXChannelTests testUnavailableLocalAddressFailsInsteadOfChangingRoute]' passed (0.004 seconds).
+Test Suite 'PTPIPPOSIXChannelTests' passed at 2026-11-01 15:47:32.464.
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.604 (0.610) seconds
+Test Suite 'PTPIPTransferRecoveryTests' started at 2026-11-01 15:47:32.464.
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDBorrowedBulkDownloadPreservesBytesWithoutOwningCallbacks]' started.
+2026-11-01 15:47:32.466040+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+PTP/IP bsdSocket loopback 16 MiB, 16 KiB frames: buffered=0.046559167 seconds, streaming=0.018504833 seconds
+2026-11-01 15:47:32.569006+0800 ZTransfer[57345:38453979] [connection] [C8 127.0.0.1:55591 tcp, local: 127.0.0.1:55590, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:32.569118+0800 ZTransfer[57345:38453979] [connection] [C9 127.0.0.1:55592 tcp, local: 127.0.0.1:55590, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDBorrowedBulkDownloadPreservesBytesWithoutOwningCallbacks]' passed (0.105 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDBorrowedWriteFailureDrainsAndPreservesSession]' started.
+2026-11-01 15:47:32.570832+0800 ZTransfer[57345:38453979] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:32.577309+0800 ZTransfer[57345:38452921] [connection] [C10 127.0.0.1:55594 tcp, local: 127.0.0.1:55593, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:32.577509+0800 ZTransfer[57345:38452921] [connection] [C11 127.0.0.1:55595 tcp, local: 127.0.0.1:55593, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDBorrowedWriteFailureDrainsAndPreservesSession]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDBulkDownloadUsesSameFramingAndPreservesBytes]' started.
+2026-11-01 15:47:32.578437+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+PTP/IP bsdSocket loopback 16 MiB, 16 KiB frames: buffered=0.018342834 seconds, streaming=0.01159025 seconds
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDBulkDownloadUsesSameFramingAndPreservesBytes]' passed (0.048 seconds).
+2026-11-01 15:47:32.626265+0800 ZTransfer[57345:38453979] [connection] [C12 127.0.0.1:55597 tcp, local: 127.0.0.1:55596, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:32.626417+0800 ZTransfer[57345:38453979] [connection] [C13 127.0.0.1:55598 tcp, local: 127.0.0.1:55596, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDCancellationDrainsBeforeReusingSession]' started.
+2026-11-01 15:47:32.627388+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:32.640142+0800 ZTransfer[57345:38452910] [connection] [C15 127.0.0.1:55602 tcp, local: 127.0.0.1:55600, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDCancellationDrainsBeforeReusingSession]' passed (0.013 seconds).
+2026-11-01 15:47:32.640231+0800 ZTransfer[57345:38452910] [connection] [C14 127.0.0.1:55601 tcp, local: 127.0.0.1:55600, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDDownloadTimeoutRenewsDuringPartiallyReceivedPacket]' started.
+2026-11-01 15:47:32.641401+0800 ZTransfer[57345:38452910] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:33.051980+0800 ZTransfer[57345:38452921] [connection] [C16 127.0.0.1:55604 tcp, local: 127.0.0.1:55603, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDDownloadTimeoutRenewsDuringPartiallyReceivedPacket]' passed (0.412 seconds).
+2026-11-01 15:47:33.052528+0800 ZTransfer[57345:38452921] [connection] [C17 127.0.0.1:55605 tcp, local: 127.0.0.1:55603, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDDrainRenewsInactivityDeadline]' started.
+2026-11-01 15:47:33.054227+0800 ZTransfer[57345:38452910] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDDrainRenewsInactivityDeadline]' passed (4.026 seconds).
+2026-11-01 15:47:37.079091+0800 ZTransfer[57345:38452927] [connection] [C18 127.0.0.1:55608 tcp, local: 127.0.0.1:55607, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:37.079239+0800 ZTransfer[57345:38452927] [connection] [C19 127.0.0.1:55609 tcp, local: 127.0.0.1:55607, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDOrdinaryCommandTimeoutRenewsForEachShortRead]' started.
+2026-11-01 15:47:37.080662+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:37.508534+0800 ZTransfer[57345:38452922] [connection] [C20 127.0.0.1:55614 tcp, local: 127.0.0.1:55613, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDOrdinaryCommandTimeoutRenewsForEachShortRead]' passed (0.430 seconds).
+2026-11-01 15:47:37.509525+0800 ZTransfer[57345:38452922] [connection] [C21 127.0.0.1:55615 tcp, local: 127.0.0.1:55613, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDReadTimeoutDoesNotIncludeSynchronousWriterTime]' started.
+2026-11-01 15:47:37.511607+0800 ZTransfer[57345:38452921] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:38.130462+0800 ZTransfer[57345:38452922] [connection] [C23 127.0.0.1:55619 tcp, local: 127.0.0.1:55617, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDReadTimeoutDoesNotIncludeSynchronousWriterTime]' passed (0.621 seconds).
+2026-11-01 15:47:38.130676+0800 ZTransfer[57345:38452922] [connection] [C22 127.0.0.1:55618 tcp, local: 127.0.0.1:55617, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDScrollingAwayFinishesBufferedThumbnailWithoutSendingPTPCancel]' started.
+2026-11-01 15:47:38.132551+0800 ZTransfer[57345:38453979] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:38.559441+0800 ZTransfer[57345:38452927] [connection] [C25 127.0.0.1:55626 tcp, local: 127.0.0.1:55624, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDScrollingAwayFinishesBufferedThumbnailWithoutSendingPTPCancel]' passed (0.428 seconds).
+2026-11-01 15:47:38.559601+0800 ZTransfer[57345:38452927] [connection] [C24 127.0.0.1:55625 tcp, local: 127.0.0.1:55624, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDSilentCameraRetiresAndUnblocksPendingRead]' started.
+2026-11-01 15:47:38.561217+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:41.567779+0800 ZTransfer[57345:38453979] [connection] [C26 127.0.0.1:55628 tcp, local: 127.0.0.1:55627, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDSilentCameraRetiresAndUnblocksPendingRead]' passed (3.008 seconds).
+2026-11-01 15:47:41.568305+0800 ZTransfer[57345:38453979] [connection] [C27 127.0.0.1:55629 tcp, local: 127.0.0.1:55627, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDSocketReadTimeoutDrainsBeforeReusingSession]' started.
+2026-11-01 15:47:41.569338+0800 ZTransfer[57345:38453979] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:41.676833+0800 ZTransfer[57345:38453979] [connection] [C28 127.0.0.1:55647 tcp, local: 127.0.0.1:55646, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDSocketReadTimeoutDrainsBeforeReusingSession]' passed (0.109 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDUnknownLengthDownloadConsumesResponseAndKeepsSessionUsable]' started.
+2026-11-01 15:47:41.677330+0800 ZTransfer[57345:38453979] [connection] [C29 127.0.0.1:55648 tcp, local: 127.0.0.1:55646, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:41.677881+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDUnknownLengthDownloadConsumesResponseAndKeepsSessionUsable]' passed (0.005 seconds).
+2026-11-01 15:47:41.682671+0800 ZTransfer[57345:38453979] [connection] [C31 127.0.0.1:55651 tcp, local: 127.0.0.1:55649, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:41.682736+0800 ZTransfer[57345:38453979] [connection] [C30 127.0.0.1:55650 tcp, local: 127.0.0.1:55649, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDWriteFailureDrainsAndPreservesSession]' started.
+2026-11-01 15:47:41.683557+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:41.688632+0800 ZTransfer[57345:38452921] [connection] [C33 127.0.0.1:55654 tcp, local: 127.0.0.1:55652, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBSDWriteFailureDrainsAndPreservesSession]' passed (0.006 seconds).
+2026-11-01 15:47:41.688747+0800 ZTransfer[57345:38452921] [connection] [C32 127.0.0.1:55653 tcp, local: 127.0.0.1:55652, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBulkDownloadMatchesBufferedBytesAndReportsTransportTimings]' started.
+2026-11-01 15:47:41.689569+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+PTP/IP networkFramework loopback 16 MiB, 16 KiB frames: buffered=0.0227925 seconds, streaming=0.0242925 seconds
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testBulkDownloadMatchesBufferedBytesAndReportsTransportTimings]' passed (0.082 seconds).
+2026-11-01 15:47:41.771582+0800 ZTransfer[57345:38453979] [connection] [C36 127.0.0.1:55656 tcp, local: 127.0.0.1:55655, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:41.771804+0800 ZTransfer[57345:38453979] [connection] [C37 127.0.0.1:55657 tcp, local: 127.0.0.1:55655, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testCancellationSendsCancelDrainsPingAndDataBeforeReusingSocket]' started.
+2026-11-01 15:47:41.772472+0800 ZTransfer[57345:38452921] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testCancellationSendsCancelDrainsPingAndDataBeforeReusingSocket]' passed (0.015 seconds).
+2026-11-01 15:47:41.786843+0800 ZTransfer[57345:38452922] [connection] [C41 127.0.0.1:55660 tcp, local: 127.0.0.1:55658, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testClosingSTAEventDeliveryDropsQueuedEventsWithoutStartingAnotherConsumer]' started.
+2026-11-01 15:47:41.787034+0800 ZTransfer[57345:38452922] [connection] [C40 127.0.0.1:55659 tcp, local: 127.0.0.1:55658, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:41.787470+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:41.796396+0800 ZTransfer[57345:38452922] [connection] [C42 127.0.0.1:55662 tcp, local: 127.0.0.1:55661, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:41.796637+0800 ZTransfer[57345:38452922] [connection] [C43 127.0.0.1:55663 tcp, local: 127.0.0.1:55661, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testClosingSTAEventDeliveryDropsQueuedEventsWithoutStartingAnotherConsumer]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testDiagnosticsResetChunkCountersButRetainFileWriteTotals]' started.
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testDiagnosticsResetChunkCountersButRetainFileWriteTotals]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testDownloadTimeoutRenewsDuringAPartiallyReceivedDataPacket]' started.
+2026-11-01 15:47:41.799616+0800 ZTransfer[57345:38452921] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testDownloadTimeoutRenewsDuringAPartiallyReceivedDataPacket]' passed (0.429 seconds).
+2026-11-01 15:47:42.228560+0800 ZTransfer[57345:38452910] [connection] [C47 127.0.0.1:55666 tcp, local: 127.0.0.1:55664, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testDrainMayLastLongerThanThreeSecondsWhileDataKeepsArriving]' started.
+2026-11-01 15:47:42.228759+0800 ZTransfer[57345:38452910] [connection] [C46 127.0.0.1:55665 tcp, local: 127.0.0.1:55664, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:42.229573+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testDrainMayLastLongerThanThreeSecondsWhileDataKeepsArriving]' passed (4.029 seconds).
+2026-11-01 15:47:46.257746+0800 ZTransfer[57345:38452910] [connection] [C50 127.0.0.1:55670 tcp, local: 127.0.0.1:55669, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:46.258691+0800 ZTransfer[57345:38452910] [connection] [C51 127.0.0.1:55671 tcp, local: 127.0.0.1:55669, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testEventReaderWithoutSubscriberStillRespondsToPing]' started.
+2026-11-01 15:47:46.260428+0800 ZTransfer[57345:38452921] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:46.269086+0800 ZTransfer[57345:38452927] [connection] [C52 127.0.0.1:55677 tcp, local: 127.0.0.1:55676, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testEventReaderWithoutSubscriberStillRespondsToPing]' passed (0.011 seconds).
+2026-11-01 15:47:46.269601+0800 ZTransfer[57345:38452927] [connection] [C53 127.0.0.1:55678 tcp, local: 127.0.0.1:55676, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testScrollingAwayFinishesBufferedThumbnailWithoutSendingPTPCancel]' started.
+2026-11-01 15:47:46.271572+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testScrollingAwayFinishesBufferedThumbnailWithoutSendingPTPCancel]' passed (0.431 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSilentCameraAfterCancelTimesOutAndRetiresSession]' started.
+2026-11-01 15:47:46.702098+0800 ZTransfer[57345:38452922] [connection] [C56 127.0.0.1:55680 tcp, local: 127.0.0.1:55679, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:46.703012+0800 ZTransfer[57345:38452922] [connection] [C57 127.0.0.1:55681 tcp, local: 127.0.0.1:55679, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:46.704758+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSilentCameraAfterCancelTimesOutAndRetiresSession]' passed (3.022 seconds).
+2026-11-01 15:47:49.723683+0800 ZTransfer[57345:38453979] [connection] [C60 127.0.0.1:55689 tcp, local: 127.0.0.1:55686, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:49.724472+0800 ZTransfer[57345:38453979] [connection] [C61 127.0.0.1:55690 tcp, local: 127.0.0.1:55686, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSizeProbeTimeoutUsesDownloadRecoveryBeforeNextCommand]' started.
+2026-11-01 15:47:49.726126+0800 ZTransfer[57345:38453979] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSizeProbeTimeoutUsesDownloadRecoveryBeforeNextCommand]' passed (0.051 seconds).
+2026-11-01 15:47:49.776178+0800 ZTransfer[57345:38452910] [connection] [C65 127.0.0.1:55709 tcp, local: 127.0.0.1:55707, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAEventQueueIsBoundedFIFOAndSlowConsumerDoesNotBlockPong]' started.
+2026-11-01 15:47:49.776973+0800 ZTransfer[57345:38452910] [connection] [C64 127.0.0.1:55708 tcp, local: 127.0.0.1:55707, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:49.778155+0800 ZTransfer[57345:38452910] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:49.791562+0800 ZTransfer[57345:38452922] [connection] [C66 127.0.0.1:55711 tcp, local: 127.0.0.1:55710, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAEventQueueIsBoundedFIFOAndSlowConsumerDoesNotBlockPong]' passed (0.016 seconds).
+2026-11-01 15:47:49.792244+0800 ZTransfer[57345:38452922] [connection] [C67 127.0.0.1:55712 tcp, local: 127.0.0.1:55710, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingDrainsStaleEventAndPingBeforeAcceptingFreshEvent]' started.
+2026-11-01 15:47:49.794222+0800 ZTransfer[57345:38453979] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:49.915269+0800 ZTransfer[57345:38452922] [connection] [C68 127.0.0.1:55714 tcp, local: 127.0.0.1:55713, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingDrainsStaleEventAndPingBeforeAcceptingFreshEvent]' passed (0.123 seconds).
+2026-11-01 15:47:49.915796+0800 ZTransfer[57345:38452922] [connection] [C69 127.0.0.1:55715 tcp, local: 127.0.0.1:55713, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingFragmentedPacketUsesPerReadRemainingBudgetLikeAndroid]' started.
+2026-11-01 15:47:49.917675+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:50.387342+0800 ZTransfer[57345:38453979] [connection] [C70 127.0.0.1:55717 tcp, local: 127.0.0.1:55716, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingFragmentedPacketUsesPerReadRemainingBudgetLikeAndroid]' passed (0.472 seconds).
+2026-11-01 15:47:50.388035+0800 ZTransfer[57345:38453979] [connection] [C71 127.0.0.1:55718 tcp, local: 127.0.0.1:55716, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingFullHandshakeCreatesReceiptAndRetiresSessionExactlyOnce]' started.
+2026-11-01 15:47:50.389950+0800 ZTransfer[57345:38452922] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:50.407276+0800 ZTransfer[57345:38452927] [connection] [C72 127.0.0.1:55722 tcp, local: 127.0.0.1:55721, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:50.407394+0800 ZTransfer[57345:38452927] [connection] [C73 127.0.0.1:55723 tcp, local: 127.0.0.1:55721, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingFullHandshakeCreatesReceiptAndRetiresSessionExactlyOnce]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingRequiresResponderGUIDInHandshake]' started.
+2026-11-01 15:47:50.409275+0800 ZTransfer[57345:38453979] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:50.412881+0800 ZTransfer[57345:38452927] [connection] [C74 127.0.0.1:55726 tcp, local: 127.0.0.1:55725, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingRequiresResponderGUIDInHandshake]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingShortEventAndUnrelatedEventAreNotConfirmation]' started.
+2026-11-01 15:47:50.414541+0800 ZTransfer[57345:38452927] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingShortEventAndUnrelatedEventAreNotConfirmation]' passed (0.108 seconds).
+2026-11-01 15:47:50.521268+0800 ZTransfer[57345:38452927] [connection] [C76 127.0.0.1:55729 tcp, local: 127.0.0.1:55727, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+2026-11-01 15:47:50.521430+0800 ZTransfer[57345:38452927] [connection] [C75 127.0.0.1:55728 tcp, local: 127.0.0.1:55727, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingTimeoutLeavesNoReaderToStealFollowingEvents]' started.
+2026-11-01 15:47:50.523065+0800 ZTransfer[57345:38452910] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+2026-11-01 15:47:50.632742+0800 ZTransfer[57345:38452921] [connection] [C78 127.0.0.1:55732 tcp, local: 127.0.0.1:55730, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testSTAPairingTimeoutLeavesNoReaderToStealFollowingEvents]' passed (0.111 seconds).
+2026-11-01 15:47:50.633007+0800 ZTransfer[57345:38452921] [connection] [C77 127.0.0.1:55731 tcp, local: 127.0.0.1:55730, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testTCPParametersPreserveDefaultACKPolicyNoDelayAndRouting]' started.
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testTCPParametersPreserveDefaultACKPolicyNoDelayAndRouting]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testWriteFailureDrainsAndPreservesOriginalErrorAndNextCommand]' started.
+2026-11-01 15:47:50.638060+0800 ZTransfer[57345:38452921] [] nw_listener_socket_inbox_create_socket setsockopt SO_NECP_LISTENUUID failed [2: No such file or directory]
+Test Case '-[ZTransferTests.PTPIPTransferRecoveryTests testWriteFailureDrainsAndPreservesOriginalErrorAndNextCommand]' passed (0.012 seconds).
+2026-11-01 15:47:50.648726+0800 ZTransfer[57345:38452921] [connection] [C81 127.0.0.1:55734 tcp, local: 127.0.0.1:55733, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Suite 'PTPIPTransferRecoveryTests' passed at 2026-11-01 15:47:50.649.
+	 Executed 32 tests, with 0 failures (0 unexpected) in 18.169 (18.185) seconds
+2026-11-01 15:47:50.649291+0800 ZTransfer[57345:38452921] [connection] [C82 127.0.0.1:55735 tcp, local: 127.0.0.1:55733, definite, attribution: developer, server, prohibit joining protocols] is already cancelled, ignoring cancel
+Test Suite 'STABrowsingSessionTests' started at 2026-11-01 15:47:50.650.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testAlbumIdentityNeverExecutesPairingCommands]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testAlbumIdentityNeverExecutesPairingCommands]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testApplicationModeCanValidateAlbumAndMustRemainSelectedOnSuccess]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testApplicationModeCanValidateAlbumAndMustRemainSelectedOnSuccess]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testCancellationAfterDeviceInfoDoesNotPromoteLegacyProof]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testCancellationAfterDeviceInfoDoesNotPromoteLegacyProof]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testConfirmedPairingValidatesFirstMiddleLastAndReusesHandles]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testConfirmedPairingValidatesFirstMiddleLastAndReusesHandles]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testDeniedObjectInfoRequiresPositiveSizeAndPartialReadNotJustThumbnail]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testDeniedObjectInfoRequiresPositiveSizeAndPartialReadNotJustThumbnail]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testEmptyHandlesCannotActivateAndFailedApplicationProbeRollsBack]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testEmptyHandlesCannotActivateAndFailedApplicationProbeRollsBack]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testHandshakeCommandsUseFiveSecondsThenNormalCommandsUseSessionDefault]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testHandshakeCommandsUseFiveSecondsThenNormalCommandsUseSessionDefault]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testLegacyPairingConfirmsOnlyAfterDeviceInfoAndAlbumAccess]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testLegacyPairingConfirmsOnlyAfterDeviceInfoAndAlbumAccess]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testLegacyVerificationRejectsMissingEmptyAndPairingOnlyDeviceInfo]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testLegacyVerificationRejectsMissingEmptyAndPairingOnlyDeviceInfo]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testPairingAcknowledgmentDoesNotPersistProofBeforeVerification]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testPairingAcknowledgmentDoesNotPersistProofBeforeVerification]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testPairingFailureDoesNotPersistSuccess]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testPairingFailureDoesNotPersistSuccess]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.STABrowsingSessionTests testPairingOnlyCapabilitiesRequireExactSet]' started.
+Test Case '-[ZTransferTests.STABrowsingSessionTests testPairingOnlyCapabilitiesRequireExactSet]' passed (0.010 seconds).
+Test Suite 'STABrowsingSessionTests' passed at 2026-11-01 15:47:50.759.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.104 (0.109) seconds
+Test Suite 'STAConnectionCoordinatorTests' started at 2026-11-01 15:47:50.759.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testAlbumAccessCannotActivateWithoutPairingAndClosesRejectedSocket]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testAlbumAccessCannotActivateWithoutPairingAndClosesRejectedSocket]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testCancellationDuringPairingDelayStopsBeforeAnotherSocket]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testCancellationDuringPairingDelayStopsBeforeAnotherSocket]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testKnownBodyTriesOnlyOneAlternateIdentityAndPreservesComputerFailure]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testKnownBodyTriesOnlyOneAlternateIdentityAndPreservesComputerFailure]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testMissingFreshEventNeverUsesSavedRouteToRetryOrSwitchIdentity]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testMissingFreshEventNeverUsesSavedRouteToRetryOrSwitchIdentity]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testPairingReconnectThenOneReadinessRetryUsesSameIdentityAndAndroidDelays]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testPairingReconnectThenOneReadinessRetryUsesSameIdentityAndAndroidDelays]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testRealBrowsingRecoveryPersistsOnlyAfterFourthSessionValidatesAlbum]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testRealBrowsingRecoveryPersistsOnlyAfterFourthSessionValidatesAlbum]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testRecoveryClearsReceiptButKeepsGUIDAndWrongBodyStopsWholeDiscovery]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testRecoveryClearsReceiptButKeepsGUIDAndWrongBodyStopsWholeDiscovery]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testRetryClassificationAndBackoffMatchAndroid]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testRetryClassificationAndBackoffMatchAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testStaleAlbumRouteForDifferentBodyFallsThroughToComputerPairing]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testStaleAlbumRouteForDifferentBodyFallsThroughToComputerPairing]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testUnconfirmedPairingAllowsOnlyOneRecoveryAndForwardsVerification]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testUnconfirmedPairingAllowsOnlyOneRecoveryAndForwardsVerification]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testUnknownRefusedEndpointDoesNotProbeAlternateIdentities]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testUnknownRefusedEndpointDoesNotProbeAlternateIdentities]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testWrongGUIDIsDeferredWithoutRePairingOrAlternateAttempt]' started.
+Test Case '-[ZTransferTests.STAConnectionCoordinatorTests testWrongGUIDIsDeferredWithoutRePairingOrAlternateAttempt]' passed (0.004 seconds).
+Test Suite 'STAConnectionCoordinatorTests' passed at 2026-11-01 15:47:50.868.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.105 (0.109) seconds
+Test Suite 'STAConnectionDiagnosticsTests' started at 2026-11-01 15:47:50.868.
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests test201FHintSurvivesBoundedFailureChainAndMissingNeedsExplicitRetry]' started.
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests test201FHintSurvivesBoundedFailureChainAndMissingNeedsExplicitRetry]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testCharacterBudgetNeverSplitsAttemptOrSurrogatePair]' started.
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testCharacterBudgetNeverSplitsAttemptOrSurrogatePair]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testCompletionFreezesElapsedAndCannotBeOverwritten]' started.
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testCompletionFreezesElapsedAndCannotBeOverwritten]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testNewDiscoveryAndClearRejectStaleCallbacks]' started.
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testNewDiscoveryAndClearRejectStaleCallbacks]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testOversizedAttemptDroppedWholeAndNewestBlocksBounded]' started.
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testOversizedAttemptDroppedWholeAndNewestBlocksBounded]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testTraceRecordsElapsedAndDeltaPreservingFirstAndLatest128]' started.
+Test Case '-[ZTransferTests.STAConnectionDiagnosticsTests testTraceRecordsElapsedAndDeltaPreservingFirstAndLatest128]' passed (0.002 seconds).
+Test Suite 'STAConnectionDiagnosticsTests' passed at 2026-11-01 15:47:50.885.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.015 (0.017) seconds
+Test Suite 'STAMetadataTests' started at 2026-11-01 15:47:50.885.
+Test Case '-[ZTransferTests.STAMetadataTests testBulkMetadataExactLayoutAndNameSafety]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testBulkMetadataExactLayoutAndNameSafety]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testCachedRawIndexFailureReturnsAndRetriesSameRangeWithoutExtraProbe]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testCachedRawIndexFailureReturnsAndRetriesSameRangeWithoutExtraProbe]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testDirectCatalogUsesCompactIndexesWithoutFullOriginalOrObjectInfo]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testDirectCatalogUsesCompactIndexesWithoutFullOriginalOrObjectInfo]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testDirectNefHeaderRejectsFalseMarkersAndFallsBackToExifStripsLikeAndroid]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testDirectNefHeaderRejectsFalseMarkersAndFallsBackToExifStripsLikeAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testEqualLengthNefRangesKeepAndroidDirectoryOrder]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testEqualLengthNefRangesKeepAndroidDirectoryOrder]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testEventDecodingRejectsTruncationAndKeepsFirstParameter]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testEventDecodingRejectsTruncationAndKeepsFirstParameter]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testExifCompressedStripsProduceDecodableBytesWithoutChangingPipelinePriority]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testExifCompressedStripsProduceDecodableBytesWithoutChangingPipelinePriority]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads]' passed (0.046 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testMakerFileInfoHasIndependentByteOrderAndRejectsTruncation]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testMakerFileInfoHasIndependentByteOrderAndRejectsTruncation]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testMediaTypesAndDatesUseAndroidFallbackRules]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testMediaTypesAndDatesUseAndroidFallbackRules]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testMpfSecondaryPreviewFromAndroidFixtureAndObjectSizeLimit]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testMpfSecondaryPreviewFromAndroidFixtureAndObjectSizeLimit]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testNefDateAndExactPreviewRangeFromAndroidFixture]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testNefDateAndExactPreviewRangeFromAndroidFixture]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testNefJoinsAndroidExifInterfaceJPEGCompressedThumbnailStrips]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testNefJoinsAndroidExifInterfaceJPEGCompressedThumbnailStrips]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testRawFalseJPEGInFirstHeaderDoesNotMaskRealPreviewOrPoisonCache]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testRawFalseJPEGInFirstHeaderDoesNotMaskRealPreviewOrPoisonCache]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testRawProbeTransportFailureIsNotTreatedAsARejectedRange]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testRawProbeTransportFailureIsNotTreatedAsARejectedRange]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testRawRejectedIndexedReadStillExtractsJPEGAlreadyInPrefix]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testRawRejectedIndexedReadStillExtractsJPEGAlreadyInPrefix]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testRawRejectedOrEmptyPreviousFileHintStillLoadsCurrentThumbnail]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testRawRejectedOrEmptyPreviousFileHintStillLoadsCurrentThumbnail]' passed (0.047 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.STAMetadataTests testRawShortHintReadsRemainingMarginLikeAndroid]' started.
+Test Case '-[ZTransferTests.STAMetadataTests testRawShortHintReadsRemainingMarginLikeAndroid]' passed (0.020 seconds).
+Test Suite 'STAMetadataTests' passed at 2026-11-01 15:47:51.130.
+	 Executed 20 tests, with 0 failures (0 unexpected) in 0.240 (0.245) seconds
+Test Suite 'STAPairingConfirmationTests' started at 2026-11-01 15:47:51.130.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testCancelledFinalWritesCannotRestoreProofRouteOrInvalidateNewProof]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testCancelledFinalWritesCannotRestoreProofRouteOrInvalidateNewProof]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testFreshReceiptWaitsForValidFrameBeforeWritingPairing]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testFreshReceiptWaitsForValidFrameBeforeWritingPairing]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testInvalidSizeNeverStartsPartialObjectRead]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testInvalidSizeNeverStartsPartialObjectRead]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testPairingResultWithoutFreshEventCannotCreateReceiptOrTrust]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testPairingResultWithoutFreshEventCannotCreateReceiptOrTrust]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testProbeStopsAfterFirstDeniedInfoAndNeverReadsThumbnail]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testProbeStopsAfterFirstDeniedInfoAndNeverReadsThumbnail]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testResetAndCancelDuringFrameCannotResurrectClearedPairing]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testResetAndCancelDuringFrameCannotResurrectClearedPairing]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testSavedTrustedPairingNeverProbesLiveView]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testSavedTrustedPairingNeverProbesLiveView]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testWrongReceiptBodyAndWrongIdentityRejectedBeforeAnyCommand]' started.
+Test Case '-[ZTransferTests.STAPairingConfirmationTests testWrongReceiptBodyAndWrongIdentityRejectedBeforeAnyCommand]' passed (0.004 seconds).
+Test Suite 'STAPairingConfirmationTests' passed at 2026-11-01 15:47:51.204.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.071 (0.074) seconds
+Test Suite 'STAPairingLiveViewTests' started at 2026-11-01 15:47:51.204.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testBrokenFrameStreamAbortsWithoutSendingCleanupOnDesynchronizedSocket]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testBrokenFrameStreamAbortsWithoutSendingCleanupOnDesynchronizedSocket]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testBusyStartReadinessAndFrameRetryWithoutPrematureFallback]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testBusyStartReadinessAndFrameRetryWithoutPrematureFallback]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testCancellationDuringStartStillClosesOwnedMonitor]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testCancellationDuringStartStillClosesOwnedMonitor]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testCleanupFailureCannotConfirmPairing]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testCleanupFailureCannotConfirmPairing]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testEightSecondBudgetStopsRepeatedInvalidFramesAndCleansUp]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testEightSecondBudgetStopsRepeatedInvalidFramesAndCleansUp]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testEnhancedUnsupportedAndInvalidFramesFallBackImmediatelyToStandard]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testEnhancedUnsupportedAndInvalidFramesFallBackImmediatelyToStandard]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testExistingMonitorIsNeverStartedOrStopped]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testExistingMonitorIsNeverStartedOrStopped]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testJPEGSignatureAloneIsNotProof]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testJPEGSignatureAloneIsNotProof]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testNegativeStandardFrameClosesOwnedMonitorAndPreservesError]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testNegativeStandardFrameClosesOwnedMonitorAndPreservesError]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testStatusMustBeExactlyOneValidByte]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testStatusMustBeExactlyOneValidByte]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testValidEmbeddedFrameEndsOnlyMonitorStartedByVerification]' started.
+Test Case '-[ZTransferTests.STAPairingLiveViewTests testValidEmbeddedFrameEndsOnlyMonitorStartedByVerification]' passed (0.001 seconds).
+Test Suite 'STAPairingLiveViewTests' passed at 2026-11-01 15:47:51.231.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.024 (0.027) seconds
+Test Suite 'STAProfileTests' started at 2026-11-01 15:47:51.232.
+Test Case '-[ZTransferTests.STAProfileTests testIdentityPersistsAcrossInstancesAndBothIdentitiesStayIndependent]' started.
+Test Case '-[ZTransferTests.STAProfileTests testIdentityPersistsAcrossInstancesAndBothIdentitiesStayIndependent]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testInvalidatingOneBodyClearsBothProofsButPreservesOtherBodyAndIdentity]' started.
+Test Case '-[ZTransferTests.STAProfileTests testInvalidatingOneBodyClearsBothProofsButPreservesOtherBodyAndIdentity]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testLegacyMarkerRequiresVerificationAndVerifiedPairingSurvivesReload]' started.
+Test Case '-[ZTransferTests.STAProfileTests testLegacyMarkerRequiresVerificationAndVerifiedPairingSurvivesReload]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testMissingOrInvalidGUIDCannotCreatePairingProof]' started.
+Test Case '-[ZTransferTests.STAProfileTests testMissingOrInvalidGUIDCannotCreatePairingProof]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testMultipleLegacyBodiesNeverReceiveGuessedIP]' started.
+Test Case '-[ZTransferTests.STAProfileTests testMultipleLegacyBodiesNeverReceiveGuessedIP]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testOnlyProtocolMarkerConfirmsPairingNotRouteOrLegacyField]' started.
+Test Case '-[ZTransferTests.STAProfileTests testOnlyProtocolMarkerConfirmsPairingNotRouteOrLegacyField]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testResetClearsAllCamerasAndRotatesIdentityWhileRetainingMode]' started.
+Test Case '-[ZTransferTests.STAProfileTests testResetClearsAllCamerasAndRotatesIdentityWhileRetainingMode]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testSingleLegacyBodyKeepsItsRouteAndIdentity]' started.
+Test Case '-[ZTransferTests.STAProfileTests testSingleLegacyBodyKeepsItsRouteAndIdentity]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.STAProfileTests testTrustedOnlyMarkerIsDiscoveredWithoutLegacyMigrationPromotingOtherCameras]' started.
+Test Case '-[ZTransferTests.STAProfileTests testTrustedOnlyMarkerIsDiscoveredWithoutLegacyMigrationPromotingOtherCameras]' passed (0.008 seconds).
+Test Suite 'STAProfileTests' passed at 2026-11-01 15:47:51.309.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.075 (0.077) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-11-01 15:47:51.309.
+	 Executed 181 tests, with 0 failures (0 unexpected) in 36.852 (36.926) seconds
+Test Suite 'Selected tests' passed at 2026-11-01 15:47:51.310.
+	 Executed 181 tests, with 0 failures (0 unexpected) in 36.852 (36.927) seconds
+2026-11-01 15:47:51.913 xcodebuild[57119:38450098] [MT] IDETestOperationsObserverDebug: 68.245 elapsed -- Testing started completed.
+2026-11-01 15:47:51.913 xcodebuild[57119:38450098] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-01 15:47:51.913 xcodebuild[57119:38450098] [MT] IDETestOperationsObserverDebug: 68.245 sec, +68.245 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-sta-20261101/ios-r1.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

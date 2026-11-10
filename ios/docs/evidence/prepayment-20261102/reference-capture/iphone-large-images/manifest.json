@@ -1,0 +1,26 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "372EA36E-28D7-4754-AFB3-B3B2AEE6F99A",
+        "deviceName" : "ZTransfer Release iphone-large",
+        "exportedFileName" : "B646D9F3-8F90-4EAE-802E-76E472D20AAE.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "02-settings_0_CA8DCD88-BF57-4E5D-9D4D-4BCBF9556191.png",
+        "timestamp" : 1793605652.515
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "372EA36E-28D7-4754-AFB3-B3B2AEE6F99A",
+        "deviceName" : "ZTransfer Release iphone-large",
+        "exportedFileName" : "0E16178C-DFF4-4339-A5A8-064B90523CBE.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "01-connect_0_AE83D9D3-214F-41DD-9274-558EEE110814.png",
+        "timestamp" : 1793605649.397
+      }
+    ],
+    "testIdentifier" : "ReleaseReferenceCapture/testCurrentReleaseHomeAndSettings()",
+    "testIdentifierURL" : "test://com.apple.xcode/ReleaseReferenceCapture/ReleaseReferenceCapture/ReleaseReferenceCapture/testCurrentReleaseHomeAndSettings"
+  }
+]

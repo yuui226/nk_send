@@ -1,0 +1,106 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "BA56EB4F-7B87-4E1F-8D8B-8F5D71729C9D.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "gps-cold-launch-0_0_01D4025A-7E5A-47EC-B492-9D282089269D.png",
+        "timestamp" : 1793978841.425
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "483B3D18-7C3E-47A5-B3CB-A68100524290.mp4",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Screen Recording 2026-11-06 at 11.27.17 下午.mp4",
+        "timestamp" : 1793978837.333
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "2BDD1646-3D7D-454F-B382-3D67EF48A67B.txt",
+        "isAssociatedWithFailure" : true,
+        "suggestedHumanReadableName" : "Complete Issue Description.txt"
+      }
+    ],
+    "testIdentifier" : "PhotoEffectsMasterUITests/testGPSColdLaunchWithOldEnabledFlagStaysOffBeforeAndAfterLocationGrant()",
+    "testIdentifierURL" : "test://com.apple.xcode/ZTransfer/ZTransferInteractionUITests/PhotoEffectsMasterUITests/testGPSColdLaunchWithOldEnabledFlagStaysOffBeforeAndAfterLocationGrant"
+  },
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "252480BB-270B-4F2F-B745-958374216E0C.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "gps-native-denied-return_0_A8D72B01-E2A6-49F1-8A08-AC3854194699.png",
+        "timestamp" : 1793978852.042
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "31E907E0-90EE-4AC8-85A5-5C10337EA0D6.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "gps-native-settings-entry_0_1565E7A2-6568-4645-ACEC-BFA81C4F1C1F.png",
+        "timestamp" : 1793978850.288
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "C22997EF-0FD3-4B64-A454-32AEC1E3A274.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "gps-native-denied-guidance_0_86D82511-3D26-4144-994E-938EBA0916AB.png",
+        "timestamp" : 1793978849.836
+      }
+    ],
+    "testIdentifier" : "PhotoEffectsMasterUITests/testGPSDeniedNativePermissionOpensSettingsAndKeepsGuidanceOnReturn()",
+    "testIdentifierURL" : "test://com.apple.xcode/ZTransfer/ZTransferInteractionUITests/PhotoEffectsMasterUITests/testGPSDeniedNativePermissionOpensSettingsAndKeepsGuidanceOnReturn"
+  },
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "3353500C-D505-48ED-9797-0FEFC3AAB901.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "gps-native-location-request_0_7E89AFED-9904-45BA-9B6B-190A953F1C4B.png",
+        "timestamp" : 1793978858.48
+      }
+    ],
+    "testIdentifier" : "PhotoEffectsMasterUITests/testGPSFirstUseNativeLocationPromptCanEnableTransport()",
+    "testIdentifierURL" : "test://com.apple.xcode/ZTransfer/ZTransferInteractionUITests/PhotoEffectsMasterUITests/testGPSFirstUseNativeLocationPromptCanEnableTransport"
+  },
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "3EDA0FD4-1099-4BF6-BB07-8D08F5018705.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "gps-enable-button-material_0_48CCEB5D-4416-41D2-A654-23390EB5EAB3.png",
+        "timestamp" : 1793978868.109
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "498FB9B8-1870-4C4D-A77D-A47D2D5F91E5.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "gps-hold-trace_0_D6372569-26CD-46BD-884F-BC5AA102EC38.txt",
+        "timestamp" : 1793978867.964
+      }
+    ],
+    "testIdentifier" : "PhotoEffectsMasterUITests/testGPSHoldDisablesBeforeReleaseWithoutReenablingAndNextTapWorks()",
+    "testIdentifierURL" : "test://com.apple.xcode/ZTransfer/ZTransferInteractionUITests/PhotoEffectsMasterUITests/testGPSHoldDisablesBeforeReleaseWithoutReenablingAndNextTapWorks"
+  }
+]

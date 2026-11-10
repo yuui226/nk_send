@@ -46,7 +46,12 @@ private struct SettingsScrollBounds: UIViewRepresentable {
             }
         }
     }
-    func makeUIView(context: Context) -> Probe { Probe() }
+    func makeUIView(context: Context) -> Probe {
+        let view = Probe()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        return view
+    }
     func updateUIView(_ view: Probe, context: Context) { view.configure() }
 }
 
@@ -68,6 +73,13 @@ struct SettingsView: View {
     @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     @ObservedObject private var directory: DirectoryAccessStore
     @ObservedObject private var effectsStore: PhotoEffectsStore
+    @StateObject private var photoFilterLifetime: PhotoFilterEditorLifetime
+    private var photoFilterSession: PhotoFilterEditorSession { photoFilterLifetime.session }
+    private let ownsPhotoFilterSession: Bool
+    private var np3Active: Bool {
+        settingsPage == .effects && !dismissalRequested &&
+        PhotoColorEffectEditorVisibility(settings: effectsDraft, isPro: entitlements.access.isPro).filter
+    }
     @StateObject private var photoLUTLifetime: PhotoLUTEditorLifetime
     private var photoLUTEditor: PhotoLUTEditorState { photoLUTLifetime.editor }
     private var photoLUTStore: PhotoLUTStore { photoLUTEditor.store }
@@ -81,7 +93,6 @@ struct SettingsView: View {
     #endif
     @State private var settingsPage: SettingsPage = .main
     @Binding private var effectsDraft: PhotoEffectsSettings
-    @Binding private var filterChooser: PhotoFilterChooserState
     @Binding private var effectsHint: PhotoEffectsHint?
     @State private var showingWatermarkPicker = false
     @State private var watermarkPickerItems: [PhotosPickerItem] = []
@@ -91,6 +102,7 @@ struct SettingsView: View {
     @State private var showingModuleMenu = false
     @State private var settingsTransitionDirection: CGFloat = 1
     @AppStorage(TransferStorageMode.persistenceKey) private var storageModeRaw = ""
+    @AppStorage(TransferSaveDestination.persistenceKey) private var saveDestinationRaw = TransferSaveDestination.photoLibrary.rawValue
     @AppStorage("auto_transfer_new_media") private var autoTransfer = false
     @AppStorage("auto_transfer_mode") private var autoTransferModeRaw = ""
     @AppStorage("defer_transfer_start") private var deferStart = false
@@ -144,11 +156,14 @@ struct SettingsView: View {
             legacyByDate: UserDefaults.standard.bool(forKey: TransferStorageMode.legacyByDateKey)
         )
     }
+    private var saveDestination: TransferSaveDestination {
+        TransferSaveDestination(rawValue: saveDestinationRaw) ?? .photoLibrary
+    }
 
     init(showPhotoEffectsEntry: Bool, effectsStore: PhotoEffectsStore, directory: DirectoryAccessStore,
-         effectsDraft: Binding<PhotoEffectsSettings>, filterChooser: Binding<PhotoFilterChooserState>,
+         effectsDraft: Binding<PhotoEffectsSettings>,
          effectsHint: Binding<PhotoEffectsHint?>, dismissalRequested: Bool,
-         photoLUTEditor: PhotoLUTEditorState? = nil,
+         photoLUTEditor: PhotoLUTEditorState? = nil, photoFilterSession: PhotoFilterEditorSession? = nil,
          popupMotionPaused: Bool = false, effectsOnly: Bool = false,
          effectPreviewInitialRotationQuarterTurns: Int = 0,
          requestTransferDirectoryAttention: Bool = false,
@@ -159,6 +174,8 @@ struct SettingsView: View {
          onShowPremium: @escaping () -> Void = {}, onPlayFireworks: @escaping () -> Void = {},
          onClose: (() -> Void)? = nil) {
         _photoLUTLifetime = StateObject(wrappedValue: PhotoLUTEditorLifetime(photoLUTEditor ?? PhotoLUTEditorState(role: .camera)))
+        ownsPhotoFilterSession = photoFilterSession == nil
+        _photoFilterLifetime = StateObject(wrappedValue: photoFilterSession.map(PhotoFilterEditorLifetime.init) ?? PhotoFilterEditorLifetime(store: effectsStore.np3Store, role: .transfer))
         self.effectsOnly = effectsOnly
         self.effectPreviewInitialRotationQuarterTurns = effectPreviewInitialRotationQuarterTurns
         _settingsPage = State(initialValue: effectsOnly ? .effects : .main)
@@ -167,7 +184,6 @@ struct SettingsView: View {
         _effectsStore = ObservedObject(wrappedValue: effectsStore)
         _directory = ObservedObject(wrappedValue: directory)
         _effectsDraft = effectsDraft
-        _filterChooser = filterChooser
         _effectsHint = effectsHint
         self.dismissalRequested = dismissalRequested
         self.popupMotionPaused = popupMotionPaused
@@ -213,7 +229,7 @@ struct SettingsView: View {
                                 settings: effectivePhotoEffectsSettings(effectsDraft, isPro: entitlements.access.isPro),
                                 onRequest: onEffectPreviewRequested,
                                 initialRotationQuarterTurns: effectPreviewInitialRotationQuarterTurns,
-                                showSourceWhileRendering: effectsOnly, sourceName: effectPreviewSourceName)
+                                sourceName: effectPreviewSourceName)
                                 .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
                             PhotoEffectsControls(draft: $effectsDraft,
                                 showingWatermarkPicker: $showingWatermarkPicker,
@@ -221,7 +237,8 @@ struct SettingsView: View {
                                 showLocationFields: true,
                                 imageImporting: effectsStore.watermarkImageImporting,
                                 photoLUTEditor: photoLUTEditor,
-                                filterChooser: $filterChooser,
+                                photoFilterSession: photoFilterSession,
+                                onFilterFavorite: effectsStore.toggleFilterFavorite,
                                 onWatermarkTextCommitted: { _ in commitFrameDraft() },
                                 onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
                                 .padding(.horizontal, 16)
@@ -313,11 +330,32 @@ struct SettingsView: View {
             if closing {
                 photoLUTEditor.close()
                 if settingsPage == .effects { commitEffectsDraft() }
+                if ownsPhotoFilterSession { photoFilterSession.end() }
             }
         }
+        .onChange(of: np3Active) { photoFilterSession.setActive($0) }
+        .onChange(of: effectsDraft.photoFilterEnabled && effectsDraft.colorEffectModule == .filter) { _ in
+            photoFilterSession.draftChanged(effectsDraft)
+        }
+        .onReceive(photoFilterSession.$notice.compactMap { $0 }) { effectsHint = .init(resource: $0.resource) }
+        .onReceive(effectsStore.filterFavorites.changes) { keys in
+            if effectsDraft.favoriteFilterIDs != keys { effectsDraft.favoriteFilterIDs = keys }
+        }
+        .onReceive(photoLUTStore.folderChanges) {
+            if effectsDraft.colorEffectModule == .lut {
+                effectsDraft.photoFilterEnabled = false
+                effectsDraft.selectedFilter = effectsDraft.rememberedBuiltinFilter
+            }
+        }
+        .onDisappear { if ownsPhotoFilterSession { photoFilterSession.end() } }
         .coordinateSpace(name: "settings-panel")
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24), value: settingsPage)
         .onAppear {
+            if ownsPhotoFilterSession {
+                photoFilterSession.begin(draft: $effectsDraft, active: np3Active) { [photoLUTEditor] in
+                    photoLUTEditor.cancelPending(); photoLUTEditor.store.select(nil)
+                }
+            } else { photoFilterSession.setActive(np3Active) }
             // Migrate the early preview value ("自动") to the same BCP-47
             // tags used by Android so the selection actually changes the app
             // locale instead of only changing the wheel label.
@@ -354,7 +392,7 @@ struct SettingsView: View {
                     .foregroundStyle(ZTransferColors.primaryText)
                     .frame(width: 30, height: 30)
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12, panel: true))
+            .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
             .accessibilityIdentifier("photo-effects-editor-back")
             Text(AppLocalized.resource("photo_effects_editor_title"))
                 .zTransferText(size: ZTransferMetrics.title, weight: .bold)
@@ -364,8 +402,7 @@ struct SettingsView: View {
             PhotoEffectModuleMenuButton(isPresented: $showingModuleMenu, size: 28)
             TipLightbulbButton(
                 attention: !photoEffectsHelpViewed, size: 28,
-                accessibilityLabel: AppLocalized.resource("photo_effects_info_title"),
-                embeddedInPanel: true
+                accessibilityLabel: AppLocalized.resource("photo_effects_info_title")
             ) {
                 photoEffectsHelpViewed = true
                 showingEffectsHelp.toggle()
@@ -408,8 +445,10 @@ struct SettingsView: View {
 
     private func commitEffectsDraft() {
         watermarkTextFocused = false
-        photoLUTStore.commitDraft()
-        effectsStore.updateFromEditor(effectsDraft)
+        let source = photoFilterSession.source(for: effectsDraft)
+        guard effectsStore.canCommitNP3(effectsDraft, source: source),
+              photoLUTStore.canCommitSelection(effectsDraft.selectedFilter), photoLUTStore.commitDraft() else { return }
+        effectsStore.commitFromEditor(effectsDraft, np3Source: source)
     }
 
     private var header: some View {
@@ -423,8 +462,7 @@ struct SettingsView: View {
                 .fixedSize(horizontal: true, vertical: false)
             TipLightbulbButton(
                 attention: !mainSettingsHelpViewed, size: 30,
-                accessibilityLabel: AppLocalized.resource("settings_help_title"),
-                embeddedInPanel: true
+                accessibilityLabel: AppLocalized.resource("settings_help_title")
             ) {
                 mainSettingsHelpViewed = true
                 showingHelp.toggle()
@@ -440,7 +478,7 @@ struct SettingsView: View {
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
             .accessibilityLabel(AppLocalized.resource("cd_close"))
         }
         .frame(minHeight: 32)
@@ -448,45 +486,78 @@ struct SettingsView: View {
 
     private var directoryCard: some View {
         SettingsDirectoryAttentionCard(
-            borderColor: directory.directoryURL == nil
+            borderColor: saveDestination == .folder && directory.directoryURL == nil
                 ? ZTransferColors.accentOrange.opacity(0.8)
                 : ZTransferColors.primaryText.opacity(0.10),
             active: directoryAttentionActive
         ) {
-            HStack(spacing: 10) {
-                Image(systemName: "location.fill").foregroundStyle(directory.directoryURL == nil ? ZTransferColors.accentOrange : .green)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(AppLocalized.resource("transfer_directory")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                    Text(directory.directoryURL?.lastPathComponent ?? AppLocalized.resource(
-                        directoryAttentionActive ? "dir_please_set" : "dir_not_set"
-                    ))
-                    .zTransferText(size: ZTransferMetrics.caption,
-                                   weight: directoryAttentionActive ? .bold : .regular)
-                    .foregroundStyle(directory.directoryURL == nil
-                                     ? ZTransferColors.accentOrange : ZTransferColors.secondaryText)
-                    .lineLimit(1)
-                }
-                Spacer()
-                Button { showingPicker = true } label: {
-                    Text(directory.directoryURL == nil ? AppLocalized.resource("choose_directory") : AppLocalized.resource("change_directory"))
-                        .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+            destinationWheel
+            if saveDestination == .folder {
+                SettingsDivider()
+                HStack(spacing: 10) {
+                    Image(systemName: "location.fill").foregroundStyle(directory.directoryURL == nil ? ZTransferColors.accentOrange : .green)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(AppLocalized.resource("transfer_directory")).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                        Text(directory.directoryURL?.lastPathComponent ?? AppLocalized.resource(
+                            directoryAttentionActive ? "dir_please_set" : "dir_not_set"
+                        ))
+                        .zTransferText(size: ZTransferMetrics.caption,
+                                       weight: directoryAttentionActive ? .bold : .regular)
+                        .foregroundStyle(directory.directoryURL == nil
+                                         ? ZTransferColors.accentOrange : ZTransferColors.secondaryText)
                         .lineLimit(1)
-                        .padding(.horizontal, 12)
-                        .frame(height: 30)
+                    }
+                    Spacer()
+                    Button { showingPicker = true } label: {
+                        Text(directory.directoryURL == nil ? AppLocalized.resource("choose_directory") : AppLocalized.resource("change_directory"))
+                            .zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+                            .lineLimit(1)
+                            .padding(.horizontal, 12)
+                            .frame(height: 30)
+                    }
+                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12, panel: true))
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 12, panel: true))
             }
             SettingsDivider()
             HStack(spacing: 8) {
-                storageModeWheel
+                if saveDestination == .folder { storageModeWheel }
                 autoTransferWheel
-                ToggleWheel(label: AppLocalized.resource("defer_transfer_start"), isOn: $deferStart, disabled: directory.directoryURL == nil)
+                ToggleWheel(label: AppLocalized.resource("defer_transfer_start"), isOn: $deferStart,
+                            disabled: saveDestination == .folder && directory.directoryURL == nil,
+                            labelColor: ZTransferColors.accentBlue)
             }
         }
     }
 
+    private var destinationWheel: some View {
+        DetentWheel(
+            label: AppLocalized.resource("transfer_save_destination"),
+            options: TransferSaveDestination.allCases,
+            selected: saveDestination,
+            optionLabel: { destination in
+                switch destination {
+                case .photoLibrary: return AppLocalized.resource("transfer_save_photo_library")
+                case .folder: return AppLocalized.resource("transfer_save_folder")
+                }
+            },
+            onCommit: { destination in
+                destination.save()
+                saveDestinationRaw = destination.rawValue
+            },
+            rowHeight: 18,
+            wheelHeight: 50,
+            optionFontSize: 14,
+            accentColor: saveDestination == .photoLibrary ? ZTransferColors.accentBlue : ZTransferColors.statusWaiting,
+            labelColor: ZTransferColors.accentBlue,
+            emphasized: saveDestination == .photoLibrary,
+            onDetent: { ZTransferHaptics.shared.play(.selection) }
+        )
+        .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("settings-transfer-destination")
+    }
+
     private var directoryAttentionActive: Bool {
-        requestTransferDirectoryAttention && directory.directoryURL == nil
+        requestTransferDirectoryAttention && saveDestination == .folder && directory.directoryURL == nil
     }
 
     /// Android's StorageModeWheel: unified, by day, and by type are one
@@ -510,7 +581,9 @@ struct SettingsView: View {
             rowHeight: 18,
             wheelHeight: 50,
             enabled: directory.directoryURL != nil,
+            optionFontSize: 14,
             accentColor: storageMode == .unified ? ZTransferColors.statusWaiting : ZTransferColors.accentBlue,
+            labelColor: ZTransferColors.accentBlue,
             emphasized: storageMode != .unified,
             onDetent: { ZTransferHaptics.shared.play(.selection) }
         )
@@ -536,8 +609,10 @@ struct SettingsView: View {
             },
             onCommit: { $0.save() },
             rowHeight: 18, wheelHeight: 50,
-            enabled: directory.directoryURL != nil,
+            enabled: saveDestination == .photoLibrary || directory.directoryURL != nil,
+            optionFontSize: 14,
             accentColor: mode == .off ? ZTransferColors.statusWaiting : ZTransferColors.accentBlue,
+            labelColor: ZTransferColors.accentBlue,
             emphasized: mode != .off,
             onDetent: { ZTransferHaptics.shared.play(.selection) }
         )
@@ -676,7 +751,7 @@ struct SettingsView: View {
 
     // User-requested build marker belongs only to the settings version plaque.
     private var versionPlaqueText: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.94"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.02"
         #if DEBUG
         return AppLocalized.versionText(version + "-D")
         #else
@@ -794,7 +869,8 @@ private struct SettingsHelpBubble: View {
     var body: some View {
         TipGuideBubble(anchor: anchor, titleKey: "settings_help_title",
             sections: TipGuides.settings(showEffects: showEffects, isPro: access.access.isPro,
-                showManagement: PremiumSettingsActions.showsManagement(access: access, purchases: purchases)),
+                showManagement: PremiumSettingsActions.showsManagement(access: access, purchases: purchases),
+                managementTitleKey: PremiumSettingsActions.managementTitleKey(for: access.entitlement)),
             introductionKey: "settings_help_wheels", alignLeading: true, close: close)
     }
 }
@@ -882,6 +958,7 @@ private struct ToggleWheel: View {
     var disabled = false
     var isHapticsPreference = false
     var compact = false
+    var labelColor: Color? = nil
     var body: some View {
         DetentWheel(
             label: label,
@@ -894,6 +971,7 @@ private struct ToggleWheel: View {
             enabled: !disabled,
             optionFontSize: compact ? 13 : 14,
             accentColor: isOn ? ZTransferColors.accentBlue : ZTransferColors.secondaryText,
+            labelColor: labelColor,
             emphasized: isOn,
             onDetent: { ZTransferHaptics.shared.play(.toggle, isPreferenceToggle: isHapticsPreference) },
         )

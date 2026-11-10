@@ -4,13 +4,15 @@ enum LosslessJpegBridge {
     private static let gate = CancellableSerialWorkGate()
     private static let nativeLock = NSLock()
 
-    static func cropAsync(input: URL, output: URL, source: JpegCropSource, rect: CropRect) async throws -> Bool {
+    static func cropAsync(input: URL, output: URL, source: JpegCropSource, rect: CropRect,
+                          locationFallback: PhotoCaptureLocation? = nil) async throws -> Bool {
         try await gate.withPermit {
-            crop(input: input, output: output, source: source, rect: rect)
+            crop(input: input, output: output, source: source, rect: rect, locationFallback: locationFallback)
         }
     }
 
-    static func crop(input: URL, output: URL, source: JpegCropSource, rect: CropRect) -> Bool {
+    static func crop(input: URL, output: URL, source: JpegCropSource, rect: CropRect,
+                     locationFallback: PhotoCaptureLocation? = nil) -> Bool {
         // Synchronous callers share the same codec exclusion. Production async
         // waiters use the cancellable gate before entering this short lock path.
         nativeLock.lock()
@@ -20,8 +22,10 @@ enum LosslessJpegBridge {
         guard input.resolvingSymlinksInPath().standardizedFileURL != output.resolvingSymlinksInPath().standardizedFileURL,
               LosslessCropInput.accepts(source),
               let header = try? LosslessCropInput.sourceHeader(from: input),
-              parseJpegCropHeader(header) == source,
-              let marker = try? LosslessCropExif.marker(header: header, source: source, rect: rect) else { return false }
+              parseJpegCropHeader(header) == source else { return false }
+        let sourceLocation = PhotoCaptureLocation.read(header: header)
+        guard let marker = try? LosslessCropExif.marker(header: header, source: source, rect: rect,
+            locationFallback: sourceLocation == nil ? locationFallback : nil) else { return false }
         let succeeded = input.path.withCString { inputPath in
             output.path.withCString { outputPath in
                 zt_lossless_jpeg_crop(inputPath, outputPath, Int32(source.width), Int32(source.height), Int32(source.mcuWidth), Int32(source.mcuHeight), Int32(rect.left), Int32(rect.top), Int32(rect.width), Int32(rect.height)) != 0
@@ -34,6 +38,12 @@ enum LosslessJpegBridge {
         }
         do {
             try LosslessCropExif.insert(marker, into: output)
+            if sourceLocation != nil || locationFallback != nil {
+                let savedHeader = try LosslessCropInput.header(from: output)
+                guard PhotoCaptureLocation.read(header: savedHeader) != nil else {
+                    throw LosslessCropProcessorError.cropFailed
+                }
+            }
             return true
         } catch {
             try? FileManager.default.removeItem(at: output)
@@ -45,7 +55,13 @@ enum LosslessJpegBridge {
 @_silgen_name("zt_lossless_jpeg_crop")
 private func zt_lossless_jpeg_crop(_ input: UnsafePointer<CChar>, _ output: UnsafePointer<CChar>, _ width: Int32, _ height: Int32, _ mcuWidth: Int32, _ mcuHeight: Int32, _ x: Int32, _ y: Int32, _ cropWidth: Int32, _ cropHeight: Int32) -> Int32
 
-/// Rebuild Android LosslessJpeg.copiedTags without copying opaque EXIF offsets,
+extension PhotoCaptureLocation {
+    /// Decode original EXIF rationals directly. ImageIO's GPS display dictionary
+    /// may round DMS fractions even when the saved TIFF is exact.
+    static func read(header: Data) -> Self? { try? LosslessCropExif.location(header: header) }
+}
+
+/// Rebuild Android PhotoCaptureExif fields without copying opaque EXIF offsets,
 /// MakerNotes, IFD1 thumbnails or unreferenced bytes from the original APP1.
 /// JPEG coefficients are never decoded or recompressed by this metadata pass.
 private enum LosslessCropExif {
@@ -104,15 +120,7 @@ private enum LosslessCropExif {
         }
     }
 
-    static let ifd0Tags: Set<UInt16> = [0x010f, 0x0110, 0x0131, 0x0132]
-    static let exifTags: Set<UInt16> = [
-        0x9003, 0x9004, 0x9291, 0x9011, 0x829a, 0x829d, 0x8827,
-        0x920a, 0xa405, 0xa433, 0xa434, 0x8822, 0x9204, 0x9207,
-        0x9209, 0xa403, 0xa001
-    ]
-    static let gpsTags: Set<UInt16> = [0, 1, 2, 3, 4, 5, 6, 7, 29, 27, 12, 13, 14, 15]
-
-    static func marker(header jpeg: Data, source: JpegCropSource, rect: CropRect) throws -> Data {
+    static func reader(header jpeg: Data) throws -> Reader? {
         guard jpeg.count >= 2, jpeg[0] == 0xff, jpeg[1] == 0xd8 else { throw LosslessCropProcessorError.cropFailed }
         var payload: [UInt8]?
         var offset = 2
@@ -131,17 +139,54 @@ private enum LosslessCropExif {
             }
             offset += length
         }
+        guard let bytes = payload else { return nil }
+        guard bytes.count >= 8 else { throw LosslessCropProcessorError.cropFailed }
+        let little = bytes[0] == 0x49 && bytes[1] == 0x49
+        guard little || (bytes[0] == 0x4d && bytes[1] == 0x4d) else { throw LosslessCropProcessorError.cropFailed }
+        let reader = Reader(bytes: bytes, little: little)
+        guard try reader.integer(2, 2) == 42 else { throw LosslessCropProcessorError.cropFailed }
+        return reader
+    }
+
+    static func location(header: Data) throws -> PhotoCaptureLocation? {
+        guard let reader = try reader(header: header) else { return nil }
+        let root = try reader.fields(at: Int(reader.integer(4, 4)), keeping: [0x8825])
+        guard let pointer = try reader.pointer(0x8825, in: root) else { return nil }
+        let gps = try reader.fields(at: pointer, keeping: [1, 2, 3, 4, 5, 6])
+        func rational(_ field: Field, at index: Int) throws -> Double? {
+            let value = Reader(bytes: field.bytes, little: reader.little)
+            let denominator = try value.integer(index * 8 + 4, 4)
+            guard denominator != 0 else { return nil }
+            return Double(try value.integer(index * 8, 4)) / Double(denominator)
+        }
+        func coordinate(_ tag: UInt16, positive: UInt8, negative: UInt8) throws -> Double? {
+            guard let ref = gps.first(where: { $0.tag == tag - 1 }), ref.type == 2,
+                  let direction = ref.bytes.first, direction == positive || direction == negative,
+                  let field = gps.first(where: { $0.tag == tag }), field.type == 5, field.count == 3,
+                  let degrees = try rational(field, at: 0), let minutes = try rational(field, at: 1),
+                  let seconds = try rational(field, at: 2) else { return nil }
+            return (degrees + minutes / 60 + seconds / 3600) * (direction == negative ? -1 : 1)
+        }
+        let altitude: Double?
+        if let ref = gps.first(where: { $0.tag == 5 }), ref.type == 1, ref.count == 1,
+           let direction = ref.bytes.first, direction <= 1,
+           let field = gps.first(where: { $0.tag == 6 }), field.type == 5, field.count == 1,
+           let meters = try rational(field, at: 0) {
+            altitude = meters * (direction == 1 ? -1 : 1)
+        } else { altitude = nil }
+        return try PhotoCaptureLocation(latitude: coordinate(2, positive: 78, negative: 83),
+            longitude: coordinate(4, positive: 69, negative: 87), altitude: altitude)
+    }
+
+    static func marker(header jpeg: Data, source: JpegCropSource, rect: CropRect,
+                       locationFallback: PhotoCaptureLocation?) throws -> Data {
         let little: Bool
         var root: [Field] = [], exif: [Field] = [], gps: [Field] = []
-        if let bytes = payload {
-            guard bytes.count >= 8 else { throw LosslessCropProcessorError.cropFailed }
-            little = bytes[0] == 0x49 && bytes[1] == 0x49
-            guard little || (bytes[0] == 0x4d && bytes[1] == 0x4d) else { throw LosslessCropProcessorError.cropFailed }
-            let reader = Reader(bytes: bytes, little: little)
-            guard try reader.integer(2, 2) == 42 else { throw LosslessCropProcessorError.cropFailed }
-            root = try reader.fields(at: Int(reader.integer(4, 4)), keeping: ifd0Tags.union([0x8769, 0x8825]))
-            if let pointer = try reader.pointer(0x8769, in: root) { exif = try reader.fields(at: pointer, keeping: exifTags) }
-            if let pointer = try reader.pointer(0x8825, in: root) { gps = try reader.fields(at: pointer, keeping: gpsTags) }
+        if let reader = try reader(header: jpeg) {
+            little = reader.little
+            root = try reader.fields(at: Int(reader.integer(4, 4)), keeping: PhotoCaptureExif.tiffTags.union([0x8769, 0x8825]))
+            if let pointer = try reader.pointer(0x8769, in: root) { exif = try reader.fields(at: pointer, keeping: PhotoCaptureExif.exifTags) }
+            if let pointer = try reader.pointer(0x8825, in: root) { gps = try reader.fields(at: pointer, keeping: PhotoCaptureExif.gpsTags) }
             root.removeAll { $0.tag == 0x8769 || $0.tag == 0x8825 }
         } else { little = true }
         func bytes(_ value: UInt32, count: Int) -> [UInt8] {
@@ -149,6 +194,35 @@ private enum LosslessCropExif {
         }
         func scalar(_ tag: UInt16, _ value: Int, short: Bool = false) -> Field {
             Field(tag: tag, type: short ? 3 : 4, count: 1, bytes: bytes(UInt32(value), count: short ? 2 : 4))
+        }
+        if let location = locationFallback {
+            // Missing/invalid coordinates make any old altitude unreliable.
+            // Preserve all other copied GPS fields; never invent GPS time/date.
+            gps.removeAll { (1...6).contains($0.tag) }
+            func rational(_ value: Double, precision: UInt32) throws -> [UInt8] {
+                var denominator = precision
+                while denominator > 1 && (value * Double(denominator)).rounded() > Double(UInt32.max) {
+                    denominator /= 10
+                }
+                let numerator = (value * Double(denominator)).rounded()
+                guard numerator.isFinite, numerator >= 0, numerator <= Double(UInt32.max) else {
+                    throw LosslessCropProcessorError.cropFailed
+                }
+                return bytes(UInt32(numerator), count: 4) + bytes(denominator, count: 4)
+            }
+            func coordinate(_ tag: UInt16, _ value: Double, positive: UInt8, negative: UInt8) throws {
+                let degrees = floor(abs(value)), minutes = floor((abs(value) - degrees) * 60)
+                let seconds = ((abs(value) - degrees) * 60 - minutes) * 60
+                gps.append(Field(tag: tag - 1, type: 2, count: 2, bytes: [value < 0 ? negative : positive, 0]))
+                let encoded = try rational(degrees, precision: 1) + rational(minutes, precision: 1) + rational(seconds, precision: 10_000_000)
+                gps.append(Field(tag: tag, type: 5, count: 3, bytes: encoded))
+            }
+            try coordinate(2, location.latitude, positive: 78, negative: 83)
+            try coordinate(4, location.longitude, positive: 69, negative: 87)
+            if let altitude = location.altitude {
+                gps.append(Field(tag: 5, type: 1, count: 1, bytes: [altitude < 0 ? 1 : 0]))
+                gps.append(Field(tag: 6, type: 5, count: 1, bytes: try rational(abs(altitude), precision: 1_000_000)))
+            }
         }
         root += [scalar(0x0100, rect.width), scalar(0x0101, rect.height), scalar(0x0112, source.orientation, short: true)]
         exif += [scalar(0xa002, rect.width), scalar(0xa003, rect.height)]

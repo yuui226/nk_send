@@ -122,6 +122,8 @@ struct GPSConnectionControl: View {
                 anchorX: source.midX / panelWidth,
                 anchorWidth: source.width / panelWidth,
                 anchorGap: -source.maxY,
+                mouthWidth: 80,
+                tiltEnabled: false,
                 onSettled: { progress in
                     if progress == 0 && !expanded && panelVisible { panelVisible = false }
                 }
@@ -218,6 +220,7 @@ private struct GPSInlinePanel: View {
     @State private var updateBurstProgress: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
     private var statusLabel: String {
+        guard coordinator.state.enabled else { return AppLocalized.resource("gps_enable") }
         switch coordinator.state.status {
         case .off: return AppLocalized.resource("gps_enable")
         case .starting, .searching: return AppLocalized.resource("gps_searching")
@@ -258,6 +261,13 @@ private struct GPSInlinePanel: View {
             }
             .id(showConnectionSteps ? "guide" : (hasCoordinates ? "location" : "empty"))
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+            if let guidance = coordinator.state.permissionIssue?.message ?? coordinator.state.pairingGuidance {
+                Text(guidance)
+                    .zTransferText(size: 12)
+                    .foregroundStyle(ZTransferColors.accentOrange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("gps-permission-guidance")
+            }
             controlRow()
                 .frame(height: 42)
         }
@@ -423,8 +433,7 @@ private struct GPSInlinePanel: View {
             TipLightbulbButton(
                 attention: !coordinator.connectionHelpViewed && !coordinator.state.enabled,
                 size: 30,
-                accessibilityLabel: AppLocalized.resource("gps_auto_write"),
-                embeddedInPanel: true
+                accessibilityLabel: AppLocalized.resource("gps_auto_write")
             ) {
                 guard !coordinator.state.enabled else { return }
                 coordinator.markConnectionHelpViewed()
@@ -589,10 +598,11 @@ private struct GPSInlinePanel: View {
 
     private func controlRow() -> some View {
         GeometryReader { geometry in
-            // Android uses weights 0.82 / 0.86 / 1.18 with two 8dp gaps.
+            // Android gives the editable off-state frequency more room while
+            // retaining the same overall footprint and 42 pt control height.
             let unit = max(0, geometry.size.width - 16) / 2.86
-            let leadingWidth = unit * 0.82
-            let frequencyWidth = unit * 0.86
+            let leadingWidth = unit * (coordinator.state.enabled ? 0.82 : 0.60)
+            let frequencyWidth = unit * (coordinator.state.enabled ? 0.86 : 1.08)
             let actionWidth = unit * 1.18
             HStack(spacing: 8) {
                 leadingControl()
@@ -622,8 +632,8 @@ private struct GPSInlinePanel: View {
                     .frame(width: 42, height: 42)
             }
             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
-            .disabled(!coordinator.bluetooth.hasSavedPairing)
-            .opacity(coordinator.bluetooth.hasSavedPairing ? 1 : 0.42)
+            .disabled(!coordinator.bluetooth.hasPairingIdentity)
+            .opacity(coordinator.bluetooth.hasPairingIdentity ? 1 : 0.42)
             .frame(maxWidth: .infinity, alignment: .leading)
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
         } else if requiresHoldToDisable {
@@ -648,11 +658,15 @@ private struct GPSInlinePanel: View {
                               frequency: coordinator.frequency, active: countdownActive) { text in
                 DetentWheel(label: "", options: [text], selected: text,
                             optionLabel: { $0 }, onCommit: { _ in }, rowHeight: 16,
-                            wheelHeight: 42, readOnly: true, cornerRadius: 14,
+                            wheelHeight: 42, readOnly: !coordinator.state.canSyncNow, cornerRadius: 14,
                             optionFontSize: 13, accentColor: ZTransferColors.statusConnected,
                             emphasized: true, showEmphasisBorder: false,
+                            onActivated: coordinator.syncNow,
                             ambientEffectColor: ZTransferColors.statusConnected,
                             ambientEffectAlpha: 0.18 * updateBurstProgress)
+                    .accessibilityLabel(AppLocalized.resource("gps_sync_now"))
+                    .accessibilityHint("")
+                    .accessibilityIdentifier("gps-sync-now")
             }
         } else if !coordinator.state.enabled {
             DetentWheel(label: AppLocalized.resource("gps_update_frequency_label"),
@@ -660,7 +674,8 @@ private struct GPSInlinePanel: View {
                         optionLabel: { $0.title }, onCommit: coordinator.setFrequency,
                         rowHeight: 16, wheelHeight: 42, enabled: true,
                         cornerRadius: 14, optionFontSize: 13,
-                        accentColor: ZTransferColors.accentBlue, onDetent: {})
+                        accentColor: ZTransferColors.accentBlue,
+                        onDetent: { haptics.play(.selection) })
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
         } else {
             Color.clear
@@ -674,16 +689,10 @@ private struct GPSInlinePanel: View {
             haptics.play(.action)
             if !coordinator.state.enabled { coordinator.setEnabled(true) }
             else if coordinator.state.status == .error {
-                let message = coordinator.state.message ?? ""
-                let needsSettings = message == AppLocalized.resource("gps_bluetooth_required") ||
-                    message == AppLocalized.resource("gps_permission_required") ||
-                    !CLLocationManager.locationServicesEnabled()
-                if needsSettings {
+                coordinator.retryOrOpenSettings {
                     if let settings = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(settings)
                     }
-                } else {
-                    coordinator.retry()
                 }
             }
             else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
@@ -721,6 +730,7 @@ private struct GPSInlinePanel: View {
             disabledAlpha: 1
         ))
         .accessibilityIdentifier("gps-status-control")
+        .accessibilityLabel(statusLabel)
         // Android's GpsStatusButton gives a held-to-disable press a short
         // foreground glow (90ms in, 170ms out) while the 800ms progressive
         // hold is running. Keep the glow inside the button so it never

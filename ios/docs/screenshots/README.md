@@ -1,5 +1,21 @@
 # App Store 截图采集与交付
 
+## 当前参考图（2026-11-02）
+
+已使用本轮严格包检查通过的无签名模拟器 **Release 2.03 (76)** 重新采集并逐张核看首页、设置各3张，全部绑定同一可执行文件。它们只有两种页面，仍为 `candidate`、`allowedForUpload=false`，完整商店截图未完成；当前可上传 `ready` 数仍为0。旧1.98图只留作历史。
+
+| 设备组 | 首页 | 设置 | 原生像素 |
+|---|---|---|---|
+| iPhone 17 Pro / `iphone-medium` | [首页](current-20261102/zh-Hans/iphone-medium/01-connect.png) | [设置](current-20261102/zh-Hans/iphone-medium/settings-reference.png) | 1206×2622 |
+| iPhone 17 Pro Max / `iphone-large` | [首页](current-20261102/zh-Hans/iphone-large/01-connect.png) | [设置](current-20261102/zh-Hans/iphone-large/settings-reference.png) | 1320×2868 |
+| iPad Pro 13-inch M5 / `ipad-13` | [首页](current-20261102/zh-Hans/ipad-13/01-connect.png) | [设置](current-20261102/zh-Hans/ipad-13/settings-reference.png) | 2064×2752 |
+
+[本轮采集记录](capture-record-20261102.json)保存构建摘要、逐图SHA-256、原始附件和设备清理结果；PNG均为RGB无alpha，复制前后摘要一致，未修图。通过App真实语言拨轮选择简体中文，系统浅色、large字号；没有Debug启动参数、模拟相机、权益或应用数据注入。设置显示当前2.03版及隐私/条款入口，控件未越界；本轮没有点击外部法律链接，也没有验证所有iPad窗口尺寸。
+
+[采集源文件](../evidence/prepayment-20261102/reference-capture/ReleaseReferenceCapture.swift)与[执行脚本](../evidence/prepayment-20261102/reference-capture/capture_one.py)保留在证据目录。1个独立UI方法在3个新建模拟器各通过一次，不计入424项模型/组件/StoreKit回归；3个临时模拟器均已关闭并删除，未安装真机。照片列表、传输、监看、效果成图及所需其他语言仍待公开素材/硬件实测及语言确认，见[当前台账P14–P17](../付费前复核与补齐-20261102.md)。
+
+## 2026-10-21历史说明
+
 2026-10-21 本次资源移除验证的 Debug UI/组件图只作测试证据，不计入商店 `ready`，也不改变旧候选的构建归属。已有新设备 Release 资源检查、183项XCTest及4个不同UI方法通过；正式截图仍须按最终提交版本采集，见[移除专项](../iOS移除品牌图标与内置预设-20261021.md)。
 
 2026-10-21 范围更新：本人已确定移除 iOS 品牌图形 Logo/对应拨轮档位及全部用于写入相机的内置 NP3 文件。包含这些旧功能的参考图只留作历史，不能直接作为此次首发截图；用户自定义图片水印继续保留。此次变更后的实际界面和候选包需对应新记录，不由此前采集成功推断新范围已验收。

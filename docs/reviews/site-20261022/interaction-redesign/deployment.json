@@ -1,0 +1,77 @@
+{
+  "commit": "9fe0280a7c836b7b9a328cea0d8265b012f1efa3",
+  "files": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 48274,
+      "sha256": "f84c7b0edc6c87f0c6a3f0b7fe973dbe4e7418902eb81dd1d3059b6515292c76",
+      "matches_source": true
+    },
+    {
+      "path": "app.js",
+      "status": 200,
+      "bytes": 7369,
+      "sha256": "d8340024cbe787e5f0f233b1f760931d63248758ce9e20984183b6f554ffa90d",
+      "matches_source": true
+    },
+    {
+      "path": "styles.css",
+      "status": 200,
+      "bytes": 22605,
+      "sha256": "61efb7926d6d6ad56362113b87e5cfbcea4bdfa4750c254e97e2f215b18bafe6",
+      "matches_source": true
+    },
+    {
+      "path": "screenshots.css",
+      "status": 200,
+      "bytes": 6796,
+      "sha256": "599df494e977efd2776bb768b7726fedab37e21b87bcee0fcda39bc60f3a900a",
+      "matches_source": true
+    },
+    {
+      "path": "feature-guide.css",
+      "status": 200,
+      "bytes": 5902,
+      "sha256": "58a1832efc3f0be90f2a864a5288a1a5655a91d8a70c4fcda760131ec0f9ca09",
+      "matches_source": true
+    }
+  ],
+  "preserved_existing_files_unchanged": true,
+  "preserved_file_count": 10,
+  "browser_viewports_checked": [
+    [
+      320,
+      568
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      1024,
+      768
+    ],
+    [
+      1440,
+      1000
+    ]
+  ],
+  "feature_checks_per_viewport": 47,
+  "maximum_layout_change_px": 0,
+  "connection_and_faq_panels_per_viewport": 9,
+  "original_screenshot_assets_unchanged": true,
+  "app_backend_unchanged": true,
+  "api_server_login_performed_this_update": false,
+  "apk_download_verification": "Existing HTTPS URL failed the TLS handshake from this environment in Python and system curl. Not confirmed available.",
+  "canonical_homepage_matches_source": true,
+  "live_browser_max_layout_change_px": 0,
+  "pages_build": {
+    "status": "built",
+    "updated_at": "2026-10-22T04:52:48Z"
+  }
+}

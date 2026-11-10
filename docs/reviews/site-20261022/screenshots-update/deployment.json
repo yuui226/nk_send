@@ -1,0 +1,120 @@
+{
+  "commit": "176335d8145fb9dab839e74f7f070a02a9003ce6",
+  "files": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 26363,
+      "sha256": "b698c0bae6b039f5e8876c3c18b75e5c56317c3394921e3f5b8d3c76eff291a4",
+      "matches_source": true
+    },
+    {
+      "path": "app.js",
+      "status": 200,
+      "bytes": 5448,
+      "sha256": "04acaa35993d5477c71be18e3722ae9653a4b4a0eba898376f56220bde431bfe",
+      "matches_source": true
+    },
+    {
+      "path": "screenshots.css",
+      "status": 200,
+      "bytes": 12538,
+      "sha256": "be6bf856b27b6670ba6ea54e8515722b743a8c7af884a5d9dec620b10faf9849",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/connection.webp",
+      "status": 200,
+      "bytes": 245748,
+      "sha256": "364274e2675f2c96a087e0a379a6f47298c6e2c22669d3b4a47c56e4725538b1",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/editor.webp",
+      "status": 200,
+      "bytes": 798412,
+      "sha256": "feec208ed75fe51c0f2bd0b0420f3d2fb8f2c6624fb0d2166febd6bab5dac497",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/filters.webp",
+      "status": 200,
+      "bytes": 1085644,
+      "sha256": "1ab96dc24e62b605694fe32093f0bf79cda9c01215455d6d7bc2d5fb4799604f",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/gallery.webp",
+      "status": 200,
+      "bytes": 1227284,
+      "sha256": "7f2840ed66b0568e6f5abf75fc68ece4731b74b53ed98f2cc2efd108d576d676",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/local-effects.webp",
+      "status": 200,
+      "bytes": 112182,
+      "sha256": "bbc8956673a973215e1c829425b4a869389477e4d29b04583291f003ea124cf6",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/queue.webp",
+      "status": 200,
+      "bytes": 474064,
+      "sha256": "8c9631eb08a92e0293c0b8163a125931f2b5d125b26275d60ceef1d7bb9ddbd7",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/remote.webp",
+      "status": 200,
+      "bytes": 223970,
+      "sha256": "900a554ea4c0dc8485006ac87ac3303eac84c6cb103ed6e5ba2eb068c07a3b3c",
+      "matches_source": true
+    }
+  ],
+  "preserved_existing_files_unchanged": true,
+  "preserved_file_count": 10,
+  "browser_viewports_checked": [
+    [
+      1440,
+      1000
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      320,
+      740
+    ]
+  ],
+  "source_pixel_validation": "Lossless WebP; decoded RGB equals every supplied original JPG. See screenshots-source-check.json.",
+  "app_backend_unchanged": true,
+  "api_server_login_performed_this_update": false,
+  "pages_build": {
+    "status": "built",
+    "commit": "176335d8145fb9dab839e74f7f070a02a9003ce6",
+    "created_at": "2026-10-22T01:30:07Z",
+    "updated_at": "2026-10-22T01:30:25Z",
+    "error": null
+  },
+  "live_browser_checks": {
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "images_loaded": true,
+    "screenshot_dialog_open_and_close": true,
+    "escape_and_focus_return": true,
+    "no_horizontal_overflow": true,
+    "console_errors_and_warnings": []
+  }
+}

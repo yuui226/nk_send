@@ -44,7 +44,9 @@ final class PTPIPSocketConnection: @unchecked Sendable {
         guard accepted else { channel.close(); throw PTPSessionError.invalidated }
     }
 
-    func sendPOSIX(_ data: Data) async throws { try await readyPOSIX().send(data) }
+    func sendPOSIX(_ data: Data, permission: PTPCommandPermission? = nil) async throws {
+        try await readyPOSIX().send(data, permission: permission)
+    }
     func receivePOSIX(maximumLength: Int, diagnostics: PTPTransferDiagnostics? = nil,
                       readTimeoutNanoseconds: UInt64? = nil) async throws -> Data {
         try await readyPOSIX().receive(maximumLength: maximumLength, diagnostics: diagnostics,

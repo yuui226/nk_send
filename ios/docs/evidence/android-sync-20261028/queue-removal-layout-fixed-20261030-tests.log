@@ -1,0 +1,49 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=B6B4E291-173A-4BFE-BB9C-2D1F62643C49" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath /tmp/ztransfer-queue-removal-layout-fixed-20261030.xcresult "-only-testing:ZTransferTests/QueueRemovalLayoutTests" CODE_SIGN_IDENTITY=- test
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = -
+
+Writing result bundle at path:
+	/tmp/ztransfer-queue-removal-layout-fixed-20261030.xcresult
+
+note: Using codesigning identity override: -
+ComputePackagePrebuildTargetDependencyGraph
+
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios16.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/Developer/Library/Frameworks -filelist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -bundle_loader /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer -Xlinker -object_path_lto -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib -Xlinker -no_adhoc_codesign -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferTests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/XCTest.framework/XCTest' which was built for newer version 17.0
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferTests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/libXCTestSwiftSupport.dylib' which was built for newer version 17.0
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest (in target 'ZTransferTests' from project 'ZTransfer')
+2026-10-30 16:23:55.846 appintentsmetadataprocessor[70049:36384005] Starting appintentsmetadataprocessor export
+2026-10-30 16:23:55.852 appintentsmetadataprocessor[70049:36384005] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+CodeSign /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest (in target 'ZTransferTests' from project 'ZTransfer')
+2026-10-30 16:24:19.812976+0800 ZTransfer[70236:36386559] [General] Failed to send CA Event for app launch measurements for ca_event_type: 1 event_name: com.apple.app_launch_measurement.ExtendedLaunchMetrics
+Test Suite 'Selected tests' started at 2026-10-30 16:24:19.995.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 16:24:19.996.
+Test Suite 'QueueRemovalLayoutTests' started at 2026-10-30 16:24:19.996.
+Test Case '-[ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows]' started.
+QUEUE_REMOVAL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/C0319D8A-735D-4D4F-9875-5EBC9D3940E7/tmp/queue-removal-initial.png
+QUEUE_REMOVAL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/C0319D8A-735D-4D4F-9875-5EBC9D3940E7/tmp/queue-removal-fade-before-collapse.png
+2026-10-30 16:24:20.740446+0800 ZTransfer[70236:36386562] [connection] nw_socket_handle_socket_event [C1:1] Socket SO_ERROR [61: Connection refused]
+2026-10-30 16:24:20.740773+0800 ZTransfer[70236:36386562] [connection] nw_endpoint_flow_failed_with_error [C1 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows]' passed (0.772 seconds).
+Test Suite 'QueueRemovalLayoutTests' passed at 2026-10-30 16:24:20.769.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.772 (0.773) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 16:24:20.770.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.772 (0.774) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 16:24:20.770.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.772 (0.775) seconds
+2026-10-30 16:24:20.810 xcodebuild[70010:36383707] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 16:24:20.810 xcodebuild[70010:36383707] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 16:24:21.121 xcodebuild[70010:36383707] [MT] IDETestOperationsObserverDebug: 24.725 elapsed -- Testing started completed.
+2026-10-30 16:24:21.121 xcodebuild[70010:36383707] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-30 16:24:21.121 xcodebuild[70010:36383707] [MT] IDETestOperationsObserverDebug: 24.725 sec, +24.725 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-queue-removal-layout-fixed-20261030.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

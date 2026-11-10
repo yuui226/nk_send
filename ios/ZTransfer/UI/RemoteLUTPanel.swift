@@ -27,7 +27,7 @@ struct RemoteLUTPanel: View {
         var selection = categorySelection
         let _ = selection.reconcile(catalog: catalog, selected: monitor.active?.file.identifier)
         let category = selection.category
-        let visible = catalog.filesByCategory[category] ?? []
+        let visible = catalog.files(in: category) ?? []
         let showList = status.accessible && !monitor.files.isEmpty
         let layout = RemoteLUTPanelLayout(hostSize: hostSize, anchor: anchor, landscape: landscape,
             hasFiles: !monitor.files.isEmpty, guidance: status.guidance.map { AppLocalized.resource($0) },
@@ -60,8 +60,8 @@ struct RemoteLUTPanel: View {
                 }
                 if showList {
                     HStack(alignment: .top, spacing: 6) {
-                        PhotoEffectChooserList(items: catalog.categories, id: \.self, initialID: .some(category)) { value in
-                            RemotePresetChoiceRow(text: categoryLabel(value), selected: category == value,
+                        PhotoEffectChooserList(items: catalog.categories, id: \.presetCategoryBytes, initialID: .some(category.presetCategoryBytes)) { value in
+                            RemotePresetChoiceRow(text: categoryLabel(value), selected: category.presetCategoryBytes == value.presetCategoryBytes,
                                 enabled: enabled, verticalPadding: 10, category: true) {
                                 categorySelection = selection
                                 categorySelection.category = value
@@ -73,7 +73,7 @@ struct RemoteLUTPanel: View {
                                 pending: monitor.loadingIdentifier == file.identifier, enabled: enabled) {
                                 ZTransferHaptics.shared.play(.selection); monitor.select(file)
                             }.accessibilityIdentifier("remote-lut-option-\(file.identifier)")
-                        }.id(category).frame(width: layout.columnWidth * 0.64)
+                        }.id(category.presetCategoryBytes).frame(width: layout.columnWidth * 0.64)
                     }.frame(height: layout.listHeight)
                 }
             }

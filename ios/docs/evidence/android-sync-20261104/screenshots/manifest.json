@@ -1,0 +1,44 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "CA046456-B859-45F4-9CB3-2C6E2F8E03B0",
+        "deviceName" : "iPhone 17 Pro",
+        "exportedFileName" : "73B5EF55-1708-40B1-BBD8-75EC7F77626A.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "self-timer-landscape-dark_0_43615922-14B8-4F66-9461-2F6CDF52BB82.png",
+        "timestamp" : 1793794641.571
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "CA046456-B859-45F4-9CB3-2C6E2F8E03B0",
+        "deviceName" : "iPhone 17 Pro",
+        "exportedFileName" : "4CFF3ED5-6A62-47AA-9457-40CAA78416CA.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "self-timer-landscape-light_0_C559FB67-7CDE-4426-97E1-D8DAF9394AF5.png",
+        "timestamp" : 1793794639.912
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "CA046456-B859-45F4-9CB3-2C6E2F8E03B0",
+        "deviceName" : "iPhone 17 Pro",
+        "exportedFileName" : "B40BC0AB-362E-4DCF-B861-92F9E34ED886.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "self-timer-portrait-dark_0_4C236FB6-56FF-4915-88B5-AC3D008E1B97.png",
+        "timestamp" : 1793794638.245
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "CA046456-B859-45F4-9CB3-2C6E2F8E03B0",
+        "deviceName" : "iPhone 17 Pro",
+        "exportedFileName" : "D0C3C096-D418-4081-9273-3592A55A7B45.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "self-timer-portrait-light_0_55D65B04-3656-4FED-91D2-85D45A785F3B.png",
+        "timestamp" : 1793794636.564
+      }
+    ],
+    "testIdentifier" : "RemoteSelfTimerTests/testActualTimerPopupAndShutterInBothOrientationsAndThemes()",
+    "testIdentifierURL" : "test://com.apple.xcode/ZTransfer/ZTransferTests/RemoteSelfTimerTests/testActualTimerPopupAndShutterInBothOrientationsAndThemes"
+  }
+]

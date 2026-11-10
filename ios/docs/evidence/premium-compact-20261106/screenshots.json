@@ -1,0 +1,128 @@
+[
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName": "ZTransfer-iOS191-Tests",
+        "exportedFileName": "08BC1229-F6EE-43E2-B120-B601A521F526.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-en-1_0_D4CB4398-BFED-4B70-8607-ADDA79EC77CE.png",
+        "timestamp": 1793957262.742,
+        "evidenceFileName": "pro-premium-compact-en-1.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName": "ZTransfer-iOS191-Tests",
+        "exportedFileName": "0235EE7E-7CC2-47FE-8D4E-93EA805D80EB.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-en-0_0_27C686E1-7219-4DB9-A380-185B4D84EB55.png",
+        "timestamp": 1793957257.671,
+        "evidenceFileName": "pro-premium-compact-en-0.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName": "ZTransfer-iOS191-Tests",
+        "exportedFileName": "099CFC8C-E691-403B-859A-FB1A88D0A654.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hant-1_0_2B79BEBF-F313-49D0-A45A-7C5FB80E3097.png",
+        "timestamp": 1793957206.921,
+        "evidenceFileName": "pro-premium-compact-zh-Hant-1.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName": "ZTransfer-iOS191-Tests",
+        "exportedFileName": "EC63B95C-7556-4697-921C-69BCF6368585.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hant-0_0_0C0FA4F3-99C3-435D-B4D4-279C37475641.png",
+        "timestamp": 1793957201.448,
+        "evidenceFileName": "pro-premium-compact-zh-Hant-0.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName": "ZTransfer-iOS191-Tests",
+        "exportedFileName": "77399A32-D126-482A-BDBA-651CBEE2BD4D.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hans-1_0_9A309FD5-DCBD-48C5-A297-3351B79C13BA.png",
+        "timestamp": 1793957146.963,
+        "evidenceFileName": "pro-premium-compact-zh-Hans-1.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName": "ZTransfer-iOS191-Tests",
+        "exportedFileName": "D788EF7C-E448-4C08-8F0A-EF3C8F151D85.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hans-0_0_BC2FD9AA-5C44-408F-9A85-A067708C4914.png",
+        "timestamp": 1793957141.538,
+        "evidenceFileName": "pro-premium-compact-zh-Hans-0.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "deviceName": "ZTransfer-Pro-Compact",
+        "exportedFileName": "29484553-8CD4-4E94-BCE3-8C06A38C229D.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-en-1_0_DF4441D0-28AD-4D2F-801A-9C0888F80285.png",
+        "timestamp": 1793957296.992,
+        "evidenceFileName": "se-premium-compact-en-1.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "deviceName": "ZTransfer-Pro-Compact",
+        "exportedFileName": "F88DF22E-5B60-4F02-896F-F5B60735822A.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-en-0_0_5BF0B821-F15D-4BCE-9014-22CFA62A72CE.png",
+        "timestamp": 1793957291.984,
+        "evidenceFileName": "se-premium-compact-en-0.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "deviceName": "ZTransfer-Pro-Compact",
+        "exportedFileName": "2BBE4270-0FE2-4C7A-8AD4-42E1146FE212.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hant-1_0_DAD1E2A8-E3F7-4B1E-873B-3F66F6A7F0FB.png",
+        "timestamp": 1793957242.248,
+        "evidenceFileName": "se-premium-compact-zh-Hant-1.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "deviceName": "ZTransfer-Pro-Compact",
+        "exportedFileName": "72DE549C-DD7F-49F4-8388-FE5675BDEA64.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hant-0_0_E3959463-CD25-47D3-8E66-034D3D821DCA.png",
+        "timestamp": 1793957236.661,
+        "evidenceFileName": "se-premium-compact-zh-Hant-0.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "deviceName": "ZTransfer-Pro-Compact",
+        "exportedFileName": "3E1103AC-0724-41E7-8CDC-95C078ADC5B0.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hans-1_0_C1F0A3AE-F802-45E1-8813-443F4000AFD8.png",
+        "timestamp": 1793957185.274,
+        "evidenceFileName": "se-premium-compact-zh-Hans-1.png"
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "13EB3240-0CC7-4910-8724-1A527489099B",
+        "deviceName": "ZTransfer-Pro-Compact",
+        "exportedFileName": "9F1E3D3F-45C1-449C-B2B6-532763581F77.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "premium-compact-zh-Hans-0_0_870D4FA9-2679-49EF-8B02-C9A01B789103.png",
+        "timestamp": 1793957179.12,
+        "evidenceFileName": "se-premium-compact-zh-Hans-0.png"
+      }
+    ],
+    "testIdentifier": "PremiumRecoveryUITests/testPurchasePageLayoutInAllLanguages()",
+    "testIdentifierURL": "test://com.apple.xcode/ZTransfer/ZTransferStoreKitUITests/PremiumRecoveryUITests/testPurchasePageLayoutInAllLanguages"
+  }
+]

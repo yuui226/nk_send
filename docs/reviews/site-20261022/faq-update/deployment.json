@@ -1,0 +1,27 @@
+{
+  "commit": "efd49f3903bb7849b69d91138cb46143b4f9af8a",
+  "files": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 17977,
+      "sha256": "79077b9ec7bf378e70c5b0f8fb1ed974d83d4bb72cb968933ce12ca7c01a3ade",
+      "matches_source": true
+    }
+  ],
+  "preserved_existing_files_unchanged": true,
+  "preserved_file_count": 10,
+  "browser_viewports_checked": [
+    [
+      1440,
+      1000
+    ],
+    [
+      390,
+      844
+    ]
+  ],
+  "source_pixel_validation": "All visual assets unchanged; only FAQ HTML text updated.",
+  "app_backend_unchanged": true,
+  "api_server_login_performed_this_update": false
+}

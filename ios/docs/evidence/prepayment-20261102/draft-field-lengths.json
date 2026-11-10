@@ -1,0 +1,93 @@
+[
+  {
+    "file": "商店文案草稿.md",
+    "field": "应用名称",
+    "count": 2,
+    "unit": "characters",
+    "limit": 30,
+    "withinLimit": true
+  },
+  {
+    "file": "商店文案草稿.md",
+    "field": "副标题",
+    "count": 16,
+    "unit": "characters",
+    "limit": 30,
+    "withinLimit": true
+  },
+  {
+    "file": "商店文案草稿.md",
+    "field": "宣传文本",
+    "count": 70,
+    "unit": "characters",
+    "limit": 170,
+    "withinLimit": true
+  },
+  {
+    "file": "商店文案草稿.md",
+    "field": "关键词",
+    "count": 68,
+    "unit": "UTF-8 bytes",
+    "limit": 100,
+    "withinLimit": true
+  },
+  {
+    "file": "商店文案草稿.md",
+    "field": "Description",
+    "count": 1303,
+    "limit": 4000,
+    "withinLimit": true,
+    "unit": "characters"
+  },
+  {
+    "file": "商店英文文案草稿.md",
+    "field": "Name",
+    "count": 9,
+    "unit": "characters",
+    "limit": 30,
+    "withinLimit": true
+  },
+  {
+    "file": "商店英文文案草稿.md",
+    "field": "Subtitle",
+    "count": 27,
+    "unit": "characters",
+    "limit": 30,
+    "withinLimit": true
+  },
+  {
+    "file": "商店英文文案草稿.md",
+    "field": "Promotional Text",
+    "count": 155,
+    "unit": "characters",
+    "limit": 170,
+    "withinLimit": true
+  },
+  {
+    "file": "商店英文文案草稿.md",
+    "field": "Keywords",
+    "count": 64,
+    "unit": "UTF-8 bytes",
+    "limit": 100,
+    "withinLimit": true
+  },
+  {
+    "file": "商店英文文案草稿.md",
+    "field": "Description",
+    "count": 3388,
+    "limit": 4000,
+    "withinLimit": true,
+    "unit": "characters"
+  },
+  {
+    "file": "审核说明草稿.md",
+    "field": "English review notes",
+    "count": 3934,
+    "utf8Bytes": 3934,
+    "limit": 4000,
+    "withinLimit": true,
+    "unit": "UTF-8 bytes",
+    "characters": 3612,
+    "source": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information/"
+  }
+]

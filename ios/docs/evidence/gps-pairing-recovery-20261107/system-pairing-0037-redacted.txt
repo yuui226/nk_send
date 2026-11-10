@@ -1,0 +1,10 @@
+2026-11-07 00:37:59.085 Df bluetoothd[6621:24f9a7] [com.apple.bluetooth:Server.Core] Connecting 0xffffd7bf services to device [camera-address], paired 1
+2026-11-07 00:38:00.128 Df bluetoothd[6621:18fbc8] [com.apple.bluetooth:Server.Security] Found link key for device [device-hash]
+2026-11-07 00:38:00.128 Df bluetoothd[6621:18fbc8] [com.apple.bluetooth:Stack.SECMGR]  Enforcement complete with OI_OK
+2026-11-07 00:38:00.313 Df bluetoothd[6621:18fbc5] [com.apple.bluetooth:Server.Security] Found link key for device [device-hash]
+2026-11-07 00:38:00.313 Df bluetoothd[6621:18fbc5] [com.apple.bluetooth:Stack.SECMGR]  Security level 2: state IDLE, key is sufficient
+2026-11-07 00:38:00.313 Df bluetoothd[6621:18fbc5] [com.apple.bluetooth:Stack.SECMGR]  Send authentication request
+2026-11-07 00:38:00.317 Df bluetoothd[6621:18fbc6] [com.apple.bluetooth:Server.Security] Found link key for device [device-hash]
+2026-11-07 00:38:00.325 Df bluetoothd[6621:18fbc6] [com.apple.bluetooth:Stack.SECMGR]  Enforcement complete with  STATUS 706
+2026-11-07 00:38:00.325 E  bluetoothd[6621:18fbc6] [com.apple.bluetooth:Server.Accessory] Connection to device [camera-address] failed - result was 706
+2026-11-07 00:38:00.327 Df bluetoothd[6621:24ff4c] [com.apple.bluetooth:CBStackController] DeviceConnected: CBDevice [device-or-session-uuid], BDA <private>, SupS 0x80 < WirelessiAP >, result 310151/0x4BB87 BT_ERROR_INVALID_LINK_KEY

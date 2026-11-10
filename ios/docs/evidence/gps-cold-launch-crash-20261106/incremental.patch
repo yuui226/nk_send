@@ -1,0 +1,522 @@
+--- before/ios/GPSTests/GPSProtocolTests.swift
++++ after/ios/GPSTests/GPSProtocolTests.swift
+@@ -44,6 +44,51 @@
+     }
+ 
+     #if !SWIFT_PACKAGE
++    @MainActor
++    func testColdLaunchIgnoresLegacyEnabledWithoutRequestingPermissionsOrStartingGPS() async throws {
++        for authorization: CLAuthorizationStatus in [.notDetermined, .denied, .authorizedWhenInUse] {
++            let suite = "GPSColdLaunch-\(UUID())"
++            let defaults = UserDefaults(suiteName: suite)!
++            defer { defaults.removePersistentDomain(forName: suite) }
++            defaults.set(true, forKey: GPSPreferences.legacyEnabled)
++            defaults.set(120, forKey: GPSPreferences.updateFrequencySeconds)
++            defaults.set(true, forKey: GPSPreferences.connectionHelpViewed)
++            defaults.set(123, forKey: GPSPreferences.deviceID)
++            defaults.set(456, forKey: GPSPreferences.nonce)
++            let manager = GPSControlledLocationManager(), transport = GPSControlledTransport()
++            manager.authorization = authorization
++            var queries = 0
++            let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport,
++                locationManager: manager, locationServicesQuery: { queries += 1; $0(true) },
++                bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
++            defer { coordinator.setEnabled(false) }
++            coordinator.resumeAuthorizationIfNeeded()
++            coordinator.locationManagerDidChangeAuthorization(manager)
++            transport.emit(.ready("old camera"))
++            coordinator.syncNow()
++            try await Task.sleep(for: .milliseconds(30))
++            XCTAssertFalse(coordinator.state.enabled)
++            XCTAssertEqual(coordinator.state.status, .off)
++            XCTAssertNil(coordinator.state.permissionIssue)
++            XCTAssertEqual(queries, 0)
++            XCTAssertEqual(manager.foregroundRequests, 0)
++            XCTAssertEqual(manager.starts, 0)
++            XCTAssertEqual(transport.starts, 0)
++            XCTAssertTrue(transport.payloads.isEmpty)
++            XCTAssertNil(defaults.object(forKey: GPSPreferences.legacyEnabled))
++            XCTAssertEqual(coordinator.frequency.rawValue, 120)
++            XCTAssertTrue(coordinator.connectionHelpViewed)
++            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.deviceID), 123)
++            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.nonce), 456)
++        }
++    }
++
++    func testBuiltAppDeclaresBothLocationAndCentralBluetoothBackgroundModes() {
++        let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
++        XCTAssertTrue(modes.contains("location"))
++        XCTAssertTrue(modes.contains("bluetooth-central"))
++    }
++
+     @MainActor
+     func testDelayedSystemSwitchCheckCannotOutliveGrantOffAPOrOwner() {
+         for action in ["grant", "off", "ap", "replace", "destroy", "background"] {
+@@ -227,7 +272,7 @@
+             XCTAssertNil(coordinator.state.lastSentAt)
+             XCTAssertEqual(transport.payloads.count, 4)
+             XCTAssertFalse(manager.updating)
+-            XCTAssertFalse(defaults.bool(forKey: GPSPreferences.enabled))
++            XCTAssertNil(defaults.object(forKey: GPSPreferences.legacyEnabled))
+         }
+     }
+ 
+@@ -565,11 +610,7 @@
+         for _ in 0..<200 where await clock.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+         let delays = await clock.delays
+         XCTAssertEqual(delays, [300_000_000_000, 300_000_000_000])
+-        // The persisted switch and live transport are independent of a READY presentation.
+-        storage.set(false, forKey: GPSPreferences.enabled)
+-        coordinator.syncNow()
+-        XCTAssertEqual(transport.payloads.count, 2)
+-        storage.set(true, forKey: GPSPreferences.enabled)
++        // The live transport is authoritative even when the UI retains READY.
+         transport.emit(.disconnected)
+         XCTAssertEqual(coordinator.state.status, .ready)
+         XCTAssertTrue(coordinator.state.canSyncNow)
+@@ -742,23 +783,19 @@
+     }
+ 
+     @MainActor
+-    func testFreshPairingAndRestoredEnabledSessionDoNotPrewarm() async throws {
+-        for restored in [false, true] {
+-            let suite = "GPSNoBackgroundWarmup-\(UUID())"
+-            let defaults = UserDefaults(suiteName: suite)!
+-            defer { defaults.removePersistentDomain(forName: suite) }
+-            defaults.set(restored, forKey: GPSPreferences.enabled)
+-            let manager = GPSControlledLocationManager(), transport = GPSControlledTransport()
+-            transport.hasSavedPairing = restored
+-            let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager)
+-            if !restored { coordinator.setEnabled(true) }
+-            for _ in 0..<200 where transport.starts == 0 { try await Task.sleep(for: .milliseconds(5)) }
+-            XCTAssertEqual(transport.starts, 1)
+-            XCTAssertEqual(manager.starts, 0)
+-            transport.emit(.connecting("Camera"))
+-            XCTAssertEqual(manager.starts, 0)
+-            coordinator.setEnabled(false)
+-        }
++    func testFreshPairingDoesNotPrewarmLocation() async throws {
++        let suite = "GPSNoBackgroundWarmup-\(UUID())"
++        let defaults = UserDefaults(suiteName: suite)!
++        defer { defaults.removePersistentDomain(forName: suite) }
++        let manager = GPSControlledLocationManager(), transport = GPSControlledTransport()
++        transport.hasSavedPairing = false
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager)
++        coordinator.setEnabled(true)
++        XCTAssertEqual(transport.starts, 1)
++        XCTAssertEqual(manager.starts, 0)
++        transport.emit(.connecting("Camera"))
++        XCTAssertEqual(manager.starts, 0)
++        coordinator.setEnabled(false)
+     }
+ 
+     @MainActor
+@@ -1042,7 +1079,7 @@
+         }
+         for _ in 0..<20 { await Task.yield() }
+         XCTAssertEqual(coordinator.state.status, .off)
+-        XCTAssertFalse(defaults.bool(forKey: GPSPreferences.enabled))
++        XCTAssertNil(defaults.object(forKey: GPSPreferences.legacyEnabled))
+     }
+ 
+     @MainActor
+@@ -1532,26 +1569,57 @@
+     }
+ 
+     @MainActor
+-    func testSystemRestorationCannotReviveStoppedClientOrReplayConsumedLaunch() {
+-        let suite = "GPSRestoration-\(UUID())"
+-        let defaults = UserDefaults(suiteName: suite)!
+-        defer { defaults.removePersistentDomain(forName: suite) }
+-        defaults.set(true, forKey: GPSPreferences.enabled)
+-        let initial = NikonGPSBluetoothClient(defaults: defaults)
+-        XCTAssertTrue(initial.takeRestorationPermission())
+-        XCTAssertFalse(initial.takeRestorationPermission())
+-        let stopped = NikonGPSBluetoothClient(defaults: defaults)
+-        stopped.stop()
+-        // Enabled remains persisted during pairing-error/user-action stops.
+-        XCTAssertTrue(defaults.bool(forKey: GPSPreferences.enabled))
+-        XCTAssertFalse(stopped.takeRestorationPermission())
+-        XCTAssertEqual(stopped.state, .disconnected)
+-        defaults.set(false, forKey: GPSPreferences.enabled)
+-        let disabled = NikonGPSBluetoothClient(defaults: defaults)
+-        XCTAssertFalse(disabled.takeRestorationPermission())
+-        defaults.set(true, forKey: GPSPreferences.enabled)
+-        XCTAssertFalse(disabled.takeRestorationPermission())
+-        XCTAssertTrue(NikonGPSBluetoothClient(defaults: defaults).takeRestorationPermission())
++    func testBluetoothManagerIsLazySessionOnlyAndReusedAfterRestart() {
++        let suite = "GPSBluetoothSession-\(UUID())"
++        let defaults = UserDefaults(suiteName: suite)!
++        defer { defaults.removePersistentDomain(forName: suite) }
++        defaults.set(true, forKey: GPSPreferences.legacyEnabled)
++        var creations = 0
++        let client = NikonGPSBluetoothClient(defaults: defaults, centralFactory: { delegate, options in
++            creations += 1
++            XCTAssertNil(options, "No restoration identifier: cold launch must not restore GPS")
++            return CBCentralManager(delegate: delegate, queue: .main, options: options)
++        })
++        XCTAssertEqual(creations, 0)
++        XCTAssertEqual(client.state, .disconnected)
++        client.stop()
++        XCTAssertEqual(creations, 0)
++        client.start()
++        XCTAssertEqual(creations, 1)
++        client.stop()
++        client.start()
++        XCTAssertEqual(creations, 1)
++        client.stop()
++        XCTAssertEqual(client.state, .disconnected)
++    }
++
++    @MainActor
++    func testEnabledSessionSurvivesForegroundReturnButNotNewCoordinator() {
++        let suite = "GPSSessionIntent-\(UUID())"
++        let defaults = UserDefaults(suiteName: suite)!
++        defer { defaults.removePersistentDomain(forName: suite) }
++        let firstTransport = GPSControlledTransport(), firstLocation = GPSControlledLocationManager()
++        var first: GPSCoordinator? = GPSCoordinator(defaults: defaults, bluetooth: firstTransport,
++            locationManager: firstLocation, bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
++        first?.setEnabled(true)
++        firstTransport.emit(.scanning)
++        first?.resumeAuthorizationIfNeeded()
++        XCTAssertEqual(firstTransport.starts, 1)
++        XCTAssertTrue(first?.state.enabled == true)
++        XCTAssertNil(defaults.object(forKey: GPSPreferences.legacyEnabled))
++        first = nil
++        let secondTransport = GPSControlledTransport(), secondLocation = GPSControlledLocationManager()
++        let second = GPSCoordinator(defaults: defaults, bluetooth: secondTransport,
++            locationManager: secondLocation, bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
++        second.resumeAuthorizationIfNeeded()
++        XCTAssertFalse(second.state.enabled)
++        XCTAssertEqual(second.state.status, .off)
++        XCTAssertEqual(secondTransport.starts, 0)
++        XCTAssertEqual(secondLocation.starts, 0)
++        second.setEnabled(true)
++        XCTAssertEqual(secondTransport.starts, 1)
++        second.setEnabled(false)
++        XCTAssertNil(defaults.object(forKey: GPSPreferences.legacyEnabled))
+     }
+ 
+     @MainActor
+--- before/ios/InteractionUITests/PhotoEffectsMasterUITests.swift
++++ after/ios/InteractionUITests/PhotoEffectsMasterUITests.swift
+@@ -404,6 +404,41 @@
+         expect(state, "expanded=0")
+     }
+ 
++    func testGPSColdLaunchWithOldEnabledFlagStaysOffBeforeAndAfterLocationGrant() {
++        continueAfterFailure = false
++        let app = XCUIApplication()
++        app.terminate()
++        app.resetAuthorizationStatus(for: .location)
++        app.launchArguments = ["--gps-permission-ui-test", "--gps-legacy-enabled-ui-test",
++                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
++        addTeardownBlock {
++            await MainActor.run { app.terminate(); app.resetAuthorizationStatus(for: .location) }
++        }
++        let status = app.staticTexts["gps-permission-status"]
++        let button = app.buttons["gps-status-control"]
++        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
++        for launch in 0..<2 {
++            app.launch()
++            XCTAssertTrue(button.waitForExistence(timeout: 10))
++            XCTAssertEqual(status.label, "OFF")
++            let coldStart = XCTAttachment(screenshot: app.screenshot())
++            coldStart.name = "gps-cold-launch-\(launch)"; coldStart.lifetime = .keepAlways; add(coldStart)
++            XCTAssertTrue(["Enable GPS", "开启GPS", "開啟GPS"].contains(button.label), button.debugDescription)
++            XCTAssertFalse(app.staticTexts["gps-permission-guidance"].exists)
++            XCTAssertFalse(springboard.alerts.firstMatch.exists)
++            button.tap()
++            if launch == 0 {
++                let alert = springboard.alerts.firstMatch
++                XCTAssertTrue(alert.waitForExistence(timeout: 5))
++                alert.buttons.matching(NSPredicate(format: "label CONTAINS 'While Using' OR label CONTAINS '使用'"))
++                    .firstMatch.tap()
++            }
++            let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "SEARCHING"), object: status)
++            XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 5), .completed)
++            app.terminate()
++        }
++    }
++
+     func testGPSFirstUseNativeLocationPromptCanEnableTransport() {
+         continueAfterFailure = false
+         let app = XCUIApplication()
+--- before/ios/ZTransfer/Domain/ConnectionViewModel.swift
++++ after/ios/ZTransfer/Domain/ConnectionViewModel.swift
+@@ -70,8 +70,8 @@
+     private var staRecovery: (source: ObjectIdentifier, catalog: STACatalogRecovery)?
+     private var usbWorkspaceEstablished = false
+     private var usbForegroundActive = true
+-    private var gpsConnectionPaused = UserDefaults(suiteName: GPSPreferences.suiteName)?
+-        .bool(forKey: GPSPreferences.enabled) ?? false
++    // Root observes this launch's GPS state; an old disk flag cannot pause AP discovery.
++    private var gpsConnectionPaused = false
+     private let wirelessPreferences = UserDefaults(suiteName: "sta_connection")!
+     @Published private(set) var pairedCameraCount = 0
+     @Published private(set) var pairedCameraModels: [String] = []
+--- before/ios/ZTransfer/Domain/GPSCoordinator.swift
++++ after/ios/ZTransfer/Domain/GPSCoordinator.swift
+@@ -130,18 +130,15 @@
+         self.bluetooth = bluetooth ?? NikonGPSBluetoothClient(defaults: storage)
+         super.init()
+         locationManager?.delegate = self
+-        let enabled = storage.bool(forKey: GPSPreferences.enabled)
+-        state = GPSState(enabled: enabled, status: enabled ? .starting : .off)
++        // Android NikonGpsRuntime starts OFF; a stored service recovery flag
++        // must not turn a normal app launch into an explicit GPS enable.
++        storage.removeObject(forKey: GPSPreferences.legacyEnabled)
++        state = GPSState()
+         connectionHelpViewed = storage.bool(forKey: GPSPreferences.connectionHelpViewed)
+         bluetoothObservation = self.bluetooth.statePublisher
+             // Both transport implementations publish on MainActor after assignment.
+             // A queued old READY/DISCONNECTED event must not revive a newer attempt.
+             .sink { [weak self] value in self?.applyBluetoothState(value) }
+-        if enabled {
+-            // Android's foreground service restores an enabled GPS session on
+-            // process restart. Defer until NSObject/CoreLocation setup is done.
+-            Task { @MainActor [weak self] in self?.resumeEnabledSession() }
+-        }
+     }
+ 
+     deinit {
+@@ -169,7 +166,6 @@
+         stopLocationUpdates()
+         bluetoothFailureOwnsRecovery = false
+         GPSDiagnostics.record("set enabled=\(enabled)")
+-        defaults.set(enabled, forKey: GPSPreferences.enabled)
+         awaitingPairingAction = false
+         pairingConfirmationPending = false
+         writeTask?.cancel(); writeTask = nil
+@@ -179,10 +175,12 @@
+         writeGeneration &+= 1
+         geoWriteInFlight = false
+         guard enabled else {
++            // stop() may synchronously publish disconnected. Close the live
++            // session before that callback so it cannot restart recovery.
++            state = GPSState()
+             locationManagerStorage?.stopUpdatingLocation()
+             locationManagerStorage?.allowsBackgroundLocationUpdates = false
+             bluetooth.stop()
+-            state = GPSState()
+             lastWrite = nil
+             latestLocation = nil
+             latestLocationDuringWrite = nil
+@@ -205,7 +203,7 @@
+     /// NikonGpsService.syncLocationNow: a late tap cannot enable GPS, write
+     /// during reconnect, or queue a second forced write behind the current one.
+     func syncNow() {
+-        guard state.canSyncNow, defaults.bool(forKey: GPSPreferences.enabled),
++        guard state.canSyncNow,
+               !apModeBlocked, !geoWriteInFlight, bluetooth.isRunning,
+               case .ready = bluetooth.state, latestLocation != nil else { return }
+         latestLocationDuringWrite = nil
+@@ -623,12 +621,8 @@
+         locationManager.showsBackgroundLocationIndicator = enabled
+     }
+ 
+-    private func resumeEnabledSession() {
+-        continueAfterLocationAuthorization()
+-    }
+-
+     func applyBluetoothState(_ value: NikonGPSBluetoothState) {
+-        guard state.enabled, defaults.bool(forKey: GPSPreferences.enabled), !apModeBlocked else { return }
++        guard state.enabled, !apModeBlocked else { return }
+         GPSDiagnostics.record("BLE state=\(String(describing: value))")
+         guard hasLocationAuthorization else {
+             continueAfterLocationAuthorization()
+--- before/ios/ZTransfer/Domain/GPSState.swift
++++ after/ios/ZTransfer/Domain/GPSState.swift
+@@ -24,7 +24,8 @@
+ /// persistence scope instead of sharing the app-wide defaults accidentally.
+ enum GPSPreferences {
+     static let suiteName = "nikon_gps"
+-    static let enabled = "enabled"
++    // Removed startup flag: read only to clear values left by older iOS builds.
++    static let legacyEnabled = "enabled"
+     static let deviceID = "device_id"
+     static let nonce = "nonce"
+     static let bleAddress = "ble_address"
+--- before/ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift
++++ after/ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift
+@@ -24,10 +24,6 @@
+     case ready(String)
+     case disconnected
+     case failed(String)
+-}
+-
+-private struct RestoredBluetoothPeripheral: @unchecked Sendable {
+-    let value: CBPeripheral?
+ }
+ 
+ /// CoreBluetooth may reuse a peripheral object across connections. Keep discovery
+@@ -198,20 +194,22 @@
+     private let setupDeadline: NikonGPSDeferredAction
+     private var connectionGeneration: UInt64 = 0
+     private var shouldRun = false
+-    // CoreBluetooth restoration belongs to this manager's initial launch,
+-    // never to a later retry after an explicit stop.
+-    private var restorationPending = true
+     private var freshPairingAttempt = false
+     private let defaults: UserDefaults
++    private let centralFactory: @MainActor (CBCentralManagerDelegate, [String: Any]?) -> CBCentralManager
+ 
+     init(controllerName: String = "ZTransfer", savedDevice: UInt32? = nil, savedNonce: UInt32? = nil, defaults: UserDefaults? = nil,
+-         sleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }) {
++         sleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
++         centralFactory: @escaping @MainActor (CBCentralManagerDelegate, [String: Any]?) -> CBCentralManager = {
++             CBCentralManager(delegate: $0, queue: .main, options: $1)
++         }) {
+         pairingDeadline = NikonGPSDeferredAction(sleep: sleep)
+         directReconnectDeadline = NikonGPSDeferredAction(sleep: sleep)
+         scanDeadline = NikonGPSDeferredAction(sleep: sleep)
+         idWriteDeadline = NikonGPSDeferredAction(sleep: sleep)
+         setupDeadline = NikonGPSDeferredAction(sleep: sleep)
+         self.controllerName = controllerName
++        self.centralFactory = centralFactory
+         let storage = defaults ?? UserDefaults(suiteName: GPSPreferences.suiteName)!
+         self.defaults = storage
+         // Migrate the short-lived pre-namespace keys once. New reads/writes
+@@ -240,25 +238,12 @@
+         super.init()
+     }
+ 
+-    /// Android creates its Bluetooth stack only when the persisted GPS
+-    /// service is actually running. Match that lifecycle so a normal launch
+-    /// with GPS off does not open CoreBluetooth's XPC connection.
++    /// Create Bluetooth only after explicit GPS enable and location authorization.
++    /// GPS is session-only: do not register for relaunch/state restoration. The
++    /// same initializer runs on Simulator and device, avoiding a device-only path.
+     private func ensureCentral() -> CBCentralManager {
+         if let central { return central }
+-        let manager: CBCentralManager
+-        #if targetEnvironment(simulator)
+-        // CoreBluetooth rejects restoration identifiers in the simulator.
+-        manager = CBCentralManager(delegate: self, queue: .main)
+-        #else
+-        // CoreBluetooth validates the state-restoration delegate during
+-        // initialization, so the delegate must be supplied here rather than
+-        // assigned afterward.
+-        manager = CBCentralManager(
+-            delegate: self,
+-            queue: .main,
+-            options: [CBCentralManagerOptionRestoreIdentifierKey: "com.ztransfer.nikon-gps"],
+-        )
+-        #endif
++        let manager = centralFactory(self, nil)
+         central = manager
+         return manager
+     }
+@@ -316,7 +301,6 @@
+     private func beginScan() {
+         guard shouldRun, let central, central.state == .poweredOn else { return }
+         if connectionRetirement.deferIfNeeded({ [weak self] in self?.beginScan() }) { return }
+-        restorationPending = false
+         directReconnectDeadline.cancel()
+         GPSDiagnostics.record("BLE scan started")
+         central.scanForPeripherals(withServices: [Self.serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+@@ -326,7 +310,6 @@
+     func stop() {
+         shouldRun = false
+         connectionRetirement.cancelPending()
+-        restorationPending = false
+         GPSDiagnostics.record("BLE stopped")
+         directReconnectDeadline.cancel()
+         pairingDeadline.cancel()
+@@ -403,11 +386,6 @@
+ 
+     var hasSavedPairing: Bool { savedDevice != nil && savedNonce != nil }
+     var isRunning: Bool { peripheral != nil || central?.isScanning == true }
+-
+-    func takeRestorationPermission() -> Bool {
+-        defer { restorationPending = false }
+-        return restorationPending && defaults.bool(forKey: GPSPreferences.enabled) && peripheral == nil
+-    }
+ 
+     func clearPairing() {
+         GPSDiagnostics.record("cached pairing identity cleared")
+@@ -574,34 +552,6 @@
+ }
+ 
+ extension NikonGPSBluetoothClient: CBCentralManagerDelegate {
+-    nonisolated func centralManager(_ central: CBCentralManager,
+-                                    willRestoreState dict: [String: Any]) {
+-        let restoredBox = RestoredBluetoothPeripheral(
+-            value: (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first
+-        )
+-        MainActor.assumeIsolated { [weak self] in
+-            guard let self, let restored = restoredBox.value else { return }
+-            // A duplicate callback must not cancel a peripheral already
+-            // accepted by the current connection or overwrite its state.
+-            if self.peripheral === restored { return }
+-            guard (self.central == nil || self.central === central),
+-                  self.takeRestorationPermission() else {
+-                central.cancelPeripheralConnection(restored)
+-                return
+-            }
+-            self.central = central
+-            self.shouldRun = true
+-            self.peripheral = restored
+-            self.savedPeripheralIdentifier = restored.identifier
+-            self.defaults.set(restored.identifier.uuidString, forKey: GPSPreferences.bleAddress)
+-            restored.delegate = self
+-            if restored.state == .connected {
+-                self.discoverServices(restored)
+-            }
+-            self.publishConnecting(restored)
+-        }
+-    }
+-
+     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
+         MainActor.assumeIsolated { [weak self] in
+             // Adapter state has the same ownership requirement as connection
+--- before/ios/ZTransfer/Info.plist
++++ after/ios/ZTransfer/Info.plist
+@@ -65,6 +65,7 @@
+ 	<key>UIBackgroundModes</key>
+ 	<array>
+ 		<string>location</string>
++		<string>bluetooth-central</string>
+ 	</array>
+ 	<key>UILaunchScreen</key>
+ 	<dict>
+--- before/ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift
++++ after/ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift
+@@ -242,6 +242,9 @@
+         let suite = "GPSPermissionAudit"
+         let defaults = UserDefaults(suiteName: suite)!
+         defaults.removePersistentDomain(forName: suite)
++        if ProcessInfo.processInfo.arguments.contains("--gps-legacy-enabled-ui-test") {
++            defaults.set(true, forKey: GPSPreferences.legacyEnabled)
++        }
+         _coordinator = StateObject(wrappedValue: GPSCoordinator(defaults: defaults,
+             bluetooth: Bluetooth(), bluetoothAuthorization: { .allowedAlways }))
+     }
+--- before/ios/ZTransfer/UI/Connection/GPSConnectionControl.swift
++++ after/ios/ZTransfer/UI/Connection/GPSConnectionControl.swift
+@@ -220,6 +220,7 @@
+     @State private var updateBurstProgress: CGFloat = 0
+     @Environment(\.colorScheme) private var colorScheme
+     private var statusLabel: String {
++        guard coordinator.state.enabled else { return AppLocalized.resource("gps_enable") }
+         switch coordinator.state.status {
+         case .off: return AppLocalized.resource("gps_enable")
+         case .starting, .searching: return AppLocalized.resource("gps_searching")
+@@ -729,6 +730,7 @@
+             disabledAlpha: 1
+         ))
+         .accessibilityIdentifier("gps-status-control")
++        .accessibilityLabel(statusLabel)
+         // Android's GpsStatusButton gives a held-to-disable press a short
+         // foreground glow (90ms in, 170ms out) while the 800ms progressive
+         // hold is running. Keep the glow inside the button so it never
+--- before/ios/project.yml
++++ after/ios/project.yml
+@@ -173,6 +173,7 @@
+         NSLocationAlwaysAndWhenInUseUsageDescription: 用于在后台持续向相机写入拍摄位置
+         UIBackgroundModes:
+           - location
++          - bluetooth-central
+         NSBluetoothAlwaysUsageDescription: 用于连接 Nikon GPS 设备
+         NSCameraUsageDescription: 用于通过 USB 连接相机、浏览和传输照片并控制拍摄
+         NSPhotoLibraryUsageDescription: 用于读取工作台照片

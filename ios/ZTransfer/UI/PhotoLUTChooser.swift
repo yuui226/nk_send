@@ -40,7 +40,7 @@ struct PhotoLUTChooser: View {
                         restingOpacity: 0, breathing: true, paused: scenePhase != .active) : nil)
                 DetentWheel(label: "", options: [false], selected: false,
                     optionLabel: { _ in AppLocalized.resource("photo_lut_settings") }, onCommit: { _ in },
-                    enabled: editor.active, accentColor: accent,
+                    enabled: store.hasSelection, readOnly: editor.loading, accentColor: accent,
                     emphasized: editor.settingsExpanded, showDragHint: false,
                     onActivated: {
                         ZTransferHaptics.shared.play(.navigation)
@@ -48,31 +48,30 @@ struct PhotoLUTChooser: View {
                     })
                 PhotoEffectFavoriteButton(
                     favorite: editor.currentIdentifier.map { store.favorites.contains($0) } == true,
-                    enabled: editor.active
+                    enabled: store.hasSelection
                 ) {
+                    guard !editor.loading else { return }
                     if let identifier = store.selectedIdentifier { store.toggleFavorite(identifier) }
-                }
+                }.allowsHitTesting(!editor.loading)
             }
-            if editor.settingsExpanded && store.hasSelection {
-                VStack(spacing: 8) {
-                    DetentWheel(label: AppLocalized.resource("photo_lut_concentration"),
-                        options: Array(stride(from: 100, through: 2, by: -2)), selected: store.intensityPercent,
-                        optionLabel: { "\($0)%" }, onCommit: setIntensity,
-                        sizing: PhotoEffectControlMetrics.lutParameterWheel, enabled: editor.active,
-                        accentColor: accent)
-                    HStack(spacing: 6) {
-                        adjustment("photo_lut_contrast", keyPath: \.contrast)
-                        adjustment("photo_lut_saturation", keyPath: \.saturation)
-                    }
-                    HStack(spacing: 6) {
-                        adjustment("photo_lut_highlights", keyPath: \.highlights)
-                        adjustment("photo_lut_shadows", keyPath: \.shadows)
-                    }
+            if editor.settingsExpanded && store.hasSelection, let selection = draft.selectedFilter,
+               selection.preset.id.hasPrefix("cube:") {
+                PhotoColorAdjustmentControls(selection: selection, intensityLabel: "photo_lut_concentration",
+                    accent: accent, enabled: store.hasSelection, readOnly: editor.loading) { intensity, adjustments in
+                    guard editor.active, editor.settingsExpanded, let current = draft.selectedFilter,
+                          PhotoColorControlIdentity(current) == PhotoColorControlIdentity(selection) else { return }
+                    if store.intensityPercent != intensity { store.setIntensity(intensity) }
+                    if store.adjustments != adjustments { store.setAdjustments(adjustments) }
+                    var changed = current
+                    changed.intensityPercent = store.intensityPercent
+                    changed.lutAdjustments = store.adjustments
+                    draft.selectedFilter = changed
                 }
-                .id(store.selectedIdentifier)
                 .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
             }
         }
+        .animation(ZTransferMotion.inlineExpansion, value: editor.settingsExpanded && store.hasSelection)
+        .onChange(of: store.hasSelection) { _ in editor.settingsExpanded = false }
         .fileImporter(isPresented: $editor.showingFolder, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
             editor.folderPickerCompleted(result, onDisable: disable)
         }
@@ -91,25 +90,6 @@ struct PhotoLUTChooser: View {
     }
     private func canAcceptSelection() -> Bool {
         PhotoColorEffectEditorVisibility(settings: draft, isPro: PremiumEntitlementStore.shared.access.isPro).lut
-    }
-    private func setIntensity(_ intensity: Int) {
-        guard editor.active, var selection = draft.selectedFilter, selection.preset.id.hasPrefix("cube:") else { return }
-        store.setIntensity(intensity)
-        selection.intensityPercent = store.intensityPercent
-        draft.selectedFilter = selection
-    }
-    private func adjustment(_ label: String, keyPath: WritableKeyPath<LUTAdjustments, Int>) -> some View {
-        DetentWheel(label: AppLocalized.resource(label), options: Array(stride(from: -100, through: 100, by: 5)),
-            selected: store.adjustments[keyPath: keyPath], optionLabel: String.init,
-            onCommit: { value in
-                guard editor.active, var selection = draft.selectedFilter, selection.preset.id.hasPrefix("cube:") else { return }
-                var adjustments = store.adjustments
-                adjustments[keyPath: keyPath] = value
-                store.setAdjustments(adjustments)
-                selection.lutAdjustments = store.adjustments
-                draft.selectedFilter = selection
-            }, sizing: PhotoEffectControlMetrics.lutParameterWheel, enabled: editor.active,
-            accentColor: accent)
     }
 }
 
@@ -134,12 +114,12 @@ struct PhotoLUTChooserOverlay: View {
     var body: some View {
         let catalog = editor.catalog
         let categories = catalog.categories
-        let visible = catalog.filesByCategory[editor.categorySelection.category] ?? []
+        let visible = catalog.files(in: editor.categorySelection.category) ?? []
         let initialID = editor.currentIdentifier.flatMap { catalog.filesByIdentifier[$0] }.flatMap {
-            $0.category == editor.categorySelection.category ? $0.identifier : nil
+            $0.category.presetCategoryBytes == editor.categorySelection.category.presetCategoryBytes ? $0.identifier : nil
         } ?? visible.first?.identifier
         PhotoEffectChooserDialog(categoryLabels: categories.map(categoryLabel),
-            optionLabels: catalog.labelsByCategory[editor.categorySelection.category] ?? [],
+            optionLabels: catalog.labels(in: editor.categorySelection.category) ?? [],
             onDismiss: { editor.showingChooser = false }) {
             HStack(spacing: 8) {
                 PhotoEffectChooserAction(label: AppLocalized.resource("lut_turn_off"), selected: editor.currentIdentifier == nil) {
@@ -153,10 +133,10 @@ struct PhotoLUTChooserOverlay: View {
             }
         } content: { width in
             HStack(spacing: 6) {
-                PhotoEffectChooserList(items: categories, id: \.self,
-                    initialID: .some(editor.categorySelection.category)) { category in
+                PhotoEffectChooserList(items: categories, id: \.presetCategoryBytes,
+                    initialID: .some(editor.categorySelection.category.presetCategoryBytes)) { category in
                     PhotoEffectChooserRow(label: categoryLabel(category),
-                        selected: editor.categorySelection.category == category, category: true) {
+                        selected: editor.categorySelection.category.presetCategoryBytes == category.presetCategoryBytes, category: true) {
                         editor.categorySelection.category = category
                     }
                 }.frame(width: max(0, width - 6) * 0.36)
@@ -177,7 +157,7 @@ struct PhotoLUTChooserOverlay: View {
                             }
                         editor.showingChooser = false
                     }
-                }.id(editor.categorySelection.category)
+                }.id(editor.categorySelection.category.presetCategoryBytes)
             }
         }
     }

@@ -1,0 +1,49 @@
+{
+  "commit": "42579b894570507c71f475cd6de93682afcd3e23",
+  "files": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 43547,
+      "sha256": "81c7b5174de26b945742c2a8c5952e50f8255c2bdf97aafff59ad5a9143290c5",
+      "matches_source": true
+    },
+    {
+      "path": "app.js",
+      "status": 200,
+      "bytes": 4538,
+      "sha256": "321d84069b4cba5430db0eb99de007954707279508933422a78bcd4fcf4c83cd",
+      "matches_source": true
+    },
+    {
+      "path": "feature-guide.css",
+      "status": 200,
+      "bytes": 4742,
+      "sha256": "cbf85f93f6a2ee686770c1c4717eef65ca21e42870c685f6e3dd9e5790df3d80",
+      "matches_source": true
+    }
+  ],
+  "preserved_existing_files_unchanged": true,
+  "preserved_file_count": 10,
+  "browser_viewports_checked": [
+    [
+      1440,
+      1100
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      320,
+      740
+    ]
+  ],
+  "source_pixel_validation": "App screenshot assets unchanged. Native HTML disclosure cards and SVG marks added for monitor/settings help.",
+  "app_backend_unchanged": true,
+  "api_server_login_performed_this_update": false
+}

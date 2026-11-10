@@ -1,0 +1,4 @@
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoNp3SnapshotTests.swift:250:24: error: call can throw but is not marked with 'try'
+    |                        |- error: call can throw but is not marked with 'try'
+Testing failed:
+** TEST FAILED **

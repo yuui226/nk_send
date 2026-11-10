@@ -1,0 +1,184 @@
+{
+  "files": [
+    {
+      "path": "ios/Package.swift",
+      "sha256": "40228750d7e350fbc071aeba5280f8b467704f670be1cc53530700b876381fdc"
+    },
+    {
+      "path": "ios/ProtocolTests/PTPIPTransferRecoveryTests.swift",
+      "sha256": "75310d0ec649e279d02dd5556dcf1d095cf103a9a264a2eb165b328dcd4fcc94"
+    },
+    {
+      "path": "ios/ProtocolTests/STABrowsingSessionTests.swift",
+      "sha256": "3e6c814283e71e1c3164a9522944670d1c9231b43c8c9088290b87749455357f"
+    },
+    {
+      "path": "ios/ProtocolTests/STAConnectionCoordinatorTests.swift",
+      "sha256": "7f43a1d96fd57b4ad8510012fe88c583c4a7ecf52569e1f5645c9b746b0c0730"
+    },
+    {
+      "path": "ios/ProtocolTests/STAIncrementalHandshakeTests.swift",
+      "sha256": "14e8492e94cdeaeb720622305418427f7e326df6aff588a536fe997bb8c82e18"
+    },
+    {
+      "path": "ios/ProtocolTests/STAPairingConfirmationTests.swift",
+      "sha256": "7c3927a4d9404d6127e0d99780233dd23e50e082d1120ebc8aaabbfc572a7c76"
+    },
+    {
+      "path": "ios/ZTransfer.xcodeproj/project.pbxproj",
+      "sha256": "e18998c0c36dbade1375eb74d24d38534ab911f798dab7cf32fdbb31ee2939ab"
+    },
+    {
+      "path": "ios/ZTransfer/App/AndroidLocalization.swift",
+      "sha256": "db3c7e094b092a5343183fed403cd7b2d0af3a959426867963c598fc9faa30a6"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/CameraRepository.swift",
+      "sha256": "babc64a56cf3e85f3b665818c7de84c82b90289da0ebc20feac79233f338e055"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/CameraSession.swift",
+      "sha256": "380ceff7eed8ee59ea1a4774db4d7ade587a8c770fa0c8120e46a3e605b84ca0"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/ConnectionViewModel.swift",
+      "sha256": "3a4b11883cdee1c5a9e37540ccd346e6e5c7a0a7624d28df4b70b40eb25ff6bb"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/RemoteDelayedCapture.swift",
+      "sha256": "e83261d908834c76c9704e45bb6767276a610fc789fa894c0e57f0cc02da5080"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/RemoteParameterWheel.swift",
+      "sha256": "1d7fd22c6c6fb5a985a22a20fd4433e36505dfd81f1c3336d13f3c201907609b"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/RemoteSelfTimer.swift",
+      "sha256": "7fe39bc4f92d9ba6322018907306c47522a036abcdbe6a909dcf6004c73f1678"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/RemoteToolLayout.swift",
+      "sha256": "ad58e1512134df50bd25f42325552091b3c248f2c46fbb08f176ad57914a4bd1"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/RemoteToolPreferences.swift",
+      "sha256": "6f4710c12efb4418b60e3eb5651e6910436f3b0708acf00bcd731cb10f2ff1e0"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/RemoteViewModel.swift",
+      "sha256": "89095b867ffe2bc134c1836ffbabfe77dcbf7986b2b20b5a71008dd61b5cf7a6"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/WiFiConnectionService.swift",
+      "sha256": "0f6e32e1b85cf2be4af59d96de5401235a72197d8c2632c146f0d76fadd37780"
+    },
+    {
+      "path": "ios/ZTransfer/Resources/en.lproj/Localizable.strings",
+      "sha256": "f2bc377a8a95c3ccae8890fcf5228c24222a2e1d7cbb68a00b1b5bb5e728c6cd"
+    },
+    {
+      "path": "ios/ZTransfer/Resources/zh-Hans.lproj/Localizable.strings",
+      "sha256": "8da5df41483d2641c8461cc87f7a3a0031ae28cac3e44805dde6d4c1b22475ee"
+    },
+    {
+      "path": "ios/ZTransfer/Resources/zh-Hant.lproj/Localizable.strings",
+      "sha256": "4f9f7a9d972d306b3f9a960cc77df021ec3332542e218a03f6982a037671118e"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/PTPCommandPermission.swift",
+      "sha256": "7deb1f239b8ded7c077dfef6d77df32fc294b376b5781dcabdee0aefdbf3847c"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/PTPIPPOSIXChannel.swift",
+      "sha256": "b0fc635760c80b70ca45150a8edea47dd3b0730b1f19afa0eb5db3ff3a89d468"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/PTPIPSocketConnection.swift",
+      "sha256": "4dc19bb4e82c6a61416c6599fa9bc2c9c3806d64923102abea70c4e0482acead"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/PTPIPSocketTransport.swift",
+      "sha256": "69b1c359b90f58570da9d784e930018abf01add889998f10577544794d8855bf"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/PTPSession.swift",
+      "sha256": "dc02db8035bdddf87a04c0828ad167f5432d33348679da9ec64218eed76dbca4"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/STABrowsingSession.swift",
+      "sha256": "4baeb416d5d1667ceead2d92097aa92c015dcf307b920ea0cdfa09016f00f5fd"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/STAConnectionCoordinator.swift",
+      "sha256": "cb3c5eff8440dca471648bdef8c79c71d9d2fde01acc8c03d4d5cd53cb9bfd6a"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/STAHandshakeDeadline.swift",
+      "sha256": "eb53c60ad10b1e01c7784c1a35927a76c3a7db6f1f33b5658ac5a8ec7821bcda"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/STAPairingConfirmation.swift",
+      "sha256": "c69e4aaef3fc5e7be8980fa759658f22d4108b6dd289bf214b4844c0563c7f08"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/PTP/STAPairingLiveView.swift",
+      "sha256": "e08f7539eb865090ee2c9221dc8986c6ccbb86c188a298d424191f273e4e8aeb"
+    },
+    {
+      "path": "ios/ZTransfer/Transport/USB/ImageCaptureUSBTransport.swift",
+      "sha256": "289c7f8dda85ee8bb4cc06cac77c3ef074ebc9120b40f8eddb2164679241e9aa"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/RemoteExposureTile.swift",
+      "sha256": "207e2065b3bc8ce17b1e12f35169c30ab27cf0b98884213a19ff8f2fdf0967c9"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/RemoteParameterInput.swift",
+      "sha256": "0e85ec503e57dc36a3ebcd8b9bfa145d6a10c6957c2bd8881a6d53ed97f0e19b"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/RemoteSelfTimerPanel.swift",
+      "sha256": "64829bfe1c702b5028f21c62bc9a0955c87a8ac0cf772b14cf3842cbb238d260"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/RemoteShutterButton.swift",
+      "sha256": "58b980bb0187b88c5d8479cd57c2a971d2d21a18b9bab832e4264ffdadf98d4e"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/RemoteToolMark.swift",
+      "sha256": "80b1cb78b944364e02190a0ad6a8a3c66b795cc4e794c36113feadca0a33b2da"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/TipLightbulbButton.swift",
+      "sha256": "31c454f001285fbc81b8ce318abb04b73346a4f0f193c9bfc5134c525eb8e7e1"
+    },
+    {
+      "path": "ios/ZTransfer/UI/GeniePopupPanel.swift",
+      "sha256": "cc0699073b6f5db829b10a2eeb5a0c97ab545948a67a9b1bf01b5114f32dc539"
+    },
+    {
+      "path": "ios/ZTransfer/UI/RemoteView.swift",
+      "sha256": "8694b321b62193782346f1b1ec1e57a83961dd3a06c6e754561239e988f904d3"
+    },
+    {
+      "path": "ios/ZTransferTests/RemoteLifecycleTests.swift",
+      "sha256": "4ad95116bd1db8a71438c5d1e5751c6c5ca95a944c107fc359f19ed8e109f206"
+    },
+    {
+      "path": "ios/ZTransferTests/RemoteParameterWheelTests.swift",
+      "sha256": "fc04d685a69b47203b1bc2e41ad36309835cb12f96d1936f3e194f4e8fd1c133"
+    },
+    {
+      "path": "ios/ZTransferTests/RemoteSelfTimerTests.swift",
+      "sha256": "618ce789e0508bbd422bccd5fc97a1e92e35f0d5fece0e4d18b0a7433515102e"
+    },
+    {
+      "path": "ios/ZTransferTests/RemoteShutterTests.swift",
+      "sha256": "6256c4c3409a66d2ebaa9732722748a66e65f6dcb497016bcea18f54c00ea9d8"
+    },
+    {
+      "path": "ios/project.yml",
+      "sha256": "caf59fbfc61f1d5aada81b565b1827301b7b75146eaf140774242a542af93102"
+    }
+  ]
+}

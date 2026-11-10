@@ -153,6 +153,10 @@ final class ModalPresentationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let effects = PhotoEffectsStore(defaults: defaults)
         let directory = DirectoryAccessStore(defaults: defaults)
+        let filters = PhotoFilterEditorSession(store: effects.np3Store, role: .transfer)
+        filters.begin(draft: .constant(PhotoEffectsSettings()), active: true, onExplicitSelection: {})
+        filters.showingChooser = true
+        defer { filters.end() }
         for settings in [true, false] {
             for paged in [true, false] {
                 let page = Group {
@@ -160,10 +164,7 @@ final class ModalPresentationTests: XCTestCase {
                     else {
                         ZStack {
                             Color.white.ignoresSafeArea()
-                            AndroidDialogPresentation(isPresented: true) {
-                                PhotoFilterChooserOverlay(draft: .constant(PhotoEffectsSettings()),
-                                    state: .constant(PhotoFilterChooserState(isPresented: true)))
-                            }
+                            PhotoNP3ChooserPresentation(session: filters, draft: .constant(PhotoEffectsSettings()))
                         }.frame(width: 393, height: 759)
                     }
                 }.defaultAppStorage(defaults).environment(\.colorScheme, .light)

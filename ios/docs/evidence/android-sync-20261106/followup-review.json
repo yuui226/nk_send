@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-06",
+  "scope": "Independent follow-up review requested by user; same Android delta 89018097",
+  "findings": [],
+  "checked": [
+    "Full seven-file Android delta against the iOS round patch, including removed resources",
+    "Reset callback, STA live protection read, persistence and independent thumbnail range",
+    "Rating cancellation, revision/generation checks and late result suppression",
+    "Date draft state identity in hosted popup, back/clear/apply and reentry",
+    "Self timer restoration, all UI option consumers, cancellation gates and per-second rendering",
+    "13 final iOS input hashes and 7 Android hashes unchanged from verified round; prior 56 test outcomes all passed",
+    "881 resource keys across three languages; no removed-source references; git diff --check"
+  ],
+  "newTestsRun": false,
+  "productionCodeChanged": false,
+  "hardwareValidationRun": false,
+  "files": {
+    "ios/ZTransfer/Domain/PhotoFilter.swift": "aac57ee8810e3b3959da45113aa3a8b7732906fe7e4e1e02832a11b9001ce5ea",
+    "ios/ZTransfer/Domain/PhotoListViewModel.swift": "8978713c799269551d9e62ce008e2dd7110c3a413126b3da28312c4947bdeecb",
+    "ios/ZTransfer/Domain/PhotoRatingScan.swift": "88b60a9c0c59e3700371e9c94015e167e940e8108a8ae5c5375ac6c4596e48be",
+    "ios/ZTransfer/Domain/RemoteSelfTimer.swift": "563f243c61119501859da6abbf87cd343174f443f08ec2f4686699491a0a1801",
+    "ios/ZTransfer/Domain/RemoteToolPreferences.swift": "6f4710c12efb4418b60e3eb5651e6910436f3b0708acf00bcd731cb10f2ff1e0",
+    "ios/ZTransfer/Domain/RemoteViewModel.swift": "89095b867ffe2bc134c1836ffbabfe77dcbf7986b2b20b5a71008dd61b5cf7a6",
+    "ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift": "ce5118914991564f02c13440ac1cd87c8586024b526390207035b41e7e11024b",
+    "ios/ZTransfer/UI/PhotoFilterComponents.swift": "9f0322b92b12900c98f30a2cf670b186812aae0c049bd8c762b159dc77c98c4a",
+    "ios/ZTransfer/UI/PhotoListView.swift": "8a622aaa31e70fd5f94193fa4396ae52f0ec5693ba8f879fbd3382c966e3bc80",
+    "ios/ZTransfer/UI/GeniePopupPanel.swift": "cc0699073b6f5db829b10a2eeb5a0c97ab545948a67a9b1bf01b5114f32dc539",
+    "ios/ZTransfer/UI/RemoteView.swift": "8694b321b62193782346f1b1ec1e57a83961dd3a06c6e754561239e988f904d3",
+    "ios/ZTransfer/UI/Components/RemoteSelfTimerPanel.swift": "64829bfe1c702b5028f21c62bc9a0955c87a8ac0cf772b14cf3842cbb238d260"
+  },
+  "subsequentFeedback": "Static review did not exercise date/reset presses or date-page rendering. User subsequently found missing press feedback, flash transition and incorrect action-button styling; corrected and verified in ../filter-motion-20261106/verification.json. Prior no-findings result must not be read as interaction verification."
+}

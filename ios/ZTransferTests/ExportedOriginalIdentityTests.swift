@@ -118,12 +118,13 @@ extension ExportedOriginalIdentityTests {
     @MainActor
     func testManualOfflineAdmissionRequiresWholeBatchInCurrentDestination() {
         let model = PhotoListViewModel(scanCatalog: nil, setRemoteGate: { _ in })
+        let store = TransferOriginalStore()
+        model.useOriginalStore(store)
         model.refreshTransferredIDs(directory: root, storageMode: .unified)
         let first = file("Z30_9049.JPG")
         let missing = file("Z30_9050.JPG") // Deliberately the same handle, different source.
         let saved = root.appendingPathComponent("DSC_9049 (2).JPG")
-        model.recordTransferredOriginals([TransferQueueItem(id: UUID(), file: first,
-            status: .completed, outputURL: saved)])
+        store.record(.init(url: saved, size: first.size), root: root, folder: nil, fileID: first.id)
         XCTAssertTrue(model.canEnqueueManually([first], connected: false, directory: root, storageMode: .unified))
         XCTAssertFalse(model.canEnqueueManually([first, missing], connected: false, directory: root, storageMode: .unified))
         XCTAssertFalse(model.canEnqueueManually([file("Z30_9049.JPG", size: 124)], connected: false, directory: root, storageMode: .unified))
@@ -132,19 +133,17 @@ extension ExportedOriginalIdentityTests {
         XCTAssertFalse(model.canEnqueueManually([first], connected: true, directory: nil, storageMode: .unified))
         XCTAssertFalse(model.canEnqueueManually([], connected: true, directory: root, storageMode: .unified))
         XCTAssertTrue(model.canEnqueueManually([first, missing], connected: true, directory: root, storageMode: .unified))
-        model.recordTransferredOriginals([TransferQueueItem(id: UUID(), file: missing,
-            status: .completed, outputURL: root.appendingPathComponent(missing.fileName))])
+        store.record(.init(url: root.appendingPathComponent(missing.fileName), size: missing.size), root: root, folder: nil, fileID: missing.id)
         XCTAssertTrue(model.canEnqueueManually([first, missing], connected: false, directory: root, storageMode: .unified))
         let typed = root.appendingPathComponent("ZT-JPG").appendingPathComponent(first.fileName)
-        model.recordTransferredOriginals([TransferQueueItem(id: UUID(), file: first,
-            status: .completed, outputURL: typed, destinationFolderName: "ZT-JPG")])
+        store.record(.init(url: typed, size: first.size), root: root, folder: "ZT-JPG", fileID: first.id)
         XCTAssertTrue(model.canEnqueueManually([first], connected: false, directory: root, storageMode: .byType))
         model.refreshTransferredIDs(directory: nil, storageMode: .unified)
         XCTAssertFalse(model.canEnqueueManually([first], connected: false, directory: root, storageMode: .unified))
     }
 
     @MainActor
-    func testManualAdmissionUsesRefreshedDiskIndexForEveryStorageMode() async throws {
+    func testManualAdmissionUsesReselectedDiskIndexForEveryStorageMode() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let first = file("Z30_9049.JPG")
@@ -160,7 +159,9 @@ extension ExportedOriginalIdentityTests {
             let model = PhotoListViewModel(scanCatalog: nil, setRemoteGate: { _ in })
 
             func refresh() async throws {
-                model.refreshTransferredIDs(directory: destinationRoot, storageMode: mode)
+                // Explicit reselection clears Android's directory cache.
+                // Catalog batches reuse it and verify only matching entries.
+                model.refreshTransferredIDs(directory: destinationRoot, storageMode: mode, resetDirectoryIndex: true)
                 let revision = model.transferOriginalIndexRevision
                 let deadline = ContinuousClock.now.advanced(by: .seconds(3))
                 while model.transferOriginalIndexRevision == revision, ContinuousClock.now < deadline {

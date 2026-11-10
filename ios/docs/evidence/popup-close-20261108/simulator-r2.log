@@ -1,0 +1,560 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=FC8ECF06-0A56-4949-B64C-3EE06870025E" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -collect-test-diagnostics never -parallel-testing-enabled NO "-only-testing:ZTransferTests/PopupBulbCaptureTests/testClosingCaptureKeepsSettledPanelVisibleThenGatesLiveSourceUntilHidden" "-only-testing:ZTransferTests/SettingsPopupLayoutTests/testPreviewEffectsAvoidsStatusBarAndCoversBothQueueButtons" -resultBundlePath /tmp/ztransfer-sta-popup-20261108-r2.xcresult test CODE_SIGN_IDENTITY=-
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = -
+
+Writing result bundle at path:
+	/tmp/ztransfer-sta-popup-20261108-r2.xcresult
+
+note: Using codesigning identity override: -
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (2 targets)
+    Target 'ZTransferTests' in project 'ZTransfer'
+        ➜ Explicit dependency on target 'ZTransfer' in project 'ZTransfer'
+    Target 'ZTransfer' in project 'ZTransfer' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/orys/code/nk_send/ios/ZTransfer/Resources/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: c65e43f3ee69dc7141ff04ccb60d469c
+Build description path: /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/XCBuildData/c65e43f3ee69dc7141ff04ccb60d469c.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache
+    cd /Users/orys/code/nk_send/ios/ZTransfer.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -o /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache
+
+SwiftDriver ZTransferTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferTests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist /Users/orys/code/nk_send/ios/ZTransfer/Info.plist (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /Users/orys/code/nk_send/ios/ZTransfer/Info.plist -producttype com.apple.product-type.application -genpkginfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/assetcatalog_generated_info.plist -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist
+
+SwiftCompile normal arm64 Compiling\ DomainModelTests.swift /Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1425:21: warning: call to main actor-isolated initializer 'init(frame:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1416 |     }
+ 1417 | 
+ 1418 |     func testTransferTitleFitsStemAndPreservesExtensionAndStyles() throws {
+      |          `- note: add '@MainActor' to make instance method 'testTransferTitleFitsStemAndPreservesExtensionAndStyles()' part of global actor 'MainActor'
+ 1419 |         let measure: (TransferFileTitleText) -> CGFloat = { CGFloat($0.full.utf16.count) }
+ 1420 |         XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 13, measure: measure).full, "DSC_12345.JPG")
+      :
+ 1423 |         XCTAssertEqual(TransferFileTitleText.fit("capture.raw.JPG", width: 5, measure: measure).full, "….JPG")
+ 1424 |         XCTAssertEqual(TransferFileTitleText.fit("照片编号12345.NEF", width: 9, measure: measure).full, "照片…45.NEF")
+ 1425 |         let label = TransferFileTitleLabel(frame: CGRect(x: 0, y: 0, width: 140, height: 20))
+      |                     `- warning: call to main actor-isolated initializer 'init(frame:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1426 |         let name = "A_VERY_LONG_CAMERA_FILENAME_123456.JPG"
+ 1427 |         label.configure(name: name, primary: .black, secondary: .gray)
+
+ZTransfer.TransferFileTitleLabel.init:2:30: note: calls to initializer 'init(frame:)' from outside of its actor context are implicitly asynchronous
+1 | class TransferFileTitleLabel {
+2 | @MainActor override internal init(frame: CGRect)}
+  |                              `- note: calls to initializer 'init(frame:)' from outside of its actor context are implicitly asynchronous
+3 | 
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1427:15: warning: call to main actor-isolated instance method 'configure(name:primary:secondary:fontSize:accessibilityName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1416 |     }
+ 1417 | 
+ 1418 |     func testTransferTitleFitsStemAndPreservesExtensionAndStyles() throws {
+      |          `- note: add '@MainActor' to make instance method 'testTransferTitleFitsStemAndPreservesExtensionAndStyles()' part of global actor 'MainActor'
+ 1419 |         let measure: (TransferFileTitleText) -> CGFloat = { CGFloat($0.full.utf16.count) }
+ 1420 |         XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 13, measure: measure).full, "DSC_12345.JPG")
+      :
+ 1425 |         let label = TransferFileTitleLabel(frame: CGRect(x: 0, y: 0, width: 140, height: 20))
+ 1426 |         let name = "A_VERY_LONG_CAMERA_FILENAME_123456.JPG"
+ 1427 |         label.configure(name: name, primary: .black, secondary: .gray)
+      |               `- warning: call to main actor-isolated instance method 'configure(name:primary:secondary:fontSize:accessibilityName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1428 |         label.layoutIfNeeded()
+ 1429 |         let text = try XCTUnwrap(label.attributedText)
+
+ZTransfer.TransferFileTitleLabel.configure:2:26: note: calls to instance method 'configure(name:primary:secondary:fontSize:accessibilityName:)' from outside of its actor context are implicitly asynchronous
+1 | class TransferFileTitleLabel {
+2 | @MainActor internal func configure(name: String, primary: UIColor, secondary: UIColor, fontSize: CGFloat = 14, accessibilityName: String? = nil)}
+  |                          `- note: calls to instance method 'configure(name:primary:secondary:fontSize:accessibilityName:)' from outside of its actor context are implicitly asynchronous
+3 | 
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1428:15: warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1416 |     }
+ 1417 | 
+ 1418 |     func testTransferTitleFitsStemAndPreservesExtensionAndStyles() throws {
+      |          `- note: add '@MainActor' to make instance method 'testTransferTitleFitsStemAndPreservesExtensionAndStyles()' part of global actor 'MainActor'
+ 1419 |         let measure: (TransferFileTitleText) -> CGFloat = { CGFloat($0.full.utf16.count) }
+ 1420 |         XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 13, measure: measure).full, "DSC_12345.JPG")
+      :
+ 1426 |         let name = "A_VERY_LONG_CAMERA_FILENAME_123456.JPG"
+ 1427 |         label.configure(name: name, primary: .black, secondary: .gray)
+ 1428 |         label.layoutIfNeeded()
+      |               `- warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1429 |         let text = try XCTUnwrap(label.attributedText)
+ 1430 |         XCTAssertTrue(text.string.contains("…"))
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:271:1: note: calls to instance method 'layoutIfNeeded()' from outside of its actor context are implicitly asynchronous
+269 | // Allows you to perform layout before the drawing cycle happens. -layoutIfNeeded forces layout early
+270 | - (void)setNeedsLayout;
+271 | - (void)layoutIfNeeded;
+    | `- note: calls to instance method 'layoutIfNeeded()' from outside of its actor context are implicitly asynchronous
+272 | 
+273 | - (void)layoutSubviews;    // override point. called by layoutIfNeeded automatically. As of iOS 6.0, when constraints-based layout is used the base implementation applies the constraints-based layout, otherwise it does nothing.
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1429:40: warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1427 |         label.configure(name: name, primary: .black, secondary: .gray)
+ 1428 |         label.layoutIfNeeded()
+ 1429 |         let text = try XCTUnwrap(label.attributedText)
+      |                                        `- warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1430 |         XCTAssertTrue(text.string.contains("…"))
+ 1431 |         XCTAssertTrue(text.string.hasSuffix(".JPG"))
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UILabel.h:60:59: note: property declared here
+ 58 | 
+ 59 | // the underlying attributed string drawn by the label, if set, the label ignores the properties above.
+ 60 | @property(nullable, nonatomic,copy)   NSAttributedString *attributedText API_AVAILABLE(ios(6.0));  // default is nil
+    |                                                           `- note: property declared here
+ 61 | 
+ 62 | // the 'highlight' property is used by subclasses for such things as pressed states. it's useful to make it part of the base class as a user property
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1433:30: warning: main actor-isolated property 'accessibilityLabel' can not be referenced from a nonisolated autoclosure
+ 1431 |         XCTAssertTrue(text.string.hasSuffix(".JPG"))
+ 1432 |         XCTAssertLessThanOrEqual(text.size().width, 140)
+ 1433 |         XCTAssertEqual(label.accessibilityLabel, name)
+      |                              `- warning: main actor-isolated property 'accessibilityLabel' can not be referenced from a nonisolated autoclosure
+ 1434 |         XCTAssertEqual(text.attribute(.foregroundColor, at: text.length - 1, effectiveRange: nil) as? UIColor, .gray)
+ 1435 |         XCTAssertEqual(text.attribute(.font, at: text.length - 1, effectiveRange: nil) as? UIFont,
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIAccessibility.h:64:49: note: property declared here
+ 62 |  Setting the property will change the label that is returned to the accessibility client. 
+ 63 |  */
+ 64 | @property (nullable, nonatomic, copy) NSString *accessibilityLabel API_UNAVAILABLE(watchos) NS_SWIFT_UI_ACTOR;
+    |                                                 `- note: property declared here
+ 65 | 
+ 66 | /*
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1437:15: warning: main actor-isolated property 'frame' can not be mutated from a nonisolated context
+ 1416 |     }
+ 1417 | 
+ 1418 |     func testTransferTitleFitsStemAndPreservesExtensionAndStyles() throws {
+      |          `- note: add '@MainActor' to make instance method 'testTransferTitleFitsStemAndPreservesExtensionAndStyles()' part of global actor 'MainActor'
+ 1419 |         let measure: (TransferFileTitleText) -> CGFloat = { CGFloat($0.full.utf16.count) }
+ 1420 |         XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 13, measure: measure).full, "DSC_12345.JPG")
+      :
+ 1435 |         XCTAssertEqual(text.attribute(.font, at: text.length - 1, effectiveRange: nil) as? UIFont,
+ 1436 |                        UIFont.systemFont(ofSize: 14, weight: .regular))
+ 1437 |         label.frame.size.width = 500
+      |               `- warning: main actor-isolated property 'frame' can not be mutated from a nonisolated context
+ 1438 |         label.setNeedsLayout(); label.layoutIfNeeded()
+ 1439 |         XCTAssertEqual(label.attributedText?.string, name)
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:197:40: note: mutation of this property is only permitted within the actor
+195 | 
+196 | // animatable. do not use frame if view is transformed since it will not correctly reflect the actual location of the view. use bounds + center instead.
+197 | @property(nonatomic) CGRect            frame;
+    |                                        `- note: mutation of this property is only permitted within the actor
+198 | 
+199 | // use bounds/center and not frame if non-identity transform.
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1438:15: warning: call to main actor-isolated instance method 'setNeedsLayout()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1416 |     }
+ 1417 | 
+ 1418 |     func testTransferTitleFitsStemAndPreservesExtensionAndStyles() throws {
+      |          `- note: add '@MainActor' to make instance method 'testTransferTitleFitsStemAndPreservesExtensionAndStyles()' part of global actor 'MainActor'
+ 1419 |         let measure: (TransferFileTitleText) -> CGFloat = { CGFloat($0.full.utf16.count) }
+ 1420 |         XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 13, measure: measure).full, "DSC_12345.JPG")
+      :
+ 1436 |                        UIFont.systemFont(ofSize: 14, weight: .regular))
+ 1437 |         label.frame.size.width = 500
+ 1438 |         label.setNeedsLayout(); label.layoutIfNeeded()
+      |               `- warning: call to main actor-isolated instance method 'setNeedsLayout()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1439 |         XCTAssertEqual(label.attributedText?.string, name)
+ 1440 |     }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:270:1: note: calls to instance method 'setNeedsLayout()' from outside of its actor context are implicitly asynchronous
+268 | 
+269 | // Allows you to perform layout before the drawing cycle happens. -layoutIfNeeded forces layout early
+270 | - (void)setNeedsLayout;
+    | `- note: calls to instance method 'setNeedsLayout()' from outside of its actor context are implicitly asynchronous
+271 | - (void)layoutIfNeeded;
+272 | 
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1438:39: warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1416 |     }
+ 1417 | 
+ 1418 |     func testTransferTitleFitsStemAndPreservesExtensionAndStyles() throws {
+      |          `- note: add '@MainActor' to make instance method 'testTransferTitleFitsStemAndPreservesExtensionAndStyles()' part of global actor 'MainActor'
+ 1419 |         let measure: (TransferFileTitleText) -> CGFloat = { CGFloat($0.full.utf16.count) }
+ 1420 |         XCTAssertEqual(TransferFileTitleText.fit("DSC_12345.JPG", width: 13, measure: measure).full, "DSC_12345.JPG")
+      :
+ 1436 |                        UIFont.systemFont(ofSize: 14, weight: .regular))
+ 1437 |         label.frame.size.width = 500
+ 1438 |         label.setNeedsLayout(); label.layoutIfNeeded()
+      |                                       `- warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1439 |         XCTAssertEqual(label.attributedText?.string, name)
+ 1440 |     }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:271:1: note: calls to instance method 'layoutIfNeeded()' from outside of its actor context are implicitly asynchronous
+269 | // Allows you to perform layout before the drawing cycle happens. -layoutIfNeeded forces layout early
+270 | - (void)setNeedsLayout;
+271 | - (void)layoutIfNeeded;
+    | `- note: calls to instance method 'layoutIfNeeded()' from outside of its actor context are implicitly asynchronous
+272 | 
+273 | - (void)layoutSubviews;    // override point. called by layoutIfNeeded automatically. As of iOS 6.0, when constraints-based layout is used the base implementation applies the constraints-based layout, otherwise it does nothing.
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1439:30: warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1437 |         label.frame.size.width = 500
+ 1438 |         label.setNeedsLayout(); label.layoutIfNeeded()
+ 1439 |         XCTAssertEqual(label.attributedText?.string, name)
+      |                              `- warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1440 |     }
+ 1441 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UILabel.h:60:59: note: property declared here
+ 58 | 
+ 59 | // the underlying attributed string drawn by the label, if set, the label ignores the properties above.
+ 60 | @property(nullable, nonatomic,copy)   NSAttributedString *attributedText API_AVAILABLE(ios(6.0));  // default is nil
+    |                                                           `- note: property declared here
+ 61 | 
+ 62 | // the 'highlight' property is used by subclasses for such things as pressed states. it's useful to make it part of the base class as a user property
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:7003:18: warning: weak variable 'owner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 7001 |                 return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+ 7002 |             })
+ 7003 |         weak var owner = store
+      |                  `- warning: weak variable 'owner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 7004 |         let task = try XCTUnwrap(store).setDirectory(slow)
+ 7005 |         await fulfillment(of: [entered], timeout: 2)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8582:18: warning: weak variable 'weakProjection' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8580 |         var renders = 0
+ 8581 |         var projection: GPSEntryPresentation? = GPSEntryPresentation(model.gps)
+ 8582 |         weak var weakProjection = projection
+      |                  `- warning: weak variable 'weakProjection' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8583 |         var updates = 0
+ 8584 |         let token = projection!.objectWillChange.sink { updates += 1 }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8587:18: warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8585 |         var host: UIHostingController<GPSControlHarness>? = UIHostingController(rootView:
+ 8586 |             GPSControlHarness(coordinator: model.gps, input: input, rendered: { renders += 1 }))
+ 8587 |         weak var weakHost = host
+      |                  `- warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8588 |         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+ 8589 |         let previous = scene.windows.first(where: \.isKeyWindow)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8638:18: warning: weak variable 'weakObservation' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8636 |         model.gps.setEnabled(true)
+ 8637 |         var observation: GPSEnabledObservation? = GPSEnabledObservation(model.gps)
+ 8638 |         weak var weakObservation = observation
+      |                  `- warning: weak variable 'weakObservation' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8639 |         var changes = 0
+ 8640 |         let token = observation!.objectWillChange.sink { changes += 1 }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8694:18: warning: weak variable 'weakOwner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8692 |     func testRootAndPagerProjectOnlyTheirOwnInputsAndReleaseSubscriptions() async throws {
+ 8693 |         var owner: RootPresentationModel? = try fixture()
+ 8694 |         weak var weakOwner = owner
+      |                  `- warning: weak variable 'weakOwner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8695 |         let connection = owner!.connection, gps = owner!.gps, effects = owner!.effects
+ 8696 |         gps.setEnabled(true)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8698:18: warning: weak variable 'weakPager' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8696 |         gps.setEnabled(true)
+ 8697 |         var pager: HomeWorkspacePresentation? = HomeWorkspacePresentation(connection: connection, gps: gps)
+ 8698 |         weak var weakPager = pager
+      |                  `- warning: weak variable 'weakPager' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8699 |         var rootChanges = 0, pagerChanges = 0, detailChanges = 0
+ 8700 |         let rootToken = owner!.objectWillChange.sink { rootChanges += 1 }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10035:22: warning: weak variable 'released' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10033 |         for gentle in [false, true] {
+10034 |             var popup: GeniePopupHostView? = GeniePopupHostView(frame: CGRect(x: 20, y: 80, width: 260, height: 160))
+10035 |             weak var released = popup
+      |                      `- warning: weak variable 'released' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10036 |             popup!.host.rootView = AnyView(Color.red.frame(width: 260, height: 160))
+10037 |             var frames: [CGFloat] = []
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10327:98: warning: main actor-isolated property 'scale' can not be referenced from a nonisolated context
+10325 |             var popup: GeniePopupHostView?
+10326 |             func snapshot(_ view: UIView) -> UIImage {
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                                  `- warning: main actor-isolated property 'scale' can not be referenced from a nonisolated context
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:60:39: note: property declared here
+ 58 | 
+ 59 | @property(nonatomic,readonly) CGRect  bounds;                // Bounds of entire screen in points
+ 60 | @property(nonatomic,readonly) CGFloat scale API_AVAILABLE(ios(4.0));
+    |                                       `- note: property declared here
+ 61 | 
+ 62 | @property(nonatomic,readonly,copy) NSArray<UIScreenMode *> *availableModes API_AVAILABLE(ios(3.2)) API_UNAVAILABLE(tvos);             // The list of modes that this screen supports
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10327:91: warning: main actor-isolated property 'screen' can not be referenced from a nonisolated context
+10325 |             var popup: GeniePopupHostView?
+10326 |             func snapshot(_ view: UIView) -> UIImage {
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                           `- warning: main actor-isolated property 'screen' can not be referenced from a nonisolated context
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIWindow.h:37:39: note: property declared here
+ 35 | @property(nonatomic, setter=setCanResizeToFitContent:) BOOL canResizeToFitContent API_AVAILABLE(macCatalyst(13.0)) API_UNAVAILABLE(watchos);
+ 36 | 
+ 37 | @property(nonatomic,strong) UIScreen *screen API_AVAILABLE(ios(3.2)) API_UNAVAILABLE(visionos);  // default is [UIScreen mainScreen]. changing the screen may be an expensive operation and should not be done in performance-sensitive code
+    |                                       `- note: property declared here
+ 38 | - (void)setScreen:(UIScreen *)screen API_DEPRECATED_WITH_REPLACEMENT("setWindowScene:", ios(3.2, 13.0)) API_UNAVAILABLE(visionos);
+ 39 | 
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10327:83: warning: main actor-isolated property 'window' can not be referenced from a nonisolated context
+10325 |             var popup: GeniePopupHostView?
+10326 |             func snapshot(_ view: UIView) -> UIImage {
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                   `- warning: main actor-isolated property 'window' can not be referenced from a nonisolated context
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:235:55: note: property declared here
+233 | @property(nullable, nonatomic,readonly) UIView       *superview;
+234 | @property(nonatomic,readonly,copy) NSArray<__kindof UIView *> *subviews;
+235 | @property(nullable, nonatomic,readonly) UIWindow     *window;
+    |                                                       `- note: property declared here
+236 | 
+237 | - (void)removeFromSuperview;
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10327:121: warning: main actor-isolated property 'scale' can not be referenced from a nonisolated autoclosure
+10325 |             var popup: GeniePopupHostView?
+10326 |             func snapshot(_ view: UIView) -> UIImage {
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                                                         `- warning: main actor-isolated property 'scale' can not be referenced from a nonisolated autoclosure
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:60:39: note: property declared here
+ 58 | 
+ 59 | @property(nonatomic,readonly) CGRect  bounds;                // Bounds of entire screen in points
+ 60 | @property(nonatomic,readonly) CGFloat scale API_AVAILABLE(ios(4.0));
+    |                                       `- note: property declared here
+ 61 | 
+ 62 | @property(nonatomic,readonly,copy) NSArray<UIScreenMode *> *availableModes API_AVAILABLE(ios(3.2)) API_UNAVAILABLE(tvos);             // The list of modes that this screen supports
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10327:116: warning: main actor-isolated class property 'main' can not be referenced from a nonisolated autoclosure
+10325 |             var popup: GeniePopupHostView?
+10326 |             func snapshot(_ view: UIView) -> UIImage {
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                                                    `- warning: main actor-isolated class property 'main' can not be referenced from a nonisolated autoclosure
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:57:49: note: class property declared here
+ 55 | 
+ 56 | @property(class, nonatomic, readonly) NSArray<UIScreen *> *screens API_DEPRECATED("Use UIApplication.shared.openSessions to find open sessions with scenes from other screens", ios(3.2, 16.0), visionos(1.0, 1.0)) API_UNAVAILABLE(watchos); // all screens currently attached to the device
+ 57 | @property(class, nonatomic, readonly) UIScreen *mainScreen API_DEPRECATED("Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.", ios(2.0, 26.0), tvos(9.0, 26.0), visionos(1.0, 26.0)) API_UNAVAILABLE(watchos);
+    |                                                 `- note: class property declared here
+ 58 | 
+ 59 | @property(nonatomic,readonly) CGRect  bounds;                // Bounds of entire screen in points
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10328:59: warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated context
+10326 |             func snapshot(_ view: UIView) -> UIImage {
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+      |                                                           `- warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated context
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+10330 |                 }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:200:40: note: property declared here
+198 | 
+199 | // use bounds/center and not frame if non-identity transform.
+200 | @property(nonatomic) CGRect            bounds;      // default bounds is zero origin, frame size. animatable
+    |                                        `- note: property declared here
+201 | @property(nonatomic) CGPoint           center;      // center is center of frame, relative to anchorPoint. animatable
+202 | @property(nonatomic) CGAffineTransform transform;   // default is CGAffineTransformIdentity. animatable. Please use this property instead of the affineTransform property on the layer
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10329:40: warning: call to main actor-isolated instance method 'drawHierarchy(in:afterScreenUpdates:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+      |                                        `- warning: call to main actor-isolated instance method 'drawHierarchy(in:afterScreenUpdates:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+10330 |                 }
+10331 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:670:1: note: calls to instance method 'drawHierarchy(in:afterScreenUpdates:)' from outside of its actor context are implicitly asynchronous
+668 | - (nullable UIView *)resizableSnapshotViewFromRect:(CGRect)rect afterScreenUpdates:(BOOL)afterUpdates withCapInsets:(UIEdgeInsets)capInsets API_AVAILABLE(ios(7.0));  // Resizable snapshots will default to stretching the center
+669 | // Use this method to render a snapshot of the view hierarchy into the current context. Returns NO if the snapshot is missing image data, YES if the snapshot is complete. Calling this method from layoutSubviews while the current transaction is committing will capture what is currently displayed regardless if afterUpdates is YES.
+670 | - (BOOL)drawViewHierarchyInRect:(CGRect)rect afterScreenUpdates:(BOOL)afterUpdates API_AVAILABLE(ios(7.0));
+    | `- note: calls to instance method 'drawHierarchy(in:afterScreenUpdates:)' from outside of its actor context are implicitly asynchronous
+671 | @end
+672 | 
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10329:63: warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated autoclosure
+10327 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+10328 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10329 |                     XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
+      |                                                               `- warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated autoclosure
+10330 |                 }
+10331 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIView.h:200:40: note: property declared here
+198 | 
+199 | // use bounds/center and not frame if non-identity transform.
+200 | @property(nonatomic) CGRect            bounds;      // default bounds is zero origin, frame size. animatable
+    |                                        `- note: property declared here
+201 | @property(nonatomic) CGPoint           center;      // center is center of frame, relative to anchorPoint. animatable
+202 | @property(nonatomic) CGAffineTransform transform;   // default is CGAffineTransformIdentity. animatable. Please use this property instead of the affineTransform property on the layer
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10888:18: warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10886 |         var host: UIHostingController<Harness>? = UIHostingController(rootView: Harness(
+10887 |             model: model, photo: file(1), feedback: feedback, frames: frames))
+10888 |         weak var weakHost = host
+      |                  `- warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10889 |         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+10890 |         let window = UIWindow(windowScene: scene)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10953:18: warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10951 |         window.frame = CGRect(x: 0, y: 0, width: 300, height: 600)
+10952 |         var host: UIHostingController<Harness>? = UIHostingController(rootView: Harness(editor: editor, frames: frames))
+10953 |         weak var weakHost = host
+      |                  `- warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10954 |         window.rootViewController = host; window.isHidden = false
+10955 |         defer { window.isHidden = true; window.rootViewController = nil }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:11579:56: warning: capture of 'popup' with non-Sendable type 'GeniePopupHostView' in a '@Sendable' closure [#SendableClosureCaptures]
+11577 |         let observation = sourceContainer.layer.observe(\.opacity, options: [.new]) { _, _ in
+11578 |             MainActor.assumeIsolated {
+11579 |                 if sourceContainer.layer.opacity == 0, popup.host.view.layer.opacity == 1,
+      |                                                        `- warning: capture of 'popup' with non-Sendable type 'GeniePopupHostView' in a '@Sendable' closure [#SendableClosureCaptures]
+11580 |                    !popup.host.view.isUserInteractionEnabled,
+11581 |                    canvas.layer.sublayers?.allSatisfy({ $0.sublayers?.first?.contents == nil }) == true {
+
+ZTransfer.GeniePopupHostView:1:33: note: class 'GeniePopupHostView' does not conform to the 'Sendable' protocol
+ 1 | @MainActor final internal class GeniePopupHostView : UIView {
+   |                                 `- note: class 'GeniePopupHostView' does not conform to the 'Sendable' protocol
+ 2 |     @MainActor internal let host: UIHostingController<AnyView>
+ 3 |     @MainActor internal var onSettled: ((CGFloat) -> Void)?
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:11536:25: warning: 'opening' mutated after capture by sendable closure
+11509 |         var exposedSource = 0
+11510 |         var settled: CGFloat?
+11511 |         var opening = false
+      |             `- note: variable defined here
+11512 |         popup.onSettled = { settled = $0 }
+11513 |         // A display-link/screenshot sample can miss the synchronous capture
+11514 |         // interval. Observe the source becoming visible inside that interval,
+11515 |         // before any mesh exists, and check its full on-screen ancestor chain.
+11516 |         let inspect: @MainActor @Sendable () -> Void = {
+      |                                                        `- note: variable captured by sendable closure
+11517 |             let layer = popup.host.view.layer
+11518 |             guard opening, layer.opacity == 1,
+      |                   `- note: capturing use
+11519 |                   !popup.host.view.isUserInteractionEnabled,
+11520 |                   canvas.layer.sublayers?.allSatisfy({ $0.sublayers?.first?.contents == nil }) == true else { return }
+      :
+11534 |         for _ in 0..<3 {
+11535 |             for target: CGFloat in [1, 0] {
+11536 |                 opening = target == 1
+      |                         `- warning: 'opening' mutated after capture by sendable closure
+11537 |                 settled = nil
+11538 |                 popup.configure(target: target, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:11579:62: error: sending 'popup' risks causing data races [#RegionIsolation::SendingRisksDataRace]
+11577 |         let observation = sourceContainer.layer.observe(\.opacity, options: [.new]) { _, _ in
+11578 |             MainActor.assumeIsolated {
+11579 |                 if sourceContainer.layer.opacity == 0, popup.host.view.layer.opacity == 1,
+      |                                                              |- error: sending 'popup' risks causing data races [#RegionIsolation::SendingRisksDataRace]
+      |                                                              `- note: 'popup' is captured by a main actor-isolated closure. main actor-isolated uses in closure may race against code in the current isolation context
+11580 |                    !popup.host.view.isUserInteractionEnabled,
+11581 |                    canvas.layer.sublayers?.allSatisfy({ $0.sublayers?.first?.contents == nil }) == true {
+
+[#ActorIsolatedCall]: <https://docs.swift.org/compiler/documentation/diagnostics/actor-isolated-call>
+[#RegionIsolation]: <https://docs.swift.org/compiler/documentation/diagnostics/region-isolation>
+[#SendableClosureCaptures]: <https://docs.swift.org/compiler/documentation/diagnostics/sendable-closure-captures>
+[#SendingRisksDataRace]: <https://docs.swift.org/compiler/documentation/diagnostics/sending-risks-data-race>
+[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+[#WeakMutability]: <https://docs.swift.org/compiler/documentation/diagnostics/weak-mutability>
+Failed frontend command:
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile DomainModelTests.swift
+
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c -filelist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/sources-1 -primary-file /Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift -emit-dependencies-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/DomainModelTests.d -emit-const-values-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/DomainModelTests.swiftconstvalues -emit-reference-dependencies-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/DomainModelTests.swiftdeps -serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/DomainModelTests.dia -target arm64-apple-ios16.0-simulator -module-can-import-version UIKit 9127.1.13.1 9127.1.13 -disable-cross-import-overlay-search -swift-module-cross-import Darwin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/usr/include/Darwin.swiftcrossimport/xlocale.swiftoverlay -swift-module-cross-import Photos /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/Photos.framework/Modules/Photos.swiftcrossimport/AppIntents.swiftoverlay -swift-module-cross-import Photos /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/Photos.framework/Modules/Photos.swiftcrossimport/AppIntents.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/SwiftUI.swiftoverlay -swift-module-cross-import PhotosUI /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/System/Library/Frameworks/PhotosUI.framework/Modules/PhotosUI.swiftcrossimport/WidgetKit.swiftoverlay -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#FoundationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#ObservationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libPreviewsMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#PreviewsMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftUIMacros -disable-implicit-swift-modules -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps -explicit-swift-module-map-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-dependencies-1.json -Xllvm -aarch64-use-tbi -enable-objc-interop -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format\=dwarf -dwarf-version\=4 -swift-version 6 -Onone -D DEBUG -serialize-debugging-options -enable-experimental-feature DebugDescriptionMacro -empty-abi-descriptor -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /Users/orys/code/nk_send/ios -enable-anonymous-context-mangled-names -file-compilation-dir /Users/orys/code/nk_send/ios -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources -Xcc -DDEBUG\=1 -no-auto-bridging-header-chaining -module-name ZTransferTests -const-gather-protocols-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_const_extract_protocols.json -disable-clang-spi -clang-target arm64-apple-ios27.2-simulator -target-sdk-version 27.2 -target-sdk-name iphonesimulator27.2 -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -o /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/DomainModelTests.o -debug-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -index-unit-output-path /ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/DomainModelTests.o -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -index-system-modules
+SwiftEmitModule normal arm64 Emitting\ module\ for\ ZTransferTests (in target 'ZTransferTests' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransferTests/NewObjectThumbnailRetryTests.swift:188:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+186 |         let stream = await store.retryWakes()
+187 |         var iterator = stream.makeAsyncIterator()
+188 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+189 |         XCTAssertNil(end)
+190 |     }
+
+SwiftCompile normal arm64 (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for ZTransferTests (in target 'ZTransferTests' from project 'ZTransfer')
+
+SwiftDriver\ Compilation\ Requirements ZTransferTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferTests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftsourceinfo (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftsourceinfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.abi.json (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.abi.json /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-sta-popup-20261108-r2.xcresult
+
+Testing failed:
+	Sending 'popup' risks causing data races
+	Testing cancelled because the build failed.
+
+** TEST FAILED **
+
+
+The following build commands failed:
+	SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+	SwiftCompile normal arm64 Compiling\ DomainModelTests.swift /Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+	Testing project ZTransfer with scheme ZTransfer
+(3 failures)

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Read-only packaging checks; not signing, runtime, privacy-label or review approval."""
 import argparse
+import csv
+import hashlib
 import ipaddress
 import json
 import pathlib
@@ -78,8 +80,21 @@ if executable.is_file():
     binary = executable.read_bytes()
     launch_source = (ios / "ZTransfer/App/ZTransferApp.swift").read_text()
     flags = sorted(set(re.findall(r'"(--[^"]*test)"', launch_source)))
-    for token in ["App-Prefs:", "--trace-storekit-startup", *flags]:
+    for token in ["App-Prefs:", "--trace-storekit-startup", "--effects-np3-fixture", "/UITestNP3", *flags]:
         require(token.encode() not in binary, f"Debug/private route string remains: {token}")
+    # Retired phone filters were compiled parameters, not .np3 resources.
+    # Check their stable catalog/name markers too. This complements the empty
+    # catalog and migration tests; it does not establish third-party rights.
+    retired = ios / "docs/evidence/prepayment-20261102/retained-filter-sources.csv"
+    with retired.open(newline="") as source:
+        rows = list(csv.DictReader(source))
+    require(len(rows) == 50, "Retired phone-filter manifest must contain 50 entries")
+    for row in rows:
+        digest = row["source_sha256"]
+        markers = [digest, hashlib.sha256((digest + "|np3-srgb-v1").encode()).hexdigest(),
+                   "photo_filter_builtin_" + row["legacy_id"]]
+        require(not any(marker.encode() in binary for marker in markers),
+                f"Retired bundled phone-filter marker remains: {row['legacy_id']}")
 else:
     errors.append("Missing executable")
 

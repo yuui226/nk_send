@@ -10,13 +10,14 @@ struct PhotoFilterPopupOverlay: View {
     let initial: PhotoFilterState
     let availableExtensions: [String]
     let availableStorageSlots: [UInt32]
-    let suggestedDate: String?
     let ratingProgress: PhotoRatingProgress
     let showProtectionFilter: Bool
     let onChange: (PhotoFilterState) -> Void
+    let onReset: () -> Void
 
     @State private var working: PhotoFilterState
     @State private var editingDate = false
+    @State private var pageTransitionsEnabled = false
     @State private var pageHeights: [Bool: CGFloat] = [:]
     @State private var showRatingTip = false
     @State private var ratingTipFrame: CGRect = .zero
@@ -25,22 +26,30 @@ struct PhotoFilterPopupOverlay: View {
     var didRender: (() -> Void)? = nil
     #endif
     @AppStorage("haptics_enabled") private var hapticsEnabled = true
+    @Environment(\.scenePhase) private var scenePhase
+
+    // Android AnimatedContent SizeTransform defaults to a critical spring.
+    // Keep the popup's top edge attached while its measured height changes.
+    // Compose 1.5.4 SizeTransform uses StiffnessMediumLow (400), not
+    // Transition's interrupted-tween fallback (1500).
+    private let pageResize = Animation.interpolatingSpring(mass: 1, stiffness: 400, damping: 40)
 
     init(isPresented: Binding<Bool>, anchor: Anchor<CGRect>,
          initial: PhotoFilterState,
          availableExtensions: [String], availableStorageSlots: [UInt32],
-         suggestedDate: String?, ratingProgress: PhotoRatingProgress,
+         ratingProgress: PhotoRatingProgress,
          showProtectionFilter: Bool = true,
-         onChange: @escaping (PhotoFilterState) -> Void) {
+         onChange: @escaping (PhotoFilterState) -> Void,
+         onReset: @escaping () -> Void) {
         _isPresented = isPresented
         self.anchor = anchor
         self.initial = initial
         self.availableExtensions = availableExtensions.map { $0.lowercased() }
         self.availableStorageSlots = availableStorageSlots
-        self.suggestedDate = suggestedDate
         self.ratingProgress = ratingProgress
         self.showProtectionFilter = showProtectionFilter
         self.onChange = onChange
+        self.onReset = onReset
         _working = State(initialValue: initial)
     }
 
@@ -50,9 +59,9 @@ struct PhotoFilterPopupOverlay: View {
         #endif
         GeometryReader { proxy in
             let localAnchor = proxy[anchor]
-            // Android's final rating row fixes the panel at 14 + 81 + 8 +
-            // 154 + 14 dp. Keep that width stable while controls crossfade.
-            let width = min(271, max(1, proxy.size.width - 24))
+            // Android 18145b3a: 300pt panel, fixed five-star slot; the
+            // switch and range wheel share the remaining flexible width.
+            let width = min(300, max(1, proxy.size.width - 24))
             // Android FilterOverlay centers the fixed-width panel. The trigger
             // only supplies the genie origin and the vertical attachment.
             let left = max(12, (proxy.size.width - width) / 2)
@@ -82,7 +91,9 @@ struct PhotoFilterPopupOverlay: View {
                     anchorGap: top - localAnchor.maxY,
                     fillsProposedSize: true
                 )
-                .frame(width: width, height: panelHeight, alignment: .top)
+                .frame(width: width)
+                .modifier(FilterPopupHeight(height: panelHeight))
+                .animation(pageTransitionsEnabled && pageHeights.count > 1 && isPresented ? pageResize : nil, value: panelHeight)
                 .padding(.leading, left)
                     .padding(.top, top)
                 .allowsHitTesting(!showRatingTip)
@@ -131,30 +142,44 @@ struct PhotoFilterPopupOverlay: View {
     private func panelContent(width: CGFloat, maxHeight: CGFloat) -> some View {
         // Measure the natural page inside the scroll view, never the flexible
         // viewport. Android wraps its column; only oversized content scrolls.
-        ScrollView(.vertical, showsIndicators: false) {
-            Group {
-                if editingDate {
-                    dateEditor
-                } else {
-                    filterForm
+        // Retain both page identities for Android's 150ms in / 100ms out.
+        // A single changing ScrollView id would destroy the outgoing page
+        // before any opacity animation could draw its first frame.
+        AndroidBooleanCrossfade(selected: editingDate, durationMilliseconds: 150,
+                                exitDurationMilliseconds: 100, alignment: .top,
+                                isActive: pageTransitionsEnabled && isPresented && scenePhase == .active,
+                                incomingAbove: true) { page in
+            ScrollView(.vertical, showsIndicators: false) {
+                Group {
+                    if page { dateEditor } else { filterForm }
+                }
+                .frame(width: max(1, width - 28))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(14)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: FilterPageHeightKey.self,
+                                               value: [page: geometry.size.height])
+                    }
                 }
             }
-            .frame(width: max(1, width - 28))
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(14)
-            .background {
-                GeometryReader { geometry in
-                    Color.clear.preference(key: FilterPageHeightKey.self,
-                                           value: [editingDate: geometry.size.height])
-                }
-            }
+            .id(page) // Each retained page owns its scroll offset and date draft.
+            .frame(height: min(maxHeight, pageHeights[page] ?? maxHeight), alignment: .top)
         }
         .onPreferenceChange(FilterPageHeightKey.self) { heights in
             for (page, height) in heights where height > 0 {
                 if pageHeights[page] != height { pageHeights[page] = height }
             }
         }
-        .frame(width: width, height: min(maxHeight, pageHeights[editingDate] ?? pageHeights[!editingDate] ?? maxHeight))
+        // The outer host is the sole animated height owner. A second explicit
+        // height animation inside UIHostingController re-centers the page as
+        // the two layout transactions arrive, moving its top edge mid-flight.
+        .frame(width: width)
+        // Retained outgoing content can be taller than the new viewport.
+        // A zero minimum lets the root accept that smaller proposal; otherwise
+        // UIHostingController centers its oversized root above the anchor.
+        .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+        .clipped()
         // Shadow the panel surface once. Applying a shadow to the entire
         // content makes the synchronous Genie capture blur every child.
         .background {
@@ -162,7 +187,6 @@ struct PhotoFilterPopupOverlay: View {
                 .compositingGroup()
                 .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
         }
-        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.15), value: editingDate)
     }
 
     private var filterForm: some View {
@@ -200,7 +224,6 @@ struct PhotoFilterPopupOverlay: View {
             }
             if !availableStorageSlots.isEmpty {
                 divider
-                section(AppLocalized.resource("filter_section_storage"))
                 HStack(spacing: 8) {
                     ForEach(availableStorageSlots, id: \.self) { slot in
                         FilterChip(label: AppLocalized.formattedResource("filter_storage_slot", ["%1$d": String(slot)]),
@@ -221,18 +244,29 @@ struct PhotoFilterPopupOverlay: View {
             ratingFilterRow
             divider
             HStack(spacing: 8) {
-                FilterChip(label: working.dateRange.map(formatRange) ?? AppLocalized.resource("filter_date"), selected: working.dateRange != nil) {
+                PhotoFilterActionButton(title: working.dateRange.map(formatRange) ?? AppLocalized.resource("filter_date"),
+                                        systemImage: "calendar", selected: working.dateRange != nil) {
+                    pageTransitionsEnabled = true
                     editingDate = true
                 }
+                .accessibilityIdentifier("photo-filter-date")
                 if working.dateRange != nil {
                     FilterClearButton { commit(working.withDateRange(nil)) }
                 }
             }
+            divider
+            PhotoFilterActionButton(title: AppLocalized.resource("reset_filters"), systemImage: "arrow.clockwise") {
+                // Android 89018097: explicit reset also clears STA's hidden
+                // protection preference; ordinary edits must preserve it.
+                working = PhotoFilterState()
+                onReset()
+            }
+            .accessibilityIdentifier("photo-filter-reset")
         }
     }
 
     private var dateEditor: some View {
-        PhotoFilterDateEditor(current: working.dateRange, suggestedDate: suggestedDate,
+        PhotoFilterDateEditor(current: working.dateRange,
                               onBack: { editingDate = false }) { range in
             commit(working.withDateRange(range))
             editingDate = false
@@ -258,7 +292,7 @@ struct PhotoFilterPopupOverlay: View {
 
             ZStack(alignment: .leading) {
                 if !working.ratingEnabled {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         DetentWheel(
                             label: AppLocalized.resource("filter_rating_range_label"),
                             options: [1, 3, 5, 0],
@@ -277,12 +311,12 @@ struct PhotoFilterPopupOverlay: View {
                             showDragHint: false,
                             onDetent: { ZTransferHaptics.shared.play(.selection) }
                         )
-                        .frame(width: 81, height: 34)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
                         TipLightbulbButton(
                             attention: false,
                             size: 34,
                             accessibilityLabel: AppLocalized.resource("filter_rating_help_title"),
-                            embeddedInPanel: true,
                             action: { showRatingTip = true }
                         )
                         .background(
@@ -360,12 +394,6 @@ struct PhotoFilterPopupOverlay: View {
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: showRatingTip ? 0.34 : 0.26), value: showRatingTip)
     }
 
-    private func section(_ title: String) -> some View {
-        Text(title).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-            .foregroundStyle(ZTransferColors.secondaryText)
-            .padding(.bottom, 8)
-    }
-
     private var divider: some View {
         Rectangle().fill(ZTransferColors.secondaryText.opacity(0.16)).frame(height: 1).padding(.vertical, 13)
     }
@@ -422,6 +450,9 @@ struct PhotoFilterPopupOverlay: View {
     }
 
     private func resetDraft() {
+        // Opening the popup is its own Genie transition, never a replay of the
+        // previously dismissed date page fading back into the filter form.
+        pageTransitionsEnabled = false
         working = initial
         editingDate = false
     }
@@ -435,7 +466,7 @@ private struct FilterClearButton: View {
             Image(systemName: "xmark")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(ZTransferColors.secondaryText)
-                .frame(width: 38, height: 38)
+            .frame(width: 34, height: 34)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 9, panel: true))
     }
@@ -445,59 +476,42 @@ private struct FilterClearButton: View {
 /// Opening the filter popup itself must not parse or initialize date drafts.
 @MainActor
 private struct PhotoFilterDateEditor: View {
-    private let dates = PhotoFilterDates()
     let onBack: () -> Void
     let onApply: (PhotoDateRange?) -> Void
-    @State private var startDate: Date
-    @State private var endDate: Date
+    @State private var draft: PhotoFilterDateDraft
 
-    init(current: PhotoDateRange?, suggestedDate: String?,
+    init(current: PhotoDateRange?,
          onBack: @escaping () -> Void, onApply: @escaping (PhotoDateRange?) -> Void) {
         self.onBack = onBack
         self.onApply = onApply
-        let initialDate = dates.date(from: current?.end)
-            ?? dates.date(from: suggestedDate)
-            ?? dates.calendar.startOfDay(for: Date())
-        _startDate = State(initialValue: dates.date(from: current?.start) ?? initialDate)
-        _endDate = State(initialValue: initialDate)
+        _draft = State(initialValue: PhotoFilterDateDraft(current: current))
     }
 
     var body: some View {
-        let years = dates.years(start: startDate, end: endDate)
+        let years = draft.years
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Button { onBack() } label: {
                     Image(systemName: "chevron.left").frame(width: 28, height: 28)
-                }.buttonStyle(.plain)
+                }.buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 10))
+                    .accessibilityLabel(AppLocalized.resource("cd_back"))
+                    .accessibilityIdentifier("photo-filter-date-back")
                 Text(AppLocalized.resource("date_range"))
-                    .zTransferTypography(.titleMedium, weight: .semibold)
+                    .zTransferTypography(.titleSmall, weight: .semibold)
                 Spacer(minLength: 0)
             }
-            DateEndpointEditor(label: AppLocalized.resource("date_start"), date: $startDate, years: years)
-            DateEndpointEditor(label: AppLocalized.resource("date_end"), date: $endDate, years: years)
+            DateEndpointEditor(date: $draft.upperDate, years: years)
+            DateEndpointEditor(date: $draft.lowerDate, years: years)
             HStack(spacing: 8) {
-                Button(AppLocalized.resource("clear")) {
+                PhotoFilterActionButton(title: AppLocalized.resource("clear"), height: 40) {
                     onApply(nil)
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11, panel: true))
-                .frame(maxWidth: .infinity, minHeight: 40)
-                Button(AppLocalized.resource("done")) {
-                    onApply(dates.range(start: startDate, end: endDate))
+                .accessibilityIdentifier("photo-filter-date-clear")
+                PhotoFilterActionButton(title: AppLocalized.resource("done"), selected: true, height: 40) {
+                    onApply(draft.range)
                 }
-                .buttonStyle(ZTransferGlassButtonStyle(
-                    cornerRadius: 11,
-                    panel: true,
-                    active: true,
-                    activeColor: ZTransferColors.accentBlue
-                ))
-                .frame(maxWidth: .infinity, minHeight: 40)
+                .accessibilityIdentifier("photo-filter-date-done")
             }
-        }
-        .onChange(of: startDate) { value in
-            if value > endDate { endDate = value }
-        }
-        .onChange(of: endDate) { value in
-            if value < startDate { startDate = value }
         }
     }
 
@@ -535,5 +549,21 @@ private struct FilterPageHeightKey: PreferenceKey {
     static let defaultValue: [Bool: CGFloat] = [:]
     static func reduce(value: inout [Bool: CGFloat], nextValue: () -> [Bool: CGFloat]) {
         value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+/// Interpolate the actual proposed height before crossing the UIKit host.
+/// An ordinary animated frame lets SwiftUI temporarily transform the hosted
+/// view around its center; resizing its inner hosting controller at the same
+/// time makes the page jump vertically. Each sample here is a plain layout.
+private struct FilterPopupHeight: AnimatableModifier {
+    var height: CGFloat
+    nonisolated var animatableData: CGFloat {
+        get { height }
+        set { height = newValue }
+    }
+    func body(content: Content) -> some View {
+        content.frame(height: height, alignment: .top)
+            .transaction { $0.animation = nil }
     }
 }

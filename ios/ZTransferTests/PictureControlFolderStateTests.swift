@@ -187,7 +187,7 @@ final class PictureControlFolderStateTests: XCTestCase {
         try await finish(state)
         let catalog = state.catalog
         let labels = catalog.labels(uncategorized: "Root")
-        let category = try XCTUnwrap(catalog.filesByCategory["Category-0"])
+        let category = try XCTUnwrap(catalog.files(in: "Category-0"))
         var fileUpdates = 0, folderUpdates = 0, snapshotUpdates = 0
         let subscriptions = [state.$files.dropFirst().sink { _ in fileUpdates += 1 },
             state.$folder.dropFirst().sink { _ in folderUpdates += 1 },
@@ -198,7 +198,7 @@ final class PictureControlFolderStateTests: XCTestCase {
         for _ in 0..<120 {
             XCTAssertTrue(state.catalog === catalog)
             XCTAssertEqual(state.catalog.labels(uncategorized: "Root")["id-100"], labels["id-100"])
-            let repeated = try XCTUnwrap(state.catalog.filesByCategory["Category-0"])
+            let repeated = try XCTUnwrap(state.catalog.files(in: "Category-0"))
             category.withUnsafeBufferPointer { first in
                 repeated.withUnsafeBufferPointer { second in XCTAssertEqual(first.baseAddress, second.baseAddress) }
             }

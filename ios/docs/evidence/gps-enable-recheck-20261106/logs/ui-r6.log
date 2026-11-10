@@ -1,0 +1,259 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer-Interactions -configuration Debug -destination "platform=iOS Simulator,id=FC8ECF06-0A56-4949-B64C-3EE06870025E" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -resultBundlePath /tmp/ztransfer-gps-recheck-ui-20261106-r6.xcresult -parallel-testing-enabled NO "-only-testing:ZTransferInteractionUITests/PhotoEffectsMasterUITests/testGPSDeniedNativePermissionOpensSettingsAndKeepsGuidanceOnReturn" "-only-testing:ZTransferInteractionUITests/PhotoEffectsMasterUITests/testGPSFirstUseNativeLocationPromptCanEnableTransport"
+
+Writing result bundle at path:
+	/tmp/ztransfer-gps-recheck-ui-20261106-r6.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (3 targets)
+    Target 'ZTransferInteractionUITests' in project 'ZTransfer'
+        ➜ Explicit dependency on target 'ZTransfer' in project 'ZTransfer'
+    Target 'ZTransferTests' in project 'ZTransfer'
+        ➜ Explicit dependency on target 'ZTransfer' in project 'ZTransfer'
+    Target 'ZTransfer' in project 'ZTransfer' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/orys/code/nk_send/ios/ZTransfer/Resources/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: a6639cc3e1cb2443aab625dda413f1ed
+Build description path: /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/XCBuildData/a6639cc3e1cb2443aab625dda413f1ed.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache
+    cd /Users/orys/code/nk_send/ios/ZTransfer.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -o /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache
+
+SwiftDriver ZTransferInteractionUITests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferInteractionUITests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.SwiftFileList -DDEBUG -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist /Users/orys/code/nk_send/ios/ZTransfer/Info.plist (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /Users/orys/code/nk_send/ios/ZTransfer/Info.plist -producttype com.apple.product-type.application -genpkginfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/assetcatalog_generated_info.plist -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/Info.plist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/empty-ZTransferInteractionUITests.plist (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/empty-ZTransferInteractionUITests.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ProductTypeInfoPlistAdditions.plist -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/Info.plist
+
+SwiftCompile normal arm64 Compiling\ PhotoEffectsMasterUITests.swift /Users/orys/code/nk_send/ios/InteractionUITests/PhotoEffectsMasterUITests.swift (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/InteractionUITests/PhotoEffectsMasterUITests.swift (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoEffectsMasterUITests.swift
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ ZTransferInteractionUITests (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+
+SwiftCompile normal arm64 (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for ZTransferInteractionUITests (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+
+SwiftDriver\ Compilation\ Requirements ZTransferInteractionUITests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferInteractionUITests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.SwiftFileList -DDEBUG -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftsourceinfo (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftsourceinfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests.swiftmodule/arm64-apple-ios-simulator.swiftmodule /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftmodule (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftmodule /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests.swiftmodule/arm64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.abi.json (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.abi.json /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+SwiftDriverJobDiscovery normal arm64 Compiling PhotoEffectsMasterUITests.swift (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+
+SwiftDriver\ Compilation ZTransferInteractionUITests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferInteractionUITests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.SwiftFileList -DDEBUG -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/ZTransferInteractionUITests normal (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios16.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -filelist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.swiftmodule -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests.xctest-Simulated.xcent -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __ents_der -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests.xctest-Simulated.xcent.der -Xlinker -no_adhoc_codesign -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/ZTransferInteractionUITests
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferInteractionUITests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/XCTest.framework/XCTest' which was built for newer version 17.0
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferInteractionUITests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/libXCTestSwiftSupport.dylib' which was built for newer version 17.0
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferInteractionUITests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/XCUIAutomation.framework/XCUIAutomation' which was built for newer version 17.0
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/ZTransferInteractionUITests --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ExtractAppIntentsMetadata (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name ZTransferInteractionUITests --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk --xcode-version 27B52 --platform-family iOS --deployment-target 16.0 --bundle-identifier com.ztransfer.ios.interactionuitests --output /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest --target-triple arm64-apple-ios16.0-simulator --binary-file /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest/ZTransferInteractionUITests --dependency-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests_dependency_info.dat --stringsdata-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.SwiftFileList --metadata-file-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests.DependencyMetadataFileList --static-metadata-file-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/ZTransferInteractionUITests.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferInteractionUITests.build/Objects-normal/arm64/ZTransferInteractionUITests.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+2026-11-06 20:55:38.735 appintentsmetadataprocessor[94265:42950098] Starting App Intents metadata extraction
+2026-11-06 20:55:38.737 appintentsmetadataprocessor[94265:42950098] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+CodeSign /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app/PlugIns/ZTransferInteractionUITests.xctest
+
+CodeSign /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app (in target 'ZTransferInteractionUITests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app
+/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferInteractionUITests-Runner.app: replacing existing signature
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+2026-11-06 20:55:39.694205+0800 ZTransferInteractionUITests-Runner[94268:42950273] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-11-06 20:55:40.286.
+Test Suite 'ZTransferInteractionUITests.xctest' started at 2026-11-06 20:55:40.286.
+Test Suite 'PhotoEffectsMasterUITests' started at 2026-11-06 20:55:40.286.
+Test Case '-[ZTransferInteractionUITests.PhotoEffectsMasterUITests testGPSDeniedNativePermissionOpensSettingsAndKeepsGuidanceOnReturn]' started.
+    t =     0.00s Start Test at 2026-11-06 20:55:40.287
+    t =     0.02s Set Up
+    t =     0.02s Terminate com.ztransfer.ios:0
+    t =     0.03s Open com.ztransfer.ios
+    t =     0.03s     Launch com.ztransfer.ios
+2026-11-06 20:55:40.399 xcodebuild[94222:42949834] [MT] IDELaunchParametersSnapshot: debugger version lookup failed for path '<nil>': noURL
+2026-11-06 20:55:40.399 xcodebuild[94222:42949834] [MT] IDELaunchParametersSnapshot: no debugger version
+objc[94268]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x106478310) and /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x106514398). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+    t =     0.93s         Setting up automation session
+    t =     1.70s         Wait for com.ztransfer.ios to idle
+    t =     3.35s Waiting 10.0s for "gps-status-control" Button to exist
+    t =     4.42s     Checking `Expect predicate `existsNoRetry == 1` for object "gps-status-control" Button`
+    t =     4.42s         Checking existence of `"gps-status-control" Button`
+    t =     4.52s Tap "gps-status-control" Button
+    t =     4.52s     Wait for com.ztransfer.ios to idle
+    t =     4.52s     Find the "gps-status-control" Button
+    t =     4.54s     Check for interrupting elements affecting "gps-status-control" Button
+    t =     4.56s     Synthesize event
+    t =     4.85s     Wait for com.ztransfer.ios to idle
+    t =     4.86s Waiting 5.0s for Alert (First Match) to exist
+    t =     5.94s     Checking `Expect predicate `existsNoRetry == 1` for object Alert (First Match)`
+    t =     5.94s         Checking existence of `Alert (First Match)`
+    t =     5.98s Tap Button (First Match)
+    t =     5.98s     Wait for com.apple.springboard to idle
+    t =     5.98s     Find the Button (First Match)
+    t =     6.02s     Check for interrupting elements affecting "不允许" Button
+    t =     6.05s     Synthesize event
+<unknown>:0: warning: -[ZTransferInteractionUITests.PhotoEffectsMasterUITests testGPSDeniedNativePermissionOpensSettingsAndKeepsGuidanceOnReturn] : This method can cause UI unresponsiveness if invoked on the main thread. Instead, consider waiting for the `-locationManagerDidChangeAuthorization:` callback and checking `authorizationStatus` first.
+    t =     6.34s     Wait for com.apple.springboard to idle
+    t =     6.57s Waiting 5.0s for "gps-permission-guidance" StaticText to exist
+    t =     7.57s     Checking `Expect predicate `existsNoRetry == 1` for object "gps-permission-guidance" StaticText`
+    t =     7.57s         Checking existence of `"gps-permission-guidance" StaticText`
+    t =     7.61s Find the "gps-permission-status" StaticText
+    t =     7.75s Added attachment named 'gps-native-denied-guidance'
+    t =     7.75s Tap "gps-status-control" Button
+    t =     7.75s     Wait for com.ztransfer.ios to idle
+    t =     7.75s     Find the "gps-status-control" Button
+    t =     7.77s     Check for interrupting elements affecting "gps-status-control" Button
+    t =     7.78s     Synthesize event
+    t =     8.08s     Wait for com.ztransfer.ios to idle
+    t =     8.08s Wait for com.apple.Preferences to become Running Foreground
+    t =     8.21s Added attachment named 'gps-native-settings-entry'
+    t =     8.21s Open com.ztransfer.ios
+    t =     8.21s     Activate com.ztransfer.ios
+    t =     8.77s         Wait for com.ztransfer.ios to idle
+    t =     8.80s Waiting 5.0s for "gps-permission-guidance" StaticText to exist
+    t =     9.81s     Checking `Expect predicate `existsNoRetry == 1` for object "gps-permission-guidance" StaticText`
+    t =     9.81s         Checking existence of `"gps-permission-guidance" StaticText`
+    t =     9.82s Find the "gps-permission-status" StaticText
+    t =     9.84s Find the "gps-location-authorization" StaticText
+    t =     9.95s Added attachment named 'gps-native-denied-return'
+    t =     9.95s Tear Down
+    t =     9.95s     Terminate com.ztransfer.ios:94272
+Test Case '-[ZTransferInteractionUITests.PhotoEffectsMasterUITests testGPSDeniedNativePermissionOpensSettingsAndKeepsGuidanceOnReturn]' passed (11.098 seconds).
+Test Case '-[ZTransferInteractionUITests.PhotoEffectsMasterUITests testGPSFirstUseNativeLocationPromptCanEnableTransport]' started.
+    t =     0.00s Start Test at 2026-11-06 20:55:51.387
+    t =     0.03s Set Up
+    t =     0.03s Terminate com.ztransfer.ios:0
+    t =     0.04s Open com.ztransfer.ios
+    t =     0.04s     Launch com.ztransfer.ios
+2026-11-06 20:55:51.436 xcodebuild[94222:42949834] [MT] IDELaunchParametersSnapshot: debugger version lookup failed for path '<nil>': noURL
+2026-11-06 20:55:51.436 xcodebuild[94222:42949834] [MT] IDELaunchParametersSnapshot: no debugger version
+    t =     0.27s         Setting up automation session
+    t =     1.12s         Wait for com.ztransfer.ios to idle
+    t =     2.65s Waiting 10.0s for "gps-status-control" Button to exist
+    t =     3.72s     Checking `Expect predicate `existsNoRetry == 1` for object "gps-status-control" Button`
+    t =     3.72s         Checking existence of `"gps-status-control" Button`
+    t =     3.81s Tap "gps-status-control" Button
+    t =     3.81s     Wait for com.ztransfer.ios to idle
+    t =     3.81s     Find the "gps-status-control" Button
+    t =     3.83s     Check for interrupting elements affecting "gps-status-control" Button
+    t =     3.85s     Synthesize event
+    t =     4.14s     Wait for com.ztransfer.ios to idle
+    t =     4.15s Waiting 5.0s for Alert (First Match) to exist
+    t =     5.22s     Checking `Expect predicate `existsNoRetry == 1` for object Alert (First Match)`
+    t =     5.23s         Checking existence of `Alert (First Match)`
+    t =     5.39s Added attachment named 'gps-native-location-request'
+    t =     5.39s Tap Button (First Match)
+    t =     5.39s     Wait for com.apple.springboard to idle
+    t =     5.40s     Find the Button (First Match)
+    t =     5.42s     Check for interrupting elements affecting "使用App时允许" Button
+    t =     5.45s     Synthesize event
+    t =     5.75s     Wait for com.apple.springboard to idle
+    t =     7.06s Checking `Expect predicate `label == "SEARCHING"` for object "gps-permission-status" StaticText`
+    t =     7.06s     Find the "gps-permission-status" StaticText
+    t =     7.09s Checking existence of `"gps-permission-guidance" StaticText`
+    t =     7.11s Find the "gps-location-authorization" StaticText
+    t =     7.13s Tear Down
+    t =     7.13s     Terminate com.ztransfer.ios:94282
+Test Case '-[ZTransferInteractionUITests.PhotoEffectsMasterUITests testGPSFirstUseNativeLocationPromptCanEnableTransport]' passed (8.241 seconds).
+Test Suite 'PhotoEffectsMasterUITests' passed at 2026-11-06 20:55:59.628.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 19.339 (19.341) seconds
+Test Suite 'ZTransferInteractionUITests.xctest' passed at 2026-11-06 20:55:59.629.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 19.339 (19.343) seconds
+Test Suite 'Selected tests' passed at 2026-11-06 20:55:59.630.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 19.339 (19.345) seconds
+2026-11-06 20:56:19.365 xcodebuild[94222:42949834] [MT] IDETestOperationsObserverDebug: 40.575 elapsed -- Testing started completed.
+2026-11-06 20:56:19.365 xcodebuild[94222:42949834] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-06 20:56:19.365 xcodebuild[94222:42949834] [MT] IDETestOperationsObserverDebug: 40.575 sec, +40.575 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-gps-recheck-ui-20261106-r6.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

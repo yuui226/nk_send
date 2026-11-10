@@ -5,6 +5,7 @@ struct ZTransferApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("keep_screen_on") private var keepScreenOn = true
     init() {
+        PhotoLibraryTransferStaging.startStartupCleanup()
         ScreenAwakeCoordinator.shared.setPreference(
             UserDefaults.standard.object(forKey: "keep_screen_on") as? Bool ?? true)
         ScreenAwakeCoordinator.shared.setForeground(UIApplication.shared.applicationState == .active)
@@ -31,7 +32,9 @@ struct ZTransferApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--gps-gesture-ui-test") {
+            if ProcessInfo.processInfo.arguments.contains("--gps-permission-ui-test") {
+                GPSPermissionAuditHarness()
+            } else if ProcessInfo.processInfo.arguments.contains("--gps-gesture-ui-test") {
                 GPSGestureAuditHarness()
             } else if ProcessInfo.processInfo.arguments.contains("--filter-gesture-ui-test") {
                 FilterGestureAuditHarness()

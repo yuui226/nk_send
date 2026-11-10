@@ -1,0 +1,36 @@
+{
+  "workdir": "/var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-release-capture-20261102-vpmw_giy",
+  "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+  "createdDevices": [
+    {
+      "id": "E36D39A1-3682-4D60-8D8D-38B1EC8F8C17",
+      "group": "iphone-medium",
+      "type": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+      "status": "removed",
+      "testExitCode": 0,
+      "attachmentExport": 0,
+      "shutdownExitCode": 0,
+      "deleteExitCode": 0
+    },
+    {
+      "id": "372EA36E-28D7-4754-AFB3-B3B2AEE6F99A",
+      "group": "iphone-large",
+      "type": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",
+      "status": "removed",
+      "testExitCode": 0,
+      "attachmentExport": 0,
+      "shutdownExitCode": 0,
+      "deleteExitCode": 0
+    },
+    {
+      "id": "24B58D40-0F5F-4B1D-AC9E-5D294B304579",
+      "group": "ipad-13",
+      "type": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB",
+      "status": "removed",
+      "testExitCode": 0,
+      "attachmentExport": 0,
+      "shutdownExitCode": 0,
+      "deleteExitCode": 0
+    }
+  ]
+}

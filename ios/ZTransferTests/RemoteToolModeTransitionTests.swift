@@ -3,6 +3,47 @@ import SwiftUI
 @testable import ZTransfer
 
 final class RemoteToolModeTransitionTests: XCTestCase {
+    func testFilterPagesUseIndependentFadeDurationsAndKeepReversalContinuous() {
+        var transition = RemoteToolModeTransition(movie: false, durationMilliseconds: 150, exitDurationMilliseconds: 100)
+        transition.setTarget(true)
+        transition.advance(frameNanos: 0)
+        transition.advance(frameNanos: 75_000_000)
+        XCTAssertEqual(transition.alpha(true), 0.7755613, accuracy: 0.00001)
+        XCTAssertGreaterThan(transition.alpha(false), 0)
+        transition.advance(frameNanos: 100_000_000)
+        XCTAssertEqual(transition.alpha(false), 0)
+        XCTAssertLessThan(transition.alpha(true), 1)
+        let current = transition.alpha(true)
+        transition.setTarget(false)
+        XCTAssertEqual(transition.alpha(true), current)
+        // The already-finished outgoing channel starts its new tween on the
+        // first display frame after retargeting, as a real display link does.
+        transition.advance(frameNanos: 100_000_000)
+        transition.advance(frameNanos: 1_000_000_000)
+        XCTAssertEqual(transition.modes, [false])
+        XCTAssertEqual(transition.alpha(false), 1)
+        XCTAssertFalse(transition.isRunning)
+    }
+
+    @MainActor
+    func testFilterClockReleasesWhenHiddenAndPreservesDurationsOnReopen() {
+        let clock = RemoteToolModeClock(movie: false, durationMilliseconds: 150, exitDurationMilliseconds: 100)
+        clock.setTarget(true)
+        XCTAssertTrue(clock.clockRunning)
+        clock.reset(movie: false)
+        XCTAssertFalse(clock.clockRunning)
+        XCTAssertEqual(clock.modes, [false])
+        XCTAssertEqual(clock.transition.exitDurationMilliseconds, 100)
+        clock.setTarget(true)
+        clock.advance(0)
+        clock.advance(100_000_000)
+        XCTAssertEqual(clock.photoOpacity.value, 0)
+        XCTAssertLessThan(clock.movieOpacity.value, 1)
+        clock.advance(150_000_000)
+        XCTAssertEqual(clock.modes, [true])
+        XCTAssertFalse(clock.clockRunning)
+    }
+
     func testPreviewHistogramUses180MillisecondsAndKeepsInterruptionContinuity() {
         var transition = RemoteToolModeTransition(movie: false, durationMilliseconds: 180)
         transition.setTarget(true)

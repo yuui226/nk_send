@@ -1,0 +1,57 @@
+Building for debugging...
+[Planning deferred tasks]
+[8 / 29] ZTransfer
+[14 / 35] ZTransfer
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPTransferDiagnostics.swift:36:78: warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 34 |     private let emit: @Sendable (String) -> Void
+ 35 | 
+ 36 |     init(emit: @escaping @Sendable (String) -> Void = PTPTransferDiagnostics.persist) {
+    |                                                                              `- warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 37 |         self.emit = emit
+ 38 |     }
+[23 / 32] ThumbnailTests-product
+[29 / 38] ThumbnailTests-product
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:188:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+186 |         let stream = await store.retryWakes()
+187 |         var iterator = stream.makeAsyncIterator()
+188 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+189 |         XCTAssertNil(end)
+190 |     }
+[33 / 37] ThumbnailTests-product
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:188:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+186 |         let stream = await store.retryWakes()
+187 |         var iterator = stream.makeAsyncIterator()
+188 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+189 |         XCTAssertNil(end)
+190 |     }
+[35 / 37] ThumbnailTests-product
+Build complete! (2.53秒)
+Test Suite 'Selected tests' started at 2026-10-31 00:17:55.306.
+Test Suite 'ThumbnailTests.xctest' started at 2026-10-31 00:17:55.308.
+Test Suite 'PhotoThumbnailPresentationTests' started at 2026-10-31 00:17:55.309.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCachedCellDoesNotSubscribeOrReadAndDisabledCellKeepsImage]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCachedCellDoesNotSubscribeOrReadAndDisabledCellKeepsImage]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCancelledReadAndReusedGenerationCannotPublishLateImage]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCancelledReadAndReusedGenerationCannotPublishLateImage]' passed (0.031 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCatalogLookupMatchesCurrentArrayAfterMixedBatchesAndReorder]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCatalogLookupMatchesCurrentArrayAfterMixedBatchesAndReorder]' passed (0.022 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCurrentCatalogLookupTracksMembershipDeletionReuseAndRecoveryCopy]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCurrentCatalogLookupTracksMembershipDeletionReuseAndRecoveryCopy]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testFadeStartsAtFirstFrameAndMatchesAndroid180msCurve]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testFadeStartsAtFirstFrameAndMatchesAndroid180msCurve]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testInterruptedBatchFadeResumesFromDisplayedValueAndCacheStartsOpaque]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testInterruptedBatchFadeResumesFromDisplayedValueAndCacheStartsOpaque]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testLocalOnlyMissRetriesWhenRemoteGateChangesWithoutClearingReadyImage]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testLocalOnlyMissRetriesWhenRemoteGateChangesWithoutClearingReadyImage]' passed (0.008 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testMissWaitsForItsNotificationThenReadsCacheAndStopsObserving]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testMissWaitsForItsNotificationThenReadsCacheAndStopsObserving]' passed (0.008 seconds).
+Test Suite 'PhotoThumbnailPresentationTests' passed at 2026-10-31 00:17:55.381.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.072 (0.073) seconds
+Test Suite 'ThumbnailTests.xctest' passed at 2026-10-31 00:17:55.381.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.072 (0.073) seconds
+Test Suite 'Selected tests' passed at 2026-10-31 00:17:55.381.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.072 (0.075) seconds

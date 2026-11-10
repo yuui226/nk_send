@@ -1,0 +1,10 @@
+{
+  "pairing_confirmed": true,
+  "pairing_verification_pending": false,
+  "identity_preserved": true,
+  "has_peripheral_identifier": true,
+  "peripheral_identifier_unchanged_since_1001": false,
+  "artifact": "ZTransfer-ios-debug-2.05-20261107-101735",
+  "installed": true,
+  "installation_failures": 0
+}

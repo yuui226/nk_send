@@ -1,0 +1,66 @@
+{
+  "commit": "b2acd2ad3bc88e3f99af7f9c253c55e46f5adeeb",
+  "files": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 26143,
+      "sha256": "aa17e75996fa8134daf981a71f4ca581c29dac21f6b78c8682b1f034ee4c9b01",
+      "matches_source": true
+    },
+    {
+      "path": "app.js",
+      "status": 200,
+      "bytes": 4063,
+      "sha256": "a7f66b4a29ae65a681cf4f8426b5d2495d7f6906cb102a6dd092ba84804c9a57",
+      "matches_source": true
+    },
+    {
+      "path": "screenshots.css",
+      "status": 200,
+      "bytes": 10543,
+      "sha256": "d112deaec05b2be01329e452347e388cc1de7b59d534d2eeca8934cc68d5e426",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/README.md",
+      "status": 200,
+      "bytes": 885,
+      "sha256": "a77c7acb614ff3ca8b568c7e153b4513ae0f9ed6a954ed4deb72e6336fd957d9",
+      "matches_source": true
+    },
+    {
+      "path": "assets/monitor-cat.webp",
+      "status": 200,
+      "bytes": 121168,
+      "sha256": "93e61f72d59297c841223473e1555f0210b464e9132e83c7bb7935e492a85819",
+      "matches_source": true
+    }
+  ],
+  "preserved_existing_files_unchanged": true,
+  "preserved_file_count": 10,
+  "browser_viewports_checked": [
+    [
+      1440,
+      1000
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      320,
+      740
+    ]
+  ],
+  "source_pixel_validation": "Original screenshot assets remain untouched. HTML/CSS recompose previews and all five effect controls; generated monitor photo is disclosed in page copy.",
+  "app_backend_unchanged": true,
+  "api_server_login_performed_this_update": false,
+  "pages_status": "built",
+  "pages_built_at": "2026-10-22T01:54:36Z",
+  "live_browser_verified": true
+}

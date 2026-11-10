@@ -1,0 +1,1069 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -project ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -resultBundlePath /tmp/ztransfer-prepay-transfer-20261102-r4.xcresult -parallel-testing-enabled NO "-only-testing:ZTransferTests/TransferBusinessParityTests" "-only-testing:ZTransferTests/TransferQueueScenarioTests" "-only-testing:ZTransferTests/PhotoMetadataPipelineTests" "-only-testing:ZTransferTests/PhotoGenerationQueueStateTests" "-only-testing:ZTransferTests/PhotoMetadataIdentityTests" "-only-testing:ZTransferTests/PhotoGenerationTimingTests" "-only-testing:ZTransferTests/CameraDownloadTests" "-only-testing:ZTransferTests/TransferOriginalQueueTests" "-only-testing:ZTransferTests/PhotoFramePlaceTests" "-only-testing:ZTransferTests/DomainModelTests" "-only-testing:ZTransferTests/PhotoMetadataPreparationTests"
+
+Writing result bundle at path:
+	/tmp/ztransfer-prepay-transfer-20261102-r4.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (2 targets)
+    Target 'ZTransferTests' in project 'ZTransfer'
+        ➜ Explicit dependency on target 'ZTransfer' in project 'ZTransfer'
+    Target 'ZTransfer' in project 'ZTransfer' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/orys/code/nk_send/ios/ZTransfer/Resources/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+Build description signature: b85f4eb127e679f7d1f8d2c05169c163
+Build description path: /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/XCBuildData/b85f4eb127e679f7d1f8d2c05169c163.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache
+    cd /Users/orys/code/nk_send/ios/ZTransfer.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -o /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache
+
+SwiftDriver ZTransferTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferTests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist /Users/orys/code/nk_send/ios/ZTransfer/Info.plist (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /Users/orys/code/nk_send/ios/ZTransfer/Info.plist -producttype com.apple.product-type.application -genpkginfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/assetcatalog_generated_info.plist -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/empty-ZTransferTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Info.plist
+
+SwiftCompile normal arm64 Compiling\ CameraDownloadTests.swift /Users/orys/code/nk_send/ios/ZTransferTests/CameraDownloadTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransferTests/CameraDownloadTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile CameraDownloadTests.swift
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ ZTransferTests (in target 'ZTransferTests' from project 'ZTransfer')
+
+SwiftCompile normal arm64 (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+
+/Users/orys/code/nk_send/ios/ZTransferTests/NewObjectThumbnailRetryTests.swift:188:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+186 |         let stream = await store.retryWakes()
+187 |         var iterator = stream.makeAsyncIterator()
+188 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+189 |         XCTAssertNil(end)
+190 |     }
+SwiftDriverJobDiscovery normal arm64 Compiling CameraDownloadTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for ZTransferTests (in target 'ZTransferTests' from project 'ZTransfer')
+
+SwiftDriver\ Compilation\ Requirements ZTransferTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferTests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver\ Compilation ZTransferTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransferTests -Onone @/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList -DDEBUG -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -target arm64-apple-ios16.0-simulator -g -module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/ztransfer-removal-derived-20261021/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/ztransfer-removal-derived-20261021/SDKStatCaches.noindex/iphonesimulator27.2-24B8118-cc78df9d8a9de6526dea716b1c70fd8e.sdkstatcache -output-file-map /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex -sdk-module-cache-path /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /tmp/ztransfer-removal-derived-20261021/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-generated-files.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-own-target-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests-project-headers.hmap -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources-normal/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources/arm64 -Xcc -I/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.abi.json (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.abi.json /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftsourceinfo (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftsourceinfo /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+Copy /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/arm64-apple-ios-simulator.swiftmodule /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransferTests.swiftmodule/arm64-apple-ios-simulator.swiftmodule
+
+Ld /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests normal (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios16.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk/Developer/Library/Frameworks -filelist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -bundle_loader /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer -Xlinker -object_path_lto -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib -Xlinker -no_adhoc_codesign -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferTests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/XCTest.framework/XCTest' which was built for newer version 17.0
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferTests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/libXCTestSwiftSupport.dylib' which was built for newer version 17.0
+
+ExtractAppIntentsMetadata (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name ZTransferTests --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.2.sdk --xcode-version 27B52 --platform-family iOS --deployment-target 16.0 --bundle-identifier com.ztransfer.ios.tests --output /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest --target-triple arm64-apple-ios16.0-simulator --binary-file /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests --dependency-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_dependency_info.dat --stringsdata-file /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftFileList --metadata-file-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests.DependencyMetadataFileList --static-metadata-file-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/ZTransferTests.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+2026-11-02 14:56:34.738 appintentsmetadataprocessor[64994:39188739] Starting App Intents metadata extraction
+2026-11-02 14:56:34.748 appintentsmetadataprocessor[64994:39188739] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Frameworks --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/PlugIns --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/SystemExtensions --scan-folder /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+CodeSign /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest (in target 'ZTransferTests' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest
+
+CodeSign /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib
+/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib: replacing existing signature
+
+CodeSign /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/__preview.dylib (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/__preview.dylib
+/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/__preview.dylib: replacing existing signature
+
+CodeSign /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Sign to Run Locally"
+    
+    /usr/bin/codesign --force --sign - --entitlements /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransfer.build/ZTransfer.app.xcent --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app
+/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app: replacing existing signature
+
+Validate /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-validationUtility /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app -shallow-bundle -infoplist-subpath Info.plist
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /tmp/ztransfer-removal-derived-20261021/SDKExplicitPrecompiledModules
+
+IOSurfaceClientSetSurfaceNotify failed e00002c7
+Test Suite 'Selected tests' started at 2026-11-02 14:56:57.135.
+Test Suite 'ZTransferTests.xctest' started at 2026-11-02 14:56:57.136.
+Test Suite 'CameraDownloadTests' started at 2026-11-02 14:56:57.136.
+Test Case '-[ZTransferTests.CameraDownloadTests testBusyAloneDoesNotEnableHighThroughput]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testBusyAloneDoesNotEnableHighThroughput]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testCancellingLargeExportDoesNotCancelOtherExportOrDownload]' started.
+F110 exports+64MiB download: cancelled=true baseline=86690216 peak=237308496 delta=150618280 samples=2591 exportSeconds=9.034130666870624
+Test Case '-[ZTransferTests.CameraDownloadTests testCancellingLargeExportDoesNotCancelOtherExportOrDownload]' passed (9.151 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testCapturedPartialHeaderExpandsThroughProductionCameraToOneMiB]' started.
+2026-11-02 14:57:06.313355+0800 ZTransfer[65172:39190861] [ZTransfer] makeImagePlus:3799: *** ERROR: 'JPEG'-_reader->initImage[0] failed err=-1
+2026-11-02 14:57:06.313461+0800 ZTransfer[65172:39190861] [ZTransfer] makeImagePlus:3799: *** ERROR: 'JPEG'-_reader->initImage[0] failed err=-1
+Test Case '-[ZTransferTests.CameraDownloadTests testCapturedPartialHeaderExpandsThroughProductionCameraToOneMiB]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testConcurrentPublicationReservesNameUntilMoveCompletes]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testConcurrentPublicationReservesNameUntilMoveCompletes]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testCopyCollisionDoesNotDeleteExternalFileAndFailedReservationCanRetry]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testCopyCollisionDoesNotDeleteExternalFileAndFailedReservationCanRetry]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testDeclaredLengthMismatchFailsAfterResponseAndKeepsSessionUsable]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testDeclaredLengthMismatchFailsAfterResponseAndKeepsSessionUsable]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testExistingJPEGWithoutCameraMetadataRendersWithEmptyFields]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testExistingJPEGWithoutCameraMetadataRendersWithEmptyFields]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testFailedFullPhotoIsRemovedAndQueueRetryDownloadsAgain]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testFailedFullPhotoIsRemovedAndQueueRetryDownloadsAgain]' passed (0.039 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testFailedMetadataCannotBeRetriedFromANewCamera]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testFailedMetadataCannotBeRetriedFromANewCamera]' passed (0.035 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testFrameworkCallbackPublishesReceivedBytesInsteadOfStaleChunkProgress]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testFrameworkCallbackPublishesReceivedBytesInsteadOfStaleChunkProgress]' passed (0.505 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testFreshHeaderCaptureIsBoundedAcrossPackets]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testFreshHeaderCaptureIsBoundedAcrossPackets]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testFreshJPEGMetadataFlowsToFrameWithoutSecondCameraRead]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testFreshJPEGMetadataFlowsToFrameWithoutSecondCameraRead]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testFullObjectChecksKnownSizeEvenWhenDataPhaseIsSelfConsistent]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testFullObjectChecksKnownSizeEvenWhenDataPhaseIsSelfConsistent]' passed (0.055 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBLargeUnsupportedPartialNeverFallsBackForThisOrNextFile]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBLargeUnsupportedPartialNeverFallsBackForThisOrNextFile]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBUnknownSizeNeverFallsBackToUnboundedFullObject]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBUnknownSizeNeverFallsBackToUnboundedFullObject]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBUnknownSizeUsesBoundedPartialUntilShortReply]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBUnknownSizeUsesBoundedPartialUntilShortReply]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBUsesBoundedPartialRequestsAboveOneCallbackChunk]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testImageCaptureUSBUsesBoundedPartialRequestsAboveOneCallbackChunk]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testLargePhotoExportsOverlapStreamingDownloadAndPreserveSources]' started.
+F110 exports+64MiB download: cancelled=false baseline=82905512 peak=328321736 delta=245416224 samples=3864 exportSeconds=11.759613249916583
+Test Case '-[ZTransferTests.CameraDownloadTests testLargePhotoExportsOverlapStreamingDownloadAndPreserveSources]' passed (11.857 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testMetadataSnapshotAndOriginalBodySurviveIndividualAndBatchRetry]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testMetadataSnapshotAndOriginalBodySurviveIndividualAndBatchRetry]' passed (0.032 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testNoExifResultSurvivesRetryWithoutAnotherCameraRead]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testNoExifResultSurvivesRetryWithoutAnotherCameraRead]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testOriginalNamingHasNoDerivedTimestampLimitAndHandlesDotNames]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testOriginalNamingHasNoDerivedTimestampLimitAndHandlesDotNames]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testOutputPreparationFailureDoesNotStartCameraSizeProbe]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testOutputPreparationFailureDoesNotStartCameraSizeProbe]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testOversizedCameraLabelIsBoundedInRenderedAndRetainedSnapshot]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testOversizedCameraLabelIsBoundedInRenderedAndRetainedSnapshot]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testPartialErrorAfterBytesNeverFallsBackAndPreservesPart]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testPartialErrorAfterBytesNeverFallsBackAndPreservesPart]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testProductionDownloadPublishesAfterOneHundredCaseInsensitiveCollisions]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testProductionDownloadPublishesAfterOneHundredCaseInsensitiveCollisions]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testProgressExcludesRetainedBytesAndUsesProtocolStartClock]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testProgressExcludesRetainedBytesAndUsesProtocolStartClock]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testResumedStreamTrimsTailAndDoesNotCaptureIncompleteHeader]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testResumedStreamTrimsTailAndDoesNotCaptureIncompleteHeader]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testResumeRejectsUnresolvedSizeWithoutFullObjectRequest]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testResumeRejectsUnresolvedSizeWithoutFullObjectRequest]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSaveCopyFallbackChecksLengthAndCompletePartDoesNotCopy]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSaveCopyFallbackChecksLengthAndCompletePartDoesNotCopy]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSaveRenameRefusalCopiesToSameReservedName]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSaveRenameRefusalCopiesToSameReservedName]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSaveSuccessfulCopyDeletesTemporary]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSaveSuccessfulCopyDeletesTemporary]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testShortCompletePartialAdvancesByReceivedBytes]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testShortCompletePartialAdvancesByReceivedBytes]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSmallCompletePartIsRenamedWithoutCameraRequest]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSmallCompletePartIsRenamedWithoutCameraRequest]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSTADirectReadKeepsPartialObjectEvenInHighThroughputWorkspace]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSTADirectReadKeepsPartialObjectEvenInHighThroughputWorkspace]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotoAboveSingleRequestLimitFailsBeforeReadingObject]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotoAboveSingleRequestLimitFailsBeforeReadingObject]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotoShortDataPhaseFailsWithoutRequestingRemainder]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotoShortDataPhaseFailsWithoutRequestingRemainder]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotosUseOneWholeImageRequestInEitherWorkspace]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotosUseOneWholeImageRequestInEitherWorkspace]' passed (0.100 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotoUnsupportedEmptyPartialRetainsStreamingFullObjectFallback]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSTAPhotoUnsupportedEmptyPartialRetainsStreamingFullObjectFallback]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testStillImageDeletesStaleResumePartAndUsesFullObject]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testStillImageDeletesStaleResumePartAndUsesFullObject]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testSupplementStopsAtTwoMiBAndCachesFinalPartialAcrossRetry]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testSupplementStopsAtTwoMiBAndCachesFinalPartialAcrossRetry]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testUnknownSizeNegativeReplyFallsBackToFullObject]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testUnknownSizeNegativeReplyFallsBackToFullObject]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testUnknownSizeResolvedUsesPartialWithResolvedSize]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testUnknownSizeResolvedUsesPartialWithResolvedSize]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testUnsupportedEmptyPartialFallsBackAndCapabilityIsRemembered]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testUnsupportedEmptyPartialFallsBackAndCapabilityIsRemembered]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testUSBAndVisibleWorkspaceStartWithFullObject]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testUSBAndVisibleWorkspaceStartWithFullObject]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.CameraDownloadTests testWriterBatchesSmallPacketsAndFlushesEveryByteOnClose]' started.
+Test Case '-[ZTransferTests.CameraDownloadTests testWriterBatchesSmallPacketsAndFlushesEveryByteOnClose]' passed (0.004 seconds).
+Test Suite 'CameraDownloadTests' passed at 2026-11-02 14:57:19.157.
+	 Executed 45 tests, with 0 failures (0 unexpected) in 22.006 (22.021) seconds
+Test Suite 'DomainModelTests' started at 2026-11-02 14:57:19.157.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidIntensityCodecKeepsFirstDuplicateAndNormalizesValues]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidIntensityCodecKeepsFirstDuplicateAndNormalizesValues]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewFocusDiagnosticIsPassiveBoundedAndChangeOnly]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewFocusDiagnosticIsPassiveBoundedAndChangeOnly]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewMetadataClipsVisibleAreaAndDoesNotShiftOffscreenBox]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewMetadataClipsVisibleAreaAndDoesNotShiftOffscreenBox]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewMetadataKeepsUnknownStateAndAllVisibleFrames]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewMetadataKeepsUnknownStateAndAllVisibleFrames]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewMetadataRejectsInvalidTableWithoutDiscardingAudio]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidLiveViewMetadataRejectsInvalidTableWithoutDiscardingAudio]' passed (0.049 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPhotoFrameOutputNameUsesVersionedRenderingIdentity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPhotoFrameOutputNameUsesVersionedRenderingIdentity]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewFallbackWaitsForCurrentFHDAndExif]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewFallbackWaitsForCurrentFHDAndExif]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewLayoutNormalCropAndSmallViewport]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewLayoutNormalCropAndSmallViewport]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewPanUsesActualRestingCenter]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewPanUsesActualRestingCenter]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewPinchPreservesPixelAtExistingZoom]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAndroidPreviewPinchPreservesPixelAtExistingZoom]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testAutomaticQueueDeduplicatesCameraIdentity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testAutomaticQueueDeduplicatesCameraIdentity]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testBackgroundCameraPreviewReturnsBoundedPixelsAndRejectsCancellation]' started.
+Test Case '-[ZTransferTests.DomainModelTests testBackgroundCameraPreviewReturnsBoundedPixelsAndRejectsCancellation]' passed (0.059 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testBorderedFilterPreservesMirroredAndRotatedPixelOrientation]' started.
+Test Case '-[ZTransferTests.DomainModelTests testBorderedFilterPreservesMirroredAndRotatedPixelOrientation]' passed (0.090 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testBundledWatermarkFontsResolveWithoutSystemFallback]' started.
+Test Case '-[ZTransferTests.DomainModelTests testBundledWatermarkFontsResolveWithoutSystemFallback]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testBurstGroupingMatchesConsecutiveNameAndOneSecondRule]' started.
+Test Case '-[ZTransferTests.DomainModelTests testBurstGroupingMatchesConsecutiveNameAndOneSecondRule]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testBurstIdentitySurvivesDisablingCollectionsAndFilteringToOneMember]' started.
+Test Case '-[ZTransferTests.DomainModelTests testBurstIdentitySurvivesDisablingCollectionsAndFilteringToOneMember]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testBurstOpeningSnapshotSelectsMemberWithoutExpandingOtherCollections]' started.
+Test Case '-[ZTransferTests.DomainModelTests testBurstOpeningSnapshotSelectsMemberWithoutExpandingOtherCollections]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testCachedHistogramReplacesPendingThumbnailWithoutReanalysis]' started.
+Test Case '-[ZTransferTests.DomainModelTests testCachedHistogramReplacesPendingThumbnailWithoutReanalysis]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testCameraPreviewBoundsLargeJPEGWithoutUpscalingOrHonoringOrientation]' started.
+Test Case '-[ZTransferTests.DomainModelTests testCameraPreviewBoundsLargeJPEGWithoutUpscalingOrHonoringOrientation]' passed (0.145 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testCameraPreviewIgnoresJPEGExifOrientationAndKeepsManualRotationPixels]' started.
+Test Case '-[ZTransferTests.DomainModelTests testCameraPreviewIgnoresJPEGExifOrientationAndKeepsManualRotationPixels]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testCameraRemovalDaysIgnoreInitialAdditionsAndSurvivingAliases]' started.
+Test Case '-[ZTransferTests.DomainModelTests testCameraRemovalDaysIgnoreInitialAdditionsAndSurvivingAliases]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testCancelledPreviewFilterReleasesPixelWorkersPromptly]' started.
+Test Case '-[ZTransferTests.DomainModelTests testCancelledPreviewFilterReleasesPixelWorkersPromptly]' passed (0.036 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testCatalogGroupingKeepsFirstSeenDayOrderAndUnknownBucket]' started.
+Test Case '-[ZTransferTests.DomainModelTests testCatalogGroupingKeepsFirstSeenDayOrderAndUnknownBucket]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testCatalogGroupingPreservesCameraOrderForEqualCaptureTimes]' started.
+Test Case '-[ZTransferTests.DomainModelTests testCatalogGroupingPreservesCameraOrderForEqualCaptureTimes]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testDualCardHeadSelectionMatchesAndroidMissingDateAndStableTieRules]' started.
+Test Case '-[ZTransferTests.DomainModelTests testDualCardHeadSelectionMatchesAndroidMissingDateAndStableTieRules]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testEffectFavoritesKeepAdditionOrderAcrossPersistenceAndRetoggling]' started.
+Test Case '-[ZTransferTests.DomainModelTests testEffectFavoritesKeepAdditionOrderAcrossPersistenceAndRetoggling]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testEffectPreviewCandidateSkipsVideoAndUsesNewestCaptureDateThenHandle]' started.
+Test Case '-[ZTransferTests.DomainModelTests testEffectPreviewCandidateSkipsVideoAndUsesNewestCaptureDateThenHandle]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testEffectsRestoreEveryAndroidMetadataPreferenceGeneration]' started.
+Test Case '-[ZTransferTests.DomainModelTests testEffectsRestoreEveryAndroidMetadataPreferenceGeneration]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testEffectsRestoreNormalizesWatermarkAndLocalMetadata]' started.
+Test Case '-[ZTransferTests.DomainModelTests testEffectsRestoreNormalizesWatermarkAndLocalMetadata]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testExpandedBurstFollowsSurvivingLogicalMembersWhenGroupIDChanges]' started.
+Test Case '-[ZTransferTests.DomainModelTests testExpandedBurstFollowsSurvivingLogicalMembersWhenGroupIDChanges]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testExportedOriginalIndexMatchesCopyNameSizeAndDestination]' started.
+Test Case '-[ZTransferTests.DomainModelTests testExportedOriginalIndexMatchesCopyNameSizeAndDestination]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testFavoriteFrameWatermarkRestoreNormalizesSizeAndOpacity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testFavoriteFrameWatermarkRestoreNormalizesSizeAndOpacity]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testFilterPersistenceMatchesAndroidAndDoesNotRestoreCameraSlot]' started.
+Test Case '-[ZTransferTests.DomainModelTests testFilterPersistenceMatchesAndroidAndDoesNotRestoreCameraSlot]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testFilterSelectionUsesOwnRememberedIntensityAndOffKeepsSelection]' started.
+Test Case '-[ZTransferTests.DomainModelTests testFilterSelectionUsesOwnRememberedIntensityAndOffKeepsSelection]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testFrameFavoriteCapturesUpdatesAndAppliesOnlyPresentationParameters]' started.
+Test Case '-[ZTransferTests.DomainModelTests testFrameFavoriteCapturesUpdatesAndAppliesOnlyPresentationParameters]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testFrameFavoriteLegacyWidthAndBackdropFormatsRoundTrip]' started.
+Test Case '-[ZTransferTests.DomainModelTests testFrameFavoriteLegacyWidthAndBackdropFormatsRoundTrip]' passed (0.037 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testFrameFavoriteUsesCurrentContentAndRejectsMissingLogo]' started.
+Test Case '-[ZTransferTests.DomainModelTests testFrameFavoriteUsesCurrentContentAndRejectsMissingLogo]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGeneratedPhotoFrameNameTreatsOccupiedNamesCaseInsensitively]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGeneratedPhotoFrameNameTreatsOccupiedNamesCaseInsensitively]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGenieAboveAnchorMatchesAndroidReflection]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGenieAboveAnchorMatchesAndroidReflection]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGenieCloseBeforeFirstFrameNotifiesAndAboveAnchorMirrorsInlet]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGenieCloseBeforeFirstFrameNotifiesAndAboveAnchorMirrorsInlet]' passed (0.103 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGeniePopupBendsCrossSectionsAndBandCorners]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGeniePopupBendsCrossSectionsAndBandCorners]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGeniePopupHostFirstCaptureAndReversal]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGeniePopupHostFirstCaptureAndReversal]' passed (1.164 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGeniePopupUsesTriggerShortEdgeAndSharedEndpoints]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGeniePopupUsesTriggerShortEdgeAndSharedEndpoints]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGenieProgressFollowsRenderedFramesThroughReversal]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGenieProgressFollowsRenderedFramesThroughReversal]' passed (0.768 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGenieRightHandMirrorPreservesAndroidTiltRules]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGenieRightHandMirrorPreservesAndroidTiltRules]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGenieTimingAndDurationsMatchAndroid]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGenieTimingAndDurationsMatchAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGPSBackgroundLocationRequiresDeclaredLocationMode]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGPSBackgroundLocationRequiresDeclaredLocationMode]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGPSBlocksOnlyEntryIntoWorkspaceAndPanelOwnsConnectionPageGesture]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGPSBlocksOnlyEntryIntoWorkspaceAndPanelOwnsConnectionPageGesture]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGPSLocationFailuresMatchAndroidWaitingPermissionAndUnavailableStates]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGPSLocationFailuresMatchAndroidWaitingPermissionAndUnavailableStates]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGPSLocationFixDoesNotHideAndroidErrorOrStableSessionStates]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGPSLocationFixDoesNotHideAndroidErrorOrStableSessionStates]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGPSOnlyReusesLocationsFromAndroidsTwoMinuteWindow]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGPSOnlyReusesLocationsFromAndroidsTwoMinuteWindow]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testGPSWideLevelInletMatchesAndroidEndpointsAndNeverFolds]' started.
+Test Case '-[ZTransferTests.DomainModelTests testGPSWideLevelInletMatchesAndroidEndpointsAndNeverFolds]' passed (0.056 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testHistogramReplacementAndExitDiscardLateResults]' started.
+Test Case '-[ZTransferTests.DomainModelTests testHistogramReplacementAndExitDiscardLateResults]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testImageWatermarkOutputIdentityUsesItsRenderedPhotoPosition]' started.
+Test Case '-[ZTransferTests.DomainModelTests testImageWatermarkOutputIdentityUsesItsRenderedPhotoPosition]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testInvalidTransferDirectoryBookmarkIsRemovedDuringRestore]' started.
+2026-11-02 14:57:21.869131+0800 ZTransfer[65172:39190874] [bookmark] BookmarkData: invalid bookmark length
+Test Case '-[ZTransferTests.DomainModelTests testInvalidTransferDirectoryBookmarkIsRemovedDuringRestore]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testJPEGHistogramAnalysisIsBoundedAndScansTinyHighlights]' started.
+Test Case '-[ZTransferTests.DomainModelTests testJPEGHistogramAnalysisIsBoundedAndScansTinyHighlights]' passed (0.312 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLargeCameraPreviewSequentialDecodeWithFiveRetainedPages]' started.
+F046 24x24MP decode: baseline=84216256, sampledPeak=156666376, delta=72450120, maxSeconds=0.08072287496179342, inFlightSamples=629, requestedIntervalMs=2
+F046 main-thread probe: ticks=314, maximumGapSeconds=0.006459041498601437, requestedIntervalMs=5
+Test Case '-[ZTransferTests.DomainModelTests testLargeCameraPreviewSequentialDecodeWithFiveRetainedPages]' passed (1.961 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLateOldDirectoryOutputDoesNotPolluteNewExportIndex]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLateOldDirectoryOutputDoesNotPolluteNewExportIndex]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLegacyCurrentFilterIntensityMigratesIntoPerFilterMap]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLegacyCurrentFilterIntensityMigratesIntoPerFilterMap]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLegacyEffectsJSONDropsRemovedFilterIntensityKeys]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLegacyEffectsJSONDropsRemovedFilterIntensityKeys]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLegacyWatermarkSizeAndOpacityMigrateWithoutVisualJump]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLegacyWatermarkSizeAndOpacityMigrateWithoutVisualJump]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLiquidEnvelopeUsesAndroidFloatRounding]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLiquidEnvelopeUsesAndroidFloatRounding]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLiquidHarmonicsFloatReferenceClampsAndCycleContinuity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLiquidHarmonicsFloatReferenceClampsAndCycleContinuity]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLiquidPathUsesFloatPixelControlPoints]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLiquidPathUsesFloatPixelControlPoints]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLiquidProgressDisabledWaveIsRectangularAndEnvelopeHasQuietEdges]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLiquidProgressDisabledWaveIsRectangularAndEnvelopeHasQuietEdges]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLiquidWavePhaseStartsOnFirstFrameAndRestartsAfterRemount]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLiquidWavePhaseStartsOnFirstFrameAndRestartsAfterRemount]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLocalEffectsFirstRunPersistsIndependentScopeButObservesLaterSharedFavorites]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLocalEffectsFirstRunPersistsIndependentScopeButObservesLaterSharedFavorites]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLocalEffectsFirstRunSharesFilterFavoritesButMigratesFrameFavoritesOnlyOnce]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLocalEffectsFirstRunSharesFilterFavoritesButMigratesFrameFavoritesOnlyOnce]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLocalEffectsKeepValidIntensityMapWhenSelectedFilterWasRemoved]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLocalEffectsKeepValidIntensityMapWhenSelectedFilterWasRemoved]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLocalPhotoSelectionMatchesAndroidImageWildcardInputRange]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLocalPhotoSelectionMatchesAndroidImageWildcardInputRange]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testLocalPreviewDecodesVisiblePagesIncludingIncomingSwipe]' started.
+Test Case '-[ZTransferTests.DomainModelTests testLocalPreviewDecodesVisiblePagesIncludingIncomingSwipe]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testManualQueueAllowsRepeatedExportsOfSameCameraHandle]' started.
+Test Case '-[ZTransferTests.DomainModelTests testManualQueueAllowsRepeatedExportsOfSameCameraHandle]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask]' started.
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:175: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:177: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertTrue failed
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:188: error: -[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask] : XCTAssertEqual failed: ("30") is not equal to ("14")
+Test Case '-[ZTransferTests.DomainModelTests testModuleToggleMatchesAndroidForEveryNonemptyMask]' failed (0.942 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoDateRangeRejectsInvalidCalendarDates]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoDateRangeRejectsInvalidCalendarDates]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsBorderPreviewUsesAndroid1920PixelLayout]' started.
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:3918: error: -[ZTransferTests.DomainModelTests testPhotoEffectsBorderPreviewUsesAndroid1920PixelLayout] : XCTAssertEqual failed: ("(1920.0, 1441.0)") is not equal to ("(1920.0, 1440.0)")
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsBorderPreviewUsesAndroid1920PixelLayout]' failed (0.211 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsFilterTilesUseAndroidPixelBudget]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsFilterTilesUseAndroidPixelBudget]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsLayoutUsesExifOrientedSourceDimensions]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsLayoutUsesExifOrientedSourceDimensions]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsMetadataInfersBrandFromModelLikeAndroid]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsMetadataInfersBrandFromModelLikeAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsPreviewIdentityIgnoresNonPixelEditorPreferences]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsPreviewIdentityIgnoresNonPixelEditorPreferences]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsPreviewUsesAndroidMetadataPlaceholdersFieldByField]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsPreviewUsesAndroidMetadataPlaceholdersFieldByField]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsUseAndroidDefaultsAndNormalizeWatermarkText]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoEffectsUseAndroidDefaultsAndNormalizeWatermarkText]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFilterAppliesTypeProtectionStorageAndDate]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFilterAppliesTypeProtectionStorageAndDate]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFilterDateEditorKeepsGregorianComponentsAcrossSystemCalendars]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFilterDateEditorKeepsGregorianComponentsAcrossSystemCalendars]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFilterDoesNotRecolorFrameBackdrop]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFilterDoesNotRecolorFrameBackdrop]' passed (0.412 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFramePresetFilmNegativeAndParameterPosterMatchAndroidDefaults]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFramePresetFilmNegativeAndParameterPosterMatchAndroidDefaults]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFramePresetFilmNegativeAndParameterPosterRenderPixelPreservingPhoto]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoFramePresetFilmNegativeAndParameterPosterRenderPixelPreservingPhoto]' passed (0.206 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramExcludesVideoCoversAndCollections]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramExcludesVideoCoversAndCollections]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramModeMigrationAndCycle]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramModeMigrationAndCycle]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramPreferencesRestoreWithoutChangingMonitorScope]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramPreferencesRestoreWithoutChangingMonitorScope]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramRGBUsesSharedPeak]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoHistogramRGBUsesSharedPeak]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoLoadingRangeCountsNewestActualShootingDays]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoLoadingRangeCountsNewestActualShootingDays]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoLoadingRangePersistenceNormalizesUnknownValues]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoLoadingRangePersistenceNormalizesUnknownValues]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoPreviewHoldAndHistogramMatchPresentationContract]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoPreviewHoldAndHistogramMatchPresentationContract]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPhotoScanSnapshotResumeKeepsOnlyUnprocessedHandlesPerCard]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPhotoScanSnapshotResumeKeepsOnlyUnprocessedHandlesPerCard]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreparedGenieGeometryMatchesAndroidCurve]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreparedGenieGeometryMatchesAndroidCurve]' passed (0.101 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewAnimatedRotationKeepsTargetDirectionInsets]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewAnimatedRotationKeepsTargetDirectionInsets]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewCaptureDateFallsBackFromInvalidTimeAndRejectsInvalidDay]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewCaptureDateFallsBackFromInvalidTimeAndRejectsInvalidDay]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewContentChangesAtHalfPageWithContinuousOpacity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewContentChangesAtHalfPageWithContinuousOpacity]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewDoesNotTreatNonFirstBurstMemberAsCollectionPage]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewDoesNotTreatNonFirstBurstMemberAsCollectionPage]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewNeighborsUsePreviousThenNextPageOrder]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewNeighborsUsePreviousThenNextPageOrder]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewPinchDoesNotReuseSingleFingerTravelOrPointerJoinMovement]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewPinchDoesNotReuseSingleFingerTravelOrPointerJoinMovement]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewPinchObserverAttachesOnceAndDetachesFromWindow]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewPinchObserverAttachesOnceAndDetachesFromWindow]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewPlacementAndGesturesShareInformationClearance]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewPlacementAndGesturesShareInformationClearance]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewRetainsOnlyTwoPagesAroundCurrentAndSkipsCollectionBitmap]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewRetainsOnlyTwoPagesAroundCurrentAndSkipsCollectionBitmap]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewRetentionChangesWhenBurstExpandsAtUnchangedCurrentIndex]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewRetentionChangesWhenBurstExpandsAtUnchangedCurrentIndex]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewReturnPreservesFullTileAndClipsOnlyTheVisibleRegion]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewReturnPreservesFullTileAndClipsOnlyTheVisibleRegion]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewTouchSamplesPreservePanAndMultiFingerZoom]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewTouchSamplesPreservePanAndMultiFingerZoom]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewUsesIndependentCollapsedBurstPageAndRestoresMembersOnExpand]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewUsesIndependentCollapsedBurstPageAndRestoresMembersOnExpand]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testPreviewVideoMetadataMatchesAndroidWithoutExtraQueries]' started.
+Test Case '-[ZTransferTests.DomainModelTests testPreviewVideoMetadataMatchesAndroidWithoutExtraQueries]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testProtectionProbeDiagnosticsPreserveExistingCaptureEntries]' started.
+Test Case '-[ZTransferTests.DomainModelTests testProtectionProbeDiagnosticsPreserveExistingCaptureEntries]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueBadgeInterruptedFadeRetainsLayersAndVelocityButRestartsPop]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueBadgeInterruptedFadeRetainsLayersAndVelocityButRestartsPop]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueBadgeStartsQuietAndFinishesFadeBeforePop]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueBadgeStartsQuietAndFinishesFadeBeforePop]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueCardColorTweenDurationAndInterruption]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueCardColorTweenDurationAndInterruption]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueCardContentSizeRetainedNodeRestartsAfterDetachment]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueCardContentSizeRetainedNodeRestartsAfterDetachment]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueCardContentSizeUses250msAndRoundedInterruption]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueCardContentSizeUses250msAndRoundedInterruption]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueDoesNotRestoreLegacyIOSOnlyTaskHistory]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueDoesNotRestoreLegacyIOSOnlyTaskHistory]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueEmptyMarkRevealAndReverseBreathing]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueEmptyMarkRevealAndReverseBreathing]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueFabReversalSharesFrameWhenScaleFinishesBeforeOpacity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueFabReversalSharesFrameWhenScaleFinishesBeforeOpacity]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueFabVisibilitySpringRetainsExitAndReversesWithVelocity]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueFabVisibilitySpringRetainsExitAndReversesWithVelocity]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueFlightHoldsOnlyDownloadsAndNeverDelayRealCompletion]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueFlightHoldsOnlyDownloadsAndNeverDelayRealCompletion]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueItemPlacementSamplesShortAxisUntilVectorFinishes]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueItemPlacementSamplesShortAxisUntilVectorFinishes]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueItemPlacementUsesPhysicalPixelSpringAndPreservesPositionOnInterruption]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueueItemPlacementUsesPhysicalPixelSpringAndPreservesPositionOnInterruption]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueueLocksDestinationFolderWhenEnqueued]' started.
+2026-11-02 14:57:26.186999+0800 ZTransfer[65172:39190577] Unbalanced calls to begin/end appearance transitions for <UIViewController: 0x107aa5c00>.
+Test Case '-[ZTransferTests.DomainModelTests testQueueLocksDestinationFolderWhenEnqueued]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillContentRetainsOutgoingSnapshotAndCleansFinishedLayers]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillContentRetainsOutgoingSnapshotAndCleansFinishedLayers]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillFadeDelayExitAndReverseSpring]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillFadeDelayExitAndReverseSpring]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillInterruptedEntryUsesDefaultFloatSpring]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillInterruptedEntryUsesDefaultFloatSpring]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillParentSegmentRebuildsUnchangedExitTarget]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillParentSegmentRebuildsUnchangedExitTarget]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillSameModeDataChangeRetargetsWithoutRemounting]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillSameModeDataChangeRetargetsWithoutRemounting]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillSettledSpeedSamplesDoNotRestartModeAnimation]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillSettledSpeedSamplesDoNotRestartModeAnimation]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillSummarySeparatesCropGenerationAndProgressOwnership]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillSummarySeparatesCropGenerationAndProgressOwnership]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillWidthCategoriesReleasePreviousMaximum]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillWidthCategoriesReleasePreviousMaximum]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillWidthFirstMeasureAndInterruptedSpring]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillWidthFirstMeasureAndInterruptedSpring]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillWidthUsesPixelRoundingAnd140msRetargeting]' started.
+Test Case '-[ZTransferTests.DomainModelTests testQueuePillWidthUsesPixelRoundingAnd140msRetargeting]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRatingLoaderAloneKeepsGridUnfilteredAndConcreteStarMatchesKnownValuesOnly]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRatingLoaderAloneKeepsGridUnfilteredAndConcreteStarMatchesKnownValuesOnly]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRatingRangePersistenceNormalizesOnlyAndroidChoicesAndDoesNotRestoreLoader]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRatingRangePersistenceNormalizesOnlyAndroidChoicesAndDoesNotRestoreLoader]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRemoteDesqueezeRestoresWithinAndroidRange]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRemoteDesqueezeRestoresWithinAndroidRange]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRemoteDisconnectReleasesGateWithoutStartingOldSessionScan]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRemoteDisconnectReleasesGateWithoutStartingOldSessionScan]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRemotePauseKeepsAcceptedBatchAndFreshResumeReconcilesIt]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRemotePauseKeepsAcceptedBatchAndFreshResumeReconcilesIt]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRemotePauseSetsGateBeforeWaitingAndResumeUsesFreshHandles]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRemotePauseSetsGateBeforeWaitingAndResumeUsesFreshHandles]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRemoteResumeWaitsForActivePreviewBeforeFreshHandleScan]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRemoteResumeWaitsForActivePreviewBeforeFreshHandleScan]' passed (0.028 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRemovedPrimaryHandleSwitchesToSurvivingDualCardAlias]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRemovedPrimaryHandleSwitchesToSurvivingDualCardAlias]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testRenderedJPEGPreservesExifAndRewritesOrientationDimensionsAndCameraGPS]' started.
+Test Case '-[ZTransferTests.DomainModelTests testRenderedJPEGPreservesExifAndRewritesOrientationDimensionsAndCameraGPS]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testSettingsPopupCaptureKeepsFinalSizeAndOutlineThroughHandoff]' started.
+Test Case '-[ZTransferTests.DomainModelTests testSettingsPopupCaptureKeepsFinalSizeAndOutlineThroughHandoff]' passed (0.904 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testSkinPreferenceRestorationMatchesAndroidMigration]' started.
+Test Case '-[ZTransferTests.DomainModelTests testSkinPreferenceRestorationMatchesAndroidMigration]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testSTADirectStorageLayoutRejectsCrossSlotAggregateMembership]' started.
+Test Case '-[ZTransferTests.DomainModelTests testSTADirectStorageLayoutRejectsCrossSlotAggregateMembership]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testSTAProtectionFilterIsUnavailableButPreferenceSurvives]' started.
+Test Case '-[ZTransferTests.DomainModelTests testSTAProtectionFilterIsUnavailableButPreferenceSurvives]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testStartupCleanupRemovesOnlyAndroidTemporaryFilesInRootAndDatedFolders]' started.
+Test Case '-[ZTransferTests.DomainModelTests testStartupCleanupRemovesOnlyAndroidTemporaryFilesInRootAndDatedFolders]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testSTASequentialScanSurvivesTransferPreviewRemoteAndFilterChanges]' started.
+Test Case '-[ZTransferTests.DomainModelTests testSTASequentialScanSurvivesTransferPreviewRemoteAndFilterChanges]' passed (0.239 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testStorageChildDirectoryExcludesDerivedFramesAndHonorsMode]' started.
+Test Case '-[ZTransferTests.DomainModelTests testStorageChildDirectoryExcludesDerivedFramesAndHonorsMode]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testStorageFilterUsesPhysicalSlotsInsteadOfOpaqueStorageIDs]' started.
+Test Case '-[ZTransferTests.DomainModelTests testStorageFilterUsesPhysicalSlotsInsteadOfOpaqueStorageIDs]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testStorageModeDestinationSnapshotSeparatesQueuedTypeFolders]' started.
+Test Case '-[ZTransferTests.DomainModelTests testStorageModeDestinationSnapshotSeparatesQueuedTypeFolders]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testStorageModeMigrationPreservesLegacyDateChoiceAndSavesThreeWayValue]' started.
+Test Case '-[ZTransferTests.DomainModelTests testStorageModeMigrationPreservesLegacyDateChoiceAndSavesThreeWayValue]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testStorageModeUsesAndroidTypePrefixAndProviderSafeNames]' started.
+Test Case '-[ZTransferTests.DomainModelTests testStorageModeUsesAndroidTypePrefixAndProviderSafeNames]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailCacheIdentityMatchesAndroidSerialAndResponderFallbacks]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailCacheIdentityMatchesAndroidSerialAndResponderFallbacks]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailCacheIdentityStillScopesCameraWithoutAnyPhysicalIdentifier]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailCacheIdentityStillScopesCameraWithoutAnyPhysicalIdentifier]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailColumnsRestoreWithinAndroidRange]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailColumnsRestoreWithinAndroidRange]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueueDoesNotRequeueAcrossScanRevision]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueueDoesNotRequeueAcrossScanRevision]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueuePreservesDatePriorityAcrossBeginScan]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueuePreservesDatePriorityAcrossBeginScan]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueuePreservesSameDateEnumerationOrder]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueuePreservesSameDateEnumerationOrder]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueueRetriesFailedItemsOnlyAfterWakeBoundary]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueueRetriesFailedItemsOnlyAfterWakeBoundary]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueueWakeReleasesAnEmptyWorker]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailFillQueueWakeReleasesAnEmptyWorker]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailLoadingRangeDropsOutOfScopeWorkAndReadmitsOnWiden]' started.
+Test Case '-[ZTransferTests.DomainModelTests testThumbnailLoadingRangeDropsOutOfScopeWorkAndReadmitsOnWiden]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferCardCompletionFillsBeforeFadingWhileFailuresKeepRealProgress]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferCardCompletionFillsBeforeFadingWhileFailuresKeepRealProgress]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferCardVisualStatePrioritizesActiveWorkOverRetainedError]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferCardVisualStatePrioritizesActiveWorkOverRetainedError]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferChunkStrategyPreservesWirelessThresholdsAndBoundsImageCaptureUSB]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferChunkStrategyPreservesWirelessThresholdsAndBoundsImageCaptureUSB]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferDateFolderMatchesAndroidAndFallsBackForInvalidDate]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferDateFolderMatchesAndroidAndFallsBackForInvalidDate]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferDestinationDirectoryKeepsRootAndDatedFoldersSeparate]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferDestinationDirectoryKeepsRootAndDatedFoldersSeparate]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferDirectoryIndexMatchesNameAndSizeAndKeepsPartialSeparate]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferDirectoryIndexMatchesNameAndSizeAndKeepsPartialSeparate]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferDraftPreferencesPersistWithoutApplyingActiveEffects]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferDraftPreferencesPersistWithoutApplyingActiveEffects]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferEffectsRestoreImmediateEditorPreferencesWithoutCommittedDraft]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferEffectsRestoreImmediateEditorPreferencesWithoutCommittedDraft]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferOutputNeverOverwritesAnExistingSameNameFile]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferOutputNeverOverwritesAnExistingSameNameFile]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferPartialIdentityAndResumeBoundaryMatchAndroid]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferPartialIdentityAndResumeBoundaryMatchAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferPillResponseOnlyRunsOnRisingEdgeAndCancelsInPlace]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferPillResponseOnlyRunsOnRisingEdgeAndCancelsInPlace]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferProgressChangesIdentityWithoutDrainOrDelay]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferProgressChangesIdentityWithoutDrainOrDelay]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferQueueIgnoresPauseRequestWhileIdle]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferQueueIgnoresPauseRequestWhileIdle]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferQueueItemKeepsIndependentEffectSnapshotForQueuedExport]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferQueueItemKeepsIndependentEffectSnapshotForQueuedExport]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferQueueUsesExistingDestinationAsSkipped]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferQueueUsesExistingDestinationAsSkipped]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferSpeedMatchesAndroidInvalidAndRetainedSampleRules]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferSpeedMatchesAndroidInvalidAndRetainedSampleRules]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testTransferTitleFitsStemAndPreservesExtensionAndStyles]' started.
+Test Case '-[ZTransferTests.DomainModelTests testTransferTitleFitsStemAndPreservesExtensionAndStyles]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testUntransferredExitOnlyIncludesNewQueueBackedOriginals]' started.
+Test Case '-[ZTransferTests.DomainModelTests testUntransferredExitOnlyIncludesNewQueueBackedOriginals]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkFullAndroidRangeSurvivesSaveAndReopen]' started.
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkFullAndroidRangeSurvivesSaveAndReopen]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkImportUsesOriginalBytesAndAndroidSizeLimit]' started.
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkImportUsesOriginalBytesAndAndroidSizeLimit]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkOnlyOutputIdentityIgnoresHiddenFrameMetadata]' started.
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkOnlyOutputIdentityIgnoresHiddenFrameMetadata]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkStoredNumbersAreNotMistakenForBooleans]' started.
+Test Case '-[ZTransferTests.DomainModelTests testWatermarkStoredNumbersAreNotMistakenForBooleans]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testWorkspaceDiscoveryHandlesCancelledGesturesAndQueuedReversal]' started.
+Test Case '-[ZTransferTests.DomainModelTests testWorkspaceDiscoveryHandlesCancelledGesturesAndQueuedReversal]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.DomainModelTests testWorkspaceDiscoveryRemainsPausedUntilReturnSettles]' started.
+Test Case '-[ZTransferTests.DomainModelTests testWorkspaceDiscoveryRemainsPausedUntilReturnSettles]' passed (0.001 seconds).
+Test Suite 'DomainModelTests' failed at 2026-11-02 14:57:27.546.
+	 Executed 186 tests, with 162 failures (0 unexpected) in 8.337 (8.389) seconds
+Test Suite 'PhotoFramePlaceTests' started at 2026-11-02 14:57:27.546.
+Test Case '-[ZTransferTests.PhotoFramePlaceTests testAndroidAdministrativeHierarchyCases]' started.
+Test Case '-[ZTransferTests.PhotoFramePlaceTests testAndroidAdministrativeHierarchyCases]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.PhotoFramePlaceTests testChineseDistrictDoesNotBecomeCity]' started.
+Test Case '-[ZTransferTests.PhotoFramePlaceTests testChineseDistrictDoesNotBecomeCity]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoFramePlaceTests testRejectsZeroPlaceholderButAllowsEquatorOnly]' started.
+Test Case '-[ZTransferTests.PhotoFramePlaceTests testRejectsZeroPlaceholderButAllowsEquatorOnly]' passed (0.000 seconds).
+Test Suite 'PhotoFramePlaceTests' passed at 2026-11-02 14:57:27.558.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.011 (0.012) seconds
+Test Suite 'PhotoGenerationQueueStateTests' started at 2026-11-02 14:57:27.558.
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testCapacityIncludesActiveAndPreparingEntriesAt4096Boundary]' started.
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testCapacityIncludesActiveAndPreparingEntriesAt4096Boundary]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testCloseAbandonsPendingExactlyOnceAndActiveCompletionRetainsOwnership]' started.
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testCloseAbandonsPendingExactlyOnceAndActiveCompletionRetainsOwnership]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testReadyWorkBypassesPreparingHeadAndDeferralPreservesOriginalOrder]' started.
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testReadyWorkBypassesPreparingHeadAndDeferralPreservesOriginalOrder]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testRuntimeGateReconsiderationAndReadinessDuringDeferralAreNotLost]' started.
+Test Case '-[ZTransferTests.PhotoGenerationQueueStateTests testRuntimeGateReconsiderationAndReadinessDuringDeferralAreNotLost]' passed (0.001 seconds).
+Test Suite 'PhotoGenerationQueueStateTests' passed at 2026-11-02 14:57:27.576.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.016 (0.018) seconds
+Test Suite 'PhotoGenerationTimingTests' started at 2026-11-02 14:57:27.576.
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testCropPauseAndResumeAccumulateOnlyActiveIntervals]' started.
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testCropPauseAndResumeAccumulateOnlyActiveIntervals]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testFailureAndExistingOutputDoNotKeepCompletedTimeAndRetryResets]' started.
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testFailureAndExistingOutputDoNotKeepCompletedTimeAndRetryResets]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testFinishingInactiveDoesNotOverwriteSavedTimeAndBackwardInputsClamp]' started.
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testFinishingInactiveDoesNotOverwriteSavedTimeAndBackwardInputsClamp]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testPreparationDoesNotStartClockAndOnlyComputeIsRecorded]' started.
+Test Case '-[ZTransferTests.PhotoGenerationTimingTests testPreparationDoesNotStartClockAndOnlyComputeIsRecorded]' passed (0.001 seconds).
+Test Suite 'PhotoGenerationTimingTests' passed at 2026-11-02 14:57:27.580.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.002 (0.004) seconds
+Test Suite 'PhotoMetadataIdentityTests' started at 2026-11-02 14:57:27.580.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testAndroidReconnectedSourceRequiresAllOriginalFields]' started.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testAndroidReconnectedSourceRequiresAllOriginalFields]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testDifferentBodyAndUnknownReconnectionNeverReadCamera]' started.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testDifferentBodyAndUnknownReconnectionNeverReadCamera]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testKnownBodySharesIdentityButUnknownBodyIsSessionLocal]' started.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testKnownBodySharesIdentityButUnknownBodyIsSessionLocal]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testReconnectedReadVerifiesObjectBeforeHeaderAndRejectsMismatch]' started.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testReconnectedReadVerifiesObjectBeforeHeaderAndRejectsMismatch]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testSTAObjectInfoDoesNotConsumeUnreliableProtectionField]' started.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testSTAObjectInfoDoesNotConsumeUnreliableProtectionField]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testUSBAndWirelessSessionsUseBodySerialBeforeTransportFallback]' started.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testUSBAndWirelessSessionsUseBodySerialBeforeTransportFallback]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testUSBThumbnailDiskCacheIsReusedOnlyByTheSameWirelessBody]' started.
+Test Case '-[ZTransferTests.PhotoMetadataIdentityTests testUSBThumbnailDiskCacheIsReusedOnlyByTheSameWirelessBody]' passed (0.006 seconds).
+Test Suite 'PhotoMetadataIdentityTests' passed at 2026-11-02 14:57:27.594.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.012 (0.014) seconds
+Test Suite 'PhotoMetadataPipelineTests' started at 2026-11-02 14:57:27.594.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testAllOriginalPathsContinueSecondDownloadWhileCropIsBlocked]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testAllOriginalPathsContinueSecondDownloadWhileCropIsBlocked]' passed (0.051 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testBlockedParserDoesNotBlockDownloadsAndBudgetFailureUsesEmptyMetadata]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testBlockedParserDoesNotBlockDownloadsAndBudgetFailureUsesEmptyMetadata]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCloseDropsPendingSpoolButRetainsActiveParserUntilItReturns]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCloseDropsPendingSpoolButRetainsActiveParserUntilItReturns]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testClosingGenerationPreservesActiveCropPublicationAndDropsWaitingCrop]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testClosingGenerationPreservesActiveCropPublicationAndDropsWaitingCrop]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropAndPlainEffectShareOneComputeSlot]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropAndPlainEffectShareOneComputeSlot]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropReceivesItsPreparedCameraLocationForBothRecipeRoutes]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropReceivesItsPreparedCameraLocationForBothRecipeRoutes]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropWaitsForMetadataThenAccumulatesCropAndEffectTime]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropWaitsForMetadataThenAccumulatesCropAndEffectTime]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDisabledGateStillSavesCropAndMarksOnlyEffectsSkipped]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDisabledGateStillSavesCropAndMarksOnlyEffectsSkipped]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDuplicatePendingRequestsShareFailedReadWithoutCachingFailure]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDuplicatePendingRequestsShareFailedReadWithoutCachingFailure]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEffectFailureRetryReusesPublishedCropWithoutRepeatingCrop]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEffectFailureRetryReusesPublishedCropWithoutRepeatingCrop]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEnablingDuringCropPausesForMetadataAndResumesWithoutRecropping]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEnablingDuringCropPausesForMetadataAndResumesWithoutRecropping]' passed (0.044 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testExifDateFallsBackToTIFFThroughBothConsumers]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testExifDateFallsBackToTIFFThroughBothConsumers]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFailureAndWorkerTimeExistingOutputHaveNoCompletedGenerationDuration]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFailureAndWorkerTimeExistingOutputHaveNoCompletedGenerationDuration]' passed (0.031 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFiveSecondsPreparationThenHalfSecondRenderRecordsOnlyHalfSecond]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFiveSecondsPreparationThenHalfSecondRenderRecordsOnlyHalfSecond]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testOneFailedRenderDoesNotLoseAnotherSharedPreparationWaiter]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testOneFailedRenderDoesNotLoseAnotherSharedPreparationWaiter]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testPhotoExifFormattingMatchesAndroidAndFrameMetadata]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testPhotoExifFormattingMatchesAndroidAndFrameMetadata]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testRuntimeSwitchSkipsOnlyWaitingWorkAndReenableRetainsRecipe]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testRuntimeSwitchSkipsOnlyWaitingWorkAndReenableRetainsRecipe]' passed (0.043 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSecondRenderDoesNotCountFirstWorkersFiveSeconds]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSecondRenderDoesNotCountFirstWorkersFiveSeconds]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSkippedComputationsCannotGrowBlockedPreparationPastCapacity]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSkippedComputationsCannotGrowBlockedPreparationPastCapacity]' passed (0.035 seconds).
+Test Suite 'PhotoMetadataPipelineTests' passed at 2026-11-02 14:57:28.043.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.443 (0.449) seconds
+Test Suite 'TransferBusinessParityTests' started at 2026-11-02 14:57:28.043.
+Test Case '-[ZTransferTests.TransferBusinessParityTests testCompleteVideoPartialRespectsQuotaSizeAndCameraBeforePublishing]' started.
+Test Case '-[ZTransferTests.TransferBusinessParityTests testCompleteVideoPartialRespectsQuotaSizeAndCameraBeforePublishing]' passed (0.058 seconds).
+Test Case '-[ZTransferTests.TransferBusinessParityTests testExistingOriginalWithDisabledRuntimeEffectsRemainsSkipped]' started.
+Test Case '-[ZTransferTests.TransferBusinessParityTests testExistingOriginalWithDisabledRuntimeEffectsRemainsSkipped]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.TransferBusinessParityTests testPlaceLookupYieldsComputeToAnUnrelatedReadyRender]' started.
+Test Case '-[ZTransferTests.TransferBusinessParityTests testPlaceLookupYieldsComputeToAnUnrelatedReadyRender]' passed (0.229 seconds).
+Test Case '-[ZTransferTests.TransferBusinessParityTests testPureDecorationDoesNotReadCameraMetadata]' started.
+Test Case '-[ZTransferTests.TransferBusinessParityTests testPureDecorationDoesNotReadCameraMetadata]' passed (0.163 seconds).
+Test Case '-[ZTransferTests.TransferBusinessParityTests testValidJPEGWithoutExifStillProducesFrame]' started.
+Test Case '-[ZTransferTests.TransferBusinessParityTests testValidJPEGWithoutExifStillProducesFrame]' passed (0.150 seconds).
+Test Suite 'TransferBusinessParityTests' passed at 2026-11-02 14:57:28.658.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.612 (0.614) seconds
+Test Suite 'TransferOriginalQueueTests' started at 2026-11-02 14:57:28.658.
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testCancellationAfterReadCannotInvalidateObservedOriginal]' started.
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testCancellationAfterReadCannotInvalidateObservedOriginal]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testDeletedExactOriginalFallsBackToSurvivingCopyWithoutCameraRead]' started.
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testDeletedExactOriginalFallsBackToSurvivingCopyWithoutCameraRead]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testDeletionAfterBatchScanDownloadsAgainAndNeverUsesDerivedFile]' started.
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testDeletionAfterBatchScanDownloadsAgainAndNeverUsesDerivedFile]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testEditedOriginalIsPreservedAndNewDownloadUsesNumberedName]' started.
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testEditedOriginalIsPreservedAndNewDownloadUsesNumberedName]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testProviderFailureFailsInsteadOfFalseSkipOrDuplicateDownload]' started.
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testProviderFailureFailsInsteadOfFalseSkipOrDuplicateDownload]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testWithdrawalDuringProviderReadKeepsActorResponsiveAndCannotPublishLateSuccess]' started.
+Test Case '-[ZTransferTests.TransferOriginalQueueTests testWithdrawalDuringProviderReadKeepsActorResponsiveAndCannotPublishLateSuccess]' passed (0.018 seconds).
+Test Suite 'TransferOriginalQueueTests' passed at 2026-11-02 14:57:28.752.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.092 (0.094) seconds
+Test Suite 'TransferQueueScenarioTests' started at 2026-11-02 14:57:28.752.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade]' passed (0.077 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedAfterCameraGateAndRecheckedAsLocalOriginal]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedAfterCameraGateAndRecheckedAsLocalOriginal]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne]' passed (0.031 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused]' passed (0.094 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt]' passed (0.038 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPrivateNP3RecipeSurvivesSourceReplacementAndFailureRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPrivateNP3RecipeSurvivesSourceReplacementAndFailureRetry]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction]' passed (0.034 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart]' passed (0.028 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks]' passed (0.031 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval]' passed (0.032 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart]' passed (0.054 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart]' passed (0.028 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving]' passed (0.024 seconds).
+Test Suite 'TransferQueueScenarioTests' passed at 2026-11-02 14:57:30.051.
+	 Executed 62 tests, with 0 failures (0 unexpected) in 1.279 (1.299) seconds
+Test Suite 'ZTransferTests.xctest' failed at 2026-11-02 14:57:30.052.
+	 Executed 341 tests, with 162 failures (0 unexpected) in 32.811 (32.916) seconds
+Test Suite 'Selected tests' failed at 2026-11-02 14:57:30.052.
+	 Executed 341 tests, with 162 failures (0 unexpected) in 32.811 (32.917) seconds
+2026-11-02 14:57:45.231 xcodebuild[64973:39188465] [MT] IDETestOperationsObserverDebug: 69.992 elapsed -- Testing started completed.
+2026-11-02 14:57:45.231 xcodebuild[64973:39188465] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-02 14:57:45.231 xcodebuild[64973:39188465] [MT] IDETestOperationsObserverDebug: 69.992 sec, +69.992 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-prepay-transfer-20261102-r4.xcresult
+
+Failing tests:
+	DomainModelTests.testModuleToggleMatchesAndroidForEveryNonemptyMask()
+	DomainModelTests.testModuleToggleMatchesAndroidForEveryNonemptyMask()
+	DomainModelTests.testModuleToggleMatchesAndroidForEveryNonemptyMask()
+	DomainModelTests.testPhotoEffectsBorderPreviewUsesAndroid1920PixelLayout()
+
+** TEST FAILED **
+
+Testing started

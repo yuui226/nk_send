@@ -1,0 +1,77 @@
+{
+  "date": "2026-11-06",
+  "tasks": "D01-D04: 4/4 development side complete",
+  "androidSource": {
+    "path": "/Users/orys/code/nk_send-android/app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+    "sha256": "56c468102e9513e7885056b6948911de15a8f885524f661eeaec8a74ca836451",
+    "symbols": [
+      "GroupedPhotoGrid",
+      "collapseHeight",
+      "GroupHeader",
+      "ThumbnailCell"
+    ]
+  },
+  "rules": {
+    "collapseMilliseconds": 300,
+    "revealMilliseconds": 220,
+    "rowStaggerMilliseconds": 18,
+    "maxStaggerRows": 4,
+    "revealWindowMilliseconds": 600,
+    "cellBottomGap": 6,
+    "persistentHeaderBottomGap": 10,
+    "chevronSpringStiffness": 1500,
+    "chevronSpringDamping": 77.459667
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "passed": 2,
+      "failed": 1,
+      "success": false
+    },
+    {
+      "round": 2,
+      "passed": 3,
+      "failed": 2,
+      "success": false
+    },
+    {
+      "round": 3,
+      "passed": 5,
+      "failed": 0,
+      "success": true
+    }
+  ],
+  "finalPassingTestCount": 5,
+  "finalTests": [
+    "ZTransferTests.PhotoDateRevealRenderingTests testCollapseMovesEveryRowAndShrinksItsGapBeforeRemovingTheGrid",
+    "ZTransferTests.PhotoDateRevealRenderingTests testExpandedCellsAreTransparentBeforeTheirEntranceTaskRuns",
+    "ZTransferTests.PhotoThumbnailPresentationTests testProductionPhotoListKeepsDecodedImagesAcrossScrollAndThemeLayouts",
+    "ZTransferInteractionUITests.PhotoPreviewInteractionUITests testDateGroupsCanCollapseAndRevealTheirOriginalCellsRepeatedly",
+    "ZTransferInteractionUITests.PhotoPreviewInteractionUITests testPhotoTapAndScrollDoNotAlsoRecognizeHold"
+  ],
+  "verified": [
+    "Half-collapse render: each row and its bottom gap shrink together, second row moves instead of remaining behind a whole-grid clip. At zero progress the grid reports zero height.",
+    "Expanded-cell initial frame remains transparent; ordinary scrolling starts fully opaque.",
+    "Production list repeatedly collapses and restores the same cell identities, with the second date header returning to the same collapsed coordinate.",
+    "Photo tap/scroll stays exclusive from hold recognition.",
+    "Production light/dark list scrolls reuse session-decoded thumbnail image identities.",
+    "30fps contact sheets of actual collapse/expansion checked for continuous row reflow, fade and no terminal gap jump.",
+    "Leaving during collapse settles pending state; source/lifecycle review only, no timed mid-transition navigation UI test."
+  ],
+  "testCorrections": [
+    "r1/r2 UI fixture inherited one-day photo-loading scope from the simulator, hiding the second group. UI launch now overrides scope only for its process; thumbnail-scroll test explicitly saves/sets/restores this input.",
+    "The second header is asserted after collapse, avoiding an assumption that an offscreen lazy group must already exist. No loading-range business rule was changed."
+  ],
+  "limits": [
+    "No physical-camera, device thermal or Instruments profiling in this round.",
+    "No phone installation, release archive/upload, commit or push."
+  ],
+  "files": {
+    "ios/ZTransfer/UI/PhotoListView.swift": "f223d9fcd59ba72f7abf8f4b6bd5b9e341c3f275ac86b3c108838c9d53b03e2e",
+    "ios/ZTransfer/UI/Components/PhotoListAdmissionHarness.swift": "72564cfc415cf3b698649c185862b208335c066ce0ed6ee26bb74f31b0ca7df2",
+    "ios/ZTransferTests/PhotoDateRevealRenderingTests.swift": "58b397752d032efea16d1dfd8a95ec3f58bd11ba61f83e6afbb6e5435f5557e1",
+    "ios/ZTransferTests/PhotoThumbnailPresentationTests.swift": "a3b1d8924b2a219a4229a6a538228199bb488a3e84fa75ddb5db15e7873134ca",
+    "ios/InteractionUITests/PhotoPreviewInteractionUITests.swift": "ba93fd3919e6e4866c7d252b1e8a9d3864fde8f5f736c595debc5a648bbf4508"
+  }
+}

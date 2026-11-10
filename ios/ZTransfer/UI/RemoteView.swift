@@ -33,6 +33,7 @@ private struct RemoteToolIconAnchor: ViewModifier {
     private var trigger: GeniePopupTrigger? {
         switch tool {
         case .grid: .remoteGrid
+        case .selfTimer: .remoteSelfTimer
         case .pictureControl: .remotePictureControl
         case .lut: .remoteLUT
         case .whiteBalance: .remoteWhiteBalance
@@ -117,6 +118,8 @@ struct RemoteView: View {
     @State private var pictureControlPicker = PictureControlFolderPickerState()
     @State private var gridMenuPresented = false
     @State private var gridMenuClosing = false
+    @State private var selfTimerMenuPresented = false
+    @State private var selfTimerMenuClosing = false
     @State private var editingTools = false
     @State private var selectedField: RemoteExposureField?
     // RemoteToolPreferences persists these values immediately on mutation.
@@ -191,7 +194,10 @@ struct RemoteView: View {
     }
 
     private let onClose: (() -> Void)?
-    private func closeMonitor() { if let onClose { onClose() } else { dismiss() } }
+    private func closeMonitor() {
+        model.selfTimer.cancel()
+        if let onClose { onClose() } else { dismiss() }
+    }
 
     init(session: CameraSession?, queueModel: TransferQueueViewModel? = nil, presentationMode: CameraPresentationMode? = nil,
          isSessionConnected: Bool = true, toolDefaults: UserDefaults = .standard,
@@ -287,6 +293,7 @@ struct RemoteView: View {
             closeMonitor()
         }
         .onChange(of: scenePhase) { phase in
+            model.configureSelfTimer(foreground: phase == .active)
             model.usageMeter.setActive(phase == .active)
             model.setExposureMeterForeground(phase == .active)
             if phase != .active {
@@ -320,6 +327,8 @@ struct RemoteView: View {
             configureFrameAnalysis()
             model.setExposureMeterForeground(scenePhase == .active)
             model.setExposureMeterVisible(tools.meter)
+            model.configureSelfTimer(seconds: tools.selfTimerSeconds, visible: tools.layout(movie: false).visible(.selfTimer),
+                                     editing: editingTools, foreground: scenePhase == .active, connected: isSessionConnected)
             model.start()
             model.setLevelVisible(tools.level)
         }
@@ -367,6 +376,7 @@ struct RemoteView: View {
             applyDeviceOrientation(device.orientation)
         }
         .onDisappear {
+            model.selfTimer.cancel()
             closePictureControl()
             pictureControlFolders.folders.close()
             monitorHintAnimator.stop()
@@ -389,22 +399,33 @@ struct RemoteView: View {
             }
         }
         .onChange(of: model.movieMode) { _ in
+            selfTimerMenuPresented = false
             closePictureControl()
             if model.movieMode && review.active { Task { await review.close() } }
             gridMenuPresented = false
         }
         .onChange(of: isSessionConnected) { connected in
+            model.configureSelfTimer(connected: connected)
+            if !connected { selfTimerMenuPresented = false }
             if !connected { closePictureControl() }
             if !connected && review.active { Task { await review.close() } }
         }
-        .onChange(of: editingTools) { _ in closePictureControl(); dismissLUTMenu(); monitorHelpPresented = false }
-        .onChange(of: layoutOrientation) { _ in closePictureControl(); dismissLUTMenu(); monitorHelpPresented = false }
-        .onChange(of: selectedField) { if $0 != nil { closePictureControl(); dismissLUTMenu() } }
-        .onChange(of: developerPanelPresented) { if $0 { closePictureControl(); dismissLUTMenu() } }
-        .onChange(of: gridMenuPresented) { if $0 { closePictureControl(); dismissLUTMenu() } }
-        .onChange(of: model.cameraToolPanel?.id) { if $0 != nil { closePictureControl(); dismissLUTMenu() } }
-        .onChange(of: pictureControlPresented) { if $0 { dismissLUTMenu() } }
-        .onChange(of: lutListPresented) { if $0 { closePictureControl() } }
+        .onChange(of: editingTools) {
+            model.configureSelfTimer(editing: $0)
+            selfTimerMenuPresented = false
+            closePictureControl(); dismissLUTMenu(); monitorHelpPresented = false
+        }
+        .onChange(of: tools.selfTimerSeconds) { model.configureSelfTimer(seconds: $0) }
+        .onChange(of: layoutOrientation) { _ in
+            selfTimerMenuPresented = false
+            closePictureControl(); dismissLUTMenu(); monitorHelpPresented = false
+        }
+        .onChange(of: selectedField) { if $0 != nil { selfTimerMenuPresented = false; closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: developerPanelPresented) { if $0 { selfTimerMenuPresented = false; closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: gridMenuPresented) { if $0 { selfTimerMenuPresented = false; closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: model.cameraToolPanel?.id) { if $0 != nil { selfTimerMenuPresented = false; closePictureControl(); dismissLUTMenu() } }
+        .onChange(of: pictureControlPresented) { if $0 { selfTimerMenuPresented = false; dismissLUTMenu() } }
+        .onChange(of: lutListPresented) { if $0 { selfTimerMenuPresented = false; closePictureControl() } }
         .onChange(of: dispMode) { mode in
             model.setMovieFormatMonitoring(mode.showsCameraInformation)
             model.setStorageMonitoring(mode.showsCameraInformation)
@@ -620,6 +641,7 @@ struct RemoteView: View {
     }
 
     private func closeMonitorPanels() {
+        selfTimerMenuPresented = false
         closePictureControl()
         gridMenuPresented = false
         gridMenuClosing = false
@@ -673,14 +695,14 @@ struct RemoteView: View {
                 .foregroundStyle(ZTransferColors.primaryText)
                 .frame(width: 40, height: 36)
         }
-        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+        .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 22))
         .accessibilityLabel(AppLocalized.resource("cd_back"))
         .accessibilityIdentifier("remote-monitor-back")
     }
 
     private var remoteSignalButton: some View {
         CameraSignalControl(isUSB: isUSBSession, wirelessMode: wirelessMode,
-                            connected: isSessionConnected)
+                            connected: isSessionConnected, onRetrySTA: onRetrySTA)
     }
 
     private var remoteBatteryButton: some View {
@@ -838,6 +860,14 @@ struct RemoteView: View {
             }) {
                 tools.meter.toggle()
             })
+        case .selfTimer: return AnyView(configuredRemoteToolButton(.selfTimer, movie: movie,
+            active: tools.selfTimerSeconds > 0, accessibilityLabel: AppLocalized.resource("remote_tool_self_timer"),
+            label: { RemoteSelfTimerIcon(seconds: tools.selfTimerSeconds) }) {
+                model.dismissCameraTool(); selectedField = nil; developerPanelPresented = false
+                gridMenuPresented = false; closePictureControl(); dismissLUTMenu()
+                if selfTimerMenuPresented { selfTimerMenuClosing = true }
+                else { selfTimerMenuClosing = false; selfTimerMenuPresented = true }
+            })
         case .pictureControl: return AnyView(configuredRemoteToolButton(.pictureControl, movie: movie,
                 active: pictureControlPresented,
                 accessibilityLabel: AppLocalized.resource("remote_tool_picture_control"), label: {
@@ -924,6 +954,12 @@ struct RemoteView: View {
                         hostSize: proxy.size, landscape: landscape, closing: $gridMenuClosing,
                         dismiss: { gridMenuPresented = false })
                 }
+                if selfTimerMenuPresented && !model.movieMode {
+                    RemoteSelfTimerPanel(selected: tools.selfTimerSeconds, anchor: anchors[.remoteSelfTimer].map { proxy[$0] },
+                        hostSize: proxy.size, landscape: landscape, closing: selfTimerMenuClosing,
+                        select: { seconds in model.selfTimer.cancel(); tools.selfTimerSeconds = seconds },
+                        close: { selfTimerMenuClosing = true }, dismiss: { selfTimerMenuPresented = false })
+                }
                 if let panel = model.cameraToolPanel {
                     let trigger: GeniePopupTrigger = switch panel.tool {
                     case .whiteBalance: .remoteWhiteBalance
@@ -994,11 +1030,19 @@ struct RemoteView: View {
     private func configuredRemoteToolButton<Label: View>(_ tool: RemoteTool, movie: Bool, active: Bool,
         enabled: Bool = true,
         accessibilityLabel: String, @ViewBuilder label: @escaping () -> Label, action: @escaping () -> Void) -> some View {
+        let timerBlocks = model.selfTimer.active &&
+            [.hd, .selfTimer, .whiteBalance, .focusMode, .focusArea, .pictureControl, .computerControl].contains(tool)
+        let available = enabled && !timerBlocks && !(editingTools && tool.fixed)
+        let invoke = {
+            // Android toolClick also closes this menu for pure display toggles.
+            if tool != .selfTimer { selfTimerMenuPresented = false }
+            action()
+        }
         if editingTools && !tool.fixed {
             remoteToolEditButton(tool, movie: movie) { toolMark(tool) }
         } else {
-            RemoteDockToolCell(id: tool.id, title: AppLocalized.resource(tool.titleKey), active: active, enabled: enabled && !(editingTools && tool.fixed), action: action) {
-                remoteToolButton(active: active, enabled: enabled && !(editingTools && tool.fixed), fixed: tool.fixed, preserveContentColors: tool == .pictureControl, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: action)
+            RemoteDockToolCell(id: tool.id, title: AppLocalized.resource(tool.titleKey), active: active, enabled: available, action: invoke) {
+                remoteToolButton(active: active, enabled: available, fixed: tool.fixed, preserveContentColors: tool == .pictureControl, accessibilityLabel: AppLocalized.resource(tool.titleKey), label: label, action: invoke)
                     .modifier(RemoteToolIconAnchor(tool: tool))
                     .accessibilityIdentifier("remote-tool-\(tool.id)")
             }
@@ -1067,6 +1111,10 @@ struct RemoteView: View {
             }
         }
         tools.layout(movie: model.movieMode).setVisible(tool, visible)
+        if tool == .selfTimer {
+            model.configureSelfTimer(seconds: tools.selfTimerSeconds, visible: visible)
+            if !visible { selfTimerMenuPresented = false }
+        }
     }
 
     private func registerFpsTap() {
@@ -1237,14 +1285,24 @@ struct RemoteView: View {
     }
 
     private func remoteShutter(diameter: CGFloat) -> some View {
-        RemoteShutterButton(
+        RemoteSelfTimerShutter(
+            timer: model.selfTimer,
             capture: model.state.capture,
             movieMode: model.movieMode,
             enabled: isSessionConnected && !model.cameraToolWriting,
             focusing: model.halfPressVisualActive,
-            onQuickTap: { if model.movieMode { model.toggleRecording() } else { model.capture() } },
+            delaySeconds: tools.selfTimerSeconds,
+            onQuickTap: {
+                if model.movieMode { model.toggleRecording() }
+                else if model.requestPhoto() {
+                    selfTimerMenuPresented = false; selectedField = nil
+                    closePictureControl(); dismissLUTMenu(); gridMenuPresented = false
+                    monitorHelpPresented = false; developerPanelPresented = false
+                }
+            },
             onFocusStart: { model.beginHalfPress() },
             onRelease: { model.endHalfPress(fire: $0) },
+            onCancel: { model.cancelSelfTimer() },
             diameter: diameter
         )
     }
@@ -1642,7 +1700,7 @@ struct RemoteView: View {
                                    autoToggle: field == .iso && model.autoISODescriptor != nil ?
                                        { model.setAutoISO(!model.autoISOEnabled) } : nil,
                                    autoBusy: model.autoISOBusy,
-                                   effectiveISO: model.effectiveISO?.current, tileHeight: height)
+                                   effectiveISO: model.effectiveISO?.current, tileHeight: height, enabled: !model.selfTimer.active)
             .geniePopupAnchor(field.popupTrigger)
     }
 }

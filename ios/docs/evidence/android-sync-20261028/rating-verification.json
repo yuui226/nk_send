@@ -1,0 +1,963 @@
+{
+  "tasks": [
+    "N07"
+  ],
+  "androidTarget": "18145b3aa14be55b97b44c277a420816505f46f7",
+  "pull": "git pull --ff-only origin android: Already up to date",
+  "iosBase": "58d9b6ed81c8f92e155b4402f8b05e88fda421ed",
+  "runs": [
+    {
+      "log": "/tmp/ztransfer-sync-rating-20261028.log",
+      "logSHA256": "2e869bd4d1d23105c5831e27da11bbd1c7b01cf3571fc5f9126f68e336c4220e",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/rating-tests.log",
+      "retainedLogSHA256": "f266a59a742686e2942667c6dc3f2b8cb27f134fac8ba7a4c0168e6cb90e5ddf",
+      "xcresult": "/tmp/ztransfer-sync-rating-20261028.xcresult",
+      "exitCode": 65,
+      "tests": []
+    },
+    {
+      "log": "/tmp/ztransfer-sync-rating-fixed-20261028.log",
+      "logSHA256": "6fb22c34837c846ca8361738e3a9687da6d6d63ffe34e3744fd333dca62032ad",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/rating-fixed-tests.log",
+      "retainedLogSHA256": "cceb89a2d07d049bc369a0d3e999a04fea93c68fe3fed4cf3676fb9f634f8ad6",
+      "xcresult": "/tmp/ztransfer-sync-rating-fixed-20261028.xcresult",
+      "exitCode": 0,
+      "tests": [
+        {
+          "name": "DisconnectedPhotoListTests testCancellingIdleThumbnailWorkerDoesNotTerminateFutureWakeWaits",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testDisconnectedCatalogStopsAllRemoteWorkButRetainsRows",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testDisconnectRejectsLateCacheReconciliationCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testDisconnectRejectsLateLoadingRangeSnapshot",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testEvictionWithoutDisconnectMakesRetainedModelTerminal",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testPhotoDateRangeRejectsInvalidCalendarDates",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testCompactFilterRowKeepsStarSlotAndRangeHelpWithinPanel",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testFullPopupProgressDoesNotRemeasureAndCloseReopenKeepsSameHost",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testProgressProjectionIgnoresDictionaryOnlyChangesAndRetainsEveryStatus",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testProgressUpdatesOnlyChipAndNativePulseKeepsIdentityAndLifecycle",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testLateJPEGChangesSourceAndRemovalRestoresRaw",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testUniquePairAlsoProjectsJPEGRatingToNRW",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testUniquePairUsesJPEGEvenWhenRawComesFirst",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testUnmatchedDifferentCardDateOrAmbiguousRawStaysIndependent",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCancelledCacheLookupCannotSupplyTheReplacementScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCancelledReadCannotOverwriteCompletedReplacementScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCatalogUpdateDuringSuspendedCacheLookupReplansBeforeLocking",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testDisableCancelsReadAndEndsRatingPhaseBeforeNextGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testEffectiveRatingRangeIsIntersectionAndZeroUsesOtherBoundary",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testEnabledPhotoRangeChangesRebuildWithoutInvalidatingCameraCache",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testFiveDayMigrationRunsOnceAndPreservesExplicitRangesAndOtherFilters",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testGenerationChangedWhileInitialInvalidationIsReturningIsNotLost",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testNoMatchMessageRequiresConcreteEnabledRatingStillLoadingToHide",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testNoMatchMessageWaitsForRealListRatingReadAndSurvivesBusyPause",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testOldReadFinishingCannotDetachReplacementBeforeSecondDisable",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testOrdinaryRatingUpdatesPreserveExplicitDiagnosticCapture",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPairReadIsOneSourceButProgressCountsBothVisibleFiles",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPhotoListRangeEntryRebuildsEnabledRatingScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanIncludesUnsupportedDaysWithoutMovingIntoOlderIncompleteDay",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanUsesNewestActualDaysForEveryTransportAndKeepsCameraOrder",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanValidatesCalendarDatesAndExtensionsButAllRetainsUndatedMedia",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanWaitsForExplicitCompletionOrConfirmedFiniteBoundary",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingCacheUsesGenerationAndEvictsOldestAfter8192Values",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingRangeRestorationDistinguishesMissingFromExplicitAll",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingReadsFollowFirstSourceAppearanceIncludingRawBeforeJPEG",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRepositoryGenerationNotificationRestartsWithoutAnotherInputUpdate",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testSTAWaitsForRecentDateBoundaryBeforeStartingReadsMainActor",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testTenDayLoadingRangePersistsAndCountsCaptureDays",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testUSBWaitsForCatalogThenOnlyReadsTheSelectedRange",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testWidenedRangeCannotLockOldCatalogWhileResumeSnapshotIsSuspended",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testAndroidWarmupGrowthColdAndInterruptedRules",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBackupDuplicateInSameBatchPublishesBothStorageMemberships",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedIncompleteCatalogKeepsEventsAliveWithoutAuthoritativeCachePruning",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedPhotoScanRetainsTailAndWiderScopeResumesIt",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedScanPreservesOlderMemoryAndDiskThumbnails",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testCancelledDualCardBatchResumesOnlyAcceptedHandles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testCompletedResumeRetainsBackupAliasesInNewMediaBaseline",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testConnectionRecoveryIsInstalledBeforePublishingReplacement",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletedInflightThumbnailCannotSettleReusedHandle",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletedSettledHandleCanFetchNewPhotoReusingThatHandle",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletionDuringEnumerationCannotRepublishResumeSnapshot",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletionInvalidatesBoundedScanBeforeWideningScope",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDiskFailureStopsScanAndBackgroundPrefetchForTheConnection",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDiskHitIsDifferentFromDownloadAndNegativeCache",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDualCardProductionScanPreservesOrderAndWarmGrowth",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testIncompleteMetadataDoesNotDisableDeletionSyncOrNewObjectResolution",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testIncompleteObjectInfoFreezesAdaptiveSizeWithoutDroppingDisplayRow",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testLoadingRangeChangesApplyToTheNextScanBatch",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testMembershipReplacementUpdatesListBeforeScanEndsWithoutRefetching",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testMonitorPageAndSessionCleanupHoldIndependentBackgroundOwnership",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testNonSTAStorageBusyRetriesAndSuccessfulEmptyRemovesBaseline",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testOrdinaryThumbnailProtocolMissSettlesButTransientErrorsRemainRetryable",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testProductionScanConsumesListCacheFeedback",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRealDualCardReplacementUpdatesCardTwoFilterDuringScan",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRealSecondCacheWriteFailureStopsWorkerAndPreservesCachedReads",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredListKeepsRowsAndDoesNotReplayOldAutomaticTransfers",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredListTransportFailureRetainsCatalogWithoutAuthoritativeReconcile",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredRepositoryAndListReconcileDeletedPrimaryAndNewPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRejectedStorageQueryPreservesBaselineAndDoesNotBecomeNoCard",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testReviewReadsFreshHandlesAndDeduplicatesAliasedCardsWhileMonitorOwnsCamera",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testShrinkingRangeWhileThumbnailAdmissionWaitsSkipsOlderFiles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testSTARecoveryMovesCatalogBaselineToNewSameBodyConnectionOnly",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testTypeSelectionNormalizesOnlyAfterScanAndPersistsWholeSelection",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testUSBScanYieldsWithinBatchToPhotoAndResumesWithoutSkippingHandles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testWideningDuringFinalBatchAutomaticallyResumesRetainedCursor",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-rating-boundary-20261028.log",
+      "logSHA256": "b5e87414bc0c79c9c8c574ab3e54056042a8cb87baba08aa4424a872d2eaa6f4",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/rating-boundary-tests.log",
+      "retainedLogSHA256": "a3aa39ada0a32c0928a116775ad5455669c8754ed398c679424e03a0156bb67f",
+      "xcresult": "/tmp/ztransfer-sync-rating-boundary-20261028.xcresult",
+      "exitCode": 65,
+      "tests": [
+        {
+          "name": "DisconnectedPhotoListTests testCancellingIdleThumbnailWorkerDoesNotTerminateFutureWakeWaits",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testDisconnectedCatalogStopsAllRemoteWorkButRetainsRows",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testDisconnectRejectsLateCacheReconciliationCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testDisconnectRejectsLateLoadingRangeSnapshot",
+          "result": "passed"
+        },
+        {
+          "name": "DisconnectedPhotoListTests testEvictionWithoutDisconnectMakesRetainedModelTerminal",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testPhotoDateRangeRejectsInvalidCalendarDates",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testCompactFilterRowKeepsStarSlotAndRangeHelpWithinPanel",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testFullPopupProgressDoesNotRemeasureAndCloseReopenKeepsSameHost",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testProgressProjectionIgnoresDictionaryOnlyChangesAndRetainsEveryStatus",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoFilterPresentationPerformanceTests testProgressUpdatesOnlyChipAndNativePulseKeepsIdentityAndLifecycle",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testLateJPEGChangesSourceAndRemovalRestoresRaw",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testUniquePairAlsoProjectsJPEGRatingToNRW",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testUniquePairUsesJPEGEvenWhenRawComesFirst",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingPairsTests testUnmatchedDifferentCardDateOrAmbiguousRawStaysIndependent",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCancelledCacheLookupCannotSupplyTheReplacementScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCancelledReadCannotOverwriteCompletedReplacementScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCatalogUpdateDuringSuspendedCacheLookupReplansBeforeLocking",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testConfirmedShootingDayStartsOnEveryTransportBeforeFullScanFinishes",
+          "result": "failed"
+        },
+        {
+          "name": "PhotoRatingScanTests testDisableCancelsReadAndEndsRatingPhaseBeforeNextGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testEffectiveRatingRangeIsIntersectionAndZeroUsesOtherBoundary",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testEnabledPhotoRangeChangesRebuildWithoutInvalidatingCameraCache",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testFiveDayMigrationRunsOnceAndPreservesExplicitRangesAndOtherFilters",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testGenerationChangedWhileInitialInvalidationIsReturningIsNotLost",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testNoMatchMessageRequiresConcreteEnabledRatingStillLoadingToHide",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testNoMatchMessageWaitsForRealListRatingReadAndSurvivesBusyPause",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testOldReadFinishingCannotDetachReplacementBeforeSecondDisable",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testOrdinaryRatingUpdatesPreserveExplicitDiagnosticCapture",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPairReadIsOneSourceButProgressCountsBothVisibleFiles",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPhotoListRangeEntryRebuildsEnabledRatingScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanIncludesUnsupportedDaysWithoutMovingIntoOlderIncompleteDay",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanUsesNewestActualDaysForEveryTransportAndKeepsCameraOrder",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanValidatesCalendarDatesAndExtensionsButAllRetainsUndatedMedia",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanWaitsForExplicitCompletionOrConfirmedFiniteBoundary",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingCacheUsesGenerationAndEvictsOldestAfter8192Values",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingRangeRestorationDistinguishesMissingFromExplicitAll",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingReadsFollowFirstSourceAppearanceIncludingRawBeforeJPEG",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRepositoryGenerationNotificationRestartsWithoutAnotherInputUpdate",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testSTAWaitsForRecentDateBoundaryBeforeStartingReadsMainActor",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testTenDayLoadingRangePersistsAndCountsCaptureDays",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testUSBWaitsForCatalogThenOnlyReadsTheSelectedRange",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testWidenedRangeCannotLockOldCatalogWhileResumeSnapshotIsSuspended",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testAndroidWarmupGrowthColdAndInterruptedRules",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBackupDuplicateInSameBatchPublishesBothStorageMemberships",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedIncompleteCatalogKeepsEventsAliveWithoutAuthoritativeCachePruning",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedPhotoScanRetainsTailAndWiderScopeResumesIt",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedScanPreservesOlderMemoryAndDiskThumbnails",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testCancelledDualCardBatchResumesOnlyAcceptedHandles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testCompletedResumeRetainsBackupAliasesInNewMediaBaseline",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testConnectionRecoveryIsInstalledBeforePublishingReplacement",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletedInflightThumbnailCannotSettleReusedHandle",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletedSettledHandleCanFetchNewPhotoReusingThatHandle",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletionDuringEnumerationCannotRepublishResumeSnapshot",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletionInvalidatesBoundedScanBeforeWideningScope",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDiskFailureStopsScanAndBackgroundPrefetchForTheConnection",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDiskHitIsDifferentFromDownloadAndNegativeCache",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDualCardProductionScanPreservesOrderAndWarmGrowth",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testIncompleteMetadataDoesNotDisableDeletionSyncOrNewObjectResolution",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testIncompleteObjectInfoFreezesAdaptiveSizeWithoutDroppingDisplayRow",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testLoadingRangeChangesApplyToTheNextScanBatch",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testMembershipReplacementUpdatesListBeforeScanEndsWithoutRefetching",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testMonitorPageAndSessionCleanupHoldIndependentBackgroundOwnership",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testNonSTAStorageBusyRetriesAndSuccessfulEmptyRemovesBaseline",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testOrdinaryThumbnailProtocolMissSettlesButTransientErrorsRemainRetryable",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testProductionScanConsumesListCacheFeedback",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRealDualCardReplacementUpdatesCardTwoFilterDuringScan",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRealSecondCacheWriteFailureStopsWorkerAndPreservesCachedReads",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredListKeepsRowsAndDoesNotReplayOldAutomaticTransfers",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredListTransportFailureRetainsCatalogWithoutAuthoritativeReconcile",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredRepositoryAndListReconcileDeletedPrimaryAndNewPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRejectedStorageQueryPreservesBaselineAndDoesNotBecomeNoCard",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testReviewReadsFreshHandlesAndDeduplicatesAliasedCardsWhileMonitorOwnsCamera",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testShrinkingRangeWhileThumbnailAdmissionWaitsSkipsOlderFiles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testSTARecoveryMovesCatalogBaselineToNewSameBodyConnectionOnly",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testTypeSelectionNormalizesOnlyAfterScanAndPersistsWholeSelection",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testUSBScanYieldsWithinBatchToPhotoAndResumesWithoutSkippingHandles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testWideningDuringFinalBatchAutomaticallyResumesRetainedCursor",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-rating-final-20261028.log",
+      "logSHA256": "188532cb6e88a0d2fdfa613d3a57f2a2518f97d4e8c9694038e5b2634b906f1a",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/rating-final-tests.log",
+      "retainedLogSHA256": "97a8b0e3902ff69805969a7a833453346884dfdabfe3de3c550372e1f7ba3c00",
+      "xcresult": "/tmp/ztransfer-sync-rating-final-20261028.xcresult",
+      "exitCode": 0,
+      "tests": [
+        {
+          "name": "PhotoRatingScanTests testCancelledCacheLookupCannotSupplyTheReplacementScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCancelledReadCannotOverwriteCompletedReplacementScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testCatalogUpdateDuringSuspendedCacheLookupReplansBeforeLocking",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testConfirmedShootingDayStartsOnEveryTransportBeforeFullScanFinishes",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testDisableCancelsReadAndEndsRatingPhaseBeforeNextGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testEffectiveRatingRangeIsIntersectionAndZeroUsesOtherBoundary",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testEnabledPhotoRangeChangesRebuildWithoutInvalidatingCameraCache",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testFiveDayMigrationRunsOnceAndPreservesExplicitRangesAndOtherFilters",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testGenerationChangedWhileInitialInvalidationIsReturningIsNotLost",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testNoMatchMessageRequiresConcreteEnabledRatingStillLoadingToHide",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testNoMatchMessageWaitsForRealListRatingReadAndSurvivesBusyPause",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testOldReadFinishingCannotDetachReplacementBeforeSecondDisable",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testOrdinaryRatingUpdatesPreserveExplicitDiagnosticCapture",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPairReadIsOneSourceButProgressCountsBothVisibleFiles",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPhotoListRangeEntryRebuildsEnabledRatingScan",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanIncludesUnsupportedDaysWithoutMovingIntoOlderIncompleteDay",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanUsesNewestActualDaysForEveryTransportAndKeepsCameraOrder",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanValidatesCalendarDatesAndExtensionsButAllRetainsUndatedMedia",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testPlanWaitsForExplicitCompletionOrConfirmedFiniteBoundary",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingCacheUsesGenerationAndEvictsOldestAfter8192Values",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingRangeRestorationDistinguishesMissingFromExplicitAll",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRatingReadsFollowFirstSourceAppearanceIncludingRawBeforeJPEG",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testRepositoryGenerationNotificationRestartsWithoutAnotherInputUpdate",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testSTAWaitsForRecentDateBoundaryBeforeStartingReadsMainActor",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testTenDayLoadingRangePersistsAndCountsCaptureDays",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testUSBWaitsForCatalogThenOnlyReadsTheSelectedRange",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoRatingScanTests testWidenedRangeCannotLockOldCatalogWhileResumeSnapshotIsSuspended",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testAndroidWarmupGrowthColdAndInterruptedRules",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBackupDuplicateInSameBatchPublishesBothStorageMemberships",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedIncompleteCatalogKeepsEventsAliveWithoutAuthoritativeCachePruning",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedPhotoScanRetainsTailAndWiderScopeResumesIt",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testBoundedScanPreservesOlderMemoryAndDiskThumbnails",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testCancelledDualCardBatchResumesOnlyAcceptedHandles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testCompletedResumeRetainsBackupAliasesInNewMediaBaseline",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testConnectionRecoveryIsInstalledBeforePublishingReplacement",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletedInflightThumbnailCannotSettleReusedHandle",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletedSettledHandleCanFetchNewPhotoReusingThatHandle",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletionDuringEnumerationCannotRepublishResumeSnapshot",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDeletionInvalidatesBoundedScanBeforeWideningScope",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDiskFailureStopsScanAndBackgroundPrefetchForTheConnection",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDiskHitIsDifferentFromDownloadAndNegativeCache",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testDualCardProductionScanPreservesOrderAndWarmGrowth",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testIncompleteMetadataDoesNotDisableDeletionSyncOrNewObjectResolution",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testIncompleteObjectInfoFreezesAdaptiveSizeWithoutDroppingDisplayRow",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testLoadingRangeChangesApplyToTheNextScanBatch",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testMembershipReplacementUpdatesListBeforeScanEndsWithoutRefetching",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testMonitorPageAndSessionCleanupHoldIndependentBackgroundOwnership",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testNonSTAStorageBusyRetriesAndSuccessfulEmptyRemovesBaseline",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testOrdinaryThumbnailProtocolMissSettlesButTransientErrorsRemainRetryable",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testProductionScanConsumesListCacheFeedback",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRealDualCardReplacementUpdatesCardTwoFilterDuringScan",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRealSecondCacheWriteFailureStopsWorkerAndPreservesCachedReads",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredListKeepsRowsAndDoesNotReplayOldAutomaticTransfers",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredListTransportFailureRetainsCatalogWithoutAuthoritativeReconcile",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRecoveredRepositoryAndListReconcileDeletedPrimaryAndNewPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testRejectedStorageQueryPreservesBaselineAndDoesNotBecomeNoCard",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testReviewReadsFreshHandlesAndDeduplicatesAliasedCardsWhileMonitorOwnsCamera",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testShrinkingRangeWhileThumbnailAdmissionWaitsSkipsOlderFiles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testSTARecoveryMovesCatalogBaselineToNewSameBodyConnectionOnly",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testTypeSelectionNormalizesOnlyAfterScanAndPersistsWholeSelection",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testUSBScanYieldsWithinBatchToPhotoAndResumesWithoutSkippingHandles",
+          "result": "passed"
+        },
+        {
+          "name": "ScanBatchPolicyTests testWideningDuringFinalBatchAutomaticallyResumesRetainedCursor",
+          "result": "passed"
+        }
+      ]
+    }
+  ],
+  "distinctPassedMethods": 77,
+  "totalMethodExecutions": 216,
+  "sourceSHA256": {
+    "ios/ZTransfer/Domain/PhotoFilter.swift": "439ff34e18b5cb6477e4a40cba3df53a74cb18aec0a0710aeee5ae97eb78b8d7",
+    "ios/ZTransfer/Domain/PhotoRatingScan.swift": "88b60a9c0c59e3700371e9c94015e167e940e8108a8ae5c5375ac6c4596e48be",
+    "ios/ZTransfer/Domain/PhotoListViewModel.swift": "c2e429f6c645d170c39fcfc9b3b803e3e00bc7516466dffdc4438a30e9e86d96",
+    "ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift": "16a529fc683567c8440662b0751b0946701a6f6f6f4179a82600686c7bc2691d",
+    "ios/ZTransfer/UI/PhotoFilterComponents.swift": "6e5c6390fa423eb0ebbf1ddc5f131981bdd69f12820416a5c2e2f9e06b4f3145",
+    "ios/ZTransfer/UI/PhotoListView.swift": "f6380511dc8895344f170be1369054e60281d75bcfbf1a674b00c925a2fa6dd9",
+    "ios/ZTransferTests/PhotoRatingScanTests.swift": "9740f83eb58596ca7ec418bbd612059d9d4ef4ce13822a4eb0a6792483292026",
+    "ios/ZTransferTests/PhotoRatingPairsTests.swift": "6fbcb4905ead5f218b5a74ad8d18ed44958d929ca8a112a29973e682e0ee2027",
+    "ios/ZTransferTests/ScanBatchPolicyTests.swift": "1b00818a01ad9413e17f1247bd3d99c7daef8fe9483789045089374edc386a88",
+    "ios/ZTransferTests/NativeAttentionMotionTests.swift": "6cfc7be2e665972ab3c5036f247480476265e80ea2a9673d3467b175bc87112c",
+    "ios/ZTransferTests/DomainModelTests.swift": "5677367f603ae08524ba5069dae4fb55f9e6dda0f2a86317bea8b8858eb361db"
+  },
+  "androidSourceSHA256": {
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingRange.kt": "c2cf2aea39794ae483384eb261790eb2ccf51053fd5b488e2e9a3056ce5f92d2",
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoRatingScan.kt": "e1bb5f6f72e466b3cf057a060f4024927732c86aeb7c3caf8d174e1d79ad5bd1",
+    "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt": "24678e8fe395673e5625adf7aebd03b3e74e89088d2fc9014220c451ce3d950c",
+    "app/src/main/java/com/ztransfer/viewmodel/PhotoDateRange.kt": "831c61030e57b9e2a1a6a352f07f197ae11fa5c8a896a83f9908e7d7e9f4231d",
+    "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt": "40e91e93c75fd7b102a282a831e04f039e29c571504f6af5582446483741d193",
+    "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt": "0d86eca04ad867ec8481bfa27bc49fe47e6bff07520c4551b347986a52d9152f",
+    "app/src/test/java/com/ztransfer/ui/screen/PhotoRatingRangeTest.kt": "a0c0fae1889194907fdc32d159f7c0ce44aa21a385fa75dd01e470debfd45aac"
+  },
+  "inspectedImages": {
+    "ios/docs/evidence/android-sync-20261028/filter-280-off.png": "bdd407687ae1516b5ca5e10e9142191d42289d6c7f9d3ec46f8032fa14c0dc14",
+    "ios/docs/evidence/android-sync-20261028/filter-280-on.png": "a40c60d001649c668b9dc511c8015ab1467c80c28afae147221d4926a29823d1",
+    "ios/docs/evidence/android-sync-20261028/filter-390-off.png": "de2af01dd09aba3d67f9fb283628bd70ae9805e48fbcc2a080856c18e43b510f",
+    "ios/docs/evidence/android-sync-20261028/filter-390-on.png": "17dba7d33a08e973f5fb7a8ac8d55a9fe88a0168a98b07170d53dd603586fc65"
+  },
+  "imageSource": "rating-fixed run; four actual UIHostingController renders at 390/280 pt width, rating off/on; inspected individually. UI source unchanged in subsequent runs.",
+  "failures": [
+    "Initial build failed before tests: test used a private CropPermitLatch from another file; replaced with the existing shared RatingLookupGate.",
+    "Boundary run: one new method failed five assertions because its canFill fixture retained the default false; set explicit true for the test that requires an open thumbnail channel. Production unchanged by that correction."
+  ],
+  "coverage": [
+    "All-transport range intersection, actual shooting days, strict dates, all includes undated media, unsupported-only day boundary and source order.",
+    "Incomplete, paused, empty, short, all, and requested/applied scope handoff readiness.",
+    "Suspended cache lookup replans; partial cancel/re-enable discards values; late read and generation isolation.",
+    "JPG/RAW read dedup with per-file progress, independent card/date sources.",
+    "Expanded scope closes readiness synchronously while cursor is suspended; rapid second scope retains resume; disconnect cannot restart.",
+    "Finite confirmed boundary wakes model directly on USB/AP and STA before full enumeration.",
+    "Progress leaf observation, fixed 154pt stars, flexible loader/range width, 34pt height, 300pt panel, close/reopen continuity."
+  ],
+  "limits": [
+    "No full UI automation or physical-camera/USB/Wi-Fi hardware acceptance.",
+    "Kotlin tests read as the behavior reference; not executed in this verification.",
+    "No new physical install, commit, or push.",
+    "N08-N20/N22-N25 remain open; round is 8/25, not complete."
+  ]
+}

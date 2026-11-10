@@ -1,6 +1,32 @@
 import SwiftUI
 import UIKit
 
+/// SharedQueueControls measures the gap from the capsule's actual springing
+/// width. The execution button reaches the fixed right edge when it is alone.
+struct SharedQueueControlsLayout: Layout {
+    private func sizes(_ subviews: Subviews) -> (CGSize, CGSize, CGFloat) {
+        // QueueTopPresence is transparent when its exit finishes, leaving
+        // only the permanent capsule subview in SwiftUI's layout collection.
+        let execution = subviews.count == 2 ? subviews[0].sizeThatFits(.unspecified) : .zero
+        let pill = subviews[subviews.count - 1].sizeThatFits(.unspecified)
+        let gap = execution.width > 0 ? 8 * min(1, max(0, pill.width / 40)) : 0
+        return (execution, pill, gap)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard (1...2).contains(subviews.count) else { return .zero }
+        let (execution, pill, gap) = sizes(subviews)
+        return CGSize(width: execution.width + gap + pill.width, height: max(execution.height, pill.height))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard (1...2).contains(subviews.count) else { return }
+        let (execution, pill, _) = sizes(subviews)
+        if subviews.count == 2 {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: .init(execution))
+        }
+        subviews[subviews.count - 1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: .init(pill))
+    }
+}
+
 /// Flight endpoints use a stable right edge/center, independent of the pill's
 /// animated width and catch transform. Never publish width frames to the grid.
 struct QueueTopFlightAnchor: View {

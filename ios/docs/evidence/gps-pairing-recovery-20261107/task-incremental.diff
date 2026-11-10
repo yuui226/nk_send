@@ -1,0 +1,619 @@
+--- /tmp/ztransfer-gps-pairing-recovery-before-20261107/ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift	2026-11-06 23:58:28
++++ /Users/orys/code/nk_send/ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift	2026-11-07 00:36:56
+@@ -9,6 +9,7 @@
+     var state: NikonGPSBluetoothState { get }
+     var statePublisher: AnyPublisher<NikonGPSBluetoothState, Never> { get }
+     var hasSavedPairing: Bool { get }
++    var hasPairingIdentity: Bool { get }
+     var isRunning: Bool { get }
+     func start()
+     func stop()
+@@ -16,6 +17,10 @@
+     func writeGeo(_ data: Data, completion: @escaping (Bool) -> Void)
+ }
+ 
++extension GPSBluetoothTransport {
++    var hasPairingIdentity: Bool { hasSavedPairing }
++}
++
+ enum NikonGPSBluetoothState: Equatable, Sendable {
+     case unauthorized
+     case unavailable
+@@ -23,14 +28,14 @@
+     case connecting(String)
+     case pairing
+     case cameraConfirm
+-    case systemPaired(String)
++    case verifyingPairing(String)
+     case ready(String)
+     case disconnected
+     case failed(String)
+ }
+ 
+ enum NikonGPSSystemPairingResult: Equatable, Sendable {
+-    case paired, alreadyConnected, cancelled, notFound, failed
++    case paired, alreadyConnected, cancelled, notFound, failed, timedOut
+ 
+     init(error: Error?) {
+         guard let underlyingError = error else { self = .paired; return }
+@@ -45,8 +50,13 @@
+     }
+ 
+     var failureMessage: String {
+-        self == .alreadyConnected ? "请在系统蓝牙中删除相机配对后重试" : "请确认蓝牙配对"
++        "请确认蓝牙配对"
+     }
++
++    // On the real Z50_2, the camera confirmed bonding while the iAP picker
++    // returned notFound. That result is not Nikon's identity/GPS verdict.
++    // Keep a provisional identity and verify over BLE; never override a cancel.
++    var canVerifyCamera: Bool { self != .cancelled && self != .timedOut }
+ }
+ 
+ @MainActor
+@@ -71,6 +81,9 @@
+     init(applicationIsActive: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .active },
+          presentPicker: @escaping PresentPicker = { filter, completion in
+              EAAccessoryManager.shared().showBluetoothAccessoryPicker(withNameFilter: filter) { error in
++                 if let error = error as NSError? {
++                     GPSDiagnostics.record("system picker callback error=\(error.domain)/\(error.code)")
++                 }
+                  let result = NikonGPSSystemPairingResult(error: error)
+                  Task { @MainActor in completion(result) }
+              }
+@@ -278,6 +291,8 @@
+     private var savedDevice: UInt32?
+     private var savedNonce: UInt32?
+     private var savedPeripheralIdentifier: UUID?
++    private var savedCameraName: String?
++    private var identityNeedsVerification = false
+     private var controllerName = "ZTransfer"
+     private let writeQueue = NikonGPSWriteQueue<CBCharacteristic>()
+     private var notificationsReady = Set<CBUUID>()
+@@ -316,20 +331,26 @@
+         self.defaults = storage
+         let storedDevice = (storage.object(forKey: GPSPreferences.deviceID) as? NSNumber).map { $0.uint32Value }
+         let storedNonce = (storage.object(forKey: GPSPreferences.nonce) as? NSNumber).map { $0.uint32Value }
+-        let confirmed = storage.bool(forKey: GPSPreferences.pairingConfirmed) && storedDevice != nil && storedNonce != nil
+-        if !confirmed {
++        let completeIdentity = storedDevice != nil && storedNonce != nil
++        let confirmed = storage.bool(forKey: GPSPreferences.pairingConfirmed) && completeIdentity
++        let pendingVerification = storage.bool(forKey: GPSPreferences.pairingVerificationPending) && completeIdentity
++        if !confirmed && !pendingVerification {
+             // Earlier iOS builds saved stage 1 before any system bond existed.
+             // Such records cannot bypass first pairing in the corrected flow.
+             storage.removeObject(forKey: GPSPreferences.deviceID)
+             storage.removeObject(forKey: GPSPreferences.nonce)
+             storage.removeObject(forKey: GPSPreferences.bleAddress)
+             storage.removeObject(forKey: GPSPreferences.pairingConfirmed)
++            storage.removeObject(forKey: GPSPreferences.pairingVerificationPending)
++            storage.removeObject(forKey: GPSPreferences.cameraName)
+         }
+         if let savedDevice, let savedNonce {
+             self.savedDevice = savedDevice; self.savedNonce = savedNonce
+-        } else if confirmed {
++        } else if confirmed || pendingVerification {
+             self.savedDevice = storedDevice; self.savedNonce = storedNonce
++            self.identityNeedsVerification = !confirmed
+         }
++        self.savedCameraName = storage.string(forKey: GPSPreferences.cameraName)
+         self.savedPeripheralIdentifier = storage.string(forKey: GPSPreferences.bleAddress)
+             .flatMap(UUID.init(uuidString:))
+         super.init()
+@@ -349,7 +370,10 @@
+         guard !systemPairingInProgress else { return }
+         shouldRun = true
+         GPSDiagnostics.record("BLE start savedIdentity=\(savedDevice != nil && savedNonce != nil)")
+-        if connectionRetirement.deferIfNeeded({ [weak self] in self?.start() }) { return }
++        if connectionRetirement.deferIfNeeded({ [weak self] in self?.start() }) {
++            GPSDiagnostics.record("BLE awaiting prior connection retirement")
++            return
++        }
+         let central = ensureCentral()
+         if central.state == .unknown || central.state == .resetting { return }
+         guard central.state == .poweredOn else {
+@@ -358,27 +382,55 @@
+             return
+         }
+         guard peripheral == nil, !central.isScanning else { return }
++        if identityNeedsVerification {
++            state = .verifyingPairing(savedCameraName ?? "Nikon")
++            guard shouldRun else { return }
++        }
+         directReconnectDeadline.cancel()
+         // Android's service first attempts the saved BLE address, then falls
+         // back to a filtered scan when the camera is unavailable. CoreBluetooth
+         // exposes the equivalent through a persisted peripheral UUID.
+-        if savedDevice != nil, savedNonce != nil,
++        let connected = hasPairingIdentity ? central.retrieveConnectedPeripherals(withServices: [Self.serviceUUID]) : []
++        let connectedID = Self.connectedPeripheralID(connected.map { ($0.identifier, $0.name) },
++                                                     savedID: savedPeripheralIdentifier, cameraName: savedCameraName)
++        if let remembered = connected.first(where: { $0.identifier == connectedID }) {
++            GPSDiagnostics.record("BLE reusing system-connected camera")
++            connectRemembered(remembered, central: central)
++        } else if hasPairingIdentity,
+            let savedPeripheralIdentifier,
+            let remembered = central.retrievePeripherals(withIdentifiers: [savedPeripheralIdentifier]).first {
+-            peripheral = remembered
+-            remembered.delegate = self
+-            central.connect(remembered)
+-            beginDirectReconnectDeadline { [weak self, weak remembered] in
+-                guard let self, let remembered, self.acceptsCallback(from: remembered),
+-                      self.state == .connecting(remembered.name ?? "Nikon") else { return }
+-                self.retireConnection(remembered)
+-                self.clearConnectionState()
+-                self.beginScan()
+-            }
+-            publishConnecting(remembered)
++            GPSDiagnostics.record("BLE reconnecting known camera")
++            connectRemembered(remembered, central: central)
+         } else {
+             beginScan()
++        }
++    }
++
++    /// Apple recommends retrieving known/system-connected peripherals before
++    /// scanning: an already connected camera may no longer advertise.
++    static func connectedPeripheralID(_ candidates: [(id: UUID, name: String?)],
++                                      savedID: UUID?, cameraName: String?) -> UUID? {
++        if let savedID, candidates.contains(where: { $0.id == savedID }) { return savedID }
++        guard let cameraName, !cameraName.isEmpty, cameraName.caseInsensitiveCompare("Nikon") != .orderedSame else { return nil }
++        let exact = candidates.filter { $0.name?.caseInsensitiveCompare(cameraName) == .orderedSame }
++        if exact.count == 1 { return exact[0].id }
++        let filter = NikonGPSAccessoryPairing.nameFilter(cameraName)
++        let matches = candidates.filter { $0.name.map { filter.evaluate(with: $0) } ?? false }
++        return matches.count == 1 ? matches[0].id : nil
++    }
++
++    private func connectRemembered(_ remembered: CBPeripheral, central: CBCentralManager) {
++        peripheral = remembered
++        remembered.delegate = self
++        central.connect(remembered)
++        beginDirectReconnectDeadline { [weak self, weak remembered] in
++            guard let self, let remembered, self.acceptsCallback(from: remembered),
++                  self.state == .connecting(remembered.name ?? "Nikon") else { return }
++            self.retireConnection(remembered)
++            self.clearConnectionState()
++            self.beginScan()
+         }
++        publishConnecting(remembered)
+     }
+ 
+     private func publishConnecting(_ peripheral: CBPeripheral) {
+@@ -430,13 +482,13 @@
+         scanDeadline.schedule(after: 15_000_000_000) { [weak self] in
+             guard let self, self.state == .scanning, self.peripheral == nil else { return }
+             stopScan()
+-            self.state = .failed("Camera not found")
++            self.state = .failed(self.identityNeedsVerification ? "GPS connection confirmation timeout" : "Camera not found")
+         }
+         state = .scanning
+     }
+ 
+     func beginIDWriteDeadline(isPending: @escaping @MainActor () -> Bool) {
+-        guard hasSavedPairing, !freshPairingAttempt else { return }
++        guard hasPairingIdentity, !freshPairingAttempt else { return }
+         idWriteDeadline.cancel()
+         idWriteDeadline.schedule(after: 3_000_000_000) { [weak self] in
+             guard let self, isPending() else { return }
+@@ -451,7 +503,7 @@
+     func beginSetupDeadline(isCurrent: @escaping @MainActor () -> Bool,
+                             closeConnection: @escaping @MainActor () -> Void) {
+         setupDeadline.cancel()
+-        guard hasSavedPairing else { return }
++        guard hasPairingIdentity else { return }
+         setupDeadline.schedule(after: 15_000_000_000) { [weak self] in
+             guard let self, isCurrent() else { return }
+             closeConnection()
+@@ -483,12 +535,15 @@
+                      data: data, completion: completion)
+     }
+ 
+-    var hasSavedPairing: Bool { savedDevice != nil && savedNonce != nil }
++    var hasPairingIdentity: Bool { savedDevice != nil && savedNonce != nil }
++    var hasSavedPairing: Bool { hasPairingIdentity && !identityNeedsVerification }
+     var isRunning: Bool { systemPairingInProgress || peripheral != nil || central?.isScanning == true }
+ 
+     func clearPairing() {
+         GPSDiagnostics.record("cached pairing identity cleared")
+         defaults.removeObject(forKey: GPSPreferences.pairingConfirmed)
++        defaults.removeObject(forKey: GPSPreferences.pairingVerificationPending)
++        defaults.removeObject(forKey: GPSPreferences.cameraName)
+         defaults.removeObject(forKey: GPSPreferences.deviceID)
+         defaults.removeObject(forKey: GPSPreferences.nonce)
+         defaults.removeObject(forKey: GPSPreferences.bleAddress)
+@@ -497,6 +552,8 @@
+         savedDevice = nil
+         savedNonce = nil
+         savedPeripheralIdentifier = nil
++        savedCameraName = nil
++        identityNeedsVerification = false
+         peripheralIdentifier = nil
+         stop()
+     }
+@@ -551,11 +608,11 @@
+     }
+ 
+     func preparePairingIdentity() -> NikonGPSPairingPacket {
+-        freshPairingAttempt = !hasSavedPairing
++        freshPairingAttempt = !hasPairingIdentity
+         let packet = NikonGPSPairingProtocol().newStage1(deviceOverride: savedDevice, nonceOverride: savedNonce)
+         stage1 = packet
+-        // Android persists this packet only after the separate system pairing
+-        // succeeds. A stage-1 write is a proposal, not a confirmed camera bond.
++        // Stage 1 alone is only a proposal. After the system picker, iOS may
++        // retain it explicitly as pending; only a GEO ACK confirms that record.
+         return packet
+     }
+ 
+@@ -575,7 +632,7 @@
+         guard shouldRun, systemPairingInProgress, token == systemPairingGeneration else { return }
+         GPSDiagnostics.record("ID acknowledged; awaiting system Bluetooth pairing")
+         systemPairingDeadline.schedule(after: 30_000_000_000) { [weak self] in
+-            self?.finishSystemPairing(.failed, identity: proposed, cameraName: cameraName, token: token)
++            self?.finishSystemPairing(.timedOut, identity: proposed, cameraName: cameraName, token: token)
+         }
+         systemPairing.pair(cameraName: cameraName) { [weak self] result in
+             self?.finishSystemPairing(result, identity: proposed, cameraName: cameraName, token: token)
+@@ -595,34 +652,49 @@
+         cancelSystemPairing()
+         let completedGeneration = systemPairingGeneration
+         GPSDiagnostics.record("system Bluetooth pairing result=\(result)")
+-        guard result == .paired else { state = .failed(result.failureMessage); return }
++        guard result.canVerifyCamera else { state = .failed(result.failureMessage); return }
+         savedDevice = identity.device; savedNonce = identity.nonce
++        identityNeedsVerification = true
++        savedCameraName = cameraName
+         defaults.set(identity.device, forKey: GPSPreferences.deviceID)
+         defaults.set(identity.nonce, forKey: GPSPreferences.nonce)
+-        defaults.set(true, forKey: GPSPreferences.pairingConfirmed)
+-        // Nikon can change its random BLE address after Classic bonding.
+-        // Android scans anew; don't immediately reconnect the pre-bond address.
+-        savedPeripheralIdentifier = nil
+-        defaults.removeObject(forKey: GPSPreferences.bleAddress)
+-        state = .systemPaired(cameraName)
++        defaults.set(false, forKey: GPSPreferences.pairingConfirmed)
++        defaults.set(true, forKey: GPSPreferences.pairingVerificationPending)
++        defaults.set(cameraName, forKey: GPSPreferences.cameraName)
++        if let savedPeripheralIdentifier {
++            defaults.set(savedPeripheralIdentifier.uuidString, forKey: GPSPreferences.bleAddress)
++        }
++        GPSDiagnostics.record("provisional identity retained; verifying camera over BLE")
++        state = .verifyingPairing(cameraName)
+         guard shouldRun, systemPairingGeneration == completedGeneration else { return }
+         state = .disconnected
+     }
+ 
++    /// Called only after the current connection's acknowledged GEO write.
++    /// A system-picker result alone must never display the paired badge.
++    func confirmIdentityAfterGeoWrite() {
++        guard shouldRun, identityNeedsVerification, hasPairingIdentity, case .ready = state else { return }
++        identityNeedsVerification = false
++        defaults.set(true, forKey: GPSPreferences.pairingConfirmed)
++        defaults.removeObject(forKey: GPSPreferences.pairingVerificationPending)
++        GPSDiagnostics.record("camera accepted GEO; pairing identity confirmed")
++    }
++
+     // Both Android handshake stages wait seven seconds. Only the initial
+     // saved-identity stage reports expiration; stage 4 reports handshake timeout.
+     func beginPairingDeadline(restoringIdentity: Bool) {
+         pairingDeadline.cancel()
+         pairingDeadline.schedule(after: 7_000_000_000) { [weak self] in
+             guard let self, !self.idQueued else { return }
+-            self.state = .failed(restoringIdentity ? "Camera pairing identity expired" : "Camera pairing handshake timeout")
++            self.state = .failed(self.identityNeedsVerification ? "GPS connection confirmation timeout" :
++                                (restoringIdentity ? "Camera pairing identity expired" : "Camera pairing handshake timeout"))
+         }
+     }
+ 
+     private func beginPairing(_ peripheral: CBPeripheral) {
+         guard let pairCharacteristic else { return }
+         setupDeadline.cancel()
+-        let restoringIdentity = hasSavedPairing
++        let restoringIdentity = hasPairingIdentity
+         let packet = preparePairingIdentity()
+         stage3Sent = false; idQueued = false
+         GPSDiagnostics.record("BLE pairing handshake")
+@@ -724,15 +796,22 @@
+ 
+     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
+                                     advertisementData: [String: Any], rssi RSSI: NSNumber) {
++        let advertisedName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+         MainActor.assumeIsolated { [weak self] in
+             guard let self, self.shouldRun, self.central === central,
+                   central.isScanning,
+                   !self.connectionRetirement.isRetiring,
+                   self.peripheral == nil else { return }
++            let name = advertisedName ?? peripheral.name
++            if self.hasPairingIdentity, let target = self.savedCameraName,
++               peripheral.identifier != self.savedPeripheralIdentifier {
++                guard let name, NikonGPSAccessoryPairing.nameFilter(target).evaluate(with: name) else { return }
++            }
++            GPSDiagnostics.record("BLE found name=\(name ?? "?")")
+             self.scanDeadline.cancel()
+             central.stopScan(); self.peripheral = peripheral
+             self.savedPeripheralIdentifier = peripheral.identifier
+-            if self.hasSavedPairing {
++            if self.hasPairingIdentity {
+                 self.defaults.set(peripheral.identifier.uuidString, forKey: GPSPreferences.bleAddress)
+             }
+             peripheral.delegate = self; central.connect(peripheral)
+@@ -857,6 +936,7 @@
+             guard let self, self.acceptsCallback(from: peripheral),
+                   let finished = self.writeQueue.acknowledge(owner: peripheral, characteristic: characteristic) else { return }
+             if characteristic.uuid == Self.idUUID { self.idWriteDeadline.cancel() }
++            if characteristic.uuid == Self.geoUUID, error == nil { self.confirmIdentityAfterGeoWrite() }
+             finished.completion?(error == nil)
+             guard self.acceptsCallback(from: peripheral) else { return }
+             if let error {
+--- /tmp/ztransfer-gps-pairing-recovery-before-20261107/ios/ZTransfer/Domain/GPSCoordinator.swift	2026-11-06 23:48:48
++++ /Users/orys/code/nk_send/ios/ZTransfer/Domain/GPSCoordinator.swift	2026-11-07 00:17:43
+@@ -661,7 +661,7 @@
+         case .cameraConfirm:
+             state.status = .cameraConfirm
+             state.message = AppLocalized.text("请在相机上按 OK")
+-        case .systemPaired(let name):
++        case .verifyingPairing(let name):
+             pairingConfirmationPending = true
+             state.cameraName = name
+             state.status = .connecting
+@@ -707,8 +707,8 @@
+                 state.status = .ready
+                 state.message = AppLocalized.text("正在重连")
+             } else {
+-                state.status = bluetooth.hasSavedPairing ? .connecting : .searching
+-                state.message = bluetooth.hasSavedPairing ? AppLocalized.text("正在重连") : nil
++                state.status = bluetooth.hasPairingIdentity ? .connecting : .searching
++                state.message = bluetooth.hasPairingIdentity ? AppLocalized.text("正在重连") : nil
+             }
+             reconnectTask = Task { [weak self] in
+                 try? await Task.sleep(for: .milliseconds(800))
+--- /tmp/ztransfer-gps-pairing-recovery-before-20261107/ios/ZTransfer/Domain/GPSState.swift	2026-11-06 23:58:28
++++ /Users/orys/code/nk_send/ios/ZTransfer/Domain/GPSState.swift	2026-11-07 00:17:43
+@@ -27,6 +27,8 @@
+     // Removed startup flag: read only to clear values left by older iOS builds.
+     static let legacyEnabled = "enabled"
+     static let pairingConfirmed = "pairing_confirmed"
++    static let pairingVerificationPending = "pairing_verification_pending"
++    static let cameraName = "camera_name"
+     static let deviceID = "device_id"
+     static let nonce = "nonce"
+     static let bleAddress = "ble_address"
+--- /tmp/ztransfer-gps-pairing-recovery-before-20261107/ios/GPSTests/GPSProtocolTests.swift	2026-11-06 23:59:32
++++ /Users/orys/code/nk_send/ios/GPSTests/GPSProtocolTests.swift	2026-11-07 00:30:58
+@@ -61,53 +61,62 @@
+ 
+     @MainActor
+     func testFreshIDACKRequiresSystemPairingThenNewBLEHandshakeBeforeReady() throws {
+-        let suite = "GPSSystemPairingSuccess-\(UUID())", defaults = UserDefaults(suiteName: suite)!
+-        defer { defaults.removePersistentDomain(forName: suite) }
+-        let pairing = GPSControlledSystemPairing()
+-        let client = NikonGPSBluetoothClient(defaults: defaults,
+-            centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
+-        defer { client.stop() }
+-        var events: [NikonGPSBluetoothState] = []
+-        let observation = client.statePublisher.sink { events.append($0) }
+-        defer { observation.cancel() }
+-        client.start()
+-        let packet = client.preparePairingIdentity()
+-        XCTAssertNotNil(client.takeControllerIDPayload())
+-        var closes = 0
+-        client.controllerIDDidWrite(cameraName: "Z30_123") { closes += 1 }
+-        client.controllerIDDidWrite(cameraName: "Z30_123") { XCTFail("Duplicate ID ACK") }
+-        XCTAssertEqual(closes, 1)
+-        XCTAssertEqual(pairing.names, ["Z30_123"])
+-        XCTAssertEqual(client.state, .cameraConfirm)
+-        XCTAssertTrue(client.isRunning)
+-        XCTAssertFalse(client.hasSavedPairing)
+-        XCTAssertFalse(events.contains(.ready("Z30_123")))
+-        var geoAccepted: Bool?
+-        client.writeGeo(Data(repeating: 0, count: 41)) { geoAccepted = $0 }
+-        XCTAssertEqual(geoAccepted, false)
+-        pairing.complete(0, .paired)
+-        XCTAssertEqual(Array(events.suffix(2)), [.systemPaired("Z30_123"), .disconnected])
+-        XCTAssertTrue(client.hasSavedPairing)
+-        XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingConfirmed))
+-        XCTAssertEqual(defaults.integer(forKey: GPSPreferences.deviceID), Int(packet.device))
+-        XCTAssertEqual(defaults.integer(forKey: GPSPreferences.nonce), Int(packet.nonce))
+-        XCTAssertNil(defaults.string(forKey: GPSPreferences.bleAddress))
+-        let afterPair = events
+-        pairing.complete(0, .paired)
+-        XCTAssertEqual(events, afterPair)
+-        client.stop(); client.start()
+-        let reconnect = client.preparePairingIdentity()
+-        XCTAssertEqual(reconnect.device, packet.device)
+-        XCTAssertEqual(reconnect.nonce, packet.nonce)
+-        XCTAssertNotNil(client.takeControllerIDPayload())
+-        client.controllerIDDidWrite(cameraName: "Z30_123") { XCTFail("Paired reconnect must retain BLE") }
+-        XCTAssertEqual(client.state, .ready("Z30_123"))
+-        XCTAssertEqual(pairing.names.count, 1)
++        for result: NikonGPSSystemPairingResult in [.paired, .alreadyConnected, .notFound, .failed] {
++            let suite = "GPSSystemPairingSuccess-\(UUID())", defaults = UserDefaults(suiteName: suite)!
++            defer { defaults.removePersistentDomain(forName: suite) }
++            let pairing = GPSControlledSystemPairing()
++            let client = NikonGPSBluetoothClient(defaults: defaults,
++                centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
++            defer { client.stop() }
++            var events: [NikonGPSBluetoothState] = []
++            let observation = client.statePublisher.sink { events.append($0) }
++            defer { observation.cancel() }
++            client.start()
++            let packet = client.preparePairingIdentity()
++            XCTAssertNotNil(client.takeControllerIDPayload())
++            var closes = 0
++            client.controllerIDDidWrite(cameraName: "Z30_123") { closes += 1 }
++            client.controllerIDDidWrite(cameraName: "Z30_123") { XCTFail("Duplicate ID ACK") }
++            XCTAssertEqual(closes, 1)
++            XCTAssertEqual(pairing.names, ["Z30_123"])
++            XCTAssertEqual(client.state, .cameraConfirm)
++            XCTAssertTrue(client.isRunning)
++            XCTAssertFalse(client.hasSavedPairing)
++            XCTAssertFalse(events.contains(.ready("Z30_123")))
++            var geoAccepted: Bool?
++            client.writeGeo(Data(repeating: 0, count: 41)) { geoAccepted = $0 }
++            XCTAssertEqual(geoAccepted, false)
++            pairing.complete(0, result)
++            XCTAssertEqual(Array(events.suffix(2)), [.verifyingPairing("Z30_123"), .disconnected])
++            XCTAssertTrue(client.hasPairingIdentity)
++            XCTAssertFalse(client.hasSavedPairing)
++            XCTAssertFalse(defaults.bool(forKey: GPSPreferences.pairingConfirmed))
++            XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingVerificationPending))
++            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.deviceID), Int(packet.device))
++            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.nonce), Int(packet.nonce))
++            XCTAssertNil(defaults.string(forKey: GPSPreferences.bleAddress))
++            let afterPair = events
++            pairing.complete(0, result)
++            XCTAssertEqual(events, afterPair)
++            client.stop(); client.start()
++            let reconnect = client.preparePairingIdentity()
++            XCTAssertEqual(reconnect.device, packet.device)
++            XCTAssertEqual(reconnect.nonce, packet.nonce)
++            XCTAssertNotNil(client.takeControllerIDPayload())
++            client.controllerIDDidWrite(cameraName: "Z30_123") { XCTFail("Paired reconnect must retain BLE") }
++            XCTAssertEqual(client.state, .ready("Z30_123"))
++            XCTAssertEqual(pairing.names.count, 1)
++            XCTAssertFalse(client.hasSavedPairing)
++            client.confirmIdentityAfterGeoWrite()
++            XCTAssertTrue(client.hasSavedPairing)
++            XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingConfirmed))
++            XCTAssertNil(defaults.object(forKey: GPSPreferences.pairingVerificationPending))
++        }
+     }
+ 
+     @MainActor
+     func testSystemPairingFailureNeverCommitsIdentityOrReportsReady() {
+-        for result: NikonGPSSystemPairingResult in [.cancelled, .failed, .notFound, .alreadyConnected] {
++        for result: NikonGPSSystemPairingResult in [.cancelled, .timedOut] {
+             let suite = "GPSSystemPairingFailure-\(UUID())", defaults = UserDefaults(suiteName: suite)!
+             defer { defaults.removePersistentDomain(forName: suite) }
+             let pairing = GPSControlledSystemPairing()
+@@ -160,7 +169,8 @@
+             if action == "replacement" {
+                 XCTAssertEqual(client.state, .cameraConfirm)
+                 pairing.complete(1, .paired)
+-                XCTAssertTrue(client.hasSavedPairing)
++                XCTAssertTrue(client.hasPairingIdentity)
++                XCTAssertFalse(client.hasSavedPairing)
+                 for _ in 0..<100 where await clock.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+                 await clock.release(1)
+             }
+@@ -177,7 +187,7 @@
+                 centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
+             let subscription = client.statePublisher.sink { state in
+                 if (cancellation == "beforePicker" && state == .cameraConfirm) ||
+-                   (cancellation == "afterPair" && state == .systemPaired("Nikon")) { client.clearPairing() }
++                   (cancellation == "afterPair" && state == .verifyingPairing("Nikon")) { client.clearPairing() }
+             }
+             defer { subscription.cancel(); client.stop() }
+             client.start(); _ = client.preparePairingIdentity(); _ = client.takeControllerIDPayload()
+@@ -208,6 +218,88 @@
+     }
+ 
+     @MainActor
++    func testProvisionalPairingSurvivesRestartAndTransportTimeoutWithoutClaimingSuccess() async throws {
++        let suite = "GPSPendingIdentity-\(UUID())", defaults = UserDefaults(suiteName: suite)!
++        defer { defaults.removePersistentDomain(forName: suite) }
++        let pairing = GPSControlledSystemPairing()
++        let first = NikonGPSBluetoothClient(defaults: defaults,
++            centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
++        first.start()
++        let packet = first.preparePairingIdentity()
++        _ = first.takeControllerIDPayload()
++        first.controllerIDDidWrite(cameraName: "Z50_2_123") {}
++        pairing.complete(0, .notFound) // Actual device trace: camera paired, picker failed its connection.
++        XCTAssertTrue(first.hasPairingIdentity)
++        XCTAssertFalse(first.hasSavedPairing)
++        first.confirmIdentityAfterGeoWrite()
++        XCTAssertFalse(first.hasSavedPairing, "Picker completion is not GEO acknowledgement")
++        first.stop()
++        let clock = GPSDeferredClock()
++        let restored = NikonGPSBluetoothClient(defaults: defaults, sleep: { await clock.wait($0) },
++            centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
++        defer { restored.stop() }
++        XCTAssertTrue(restored.hasPairingIdentity)
++        XCTAssertFalse(restored.hasSavedPairing)
++        XCTAssertFalse(restored.isRunning, "Pending credentials must never auto-enable GPS")
++        restored.start()
++        let retry = restored.preparePairingIdentity()
++        XCTAssertEqual(retry.device, packet.device)
++        XCTAssertEqual(retry.nonce, packet.nonce)
++        restored.beginPairingDeadline(restoringIdentity: true)
++        for _ in 0..<100 where await clock.count == 0 { try await Task.sleep(for: .milliseconds(5)) }
++        let delays = await clock.delays
++        XCTAssertEqual(delays, [7_000_000_000])
++        await clock.release(0)
++        for _ in 0..<20 { await Task.yield() }
++        XCTAssertEqual(restored.state, .failed("GPS connection confirmation timeout"))
++        XCTAssertFalse(GPSBluetoothFailurePolicy("GPS connection confirmation timeout").invalidatesIdentity)
++        XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingVerificationPending))
++        restored.clearPairing()
++        for key in [GPSPreferences.deviceID, GPSPreferences.nonce, GPSPreferences.pairingConfirmed,
++                    GPSPreferences.pairingVerificationPending, GPSPreferences.cameraName, GPSPreferences.bleAddress] {
++            XCTAssertNil(defaults.object(forKey: key))
++        }
++    }
++
++    @MainActor
++    func testProvisionalPairingCannotBeConfirmedByFailedWriteOrAfterStop() {
++        let suite = "GPSPendingACK-\(UUID())", defaults = UserDefaults(suiteName: suite)!
++        defer { defaults.removePersistentDomain(forName: suite) }
++        let pairing = GPSControlledSystemPairing()
++        let client = NikonGPSBluetoothClient(defaults: defaults,
++            centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
++        client.start(); _ = client.preparePairingIdentity(); _ = client.takeControllerIDPayload()
++        client.controllerIDDidWrite(cameraName: "Z50_2_123") {}
++        pairing.complete(0, .notFound)
++        client.stop(); client.start()
++        _ = client.preparePairingIdentity(); _ = client.takeControllerIDPayload()
++        client.controllerIDDidWrite(cameraName: "Z50_2_123") {}
++        XCTAssertEqual(client.state, .ready("Z50_2_123"))
++        var success: Bool?
++        client.writeGeo(Data(repeating: 0, count: 41)) { success = $0 }
++        XCTAssertEqual(success, false, "No real peripheral exists in this unit test")
++        XCTAssertFalse(client.hasSavedPairing)
++        client.stop()
++        client.confirmIdentityAfterGeoWrite()
++        XCTAssertFalse(client.hasSavedPairing)
++        XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingVerificationPending))
++        client.clearPairing()
++    }
++
++    @MainActor
++    func testConnectedCameraSelectionUsesKnownIDOrUnambiguousName() {
++        let a = UUID(), b = UUID(), other = UUID()
++        let candidates: [(id: UUID, name: String?)] = [(a, "Z50_2_123"), (b, "Z30_456"), (other, nil)]
++        XCTAssertEqual(NikonGPSBluetoothClient.connectedPeripheralID(candidates, savedID: other, cameraName: nil), other)
++        XCTAssertEqual(NikonGPSBluetoothClient.connectedPeripheralID(candidates, savedID: UUID(), cameraName: "z50_2_123"), a)
++        XCTAssertNil(NikonGPSBluetoothClient.connectedPeripheralID(candidates, savedID: nil, cameraName: "Nikon"))
++        XCTAssertNil(NikonGPSBluetoothClient.connectedPeripheralID(candidates, savedID: nil, cameraName: "Z6_987"))
++        XCTAssertEqual(NikonGPSBluetoothClient.connectedPeripheralID([(a, "Z50_")], savedID: nil, cameraName: "Z50_2_123"), a)
++        XCTAssertNil(NikonGPSBluetoothClient.connectedPeripheralID([(a, "Z50_"), (b, "Z50_")], savedID: nil, cameraName: "Z50_2_123"))
++        XCTAssertEqual(NikonGPSBluetoothClient.connectedPeripheralID([(a, "Z50_"), (b, "Z50_2_123")], savedID: nil, cameraName: "Z50_2_123"), b)
++    }
++
++    @MainActor
+     func testSystemPairingNameFilterAndErrorsMatchAndroidCameraScope() {
+         let filter = NikonGPSAccessoryPairing.nameFilter("Z30_123456")
+         for name in ["Z30_123456", "z30_123456", "Z30_123456_extra", "Z30_123"] { XCTAssertTrue(filter.evaluate(with: name), name) }
+@@ -477,7 +569,7 @@
+             transport.emit(.pairing)
+             transport.emit(.cameraConfirm)
+             XCTAssertFalse(manager.updating)
+-            transport.emit(.systemPaired("Camera"))
++            transport.emit(.verifyingPairing("Camera"))
+             XCTAssertEqual(coordinator.state.status, .connecting)
+             XCTAssertNil(coordinator.state.lastSentAt)
+             transport.emit(.disconnected)
+--- before/ios/ZTransfer/UI/Connection/GPSConnectionControl.swift
++++ ios/ZTransfer/UI/Connection/GPSConnectionControl.swift
+@@ -632,8 +632,8 @@
+                     .frame(width: 42, height: 42)
+             }
+             .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
+-            .disabled(!coordinator.bluetooth.hasSavedPairing)
+-            .opacity(coordinator.bluetooth.hasSavedPairing ? 1 : 0.42)
++            .disabled(!coordinator.bluetooth.hasPairingIdentity)
++            .opacity(coordinator.bluetooth.hasPairingIdentity ? 1 : 0.42)
+             .frame(maxWidth: .infinity, alignment: .leading)
+             .transition(.opacity.combined(with: .scale(scale: 0.96)))
+         } else if requiresHoldToDisable {

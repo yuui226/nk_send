@@ -1,0 +1,243 @@
+import Foundation
+
+/// Priority queue used by the thumbnail fill pipeline.  It mirrors Android's
+/// `ThumbnailFillQueue`: settled items survive a new scan, failed items are
+/// kept out of the hot loop, and a retry only happens after an explicit wake.
+/// STA's explicit user contract uses the sequential variant: display filters
+/// do not prioritize work and additions go after the remaining catalog.
+actor PhotoThumbnailFillQueue {
+    private let sequential: Bool
+    private var priority: [UInt32] = []
+    private var regular: [UInt32] = []
+    private var pending = Set<UInt32>()
+    private var failed = Set<UInt32>()
+    private var failedOrder: [UInt32] = []
+    private var settled = Set<UInt32>()
+    private var filesByID: [UInt32: CameraFile] = [:]
+    private var ownership: [UInt32: UUID] = [:]
+    private var revision = 0
+    // Android seeds the post-scan queue exactly once for each scan revision.
+    // Keeping this guard is important because accepted metadata batches and
+    // the final scan completion can both reach the fill pipeline.
+    private var seededRevision = -1
+    private var priorityRange: PhotoDateRange?
+    private var loadingRange: PhotoDateRange?
+    // Loading range bounds historical enumeration, not live camera additions
+    // (Android enqueueNew/returnToFront). Keep that admission through pauses,
+    // explicit retries and same-session scans; removal retires the handle.
+    private var liveHandles = Set<UInt32>()
+    private var wakePending = false
+    private var wakeWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+
+    init(sequential: Bool = false) {
+        self.sequential = sequential
+    }
+
+    /// Mirrors Android's conflated `thumbnailFillWake` channel.  A worker
+    /// waits here when the queue is empty instead of exiting, so a later
+    /// object event, filter change, or foreground-owner release resumes the
+    /// same fill lifecycle.
+    func wake() {
+        if let id = wakeWaiters.keys.first, let waiter = wakeWaiters.removeValue(forKey: id) {
+            waiter.resume(returning: true)
+        } else { wakePending = true }
+    }
+
+    /// Cancelling an AsyncStream iterator finishes its shared stream forever.
+    /// The fill worker is intentionally cancelled during transfers, so its
+    /// next generation needs a fresh, cancellable waiter on the same channel.
+    /// A conflated pending event survives gaps between worker generations.
+    @discardableResult
+    func waitForWake() async -> Bool {
+        guard !Task.isCancelled else { return false }
+        if wakePending { wakePending = false; return true }
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume(returning: false) }
+                else { wakeWaiters[id] = continuation }
+            }
+        } onCancel: {
+            Task { await self.cancelWake(id) }
+        }
+    }
+    private func cancelWake(_ id: UUID) {
+        wakeWaiters.removeValue(forKey: id)?.resume(returning: false)
+    }
+
+    func beginScan() {
+        revision &+= 1
+        priority.removeAll(keepingCapacity: true)
+        regular.removeAll(keepingCapacity: true)
+        pending.removeAll(keepingCapacity: true)
+        failed.removeAll(keepingCapacity: true)
+        failedOrder.removeAll(keepingCapacity: true)
+        // Android's beginScan() deliberately preserves the active date range.
+        // A new enumeration resets only the work lanes; ObjectAdded events
+        // arriving before seed() must still be classified by that range.
+    }
+
+    func seed(_ files: [CameraFile], priorityRange: PhotoDateRange? = nil,
+              loadingRange: PhotoDateRange? = nil) {
+        guard seededRevision != revision else { return }
+        seededRevision = revision
+        for file in files {
+            filesByID[file.id] = file
+            if ownership[file.id] == nil { ownership[file.id] = UUID() }
+        }
+        self.loadingRange = loadingRange
+        self.priorityRange = sequential ? nil : priorityRange
+        let ordered = sequential ? files : stableNewestFirst(files)
+        for file in ordered where !settled.contains(file.id) && !pending.contains(file.id) && !failed.contains(file.id) {
+            enqueue(file.id, priority: self.priorityRange?.contains(file.captureDate) == true, front: false)
+        }
+    }
+
+    func enqueueNew(_ files: [CameraFile]) {
+        for file in files {
+            filesByID[file.id] = file
+            if ownership[file.id] == nil { ownership[file.id] = UUID() }
+            liveHandles.insert(file.id)
+        }
+        for file in files where !settled.contains(file.id) && !failed.contains(file.id) {
+            enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: !sequential)
+        }
+    }
+
+    func poll() -> (id: UInt32, revision: Int, owner: UUID)? {
+        let id: UInt32?
+        if !priority.isEmpty { id = removeFirst(&priority) }
+        else if !regular.isEmpty { id = removeFirst(&regular) }
+        else { id = nil }
+        if let id { pending.remove(id) }
+        guard let id, let owner = ownership[id] else { return nil }
+        return (id, revision, owner)
+    }
+
+    func finish(_ id: UInt32, expectedRevision: Int, owner: UUID, settled: Bool) {
+        guard revision == expectedRevision, ownership[id] == owner else { return }
+        if settled { markSettled(id) } else { markFailed(id) }
+    }
+
+    func returnToFront(_ id: UInt32, expectedRevision: Int, owner: UUID? = nil) {
+        guard revision == expectedRevision else { return }
+        if let owner, ownership[id] != owner { return }
+        guard !settled.contains(id), !failed.contains(id) else { return }
+        priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
+        pending.insert(id)
+        guard isInLoadingRange(filesByID[id]) else {
+            pending.remove(id)
+            return
+        }
+        if priorityRange?.contains(filesByID[id]?.captureDate) == true {
+            priority.insert(id, at: 0)
+        } else {
+            regular.insert(id, at: 0)
+        }
+    }
+
+    func markSettled(_ id: UInt32) {
+        pending.remove(id); failed.remove(id); priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
+        failedOrder.removeAll { $0 == id }
+        settled.insert(id)
+    }
+
+    func markFailed(_ id: UInt32) {
+        guard !settled.contains(id) else { return }
+        pending.remove(id); priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
+        if failed.insert(id).inserted { failedOrder.append(id) }
+    }
+
+    func remove(_ ids: Set<UInt32>) {
+        guard !ids.isEmpty else { return }
+        priority.removeAll { ids.contains($0) }
+        regular.removeAll { ids.contains($0) }
+        pending.subtract(ids); failed.subtract(ids); settled.subtract(ids)
+        liveHandles.subtract(ids)
+        failedOrder.removeAll { ids.contains($0) }
+        ids.forEach {
+            filesByID.removeValue(forKey: $0)
+            ownership.removeValue(forKey: $0)
+        }
+    }
+
+    func retryFailed(excluding blocked: Set<UInt32> = []) {
+        // Android keeps the failure insertion order for equal capture times;
+        // Swift's standard sort is not stable, so preserve the explicit order.
+        let ready = failed.subtracting(blocked)
+        let failedFiles = failedOrder.filter { ready.contains($0) }.compactMap { filesByID[$0] }
+        let files = sequential ? failedFiles : stableNewestFirst(failedFiles)
+        failed.subtract(ready); failedOrder.removeAll { ready.contains($0) }
+        for file in files {
+            enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
+        }
+    }
+
+    func updatePriorityRange(_ files: [CameraFile], range: PhotoDateRange?) {
+        guard !sequential else { return }
+        guard self.priorityRange != range else { return }
+        for file in files { filesByID[file.id] = file }
+        self.priorityRange = range
+        let unfinished = stableNewestFirst((priority + regular).compactMap { filesByID[$0] })
+        priority = unfinished.filter { range?.contains($0.captureDate) == true }.map(\.id)
+        regular = unfinished.filter { range?.contains($0.captureDate) != true }.map(\.id)
+        pending = Set(unfinished.map(\.id))
+    }
+
+    /// Changing the loading scope is a new work boundary. Finished cache
+    /// entries survive, while pending and failed entries outside the new
+    /// scope are discarded and entries newly brought into scope can be seeded
+    /// from the retained catalog/snapshot.
+    func updateLoadingRange(_ files: [CameraFile], range: PhotoDateRange?) {
+        guard loadingRange != range else { return }
+        for file in files { filesByID[file.id] = file }
+        loadingRange = range
+        let unfinishedIDs = priority + regular + failedOrder
+        let unfinished = unfinishedIDs.compactMap { filesByID[$0] }
+        priority.removeAll(); regular.removeAll(); pending.removeAll()
+        failed.removeAll(); failedOrder.removeAll()
+        revision &+= 1
+        seededRevision = -1
+        for file in unfinished where isInLoadingRange(file) {
+            enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
+        }
+    }
+
+    func state() -> (revision: Int, pending: Set<UInt32>, failed: Set<UInt32>, settled: Set<UInt32>) {
+        (revision, pending, failed, settled)
+    }
+
+    private func enqueue(_ id: UInt32, priority: Bool, front: Bool) {
+        guard !pending.contains(id), !settled.contains(id) else { return }
+        guard isInLoadingRange(filesByID[id]) else { return }
+        pending.insert(id)
+        if priority {
+            if front { self.priority.insert(id, at: 0) } else { self.priority.append(id) }
+        } else {
+            if front { regular.insert(id, at: 0) } else { regular.append(id) }
+        }
+    }
+
+    private func removeFirst(_ queue: inout [UInt32]) -> UInt32 {
+        let id = queue.removeFirst()
+        return id
+    }
+
+    /// Android's `prioritizedThumbnailFiles` uses a stable newest-first sort.
+    /// The original array order is meaningful for same-time JPG/RAW pairs and
+    /// must survive the sort on platforms whose standard sort is unstable.
+    private func stableNewestFirst(_ files: [CameraFile]) -> [CameraFile] {
+        files.enumerated().sorted { lhs, rhs in
+            let left = lhs.element.captureDate ?? ""
+            let right = rhs.element.captureDate ?? ""
+            if left != right { return left > right }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
+    private func isInLoadingRange(_ file: CameraFile?) -> Bool {
+        if let file, liveHandles.contains(file.id) { return true }
+        guard let loadingRange, let file else { return loadingRange == nil }
+        return file.captureDate == nil || loadingRange.contains(file.captureDate)
+    }
+}

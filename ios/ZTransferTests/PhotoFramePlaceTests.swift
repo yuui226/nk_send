@@ -39,25 +39,39 @@ final class PhotoFramePlaceTests: XCTestCase {
 
 
 final class PhotoFramePlaceCacheTests: XCTestCase {
+    func testErrorEmptyAndUnavailableHaveDistinctExpiryAndClockRollbackExpires() {
+        var cache = PhotoFramePlaceCache()
+        cache.insert(.error, for: "error", now: 100)
+        cache.insert(.empty, for: "empty", now: 100)
+        cache.insert(.unavailable, for: "unavailable", now: 100)
+        XCTAssertEqual(cache.entry(for: "error", now: 104.999)?.result, .error)
+        XCTAssertNil(cache.entry(for: "error", now: 105))
+        XCTAssertEqual(cache.entry(for: "empty", now: 114.999)?.result, .empty)
+        XCTAssertNil(cache.entry(for: "empty", now: 115))
+        XCTAssertNil(cache.entry(for: "unavailable", now: 101))
+        cache.insert(.found(.init(city: "Paris", region: nil)), for: "clock", now: 100)
+        XCTAssertNil(cache.entry(for: "clock", now: 99))
+        XCTAssertEqual(cache.count, 0)
+    }
     func testPositiveAndNegativeEntriesHaveAndroidExpiryBoundaries() throws {
         var cache = PhotoFramePlaceCache()
         let place = PhotoFramePlace(city: "Paris", region: nil)
-        cache.insert(place, for: "positive", now: 100)
-        cache.insert(nil, for: "negative", now: 100)
+        cache.insert(.found(place), for: "positive", now: 100)
+        cache.insert(.empty, for: "negative", now: 100)
         XCTAssertEqual(cache.entry(for: "positive", now: 86_499)?.place, place)
         XCTAssertNil(cache.entry(for: "positive", now: 86_500))
-        let negative = try XCTUnwrap(cache.entry(for: "negative", now: 159.999))
+        let negative = try XCTUnwrap(cache.entry(for: "negative", now: 114.999))
         XCTAssertNil(negative.place, "Cached failure must be distinguishable from a cache miss")
-        XCTAssertNil(cache.entry(for: "negative", now: 160))
-        cache.insert(place, for: "negative", now: 161)
+        XCTAssertNil(cache.entry(for: "negative", now: 115))
+        cache.insert(.found(place), for: "negative", now: 161)
         XCTAssertEqual(cache.entry(for: "negative", now: 162)?.place, place)
     }
 
     func testAccessOrderEvictsOldestAtThirtyTwoAndLocaleSeparatesKeys() {
         var cache = PhotoFramePlaceCache()
-        for index in 0..<32 { cache.insert(nil, for: String(index), now: 0) }
+        for index in 0..<32 { cache.insert(.empty, for: String(index), now: 0) }
         XCTAssertNotNil(cache.entry(for: "0", now: 1))
-        cache.insert(nil, for: "32", now: 2)
+        cache.insert(.empty, for: "32", now: 2)
         XCTAssertEqual(cache.count, 32)
         XCTAssertNil(cache.entry(for: "1", now: 3))
         XCTAssertNotNil(cache.entry(for: "0", now: 3))
@@ -87,46 +101,96 @@ private actor SuspendedPlaceBackend {
 }
 
 final class PhotoFramePlaceResolverTests: XCTestCase {
+    private func waitForPending(_ resolver: PhotoFramePlaceResolver, count: Int) async throws {
+        let limit = ContinuousClock.now.advanced(by: .seconds(2))
+        while await resolver.pendingCount != count, ContinuousClock.now < limit { try await Task.sleep(for: .milliseconds(5)) }
+        let actual = await resolver.pendingCount
+        XCTAssertEqual(actual, count)
+    }
+    func testCancelledWaiterNeverStartsAndSameCoordinateWaitersShareCompletedResult() async throws {
+        let backend = SuspendedPlaceBackend()
+        let resolver = PhotoFramePlaceResolver { latitude, _, _ in PhotoPlaceLookupResult(await backend.query(latitude)) }
+        let first = Task { await resolver.resolve(latitude: 10, longitude: 20) }
+        try await backend.waitForCalls(1)
+        let cancelled = Task { await resolver.resolve(latitude: 11, longitude: 20) }
+        let same = Task { await resolver.resolve(latitude: 10, longitude: 20) }
+        try await waitForPending(resolver, count: 3)
+        cancelled.cancel()
+        let cancelledResult = await cancelled.value
+        XCTAssertNil(cancelledResult)
+        await backend.release(10)
+        let a = await first.value, b = await same.value
+        XCTAssertEqual(a?.city, "Result"); XCTAssertEqual(a, b)
+        let calls = await backend.calls, pending = await resolver.pendingCount
+        XCTAssertEqual(calls, [10]); XCTAssertEqual(pending, 0)
+    }
+
+    func testExplicitErrorEmptyUnavailableAndBackendCancellationCachePolicy() async throws {
+        for outcome in [PhotoPlaceLookupResult.empty, .error, .unavailable] {
+            let backend = SequencePlaceBackend(outcome: outcome)
+            let resolver = PhotoFramePlaceResolver { _, _, _ in try await backend.query() }
+            let first = await resolver.resolve(latitude: 10, longitude: 20)
+            XCTAssertNil(first)
+            let second = await resolver.resolve(latitude: 10, longitude: 20)
+            if outcome == .unavailable { XCTAssertEqual(second?.city, "Retry") }
+            else { XCTAssertNil(second) }
+            let count = await backend.calls
+            XCTAssertEqual(count, outcome == .unavailable ? 2 : 1)
+        }
+        for cancel in [false, true] {
+            let backend = SequencePlaceBackend(outcome: .unavailable, throwFirst: true, cancellation: cancel)
+            let resolver = PhotoFramePlaceResolver { _, _, _ in try await backend.query() }
+            let first = await resolver.resolve(latitude: 10, longitude: 20)
+            XCTAssertNil(first)
+            let retry = await resolver.resolve(latitude: 10, longitude: 20)
+            XCTAssertEqual(retry?.city, cancel ? "Retry" : nil)
+            let count = await backend.calls
+            XCTAssertEqual(count, cancel ? 2 : 1)
+        }
+        XCTAssertEqual(PhotoFramePlaceResolver.requestTimeout, .seconds(3))
+    }
     func testTimeoutReturnsWithoutWaitingForUncooperativeBackendAndDiscardsLateResult() async throws {
         let backend = SuspendedPlaceBackend()
-        let resolver = PhotoFramePlaceResolver { latitude, _, _ in await backend.query(latitude) }
+        let resolver = PhotoFramePlaceResolver { latitude, _, _ in PhotoPlaceLookupResult(await backend.query(latitude)) }
         let started = ContinuousClock.now
         let result = await resolver.resolve(latitude: 10, longitude: 20, timeout: .milliseconds(80))
         XCTAssertNil(result)
         XCTAssertLessThan(started.duration(to: .now), .seconds(1))
         await backend.release(10, city: "Late")
-        let cached = await resolver.resolve(latitude: 10, longitude: 20)
-        XCTAssertNil(cached)
+        let retry = Task { await resolver.resolve(latitude: 10, longitude: 20) }
+        try await backend.waitForCalls(2)
+        await backend.release(10, city: "Retry")
+        let resultAfterTimeout = await retry.value
+        XCTAssertEqual(resultAfterTimeout?.city, "Retry")
         let calls = await backend.calls
-        XCTAssertEqual(calls, [10])
+        XCTAssertEqual(calls, [10, 10])
     }
 
-    func testQueuedTimeoutDoesNotStartBackendOrCacheAnUnattemptedCoordinate() async throws {
+    func testQueueWaitDoesNotConsumeBackendBudgetAndCacheHitBypassesQueue() async throws {
         let backend = SuspendedPlaceBackend()
-        let resolver = PhotoFramePlaceResolver { latitude, _, _ in await backend.query(latitude) }
+        let resolver = PhotoFramePlaceResolver { latitude, _, _ in PhotoPlaceLookupResult(await backend.query(latitude)) }
         let first = Task { await resolver.resolve(latitude: 10, longitude: 20) }
         try await backend.waitForCalls(1)
-        let expired = await resolver.resolve(latitude: 11, longitude: 20, timeout: .milliseconds(50))
-        XCTAssertNil(expired)
-        let before = await backend.calls
-        XCTAssertEqual(before, [10])
+        let second = Task { await resolver.resolve(latitude: 11, longitude: 20, timeout: .milliseconds(100)) }
+        try await waitForPending(resolver, count: 2)
+        try await Task.sleep(for: .milliseconds(150))
+        let before = await backend.calls, pending = await resolver.pendingCount
+        XCTAssertEqual(before, [10]); XCTAssertEqual(pending, 2)
         await backend.release(10)
         let firstResult = await first.value
         XCTAssertEqual(firstResult?.city, "Result")
-        let retry = Task { await resolver.resolve(latitude: 11, longitude: 20) }
         try await backend.waitForCalls(2)
-        // A completed cache hit must not queue behind this suspended lookup.
         let hit = await resolver.resolve(latitude: 10, longitude: 20, timeout: .zero)
         XCTAssertEqual(hit?.city, "Result")
         await backend.release(11)
-        let retried = await retry.value
-        XCTAssertEqual(retried?.city, "Result")
+        let secondResult = await second.value
+        XCTAssertEqual(secondResult?.city, "Result")
     }
 
     func testQueuedConnectivityLossSkipsBackendWithoutNegativeCaching() async throws {
         let backend = SuspendedPlaceBackend()
         let availability = PlaceAvailabilityFixture()
-        let resolver = PhotoFramePlaceResolver { latitude, _, _ in await backend.query(latitude) }
+        let resolver = PhotoFramePlaceResolver { latitude, _, _ in PhotoPlaceLookupResult(await backend.query(latitude)) }
         let first = Task { await resolver.resolve(latitude: 10, longitude: 20) }
         try await backend.waitForCalls(1)
         let second = Task {
@@ -154,7 +218,7 @@ final class PhotoFramePlaceResolverTests: XCTestCase {
 
     func testParentCancellationReleasesSerialSlotBeforeBackendReturns() async throws {
         let backend = SuspendedPlaceBackend()
-        let resolver = PhotoFramePlaceResolver { latitude, _, _ in await backend.query(latitude) }
+        let resolver = PhotoFramePlaceResolver { latitude, _, _ in PhotoPlaceLookupResult(await backend.query(latitude)) }
         let first = Task { await resolver.resolve(latitude: 10, longitude: 20) }
         try await backend.waitForCalls(1)
         first.cancel()
@@ -166,11 +230,33 @@ final class PhotoFramePlaceResolverTests: XCTestCase {
         await backend.release(11, city: "Next")
         let result = await next.value
         XCTAssertEqual(result?.city, "Next")
-        let stale = await resolver.resolve(latitude: 10, longitude: 20)
-        XCTAssertNil(stale)
+        let retry = Task { await resolver.resolve(latitude: 10, longitude: 20) }
+        try await backend.waitForCalls(3)
+        await backend.release(10, city: "Fresh")
+        let fresh = await retry.value
+        XCTAssertEqual(fresh?.city, "Fresh", "Cancellation must not cache an empty response")
     }
 }
 
+
+private actor SequencePlaceBackend {
+    let outcome: PhotoPlaceLookupResult
+    let throwFirst: Bool
+    let cancellation: Bool
+    private(set) var calls = 0
+    init(outcome: PhotoPlaceLookupResult, throwFirst: Bool = false, cancellation: Bool = false) {
+        self.outcome = outcome; self.throwFirst = throwFirst; self.cancellation = cancellation
+    }
+    func query() throws -> PhotoPlaceLookupResult {
+        calls += 1
+        if calls != 1 { return .found(.init(city: "Retry", region: nil)) }
+        if throwFirst {
+            if cancellation { throw CancellationError() }
+            throw CocoaError(.fileReadUnknown)
+        }
+        return outcome
+    }
+}
 
 private actor PlaceAvailabilityFixture {
     var allowed = true
@@ -185,7 +271,7 @@ final class PhotoFramePlaceGatingTests: XCTestCase {
     }
 
     func testBlockedOrDisabledLookupClearsOldPlaceAndPreservesEXIF() async {
-        let resolver = PhotoFramePlaceResolver { _, _, _ in XCTFail("Blocked lookup started"); return nil }
+        let resolver = PhotoFramePlaceResolver { _, _, _ in XCTFail("Blocked lookup started"); return .unavailable }
         var settings = PhotoFrameMetadataSettings()
         settings.showCity = true
         let blocked = await resolver.enriching(metadata(), settings: settings, allowed: { false })
@@ -201,7 +287,7 @@ final class PhotoFramePlaceGatingTests: XCTestCase {
         let availability = PlaceAvailabilityFixture()
         let resolver = PhotoFramePlaceResolver { _, _, _ in
             await availability.block()
-            return PhotoFramePlace(city: "New city", region: "New region")
+            return .found(PhotoFramePlace(city: "New city", region: "New region"))
         }
         var settings = PhotoFrameMetadataSettings(); settings.showRegion = true
         let result = await resolver.enriching(metadata(), settings: settings, allowed: { await availability.allowed })
@@ -531,7 +617,7 @@ final class PhotoFrameMetadataOutputIdentityTests: XCTestCase {
 extension PhotoFramePlaceResolverTests {
     func testSameCoordinateQueriesAndCachesEachLanguageIndependently() async throws {
         let backend = SuspendedPlaceBackend()
-        let resolver = PhotoFramePlaceResolver { latitude, _, _ in await backend.query(latitude) }
+        let resolver = PhotoFramePlaceResolver { latitude, _, _ in PhotoPlaceLookupResult(await backend.query(latitude)) }
         let english = Task { await resolver.resolve(latitude: 30, longitude: 120, locale: Locale(identifier: "en_US")) }
         try await backend.waitForCalls(1)
         await backend.release(30, city: "Hangzhou")

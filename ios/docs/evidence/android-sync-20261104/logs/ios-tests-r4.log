@@ -1,0 +1,44 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -parallel-testing-enabled NO -resultBundlePath /tmp/ztransfer-android-20261104-r4.xcresult "-only-testing:ZTransferTests/RemoteSelfTimerTests" test-without-building
+
+Writing result bundle at path:
+	/tmp/ztransfer-android-20261104-r4.xcresult
+
+IOSurfaceClientSetSurfaceNotify failed e00002c7
+Test Suite 'Selected tests' started at 2026-11-04 20:25:52.062.
+Test Suite 'ZTransferTests.xctest' started at 2026-11-04 20:25:52.062.
+Test Suite 'RemoteSelfTimerTests' started at 2026-11-04 20:25:52.062.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testActualTimerPopupAndShutterInBothOrientationsAndThemes]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testActualTimerPopupAndShutterInBothOrientationsAndThemes]' passed (6.593 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testBusyRetriesBoundedAndCancellationBetweenRepliesStopsAnotherShutter]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testBusyRetriesBoundedAndCancellationBetweenRepliesStopsAnotherShutter]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelDuringAutofocusDrainsAndPreventsNewOrLateShutter]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelDuringAutofocusDrainsAndPreventsNewOrLateShutter]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelledBeforeWorkerDispatchNeverFocuses]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelledBeforeWorkerDispatchNeverFocuses]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCountdownCancellationAndInvalidContextNeverFocus]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCountdownCancellationAndInvalidContextNeverFocus]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testFailedFocusAndExceptionResetForNextShotAndReportOnlyCurrentFailure]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testFailedFocusAndExceptionResetForNextShotAndReportOnlyCurrentFailure]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testMonotonicDeadlineDoesNotAccumulateDelayedWakeupsAndReservesSynchronously]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testMonotonicDeadlineDoesNotAccumulateDelayedWakeupsAndReservesSynchronously]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPermissionRemainsInvalidAfterCancelledCaptureDrains]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPermissionRemainsInvalidAfterCancelledCaptureDrains]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPreferencesAndPhotoMovieLayoutsKeepIndependentScopes]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPreferencesAndPhotoMovieLayoutsKeepIndependentScopes]' passed (0.018 seconds).
+Test Suite 'RemoteSelfTimerTests' passed at 2026-11-04 20:25:58.711.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 6.643 (6.649) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-11-04 20:25:58.711.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 6.643 (6.649) seconds
+Test Suite 'Selected tests' passed at 2026-11-04 20:25:58.712.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 6.643 (6.650) seconds
+2026-11-04 20:25:59.090 xcodebuild[14522:41068892] [MT] IDETestOperationsObserverDebug: 31.618 elapsed -- Testing started completed.
+2026-11-04 20:25:59.090 xcodebuild[14522:41068892] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-04 20:25:59.090 xcodebuild[14522:41068892] [MT] IDETestOperationsObserverDebug: 31.618 sec, +31.618 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-android-20261104-r4.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

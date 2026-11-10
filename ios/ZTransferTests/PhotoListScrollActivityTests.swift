@@ -107,8 +107,10 @@ final class PhotoListScrollActivityTests: XCTestCase {
         }
         let partial = CGRect(x: 0, y: 90, width: 90, height: 90)
         XCTAssertEqual(visiblePhotoListCellBounds(.photo(1), bounds: [.photo(1): partial], viewport: viewport), partial)
-        XCTAssertFalse(photoFrameIsFullyVisible(partial, in: viewport),
-                       "A partially visible source is usable, but preview return still needs scrolling")
+        let preview = photoPreviewAnchorBounds(.photo(42), bounds: [.photo(42): partial], viewport: viewport)
+        XCTAssertEqual(preview?.image, partial)
+        XCTAssertEqual(preview?.visible, partial.intersection(viewport),
+                       "Android returns partially visible tiles without an extra scroll")
     }
 
     func testScrollLayoutCountsHeadersCollectionsAndOnlyDisplayedMembers() {

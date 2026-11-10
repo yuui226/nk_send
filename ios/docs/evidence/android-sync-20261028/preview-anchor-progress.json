@@ -1,0 +1,115 @@
+{
+  "task": "N25",
+  "status": "in_progress",
+  "android_revision": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "ledger_completed": 17,
+  "ledger_total": 26,
+  "basis": [
+    "eec5d6db PreviewAnchorGeometry.kt and seven tests; full FileListPreviewMotionInstrumentation.kt",
+    "PhotoPreview: frozen full/visible source, cached image, saved direction, actual image placement; 340/260 ms motion; layout-based 340 ms delay plus <=120 ms completion grace",
+    "dfd66a20 immediate removal of faded tools during regroup, ordinary 180 ms paging exit"
+  ],
+  "changes": [
+    "Full and visible tile bounds, actual image affine/clip mapping with rotation, unclamped aspect-fill source scale; stable modifier hierarchy; collections/videos retain whole-page fallback.",
+    "Opening source, image, index and saved rotation retained; invalid cached dimensions cannot block readiness.",
+    "Wait for actual image viewport matching safe insets and bottom-tool padding, never freeze first-pass or full-pager geometry.",
+    "Close freezes current placement before async return target preparation and cancels late dismissal.",
+    "Frame clock observed by render modifiers only; bounded FHD grace and cancellable completion streams.",
+    "Existing production placement/rotation/crop/zoom mathematics moved unchanged into Domain for shared native validation.",
+    "Original shared expanded-effects anchor modifier retained; obsolete fully-visible-only helper/assertions replaced."
+  ],
+  "native_rounds": [
+    {
+      "round": 1,
+      "methods": 10,
+      "failures": 0,
+      "exit_code": 0,
+      "log": "preview-anchor/native-r1.log"
+    },
+    {
+      "round": 2,
+      "methods": 12,
+      "failures": 0,
+      "exit_code": 0,
+      "log": "preview-anchor/native-r2.log"
+    },
+    {
+      "round": 3,
+      "methods": 13,
+      "failures": 0,
+      "exit_code": 0,
+      "log": "preview-anchor/native-r3.log"
+    },
+    {
+      "round": 4,
+      "methods": 21,
+      "failures": 0,
+      "exit_code": 0,
+      "log": "preview-anchor/native-r4.log"
+    }
+  ],
+  "final_unique_methods": 21,
+  "new_test_methods": 13,
+  "native_scope": "macOS SwiftPM actual geometry/scalar/completion clock; actual list adapters and eight verbatim existing regression methods. No UIKit driver, pixels or real page lifecycle execution.",
+  "build_rounds": [
+    {
+      "round": 1,
+      "exit_code": 65,
+      "log": "preview-anchor/build-r1.log.gz"
+    },
+    {
+      "round": 2,
+      "exit_code": 65,
+      "log": "preview-anchor/build-r2.log.gz"
+    },
+    {
+      "round": 3,
+      "exit_code": 0,
+      "log": "preview-anchor/build-r3.log.gz"
+    },
+    {
+      "round": 4,
+      "exit_code": 0,
+      "log": "preview-anchor/build-r4.log.gz"
+    },
+    {
+      "round": 5,
+      "exit_code": 0,
+      "log": "preview-anchor/build-r5.log.gz"
+    }
+  ],
+  "build_notes": [
+    "r1 fixed invalid Swift if-expression with declarations",
+    "r2 restored shared old modifier used by effects inspector",
+    "r3 intermediate successful build",
+    "r4 final real-viewport readiness gate included",
+    "r5 final partial-visibility adapter tests included"
+  ],
+  "ios_methods_executed": 0,
+  "remaining": [
+    "Real list/preview source/return pixels, saved rotation, partial tiles, interruptions, FHD handoff and frame/CPU validation.",
+    "Existing offscreen return top/bottom/center positioning still differs from Android final 88dp top clearance; not claimed complete.",
+    "N17/N25 eec5d6db effect preview convergence still missing: showSourceWhileRendering remains, first rendered frame appears immediately; implement wait-for-complete, initial 220 ms fade and 22dp loader.",
+    "CoreSimulator 1174.9.2 vs Xcode 1174.21.0; old first-launch PID95870 still awaiting macOS admin authorization."
+  ],
+  "not_run": [
+    "iOS runtime tests",
+    "Android instrumentation",
+    "phone/camera",
+    "pixel/FPS/energy"
+  ],
+  "actions_not_taken": [
+    "install",
+    "commit",
+    "push",
+    "Android/site edits"
+  ],
+  "followup_evidence": "effects-first-frame-and-return-progress.json",
+  "followup_note": "The offscreen 88pt return and initial effects-frame gaps listed above were subsequently implemented; runtime acceptance remains pending. The earlier logs/hashes remain historical evidence.",
+  "final_verification": {
+    "status": "complete",
+    "date": "2026-10-31",
+    "evidence": "resumed-runtime/final-verification.json",
+    "note": "Supersedes historical runtime blockers and pending-runtime fields above; original per-run results remain unchanged."
+  }
+}

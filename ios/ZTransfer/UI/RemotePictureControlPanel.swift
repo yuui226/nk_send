@@ -28,8 +28,8 @@ struct RemotePictureControlPanel: View {
         let catalog = folders.catalog
         let labels = catalog.labels(uncategorized: text("lut_uncategorized"))
         return accessible ? catalog.categories.map { name in
-            RemotePresetCategory(id: name.map { "folder:" + $0 } ?? "root", label: name ?? text("lut_uncategorized"),
-                choices: (catalog.filesByCategory[name] ?? []).map { .init(choice: .document($0), label: labels[$0.identifier] ?? $0.label) })
+            RemotePresetCategory(id: name.presetCategoryIdentifier, label: name ?? text("lut_uncategorized"),
+                choices: (catalog.files(in: name) ?? []).map { .init(choice: .document($0), label: labels[$0.identifier] ?? $0.label) })
         } : []
     }
     private var guidance: String? {
@@ -68,7 +68,9 @@ struct RemotePictureControlPanel: View {
                         .frame(width: motion.size.width, height: motion.size.height, alignment: .topLeading)
                         .background(ZTransferColors.surface, in: RoundedRectangle(cornerRadius: 12))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .accessibilityIdentifier("remote-preset-popup")
+                        // The UIKit popup host already owns its identifier.
+                        // A SwiftUI group identifier propagates to every button
+                        // and can make folder/clear accessibility actions target Back.
                     }
                     .onAppear { motion.configure(page: page, size: targetSize, scale: scale) }
                     .onChange(of: page) { motion.configure(page: $0, size: layout.size(for: $0), scale: scale) }
@@ -79,7 +81,7 @@ struct RemotePictureControlPanel: View {
                 #endif
             }
         }
-        .sheet(isPresented: $sharing) { if let shareURL { PictureControlShareSheet(url: shareURL) } }
+        .sheet(isPresented: $sharing) { if let shareURL { FileShareSheet(url: shareURL) } }
         .onAppear {
             if !categories.contains(where: { $0.id == category }) { category = categories.first?.id ?? "" }
             model.open()
@@ -185,7 +187,6 @@ struct RemotePictureControlPanel: View {
         .padding(.bottom, displayed.slot == nil ? 0 : 8)
         .frame(width: max(1, size.width), height: max(1, size.height), alignment: .topLeading)
         .allowsHitTesting(enabled)
-        .accessibilityIdentifier(displayed.slot.map { "remote-preset-editor-\($0)" } ?? "remote-preset-slots")
     }
     private var pendingKey: String? {
         if case .write(_, let choice) = model.pending { return choice.id }
@@ -194,7 +195,7 @@ struct RemotePictureControlPanel: View {
     private func slotRow(_ item: PictureControlSlotInfo, enabled: Bool) -> some View {
         let editable = enabled && canWrite && model.canEdit(item)
         let activatable = item.availability == .empty ? editable :
-            enabled && canWrite && !model.loadFailed && model.overview?.canActivate == true && item.availability == .occupied
+            enabled && canWrite && !model.loadFailed && model.overview?.canActivate == true && item.selectable
         let selected = model.overview?.selected == item.slot
         return HStack(spacing: 0) {
             RemotePresetChoiceRow(text: RemotePictureControlLayout.slotLabel(item), selected: selected,
@@ -228,13 +229,14 @@ struct RemotePictureControlPanel: View {
                 outlinedButton(text("picture_control_clear_slot"), destructive: true,
                     enabled: enabled && canWrite && slot.map(model.canEdit) == true) { model.feedback(); self.confirmation = .clear }
                     .padding(.leading, 6)
+                    .accessibilityIdentifier("remote-preset-clear")
             }
             Spacer(minLength: 0)
             if confirmation == nil {
                 outlinedButton(text("picture_control_folder"), enabled: enabled && !folders.isRestoring) {
                     model.feedback()
                     if folders.folder == nil { self.confirmation = .folder } else { chooseFolder(number) }
-                }.frame(maxWidth: 112)
+                }.frame(maxWidth: 112).accessibilityIdentifier("remote-preset-folder")
             }
         }.padding(.bottom, 2)
     }
@@ -270,7 +272,6 @@ struct RemotePictureControlPanel: View {
                 reportButton(enabled: !model.closeRequested)
             }.padding(.horizontal, 12).frame(height: height)
                 .background(ZTransferColors.surface, in: RoundedRectangle(cornerRadius: 12))
-                .accessibilityIdentifier("remote-preset-read-failure")
         }
     }
     #endif
@@ -445,11 +446,6 @@ struct RemotePictureControlToolMark: View {
         if panel.opening { RemoteCameraToolLoading() }
         else { RemoteToolMark(tool: .pictureControl) }
     }
-}
-private struct PictureControlShareSheet: UIViewControllerRepresentable {
-    let url: URL
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [url], applicationActivities: nil) }
-    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 private extension View {

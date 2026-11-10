@@ -1,0 +1,154 @@
+Test Suite 'Selected tests' started at 2026-10-30 19:37:14.251.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 19:37:14.251.
+Test Suite 'LUTFinishingPerformanceTests' started at 2026-10-30 19:37:14.252.
+Test Case '-[ZTransferTests.LUTFinishingPerformanceTests testPreparedFinishingMatchesOriginalByteMathIncludingClampsAndAlpha]' started.
+Test Case '-[ZTransferTests.LUTFinishingPerformanceTests testPreparedFinishingMatchesOriginalByteMathIncludingClampsAndAlpha]' passed (0.088 seconds).
+Test Case '-[ZTransferTests.LUTFinishingPerformanceTests testProductionMapperMatchesOriginalRGBAAtDifferentStrengthsAndAlpha]' started.
+Test Case '-[ZTransferTests.LUTFinishingPerformanceTests testProductionMapperMatchesOriginalRGBAAtDifferentStrengthsAndAlpha]' passed (0.433 seconds).
+Test Case '-[ZTransferTests.LUTFinishingPerformanceTests testSharedImageContextMatchesFreshContextUnderConcurrentRendering]' started.
+Test Case '-[ZTransferTests.LUTFinishingPerformanceTests testSharedImageContextMatchesFreshContextUnderConcurrentRendering]' passed (0.143 seconds).
+Test Suite 'LUTFinishingPerformanceTests' passed at 2026-10-30 19:37:14.918.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.664 (0.666) seconds
+Test Suite 'Np3AndroidGoldenTests' started at 2026-10-30 19:37:14.918.
+Test Case '-[ZTransferTests.Np3AndroidGoldenTests testAllFiftyPresetsMatchAndroidPixelOracle]' started.
+Test Case '-[ZTransferTests.Np3AndroidGoldenTests testAllFiftyPresetsMatchAndroidPixelOracle]' passed (0.009 seconds).
+Test Suite 'Np3AndroidGoldenTests' passed at 2026-10-30 19:37:14.928.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.009 (0.010) seconds
+Test Suite 'Np3BitmapFilterTests' started at 2026-10-30 19:37:14.928.
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testCancelledRenderDoesNotAllocateOrReturnAFilteredImage]' started.
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testCancelledRenderDoesNotAllocateOrReturnAFilteredImage]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testOriginalIsSerialAndPreviewHasAtMostTwoWorkers]' started.
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testOriginalIsSerialAndPreviewHasAtMostTwoWorkers]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testSerialAndParallelPathsProduceIdenticalPixelsIncludingOddFinalRow]' started.
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testSerialAndParallelPathsProduceIdenticalPixelsIncludingOddFinalRow]' passed (0.462 seconds).
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testSRGBAdapterPreservesPixelOrderAndMatchesOpaqueAndroidPixels]' started.
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testSRGBAdapterPreservesPixelOrderAndMatchesOpaqueAndroidPixels]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testTranslucentInputIsUnpremultipliedForFilteringAndPremultipliedForDrawing]' started.
+Test Case '-[ZTransferTests.Np3BitmapFilterTests testTranslucentInputIsUnpremultipliedForFilteringAndPremultipliedForDrawing]' passed (0.001 seconds).
+Test Suite 'Np3BitmapFilterTests' passed at 2026-10-30 19:37:15.398.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.469 (0.470) seconds
+Test Suite 'Np3FilterEngineTests' started at 2026-10-30 19:37:15.398.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testBoundedHueAndSecondaryComponentMatchAndroidModuloDefinition]' started.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testBoundedHueAndSecondaryComponentMatchAndroidModuloDefinition]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.Np3FilterEngineTests testCancellationStopsAtAndroidStripeCheckBoundary]' started.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testCancellationStopsAtAndroidStripeCheckBoundary]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.Np3FilterEngineTests testCatalogHasFiftyDistinctAndroidIdentitiesAndLegacyMappings]' started.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testCatalogHasFiftyDistinctAndroidIdentitiesAndLegacyMappings]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.Np3FilterEngineTests testIntensityHasAndroidEvenDetentsAndSeparateDisabledState]' started.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testIntensityHasAndroidEvenDetentsAndSeparateDisabledState]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.Np3FilterEngineTests testLookupPreservesAlphaAndTransparentSourcePixels]' started.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testLookupPreservesAlphaAndTransparentSourcePixels]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.Np3FilterEngineTests testNeutralProtectionRejectsNoiseAndPreservesEstablishedColor]' started.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testNeutralProtectionRejectsNoiseAndPreservesEstablishedColor]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.Np3FilterEngineTests testRepresentativeSourceControlsAndCurvesRemainStable]' started.
+Test Case '-[ZTransferTests.Np3FilterEngineTests testRepresentativeSourceControlsAndCurvesRemainStable]' passed (0.001 seconds).
+Test Suite 'Np3FilterEngineTests' passed at 2026-10-30 19:37:15.418.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.017 (0.019) seconds
+Test Suite 'PhotoCubeLUTMapperTests' started at 2026-10-30 19:37:15.418.
+Test Case '-[ZTransferTests.PhotoCubeLUTMapperTests testIdentityKeepsPixelsAtAnyIntensityAndAlpha]' started.
+Test Case '-[ZTransferTests.PhotoCubeLUTMapperTests testIdentityKeepsPixelsAtAnyIntensityAndAlpha]' passed (0.001 seconds).
+Test Suite 'PhotoCubeLUTMapperTests' passed at 2026-10-30 19:37:15.419.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'PhotoEffectsBatchTests' started at 2026-10-30 19:37:15.419.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings]' passed (0.020 seconds).
+Test Suite 'PhotoEffectsBatchTests' passed at 2026-10-30 19:37:15.493.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.070 (0.074) seconds
+Test Suite 'PhotoNp3ParserTests' started at 2026-10-30 19:37:15.493.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllGradingRegionsAndMasksSurviveAndInactiveGradingCanonicalizes]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllGradingRegionsAndMasksSurviveAndInactiveGradingCanonicalizes]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllRequiredFieldsRejectMissingAndWrongLength]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllRequiredFieldsRejectMissingAndWrongLength]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllSixControlsAndEightBandsAreReadWithoutClamping]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllSixControlsAndEightBandsAreReadWithoutClamping]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testBoundedReaderAcceptsShortChunksAndStopsAtOneOverflowByte]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testBoundedReaderAcceptsShortChunksAndStopsAtOneOverflowByte]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicInvalidAndUnsupportedControlsAreNotSilentlyDropped]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicInvalidAndUnsupportedControlsAreNotSilentlyDropped]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicMonochromeAndFixedCreativeTonesKeepIndependentDensity]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicMonochromeAndFixedCreativeTonesKeepIndependentDensity]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicQuarterStepsAndAutoRetainTheirExactMeaning]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicQuarterStepsAndAutoRetainTheirExactMeaning]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testCurveEditingMetadataIsNotDoubleAppliedAndReservedLayoutIsRejected]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testCurveEditingMetadataIsNotDoubleAppliedAndReservedLayoutIsRejected]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryKnownClassicStyleAnd0310ContainerIsRoutedByBase]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryKnownClassicStyleAnd0310ContainerIsRoutedByBase]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryTruncationAndMalformedContainerIsInvalid]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryTruncationAndMalformedContainerIsInvalid]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testIndependentFlexibleSamplesPreserveIdentityCommentsAndCurve]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testIndependentFlexibleSamplesPreserveIdentityCommentsAndCurve]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testLegacyParameterDecodingDefaultsGradingAndRejectsUnsafeShapes]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testLegacyParameterDecodingDefaultsGradingAndRejectsUnsafeShapes]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testNamesPreserveASCIIAndRejectMalformedOrUnsupportedEncoding]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testNamesPreserveASCIIAndRejectMalformedOrUnsupportedEncoding]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testOutOfRangeColorDetailAndGradingValuesAreNotClamped]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testOutOfRangeColorDetailAndGradingValuesAreNotClamped]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testQuickAndDetailControlsAreValidatedWithoutSecondSharpeningPass]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testQuickAndDetailControlsAreValidatedWithoutSecondSharpeningPass]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testReaderCancellationStallAndProviderFailureRemainDistinct]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testReaderCancellationStallAndProviderFailureRemainDistinct]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testRealFileHandleUsesTheSameReadLimitAndDoesNotRetainSource]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testRealFileHandleUsesTheSameReadLimitAndDoesNotRetainSource]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testSixPairedClassicCameraExportsRetainEveryCurveSampleAndSourceName]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testSixPairedClassicCameraExportsRetainEveryCurveSampleAndSourceName]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testTLVOrderDoesNotChangeParametersAndSourceBytesCannotMutateRecipe]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testTLVOrderDoesNotChangeParametersAndSourceBytesCannotMutateRecipe]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testUnknownVersionsFieldsAndEncodingsRemainUnsupported]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testUnknownVersionsFieldsAndEncodingsRemainUnsupported]' passed (0.004 seconds).
+Test Suite 'PhotoNp3ParserTests' passed at 2026-10-30 19:37:15.622.
+	 Executed 20 tests, with 0 failures (0 unexpected) in 0.122 (0.128) seconds
+Test Suite 'PhotoNp3RenderingTests' started at 2026-10-30 19:37:15.622.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testAll1648ConfigurationsMatchCurrentAndroidByteForByte]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testAll1648ConfigurationsMatchCurrentAndroidByteForByte]' passed (0.834 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testApplicationFilterPathActuallyAppliesFinishing]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testApplicationFilterPathActuallyAppliesFinishing]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCancellationStopsBothNewPixelPathsAtBoundedBatch]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCancellationStopsBothNewPixelPathsAtBoundedBatch]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testClassicAutomaticAndCurveOwnership]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testClassicAutomaticAndCurveOwnership]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCreativeEffectZeroPreservesDevelopedSource]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCreativeEffectZeroPreservesDevelopedSource]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testEachGradingRegionBrightnessWorksWithoutTint]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testEachGradingRegionBrightnessWorksWithoutTint]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testFinishingIsOnceAfterStrengthAndKeepsTransparentPixels]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testFinishingIsOnceAfterStrengthAndKeepsTransparentPixels]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testGradingRegionsBalanceBlendAndHueWrap]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testGradingRegionsBalanceBlendAndHueWrap]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testNeutralGradingHasNoCompiledTables]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testNeutralGradingHasNoCompiledTables]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTintPreservesLuminanceAndGrayRampHasNoBandJumps]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTintPreservesLuminanceAndGrayRampHasNoBandJumps]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTypedBitmapSerialAndPreviewMatchAndPreserveSource]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTypedBitmapSerialAndPreviewMatchAndPreserveSource]' passed (0.850 seconds).
+Test Suite 'PhotoNp3RenderingTests' passed at 2026-10-30 19:37:17.368.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 1.743 (1.746) seconds
+Test Suite 'UserPictureControlResourcesTests' started at 2026-10-30 19:37:17.368.
+Test Case '-[ZTransferTests.UserPictureControlResourcesTests testApplicationBundleContainsNoBuiltInNP3Resources]' started.
+Test Case '-[ZTransferTests.UserPictureControlResourcesTests testApplicationBundleContainsNoBuiltInNP3Resources]' passed (0.001 seconds).
+Test Suite 'UserPictureControlResourcesTests' passed at 2026-10-30 19:37:17.370.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 19:37:17.370.
+	 Executed 60 tests, with 0 failures (0 unexpected) in 3.096 (3.118) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 19:37:17.370.
+	 Executed 60 tests, with 0 failures (0 unexpected) in 3.096 (3.119) seconds
+** TEST SUCCEEDED **

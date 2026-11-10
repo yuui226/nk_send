@@ -1,0 +1,46 @@
+Building for debugging...
+[Planning deferred tasks]
+[4 / 8] ZTransfer
+[5 / 9] ZTransfer
+[12 / 17] ZTransfer
+[16 / 20] AnchorTests-product
+[18 / 22] AnchorTests-product
+[24 / 26] AnchorTests-product
+Build complete! (1.90秒)
+Test Suite 'All tests' started at 2026-10-31 01:25:14.397.
+Test Suite 'AnchorTests.xctest' started at 2026-10-31 01:25:14.398.
+Test Suite 'PhotoPreviewAnchorGeometryTests' started at 2026-10-31 01:25:14.398.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testActualRendererLayoutKeepsThumbnailAndFHDAtTheSameNoncentralEndpoint]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testActualRendererLayoutKeepsThumbnailAndFHDAtTheSameNoncentralEndpoint]' passed (0.001 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testClipMatrixKeepsImageCentreFixedAndProgressIsBounded]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testClipMatrixKeepsImageCentreFixedAndProgressIsBounded]' passed (0.000 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testEndIsIdentityAndReleasesEntireRotatedPhoto]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testEndIsIdentityAndReleasesEntireRotatedPhoto]' passed (0.000 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testEveryIntermediateFrameMovesContinuouslyAndOnlyReleasesMorePixels]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testEveryIntermediateFrameMovesContinuouslyAndOnlyReleasesMorePixels]' passed (0.004 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testExtremeAspectRatiosAndDestinationSmallerThanTileKeepExactCrop]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testExtremeAspectRatiosAndDestinationSmallerThanTileKeepExactCrop]' passed (0.000 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testOpeningFrameCompletionWinsGraceAndCancellationReleasesWaiter]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testOpeningFrameCompletionWinsGraceAndCancellationReleasesWaiter]' passed (0.010 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testOpeningMapsActualImageOntoOffCentreCropTile]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testOpeningMapsActualImageOntoOffCentreCropTile]' passed (0.000 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testPresentationClockUsesReal340And260msFramesWithoutIdleDeadlineReuse]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testPresentationClockUsesReal340And260msFramesWithoutIdleDeadlineReuse]' passed (0.000 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testReturnUsesActualZoomedCropPlacementInsteadOfViewportCenter]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testReturnUsesActualZoomedCropPlacementInsteadOfViewportCenter]' passed (0.000 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testSavedDirectionsCancelAtSourceWithAsymmetricVisibleCrop]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testSavedDirectionsCancelAtSourceWithAsymmetricVisibleCrop]' passed (0.000 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testStalledOpeningGraceIsBoundedAndReleasesItsWaiter]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testStalledOpeningGraceIsBoundedAndReleasesItsWaiter]' passed (0.129 seconds).
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testVisibleGridBoundsRetainFullCropAndConvertTogetherToPagerSpace]' started.
+Test Case '-[AnchorTests.PhotoPreviewAnchorGeometryTests testVisibleGridBoundsRetainFullCropAndConvertTogetherToPagerSpace]' passed (0.000 seconds).
+Test Suite 'PhotoPreviewAnchorGeometryTests' passed at 2026-10-31 01:25:14.545.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.146 (0.147) seconds
+Test Suite 'AnchorTests.xctest' passed at 2026-10-31 01:25:14.545.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.146 (0.147) seconds
+Test Suite 'All tests' passed at 2026-10-31 01:25:14.545.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.146 (0.148) seconds
+◇ Test run started.
+↳ Testing Library Version: 2403
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

@@ -26,12 +26,13 @@ final class PhotoGrainControlTests: XCTestCase {
     private struct Controls: View {
         @State var draft: PhotoEffectsSettings
         @State private var picker = false
-        @State private var chooser = PhotoFilterChooserState()
+        @StateObject private var filters = PhotoFilterEditorLifetime(role: .transfer)
         @FocusState private var focus: Bool
         let editor: PhotoLUTEditorState
         var body: some View {
             PhotoEffectsControls(draft: $draft, showingWatermarkPicker: $picker,
-                textFieldFocused: $focus, photoLUTEditor: editor, filterChooser: $chooser)
+                textFieldFocused: $focus, photoLUTEditor: editor, photoFilterSession: filters.session,
+                onFilterFavorite: { _ in XCTFail("Grain controls must not toggle filter favorites") })
                 .padding(16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .background(ZTransferColors.background)

@@ -1,0 +1,109 @@
+{
+  "task": "N20",
+  "status": "implementation_compiles_runtime_validation_pending",
+  "android_head": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "source_sha256": {
+    "ios/ZTransfer/Domain/SharedPhotoFilterFavorites.swift": "53f3cbc0a6010347f73b61991c90f85bfd9c672dbc7b1f818da68207b72d6741",
+    "ios/ZTransfer/Domain/PhotoEffects.swift": "49feb44e7a1cfac40defb1edc566a613809a89beb92c845322a333550f25d4e9",
+    "ios/ZTransfer/UI/PhotoNP3Chooser.swift": "f7f07456b0eb2e96bbd084a618444fb61985d1e3ea1b333b7b1310acc349affe",
+    "ios/ZTransfer/UI/PhotoEffectsEditorView.swift": "e60bfa59ce9421c5164df65ab0238f99efe82bce8446a1d5b1541646016cebb4",
+    "ios/ZTransfer/UI/SettingsView.swift": "7984eb53a8959e4b840f27f8005f4e82f30162ce7db60db1dc814dbd75bbb134",
+    "ios/ZTransfer/UI/LocalPhotoEffectsView.swift": "45ffcc5e5862b7276a61571d2d3a30969bd9b58886e2a8854131231c0500dcd5",
+    "ios/ZTransferTests/SharedPhotoFilterFavoritesTests.swift": "89f78106694b615458c34b89063f71577e309e88e33655604164a6187c61a1ac",
+    "ios/ZTransferTests/PhotoFilterEditorSessionTests.swift": "fe53d89d7bcfa448e888bde280d4fcf635a168be2d658c551ebb185958d21081",
+    "ios/ZTransferTests/PhotoGrainControlTests.swift": "27235d60dd960c9c6bb47bfeec0af3f8c34a8976a16027a6ac891d2fc374b28b",
+    "ios/ZTransferTests/DomainModelTests.swift": "c4d92a1a96b5039173d8bd5ddf6e31d6b2122ee9206ab41c789d37c22c48aead",
+    "ios/ZTransferTests/PremiumBusinessTests.swift": "59589df08c48c661b2d73503fa4fbdc9f7069b2129a7d1f416f71b7bdeba1e3f"
+  },
+  "android_source_sha256": {
+    "app/src/main/java/com/ztransfer/effects/SharedPhotoFilterFavorites.kt": "e76bf52eb56e9928b99555d6728754f0785586a17237fb4e33b37463b2b6284f",
+    "app/src/test/java/com/ztransfer/effects/SharedPhotoFilterFavoritesTest.kt": "4a046db936fab245eba42e425345ed0af73dd8c1a038237cf70198ca63fb5d9f",
+    "app/src/main/java/com/ztransfer/effects/PhotoEffectFavorites.kt": "27ac8a1e50467bf70997948f3ec02b7084ff08312064a96532fe05bd8960b916",
+    "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt": "1d984bc12933efae7d252f1c54c3418db3d5936a5766b315511287b3809c387e",
+    "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt": "a892f5e95344d51f12ae8a69190321d60c13f24cca6bb32accdbd7e9fef19b9c",
+    "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt": "1146526c869d9abda6433fe6db3cdef44419707358b0a1d1317ad7b287ab1c87"
+  },
+  "builds": [
+    {
+      "file": "ztransfer-shared-favorites-build-20261030.log",
+      "sha256": "0d28157a18cbde795e91bcf53e1632c98eab5588fda124074ff584fea1e4b782",
+      "session": 61199,
+      "observed_exit_code": 65,
+      "result": "TEST BUILD FAILED",
+      "executed_test_methods": 0
+    },
+    {
+      "file": "ztransfer-shared-favorites-build-20261030-r2.log",
+      "sha256": "8ddb5dc6bae872f6b4f1b4514b6e65c2142e18bf0fd165c205f6564eac6adb05",
+      "session": 37725,
+      "observed_exit_code": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "executed_test_methods": 0
+    },
+    {
+      "file": "ztransfer-shared-favorites-build-20261030-r3.log",
+      "sha256": "dea09b1f66621bb2b19bfc77c6edb984b883ddb62341729f0045df07a37ef901",
+      "session": 30174,
+      "observed_exit_code": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "executed_test_methods": 0
+    }
+  ],
+  "new_methods": 12,
+  "pending_runtime_classes": [
+    "PhotoFilterFavoritesCodecTests",
+    "SharedPhotoFilterFavoritesTests",
+    "PhotoFilterEditorSessionTests",
+    "PhotoFilterPreferencesTests",
+    "PhotoFilterOwnerMemoryTests",
+    "PremiumBusinessTests",
+    "DomainModelTests favorite/legacy-local methods"
+  ],
+  "first_build_failure": "PhotoEffectsStore read @Published settings before initializing let filterFavorites; restored into a local value before assigning both stored properties.",
+  "environment": "simctl session24948 auto-launched Xcode runFirstLaunch; awaiting macOS PackageKit authorization (CoreSimulator1174.9.2 vs required1174.21.0). No new runtime attempt this phase.",
+  "limits": [
+    "No simulator runtime/screenshot assertion executed for N20",
+    "No device installation, commit or push",
+    "Existing N16 evidence predates these shared code changes"
+  ],
+  "behavior": [
+    "Immediate shared filter favorites; stable transfer then local-only one-time merge; malformed keys discarded, detached valid NP3 retained",
+    "Legacy local raw favorites left untouched; flag prevents resurrection after removal/folder replacement",
+    "Original iOS JSON favorites migrate without applying its other settings or hiding legacy camera configuration",
+    "Role owner snapshots mirror favorites, but stale draft saves cannot replace the shared list",
+    "Actual SettingsView and LocalPhotoEffectsView callbacks wired; transfer onReceive updates open draft; frames/LUT/parameters remain scoped"
+  ],
+  "ios_runtime_tests_run": false,
+  "native_check": {
+    "session": 38133,
+    "observed_exit_code": 0,
+    "result": "four assertion groups passed",
+    "files": {
+      "shared-favorites-native-Check.swift": "941256f60914eafc9b56f4e2008c602ada07535fa010534c121b33170f404dbd",
+      "shared-favorites-native-PhotoEffectValueTypes.swift": "38aded81c3bb6426ba9f5e3f19e4eb22531a39135659dcff99d781a2b4c6c4bd",
+      "shared-favorites-native-inputs.json": "d516386ba35c73f1357dcd77279b1f0e740d6db2932d87d56e79d05a24250a42",
+      "shared-favorites-native-check.log": "728c727b1b3d3f22b5655a94f8a522ded175d2f3759a96db62366dfa4f2d969c"
+    },
+    "production_sha256": {
+      "ios/ZTransfer/Domain/Np3FilterEngine.swift": "012b8c310c3efdd39a88d81e38bcb344b50f3fec1d3fe21c5f0f991c578fe063",
+      "ios/ZTransfer/Domain/Np3FilterCatalog.swift": "95ed694fb78e159e52764a61dd3ff4876a0d7ff625421192bf7045e751fb5b07",
+      "ios/ZTransfer/Domain/PhotoNp3Recipe.swift": "9477657afee9d1058aa59baf39dcb73120ff3aadd654c7cc5c3701cc116739bd",
+      "ios/ZTransfer/Domain/PhotoNp3Parser.swift": "4559967af2e74d0e2188feec6e464b28d6092ba92d62baa83e64739ae1c77ab4",
+      "ios/ZTransfer/Domain/ClassicPhotoNp3Parser.swift": "e37c56b436b457735c2f27748d0edbaaaa0a2926890fa1ca53fda6cde8f8830d",
+      "ios/ZTransfer/Domain/PhotoNp3SnapshotCodec.swift": "23b658927ac20fef04cc834f0ce5c777e1307910eb82fbfac7fbe88b36c6071a",
+      "ios/ZTransfer/Domain/CompiledFlexibleNp3.swift": "1d446ab580b6d25fa43a0bee9807ceb73d1a9cc0705b3381bfe15f499ef16b85",
+      "ios/ZTransfer/Domain/CompiledClassicNp3.swift": "6d48c976b138d5a45cb43d26598332c85423c52812c18b0dfe64f06c803771f6",
+      "ios/ZTransfer/Domain/CompiledNp3ColorGrading.swift": "eb359aec0ebeec1498278b4e7d33fc4ba7a933afa44c3219cdecf05c92f5caf0",
+      "ios/ZTransfer/Domain/LUTColorPipeline.swift": "98cbdf98498d30edc867c2553359daa934780530f023e642152b4c3c07ac368f",
+      "ios/ZTransfer/Domain/PhotoFilterPreferences.swift": "9b2d865ffb76b5aec4ec1e5bf7454657423ac25f86efe1545db216c4aa75751a",
+      "ios/ZTransfer/Domain/SharedPhotoFilterFavorites.swift": "53f3cbc0a6010347f73b61991c90f85bfd9c672dbc7b1f818da68207b72d6741"
+    },
+    "scope": "Compiled the actual SharedPhotoFilterFavorites, PhotoFilterPreferences, NP3 catalog/parser/codec/render types with Foundation and Combine on macOS. PhotoFilterPreset/LUTAdjustments declarations extracted verbatim to avoid UIKit. Verified raw/JSON one-time merge, invalid keys and flags, shared instances, removal/reset non-resurrection, weak release. Does not execute PhotoEffectsStore or SwiftUI/iOS tests."
+  },
+  "final_verification": {
+    "status": "complete",
+    "date": "2026-10-31",
+    "evidence": "resumed-runtime/final-verification.json",
+    "note": "Supersedes historical runtime blockers and pending-runtime fields above; original per-run results remain unchanged."
+  }
+}

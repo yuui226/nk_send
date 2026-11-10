@@ -258,38 +258,6 @@ func decodeCameraPhotoPreview(_ data: Data) -> UIImage? {
     return UIImage(cgImage: image, scale: 1, orientation: .up)
 }
 
-@preconcurrency
-struct PhotoPreviewAnchorTransform: AnimatableModifier {
-    var progress: CGFloat
-    let anchor: CGRect?
-    let enabled: Bool
-    let closing: Bool
-
-    nonisolated var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        let viewport = UIScreen.main.bounds
-        let validAnchor = anchor.flatMap { rect in
-            rect.width > 0 && rect.height > 0 && viewport.width > 0 && viewport.height > 0 ? rect : nil
-        }
-        let shouldAnchor = enabled && validAnchor != nil
-        let startScale = validAnchor.map { min(max($0.width / viewport.width, 0.05), 1) } ?? 1
-        let scale = shouldAnchor ? startScale + (1 - startScale) * progress : 1
-        let origin = validAnchor.map {
-            UnitPoint(
-                x: min(max(($0.midX - viewport.minX) / viewport.width, 0), 1),
-                y: min(max(($0.midY - viewport.minY) / viewport.height, 0), 1)
-            )
-        } ?? .center
-        content
-            .scaleEffect(scale, anchor: origin)
-            .opacity(shouldAnchor ? (closing ? min(progress * 1.6, 1) : 1) : progress)
-    }
-}
-
 /// Android ThumbnailPreviewPriorityTest: remote fallback belongs exclusively
 /// to the current page, after both FHD failure and EXIF completion.
 func allowPreviewRemoteThumbnailFallback(
@@ -414,11 +382,10 @@ struct PhotoPreviewView: View {
     let onQueueFlightStarted: (Int) -> Void
     let onQueueFlightFinished: (Int) -> Void
     let onQueueFlightCancelled: (Int) -> Void
-    let initialAnchor: CGRect?
-    let prepareDismissTarget: (CameraFile) async -> CGRect?
+    let prepareDismissTarget: (CameraFile) async -> PhotoPreviewAnchorBounds?
     let onDismiss: (CameraFile?) -> Void
     let onCropConfirmed: (CameraFile, JpegCropSelection) async -> Bool
-    private let initialIndex: Int
+    @State private var initialIndex: Int
     @State private var index: Int
     @State private var pagerSelection: Int
     @State private var pageFeedback = PhotoPreviewPageFeedback()
@@ -494,9 +461,17 @@ struct PhotoPreviewView: View {
     @State private var queueFlightSourceFrame: CGRect?
     @State private var queueFlightRotation: Double = 0
     @State private var expandedBurstIDs: Set<String> = []
-    @State private var presentationProgress: CGFloat = 0
+    @State private var presentation = PhotoPreviewPresentationClock()
+    private var presentationProgress: CGFloat { presentation.progress }
+    @State private var openingSource: PhotoPreviewOpeningSource
+    @State private var openingPlacement: PhotoPreviewImagePlacement?
+    @State private var closingPlacement: PhotoPreviewImagePlacement?
+    @State private var pagerBounds: CGRect?
+    @State private var safeInsetsReady = false
+    @State private var openingStarted = false
+    @State private var closeTask: Task<Void, Never>?
     @State private var closing = false
-    @State private var collapseAnchor: CGRect?
+    @State private var collapseAnchor: PhotoPreviewAnchorBounds?
     @State private var burstTransitionBusy = false
     @State private var burstTransitionTask: Task<Void, Never>?
     @State private var animatedBurstID: String?
@@ -515,6 +490,7 @@ struct PhotoPreviewView: View {
          directory: URL? = nil, storageMode: TransferStorageMode = .unified,
          queueTarget: CGRect? = nil,
          initialAnchor: CGRect? = nil,
+         initialVisibleAnchor: CGRect? = nil,
          initialExpandedBurstIDs: Set<String> = [],
          collapseBursts: Bool = true,
          onBurstChanged: @escaping (String, Bool) -> Void = { _, _ in },
@@ -523,7 +499,7 @@ struct PhotoPreviewView: View {
          onQueueFlightStarted: @escaping (Int) -> Void = { _ in },
          onQueueFlightFinished: @escaping (Int) -> Void = { _ in },
          onQueueFlightCancelled: @escaping (Int) -> Void = { _ in },
-         prepareDismissTarget: @escaping (CameraFile) async -> CGRect? = { _ in nil },
+         prepareDismissTarget: @escaping (CameraFile) async -> PhotoPreviewAnchorBounds? = { _ in nil },
          onDismiss: @escaping (CameraFile?) -> Void = { _ in },
          onCropConfirmed: @escaping (CameraFile, JpegCropSelection) async -> Bool = { _, _ in false }) {
         self.queueModel = queueModel
@@ -536,7 +512,6 @@ struct PhotoPreviewView: View {
         self.burstIDByFile = burstIDByFile
         self.transferredFileIDs = transferredFileIDs
         self.queueTarget = queueTarget
-        self.initialAnchor = initialAnchor
         self.storageMode = storageMode; _selectedFile = selectedFile
         self.onEnqueue = onEnqueue; self.onEnqueueBurst = onEnqueueBurst
         self.onQueueFlightStarted = onQueueFlightStarted
@@ -554,11 +529,17 @@ struct PhotoPreviewView: View {
             expandedBurstIDs: initialExpandedBurstIDs, selectedFileID: selectedFile.wrappedValue?.id
         )
         _expandedBurstIDs = State(initialValue: initialExpandedBurstIDs)
-        self.initialIndex = opening.index
+        _initialIndex = State(initialValue: opening.index)
         _previewEntries = State(initialValue: opening.entries)
         _index = State(initialValue: opening.index)
         _pagerSelection = State(initialValue: opening.index)
-        _collapseAnchor = State(initialValue: initialAnchor)
+        let sourceFile = opening.entries.indices.contains(opening.index) ? opening.entries[opening.index].file : nil
+        let sourceBounds = initialAnchor.map { PhotoPreviewAnchorBounds(image: $0, visible: initialVisibleAnchor) }
+        _openingSource = State(initialValue: PhotoPreviewOpeningSource(anchor: sourceBounds, file: sourceFile,
+            thumbnail: sourceFile.flatMap { session.memoryThumbnailImage(file: $0) }))
+        _collapseAnchor = State(initialValue: sourceBounds)
+        let savedRotation = UserDefaults.standard.integer(forKey: "preview_rotation_quarter_turns")
+        _rotationDegrees = State(initialValue: -90 * Double(((savedRotation % 4) + 4) % 4))
         #if DEBUG
         ButtonInteractionTrace.recordNow("preview-init-end")
         #endif
@@ -572,7 +553,7 @@ struct PhotoPreviewView: View {
             // Monitor review owns one edge-to-edge black surface. A second
             // inset backdrop makes its middle fade differently from safe areas.
             if review == nil {
-                Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
+                Color.black.modifier(PhotoPreviewPresentationOpacity(clock: presentation, factor: 0.74)).ignoresSafeArea()
             }
             GeometryReader { pagerViewport in
                 TabView(selection: $pagerSelection) {
@@ -584,6 +565,7 @@ struct PhotoPreviewView: View {
                             case .photo(let file, _):
                                 PreviewImage(session: session, file: file,
                                              highResolutionImage: highResolutionImages[file.id],
+                                             initialThumbnail: file.id == openingSource.file?.id ? openingSource.thumbnail : nil,
                                              rotationDegrees: rotationDegrees,
                                              infoBottom: landscapeReview ? nil : previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
                                              interactive: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
@@ -624,6 +606,12 @@ struct PhotoPreviewView: View {
                                                  if ButtonInteractionTrace.enabled { ButtonInteractionTrace.recordNow("preview-viewport:\(file.id):\(viewport.size):\(viewport.infoBottom)") }
                                                  #endif
                                              },
+                                             onPlacementChange: { placement in
+                                                 if index == itemIndex {
+                                                     geometrySnapshot.placement = placement
+                                                     beginOpeningIfReady()
+                                                 }
+                                             },
                                              onMagnificationChange: { active in
                                                  guard index == itemIndex else { return }
                                                  magnificationActive = active
@@ -633,7 +621,7 @@ struct PhotoPreviewView: View {
                                                  }
                                              },
                                              isCurrent: index == itemIndex, tapWhenZoomed: review != nil)
-                                    .padding(.bottom, landscapeReview ? 0 : previewSafeInsets.bottom + 88)
+                                    .padding(.bottom, previewBottomPadding)
                             case .burst(let group):
                                 BurstCollectionPreview(
                                     session: session,
@@ -654,6 +642,9 @@ struct PhotoPreviewView: View {
                         // mounting. The full-screen stage owns this size; a
                         // bitmap arrival must not resize the page mid-animation.
                         .frame(width: pagerViewport.size.width, height: pagerViewport.size.height)
+                        // This page already positions its image and controls
+                        // from the stage's explicit safe-area measurements.
+                        .ignoresSafeArea(.container, edges: review == nil ? .all : [])
                         .background {
                             PhotoPreviewPageObserver(observation: pagerObservation, index: itemIndex) { page, offset in
                                 guard !closing, effectsFile == nil, !burstTransitionBusy,
@@ -673,11 +664,13 @@ struct PhotoPreviewView: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .onChange(of: pagerSelection) { index = $0 }
                 .frame(width: pagerViewport.size.width, height: pagerViewport.size.height)
-                .modifier(PhotoPreviewAnchorTransform(
-                    progress: presentationProgress,
-                    anchor: closing ? collapseAnchor : initialAnchor,
+                .modifier(PhotoPreviewAnchorPresentation(
+                    clock: presentation,
+                    anchor: closing ? collapseAnchor : openingSource.anchor,
+                    placement: closing ? closingPlacement : openingPlacement,
+                    viewport: pagerViewport.frame(in: .global),
                     enabled: closing ? collapseAnchor != nil : index == initialIndex,
-                    closing: closing
+                    closing: closing, openingReady: !needsOpeningPlacement || openingPlacement != nil
                 ))
                 .scaleEffect(burstPagerScale)
                 .opacity(burstPagerAlpha)
@@ -693,6 +686,14 @@ struct PhotoPreviewView: View {
                 .allowsHitTesting(
                     effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !closing && !burstTransitionBusy
                 )
+                .onAppear {
+                    pagerBounds = pagerViewport.frame(in: .global)
+                    beginOpeningIfReady()
+                }
+                .onChange(of: pagerViewport.frame(in: .global)) {
+                    pagerBounds = $0
+                    beginOpeningIfReady()
+                }
             }
             // Keep the edge-to-edge viewport outside every visual transform.
             // Scaling ignoresSafeArea itself makes its edges leave the safe
@@ -739,7 +740,8 @@ struct PhotoPreviewView: View {
                     HStack(spacing: 8) {
                         PreviewInfoText(text: reviewTitle(file))
                             .layoutPriority(1)
-                            .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: presentationProgress * burstPagerAlpha))
+                            .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: burstPagerAlpha))
+                            .modifier(PhotoPreviewPresentationOpacity(clock: presentation))
                             .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                         if review == nil, let task = queueModel.task(for: file.id), task.status != .completed {
                             PhotoPreviewLiveTransferBadge(
@@ -756,7 +758,8 @@ struct PhotoPreviewView: View {
                         else { Color.clear }
                     }
                     .frame(height: 26, alignment: .topLeading)
-                    .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: presentationProgress * burstPagerAlpha * exifLoadedAlpha))
+                    .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: burstPagerAlpha * exifLoadedAlpha))
+                    .modifier(PhotoPreviewPresentationOpacity(clock: presentation))
                     .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                     if burstIDByFile[file.id] != nil || file.isProtected {
                         HStack(spacing: 8) {
@@ -774,7 +777,8 @@ struct PhotoPreviewView: View {
                         }
                         .font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
                         .padding(.top, 8)
-                        .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: presentationProgress * burstPagerAlpha))
+                        .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: burstPagerAlpha))
+                        .modifier(PhotoPreviewPresentationOpacity(clock: presentation))
                         .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                     }
                 }
@@ -785,7 +789,7 @@ struct PhotoPreviewView: View {
             }
             if let file = currentPhoto, highResolutionLoading.contains(file.id) {
                 RemoteReviewFHDLoading()
-                    .opacity(presentationProgress * burstPagerAlpha * (cropPresented ? 0 : 1))
+                    .modifier(PhotoPreviewPresentationOpacity(clock: presentation, factor: burstPagerAlpha * (cropPresented ? 0 : 1)))
                     .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .allowsHitTesting(false)
@@ -793,6 +797,7 @@ struct PhotoPreviewView: View {
             PhotoPreviewTools(
                 selection: currentPhoto.map { .init(file: $0,
                     canCollapse: photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil) },
+                burstTransitionInProgress: burstTransitionBusy,
                 isReview: review != nil, effectsAvailable: effectsStore != nil && effectsDirectory != nil,
                 effectsEnabled: effectsStore?.isEnabled == true, histogramMode: histogramMode,
                 feedback: pageFeedback,
@@ -819,15 +824,16 @@ struct PhotoPreviewView: View {
                     rotationQuarterTurns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
                 })
                 .compositingGroup()
-                .opacity(presentationProgress * burstPagerAlpha * (cropPresented ? 0 : 1))
+                .modifier(PhotoPreviewPresentationOpacity(clock: presentation, factor: burstPagerAlpha * (cropPresented ? 0 : 1)))
                 .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
                 .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                 .padding(.trailing, landscapeReview ? 12 : review != nil ? 20 : 76)
                 .padding(.bottom, landscapeReview ? 8 : 32)
             PhotoPreviewHistogramLayer(model: histogram, mode: histogramMode,
                 currentPhoto: currentPhoto, cropPresented: cropPresented,
-                alpha: presentationProgress * burstPagerAlpha, feedback: pageFeedback,
+                alpha: burstPagerAlpha, feedback: pageFeedback,
                 review: review != nil, landscapeReview: landscapeReview)
+                .modifier(PhotoPreviewPresentationOpacity(clock: presentation))
         }
         .overlayPreferenceValue(PreviewEffectsButtonAnchorKey.self) { anchor in
             if let anchor, let store = effectsStore, let directory = effectsDirectory, let file = effectsFile {
@@ -863,8 +869,8 @@ struct PhotoPreviewView: View {
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { previewSafeInsets = review == nil ? proxy.safeAreaInsets : EdgeInsets() }
-                    .onChange(of: proxy.safeAreaInsets) { previewSafeInsets = review == nil ? $0 : EdgeInsets() }
+                    .onAppear { previewSafeInsets = review == nil ? proxy.safeAreaInsets : EdgeInsets(); safeInsetsReady = true; beginOpeningIfReady() }
+                    .onChange(of: proxy.safeAreaInsets) { previewSafeInsets = review == nil ? $0 : EdgeInsets(); beginOpeningIfReady() }
             }
         }
         #if DEBUG
@@ -926,13 +932,12 @@ struct PhotoPreviewView: View {
             ButtonInteractionTrace.recordNow("preview-appear")
             #endif
             rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
-            rotationDegrees = -90 * Double(rotationQuarterTurns)
             previousTransfersBusy = queueModel.snapshot.isTransferring
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.34)) {
-                presentationProgress = 1
-            }
+            beginOpeningIfReady()
         }
         .onDisappear {
+            closeTask?.cancel(); closeTask = nil
+            presentation.stop()
             pagerObservation.unlockPaging()
             projection.clear()
             cropCloseTask?.cancel()
@@ -960,6 +965,7 @@ struct PhotoPreviewView: View {
         .onChange(of: index) { value in
             closeCrop()
             currentCropViewport = nil
+            geometrySnapshot.placement = nil
             if previewEntries.indices.contains(value) {
                 selectedFile = previewEntries[value].file ?? {
                     if case .burst(let group) = previewEntries[value] { return group.files.first }
@@ -990,12 +996,16 @@ struct PhotoPreviewView: View {
         .task {
             await session.setFHDActive(true)
             do {
-                try await Task.sleep(nanoseconds: 340_000_000)
-                guard !Task.isCancelled else { throw CancellationError() }
-                if !closing { deferredLoadsEnabled = true }
                 try await Task.sleep(nanoseconds: .max)
             } catch {}
             await session.setFHDActive(false)
+        }
+        .task(id: pagerBounds != nil) {
+            guard pagerBounds != nil, !deferredLoadsEnabled else { return }
+            do { try await Task.sleep(nanoseconds: 340_000_000) } catch { return }
+            await presentation.waitForOpeningGrace()
+            guard !Task.isCancelled, !closing else { return }
+            deferredLoadsEnabled = true
         }
         .task(id: previewLoadIdentity) {
             guard deferredLoadsEnabled else { return }
@@ -1118,10 +1128,37 @@ struct PhotoPreviewView: View {
         return file.fileName + " +" + raw.trimmingCharacters(in: CharacterSet(charactersIn: ".")).uppercased()
     }
 
+    private var needsOpeningPlacement: Bool {
+        review == nil && openingSource.anchor != nil && openingSource.hasImage
+    }
+    private var previewBottomPadding: CGFloat { landscapeReview ? 0 : previewSafeInsets.bottom + 88 }
+    private func beginOpeningIfReady() {
+        guard !openingStarted, !closing, let bounds = pagerBounds,
+              bounds.width > 0, bounds.height > 0 else { return }
+        if needsOpeningPlacement {
+            guard safeInsetsReady else { return }
+            let badges = openingSource.file.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false
+            let infoBottom = previewSafeInsets.top + (badges ? 112 : 70)
+            // The image owns a smaller viewport than the pager because of the
+            // bottom tools. Wait for that actual layout and the resolved safe
+            // insets, not a synthetic full-screen image rectangle or the first
+            // callback produced with zero safe-area insets.
+            guard let placement = readyPhotoPreviewOpeningPlacement(geometrySnapshot.placement,
+                pageSize: bounds.size, bottomPadding: previewBottomPadding,
+                rotation: rotationDegrees, infoBottom: infoBottom) else { return }
+            openingPlacement = placement
+        }
+        openingStarted = true
+        presentation.animate(to: 1)
+    }
+
     private func startClose() {
         if cropPresented { closeCrop(); return }
         guard !cropRestoring else { return }
         guard !closing, !burstTransitionBusy else { return }
+        closingPlacement = currentPhoto.flatMap { file in
+            [".mov", ".mp4"].contains(file.fileExtension.lowercased()) ? nil : geometrySnapshot.placement
+        }
         closing = true
         queueFlightTask?.cancel()
         queueFlightTask = nil
@@ -1132,16 +1169,15 @@ struct PhotoPreviewView: View {
             return
         }
         let returnFile = currentPhoto
-        Task { @MainActor in
+        closeTask = Task { @MainActor in
             collapseAnchor = if let returnFile {
                 await prepareDismissTarget(returnFile)
             } else {
                 nil
             }
-            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
-                presentationProgress = 0
-            }
-            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard !Task.isCancelled else { return }
+            presentation.animate(to: 0)
+            guard await presentation.waitUntilRest(at: 0), !Task.isCancelled else { return }
             onDismiss(collapseAnchor == nil ? nil : returnFile)
         }
     }
@@ -1850,16 +1886,21 @@ struct PhotoPreviewToolLayout {
 /// the same fixed-size slot without scale/expand transitions or parent ticks.
 struct PreviewActionVisibility<Content: View>: View {
     let visible: Bool
+    var immediateExit = false
     @ViewBuilder let content: () -> Content
     var body: some View {
-        AndroidBooleanCrossfade(selected: visible, durationMilliseconds: 180) { showing in
-            if showing { content().compositingGroup() }
+        if !visible && immediateExit { Color.clear }
+        else {
+            AndroidBooleanCrossfade(selected: visible, durationMilliseconds: 180) { showing in
+                if showing { content().compositingGroup() }
+            }
         }
     }
 }
 
 struct PhotoPreviewTools: View {
     let selection: PhotoPreviewToolSelection?
+    var burstTransitionInProgress = false
     let isReview: Bool
     let effectsAvailable: Bool
     let effectsEnabled: Bool
@@ -1881,8 +1922,8 @@ struct PhotoPreviewTools: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            PreviewActionVisibility(visible: selection != nil) {
-                if let item = selection ?? retained {
+            PreviewActionVisibility(visible: selection != nil, immediateExit: burstTransitionInProgress) {
+                if let item = selection ?? (burstTransitionInProgress ? nil : retained) {
                     let file = item.file
                     let metrics = PhotoPreviewToolLayout(width: geometry.size.width,
                         effects: effectsAvailable && effectsEnabled, collapse: item.canCollapse)
@@ -2241,6 +2282,7 @@ private struct PreviewImage: View {
     let session: CameraSession
     let file: CameraFile
     let highResolutionImage: UIImage?
+    var initialThumbnail: UIImage? = nil
     let rotationDegrees: Double
     let infoBottom: CGFloat?
     let interactive: Bool
@@ -2257,6 +2299,7 @@ private struct PreviewImage: View {
     let onTap: () -> Void
     let onZoomedChange: (Bool) -> Void
     let onViewportChange: (PhotoPreviewCropViewport) -> Void
+    let onPlacementChange: (PhotoPreviewImagePlacement?) -> Void
     let onMagnificationChange: (Bool) -> Void
     let isCurrent: Bool
     var tapWhenZoomed = false
@@ -2276,10 +2319,14 @@ private struct PreviewImage: View {
     @State private var cropReturnOffset: CGSize = .zero
 
     var body: some View {
-        let cachedThumbnail = thumbnail ?? session.memoryThumbnailImage(file: file)
+        let cachedThumbnail = thumbnail ?? initialThumbnail ?? session.memoryThumbnailImage(file: file)
         GeometryReader { proxy in
             let cropViewport = PhotoPreviewCropViewport(size: proxy.size, scale: scale, offset: offset,
                 rotation: rotationDegrees, infoBottom: infoBottom ?? 0)
+            let placement = zoomEnabled ? photoPreviewImagePlacement(
+                imageSize: (highResolutionImage ?? cachedThumbnail)?.size, viewportSize: proxy.size,
+                rotation: rotationDegrees, infoBottom: infoBottom, scale: scale, offset: offset,
+                cropTop: cropTop, cropProgress: cropProgress) : nil
             ZStack {
                 if let cachedThumbnail {
                     Image(uiImage: cachedThumbnail)
@@ -2327,6 +2374,9 @@ private struct PreviewImage: View {
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            #if DEBUG
+            .modifier(PreviewImageGeometryTrace(source: "stack", id: file.id))
+            #endif
             .modifier(PreviewRotationTransform(
                 rotationDegrees: zoomEnabled ? rotationDegrees : 0,
                 targetRotationDegrees: zoomEnabled ? rotationDegrees : 0,
@@ -2357,9 +2407,10 @@ private struct PreviewImage: View {
                                    imageSize: (highResolutionImage ?? cachedThumbnail)?.size)
                     })
             }
-            .onAppear { if isCurrent { onViewportChange(cropViewport) } }
+            .onAppear { if isCurrent { onViewportChange(cropViewport); onPlacementChange(placement) } }
+            .onChange(of: placement) { if isCurrent { onPlacementChange($0) } }
             .onChange(of: cropViewport) { if isCurrent { onViewportChange($0) } }
-            .onChange(of: isCurrent) { if $0 { onViewportChange(cropViewport) } }
+            .onChange(of: isCurrent) { if $0 { onViewportChange(cropViewport); onPlacementChange(placement) } }
         }
         // Tap positions belong to the untransformed viewport, just like
         // Android detectTapGestures. Subtracting a global bounding-box origin
@@ -2433,12 +2484,12 @@ private struct PreviewImage: View {
             }
         }
         .task(id: file.id) {
-            thumbnail = nil
+            thumbnail = initialThumbnail
             remoteThumbnailUnavailable = false
             // Android publishes a cached thumbnail immediately, then waits
             // for the overlay transition to settle before opening the FHD
             // channel. This avoids competing with the opening animation.
-            if let thumb = session.memoryThumbnailImage(file: file) {
+            if let thumb = initialThumbnail ?? session.memoryThumbnailImage(file: file) {
                 thumbnail = thumb
                 onDisplayImage(thumb)
             }
@@ -2565,57 +2616,6 @@ let photoPreviewDoubleTapZoom: CGFloat = 2.5
 private let photoPreviewRotationAnimation =
     Animation.timingCurve(0.4, 0, 0.2, 1, duration: photoPreviewRotationDuration)
 
-/// Continuously recomputed rotation fit used by Android's graphicsLayer.
-/// Calculating it from the interpolated angle keeps portrait and landscape
-/// photos inside the viewport for every frame instead of resizing only after
-/// the quarter turn has finished.
-func photoPreviewRotationFitScale(
-    imageSize: CGSize?,
-    viewportSize: CGSize,
-    rotationDegrees: Double
-) -> CGFloat {
-    guard let imageSize,
-          imageSize.width > 0, imageSize.height > 0,
-          viewportSize.width > 0, viewportSize.height > 0 else { return 1 }
-    let rawAspect = imageSize.width / imageSize.height
-    let viewportAspect = viewportSize.width / viewportSize.height
-    let baseWidth = rawAspect > viewportAspect
-        ? viewportSize.width
-        : viewportSize.height * rawAspect
-    let baseHeight = rawAspect > viewportAspect
-        ? viewportSize.width / rawAspect
-        : viewportSize.height
-    let radians = rotationDegrees * .pi / 180
-    let absoluteCosine = abs(cos(radians))
-    let absoluteSine = abs(sin(radians))
-    let rotatedWidth = baseWidth * absoluteCosine + baseHeight * absoluteSine
-    let rotatedHeight = baseWidth * absoluteSine + baseHeight * absoluteCosine
-    guard rotatedWidth > 0, rotatedHeight > 0 else { return 1 }
-    let fit = min(viewportSize.width / rotatedWidth, viewportSize.height / rotatedHeight)
-    return fit
-}
-
-/// Axis-aligned size of the fitted image at the current quarter-turn target.
-/// Android uses this size when constraining pan so no empty space can be pulled
-/// into the viewport after zooming.
-func photoPreviewDisplaySize(
-    imageSize: CGSize?,
-    viewportSize: CGSize,
-    rotationDegrees: Double
-) -> CGSize {
-    guard let imageSize,
-          imageSize.width > 0, imageSize.height > 0,
-          viewportSize.width > 0, viewportSize.height > 0 else { return viewportSize }
-    let rawAspect = imageSize.width / imageSize.height
-    let quarterTurns = Int((rotationDegrees / 90).rounded())
-    let orientedAspect = abs(quarterTurns) % 2 == 1 ? 1 / rawAspect : rawAspect
-    let viewportAspect = viewportSize.width / viewportSize.height
-    if orientedAspect > viewportAspect {
-        return CGSize(width: viewportSize.width, height: viewportSize.width / orientedAspect)
-    }
-    return CGSize(width: viewportSize.height * orientedAspect, height: viewportSize.height)
-}
-
 struct PhotoPreviewCropViewport: Equatable {
     let size: CGSize
     let scale: CGFloat
@@ -2632,152 +2632,6 @@ struct PhotoPreviewCropViewport: Equatable {
             width: imageSize.width, height: imageSize.height)
         return try preview.visibleBounds(viewport: CGRect(origin: .zero, size: size), imageFrame: frame)
     }
-}
-
-struct PhotoPreviewPlacement {
-    let scale: CGFloat
-    let size: CGSize
-    let center: CGPoint
-}
-
-/// Final Android ZoomablePreviewViewport: width inset, information clearance,
-/// portrait lift and rotation all contribute to the actual resting geometry.
-func photoPreviewPlacement(imageSize: CGSize?, viewportSize: CGSize,
-                           rotationDegrees: Double, infoBottom: CGFloat? = nil,
-                           targetRotationDegrees: Double? = nil, cropTop: CGFloat = 0,
-                           cropProgress: CGFloat = 0) -> PhotoPreviewPlacement {
-    let center = CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
-    guard let imageSize, imageSize.width > 0, imageSize.height > 0,
-          viewportSize.width > 0, viewportSize.height > 0 else {
-        return PhotoPreviewPlacement(scale: 1, size: viewportSize, center: center)
-    }
-    let aspect = imageSize.width / imageSize.height
-    let baseWidth = min(viewportSize.width, viewportSize.height * aspect)
-    let baseHeight = baseWidth / aspect
-    let radians = rotationDegrees * .pi / 180
-    let width = baseWidth * abs(cos(radians)) + baseHeight * abs(sin(radians))
-    let height = baseWidth * abs(sin(radians)) + baseHeight * abs(cos(radians))
-    let orientedAspect = abs(Int(((targetRotationDegrees ?? rotationDegrees) / 90).rounded())) % 2 == 1 ? 1 / aspect : aspect
-    let inset: CGFloat = infoBottom == nil ? 0 : (orientedAspect < 1 ? 40 : 24)
-    let fit = min(max(1, viewportSize.width - inset) / width, viewportSize.height / height)
-    guard let infoBottom else {
-        return PhotoPreviewPlacement(scale: fit, size: CGSize(width: width * fit, height: height * fit), center: center)
-    }
-    let layout = previewPhotoLayout(viewportHeight: viewportSize.height, imageHeight: height * fit,
-                                    infoBottom: infoBottom, cropTop: cropTop + (orientedAspect > 1 ? 60 : 0),
-                                    cropExtraBottom: 84, progress: cropProgress, cropTopAlignment: orientedAspect > 1 ? 0.5 : 1)
-    let lift: CGFloat = orientedAspect < 1 ? min(12 * (1 - cropProgress), max(0, layout.centerY - height * fit * layout.scale / 2 - infoBottom)) : 0
-    let scale = fit * layout.scale
-    return PhotoPreviewPlacement(scale: scale, size: CGSize(width: width * scale, height: height * scale),
-                                 center: CGPoint(x: center.x, y: layout.centerY - lift))
-}
-
-/// Android PreviewGestureGeometry.kt. Coordinates are relative to the resting
-/// image center; applying the incremental factor preserves the touched pixel.
-func previewPinchOffset(offset: CGSize, centroidFromCenter: CGPoint,
-                        factor: CGFloat, pan: CGSize) -> CGSize {
-    CGSize(width: offset.width * factor + centroidFromCenter.x * (1 - factor) + pan.width,
-           height: offset.height * factor + centroidFromCenter.y * (1 - factor) + pan.height)
-}
-
-func clampPreviewPan(scale: CGFloat, offset: CGSize, image: CGSize,
-                     viewport: CGSize, center: CGPoint) -> CGSize {
-    guard scale > 1 else { return .zero }
-    func axis(_ value: CGFloat, extent: CGFloat, container: CGFloat, origin: CGFloat) -> CGFloat {
-        guard extent > container else { return 0 }
-        let minimum = min(0, container - origin - extent / 2)
-        let maximum = max(0, extent / 2 - origin)
-        return min(max(value, minimum), maximum)
-    }
-    return CGSize(width: axis(offset.width, extent: image.width * scale,
-                              container: viewport.width, origin: center.x),
-                  height: axis(offset.height, extent: image.height * scale,
-                               container: viewport.height, origin: center.y))
-}
-
-struct PreviewPhotoLayout: Equatable {
-    let scale: CGFloat
-    let centerY: CGFloat
-}
-
-func previewPhotoLayout(viewportHeight: CGFloat, imageHeight: CGFloat, infoBottom: CGFloat,
-                        cropTop: CGFloat, cropExtraBottom: CGFloat, progress: CGFloat,
-                        cropTopAlignment: CGFloat = 1) -> PreviewPhotoLayout {
-    let height = max(viewportHeight, 1)
-    let normalTop = min(max(infoBottom, 0), height - 1)
-    let bottom = max(height - cropExtraBottom, 1)
-    let top = min(max(cropTop, 0), bottom - 1)
-    let normalScale = min(1, (height - normalTop) / max(imageHeight, 1))
-    let cropScale = min(1, (bottom - top) / max(imageHeight, 1))
-    let p = min(max(progress, 0), 1)
-    let normalCenter = (normalTop + height) / 2
-    let halfHeight = imageHeight * cropScale / 2
-    let upperCenter = top + halfHeight
-    let cropCenter = min(max(normalCenter + (upperCenter - normalCenter) *
-                             min(max(cropTopAlignment, 0), 1), upperCenter),
-                         max(upperCenter, bottom - halfHeight))
-    return PreviewPhotoLayout(scale: normalScale + (cropScale - normalScale) * p,
-                              centerY: normalCenter + (cropCenter - normalCenter) * p)
-}
-
-func photoPreviewClampedOffset(
-    _ proposed: CGSize,
-    scale: CGFloat,
-    imageSize: CGSize?,
-    viewportSize: CGSize,
-    rotationDegrees: Double,
-    infoBottom: CGFloat? = nil
-) -> CGSize {
-    let placement = photoPreviewPlacement(imageSize: imageSize, viewportSize: viewportSize,
-                                          rotationDegrees: rotationDegrees, infoBottom: infoBottom)
-    return clampPreviewPan(scale: scale, offset: proposed, image: placement.size,
-                           viewport: viewportSize, center: placement.center)
-}
-
-func photoPreviewDoubleTapOffset(
-    location: CGPoint,
-    scale: CGFloat,
-    imageSize: CGSize?,
-    viewportSize: CGSize,
-    rotationDegrees: Double,
-    infoBottom: CGFloat? = nil
-) -> CGSize {
-    let placement = photoPreviewPlacement(imageSize: imageSize, viewportSize: viewportSize,
-                                          rotationDegrees: rotationDegrees, infoBottom: infoBottom)
-    return photoPreviewClampedOffset(
-        CGSize(
-            width: (location.x - placement.center.x) * (1 - scale),
-            height: (location.y - placement.center.y) * (1 - scale)
-        ),
-        scale: scale,
-        imageSize: imageSize,
-        viewportSize: viewportSize,
-        rotationDegrees: rotationDegrees, infoBottom: infoBottom
-    )
-}
-
-func photoPreviewMaximumZoom(
-    imageSize: CGSize?,
-    viewportSize: CGSize,
-    rotationDegrees: Double,
-    infoBottom: CGFloat? = nil
-) -> CGFloat {
-    guard let imageSize,
-          imageSize.width > 0, imageSize.height > 0,
-          viewportSize.width > 0, viewportSize.height > 0 else { return 4 }
-    let rawAspect = imageSize.width / imageSize.height
-    let viewportAspect = viewportSize.width / viewportSize.height
-    let baseWidth = rawAspect > viewportAspect
-        ? viewportSize.width
-        : viewportSize.height * rawAspect
-    let baseHeight = rawAspect > viewportAspect
-        ? viewportSize.width / rawAspect
-        : viewportSize.height
-    let fit = max(0.01, photoPreviewPlacement(imageSize: imageSize, viewportSize: viewportSize,
-                                             rotationDegrees: rotationDegrees,
-                                             infoBottom: infoBottom).scale)
-    let oneToOne = max(imageSize.width / baseWidth, imageSize.height / baseHeight) / fit
-    return max(4, oneToOne)
 }
 
 @preconcurrency
@@ -2857,6 +2711,7 @@ private struct PreviewEffectsButtonAnchorKey: PreferenceKey {
 @MainActor
 final class PhotoPreviewGeometrySnapshot {
     var viewport: PhotoPreviewCropViewport?
+    var placement: PhotoPreviewImagePlacement?
 }
 
 @MainActor

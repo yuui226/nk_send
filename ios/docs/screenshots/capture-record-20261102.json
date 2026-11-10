@@ -1,0 +1,188 @@
+{
+  "date": "2026-11-02",
+  "status": "partial-current-release-references",
+  "readyForUploadCount": 0,
+  "build": {
+    "version": "2.03",
+    "build": "76",
+    "sdk": "iphonesimulator27.2",
+    "minimumOS": "16.0",
+    "binarySHA256": "2398f2dc775b41f799fe05f239239ab5c6f05737a4e83cf04ffd1959e6e943fa",
+    "codeSigningAllowed": false,
+    "strictAudit": {
+      "bundle": "/private/tmp/ztransfer-prepay-release-20261102/Build/Products/Release-iphonesimulator/ZTransfer.app",
+      "version": "2.03",
+      "build": "76",
+      "minimumOS": "16.0",
+      "deviceFamilies": [
+        1,
+        2
+      ],
+      "packagingChecksPassed": true,
+      "errors": [],
+      "removedCameraPresetsAndBrandLogosAbsent": true,
+      "removedCameraPresetAndBrandLogoResources": [],
+      "validationMode": "packaging-and-submission-configuration",
+      "selectedChecksPassed": true,
+      "legalURLs": {
+        "ZTransferPrivacyPolicyURL": "https://www.ztransfer.top/ios/privacy/",
+        "ZTransferTermsOfUseURL": "https://www.ztransfer.top/ios/terms/"
+      },
+      "legalURLConfigurationPassed": true,
+      "legalURLConfigurationErrors": [],
+      "notCovered": [
+        "Code signing, device Archive validation and App Store upload",
+        "Live legal URLs, policy content, in-app link reachability and all submission metadata",
+        "Runtime behavior, permissions, hardware, UI and real Apple sandbox",
+        "Complete data-flow, encryption classification and intellectual-property review"
+      ]
+    }
+  },
+  "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+  "localeSelection": "App Settings language wheel selected 简体中文; appearance light, content size large",
+  "launchArguments": [],
+  "launchEnvironment": {},
+  "appStateInjection": false,
+  "distinctUITestMethods": 1,
+  "deviceExecutions": 3,
+  "passedExecutions": 3,
+  "testIdentifier": "ReleaseReferenceCapture/testCurrentReleaseHomeAndSettings()",
+  "scope": "Home and Settings only. Does not validate camera hardware, public photo permissions, full store scenes, all iPad window sizes, or Apple submission. Separate from the 424 model/component/StoreKit test count. Original image pixels unchanged.",
+  "runner": {
+    "source": "../evidence/prepayment-20261102/reference-capture/ReleaseReferenceCapture.swift",
+    "sha256": "d42e4214cda697483dc7c9fe9b2d196e2b93086733b882584e15323b2329a0a4",
+    "orchestrator": "../evidence/prepayment-20261102/reference-capture/capture_one.py",
+    "orchestratorSHA256": "c65c435439e71fda01f1e920a07fa5c19a3723faf6393a76ae07762e94538cea"
+  },
+  "runs": [
+    {
+      "id": "E36D39A1-3682-4D60-8D8D-38B1EC8F8C17",
+      "group": "iphone-medium",
+      "type": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+      "status": "removed",
+      "testExitCode": 0,
+      "attachmentExport": 0,
+      "shutdownExitCode": 0,
+      "deleteExitCode": 0
+    },
+    {
+      "id": "372EA36E-28D7-4754-AFB3-B3B2AEE6F99A",
+      "group": "iphone-large",
+      "type": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",
+      "status": "removed",
+      "testExitCode": 0,
+      "attachmentExport": 0,
+      "shutdownExitCode": 0,
+      "deleteExitCode": 0
+    },
+    {
+      "id": "24B58D40-0F5F-4B1D-AC9E-5D294B304579",
+      "group": "ipad-13",
+      "type": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB",
+      "status": "removed",
+      "testExitCode": 0,
+      "attachmentExport": 0,
+      "shutdownExitCode": 0,
+      "deleteExitCode": 0
+    }
+  ],
+  "temporarySimulatorDeletionVerified": true,
+  "images": [
+    {
+      "file": "current-20261102/zh-Hans/iphone-medium/settings-reference.png",
+      "sourceAttachment": "ios/docs/evidence/prepayment-20261102/reference-capture/iphone-medium-images/EE3D68D9-D53C-4AF2-BF71-1CDD7B22B312.png",
+      "sha256": "cdd1d74f705ebaade8e6a005c7d47f0aa0d5a76184b48a61fde0945038676f98",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "group": "iphone-medium",
+      "scene": "settings-reference",
+      "capturedAtUnix": 1793605510.203,
+      "status": "candidate",
+      "allowedForUpload": false,
+      "visuallyReviewed": true,
+      "review": "Actual Release, no debug badge or simulated camera; visible labels and controls readable and inside the viewport. Settings legal row visible; external links not opened in this run."
+    },
+    {
+      "file": "current-20261102/zh-Hans/iphone-medium/01-connect.png",
+      "sourceAttachment": "ios/docs/evidence/prepayment-20261102/reference-capture/iphone-medium-images/44E8994E-9602-45EC-B7C1-00258A4DF77B.png",
+      "sha256": "6b6c5581ab67365246f26a2c301e19387918c8e83d0b6d5b8291abb3fa795fc3",
+      "width": 1206,
+      "height": 2622,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "group": "iphone-medium",
+      "scene": "01-connect",
+      "capturedAtUnix": 1793605507.243,
+      "status": "candidate",
+      "allowedForUpload": false,
+      "visuallyReviewed": true,
+      "review": "Actual Release, no debug badge or simulated camera; visible labels and controls readable and inside the viewport. Settings legal row visible; external links not opened in this run."
+    },
+    {
+      "file": "current-20261102/zh-Hans/iphone-large/settings-reference.png",
+      "sourceAttachment": "ios/docs/evidence/prepayment-20261102/reference-capture/iphone-large-images/B646D9F3-8F90-4EAE-802E-76E472D20AAE.png",
+      "sha256": "07de479e82eec9c4161db084f81212cf71bbfc283516d770c03afce49207161c",
+      "width": 1320,
+      "height": 2868,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "group": "iphone-large",
+      "scene": "settings-reference",
+      "capturedAtUnix": 1793605652.515,
+      "status": "candidate",
+      "allowedForUpload": false,
+      "visuallyReviewed": true,
+      "review": "Actual Release, no debug badge or simulated camera; visible labels and controls readable and inside the viewport. Settings legal row visible; external links not opened in this run."
+    },
+    {
+      "file": "current-20261102/zh-Hans/iphone-large/01-connect.png",
+      "sourceAttachment": "ios/docs/evidence/prepayment-20261102/reference-capture/iphone-large-images/0E16178C-DFF4-4339-A5A8-064B90523CBE.png",
+      "sha256": "83b4c0794525496a7b60db55a601c031776dfa8a03d26672928fe1b2ae120d9a",
+      "width": 1320,
+      "height": 2868,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "group": "iphone-large",
+      "scene": "01-connect",
+      "capturedAtUnix": 1793605649.397,
+      "status": "candidate",
+      "allowedForUpload": false,
+      "visuallyReviewed": true,
+      "review": "Actual Release, no debug badge or simulated camera; visible labels and controls readable and inside the viewport. Settings legal row visible; external links not opened in this run."
+    },
+    {
+      "file": "current-20261102/zh-Hans/ipad-13/settings-reference.png",
+      "sourceAttachment": "ios/docs/evidence/prepayment-20261102/reference-capture/ipad-13-images/CF69A193-623E-4F91-9EF1-60342693D9A4.png",
+      "sha256": "2579a3005f619b05ac719ae5b112baaee45a1e342e89c9c7e8ca0d14833574e9",
+      "width": 2064,
+      "height": 2752,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "group": "ipad-13",
+      "scene": "settings-reference",
+      "capturedAtUnix": 1793605829.367,
+      "status": "candidate",
+      "allowedForUpload": false,
+      "visuallyReviewed": true,
+      "review": "Actual Release, no debug badge or simulated camera; visible labels and controls readable and inside the viewport. Settings legal row visible; external links not opened in this run."
+    },
+    {
+      "file": "current-20261102/zh-Hans/ipad-13/01-connect.png",
+      "sourceAttachment": "ios/docs/evidence/prepayment-20261102/reference-capture/ipad-13-images/6444C76C-B01C-4B14-9239-7414678258F0.png",
+      "sha256": "44ff2050c37c8ec7db9093112224e4909ec338168ced088b0bf9c2fafb1bf4bd",
+      "width": 2064,
+      "height": 2752,
+      "pngColorType": 2,
+      "hasAlpha": false,
+      "group": "ipad-13",
+      "scene": "01-connect",
+      "capturedAtUnix": 1793605825.985,
+      "status": "candidate",
+      "allowedForUpload": false,
+      "visuallyReviewed": true,
+      "review": "Actual Release, no debug badge or simulated camera; visible labels and controls readable and inside the viewport. Settings legal row visible; external links not opened in this run."
+    }
+  ]
+}

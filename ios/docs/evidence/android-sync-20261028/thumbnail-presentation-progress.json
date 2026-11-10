@@ -1,0 +1,150 @@
+{
+  "task": "N23; N22 late-cache presentation integration",
+  "status": "in_progress",
+  "android_revision": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "ledger_completed": 17,
+  "ledger_total": 26,
+  "basis": [
+    "FileListScreen: firstBatchEnterAlpha, theme outlines, rendered-three stack content key, 180/160 ms AnimatedContent, fixed stack placement, collapsedDates short circuit, direct member grouping",
+    "ThumbnailImagePresentation.kt and Android instrumentation: cache mounts, subscribe before initial read, local-only ready notifications, load-key cancellation separate from ready image fade",
+    "BurstStackImage.kt: decoded bitmap reuse, round crop, antialiased rotated edges",
+    "CameraViewModel: pending-object empty guard, indexed current metadata, stable rating-ready observation"
+  ],
+  "changes": [
+    "Current-handle catalog index with bulk rebuild/incremental upsert and independent recovery copy; worker no longer scans all files per photo.",
+    "Single-pass visible burst membership shared by list/preview; no intermediate tuple arrays.",
+    "No day-set traversal when no dates are collapsed; thumbnail-ready rating count no longer publishes the whole list, while explicitly updating rating scan input.",
+    "Repository pending resolver already uses pending-map/known-handle set, no full-album pending-empty scan; deadline selection is lazy; incoming logical identity computed once.",
+    "Ready-event loader shared by USB/AP/STA; STA retains cache-only cell policy; actual store late publication fills an existing cell with local-only read.",
+    "One 180 ms first-nonempty batch entrance; cached images are immediate; newly loaded images fade for 180 ms using Android motion clock; cancellation does not clear ready image.",
+    "Decoded UIImage reused by identity, rounded native crop/edge antialiasing, no duplicate stack clip or rasterized bitmap; returning ready view does not keep partial alpha.",
+    "Stack rendered-three identity transition uses 180/160 ms, preserves interrupted alpha/velocity, does not replay on tail changes, refreshes alias payload without transition.",
+    "Android stack angles, fixed offsets, bottom vignette and theme outline parameters; liquid glass keeps the approved glass styling family."
+  ],
+  "native_rounds": [
+    {
+      "round": 1,
+      "executed": 8,
+      "assertion_failures": 0,
+      "exit_code": 0,
+      "note": "Initial loader, catalog, fade cases.",
+      "log": "thumbnail-presentation/native-r1.log"
+    },
+    {
+      "round": 2,
+      "executed": 49,
+      "assertion_failures": 0,
+      "exit_code": 0,
+      "note": "38 existing retry/store/queue methods plus 11 presentation methods.",
+      "log": "thumbnail-presentation/native-r2.log"
+    },
+    {
+      "round": 3,
+      "executed": 11,
+      "assertion_failures": 0,
+      "exit_code": 0,
+      "note": "Rechecked catalog bulk-index construction and duplicate identity after change.",
+      "log": "thumbnail-presentation/native-r3.log"
+    },
+    {
+      "round": 4,
+      "executed": 0,
+      "assertion_failures": 0,
+      "exit_code": 1,
+      "note": "Harness compile failed: full PhotoCatalog needs RemoteReviewPhoto; no tests executed.",
+      "log": "thumbnail-presentation/native-r4.log"
+    },
+    {
+      "round": 5,
+      "executed": 0,
+      "assertion_failures": 0,
+      "exit_code": 1,
+      "note": "Harness compile failed: RemoteReviewCatalog needs selectNewestPhotoHeadIndex; no tests executed.",
+      "log": "thumbnail-presentation/native-r5.log"
+    },
+    {
+      "round": 6,
+      "executed": 15,
+      "assertion_failures": 0,
+      "exit_code": 0,
+      "note": "Final presentation tests, including four real stack-motion cases; exact PublishedPhotoIdentity declaration extracted without unrelated owners.",
+      "log": "thumbnail-presentation/native-r6.log"
+    }
+  ],
+  "native_unique_methods_covered": 53,
+  "native_count_explanation": "38 unchanged retry/cache/queue methods passed in round 2 plus final 15 presentation methods in round 6; not 53 in a single final run. Native harness copies production sources; PublishedPhotoIdentity and previously recorded date-range dependencies are verbatim declarations, not substitutes. UIKit conditional tests are excluded on macOS.",
+  "ios_builds": [
+    {
+      "round": 1,
+      "success": true,
+      "executed_methods": 0,
+      "log": "thumbnail-presentation/ios-build-r1.log.gz",
+      "uncompressed_sha256": "24357d240b02f03398722db696e0571d374c562dc49ab7f9d48566c96be7a965",
+      "note": "Compile only; new test file was first included after xcodegen in round 4."
+    },
+    {
+      "round": 2,
+      "success": false,
+      "executed_methods": 0,
+      "log": "thumbnail-presentation/ios-build-r2.log.gz",
+      "uncompressed_sha256": "102aa5b44df44a34689792884572c709a91eabff63461d1e29e6e0a880778722",
+      "note": "PrefKey compile error fixed to existing skin_preset key."
+    },
+    {
+      "round": 3,
+      "success": true,
+      "executed_methods": 0,
+      "log": "thumbnail-presentation/ios-build-r3.log.gz",
+      "uncompressed_sha256": "33c4a028b9549c099f7d034c4fcdbe488285aa7376e9060001b0a0245682d31f",
+      "note": "Compile only; new test file was first included after xcodegen in round 4."
+    },
+    {
+      "round": 4,
+      "success": true,
+      "executed_methods": 0,
+      "log": "thumbnail-presentation/ios-build-r4.log.gz",
+      "uncompressed_sha256": "757ba49ef76cce4242c4a2308126cac0c009e3a0920bf47264e68a520200221b",
+      "note": "Compile only; new test file was first included after xcodegen in round 4."
+    },
+    {
+      "round": 5,
+      "success": true,
+      "executed_methods": 0,
+      "log": "thumbnail-presentation/ios-build-r5.log.gz",
+      "uncompressed_sha256": "43c63c1f0960f4cc1ecd9a28f09a451dad28fabd54d907b1517e5841d4c049bd",
+      "note": "Final sources and all 18 presentation methods compiled for arm64/x86_64 simulator; no execution."
+    }
+  ],
+  "not_yet_verified": [
+    "Three UIKit presentation methods compiled but not executed (bitmap opacity/image identity, return from partial fade, shared entrance clock).",
+    "Actual SwiftUI cell mounts/scroll/collapse/stack deletion pixels, rotated edge antialiasing and composition counts.",
+    "PhotoListViewModel live owner recovery, cancellation and end-to-end new JPG fill regressions.",
+    "Actual iOS frame time and thermal behavior; macOS core tests are not FPS evidence."
+  ],
+  "environment": "Existing session 24948 / xcodebuild -runFirstLaunch PID 95870 still awaits macOS authorization; CoreSimulator 1174.9.2 vs required 1174.21.0. No second installer or simulator started. No phone install, commit, push.",
+  "source_sha256": {
+    "ios/ZTransfer/Domain/PhotoFileCatalog.swift": "f03b1b8f931c26203d165daaf99f1b3cd5f60ca3e43bb0c0cf2fb94599795d92",
+    "ios/ZTransfer/Domain/PhotoThumbnailPresentation.swift": "7ead78c8a618373e684d037c3857f4b2423cf5311c2c23b545e4708ae7279d18",
+    "ios/ZTransfer/Domain/PhotoListViewModel.swift": "9ba2987c64764dd58503357b9cf4618c32f24e8a5eff89b368df2a50ea391832",
+    "ios/ZTransfer/Domain/PhotoCatalog.swift": "aa4dce79b50519714cdd684965d5f2cf778d56df37f5e2ba523e86f186209c3c",
+    "ios/ZTransfer/Domain/CameraRepository.swift": "a7f39eef025a4268d39ca9c78805db78e3968804339eb972a60728a0f91811a7",
+    "ios/ZTransfer/Domain/CameraSession.swift": "8d6d664f55d3fa92c9dd673b70a39f4399556d22f6aef4ea40c30dcf70a86966",
+    "ios/ZTransfer/Domain/PhotoThumbnailStore.swift": "2741134ed518dc0458ed58f28e4359d3e738208d27130c22740bff22b1afd5c4",
+    "ios/ZTransfer/Domain/PhotoThumbnailDiskCache.swift": "37f661091594583f2fa1951df565153c2b2853005caa978b9f8248da50ca4b42",
+    "ios/ZTransfer/UI/PhotoListView.swift": "fd5f27855e5b3fd49efdb1f86a8dbdf710d77aebbf7719425f14066dc04d41cb",
+    "ios/ZTransfer/UI/Components/PhotoThumbnailImage.swift": "c26450e6436541885c264efcde525f62c9c728d386a1a30e59c40409c0c7477c",
+    "ios/ZTransfer/UI/Components/PhotoThumbnailStackTransition.swift": "d8aad861d7edc146e64315c38ce2d44ced43b1aa1e4766c252341958f9d870b9",
+    "ios/ZTransfer/UI/Components/RemoteToolModeCrossfade.swift": "ac1acb48a0c0c88cd68c43ac38c456e960d5c81c7da83450d87c676f49a8568e",
+    "ios/ZTransferTests/PhotoThumbnailPresentationTests.swift": "4379bb30dfc4c9dd0517835c1e17c4842a2f02307dbef42e5daa193b1b05c3c3",
+    "ios/ZTransfer/DesignSystem/ZTransferScalarAnimation.swift": "e67472d6b26a8443086202579a37a1f53dc539fed5f07c0fe0e6fc58c7e87640",
+    "ios/ZTransfer/DesignSystem/ZTransferAndroidMotion.swift": "4487d44e8132d41c8be9adf3f3fece0a9697aff6233a1cc1cc0c84d4fccf7d48",
+    "ios/ZTransfer/DesignSystem/ZTransferAndroidMath.swift": "c4f7843eea31f171b80548ba1709b5112b487343c7e380ec89588d6271ea9f65"
+  },
+  "native_inputs": "thumbnail-presentation/native-inputs.json",
+  "final_verification": {
+    "status": "complete",
+    "date": "2026-10-31",
+    "evidence": "resumed-runtime/final-verification.json",
+    "note": "Supersedes historical runtime blockers and pending-runtime fields above; original per-run results remain unchanged."
+  }
+}

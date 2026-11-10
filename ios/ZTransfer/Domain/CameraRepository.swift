@@ -170,6 +170,7 @@ enum CameraRepositoryError: Error, Equatable, Sendable {
 /// foreground preview interrupts metadata reads; only handles already
 /// accepted by the list are marked processed.
 struct PhotoScanSnapshot: Sendable {
+    let sessionID: UUID
     var catalogRevision: UInt64 = 0
     let storageIDs: [UInt32]
     let handleOrders: [(storageID: UInt32, handles: [UInt32])]
@@ -177,6 +178,7 @@ struct PhotoScanSnapshot: Sendable {
     let handleQueriesSucceeded: Bool
     var filterStorageIDs: [UInt32] = []
     var directStorageIDsByHandle: [UInt32: Set<UInt32>] = [:]
+    var addedHandles: Set<UInt32> = []
 
     var remainingHandles: [(storageID: UInt32, handles: [UInt32])] {
         handleOrders.map { ($0.storageID, $0.handles.filter { !processedHandles.contains($0) }) }
@@ -194,17 +196,6 @@ struct PhotoScanResult: Sendable {
     /// scan reaches an older shooting day. The next wider scope resumes it.
     var stoppedAtLoadingRange: Bool = false
     var loadingRangeAtStop: PhotoLoadingRange? = nil
-}
-
-/// Data-only recovery state. Protocol tasks, ratings and scan cursors belong
-/// to one connection and must never cross this boundary.
-struct STACatalogRecovery: Sendable {
-    fileprivate let responderGUID: String
-    fileprivate let files: [UInt32: CameraFile]
-    fileprivate let indexedFiles: [UInt32: CameraFile]
-    fileprivate let order: [UInt32]
-    fileprivate let storageIDs: [UInt32]
-    fileprivate let knownHandles: Set<UInt32>
 }
 
 struct STADirectStorageLayout: Equatable, Sendable {
@@ -337,6 +328,7 @@ actor CameraRepository {
     private var subjectTrackingActive = false
     private var subjectTrackingSupported: Bool?
     private let focusGate = CameraIOGate()
+    nonisolated let catalogSessionID = UUID()
     private let metadataSessionIdentity = UUID().uuidString
     private var cachedDeviceInfo: PTPDeviceInfo?
     private var pictureControlProtocol: NikonPictureControlProtocol?
@@ -829,6 +821,26 @@ actor CameraRepository {
         guard response == PTPConstants.responseOK else { throw PTPSessionError.responseCode(response) }
     }
 
+    func capturePhotoIfCurrent(_ permission: PTPCommandPermission) async throws -> Bool {
+        let response = try await RemoteDelayedCapture.execute(permission: permission) { [self] in
+            guard permission.isCurrent else { return nil }
+            // Do not cancel a wire response; every queue checks the shared
+            // permission again before dispatching the next shutter command.
+            let request = Task { [self] in
+                try await focusGate.withCommand { [self] in
+                    guard permission.isCurrent else { return nil as UInt16? }
+                    return try await ioGate.withInteractive { [self] in
+                        guard permission.isCurrent else { return nil }
+                        return try await session.executeResponseIfCurrent(operation: PTPConstants.captureInMedia,
+                            parameters: [.max, 0], permission: permission)?.code
+                    }
+                }
+            }
+            return try await request.value
+        }
+        return response == PTPConstants.responseOK
+    }
+
     /// Prepare USB movie control without cycling the ImageCaptureCore session.
     /// Android can reopen its raw USB handle, but ZTransfer has no proactive
     /// disconnect action on iOS; draining Nikon's compatibility event on the
@@ -1145,12 +1157,12 @@ actor CameraRepository {
         return info
     }
 
-    /// Stable per-body cache identity, matching Android's serial -> transport
-    /// GUID -> model-scoped fallback. It must never disable the thumbnail
-    /// store merely because DeviceInfo omitted a serial number.
+    /// Identified bodies share thumbnails across transports. Without a serial
+    /// or physical transport ID, a model name cannot prove camera ownership.
     func thumbnailCacheIdentity() -> String {
-        cameraThumbnailCacheIdentity(deviceInfo: cachedDeviceInfo,
-                                     transportIdentifier: transportCameraIdentifier)
+        let identity = cameraThumbnailCacheIdentity(deviceInfo: cachedDeviceInfo,
+                                                   transportIdentifier: transportCameraIdentifier)
+        return PhotoMetadataCameraIdentity(cacheIdentity: identity, session: metadataSessionIdentity).camera
     }
 
     func photoMetadataIdentity() -> PhotoMetadataCameraIdentity {
@@ -1324,34 +1336,6 @@ actor CameraRepository {
     /// from the number of published rows.
     func scanSnapshotForResume() -> PhotoScanSnapshot? { scanSnapshot }
 
-    func staCatalogRecovery() -> STACatalogRecovery? {
-        guard staAlbum != nil,
-              let guid = STAProfileStore.normalizeGUID(transportCameraIdentifier),
-              !catalogOrder.isEmpty || catalogReady else { return nil }
-        return STACatalogRecovery(responderGUID: guid, files: catalogFiles,
-            indexedFiles: indexedCatalogFiles, order: catalogOrder,
-            storageIDs: catalogStorageIDs, knownHandles: knownHandles)
-    }
-
-    /// Install only before a new same-body STA session begins scanning.
-    /// The next scan must re-enumerate handles, not reuse handshake results.
-    @discardableResult
-    func restoreSTACatalog(_ recovery: STACatalogRecovery) -> Bool {
-        guard staAlbum != nil, activeCatalogScans == 0, catalogOrder.isEmpty,
-              knownHandles.isEmpty, !catalogReady,
-              STAProfileStore.normalizeGUID(transportCameraIdentifier) == recovery.responderGUID else { return false }
-        catalogFiles = recovery.files
-        indexedCatalogFiles = recovery.indexedFiles
-        catalogOrder = recovery.order
-        catalogStorageIDs = recovery.storageIDs
-        knownHandles = recovery.knownHandles
-        prefetchedStorageIDs = nil
-        prefetchedHandles = nil
-        scanSnapshot = nil
-        invalidatePhotoRatings()
-        resetRatingCapabilityState()
-        return true
-    }
     func backgroundThumbnailFillAllowed() -> Bool {
         activeForegroundReads == 0 && !remoteActive && !fhdActive && !transfersBusy && !effectPreviewActive
     }
@@ -1569,8 +1553,41 @@ actor CameraRepository {
             groups.append(ids.reversed().filter { seen.insert($0).inserted })
             for id in ids where storageByHandle[id] == nil { storageByHandle[id] = store }
         }
+        // A card moved between bodies can contain directory/sequence blocks
+        // that are not chronological. The camera's compact date index avoids
+        // reading every original (or every ObjectInfo) before the first page.
+        // Refresh per opening: the monitor can have produced new objects since
+        // the album's index was populated. Never populate the review from it;
+        // only the freshly enumerated handles are eligible.
+        let cached = indexedCatalogFiles.merging(catalogFiles) { _, published in published }
+        var dates = cached.compactMapValues(\.captureDate)
+        if groups.contains(where: { !$0.isEmpty }),
+           cachedDeviceInfo?.operations.contains(PTPConstants.getObjectsMetadata) == true {
+            for store in stores {
+                do {
+                    let result = try await reviewCommand(PTPConstants.getObjectsMetadata, [store, 0, 0])
+                    dates.merge(STAMediaMetadata.indexedDates(result.data)) { _, new in new }
+                } catch PTPSessionError.responseCode {
+                    // Optional metadata can be unavailable while live view is
+                    // running. Preserve Android's lazy handle-order fallback.
+                }
+            }
+        }
+        groups = groups.flatMap { handles -> [[UInt32]] in
+            // A partial list may already know the latest capture while older
+            // unvisited objects have no cached date. Keep two merge streams:
+            // read an unknown head's real metadata before comparing it with
+            // dated captures, rather than placing every unknown ahead of them.
+            let dated = handles.filter { dates[$0] != nil }
+            let unknown = handles.filter { dates[$0] == nil }
+            return [newestReviewHandles(dated, captureDates: dates), unknown].filter { !$0.isEmpty }
+        }
+        CameraRuntimeDiagnostics.record(.review,
+            "camera=\(cachedDeviceInfo?.model ?? "unknown") sta=\(staAlbum != nil) stores=\(stores) handles=\(groups.map(\.count)) dated=\(groups.map { $0.filter { dates[$0] != nil }.count })\n" +
+            groups.enumerated().map { slot, ids in
+                "slot=\(slot) head=" + ids.prefix(12).map { "\($0):\(dates[$0] ?? "unknown")" }.joined(separator: ",")
+            }.joined(separator: "\n"))
         let memberships = storageByHandle
-        let cached = catalogFiles
         return RemoteReviewCatalog(handlesByStorage: groups) { [self] handle in
             if let file = cached[handle] { return file }
             return try await readReviewFile(handle, storage: memberships[handle] ?? .max)
@@ -1762,17 +1779,24 @@ actor CameraRepository {
         await directReader?.discardThumbnail(handle: handle)
     }
 
-    func thumbnail(handle: UInt32, priority: CameraRequestKind = .visibleThumbnail) async throws -> Data {
+    func thumbnail(handle: UInt32, file: CameraFile? = nil,
+                   priority: CameraRequestKind = .visibleThumbnail,
+                   retryNewObject: Bool = false) async throws -> Data {
         #if DEBUG
         if let debugData { return debugData.thumbnailData }
         #endif
+        let knownFile = file ?? catalogFiles[handle]
         activeForegroundReads += 1; defer { activeForegroundReads -= 1; scheduleObjectResolver() }
         return try await ioGate.withCameraTransaction(priority, owner: priority == .visibleThumbnail ? "VISIBLE_THUMBNAIL" : "BACKGROUND_THUMBNAIL") {
-            if let directReader { return try await directReader.thumbnail(handle: handle) }
+            if let directReader {
+                if retryNewObject { await directReader.prepareNewObjectThumbnailRetry(handle: handle) }
+                return try await directReader.thumbnail(handle: handle)
+            }
             let response = try await session.executeResponse(operation: PTPConstants.getThumb, parameters: [handle])
             switch response.code {
-            case PTPConstants.responseOK: return response.data
-            case PTPConstants.noThumbnailPresent, PTPConstants.invalidObjectHandle: return Data()
+            case PTPConstants.responseOK, PTPConstants.noThumbnailPresent:
+                return try await JpegThumbnailFallback.read(session: session, handle: handle, file: knownFile, response: response)
+            case PTPConstants.invalidObjectHandle: return Data()
             default: throw PTPSessionError.responseCode(response.code)
             }
         }
@@ -2313,7 +2337,9 @@ actor CameraRepository {
         // boundary. Do this before the debug catalog early return as well, so
         // simulator fixtures cannot accidentally retain a previous session's
         // ratings.
-        var reusable = resumeSnapshot.flatMap { $0.catalogRevision == scanCatalogRevision ? $0 : nil }
+        var reusable = resumeSnapshot.flatMap {
+            preserveExisting && $0.sessionID == catalogSessionID && $0.catalogRevision == scanCatalogRevision ? $0 : nil
+        }
         if !preserveExisting && reusable == nil {
             invalidatePhotoRatings()
             resetRatingCapabilityState()
@@ -2349,7 +2375,9 @@ actor CameraRepository {
               !movieApplicationPropertySet else { throw CameraRepositoryError.foregroundPreempted }
         // A deletion can arrive while foreground preview holds this scan.
         // Revalidate the caller's captured value after that suspension too.
-        reusable = resumeSnapshot.flatMap { $0.catalogRevision == scanCatalogRevision ? $0 : nil }
+        reusable = resumeSnapshot.flatMap {
+            preserveExisting && $0.sessionID == catalogSessionID && $0.catalogRevision == scanCatalogRevision ? $0 : nil
+        }
 
         // A resume snapshot is valid only for this repository/session.  A fresh
         // scan invalidates old rows and cache state exactly like Android.
@@ -2381,6 +2409,7 @@ actor CameraRepository {
             handleQueriesSucceeded = reusable.handleQueriesSucceeded
             filterStorageIDs = reusable.filterStorageIDs
             directStorageIDsByHandle = reusable.directStorageIDsByHandle
+            addedHandles = reusable.addedHandles
             scanSnapshot = reusable
         } else {
             let raw: [UInt32]
@@ -2476,13 +2505,14 @@ actor CameraRepository {
                 catalogStorageIDs = storageIDs
             }
             scanSnapshot = enumerationRevision == scanCatalogRevision ? PhotoScanSnapshot(
-                catalogRevision: enumerationRevision,
+                sessionID: catalogSessionID, catalogRevision: enumerationRevision,
                 storageIDs: storageIDs,
                 handleOrders: groups.map { ($0.storage, $0.handles) },
                 processedHandles: Set(existingHandles),
                 handleQueriesSucceeded: handleQueriesSucceeded,
                 filterStorageIDs: filterStorageIDs,
-                directStorageIDsByHandle: directStorageIDsByHandle
+                directStorageIDsByHandle: directStorageIDsByHandle,
+                addedHandles: addedHandles
             ) : nil
             // Preserve the Android refresh contract: metadata is requested only
             // for handles not already published in this camera session.
@@ -2557,10 +2587,16 @@ actor CameraRepository {
                 replacingStorageIDs(rawFile, with: directStorageIDsByHandle[rawFile.id] ?? [])
             }
             let rangeInput = files + parsedOutput
-            let observedDays = Set(rangeInput.compactMap { validPhotoCaptureDay($0.captureDate) })
             let batchRange = await currentLoadingRange?() ?? loadingRange
-            let boundaryReached = batchRange.days > 0 && observedDays.count > batchRange.days
             let allowedRange = newestCaptureDaysRange(rangeInput, days: batchRange.days)
+            // Cached older days do not mean this newest-first cursor crossed
+            // the boundary. A same-session refresh after capture must finish
+            // every new in-range row, even when old rows are still displayed.
+            let boundaryReached = allowedRange.map { range in
+                parsedOutput.contains { file in
+                    validPhotoCaptureDay(file.captureDate).map { $0 < range.start } ?? false
+                }
+            } ?? false
             let acceptedOutput = boundaryReached && allowedRange != nil
                 ? parsedOutput.filter { file in
                     file.captureDate == nil || allowedRange?.contains(file.captureDate) == true
@@ -2787,7 +2823,7 @@ actor CameraRepository {
     }
     private func scheduleObjectResolver() {
         guard eventResolveTask == nil, backgroundReadsAllowed,
-              let earliest = pendingObjects.values.map(\.ready).min() else { return }
+              let earliest = pendingObjects.values.lazy.map(\.ready).min() else { return }
         eventResolveTask = Task { [weak self] in
             do { try await ContinuousClock().sleep(until: earliest) } catch { return }
             await self?.resolvePendingObjects()
@@ -2826,9 +2862,10 @@ actor CameraRepository {
                 if pendingObjects.removeValue(forKey: handle) != nil {
                     knownHandles.insert(handle)
                     indexedCatalogFiles[handle] = file
+                    let newIdentity = catalogLogicalIdentity(file)
                     if let existingIndex = catalogOrder.firstIndex(where: {
                         guard let existing = catalogFiles[$0] else { return false }
-                        return catalogLogicalIdentity(existing) == catalogLogicalIdentity(file)
+                        return catalogLogicalIdentity(existing) == newIdentity
                     }), let existing = catalogFiles[catalogOrder[existingIndex]] {
                         let memberships = existing.storageIDs.union(file.storageIDs)
                         catalogFiles[existing.id] = replacingStorageIDs(existing, with: memberships)

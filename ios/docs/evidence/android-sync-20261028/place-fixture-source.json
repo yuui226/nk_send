@@ -1,0 +1,10 @@
+{
+  "android": "431132ca",
+  "literalCases": 134,
+  "sourcesSHA256": {
+    "PhotoFrameRegionalPlaceTest.kt": "7d7e3f0bececcb91cbd46f0ada25cf8e80f4075435f94eafeac933b1bc020298",
+    "PhotoFrameInternationalPlaceTest.kt": "74aa61d1b4a5fb48d77743c4f6f82fd92d15974842356618c46db100336ff18a",
+    "PhotoFramePlaceTest.kt": "59f1f0b4d7676a8039db6a0baa90d3ea5d8ea115fe9c39f376fc96ccdee5612f"
+  },
+  "kind": "Android expected fixture transcription, not an executed Android oracle"
+}

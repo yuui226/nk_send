@@ -1,0 +1,381 @@
+Skipped export for CameraConnectionPresentationTests/testActualTransportWinsHistoryAndUSBWinsStaleSTAFlag(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testCompactConnectionSceneReservesGPSPanelBeforeExpansion(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testCompactSceneReclaimsToolbarWhitespaceWithoutChangingButtonSizeOrCardClearance(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testConnectionSceneConsumesOnlyAvailableTopWhitespace(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testEnglishCompactFootprintClearsToolbarAtPeakBreathingAndEntireWorkbench(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testEveryDisconnectedTransportKeepsItsHintAndAction(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testInvalidOrAbsentHistoryFallsBackToWirelessPreference(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testRestorationDoesNotInventConnectedState(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testRetryDoesNotChangePresentationBeforeSuccess(): no matching attachments
+
+Skipped export for CameraConnectionPresentationTests/testRoomyConnectionSceneKeepsOriginalPositionAndCardDimensions(): no matching attachments
+
+Exported 1 attachment for: ConnectionMethodCardLayoutTests/testAPProbingDelayCancelsOnStateBackgroundAndUnmountBeforePublishing():
+File: 1E87BA22-6CC3-43D7-89E4-4E80171B7B9D.png, suggested name: "english-ap-delayed-probing_0_D2A9D193-3BCA-49BB-BEE9-79ED89E6B0BA.png"
+
+Exported 7 attachments for: ConnectionMethodCardLayoutTests/testEnglishAPFeedbackKeepsHeaderTabsAndHelpInsideCardThroughFailureAndRecovery():
+File: 1B486991-0650-4712-BF9B-C308806CD74E.png, suggested name: "english-ap-recovered_0_1BC2D3E5-1EB8-4B66-81DA-A9BDCFFD1945.png"
+File: 6FD324F5-7BB6-4B85-8E53-4D266C58FB87.png, suggested name: "english-ap-connected_0_C6D27960-79CB-4370-B97B-D64C81EA76A0.png"
+File: D0A1C332-5F2E-48A6-80FE-8A5EAAADDE81.png, suggested name: "english-ap-reconnecting_0_95CC185C-CBE5-41D1-8723-C5F902DFEE36.png"
+File: 4CCFCC52-C222-4426-8CF8-A79C50459BA1.png, suggested name: "english-ap-failed_0_090C58B7-AF97-4F67-8A54-E47524CFE1BE.png"
+File: 782B5CF5-3A8B-45B7-89D0-5A52A35AEBDA.png, suggested name: "english-ap-refused_0_26789BC5-FF9B-4A13-ADAF-8798719C7C48.png"
+File: 868E5BC9-1E35-4078-9F34-200A779D6EA8.png, suggested name: "english-ap-not-found_0_BECEE55C-CBD4-4864-8683-BD0CE3A82CCE.png"
+File: 9EE2EDA5-7971-48AF-A45D-DA5E637D4ABE.png, suggested name: "english-ap-idle_0_78C28392-BB3F-47FA-AF8E-4F78DB181A8E.png"
+
+Exported 10 attachments for: ConnectionMethodCardLayoutTests/testEnglishSTAStepsAndErrorShareSlotWithoutMovingActions():
+File: F9526B68-7E03-411E-9327-0FE744C74598.png, suggested name: "english-sta-state-8_0_0744B382-204C-4562-9F40-E534B3D562CE.png"
+File: 4BA3CBE7-CD3A-44B7-A882-6FDC79CCECC3.png, suggested name: "english-sta-state-7_0_0BE1B4DD-C74E-4837-8DF8-B39AA6ED4B55.png"
+File: 6E026882-0795-4B4A-9DC8-33952C95A6CC.png, suggested name: "english-sta-state-6_0_BE4D4E1D-492F-4E7B-ABB9-D84622D90689.png"
+File: C37866FD-FA3C-49FC-95FD-38C3A238BA6A.png, suggested name: "english-sta-state-5_0_75BD4749-9E91-4F56-8B61-CF91D02D5305.png"
+File: A6E7CFDE-BB2A-4029-9DBE-AD5B3B3F57D0.png, suggested name: "english-sta-state-4_0_02D21F16-10D0-4504-855A-57357E9B51F6.png"
+File: 474A946C-30AA-4C6D-BF41-809C41A5E212.png, suggested name: "english-sta-state-3_0_7A3B6D2B-02CA-4010-BC2B-5C4069DB961D.png"
+File: 6DAC2544-7141-4CB9-87A2-26FAEC99B0CF.png, suggested name: "english-sta-state-2_0_1938685F-EBF6-4CDC-A7AE-CDC420251FB5.png"
+File: EB3D087C-B53B-42C7-9BD2-20EE28A4032C.png, suggested name: "english-sta-state-1_0_070746DD-1E27-4146-B934-BCC195B5FD67.png"
+File: 90EFB881-05D3-45C0-803F-ED2B43FB0393.png, suggested name: "english-sta-state-0_0_E01BD03F-2F8D-49D2-9C18-40FFED1A36AE.png"
+File: E5C30E03-61F4-438B-8353-BED63630D8C0.png, suggested name: "english-sta-idle_0_6E430D71-BBEA-490F-86BA-E8E1F52390A4.png"
+
+Skipped export for ConnectionMethodCardLayoutTests/testWirelessFeedbackKeepsAndroidPriorityTextAndBusyTreatment(): no matching attachments
+
+Skipped export for ConnectionStateTests/testAcceptedWirelessWorkspaceIgnoresUSBWhenDisconnected(): no matching attachments
+
+Skipped export for ConnectionStateTests/testAPCancellationRestartsBackoffAndReconnectingStaysVisible(): no matching attachments
+
+Skipped export for ConnectionStateTests/testAPFailureClassificationMatchesAndroid(): no matching attachments
+
+Skipped export for ConnectionStateTests/testAPRetriesKeepFailureVisibleUntilSuccess(): no matching attachments
+
+Skipped export for ConnectionStateTests/testConnectionCelebrationUsesEstablishedIOSHandoffTiming(): no matching attachments
+
+Skipped export for ConnectionStateTests/testConnectionModeSelectionIsStable(): no matching attachments
+
+Skipped export for ConnectionStateTests/testDebugPremiumPreviewIsSessionScopedAndDoesNotGrantAccess(): no matching attachments
+
+Skipped export for ConnectionStateTests/testGrantingUSBAuthorizationAfterDenialRestoresWaitingState(): no matching attachments
+
+Skipped export for ConnectionStateTests/testMissingSTAConfirmationKeepsFailureUntilExplicitRetryEvenWithSavedRoute(): no matching attachments
+
+Skipped export for ConnectionStateTests/testRemoteEntryIntroStopsAfterTwentyRecordedStarts(): no matching attachments
+
+Skipped export for ConnectionStateTests/testRepeatedDiscoveryKeepsCleanupButDoesNotRepublishUnchangedState(): no matching attachments
+
+Skipped export for ConnectionStateTests/testRepeatedWirelessSelectionStillPersistsItsPresentationMode(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUnreadTipReversesTheSameCurveRatherThanStartingANewEase(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUnreadTipUsesAndroidBreathingEndpoints(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBDetachDoesNotClearPersistentIOSPermissionDenial(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBFrameworkFailureWithoutDescriptionUsesLocalizedFallback(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBIsTheInitialConnectionMode(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBPermissionDenialKeepsActionableErrorOnCard(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBPermissionRecoveryUsesAuthorizationAcrossLanguageChanges(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBReattachDoesNotClearPersistentIOSPermissionDenial(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBReducerKeepsDeviceAndSessionTransitionsPure(): no matching attachments
+
+Skipped export for ConnectionStateTests/testUSBViewModelPreservesReducerFallbackAndPermissionError(): no matching attachments
+
+Skipped export for ConnectionStateTests/testWorkspacePauseAndResumePreserveAcceptedCameraSession(): no matching attachments
+
+Skipped export for ConnectionStateTests/testWorkspaceReturnDefersDiscoverySnapshotAndTransportEventsUntilSettled(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testBorrowedDataHasNoTransactionPrefixAndWaitsForResponse(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testBorrowedPhaseRejectsTruncatedAndMismatchedDataBeforeCallingSink(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testCancelRequestContainsOnlyTheActiveTransactionID(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testCommandRequestWrapsStandardPTPContainer(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testDownloadPhaseConsumesEndDataThenCommandResponseAndRetainsDeclaration(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testDownloadPhaseRejectsMismatchedStartAndResponseTransaction(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testDrainBudgetCountsWholePayloadsAndIgnoresPing(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testDrainRejectsAnotherPacketAfterBudgetIsExceeded(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testNonnegativeDownloadDeclarationsRetainAndroidValidationBoundaries(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testPacketLimitAcceptsAndroidHighThroughputChunkWithFraming(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testRejectsLengthMismatchAndUnknownType(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testResponseContainerLengthIncludesLengthAndTypeFields(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testSignedUnknownDownloadDeclarationsMatchAndroid(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testSplitHeaderAndBodyDecodeWithoutRejoiningPacket(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testSTAIdentityAndVersionMatchAndroidWhileAPStaysSeparate(): no matching attachments
+
+Skipped export for PTPIPCodecTests/testStreamingReadWindowCoalescesHeaderAndAllowsLargeBodyChunks(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testBorrowedConsumerFailurePreservesReadAheadAndReaderStorage(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testBorrowedPacketStorageIsReusedAndOwningFallbackIsIndependent(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testBulkEchoPreservesBytesAndConfiguresKernelBuffer(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testCallerCancellationDoesNotCloseAcceptedSocket(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testCloseWakesActiveReadAndRejectsQueuedRead(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testEventChannelKeepsAndroidDefaultSocketOptions(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testInvalidRouteDoesNotFallBackToAnotherInterface(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testLargePacketReadsDirectlyIntoBodyLikeAndroidBufferedInputStream(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testPacketReaderHandlesSplitHeaderBodyAndRetainedPackets(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testPacketReaderPreservesReadAheadAcrossOwnersAndReusesAfterGrowth(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testPacketReaderRejectsInvalidLengthsAndTruncatedBody(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testPacketReaderReturnsNetworkReadAheadBeforeNextOwner(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testShortReadDoesNotWaitForRequestedMaximum(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testSocketReadTimeoutRestoresUnlimitedEventStyleRead(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testSocketTimeoutRoundsUpWithoutAccidentallyDisablingDeadline(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testSTACommandDarwinACKAdaptationPreservesData(): no matching attachments
+
+Skipped export for PTPIPPOSIXChannelTests/testUnavailableLocalAddressFailsInsteadOfChangingRoute(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDBorrowedBulkDownloadPreservesBytesWithoutOwningCallbacks(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDBorrowedWriteFailureDrainsAndPreservesSession(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDBulkDownloadUsesSameFramingAndPreservesBytes(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDCancellationDrainsBeforeReusingSession(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDDownloadTimeoutRenewsDuringPartiallyReceivedPacket(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDDrainRenewsInactivityDeadline(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDOrdinaryCommandTimeoutRenewsForEachShortRead(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDReadTimeoutDoesNotIncludeSynchronousWriterTime(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDScrollingAwayFinishesBufferedThumbnailWithoutSendingPTPCancel(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDSilentCameraRetiresAndUnblocksPendingRead(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDSocketReadTimeoutDrainsBeforeReusingSession(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDUnknownLengthDownloadConsumesResponseAndKeepsSessionUsable(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBSDWriteFailureDrainsAndPreservesSession(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testBulkDownloadMatchesBufferedBytesAndReportsTransportTimings(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testCancellationSendsCancelDrainsPingAndDataBeforeReusingSocket(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testClosingSTAEventDeliveryDropsQueuedEventsWithoutStartingAnotherConsumer(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testDiagnosticsResetChunkCountersButRetainFileWriteTotals(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testDownloadTimeoutRenewsDuringAPartiallyReceivedDataPacket(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testDrainMayLastLongerThanThreeSecondsWhileDataKeepsArriving(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testEventReaderWithoutSubscriberStillRespondsToPing(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testScrollingAwayFinishesBufferedThumbnailWithoutSendingPTPCancel(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSilentCameraAfterCancelTimesOutAndRetiresSession(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSizeProbeTimeoutUsesDownloadRecoveryBeforeNextCommand(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSTAEventQueueIsBoundedFIFOAndSlowConsumerDoesNotBlockPong(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSTAPairingDrainsStaleEventAndPingBeforeAcceptingFreshEvent(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSTAPairingFragmentedPacketUsesPerReadRemainingBudgetLikeAndroid(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSTAPairingFullHandshakeCreatesReceiptAndRetiresSessionExactlyOnce(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSTAPairingRequiresResponderGUIDInHandshake(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSTAPairingShortEventAndUnrelatedEventAreNotConfirmation(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testSTAPairingTimeoutLeavesNoReaderToStealFollowingEvents(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testTCPParametersPreserveDefaultACKPolicyNoDelayAndRouting(): no matching attachments
+
+Skipped export for PTPIPTransferRecoveryTests/testWriteFailureDrainsAndPreservesOriginalErrorAndNextCommand(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testAlbumIdentityNeverExecutesPairingCommands(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testApplicationModeCanValidateAlbumAndMustRemainSelectedOnSuccess(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testCancellationAfterDeviceInfoDoesNotPromoteLegacyProof(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testConfirmedPairingValidatesFirstMiddleLastAndReusesHandles(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testDeniedObjectInfoRequiresPositiveSizeAndPartialReadNotJustThumbnail(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testEmptyHandlesCannotActivateAndFailedApplicationProbeRollsBack(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testHandshakeCommandsUseFiveSecondsThenNormalCommandsUseSessionDefault(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testLegacyPairingConfirmsOnlyAfterDeviceInfoAndAlbumAccess(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testLegacyVerificationRejectsMissingEmptyAndPairingOnlyDeviceInfo(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testPairingAcknowledgmentDoesNotPersistProofBeforeVerification(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testPairingFailureDoesNotPersistSuccess(): no matching attachments
+
+Skipped export for STABrowsingSessionTests/testPairingOnlyCapabilitiesRequireExactSet(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testAlbumAccessCannotActivateWithoutPairingAndClosesRejectedSocket(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testCancellationDuringPairingDelayStopsBeforeAnotherSocket(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testKnownBodyTriesOnlyOneAlternateIdentityAndPreservesComputerFailure(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testMissingFreshEventNeverUsesSavedRouteToRetryOrSwitchIdentity(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testPairingReconnectThenOneReadinessRetryUsesSameIdentityAndAndroidDelays(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testRealBrowsingRecoveryPersistsOnlyAfterFourthSessionValidatesAlbum(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testRecoveryClearsReceiptButKeepsGUIDAndWrongBodyStopsWholeDiscovery(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testRetryClassificationAndBackoffMatchAndroid(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testStaleAlbumRouteForDifferentBodyFallsThroughToComputerPairing(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testUnconfirmedPairingAllowsOnlyOneRecoveryAndForwardsVerification(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testUnknownRefusedEndpointDoesNotProbeAlternateIdentities(): no matching attachments
+
+Skipped export for STAConnectionCoordinatorTests/testWrongGUIDIsDeferredWithoutRePairingOrAlternateAttempt(): no matching attachments
+
+Skipped export for STAConnectionDiagnosticsTests/test201FHintSurvivesBoundedFailureChainAndMissingNeedsExplicitRetry(): no matching attachments
+
+Skipped export for STAConnectionDiagnosticsTests/testCharacterBudgetNeverSplitsAttemptOrSurrogatePair(): no matching attachments
+
+Skipped export for STAConnectionDiagnosticsTests/testCompletionFreezesElapsedAndCannotBeOverwritten(): no matching attachments
+
+Skipped export for STAConnectionDiagnosticsTests/testNewDiscoveryAndClearRejectStaleCallbacks(): no matching attachments
+
+Skipped export for STAConnectionDiagnosticsTests/testOversizedAttemptDroppedWholeAndNewestBlocksBounded(): no matching attachments
+
+Skipped export for STAConnectionDiagnosticsTests/testTraceRecordsElapsedAndDeltaPreservingFirstAndLatest128(): no matching attachments
+
+Skipped export for STAMetadataTests/testBulkMetadataExactLayoutAndNameSafety(): no matching attachments
+
+Skipped export for STAMetadataTests/testCachedRawIndexFailureReturnsAndRetriesSameRangeWithoutExtraProbe(): no matching attachments
+
+Skipped export for STAMetadataTests/testDirectCatalogUsesCompactIndexesWithoutFullOriginalOrObjectInfo(): no matching attachments
+
+Skipped export for STAMetadataTests/testDirectNefHeaderRejectsFalseMarkersAndFallsBackToExifStripsLikeAndroid(): no matching attachments
+
+Skipped export for STAMetadataTests/testEqualLengthNefRangesKeepAndroidDirectoryOrder(): no matching attachments
+
+Skipped export for STAMetadataTests/testEventDecodingRejectsTruncationAndKeepsFirstParameter(): no matching attachments
+
+Skipped export for STAMetadataTests/testExifCompressedStripsProduceDecodableBytesWithoutChangingPipelinePriority(): no matching attachments
+
+Skipped export for STAMetadataTests/testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads(): no matching attachments
+
+Skipped export for STAMetadataTests/testMakerFileInfoHasIndependentByteOrderAndRejectsTruncation(): no matching attachments
+
+Skipped export for STAMetadataTests/testMediaTypesAndDatesUseAndroidFallbackRules(): no matching attachments
+
+Skipped export for STAMetadataTests/testMpfSecondaryPreviewFromAndroidFixtureAndObjectSizeLimit(): no matching attachments
+
+Skipped export for STAMetadataTests/testNefDateAndExactPreviewRangeFromAndroidFixture(): no matching attachments
+
+Skipped export for STAMetadataTests/testNefJoinsAndroidExifInterfaceJPEGCompressedThumbnailStrips(): no matching attachments
+
+Skipped export for STAMetadataTests/testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects(): no matching attachments
+
+Skipped export for STAMetadataTests/testRawFalseJPEGInFirstHeaderDoesNotMaskRealPreviewOrPoisonCache(): no matching attachments
+
+Skipped export for STAMetadataTests/testRawProbeTransportFailureIsNotTreatedAsARejectedRange(): no matching attachments
+
+Skipped export for STAMetadataTests/testRawRejectedIndexedReadStillExtractsJPEGAlreadyInPrefix(): no matching attachments
+
+Skipped export for STAMetadataTests/testRawRejectedOrEmptyPreviousFileHintStillLoadsCurrentThumbnail(): no matching attachments
+
+Skipped export for STAMetadataTests/testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest(): no matching attachments
+
+Skipped export for STAMetadataTests/testRawShortHintReadsRemainingMarginLikeAndroid(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testCancelledFinalWritesCannotRestoreProofRouteOrInvalidateNewProof(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testFreshReceiptWaitsForValidFrameBeforeWritingPairing(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testInvalidSizeNeverStartsPartialObjectRead(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testPairingResultWithoutFreshEventCannotCreateReceiptOrTrust(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testProbeStopsAfterFirstDeniedInfoAndNeverReadsThumbnail(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testResetAndCancelDuringFrameCannotResurrectClearedPairing(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testSavedTrustedPairingNeverProbesLiveView(): no matching attachments
+
+Skipped export for STAPairingConfirmationTests/testWrongReceiptBodyAndWrongIdentityRejectedBeforeAnyCommand(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testBrokenFrameStreamAbortsWithoutSendingCleanupOnDesynchronizedSocket(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testBusyStartReadinessAndFrameRetryWithoutPrematureFallback(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testCancellationDuringStartStillClosesOwnedMonitor(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testCleanupFailureCannotConfirmPairing(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testEightSecondBudgetStopsRepeatedInvalidFramesAndCleansUp(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testEnhancedUnsupportedAndInvalidFramesFallBackImmediatelyToStandard(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testExistingMonitorIsNeverStartedOrStopped(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testJPEGSignatureAloneIsNotProof(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testNegativeStandardFrameClosesOwnedMonitorAndPreservesError(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testStatusMustBeExactlyOneValidByte(): no matching attachments
+
+Skipped export for STAPairingLiveViewTests/testValidEmbeddedFrameEndsOnlyMonitorStartedByVerification(): no matching attachments
+
+Skipped export for STAProfileTests/testIdentityPersistsAcrossInstancesAndBothIdentitiesStayIndependent(): no matching attachments
+
+Skipped export for STAProfileTests/testInvalidatingOneBodyClearsBothProofsButPreservesOtherBodyAndIdentity(): no matching attachments
+
+Skipped export for STAProfileTests/testLegacyMarkerRequiresVerificationAndVerifiedPairingSurvivesReload(): no matching attachments
+
+Skipped export for STAProfileTests/testMissingOrInvalidGUIDCannotCreatePairingProof(): no matching attachments
+
+Skipped export for STAProfileTests/testMultipleLegacyBodiesNeverReceiveGuessedIP(): no matching attachments
+
+Skipped export for STAProfileTests/testOnlyProtocolMarkerConfirmsPairingNotRouteOrLegacyField(): no matching attachments
+
+Skipped export for STAProfileTests/testResetClearsAllCamerasAndRotatesIdentityWhileRetainingMode(): no matching attachments
+
+Skipped export for STAProfileTests/testSingleLegacyBodyKeepsItsRouteAndIdentity(): no matching attachments
+
+Skipped export for STAProfileTests/testTrustedOnlyMarkerIsDiscoveredWithoutLegacyMigrationPromotingOtherCameras(): no matching attachments
+
+Generated manifest file with attachment details: /tmp/ztransfer-sta-20261101/attachments/manifest.json

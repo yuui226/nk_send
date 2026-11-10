@@ -1,0 +1,17 @@
+Building for debugging...
+[1 / 5]
+[2 / 5] ProtocolTests-product
+[4 / 7] ProtocolTests-product
+[10 / 12] ProtocolTests-product
+Build complete! (2.77秒)
+Test Suite 'Selected tests' started at 2026-11-08 11:18:04.704.
+Test Suite 'ProtocolTests.xctest' started at 2026-11-08 11:18:04.704.
+Test Suite 'PTPIPTransferRecoveryTests' started at 2026-11-08 11:18:04.704.
+Test Case '-[ProtocolTests.PTPIPTransferRecoveryTests testDifferentSTABodyLeavesDiscoveryBeforeOpeningEventSocketOrPairing]' started.
+Test Case '-[ProtocolTests.PTPIPTransferRecoveryTests testDifferentSTABodyLeavesDiscoveryBeforeOpeningEventSocketOrPairing]' passed (0.005 seconds).
+Test Suite 'PTPIPTransferRecoveryTests' passed at 2026-11-08 11:18:04.709.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+Test Suite 'ProtocolTests.xctest' passed at 2026-11-08 11:18:04.709.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+Test Suite 'Selected tests' passed at 2026-11-08 11:18:04.709.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.005 (0.006) seconds

@@ -9,38 +9,67 @@ import XCTest
 
 @MainActor
 final class PTPIPTransferRecoveryTests: XCTestCase {
-    func testSTAPairingTimeoutLeavesNoReaderToStealFollowingEvents() async throws {
-        let peer = try PTPIPRecoveryPeer(behavior: .smallTransfer)
-        let transport = try await peer.connect(backend: .bsdSocket)
-        let consumer = SuspendedEventConsumer()
-        defer { transport.close(); peer.close(); Task { await consumer.release() } }
-        await transport.waitForPairingEvent(timeoutNanoseconds: 100_000_000)
-        await consumer.release()
-        transport.startEvents { await consumer.receive($0) }
-        try await peer.sendEvents([42], ping: true)
-        try await waitUntil { peer.pongCount == 1 }
-        try await waitUntilAsync { await consumer.values.count == 1 }
-        let events = await consumer.values
-        XCTAssertEqual(events.map(\.handle), [42])
+    func testDifferentSTABodyLeavesDiscoveryBeforeOpeningEventSocketOrPairing() async throws {
+        let old = String(repeating: "1", count: 32), new = String(repeating: "2", count: 32)
+        let peer = try PTPIPRecoveryPeer(behavior: .staPairing, responderGUID: Data(repeating: 0x22, count: 16))
+        defer { peer.close() }
+        do {
+            let transport = try await peer.connect(backend: .bsdSocket, sta: true, expectedGUID: old)
+            transport.close()
+            XCTFail("The new body must be deferred before any pairing operation")
+        } catch {
+            XCTAssertEqual(error as? STAConnectionError, .unexpectedResponder(expected: old, actual: new))
+        }
+        XCTAssertFalse(peer.eventInitializationReceived)
+        XCTAssertEqual(peer.closeSessionCount, 0)
     }
 
-    func testSTAPairingFragmentedPacketUsesPerReadRemainingBudgetLikeAndroid() async throws {
+    func testSTAPairingRequiresResponderGUIDInHandshake() async throws {
         let peer = try PTPIPRecoveryPeer(behavior: .smallTransfer)
-        let transport = try await peer.connect(backend: .bsdSocket)
+        defer { peer.close() }
+        do { _ = try await peer.connect(backend: .bsdSocket, sta: true); XCTFail() }
+        catch { XCTAssertEqual(error as? PTPSessionError, .invalidResponse) }
+    }
+
+    func testSTAPairingFullHandshakeRetiresImmediatelyWithoutCloseSession() async throws {
+        let peer = try PTPIPRecoveryPeer(behavior: .staPairing, responderGUID: Data(repeating: 0x11, count: 16))
+        let transport = try await peer.connect(backend: .bsdSocket, sta: true)
         defer { transport.close(); peer.close() }
-        let started = ContinuousClock.now
-        let waiting = Task {
-            await transport.waitForPairingEvent(timeoutNanoseconds: 250_000_000)
-            return started.duration(to: .now)
+        let prefs = STAProfileFixture(), session = PTPSession(transport: transport, firstTransactionID: 0)
+        let browsing = STABrowsingSession(session: session, guid: transport.responderGUID, identity: .pairedComputer,
+            profiles: prefs.store, abortTransport: { transport.close() },
+            onStage: { _ in })
+        do { _ = try await browsing.open(); XCTFail() }
+        catch { XCTAssertEqual((error as? STAPairingCompleted)?.confirmation.responderGUID, String(repeating: "1", count: 32)) }
+        XCTAssertFalse(prefs.store.isPaired(transport.responderGUID))
+        XCTAssertTrue(transport.isClosed)
+        _ = await session.invalidate()
+        XCTAssertEqual(peer.closeSessionCount, 0)
+    }
+
+    func testSTADeadlineCoversRepeatedPingAndTrickledCommandResponse() async throws {
+        for behavior in [PTPIPRecoveryPeer.Behavior.pingReply, .trickleReply] {
+            for handshake in [true, false] {
+                let peer = try PTPIPRecoveryPeer(behavior: behavior, responderGUID: Data(repeating: 0x11, count: 16))
+                let transport = try await peer.connect(backend: .bsdSocket, sta: true)
+                defer { transport.close(); peer.close() }
+                if !handshake { transport.completeSTAHandshake() }
+                let session = PTPSession(transport: transport)
+                let started = ContinuousClock.now
+                do {
+                    _ = try await session.executeResponse(operation: PTPConstants.getDeviceInfo, timeoutNanoseconds: 200_000_000)
+                    XCTAssertFalse(handshake, "Active packets cannot renew the handshake's total budget")
+                    XCTAssertGreaterThan(started.duration(to: .now), .milliseconds(300))
+                    XCTAssertFalse(transport.isClosed)
+                } catch {
+                    XCTAssertTrue(handshake)
+                    XCTAssertTrue(STAConnectionCoordinator.isTransientReadinessFailure(error))
+                    XCTAssertLessThan(started.duration(to: .now), .seconds(1))
+                    XCTAssertTrue(transport.isClosed)
+                    XCTAssertEqual(peer.closeSessionCount, 0)
+                }
+            }
         }
-        defer { waiting.cancel() }
-        try await peer.sendFragmentedPairingEvent()
-        let waitDuration = await waiting.value
-        XCTAssertGreaterThan(waitDuration, .milliseconds(400))
-        // The whole fragmented packet was consumed, not abandoned after 250 ms.
-        transport.startEvents()
-        try await peer.sendEvents([], ping: true)
-        try await waitUntil { peer.pongCount == 1 }
     }
 
     func testSTAEventQueueIsBoundedFIFOAndSlowConsumerDoesNotBlockPong() async throws {
@@ -527,8 +556,12 @@ private final class ReceivedBytes: @unchecked Sendable {
 /// only packets prescribed by NikonCamera.abortActiveTransaction; no camera
 /// samples or changes to Android are required.
 private final class PTPIPRecoveryPeer: @unchecked Sendable {
-    enum Behavior: Sendable { case cancel, writeFailure, slowDrain, silent, slowTransfer, bulkTransfer, smallTransfer, unknownLengthTransfer }
+    enum Behavior: Sendable { case staPairing, pingReply, trickleReply, cancel, writeFailure, slowDrain, silent, slowTransfer, bulkTransfer, smallTransfer, unknownLengthTransfer }
     private let behavior: Behavior
+    private let responderGUID: Data?
+    private var closes = 0
+    var closeSessionCount: Int { lock.withLock { closes } }
+    var eventInitializationReceived: Bool { lock.withLock { eventConnection != nil } }
     private let listener: NWListener
     private let queue = DispatchQueue(label: "ztransfer.tests.ptpip.recovery")
     private let lock = NSLock()
@@ -542,17 +575,6 @@ private final class PTPIPRecoveryPeer: @unchecked Sendable {
     var cancelledTransactions: [UInt32] { lock.withLock { cancels } }
     var pongCount: Int { lock.withLock { pongs } }
 
-    func sendFragmentedPairingEvent() async throws {
-        let connection = try lock.withLock { try XCTUnwrap(eventConnection) }
-        let frame = try PTPIPCodec.encode(type: .event,
-            payload: littleEndian(UInt16(0x4008)) + littleEndian(UInt32(0)) + littleEndian(UInt32(0)))
-        try await sendBytes(Data(frame.prefix(8)), on: connection)
-        for range in [8..<11, 11..<14, 14..<18] {
-            try await Task.sleep(nanoseconds: 150_000_000)
-            try await sendBytes(frame.subdata(in: range), on: connection)
-        }
-    }
-
     func sendEvents(_ handles: [UInt32], malformedFirst: Bool = false, ping: Bool = false) async throws {
         let connection = try lock.withLock { try XCTUnwrap(eventConnection) }
         var batch = Data()
@@ -565,12 +587,13 @@ private final class PTPIPRecoveryPeer: @unchecked Sendable {
         try await sendBytes(batch, on: connection)
     }
 
-    init(behavior: Behavior) throws {
-        self.behavior = behavior
+    init(behavior: Behavior, responderGUID: Data? = nil) throws {
+        self.behavior = behavior; self.responderGUID = responderGUID
         listener = try NWListener(using: .tcp, on: .any)
     }
 
-    func connect(backend: PTPIPSocketBackend = .networkFramework) async throws -> PTPIPSocketTransport {
+    func connect(backend: PTPIPSocketBackend = .networkFramework, sta: Bool = false,
+                 expectedGUID: String? = nil) async throws -> PTPIPSocketTransport {
         listener.newConnectionHandler = { [weak self] connection in
             guard let self else { connection.cancel(); return }
             connection.start(queue: queue)
@@ -586,7 +609,8 @@ private final class PTPIPRecoveryPeer: @unchecked Sendable {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
         return try await PTPIPSocketTransport.open(host: "127.0.0.1", port: listener.port!.rawValue,
-                                                  connectionParameters: .tcp, backend: backend)
+                                                  staInitiatorID: sta ? Data("1234567890abcdef".utf8) : nil,
+                                                  expectedGUID: expectedGUID, connectionParameters: .tcp, backend: backend)
     }
 
     func close() {
@@ -605,7 +629,7 @@ private final class PTPIPRecoveryPeer: @unchecked Sendable {
             let packet = try await readPacket(connection)
             switch packet.type {
             case .initCommandRequest:
-                try await send(.initCommandAck, payload: littleEndian(UInt32(1)), on: connection)
+                try await send(.initCommandAck, payload: littleEndian(UInt32(1)) + (responderGUID ?? Data()), on: connection)
             case .initEventRequest:
                 lock.withLock { eventConnection = connection }
                 try await send(.initEventAck, on: connection)
@@ -614,7 +638,30 @@ private final class PTPIPRecoveryPeer: @unchecked Sendable {
             case .commandRequest:
                 let operation = UInt16(packet.payload[4]) | UInt16(packet.payload[5]) << 8
                 let transaction = uint32(packet.payload, at: 6)
-                if operation == PTPConstants.getObject || operation == PTPConstants.getObjectSize {
+                if operation == PTPConstants.closeSession { lock.withLock { closes += 1 } }
+                if operation == PTPConstants.getDeviceInfo && (behavior == .pingReply || behavior == .trickleReply) {
+                    if behavior == .pingReply {
+                        for _ in 0..<7 {
+                            try await send(.ping, on: connection)
+                            try await Task.sleep(for: .milliseconds(50))
+                        }
+                        try await send(.commandResponse, payload: littleEndian(PTPConstants.responseOK) + littleEndian(transaction), on: connection)
+                    } else {
+                        let response = try PTPIPCodec.encode(type: .commandResponse,
+                            payload: littleEndian(PTPConstants.responseOK) + littleEndian(transaction))
+                        for byte in response {
+                            try await sendBytes(Data([byte]), on: connection)
+                            try await Task.sleep(for: .milliseconds(30))
+                        }
+                    }
+                } else if behavior == .staPairing {
+                    if operation == PTPConstants.getStorageIDs {
+                        let data = staU32Array([0x10001])
+                        try await send(.startData, payload: littleEndian(transaction) + littleEndian(UInt64(data.count)), on: connection)
+                        try await send(.endData, payload: littleEndian(transaction) + data, on: connection)
+                    }
+                    try await send(.commandResponse, payload: littleEndian(PTPConstants.responseOK) + littleEndian(transaction), on: connection)
+                } else if operation == PTPConstants.getObject || operation == PTPConstants.getObjectSize {
                     lock.withLock { starts += 1 }
                     if behavior == .bulkTransfer {
                         try await send(.startData, payload: littleEndian(transaction) + littleEndian(UInt64(16 * 1024 * 1024)), on: connection)

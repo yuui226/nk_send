@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Shared by GPS, STA/AP, both settings pages, the local effects workbench
-/// and the rating filter. All seven entries use a static icon/unread dot:
+/// and the rating filter. Every entry uses a static icon/unread dot:
 /// the user explicitly disabled bulb breathing app-wide on 2026-10-18.
 /// Each caller owns its Android-equivalent persisted viewed flag. Rendering
 /// never marks a tip read; only the caller's tap action does so.
@@ -10,7 +10,6 @@ struct TipLightbulbButton: View {
     let attention: Bool
     let size: CGFloat
     let accessibilityLabel: String
-    var embeddedInPanel = false
     let action: () -> Void
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -42,10 +41,9 @@ struct TipLightbulbButton: View {
                     }
                 }
         }
-        .buttonStyle(ZTransferGlassButtonStyle(
-            tint: iconColor,
+        .buttonStyle(ZTransferGlassButtonStyle.iconControl(
             cornerRadius: 12,
-            panel: embeddedInPanel,
+            tint: iconColor,
             materialContentColor: iconColor
         ))
         // Keep the complete glass tile as the physical touch target. The
@@ -327,7 +325,7 @@ struct TipGuideContent: View {
         _state = State(initialValue: .init(first: sections.first?.id))
     }
     var body: some View {
-        TipGuideViewportLayout {
+        ContentSizedDialogLayout {
             HStack(spacing: 8) {
                 Image(systemName: "lightbulb.fill").resizable().scaledToFit()
                     .foregroundStyle(ZTransferColors.accentOrange).frame(width: 18, height: 18)
@@ -337,7 +335,8 @@ struct TipGuideContent: View {
                     Image(systemName: "xmark").font(.system(size: 18))
                         .foregroundStyle(ZTransferColors.secondaryText).frame(width: 32, height: 32)
                         .contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel(AppLocalized.resource("cd_close"))
+                }.buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
+                    .accessibilityLabel(AppLocalized.resource("cd_close"))
             }.padding(.horizontal, 18).padding(.top, 12)
             guideBody(measuring: true).hidden().allowsHitTesting(false).accessibilityHidden(true)
             ScrollView(.vertical, showsIndicators: false) { guideBody(measuring: false) }
@@ -381,27 +380,6 @@ struct TipGuideContent: View {
             }
         }.padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 18)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// The measured body and scroll viewport share one expansion state; the
-/// invisible copy has no gestures, subscriptions, clocks or accessibility.
-private struct TipGuideViewportLayout: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard subviews.count == 3 else { return .zero }
-        let width = proposal.width ?? 300
-        let p = ProposedViewSize(width: width, height: nil)
-        return CGSize(width: width, height: min(proposal.height ?? 560,
-            subviews[0].sizeThatFits(p).height + subviews[1].sizeThatFits(p).height))
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count == 3 else { return }
-        let p = ProposedViewSize(width: bounds.width, height: nil)
-        let header = min(bounds.height, subviews[0].sizeThatFits(p).height)
-        subviews[0].place(at: bounds.origin, anchor: .topLeading, proposal: .init(width: bounds.width, height: header))
-        subviews[1].place(at: CGPoint(x: bounds.minX - bounds.width - 1, y: bounds.minY), anchor: .topLeading, proposal: p)
-        subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.minY + header), anchor: .topLeading,
-                          proposal: .init(width: bounds.width, height: max(0, bounds.height - header)))
     }
 }
 
@@ -532,8 +510,10 @@ enum TipGuides {
     private static func item(_ label: String, _ text: String) -> TipGuideItem {
         .init(textKey: text, labelKey: label)
     }
-    static func settings(showEffects: Bool, isPro: Bool, showManagement: Bool) -> [TipGuideSection] {
+    static func settings(showEffects: Bool, isPro: Bool, showManagement: Bool,
+                         managementTitleKey: String = "iap_manage") -> [TipGuideSection] {
         var sections = [TipGuideSection(id: "settings_help_transfer", items: [
+            item("transfer_save_destination", "transfer_save_destination_summary"),
             item("transfer_directory", "settings_help_directory"), item("storage_mode", "storage_mode_summary"),
             item("auto_transfer_new_media", "auto_transfer_new_media_summary"), item("defer_transfer_start", "defer_transfer_start_summary")]),
             TipGuideSection(id: "settings_help_photos", items: [item("columns", "settings_help_columns"),
@@ -547,7 +527,7 @@ enum TipGuides {
             item("keep_screen_on", "settings_help_screen")]))
         var more: [TipGuideItem] = []
         if !isPro { more.append(item("unlock_pro", "settings_help_pro")) }
-        if showManagement { more.append(item("iap_manage", "iap_renewal_terms")) }
+        if showManagement { more.append(item(managementTitleKey, "iap_renewal_terms")) }
         more.append(item("feedback", "settings_help_feedback"))
         sections.append(.init(id: "settings_help_more", items: more))
         return sections
@@ -569,7 +549,7 @@ enum TipGuides {
         }
         return [.init(id: "monitor_help_section_basic", items: ["capture", "focus", "parameters", "review", "status"].map {
             item("monitor_help_\($0)_label", "monitor_help_\($0)") }),
-            .init(id: "monitor_help_section_camera", items: [.whiteBalance, .focusMode, .focusArea, .focusFrame, .pictureControl, .computerControl].map(tool)),
+            .init(id: "monitor_help_section_camera", items: [.selfTimer, .whiteBalance, .focusMode, .focusArea, .focusFrame, .pictureControl, .computerControl].map(tool)),
             .init(id: "monitor_help_section_exposure", items: [.histogram, .exposure, .meter, .waveform, .lut].map(tool)),
             .init(id: "monitor_help_section_display", items: [.hd, .fps, .audio].map(tool)),
             .init(id: "monitor_help_section_layout", items: [.grid, .level, .desqueeze, .lock, .rotate].map(tool) + [

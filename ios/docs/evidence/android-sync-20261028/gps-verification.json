@@ -1,0 +1,354 @@
+{
+  "scope": [
+    "N04",
+    "N05",
+    "N06"
+  ],
+  "androidHead": "18145b3aa14be55b97b44c277a420816505f46f7",
+  "runs": [
+    {
+      "log": "/tmp/ztransfer-sync-gps-20261028.log",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/gps-tests.log",
+      "logSHA256": "c1d4c2d50713a67dee6b341372217c7fa2f325c553b805a1ca0156be1d34e362",
+      "xcresult": "/tmp/ztransfer-sync-gps-20261028.xcresult",
+      "exitCode": 65,
+      "tests": []
+    },
+    {
+      "log": "/tmp/ztransfer-sync-gps-fixed-20261028.log",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/gps-fixed-tests.log",
+      "logSHA256": "2fe5fb6dc35b7a0dbe4e99a1baf760cedfdc6f143f6f50601043ed0c9a56d6d7",
+      "xcresult": "/tmp/ztransfer-sync-gps-fixed-20261028.xcresult",
+      "exitCode": 0,
+      "tests": [
+        {
+          "name": "CameraConnectionPresentationTests testActualTransportWinsHistoryAndUSBWinsStaleSTAFlag",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testCompactConnectionSceneReservesGPSPanelBeforeExpansion",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testCompactSceneReclaimsToolbarWhitespaceWithoutChangingButtonSizeOrCardClearance",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testConnectionSceneConsumesOnlyAvailableTopWhitespace",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testEnglishCompactFootprintClearsToolbarAtPeakBreathingAndEntireWorkbench",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testEveryDisconnectedTransportKeepsItsHintAndAction",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testInvalidOrAbsentHistoryFallsBackToWirelessPreference",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testRestorationDoesNotInventConnectedState",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testRetryDoesNotChangePresentationBeforeSuccess",
+          "result": "passed"
+        },
+        {
+          "name": "CameraConnectionPresentationTests testRoomyConnectionSceneKeepsOriginalPositionAndCardDimensions",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGenieAboveAnchorMatchesAndroidReflection",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGenieCloseBeforeFirstFrameNotifiesAndAboveAnchorMirrorsInlet",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGeniePopupBendsCrossSectionsAndBandCorners",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGeniePopupHostFirstCaptureAndReversal",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGeniePopupUsesTriggerShortEdgeAndSharedEndpoints",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGenieProgressFollowsRenderedFramesThroughReversal",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGenieRightHandMirrorPreservesAndroidTiltRules",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGenieTimingAndDurationsMatchAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testGPSWideLevelInletMatchesAndroidEndpointsAndNeverFolds",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testPreparedGenieGeometryMatchesAndroidCurve",
+          "result": "passed"
+        },
+        {
+          "name": "GPSPresentationPerformanceTests testActualCountdownTicksOnlyItsLeafAndSleepsWhenHiddenBackgroundedOrExpired",
+          "result": "passed"
+        },
+        {
+          "name": "GPSPresentationPerformanceTests testCountdownScheduleKeepsSecondCadenceAndFinalZeroFrame",
+          "result": "passed"
+        },
+        {
+          "name": "GPSPresentationPerformanceTests testEntryProjectionCoversEveryStatusAndLastSentTextReusesFormatting",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testAdapterLossCancelsOutstandingConnectionDeadlines",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testAdapterTerminalStatesCancelPendingRecovery",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testAltitudePolicyRejectsStaleOrDistantFix",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testAltitudePolicyReusesRecentNearbyTrustedFix",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testCachedAltitudeInclusiveAgeAndDistanceBoundaries",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testCameraCoordinateFormatAndClipboardMatchAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testConnectionRetirementWaitsForExactOwnerAndKeepsNewestRequest",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testControllerFallbackDoesNotPostponeOrCrossConnectionCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testControllerIDUsesFixedWidthAndroidASCIIWithoutUTF8Expansion",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testCoordinatorFailurePresentationAndRetryAreIndependent",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testCoordinatorGeoPayloadRevalidatesAltitudeOnEveryWrite",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testCoordinatorWritesExpiredAltitudeOnTickerAndRejectsLateACK",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testDirectReconnectDeadlineReplacesAndCancelsLateFallback",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testDisablingGPSRejectsLateRecoveryAndBluetoothStates",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testDiscoveryOwnershipRejectsReplacedServiceAndSameUUIDNotifications",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testEnabledRecoveryRestartsTransportAndIgnoresStopDisconnect",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testFreshPairingAndRestoredEnabledSessionDoNotPrewarm",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testGeoPayloadMatchesAndroidFieldLayout",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testHandshakeDeadlineStageReplacementAndControllerIDCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testManualSyncPresentationMatchesEveryAndroidStatus",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testManualSyncUsesLatestFixSerializesTapsAndReanchorsOnlyAfterSuccess",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testMissingAnyRequiredGPSCharacteristicIsRejected",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testNOT1ConfirmationCancelsFallbackAndEnqueuesOneProductionWrite",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testNOT1RoutesConfirmationAndControllerIDGateIsSharedWithFallback",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testPairingFailureClearsRuntimeIdentityOnlyForRejectionOrExpiry",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testPairingFailureWaitsForExplicitRetryThroughPublisher",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testPairingMatchesAndroidCapturedVector",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testProductionWriteQueueRejectsOldOwnerAndWrongCharacteristicACKs",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testReauthenticatedSessionDoesNotInheritOldCadenceAndFailureDoesNotAdvanceTimestamp",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testRetirementCompletionCanSynchronouslyStartAndStopAnotherConnection",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testSavedSetupDeadlineClosesBeforeFailureAndCancelsOnRetirement",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testScanAndSavedIdentityConfirmationDeadlinesUseAndroidDurations",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testSupersededRecoveryCannotClearCurrentRecovery",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testSynchronousStopFromScanPublicationDoesNotRecreateDeadline",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testSystemRestorationCannotReviveStoppedClientOrReplayConsumedLaunch",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testTrustedAltitudeDuringWriteForcesOneFollowupAfterACK",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testUnownedCentralStateCallbackCannotReplacePendingClientState",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testWarmupTimeoutAndShutdownPathsDoNotRestartLocationOnBackgroundRetry",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testWarmupUsesOnlySystemCacheAndHandsOffWithoutLateTimeoutStoppingGPS",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testWriteCancellationCanSynchronouslyStartReplacementWrite",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testWriteSchedulingCannotReviveDisabledGPS",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-gps-panel-20261028.log",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/gps-panel-tests.log",
+      "logSHA256": "0aaca43198bbe164eee0d95be0d4e3d0de4e84fb8da0d38be76635e7695d7eca",
+      "xcresult": "/tmp/ztransfer-sync-gps-panel-20261028.xcresult",
+      "exitCode": 0,
+      "tests": [
+        {
+          "name": "GPSPresentationPerformanceTests testActualCountdownTicksOnlyItsLeafAndSleepsWhenHiddenBackgroundedOrExpired",
+          "result": "passed"
+        },
+        {
+          "name": "GPSPresentationPerformanceTests testCountdownScheduleKeepsSecondCadenceAndFinalZeroFrame",
+          "result": "passed"
+        },
+        {
+          "name": "GPSPresentationPerformanceTests testEntryProjectionCoversEveryStatusAndLastSentTextReusesFormatting",
+          "result": "passed"
+        },
+        {
+          "name": "GPSProtocolTests testGPSPanelActualHostRendersOffAndLiveSyncStates",
+          "result": "passed"
+        }
+      ]
+    }
+  ],
+  "images": [
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/gps-panel-off.png",
+      "sha256": "6ca5098f1157b8c39d2c00ca70dd70887c852ae84bfcb49569051892671b1e69",
+      "review": "Viewed original pixels: compact frequency/options and timestamp/countdown/hold control visible without overlap; controlled BLE/location fixture, not real camera."
+    },
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/gps-panel-ready.png",
+      "sha256": "d2570f5433671698005ab780e9f20ed218effe0fef5e117d876939ec84dcdb04",
+      "review": "Viewed original pixels: compact frequency/options and timestamp/countdown/hold control visible without overlap; controlled BLE/location fixture, not real camera."
+    }
+  ],
+  "finalSourceSHA256": {
+    "ios/ZTransfer/Domain/GPSState.swift": "4363488c9a231ad711bf2584663b78654c69103e7fc6f88d6dc0757e0b5193c3",
+    "ios/ZTransfer/Domain/GPSCoordinator.swift": "e0ad0048b1d6feb9ea7560cc351790ca7f593259fa212fad632f429eb8d9e17d",
+    "ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift": "de67d4ded78ea4c868ce244f96227caa5ae82146f2f2349e8a676af24c6c5f7e",
+    "ios/ZTransfer/UI/Connection/GPSConnectionControl.swift": "8e72fe6a712200f56ce94497e494732ff7845d7a8853a7657b0a6e4713844989",
+    "ios/ZTransfer/UI/GeniePopupMotion.swift": "68d8466353a9139d6ea93386399eff5145b5c34fb3e49b85ab3deb96c75cd426",
+    "ios/ZTransfer/UI/GeniePopupPanel.swift": "147fd554950d6bbf6af77fbf93ab09c217d2b0cf145f8cfedd0ba524ad91e3b3",
+    "ios/ZTransfer/App/AndroidLocalization.swift": "f682afafbf30075b6f5b08484ecb9583d84726e4a338e8dc321d1697a508af8d",
+    "ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift": "681f0ecb27b9b02fc2e85c040cadc539ab18ab9035c3251fa1f901b8a57255b7",
+    "ios/GPSTests/GPSProtocolTests.swift": "e7a06604d0b98bbbcb793fca451ec5dc390040a9ff65df05684aa4e85606ee45",
+    "ios/ZTransferTests/DomainModelTests.swift": "5677367f603ae08524ba5069dae4fb55f9e6dda0f2a86317bea8b8858eb361db",
+    "ios/ZTransferTests/CameraConnectionPresentationTests.swift": "37c87c34dbd0207571259dd123b0a3f5b1e7009be75bb1e530f160af1efd87ed",
+    "ios/ZTransferTests/NativeAttentionMotionTests.swift": "197c92badadef100eeff9669b3f315e33e9b3e68c7918a88404c05994cc62f97"
+  },
+  "androidSourceSHA256": {
+    "app/src/main/java/com/ztransfer/gps/GpsState.kt": "1fefee4ca2cf77652b7f1ab746c13a7dfee2ebeac4fed155ac9b2915aa2d9575",
+    "app/src/main/java/com/ztransfer/gps/GpsViewModel.kt": "2fcb65d0136ea42822c2e9cc85d0fabecd58897052b89d90d0a4bf6e49547c2c",
+    "app/src/main/java/com/ztransfer/gps/NikonGpsService.kt": "06aeab81175807338f11c5a4a8b4bea7b8f53a8eedb59b4e57497e78aa39e4a6",
+    "app/src/main/java/com/ztransfer/gps/NikonGpsBleClient.kt": "859838970913c439c4186e8bb25975774c8adcf0cfeab0928593fcf382956035",
+    "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt": "a892f5e95344d51f12ae8a69190321d60c13f24cca6bb32accdbd7e9fef19b9c",
+    "app/src/main/java/com/ztransfer/ui/screen/GeniePopupGeometry.kt": "a7dd31c0e10d3b07ad944fc205277e90b61f84855a4f0492accd7a88bfe81e55",
+    "app/src/main/java/com/ztransfer/ui/screen/GenieVisibility.kt": "b870241fffb76d2fdca732b0bad12f36c4ec94215b91e693beeecbaf90e5c613",
+    "app/src/main/java/com/ztransfer/ui/screen/GeniePopupLayer.kt": "ea487ca9bb1b86342cabd4d35c1292f985755f08f93f1ce7db09c5ccbdeaa2e9",
+    "app/src/test/java/com/ztransfer/gps/GpsRecoveryPolicyTest.kt": "7bb6ecbc3abf4b46689bc72803fc5961716f9540836a78cc48a40b67b8ad3939",
+    "app/src/androidTest/java/com/ztransfer/gps/GpsLifecycleInstrumentation.kt": "60578693c49c28b66d7127921a8b0da5f01e90faf5c915a49dae76a135b9b60a",
+    "app/src/test/java/com/ztransfer/ui/screen/GenieLevelInletTest.kt": "6afd899fe0b7f876c15f94d3c6c8e5f18d2dd4aee759c71483da04ca9938ad4d"
+  },
+  "limits": [
+    "First run failed compilation: Debug GPS gesture harness lacked new isRunning protocol property; no tests executed. All conformers then updated.",
+    "64 selected tests passed. Subsequent change only clears generic wheel accessibility hint on manual-sync button; adds real hosted panel rendering test. Final 4 tests passed, including 3 repeated countdown tests: 68 successful executions / 65 distinct methods, not a single 65-test run.",
+    "Core Location subscriptions use a controlled manager; protocol writes and clocks are controlled. Real production coordinator/deadlines/queue/discovery ownership/retirement and actual UIKit popup hosting execute. No physical camera/BLE, system subscription introspection, real permission prompt, all UI, VoiceOver device or energy measurements.",
+    "Wide inlet cases transcribe Android GenieLevelInletTest; existing standard geometry tests compare source-equation Swift reference, not an executed Android binary in this batch.",
+    "Preserved explicit iOS differences: CoreLocation accuracy tiers, saved peripheral UUID, no Android Classic-bond implementation; no lamp breathing or monitor recording reintroduced."
+  ]
+}

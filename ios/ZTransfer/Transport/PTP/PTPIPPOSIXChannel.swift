@@ -8,11 +8,24 @@ typealias PTPIPBorrowedPacketRead = (PTPIPBorrowedPacketConsumer) throws -> Void
 /// Shared by Debug/Release; AP keeps its existing Network.framework path.
 /// Blocking syscalls run on dedicated queues, never Swift executors.
 final class PTPIPPOSIXChannel: @unchecked Sendable {
-    enum ChannelError: Error, Equatable {
+    enum ChannelError: Error, Equatable, CustomNSError {
         case system(Int32)
         case invalidAddress
         case closed
         case timeout
+
+        // NSError otherwise exposes the enum case index: every system(errno)
+        // becomes "ChannelError error 0", losing the actual socket failure.
+        // Preserve POSIX domain/code, just as Android retains its socket cause.
+        static var errorDomain: String { NSPOSIXErrorDomain }
+        var errorCode: Int {
+            switch self {
+            case .system(let code): Int(code)
+            case .invalidAddress: Int(EINVAL)
+            case .closed: Int(ENOTCONN)
+            case .timeout: Int(ETIMEDOUT)
+            }
+        }
     }
 
     private let lock = NSLock()
@@ -196,8 +209,9 @@ final class PTPIPPOSIXChannel: @unchecked Sendable {
         return bytes
     }
 
-    func send(_ bytes: Data) async throws {
+    func send(_ bytes: Data, permission: PTPCommandPermission? = nil) async throws {
         try await onQueue(writeQueue) { fd in
+            try permission?.check()
             try Self.sendBlocking(bytes, descriptor: fd)
         }
     }

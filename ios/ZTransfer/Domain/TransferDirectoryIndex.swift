@@ -20,22 +20,72 @@ enum PhotoFrameTemporaryFiles {
     static func isCurrent(_ name: String) -> Bool { name.hasPrefix(currentPrefix) }
 }
 
+struct IndexedTransferOriginal: Equatable, Sendable {
+    var name: String
+    var size: UInt64
+    var url: URL
+    fileprivate var revision: UInt64 = 0
+
+    init(url: URL, size: UInt64, name: String? = nil) {
+        self.url = url; self.size = size; self.name = name ?? url.lastPathComponent
+    }
+}
+
+/// ExistingOriginalDocument: query fresh metadata and open for reading, without
+/// consuming contents. Permission/provider errors are not evidence of deletion.
+func readExistingTransferOriginal(_ cached: IndexedTransferOriginal) throws -> IndexedTransferOriginal? {
+    do {
+        var url = cached.url
+        url.removeAllCachedResourceValues()
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .nameKey])
+        if values.isDirectory == true { throw TransferOriginalReadError.directory }
+        let handle = try FileHandle(forReadingFrom: url)
+        try handle.close()
+        var actual = cached
+        if let name = values.name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { actual.name = name }
+        if let size = values.fileSize, size >= 0 { actual.size = UInt64(size) }
+        return actual
+    } catch {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(ns.code) ||
+            ns.domain == NSPOSIXErrorDomain && ns.code == Int(ENOENT) { return nil }
+        throw error
+    }
+}
+
+private enum TransferOriginalReadError: LocalizedError {
+    case directory
+    var errorDescription: String? { "Indexed original is a directory" }
+}
+
 struct TransferDirectoryIndex: Sendable {
     let directory: URL
-    private(set) var files: [String: [(size: UInt64, url: URL)]] = [:]
-    private var exactNames: [String: (size: UInt64, url: URL)] = [:]
+    private(set) var files: [String: [IndexedTransferOriginal]] = [:]
+    private var exactNames: [String: IndexedTransferOriginal] = [:]
+    private var revision: UInt64 = 0
     private(set) var partials: [String: URL] = [:]
 
     static func scan(directory: URL) -> TransferDirectoryIndex {
+        (try? read(directory: directory)) ?? TransferDirectoryIndex(directory: directory)
+    }
+
+    static func read(directory: URL) throws -> TransferDirectoryIndex {
         var index = TransferDirectoryIndex(directory: directory)
-        guard let entries = try? FileManager.default.contentsOfDirectory(
+        let entries = try FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey],
             options: []
-        ) else { return index }
+        )
         for url in entries {
-            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey]),
-                  values.isDirectory != true,
+            try Task.checkCancellation()
+            let values: URLResourceValues
+            do { values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey]) }
+            catch {
+                let ns = error as NSError
+                if ns.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(ns.code) { continue }
+                throw error
+            }
+            guard values.isDirectory != true,
                   values.isRegularFile == true else { continue }
             let name = url.lastPathComponent
             if LosslessCropTemporaryFiles.recognizes(name) { continue }
@@ -91,11 +141,45 @@ struct TransferDirectoryIndex: Sendable {
     }
 
     func existingOriginal(for file: CameraFile) -> URL? {
+        candidate(for: file)?.url
+    }
+
+    func candidate(for file: CameraFile) -> IndexedTransferOriginal? {
         if let exact = exactNames[file.fileName], file.size == UInt64(UInt32.max) || exact.size == file.size {
-            return exact.url
+            return exact
         }
         return files[transferDirectoryLookupKey(file.fileName)]?
-            .first(where: { file.size == UInt64(UInt32.max) || $0.size == file.size })?.url
+            .first(where: { file.size == UInt64(UInt32.max) || $0.size == file.size })
+    }
+
+    /// Recheck only candidates. Invalid originals fall through to surviving
+    /// copies; edited/renamed documents retain their new name and size.
+    mutating func findVerified(for file: CameraFile,
+                              verify: (IndexedTransferOriginal) throws -> IndexedTransferOriginal? = readExistingTransferOriginal,
+                              onInvalidated: (IndexedTransferOriginal) -> Void = { _ in }) throws -> IndexedTransferOriginal? {
+        while let cached = candidate(for: file) {
+            try Task.checkCancellation()
+            let actual = try verify(cached)
+            try Task.checkCancellation()
+            // A reader may construct a fresh value. The index's replacement
+            // revision is not filesystem metadata and must not cause a loop.
+            if let actual, actual.name == cached.name, actual.size == cached.size,
+               actual.url == cached.url { return cached }
+            if remove(cached) {
+                if let actual { addOriginal(actual) }
+                onInvalidated(cached)
+            }
+        }
+        return nil
+    }
+
+    @discardableResult mutating func remove(_ entry: IndexedTransferOriginal) -> Bool {
+        guard exactNames[entry.name] == entry else { return false }
+        exactNames[entry.name] = nil
+        let key = transferDirectoryLookupKey(entry.name)
+        files[key]?.removeAll { $0 == entry }
+        if files[key]?.isEmpty == true { files[key] = nil }
+        return true
     }
 
     func completePartial(for file: CameraFile) -> URL? {
@@ -119,14 +203,21 @@ struct TransferDirectoryIndex: Sendable {
     }
 
     mutating func addOriginal(_ url: URL, size: UInt64) {
-        let name = url.lastPathComponent
+        addOriginal(IndexedTransferOriginal(url: url, size: size))
+    }
+
+    mutating func addOriginal(_ value: IndexedTransferOriginal) {
+        var value = value
+        revision &+= 1
+        value.revision = revision
+        let name = value.name
         let key = transferDirectoryLookupKey(name)
         // Android replaces the exact entry and removes its old size from the
         // normalized bucket. A rewritten local file cannot leave a stale hit.
-        if exactNames.updateValue((size: size, url: url), forKey: name) != nil {
-            files[key]?.removeAll { $0.url.lastPathComponent == name }
+        if exactNames.updateValue(value, forKey: name) != nil {
+            files[key]?.removeAll { $0.name == name }
         }
-        files[key, default: []].append((size: size, url: url))
+        files[key, default: []].append(value)
     }
 }
 
@@ -136,30 +227,37 @@ struct ExportedOriginalIndex: Sendable {
     private var destinations: [String: [String: [UInt64: URL]]] = [:]
 
     @discardableResult
-    mutating func add(_ url: URL, size: UInt64, folderName: String?) -> Bool {
+    mutating func add(_ url: URL, size: UInt64, folderName: String?, name: String? = nil) -> Bool {
         let folder = folderName?.lowercased() ?? ""
-        let name = transferDirectoryLookupKey(url.lastPathComponent)
-        guard destinations[folder]?[name]?[size] != url else { return false }
-        destinations[folder, default: [:]][name, default: [:]][size] = url
+        let name = transferDirectoryLookupKey(name ?? url.lastPathComponent)
+        return add(url, size: size, folderKey: folder, lookupKey: name)
+    }
+
+    /// Directory scans already normalized their keys. Do not run a regular
+    /// expression for every entry while holding the shared-store lock.
+    @discardableResult
+    mutating func add(_ url: URL, size: UInt64, folderKey: String, lookupKey: String) -> Bool {
+        guard destinations[folderKey]?[lookupKey]?[size] != url else { return false }
+        destinations[folderKey, default: [:]][lookupKey, default: [:]][size] = url
+        return true
+    }
+
+    /// forgetExistingExport: only the observed URL/size/destination may leave.
+    @discardableResult
+    mutating func remove(_ entry: IndexedTransferOriginal, folderName: String?) -> Bool {
+        let folder = folderName?.lowercased() ?? ""
+        let name = transferDirectoryLookupKey(entry.name)
+        guard destinations[folder]?[name]?[entry.size] == entry.url else { return false }
+        destinations[folder]?[name]?[entry.size] = nil
+        if destinations[folder]?[name]?.isEmpty == true { destinations[folder]?[name] = nil }
+        if destinations[folder]?.isEmpty == true { destinations[folder] = nil }
         return true
     }
 
     mutating func merge(_ index: TransferDirectoryIndex, folderName: String?) {
         for entries in index.files.values {
-            for entry in entries { add(entry.url, size: entry.size, folderName: folderName) }
+            for entry in entries { add(entry.url, size: entry.size, folderName: folderName, name: entry.name) }
         }
-    }
-
-    @discardableResult
-    mutating func record(_ items: [TransferQueueItem], root: URL) -> Bool {
-        var changed = false
-        for item in items {
-            guard let output = item.outputURL,
-                  output.deletingLastPathComponent() == transferDestinationDirectory(root: root, folderName: item.destinationFolderName)
-            else { continue }
-            if add(output, size: item.file.size, folderName: item.destinationFolderName) { changed = true }
-        }
-        return changed
     }
 
     func original(for file: CameraFile, folderName: String?) -> URL? {

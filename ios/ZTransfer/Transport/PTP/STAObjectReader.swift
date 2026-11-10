@@ -223,6 +223,16 @@ actor STAObjectReader {
         noThumbnail.remove(handle)
     }
 
+    /// Android getThumbnail(retryNewObject): the file may have been announced
+    /// before its embedded thumbnail/header was complete. Retire only this
+    /// object's early bytes; keep metadata, RAW indexes and every other object.
+    func prepareNewObjectThumbnailRetry(handle: UInt32) {
+        discardThumbnail(handle: handle)
+        prefixes.removeValue(forKey: handle)
+        prefixOrder.removeAll { $0 == handle }
+        mpfPreviews.removeValue(forKey: handle)
+    }
+
     private func readHeader(handle: UInt32, storage: UInt32, requirePreview: Bool = false) async throws -> CameraFile {
         let protocolName = try await originalName(handle)
         let size: UInt64

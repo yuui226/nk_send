@@ -4,6 +4,19 @@ import XCTest
 #endif
 
 final class PhotoThumbnailDiskCacheTests: XCTestCase {
+    func testUnownedLegacyCacheIsNeverAssignedToANewCamera() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = PhotoThumbnailDiskCache(root: root)
+        let old = cache.openCamera(identity: "old-body")
+        let new = cache.openCamera(identity: "new-body")
+        XCTAssertTrue(old.write(Data([1]), as: "same.jpg"))
+        try Data([2]).write(to: root.appendingPathComponent("legacy.jpg"))
+        XCTAssertNil(new.find("same.jpg", alternateName: "legacy.jpg"))
+        XCTAssertNil(new.find("legacy.jpg"))
+        XCTAssertNotNil(old.find("same.jpg"))
+    }
+
     func testCameraIsolationRetentionBoundaryAndReconnect() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -23,15 +36,15 @@ final class PhotoThumbnailDiskCacheTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: other.target("same.jpg").deletingLastPathComponent().path))
     }
 
-    func testLegacyAndDisplayNameMigrationAndWriteFailure() throws {
+    func testOnlySameBodyDisplayNameMigratesAndWriteFailureRemainsRecoverable() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let cache = PhotoThumbnailDiskCache(root: root)
         let store = cache.openCamera(identity: "body")
         let legacy = root.appendingPathComponent("legacy.jpg")
         try Data([1]).write(to: legacy)
-        XCTAssertEqual(store.find("hashed.jpg", legacyName: "legacy.jpg"), store.target("hashed.jpg"))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertNil(store.find("hashed.jpg", alternateName: "legacy.jpg"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path))
         XCTAssertTrue(store.write(Data([2]), as: "display.jpg"))
         XCTAssertEqual(store.find("stable.jpg", alternateName: "display.jpg"), store.target("stable.jpg"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.target("display.jpg").path))

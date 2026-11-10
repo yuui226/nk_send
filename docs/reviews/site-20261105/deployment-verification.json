@@ -1,0 +1,39 @@
+{
+  "commit": "994c658269776fdeb9783aa37ef08cdbcc25f35a",
+  "pages_status": "built",
+  "pages_commit": "994c658269776fdeb9783aa37ef08cdbcc25f35a",
+  "pages_updated_at": "2026-11-05T12:20:36Z",
+  "browser_checks": {
+    "environment": "local preview",
+    "widths": [
+      320,
+      1280
+    ],
+    "horizontal_overflow": false,
+    "registration_visible": true,
+    "icon_loaded": true
+  },
+  "public_files": [
+    {
+      "file": "index.html",
+      "url": "https://www.ztransfer.top/",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "48f4bb1125255e4029e88715e37bc751d3fae8f52116cce5f700e0ce0ae5c3d6"
+    },
+    {
+      "file": "styles.css",
+      "url": "https://www.ztransfer.top/styles.css?v=20261105beian1",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "3f4405d87934091f6bdce4b2d176eb562c9465830e0a0841cb20d4d231a2bb97"
+    },
+    {
+      "file": "assets/police-registration.png",
+      "url": "https://www.ztransfer.top/assets/police-registration.png",
+      "status": 200,
+      "matches_local": true,
+      "sha256": "46cd2348b88c2d0fc46283fabd5ed76d858d0567d6450fee513bfaaa1694cb12"
+    }
+  ]
+}

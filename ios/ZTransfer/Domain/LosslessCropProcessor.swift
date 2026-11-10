@@ -75,14 +75,19 @@ enum LosslessCropProcessor {
     }
 
     static func processAsync(task: LosslessCropTask, sourceURL: URL, directory: URL,
-                             transform: @escaping AsyncTransform = LosslessJpegBridge.cropAsync) async throws -> URL {
+                             locationFallback: PhotoCaptureLocation? = nil,
+                             transform: AsyncTransform? = nil) async throws -> URL {
         try Task.checkCancellation()
         let operation = Task.detached(priority: .utility) {
             let stagingDirectory = try prepare(task: task, sourceURL: sourceURL, directory: directory)
             defer { try? FileManager.default.removeItem(at: stagingDirectory) }
             let staging = stagingDirectory.appendingPathComponent("cropped.jpg")
-            let succeeded = try await transform(sourceURL, staging, task.source, task.rect)
-            return try publish(task: task, sourceURL: sourceURL, directory: directory, staging: staging, succeeded: succeeded)
+            let succeeded: Bool
+            if let transform { succeeded = try await transform(sourceURL, staging, task.source, task.rect) }
+            else { succeeded = try await LosslessJpegBridge.cropAsync(input: sourceURL, output: staging,
+                source: task.source, rect: task.rect, locationFallback: locationFallback) }
+            return try publish(task: task, sourceURL: sourceURL, directory: directory, staging: staging,
+                               succeeded: succeeded, locationFallback: locationFallback)
         }
         return try await withTaskCancellationHandler {
             try await operation.value
@@ -90,12 +95,16 @@ enum LosslessCropProcessor {
     }
 
     static func process(task: LosslessCropTask, sourceURL: URL, directory: URL,
-                        transform: Transform = LosslessJpegBridge.crop) throws -> URL {
+                        locationFallback: PhotoCaptureLocation? = nil,
+                        transform: Transform? = nil) throws -> URL {
         let stagingDirectory = try prepare(task: task, sourceURL: sourceURL, directory: directory)
         defer { try? FileManager.default.removeItem(at: stagingDirectory) }
         let staging = stagingDirectory.appendingPathComponent("cropped.jpg")
-        let succeeded = transform(sourceURL, staging, task.source, task.rect)
-        return try publish(task: task, sourceURL: sourceURL, directory: directory, staging: staging, succeeded: succeeded)
+        let succeeded = transform.map { $0(sourceURL, staging, task.source, task.rect) }
+            ?? LosslessJpegBridge.crop(input: sourceURL, output: staging, source: task.source,
+                                       rect: task.rect, locationFallback: locationFallback)
+        return try publish(task: task, sourceURL: sourceURL, directory: directory, staging: staging,
+                           succeeded: succeeded, locationFallback: locationFallback)
     }
 
     private static func prepare(task: LosslessCropTask, sourceURL: URL, directory: URL) throws -> URL {
@@ -110,7 +119,7 @@ enum LosslessCropProcessor {
     }
 
     private static func publish(task: LosslessCropTask, sourceURL: URL, directory: URL,
-                                staging: URL, succeeded: Bool) throws -> URL {
+                                staging: URL, succeeded: Bool, locationFallback: PhotoCaptureLocation?) throws -> URL {
         try Task.checkCancellation()
         guard succeeded,
               let header = try? LosslessCropInput.header(from: staging),
@@ -119,6 +128,10 @@ enum LosslessCropProcessor {
               result.height == task.rect.height,
               result.orientation == task.source.orientation else {
             throw LosslessCropProcessorError.cropFailed
+        }
+        let sourceHeader = try LosslessCropInput.header(from: sourceURL)
+        if locationFallback != nil || PhotoCaptureLocation.read(header: sourceHeader) != nil {
+            guard PhotoCaptureLocation.read(header: header) != nil else { throw LosslessCropProcessorError.cropFailed }
         }
         return try OutputFileNameReservations.shared.withReservedName(outputURL(for: sourceURL, in: directory)) { output in
             try Task.checkCancellation()

@@ -1,0 +1,41 @@
+{
+  "viewports": [
+    [
+      1440,
+      1000
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      320,
+      740
+    ]
+  ],
+  "document_width_equals_scroll_width": [
+    1425,
+    753,
+    375,
+    305
+  ],
+  "effects_settings_count_per_showcase": 5,
+  "effects_preview_included": true,
+  "filter_beside_gallery": true,
+  "removed_zoom_dialog": true,
+  "keyboard_workflow_arrow_right": "tab-transfer + panel-transfer",
+  "keyboard_connection_arrow_down": "connect-sta",
+  "connection_modes_checked": [
+    "usb",
+    "ap",
+    "sta"
+  ],
+  "console_errors_or_warnings": [],
+  "app_screenshot_pixels_modified": false,
+  "monitor_viewfinder": "Generated orange tabby photo, HTML overlay inside actual App frame",
+  "api_server_login": false
+}

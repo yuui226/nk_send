@@ -1,0 +1,87 @@
+Test Suite 'Selected tests' started at 2026-10-30 20:51:22.394.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 20:51:22.395.
+Test Suite 'PhotoEffectsBatchTests' started at 2026-10-30 20:51:22.395.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled]' passed (0.060 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings]' passed (0.026 seconds).
+Test Suite 'PhotoEffectsBatchTests' passed at 2026-10-30 20:51:22.535.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.135 (0.140) seconds
+Test Suite 'PhotoLUTEditorStateTests' started at 2026-10-30 20:51:22.535.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails]' started.
+2026-10-30 20:51:23.133920+0800 ZTransfer[89580:36673055] [connection] nw_socket_handle_socket_event [C1:1] Socket SO_ERROR [61: Connection refused]
+2026-10-30 20:51:23.136856+0800 ZTransfer[89580:36673055] [connection] nw_endpoint_flow_failed_with_error [C1 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails]' passed (0.882 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites]' passed (0.156 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints]' passed (0.186 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied]' passed (0.109 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected]' passed (0.133 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal]' passed (0.513 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole]' passed (0.080 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately]' passed (0.066 seconds).
+Test Suite 'PhotoLUTEditorStateTests' passed at 2026-10-30 20:51:24.696.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 2.157 (2.161) seconds
+Test Suite 'PhotoNp3StoreTests' started at 2026-10-30 20:51:24.697.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testCorruptMismatchedOversizedSnapshotsAndLabelsFailIndependently]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testCorruptMismatchedOversizedSnapshotsAndLabelsFailIndependently]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testDirectoryReplacementInvalidatesCustomDraftsButRetainsQueuedValueAndBuiltin]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testDirectoryReplacementInvalidatesCustomDraftsButRetainsQueuedValueAndBuiltin]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testFolderNotificationsAreSharedDeduplicatedAndCancelled]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testFolderNotificationsAreSharedDeduplicatedAndCancelled]' passed (0.039 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testNormalizationRetainsPrivateRecipeAndFinishingWithoutMergingRoles]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testNormalizationRetainsPrivateRecipeAndFinishingWithoutMergingRoles]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRenamingUpdatesOnlyLabelAndDuplicateLabelsMatchCatalogOrder]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRenamingUpdatesOnlyLabelAndDuplicateLabelsMatchCatalogOrder]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRolesRestorePrivateRecipesWithoutSourceAndDisableIsIndependent]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRolesRestorePrivateRecipesWithoutSourceAndDisableIsIndependent]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testSourceHintsSurviveOffRefreshOnlyAfterReadAndAreIndependentSnapshots]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testSourceHintsSurviveOffRefreshOnlyAfterReadAndAreIndependentSnapshots]' passed (0.012 seconds).
+Test Suite 'PhotoNp3StoreTests' passed at 2026-10-30 20:51:24.818.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.119 (0.122) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 20:51:24.818.
+	 Executed 29 tests, with 0 failures (0 unexpected) in 2.411 (2.424) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 20:51:24.819.
+	 Executed 29 tests, with 0 failures (0 unexpected) in 2.411 (2.425) seconds
+2026-10-30 20:51:24.861 xcodebuild[89250:36668895] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:51:24.862 xcodebuild[89250:36668895] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:51:25.170 xcodebuild[89250:36668895] [MT] IDETestOperationsObserverDebug: 36.929 elapsed -- Testing started completed.
+2026-10-30 20:51:25.170 xcodebuild[89250:36668895] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-30 20:51:25.170 xcodebuild[89250:36668895] [MT] IDETestOperationsObserverDebug: 36.929 sec, +36.929 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-np3-owner-20261030.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

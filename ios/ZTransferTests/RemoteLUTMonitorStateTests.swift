@@ -954,7 +954,7 @@ final class RemoteLUTPanelPerformanceTests: XCTestCase {
         try await waitFor { !state.scanning }
         XCTAssertEqual(state.files, files)
         let catalog = state.catalog
-        let group = try XCTUnwrap(catalog.filesByCategory["C8"])
+        let group = try XCTUnwrap(catalog.files(in: "C8"))
         let address = group.withUnsafeBufferPointer { $0.baseAddress }
         var selection = PhotoLUTCategorySelection()
         selection.reconcile(catalog: catalog, selected: "9999")
@@ -971,7 +971,7 @@ final class RemoteLUTPanelPerformanceTests: XCTestCase {
         for _ in 0..<120 {
             selection.reconcile(catalog: state.catalog, selected: "9999")
             XCTAssertEqual(selection.category, "C8", "Refresh must preserve the browsed category")
-            XCTAssertEqual(state.catalog.filesByCategory["C8"]?.withUnsafeBufferPointer { $0.baseAddress }, address)
+            XCTAssertEqual(state.catalog.files(in: "C8")?.withUnsafeBufferPointer { $0.baseAddress }, address)
         }
         XCTAssertEqual(changes, 0)
         XCTAssertEqual(access.bookmarkData, Data([1, 2, 3]))

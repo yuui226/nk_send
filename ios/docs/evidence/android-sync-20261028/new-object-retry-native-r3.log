@@ -1,0 +1,49 @@
+Building for debugging...
+[1 / 4] ThumbnailTests-product
+[2 / 4] ThumbnailTests-product
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:187:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+185 |         let stream = await store.retryWakes()
+186 |         var iterator = stream.makeAsyncIterator()
+187 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+188 |         XCTAssertNil(end)
+189 |     }
+[4 / 6] ThumbnailTests-product
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:187:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+185 |         let stream = await store.retryWakes()
+186 |         var iterator = stream.makeAsyncIterator()
+187 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+188 |         XCTAssertNil(end)
+189 |     }
+[10 / 11] ThumbnailTests-product
+Build complete! (1.70秒)
+Test Suite 'Selected tests' started at 2026-10-30 23:37:53.590.
+Test Suite 'ThumbnailTests.xctest' started at 2026-10-30 23:37:53.590.
+Test Suite 'NewObjectThumbnailRetryTests' started at 2026-10-30 23:37:53.590.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testAndroidFiniteBudgetAndJoinedFailureBoundaries]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testAndroidFiniteBudgetAndJoinedFailureBoundaries]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testBothStoreLanesWaitAndStopAfterThreeRetries]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testBothStoreLanesWaitAndStopAfterThreeRetries]' passed (0.007 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testFillQueuePreservesBlockedFailuresUntilTheirOwnDeadline]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testFillQueuePreservesBlockedFailuresUntilTheirOwnDeadline]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testIndependentDeadlinesAndRemovalReset]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testIndependentDeadlinesAndRemovalReset]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testLateInFlightResultAfterDeletionCannotRecreateRetryOrCache]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testLateInFlightResultAfterDeletionCannotRecreateRetryOrCache]' passed (0.009 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testRealTimerWakesOnceWithoutOwningCameraIO]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testRealTimerWakesOnceWithoutOwningCameraIO]' passed (0.304 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSharedVisibleAndPrefetchFailureConsumesOnlyOneAttempt]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSharedVisibleAndPrefetchFailureConsumesOnlyOneAttempt]' passed (0.018 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSuccessHistoricalMissAndHandleReuseKeepIndependentPolicies]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSuccessHistoricalMissAndHandleReuseKeepIndependentPolicies]' passed (0.004 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testTransportFailureRetriesButCancellationDoesNotSpendBudget]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testTransportFailureRetriesButCancellationDoesNotSpendBudget]' passed (0.002 seconds).
+Test Suite 'NewObjectThumbnailRetryTests' passed at 2026-10-30 23:37:53.938.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.346 (0.347) seconds
+Test Suite 'ThumbnailTests.xctest' passed at 2026-10-30 23:37:53.938.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.346 (0.347) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 23:37:53.938.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.346 (0.348) seconds

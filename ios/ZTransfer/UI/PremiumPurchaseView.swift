@@ -10,6 +10,11 @@ struct PremiumSettingsActions: View {
     let onShowPremium: () -> Void
     let onPlayFireworks: () -> Void
     private var showManagement: Bool { Self.showsManagement(access: access, purchases: purchases) }
+    static func managementTitleKey(for entitlement: PremiumEntitlement) -> String {
+        // A lifetime owner can still have a previous annual subscription to
+        // cancel; never imply that lifetime access itself needs renewing.
+        entitlement == .lifetime ? "iap_manage" : "renew_action"
+    }
     static func showsManagement(access: PremiumEntitlementStore, purchases: StoreKitPurchaseStore) -> Bool {
         #if DEBUG
         // Simulated ownership needs no separate settings management button.
@@ -27,12 +32,13 @@ struct PremiumSettingsActions: View {
             if showManagement {
                 // Lifetime owners retain the management route as well: their
                 // former annual renewal may still be active or unconfirmed.
-                Button(AppLocalized.resource("iap_manage"), action: onShowPremium)
+                Button(AppLocalized.resource(Self.managementTitleKey(for: access.entitlement)), action: onShowPremium)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(ZTransferColors.accentBlue)
                     .padding(.horizontal, 8).frame(height: 28)
                     .background(ZTransferGlassSurface(cornerRadius: 14, kind: .button))
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("premium-settings-renewal")
             }
             ProBadgeButton(label: badgeLabel,
                            motionPaused: motionPaused) {
@@ -63,7 +69,7 @@ enum AppLegalDocument: String, CaseIterable, Hashable, Sendable {
     }
 }
 
-/// Both entry points use the published HTTPS destinations from the same bundle.
+/// Settings uses the published HTTPS destinations from the bundle.
 /// Missing configuration remains disabled until the public pages are connected;
 /// neither membership nor the purchase panel is a prerequisite for reading them.
 struct AppLegalLinksConfiguration: Equatable, Sendable {
@@ -147,19 +153,15 @@ struct PremiumPurchaseView: View {
     @State private var selected: PremiumProduct = .annual
     @State private var scene: UIWindowScene?
     @State private var confirmLifetime = false
-    @State private var copiedSupport = false
     let onClose: () -> Void
     let onCelebrate: () -> Void
 
     private var busy: Bool { store.operation != .idle }
-    private var isDevelopmentSimulation: Bool {
-        #if DEBUG
-        return access.developmentPurchase != nil
-        #else
-        return false
-        #endif
-    }
     private var isLifetime: Bool { access.entitlement == .lifetime }
+    private var isAnnualSubscriber: Bool {
+        if case .annual = access.entitlement { return true }
+        return false
+    }
     private var hasAnnual: Bool {
         switch store.renewal.state {
         case .subscribed, .grace, .retrying: true
@@ -185,92 +187,29 @@ struct PremiumPurchaseView: View {
         GeometryReader { proxy in
             ZStack {
                 DialogBackdrop(onDismiss: onClose)
-                ScrollView {
-                    VStack(spacing: 16) {
-                        header
-                        #if DEBUG
-                        developmentPurchases
-                        #endif
-                        if !isDevelopmentSimulation {
-                            // Billing retry without grace removes Pro access, but
-                            // the verified payment problem still needs to be shown.
-                            if access.entitlement != .free || hasAnnual { entitlementStatus }
-                            if !isLifetime {
-                                comparison(width: min(420, proxy.size.width - 48) - 40)
-                                VStack(spacing: 10) {
-                                    plan(.annual)
-                                    plan(.lifetime)
-                                }
-                                Text(AppLocalized.resource("iap_account_hint"))
-                                    .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                if selected == .lifetime, needsCancellationReminder {
-                                    notice("iap_lifetime_notice")
-                                }
-                                if selected == .annual {
-                                    Text(AppLocalized.resource("iap_renewal_terms"))
-                                        .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-                                }
-                                ProBadgeButton(label: purchaseLabel, big: true,
-                                               enabled: canPurchase, motionPaused: busy) {
-                                    if selected == .lifetime, needsCancellationReminder { confirmLifetime = true }
-                                    else { Task { await store.purchase(selected) } }
-                                }
-                            }
-                            if store.loadingProducts { ProgressView().accessibilityLabel(AppLocalized.resource("iap_loading")) }
-                            if store.productError, !isLifetime {
-                                Text(AppLocalized.resource("iap_prices_failed"))
-                                    .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-                                action("iap_retry") { Task { await store.loadProducts() } }
-                            }
-                            if let message = store.messageKey {
-                                Text(AppLocalized.resource(message)).font(.system(size: 13))
-                                    .foregroundStyle(ZTransferColors.secondaryText)
-                            }
-                            if busy { ProgressView() }
-                            if needsRenewalManagement {
-                                if isLifetime, store.renewal.willAutoRenew != false {
-                                    notice("iap_lifetime_followup")
-                                }
-                                action("iap_manage") {
-                                    guard let scene else { return }
-                                    Task { await store.manage(in: scene) }
-                                }.disabled(scene == nil)
-                            }
-                            HStack(spacing: 10) {
-                                action("iap_restore") { Task { await store.restore() } }
-                                action("iap_redeem") {
-                                    guard let scene else { return }
-                                    Task { await store.redeem(in: scene) }
-                                }.disabled(scene == nil)
-                            }
-                            if #unavailable(iOS 16.3) {
-                                Text(AppLocalized.resource("iap_redeem_version")).font(.system(size: 11))
-                            }
-                            action("feedback") {
-                                UIPasteboard.general.string = "953000922"
-                                copiedSupport = true
-                            }
-                            AppLegalLinks()
-                        }
+                ContentSizedDialogLayout {
+                    header.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 12)
+                    purchaseContent(width: min(420, proxy.size.width - 48), measuring: true)
+                        .hidden().allowsHitTesting(false).accessibilityHidden(true)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        purchaseContent(width: min(420, proxy.size.width - 48), measuring: false)
                     }
-                    .padding(20)
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("premium-purchase-panel")
-                // Let the scroll viewport honor the screen's height proposal.
-                // fixedSize(vertical: true) puts the header outside small screens.
+                // Measure content once per layout pass; only short screens scroll.
+                // The close button stays outside the viewport and always reachable.
                 .frame(maxWidth: 420)
-                .frame(maxHeight: max(1, proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom - 32))
                 .background(ZTransferGlassSurface(cornerRadius: 22, kind: .panel)
                     .shadow(color: .black.opacity(0.18), radius: 6, y: 3))
                 .clipShape(RoundedRectangle(cornerRadius: 22))
+                .frame(maxHeight: max(1, proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom - 32))
                 .padding(.horizontal, 24)
                 .androidDialogSurface()
             }
         }
         .background(PurchaseSceneReader { scene = $0 }.frame(width: 0, height: 0))
         .task {
-            if access.entitlement.isPro() { selected = .lifetime }
             store.clearMessage()
             store.refresh()
             await store.loadProducts()
@@ -282,41 +221,81 @@ struct PremiumPurchaseView: View {
             if !isLifetime || !needsCancellationReminder { onClose() }
         }
         .alert(AppLocalized.resource("plan_lifetime"), isPresented: $confirmLifetime) {
-            Button(AppLocalized.resource("iap_continue")) { Task { await store.purchase(.lifetime) } }
+            Button(AppLocalized.resource("iap_continue")) {
+                // Automatic recovery can complete while confirmation is open.
+                guard canPurchase else { return }
+                Task { await store.purchase(.lifetime) }
+            }
             Button(AppLocalized.resource("cancel"), role: .cancel) {}
         } message: { Text(AppLocalized.resource("iap_lifetime_notice")) }
-        .alert(AppLocalized.formattedResource("feedback_qq_copied", ["%1$s": "953000922"]),
-               isPresented: $copiedSupport) {
-            Button(AppLocalized.resource("cd_close"), role: .cancel) {}
-        }
     }
 
-    #if DEBUG
-    private var developmentPurchases: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("开发测试 · 模拟支付").font(.system(size: 15, weight: .bold))
-            Text("不会扣款，无需 Apple 账号。测试权益在重开应用后保留，仅此开发版可用。")
-                .font(.system(size: 12))
-            if let purchase = access.developmentPurchase {
-                Text("当前：模拟" + AppLocalized.resource(purchase.product == .annual ? "plan_annual" : "plan_lifetime"))
-                    .font(.system(size: 13, weight: .semibold))
+    // TestFlight and App Store use the same product.purchase() entry point.
+    // StoreKit selects the environment; no in-app test purchase controls.
+    private func purchaseContent(width: CGFloat, measuring: Bool) -> some View {
+        VStack(spacing: 12) {
+            // Billing retry without grace removes Pro access, but
+            // the verified payment problem still needs to be shown.
+            if isAnnualSubscriber {
+                HStack(spacing: 12) {
+                    entitlementStatus
+                    managementAction(compact: true)
+                }
+            } else if access.entitlement != .free || hasAnnual { entitlementStatus }
+            if !isLifetime && !isAnnualSubscriber {
+                // Android RenewDialog omits the new-customer comparison.
+                // On iOS annual access renews through Apple: the user's
+                // renewal panel offers neither a duplicate annual charge nor
+                // a lifetime upgrade. Once access expires, both plans return.
+                comparison(width: width - 36)
+                VStack(spacing: 10) {
+                    plan(.annual)
+                    plan(.lifetime)
+                }
+                // This describes the annual option regardless of selection.
+                // Switching plans changes neither the text nor its layout.
+                Text(AppLocalized.resource("iap_annual_disclosure"))
+                    .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ProBadgeButton(label: purchaseLabel(for: selected), big: true,
+                               enabled: canPurchase, motionPaused: busy || measuring,
+                               animatesLabelChanges: true) {
+                    if selected == .lifetime, needsCancellationReminder { confirmLifetime = true }
+                    else { Task { await store.purchase(selected) } }
+                }
+                .accessibilityIdentifier("premium-purchase-action")
             }
-            HStack(spacing: 12) {
-                Button("模拟购买年度版") { access.simulatePurchase(.annual); onCelebrate() }
-                Button("模拟购买永久版") { access.simulatePurchase(.lifetime); onCelebrate() }
-            }.font(.system(size: 13, weight: .semibold))
-            if isDevelopmentSimulation {
-                Button("结束模拟，恢复真实权益") { access.endSimulatedPurchase() }
-                    .font(.system(size: 12))
+            if store.productError, !isLifetime && !isAnnualSubscriber {
+                Text(AppLocalized.resource("iap_prices_failed"))
+                    .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
+                action("iap_retry") { Task { await store.loadProducts() } }
+            }
+            if let message = store.messageKey {
+                Text(AppLocalized.resource(message)).font(.system(size: 13))
+                    .foregroundStyle(ZTransferColors.secondaryText)
+            }
+            if needsRenewalManagement {
+                if isLifetime, store.renewal.willAutoRenew != false {
+                    notice("iap_lifetime_followup")
+                }
+            }
+            // Recovery is a fallback for missing access, not an action an
+            // already-unlocked customer needs. Keep secondary actions in one
+            // row, restore on the left whenever both actions are applicable.
+            if !access.entitlement.isPro() || (needsRenewalManagement && !isAnnualSubscriber) {
+                HStack(spacing: 10) {
+                    if !access.entitlement.isPro() {
+                        action("iap_restore") { Task { await store.restore() } }
+                            .accessibilityIdentifier("premium-restore")
+                    }
+                    if needsRenewalManagement && !isAnnualSubscriber {
+                        managementAction(compact: false)
+                    }
+                }
             }
         }
-        .foregroundStyle(ZTransferColors.accentBlue)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(ZTransferColors.accentBlue.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-        .disabled(busy)
+        .padding(.horizontal, 18).padding(.bottom, 16)
     }
-    #endif
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -324,11 +303,17 @@ struct PremiumPurchaseView: View {
                 .foregroundStyle(ZTransferColors.accentYellow)
                 .frame(width: 42, height: 42)
                 .background(ZTransferColors.accentYellow.opacity(0.16), in: Circle())
-            Text(AppLocalized.resource("pro_version")).font(.system(size: 22, weight: .bold))
+            Text(AppLocalized.resource(isAnnualSubscriber ? "renew_action" : "pro_version"))
+                .font(.system(size: 22, weight: .bold))
             Spacer(minLength: 0)
+            if busy {
+                ProgressView().controlSize(.small)
+                    .frame(width: 32, height: 32)
+            }
             Button(action: onClose) {
                 Image(systemName: "xmark").frame(width: 32, height: 32)
-            }.buttonStyle(.plain).accessibilityLabel(AppLocalized.resource("cd_close"))
+            }.buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
+                .accessibilityLabel(AppLocalized.resource("cd_close"))
                 .accessibilityIdentifier("premium-close")
         }.foregroundStyle(ZTransferColors.primaryText)
     }
@@ -349,9 +334,6 @@ struct PremiumPurchaseView: View {
                 if let date = store.renewal.nextRenewalDate {
                     subscriptionDate("iap_renews_on", date)
                 }
-                Text(AppLocalized.resource(store.renewal.willAutoRenew.map {
-                    $0 ? "iap_renewal_on" : "iap_renewal_off"
-                } ?? "iap_renewal_unknown"))
                 if store.renewal.state == .retrying { Text(AppLocalized.resource("iap_billing_retry")) }
             }
         }.font(.system(size: 13)).foregroundStyle(ZTransferColors.secondaryText)
@@ -377,18 +359,22 @@ struct PremiumPurchaseView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .foregroundStyle(ZTransferColors.primaryText)
                 Text(AppLocalized.formattedResource(free, ["%1$d": value]))
+                    // Keep short values together (including English Supported
+                    // and 400 MB each); descriptive labels may use two lines.
+                    .lineLimit(free == "compare_watermark_free" || free == "duration_free" ? 2 : 1)
+                    .minimumScaleFactor(0.7)
                     .frame(width: columnWidth).foregroundStyle(ZTransferColors.secondaryText)
                 Text(AppLocalized.resource(annual))
                     .fontWeight(header ? .bold : (duration ? .semibold : .heavy))
                     // Keep Android's shared column widths; fit the iOS bold
                     // glyphs without splitting short tier values mid-word.
-                    .lineLimit(1).minimumScaleFactor(0.8).padding(.horizontal, 2)
+                    .lineLimit(1).minimumScaleFactor(0.7).padding(.horizontal, 2)
                     .frame(width: columnWidth)
                     .foregroundStyle(header ? ZTransferColors.accentYellow :
                         (duration ? ZTransferColors.primaryText : ZTransferColors.statusConnected))
                 Text(AppLocalized.resource(lifetime))
                     .fontWeight(header ? .bold : .heavy)
-                    .lineLimit(1).minimumScaleFactor(0.8).padding(.horizontal, 2)
+                    .lineLimit(1).minimumScaleFactor(0.7).padding(.horizontal, 2)
                     .frame(width: columnWidth)
                     .foregroundStyle(header || duration ? ZTransferColors.accentYellow : ZTransferColors.statusConnected)
             }.font(.system(size: header ? (compact ? 11 : 12) : (compact ? 12 : 14)))
@@ -417,7 +403,10 @@ struct PremiumPurchaseView: View {
         let enabled = product != nil && !(kind == .annual && access.entitlement.isPro())
         return Button { selected = kind } label: {
             HStack(spacing: 8) {
-                Image(systemName: selected == kind ? "checkmark.circle.fill" : "circle").font(.system(size: 20))
+                ZStack {
+                    Image(systemName: "circle").opacity(selected == kind ? 0 : 1)
+                    Image(systemName: "checkmark.circle.fill").opacity(selected == kind ? 1 : 0)
+                }.font(.system(size: 20)).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(AppLocalized.resource(kind == .annual ? "plan_annual" : "plan_lifetime"))
                         .font(.system(size: 14, weight: .bold)).foregroundStyle(ZTransferColors.primaryText)
@@ -441,17 +430,19 @@ struct PremiumPurchaseView: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
                     selected == kind && enabled ? ZTransferColors.accentYellow : ZTransferColors.secondaryText.opacity(0.2),
                     lineWidth: selected == kind && enabled ? 2 : 1))
+                .animation(PremiumPlanMotion.selection, value: selected == kind)
         }.buttonStyle(.plain).disabled(!enabled || busy)
             .accessibilityAddTraits(selected == kind ? [.isSelected] : [])
+            .accessibilityIdentifier(kind == .annual ? "premium-plan-annual" : "premium-plan-lifetime")
     }
 
     private var canPurchase: Bool {
-        !busy && store.products[selected] != nil && !isLifetime && access.entitlement != .unresolved
-            && !(selected == .annual && access.entitlement.isPro())
+        !busy && store.products[selected] != nil && !isLifetime && !isAnnualSubscriber
+            && access.entitlement != .unresolved
     }
-    private var purchaseLabel: String {
-        guard let product = store.products[selected] else { return AppLocalized.resource("plan_unavailable") }
-        return AppLocalized.formattedResource(selected == .annual ? "iap_annual_cta" : "buy_lifetime_cta",
+    private func purchaseLabel(for kind: PremiumProduct) -> String {
+        guard let product = store.products[kind] else { return AppLocalized.resource("plan_unavailable") }
+        return AppLocalized.formattedResource(kind == .annual ? "iap_annual_cta" : "buy_lifetime_cta",
                                              ["%1$s": product.displayPrice])
     }
     private func notice(_ key: String) -> some View {
@@ -460,14 +451,29 @@ struct PremiumPurchaseView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(ZTransferColors.accentYellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
-    private func action(_ key: String, perform: @escaping () -> Void) -> some View {
+    private func managementAction(compact: Bool) -> some View {
+        action("iap_manage", fillsWidth: !compact) {
+            guard let scene else { return }
+            Task { await store.manage(in: scene) }
+        }.disabled(scene == nil)
+            .accessibilityIdentifier("premium-manage")
+    }
+    private func action(_ key: String, fillsWidth: Bool = true, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
             Text(AppLocalized.resource(key)).font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(ZTransferColors.accentBlue)
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                .lineLimit(1).fixedSize(horizontal: !fillsWidth, vertical: false)
+                .frame(maxWidth: fillsWidth ? .infinity : nil)
+                .padding(.horizontal, 10).padding(.vertical, 10)
                 .background(ZTransferGlassSurface(cornerRadius: 12, kind: .button))
         }.buttonStyle(.plain).disabled(busy)
     }
+}
+
+/// User-requested iOS refinement (2026-11-06): finite local crossfade, no
+/// selection-driven parent resizing or continuously observed animation clock.
+enum PremiumPlanMotion {
+    static var selection: Animation { .timingCurve(0.4, 0, 0.2, 1, duration: 0.18) }
 }
 
 /// Use the presenting window, including on iPad with more than one app scene.
@@ -497,6 +503,7 @@ struct ProBadgeButton: View {
     var big = false
     var enabled = true
     var motionPaused = false
+    var animatesLabelChanges = false
     let action: () -> Void
     @State private var origin = Date()
     @Environment(\.scenePhase) private var scenePhase
@@ -505,8 +512,11 @@ struct ProBadgeButton: View {
             HStack(spacing: big ? 6 : 4) {
                 Image(systemName: "seal.fill").font(.system(size: big ? 19 : 15))
                     .accessibilityHidden(true)
-                Text(label).font(.system(size: big ? 14 : 12, weight: .bold))
-                    .lineLimit(big ? 2 : 1)
+                if animatesLabelChanges {
+                    labelText(label)
+                        .contentTransition(.opacity)
+                        .animation(PremiumPlanMotion.selection, value: label)
+                } else { labelText(label) }
             }
             .foregroundStyle(Color(red: 74 / 255, green: 50 / 255, blue: 22 / 255))
             .padding(.horizontal, 12).frame(maxWidth: big ? .infinity : nil)
@@ -526,6 +536,11 @@ struct ProBadgeButton: View {
             .opacity(enabled ? 1 : 0.5)
         }.buttonStyle(.plain).disabled(!enabled)
             .accessibilityLabel(label)
+    }
+
+    private func labelText(_ text: String) -> some View {
+        Text(text).font(.system(size: big ? 14 : 12, weight: .bold))
+            .lineLimit(big ? 2 : 1)
     }
 }
 

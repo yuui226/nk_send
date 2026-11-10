@@ -22,6 +22,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photography</string>
 	<key>ZTransferPrivacyPolicyURL</key>
@@ -44,9 +46,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于向相机写入拍摄位置</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>用于保存工作台生成的效果图</string>
+	<string>用于把照片保存到系统照片图库</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于读取工作台照片</string>
+	<string>用于把传输的照片和视频保存到名为“Z传”的相簿</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>great_vibes_regular.ttf</string>
@@ -63,12 +65,15 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>bluetooth-central</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UILaunchScreen</key>
 		<dict/>
 	</dict>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

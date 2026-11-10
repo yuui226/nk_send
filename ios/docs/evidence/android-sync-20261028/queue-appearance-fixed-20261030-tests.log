@@ -1,0 +1,69 @@
+Test Suite 'Selected tests' started at 2026-10-30 17:34:41.464.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 17:34:41.464.
+Test Suite 'QueueAppearanceKeyMapTests' started at 2026-10-30 17:34:41.465.
+Test Case '-[ZTransferTests.QueueAppearanceKeyMapTests testFirstLayoutAndEmptyListResetDoNotFadeHistory]' started.
+Test Case '-[ZTransferTests.QueueAppearanceKeyMapTests testFirstLayoutAndEmptyListResetDoNotFadeHistory]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.QueueAppearanceKeyMapTests testInsertionReplacementAndReorderUseKeysWithoutResettingThePreviousMap]' started.
+Test Case '-[ZTransferTests.QueueAppearanceKeyMapTests testInsertionReplacementAndReorderUseKeysWithoutResettingThePreviousMap]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.QueueAppearanceKeyMapTests testPreviousNearestRangeSeparatesOrdinaryScrollAndFarJump]' started.
+Test Case '-[ZTransferTests.QueueAppearanceKeyMapTests testPreviousNearestRangeSeparatesOrdinaryScrollAndFarJump]' passed (0.001 seconds).
+Test Suite 'QueueAppearanceKeyMapTests' passed at 2026-10-30 17:34:41.473.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+Test Suite 'QueueItemAppearanceLayoutTests' started at 2026-10-30 17:34:41.473.
+Test Case '-[ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock]' started.
+QUEUE_APPEARANCE_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/C68516C7-98C5-4D11-A63C-A686C66FF4B8/tmp/queue-appearance-hidden.png
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueItemAppearanceTests.swift:130: error: -[ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock] : XCTAssertGreaterThan failed: ("0.0") is not greater than ("0.98")
+QUEUE_APPEARANCE_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/C68516C7-98C5-4D11-A63C-A686C66FF4B8/tmp/queue-appearance-middle.png
+QUEUE_APPEARANCE_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/C68516C7-98C5-4D11-A63C-A686C66FF4B8/tmp/queue-appearance-settled.png
+Test Case '-[ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock]' failed (1.638 seconds).
+Test Suite 'QueueItemAppearanceLayoutTests' failed at 2026-10-30 17:34:43.111.
+	 Executed 1 test, with 1 failure (0 unexpected) in 1.638 (1.638) seconds
+Test Suite 'QueueItemAppearanceTests' started at 2026-10-30 17:34:43.112.
+Test Case '-[ZTransferTests.QueueItemAppearanceTests testFiniteFadeUses180msFastOutSlowInAndDoesNotRestart]' started.
+Test Case '-[ZTransferTests.QueueItemAppearanceTests testFiniteFadeUses180msFastOutSlowInAndDoesNotRestart]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.QueueItemAppearanceTests testLeavingOrBackgroundingFinishesWithoutReplayAndDoesNotRetainOwner]' started.
+Test Case '-[ZTransferTests.QueueItemAppearanceTests testLeavingOrBackgroundingFinishesWithoutReplayAndDoesNotRetainOwner]' passed (0.001 seconds).
+Test Suite 'QueueItemAppearanceTests' passed at 2026-10-30 17:34:43.114.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'QueueRemovalCoordinatorTests' started at 2026-10-30 17:34:43.115.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork]' started.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork]' passed (0.041 seconds).
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearLeavingFinishesOldTargetsAndAllowsNewClear]' started.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearLeavingFinishesOldTargetsAndAllowsNewClear]' passed (0.141 seconds).
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames]' started.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames]' passed (0.491 seconds).
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testPendingTasksDoNotRetainTheirScreenOwner]' started.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testPendingTasksDoNotRetainTheirScreenOwner]' passed (0.417 seconds).
+Test Suite 'QueueRemovalCoordinatorTests' passed at 2026-10-30 17:34:44.206.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.090 (1.091) seconds
+Test Suite 'QueueRemovalLayoutTests' started at 2026-10-30 17:34:44.206.
+Test Case '-[ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows]' started.
+QUEUE_REMOVAL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/C68516C7-98C5-4D11-A63C-A686C66FF4B8/tmp/queue-removal-initial.png
+QUEUE_REMOVAL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/C68516C7-98C5-4D11-A63C-A686C66FF4B8/tmp/queue-removal-fade-before-collapse.png
+Test Case '-[ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows]' passed (0.710 seconds).
+Test Suite 'QueueRemovalLayoutTests' passed at 2026-10-30 17:34:44.916.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.710 (0.710) seconds
+Test Suite 'QueueRemovalTests' started at 2026-10-30 17:34:44.916.
+Test Case '-[ZTransferTests.QueueRemovalTests testAlreadyDeletedRowNeverRestoresOnLateAnimationCompletion]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testAlreadyDeletedRowNeverRestoresOnLateAnimationCompletion]' passed (0.065 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testCleanupWaitsForActualFramesAndReleasesTheWaiterOnCancellation]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testCleanupWaitsForActualFramesAndReleasesTheWaiterOnCancellation]' passed (0.497 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testClearImmediatelyDropsOffscreenTargetsButPreservesNewWorkAndPausedVisibleRows]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testClearImmediatelyDropsOffscreenTargetsButPreservesNewWorkAndPausedVisibleRows]' passed (0.504 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testOpacityLeadsHeightAndBothStayMonotonic]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testOpacityLeadsHeightAndBothStayMonotonic]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testPageExitFinishesCapturedClearButCannotTouchTasksAddedAfterward]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testPageExitFinishesCapturedClearButCannotTouchTasksAddedAfterward]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testPlacementDoesNotChaseHeightCollapseAndResumesFromFinalPosition]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testPlacementDoesNotChaseHeightCollapseAndResumesFromFinalPosition]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testTimelineUsesFirstDeliveredFrameAndSupportsScaledStagger]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testTimelineUsesFirstDeliveredFrameAndSupportsScaledStagger]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testVisibleTargetsStaggerByPositionWithBoundedDelayAndNoDuplicate]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testVisibleTargetsStaggerByPositionWithBoundedDelayAndNoDuplicate]' passed (0.007 seconds).
+Test Suite 'QueueRemovalTests' passed at 2026-10-30 17:34:46.016.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 1.097 (1.100) seconds
+Test Suite 'ZTransferTests.xctest' failed at 2026-10-30 17:34:46.017.
+	 Executed 19 tests, with 1 failure (0 unexpected) in 4.543 (4.552) seconds
+Test Suite 'Selected tests' failed at 2026-10-30 17:34:46.017.
+	 Executed 19 tests, with 1 failure (0 unexpected) in 4.543 (4.553) seconds
+** TEST FAILED **

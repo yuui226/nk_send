@@ -1,0 +1,25 @@
+{
+  "commit": "87328b56df3c9c0f83317642dab9a1a8116ab932",
+  "pages_status": "built",
+  "pages_commit": "87328b56df3c9c0f83317642dab9a1a8116ab932",
+  "pages_error": {
+    "message": null
+  },
+  "pages_updated_at": "2026-11-02T02:33:01Z",
+  "public_files": [
+    {
+      "file": "index.html",
+      "url": "https://www.ztransfer.top/",
+      "status": 200,
+      "sha256": "2bb9f6b96e4872b29ae267fb2ac58b324870d44543640268ad888b3d70022d75",
+      "matches_local": true
+    },
+    {
+      "file": "styles.css",
+      "url": "https://www.ztransfer.top/styles.css?v=20261102copy1",
+      "status": 200,
+      "sha256": "f4c2d9331ad057575301b7a9781abed51cda3dcc19138088bc8a16fc95b3f9b7",
+      "matches_local": true
+    }
+  ]
+}

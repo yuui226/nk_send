@@ -3,6 +3,80 @@ import XCTest
 @MainActor
 final class PhotoEffectsMasterUITests: XCTestCase {
     private struct Event: Decodable { let event: String; let milliseconds: Int64 }
+    func testSettingsPopupCanOpenAndCloseRepeatedlyWithNativeGlass() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--effects-master-ui-test", "--reset-effects-master", "--effects-popup-motion",
+            "-skin_preset", "LIQUID_GLASS", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        let open = app.buttons["photo-effects-test-popup-open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        for _ in 0..<3 {
+            open.tap()
+            let close = app.buttons.matching(NSPredicate(format: "label == %@", "Close")).firstMatch
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            XCTAssertTrue(close.isHittable)
+            close.tap()
+            let returned = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in open.isHittable }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [returned], timeout: 5), .completed)
+        }
+    }
+
+    func testModuleVisibilityRestoresThroughRealPopupAndLocalWorkbench() throws {
+        continueAfterFailure = false
+        for local in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--effects-master-ui-test", "--reset-effects-master",
+                local ? "--effects-np3-local" : "--effects-popup-motion",
+                "-skin_preset", "LIQUID_GLASS", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launch()
+            if !local {
+                let open = app.buttons["photo-effects-test-popup-open"]
+                XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
+                let entry = app.buttons["photo-effects-open-editor"]
+                XCTAssertTrue(entry.waitForExistence(timeout: 5)); entry.tap()
+            }
+            let menu = app.buttons["photo-effect-modules"]
+            XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+            let first = app.buttons["photo-effect-module-1"]
+            XCTAssertTrue(first.waitForExistence(timeout: 5))
+            let origin = menu.frame
+            for id in [1, 2, 16, 4, 8, 8, 4, 16, 2, 1] {
+                let chip = app.buttons["photo-effect-module-\(id)"]
+                XCTAssertTrue(chip.isHittable); chip.tap()
+                XCTAssertTrue(first.isHittable, "Management remains open while content shrinks")
+                XCTAssertEqual(menu.frame.minY, origin.minY, accuracy: 1, "Header must stay anchored")
+                XCTAssertEqual(menu.frame.maxX, origin.maxX, accuracy: 1)
+            }
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = local ? "module-workbench-restored" : "module-popup-restored"
+            shot.lifetime = .keepAlways; add(shot)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.45)).tap()
+            let closedMenu = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: first)
+            XCTAssertEqual(XCTWaiter.wait(for: [closedMenu], timeout: 5), .completed)
+            let header = XCTAttachment(screenshot: app.screenshot()); header.name = local ? "workbench-native-glass-header" : "popup-native-glass-header"
+            header.lifetime = .keepAlways; add(header)
+            app.buttons[local ? "tip-trigger-localEffects" : "tip-trigger-photoEffects"].tap()
+            let closeHelp = app.buttons.matching(NSPredicate(format: "label == %@", "Close")).firstMatch
+            XCTAssertTrue(closeHelp.waitForExistence(timeout: 5)); closeHelp.tap()
+            let details = app.buttons["photo-frame-settings"]
+            if !details.isHittable { app.swipeUp() }
+            XCTAssertTrue(details.isHittable); details.tap()
+            let expanded = XCTAttachment(screenshot: app.screenshot()); expanded.name = local ? "workbench-expanded-frame" : "popup-expanded-frame"
+            expanded.lifetime = .keepAlways; add(expanded)
+            if !local {
+                let back = app.buttons["photo-effects-editor-back"]
+                if !back.isHittable { app.swipeDown() }
+                back.tap()
+                XCTAssertTrue(app.buttons["photo-effects-open-editor"].waitForExistence(timeout: 5))
+                app.buttons.matching(NSPredicate(format: "label == %@", "Close")).firstMatch.tap()
+                let open = app.buttons["photo-effects-test-popup-open"]
+                let returned = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in open.isHittable }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [returned], timeout: 5), .completed)
+            }
+            app.terminate()
+        }
+    }
+
     func testModuleMenuUsesCompactChipsAndRemainsOpenWhenChangingModules() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -88,18 +162,40 @@ final class PhotoEffectsMasterUITests: XCTestCase {
         XCTAssertLessThan(hold.milliseconds - down.milliseconds, 620)
         XCTAssertFalse(trace.contains { $0.event == "wheel-commit" })
         XCTAssertEqual(wheel.value as? String, "5")
+        let feedback = trace.filter { $0.event.hasPrefix("haptic-") }
+        XCTAssertEqual(feedback.map(\.event), ["haptic-holdConfirmed"])
+        XCTAssertGreaterThanOrEqual(feedback[0].milliseconds - down.milliseconds, 430)
     }
 
     func testWheelDragCommitsOnceWithoutHoldOrTap() throws {
+        try verifyWheelDrag(holdAction: true)
+    }
+
+    func testWheelWithoutLongPressActionStillOwnsVerticalDrag() throws {
+        try verifyWheelDrag(holdAction: false)
+    }
+
+    func testWheelCanDragAfterAStationaryHoldWithoutLongPressAction() throws {
+        try verifyWheelDrag(holdAction: false, holdDuration: 0.8)
+    }
+
+    func testWheelBecomesDraggableWhenOptionsArrive() throws {
+        try verifyWheelDrag(holdAction: false, loadsOptions: true)
+    }
+
+    private func verifyWheelDrag(holdAction: Bool, holdDuration: TimeInterval = 0.1, loadsOptions: Bool = false) throws {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--gesture-audit-ui-test", "--audit-wheel"]
+        if !holdAction { app.launchArguments.append("--audit-wheel-no-hold") }
+        if loadsOptions { app.launchArguments.append("--audit-wheel-load-options") }
         app.launch(); defer { app.terminate() }
         let wheel = app.buttons["Audit wheel"]
         XCTAssertTrue(wheel.waitForExistence(timeout: 10))
+        if loadsOptions { app.buttons["load-wheel-options"].tap() }
         app.buttons["clear-trace"].tap()
         let start = wheel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -54)),
+        start.press(forDuration: holdDuration, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -54)),
                     withVelocity: .slow, thenHoldForDuration: 0.6)
         app.buttons["read-trace"].tap()
         let json = try XCTUnwrap(app.staticTexts["interaction-trace"].value as? String)
@@ -107,6 +203,84 @@ final class PhotoEffectsMasterUITests: XCTestCase {
         XCTAssertEqual(trace.filter { $0.event == "wheel-commit" }.count, 1)
         XCTAssertFalse(trace.contains { $0.event == "wheel-hold" })
         XCTAssertNotEqual(wheel.value as? String, "5")
+        let feedback = trace.filter { $0.event.hasPrefix("haptic-") }
+        XCTAssertFalse(feedback.isEmpty, "Crossing actual detents still gives feedback")
+        XCTAssertTrue(feedback.allSatisfy { $0.event == "haptic-selection" })
+    }
+
+    func testEmptyAndClampedWheelDragsDoNotVibrate() throws {
+        for argument in ["--audit-wheel-load-options", "--audit-wheel-at-end"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--gesture-audit-ui-test", "--audit-wheel", argument]
+            app.launch(); defer { app.terminate() }
+            let wheel = app.buttons["Audit wheel"]
+            XCTAssertTrue(wheel.waitForExistence(timeout: 10))
+            let original = wheel.value as? String
+            app.buttons["clear-trace"].tap()
+            let start = wheel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -54)),
+                        withVelocity: .fast, thenHoldForDuration: 0.6)
+            app.buttons["read-trace"].tap()
+            let json = try XCTUnwrap(app.staticTexts["interaction-trace"].value as? String)
+            let trace = try JSONDecoder().decode([Event].self, from: Data(json.utf8))
+            XCTAssertFalse(trace.contains { $0.event.hasPrefix("haptic-") }, json)
+            XCTAssertFalse(trace.contains { $0.event == "wheel-commit" || $0.event == "wheel-hold" }, json)
+            XCTAssertEqual(wheel.value as? String, original)
+        }
+    }
+
+    func testInitialPhotoFilterEntryOpensFolderPickerAndCancelKeepsSetupLabel() {
+        continueAfterFailure = false
+        for local in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--effects-master-ui-test", "--reset-effects-master", "--effects-np3-fixture",
+                                   "--effects-np3-fixture-no-folder", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            if local { app.launchArguments.append("--effects-np3-local") }
+            app.launch(); defer { app.terminate() }
+            if !local {
+                let entry = app.buttons["photo-effects-open-editor"]
+                XCTAssertTrue(entry.waitForExistence(timeout: 10)); entry.tap()
+            }
+            let name = app.buttons["photo-np3-name"]
+            XCTAssertTrue(name.waitForExistence(timeout: 5))
+            XCTAssertEqual(name.value as? String, "Set NP3 folder")
+            name.tap()
+            let cancel = app.buttons["Cancel"].firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 5), "A tap must present the system directory picker")
+            cancel.tap()
+            XCTAssertTrue(name.waitForExistence(timeout: 5))
+            XCTAssertEqual(name.value as? String, "Set NP3 folder")
+        }
+    }
+
+    func testPhotoEffectsNameAndIntensityDragInRealEditor() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--effects-master-ui-test", "--reset-effects-master", "--effects-np3-fixture",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        let entry = app.buttons["photo-effects-open-editor"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let name = app.buttons["photo-np3-name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        var lastFrame = CGRect.zero
+        let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frame = name.frame; defer { lastFrame = frame }
+            return name.isHittable && frame == lastFrame
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [stable], timeout: 5), .completed)
+        let previous = name.value as? String
+        let start = name.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -45)))
+        XCTAssertNotEqual(name.value as? String, previous)
+        app.buttons["photo-np3-adjust"].tap()
+        let intensity = app.buttons["Intensity"].firstMatch
+        XCTAssertTrue(intensity.waitForExistence(timeout: 5))
+        let value = intensity.value as? String
+        let center = intensity.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        center.press(forDuration: 0.7, thenDragTo: center.withOffset(CGVector(dx: 0, dy: 36)))
+        XCTAssertNotEqual(intensity.value as? String, value)
     }
 
     func testSmallFingerDriftDoesNotCancelWheelHold() throws {
@@ -230,6 +404,102 @@ final class PhotoEffectsMasterUITests: XCTestCase {
         expect(state, "expanded=0")
     }
 
+    func testGPSColdLaunchWithOldEnabledFlagStaysOffBeforeAndAfterLocationGrant() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.terminate()
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--gps-permission-ui-test", "--gps-legacy-enabled-ui-test",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        addTeardownBlock {
+            await MainActor.run { app.terminate(); app.resetAuthorizationStatus(for: .location) }
+        }
+        let status = app.staticTexts["gps-permission-status"]
+        let button = app.buttons["gps-status-control"]
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for launch in 0..<2 {
+            app.launch()
+            XCTAssertTrue(button.waitForExistence(timeout: 10))
+            XCTAssertEqual(status.label, "OFF")
+            let coldStart = XCTAttachment(screenshot: app.screenshot())
+            coldStart.name = "gps-cold-launch-\(launch)"; coldStart.lifetime = .keepAlways; add(coldStart)
+            XCTAssertTrue(["Enable GPS", "开启GPS", "開啟GPS"].contains(button.label), button.debugDescription)
+            XCTAssertFalse(app.staticTexts["gps-permission-guidance"].exists)
+            XCTAssertFalse(springboard.alerts.firstMatch.exists)
+            button.tap()
+            if launch == 0 {
+                let alert = springboard.alerts.firstMatch
+                XCTAssertTrue(alert.waitForExistence(timeout: 5))
+                alert.buttons.matching(NSPredicate(format: "label CONTAINS 'While Using' OR label CONTAINS '使用'"))
+                    .firstMatch.tap()
+            }
+            let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "SEARCHING"), object: status)
+            XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 5), .completed)
+            app.terminate()
+        }
+    }
+
+    func testGPSFirstUseNativeLocationPromptCanEnableTransport() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.terminate()
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--gps-permission-ui-test", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        addTeardownBlock {
+            await MainActor.run { app.terminate(); app.resetAuthorizationStatus(for: .location) }
+        }
+        let button = app.buttons["gps-status-control"]
+        XCTAssertTrue(button.waitForExistence(timeout: 10))
+        button.tap()
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "First use must show the actual system prompt")
+        let prompt = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        prompt.name = "gps-native-location-request"; prompt.lifetime = .keepAlways; add(prompt)
+        alert.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@", "While Using", "使用")).firstMatch.tap()
+        let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "SEARCHING"),
+            object: app.staticTexts["gps-permission-status"])
+        XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 5), .completed)
+        XCTAssertFalse(app.staticTexts["gps-permission-guidance"].exists)
+        XCTAssertEqual(app.staticTexts["gps-location-authorization"].label, "4")
+    }
+
+    func testGPSDeniedNativePermissionOpensSettingsAndKeepsGuidanceOnReturn() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.terminate()
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--gps-permission-ui-test", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        addTeardownBlock {
+            await MainActor.run { app.terminate(); app.resetAuthorizationStatus(for: .location) }
+        }
+        let button = app.buttons["gps-status-control"]
+        XCTAssertTrue(button.waitForExistence(timeout: 10))
+        button.tap()
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons.matching(NSPredicate(format: "label IN %@", ["Don’t Allow", "Don't Allow", "不允许", "不允許"])).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["gps-permission-guidance"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["gps-permission-status"].label, "ERROR")
+        let denied = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        denied.name = "gps-native-denied-guidance"; denied.lifetime = .keepAlways; add(denied)
+        button.tap()
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 5))
+        let settingsEntry = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        settingsEntry.name = "gps-native-settings-entry"; settingsEntry.lifetime = .keepAlways; add(settingsEntry)
+        // Do not make app tests depend on Simulator Settings' inconsistent row
+        // navigation. Grant-and-return is covered by coordinator state tests;
+        // this native test verifies denial, actual Settings launch and return.
+        app.activate()
+        XCTAssertTrue(app.staticTexts["gps-permission-guidance"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["gps-permission-status"].label, "ERROR")
+        XCTAssertEqual(app.staticTexts["gps-location-authorization"].label, "2")
+        let returned = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        returned.name = "gps-native-denied-return"; returned.lifetime = .keepAlways; add(returned)
+    }
+
     func testGPSHoldDisablesBeforeReleaseWithoutReenablingAndNextTapWorks() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -259,13 +529,72 @@ final class PhotoEffectsMasterUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["gps-enabled"].label, "1")
     }
 
+    func testFilterResetKeepsPanelOpenAndQuickRepeatedTapsHavePressFeedback() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--filter-gesture-ui-test", "--filter-compact", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        app.buttons["Filter"].tap()
+        let reset = app.buttons["photo-filter-reset"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 10))
+        reset.tap(); reset.tap()
+        XCTAssertTrue(reset.isHittable)
+        XCTAssertTrue(app.staticTexts["filter-audit-state"].label.contains("date=nil:nil"))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
+        app.buttons["read-trace"].tap()
+        let json = try XCTUnwrap(app.staticTexts["filter-audit-trace"].value as? String)
+        let events = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+        XCTAssertEqual(events.filter { $0["event"] as? String == "action" }.count, 2)
+        XCTAssertTrue(events.contains { ($0["event"] as? String) == "frame" && ($0["scale"] as? Double ?? 1) < 0.999 })
+        let attachment = XCTAttachment(string: json); attachment.name = "filter-reset-press"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
+    func testFilterDateButtonsFillRowsAndBackDiscardsOnlyDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--filter-gesture-ui-test", "--filter-compact", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        app.buttons["Filter"].tap()
+        let date = app.buttons["photo-filter-date"]
+        XCTAssertTrue(date.waitForExistence(timeout: 10)); date.tap()
+        let clear = app.buttons["photo-filter-date-clear"], done = app.buttons["photo-filter-date-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        // AX bounds include the styled button's full interaction surface.
+        // Assert matching usable rows, not equality with the 40pt label alone.
+        XCTAssertGreaterThanOrEqual(done.frame.height, 40)
+        XCTAssertLessThanOrEqual(done.frame.height, 44)
+        XCTAssertEqual(clear.frame.height, done.frame.height, accuracy: 1)
+        XCTAssertGreaterThan(done.frame.width, 100)
+        XCTAssertEqual(clear.frame.width, done.frame.width, accuracy: 1)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "filter-date-buttons"; shot.lifetime = .keepAlways; add(shot)
+        let months = app.buttons.matching(NSPredicate(format: "label == %@", "Month"))
+        XCTAssertEqual(months.count, 2)
+        XCTAssertEqual(months.element(boundBy: 0).value as? String, "03")
+        months.element(boundBy: 0).tap()
+        app.buttons["photo-filter-date-back"].tap()
+        XCTAssertTrue(date.waitForExistence(timeout: 5)); date.tap()
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        XCTAssertEqual(months.element(boundBy: 0).value as? String, "03")
+        months.element(boundBy: 0).tap(); done.tap()
+        XCTAssertTrue(date.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["filter-audit-state"].label.contains("date=20240201:20240415"))
+        date.tap(); XCTAssertTrue(clear.waitForExistence(timeout: 5)); clear.tap()
+        XCTAssertTrue(date.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["filter-audit-state"].label.contains("date=nil:nil"))
+        date.tap(); XCTAssertTrue(done.waitForExistence(timeout: 5))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
+        app.buttons["Filter"].tap()
+        XCTAssertTrue(date.waitForExistence(timeout: 5))
+        XCTAssertFalse(done.exists)
+    }
+
     func testFilterPopupScrollAndWheelKeepIndependentOwnership() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--filter-gesture-ui-test", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch(); defer { app.terminate() }
         app.buttons["Filter"].tap()
-        let wheel = app.buttons["Range"]
+        let wheel = app.buttons["Rating load range"]
         XCTAssertTrue(wheel.waitForExistence(timeout: 10))
         // The long extension list forces the real popup's inner ScrollView.
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))

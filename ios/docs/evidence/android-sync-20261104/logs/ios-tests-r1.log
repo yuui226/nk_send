@@ -1,0 +1,68 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=CA046456-B859-45F4-9CB3-2C6E2F8E03B0" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -parallel-testing-enabled NO -resultBundlePath /tmp/ztransfer-android-20261104-r1.xcresult "-only-testing:ZTransferTests/RemoteSelfTimerTests" "-only-testing:ZTransferTests/RemoteShutterTests" "-only-testing:ZTransferTests/RemoteToolPreferencesTests" test-without-building
+
+Writing result bundle at path:
+	/tmp/ztransfer-android-20261104-r1.xcresult
+
+IOSurfaceClientSetSurfaceNotify failed e00002c7
+2026-11-04 19:41:51.838282+0800 ZTransfer[12863:41030665] [General] Failed to send CA Event for app launch measurements for ca_event_type: 0 event_name: com.apple.app_launch_measurement.FirstFramePresentationMetric
+2026-11-04 19:41:52.084790+0800 ZTransfer[12863:41030835] [General] Failed to send CA Event for app launch measurements for ca_event_type: 1 event_name: com.apple.app_launch_measurement.ExtendedLaunchMetrics
+Test Suite 'Selected tests' started at 2026-11-04 19:41:52.226.
+Test Suite 'ZTransferTests.xctest' started at 2026-11-04 19:41:52.226.
+Test Suite 'RemoteSelfTimerTests' started at 2026-11-04 19:41:52.227.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testBusyRetriesBoundedAndCancellationBetweenRepliesStopsAnotherShutter]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testBusyRetriesBoundedAndCancellationBetweenRepliesStopsAnotherShutter]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelDuringAutofocusDrainsAndPreventsNewOrLateShutter]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelDuringAutofocusDrainsAndPreventsNewOrLateShutter]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelledBeforeWorkerDispatchNeverFocuses]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCancelledBeforeWorkerDispatchNeverFocuses]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCountdownCancellationAndInvalidContextNeverFocus]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testCountdownCancellationAndInvalidContextNeverFocus]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testFailedFocusAndExceptionResetForNextShotAndReportOnlyCurrentFailure]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testFailedFocusAndExceptionResetForNextShotAndReportOnlyCurrentFailure]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testMonotonicDeadlineDoesNotAccumulateDelayedWakeupsAndReservesSynchronously]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testMonotonicDeadlineDoesNotAccumulateDelayedWakeupsAndReservesSynchronously]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPermissionRemainsInvalidAfterCancelledCaptureDrains]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPermissionRemainsInvalidAfterCancelledCaptureDrains]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPreferencesAndPhotoMovieLayoutsKeepIndependentScopes]' started.
+Test Case '-[ZTransferTests.RemoteSelfTimerTests testPreferencesAndPhotoMovieLayoutsKeepIndependentScopes]' passed (0.021 seconds).
+Test Suite 'RemoteSelfTimerTests' passed at 2026-11-04 19:41:52.272.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.042 (0.046) seconds
+Test Suite 'RemoteShutterTests' started at 2026-11-04 19:41:52.275.
+Test Case '-[ZTransferTests.RemoteShutterTests testControllerCancelsFiredHoldWhenDisabledAndDoesNotFireAgainOnUp]' started.
+Test Case '-[ZTransferTests.RemoteShutterTests testControllerCancelsFiredHoldWhenDisabledAndDoesNotFireAgainOnUp]' passed (0.316 seconds).
+Test Case '-[ZTransferTests.RemoteShutterTests testControllerDisappearanceCancelsTimerAndCapturingBlocksDown]' started.
+Test Case '-[ZTransferTests.RemoteShutterTests testControllerDisappearanceCancelsTimerAndCapturingBlocksDown]' passed (0.360 seconds).
+Test Case '-[ZTransferTests.RemoteShutterTests testInitialLandscapeRecordingGeometryDoesNotAnimateFromPortrait]' started.
+Test Case '-[ZTransferTests.RemoteShutterTests testInitialLandscapeRecordingGeometryDoesNotAnimateFromPortrait]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.RemoteShutterTests testLongHoldHasOneFocusAndReleaseOrCancel]' started.
+Test Case '-[ZTransferTests.RemoteShutterTests testLongHoldHasOneFocusAndReleaseOrCancel]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.RemoteShutterTests testPressDoesNotPretendTheCameraAcceptedFocusAndMorphChannelsRemainIndependent]' started.
+Test Case '-[ZTransferTests.RemoteShutterTests testPressDoesNotPretendTheCameraAcceptedFocusAndMorphChannelsRemainIndependent]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.RemoteShutterTests testQuickTapAndCancelledTapNeverStartFocus]' started.
+Test Case '-[ZTransferTests.RemoteShutterTests testQuickTapAndCancelledTapNeverStartFocus]' passed (0.000 seconds).
+Test Suite 'RemoteShutterTests' passed at 2026-11-04 19:41:52.955.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.678 (0.680) seconds
+Test Suite 'RemoteToolPreferencesTests' started at 2026-11-04 19:41:52.955.
+Test Case '-[ZTransferTests.RemoteToolPreferencesTests testDefaultsAndLegacyFallbackDoNotOverwriteUnknownStoredValuesOnRead]' started.
+Test Case '-[ZTransferTests.RemoteToolPreferencesTests testDefaultsAndLegacyFallbackDoNotOverwriteUnknownStoredValuesOnRead]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.RemoteToolPreferencesTests testHideClosesFeatureAndRestoreDoesNotReactivateIt]' started.
+Test Case '-[ZTransferTests.RemoteToolPreferencesTests testHideClosesFeatureAndRestoreDoesNotReactivateIt]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.RemoteToolPreferencesTests testRepeatedHiddenApplicationDisablesAgainWithoutResettingOtherPreferences]' started.
+Test Case '-[ZTransferTests.RemoteToolPreferencesTests testRepeatedHiddenApplicationDisablesAgainWithoutResettingOtherPreferences]' passed (0.011 seconds).
+Test Suite 'RemoteToolPreferencesTests' passed at 2026-11-04 19:41:52.999.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.043 (0.044) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-11-04 19:41:52.999.
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.763 (0.773) seconds
+Test Suite 'Selected tests' passed at 2026-11-04 19:41:52.999.
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.763 (0.773) seconds
+2026-11-04 19:41:53.459 xcodebuild[12637:41028091] [MT] IDETestOperationsObserverDebug: 28.371 elapsed -- Testing started completed.
+2026-11-04 19:41:53.460 xcodebuild[12637:41028091] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-04 19:41:53.460 xcodebuild[12637:41028091] [MT] IDETestOperationsObserverDebug: 28.371 sec, +28.371 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-android-20261104-r1.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

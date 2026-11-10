@@ -1,0 +1,61 @@
+Building for debugging...
+[Planning deferred tasks]
+[27 / 50]
+[28 / 51] ZTransfer
+[37 / 125]
+[38 / 125]
+[40 / 125]
+[48 / 125]
+[50 / 125]
+[51 / 125]
+[56 / 125]
+[57 / 125]
+[59 / 125]
+[63 / 125]
+[68 / 125]
+[71 / 125]
+[73 / 125]
+[74 / 125]
+[81 / 125]
+[84 / 125]
+[85 / 125]
+[89 / 125]
+[92 / 125]
+[93 / 125]
+error: SwiftCompile normal arm64 failed with a nonzero exit code. Command line:     cd /private/tmp
+    
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPTransferDiagnostics.swift:36:78: warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 34 |     private let emit: @Sendable (String) -> Void
+ 35 | 
+ 36 |     init(emit: @escaping @Sendable (String) -> Void = PTPTransferDiagnostics.persist) {
+    |                                                                              `- warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 37 |         self.emit = emit
+ 38 |     }
+
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoCatalog.swift:111:71: error: cannot find type 'RemoteReviewPhoto' in scope
+109 | }
+110 | 
+111 | func photoPreviewPages(_ entries: [PhotoPreviewEntry], reviewPhotos: [RemoteReviewPhoto] = []) -> [PhotoPreviewPage] {
+    |                                                                       `- error: cannot find type 'RemoteReviewPhoto' in scope
+112 |     var captureByHandle: [UInt32: UInt32] = [:]
+113 |     for photo in reviewPhotos {
+
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoFilter.swift:201:18: error: cannot find type 'TransferQueueItem' in scope
+199 |     previous: Set<UInt32>,
+200 |     current: Set<UInt32>,
+201 |     queueItems: [TransferQueueItem],
+    |                  `- error: cannot find type 'TransferQueueItem' in scope
+202 |     untransferredOnly: Bool
+203 | ) -> Set<UInt32> {
+
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoRatingScan.swift:221:19: error: cannot find type 'CameraSession' in scope
+219 |     )
+220 | 
+221 |     init(session: CameraSession) {
+    |                   `- error: cannot find type 'CameraSession' in scope
+222 |         self.init(
+223 |             generation: { await session.photoRatingGeneration() },
+Failed frontend command:
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -emit-module -experimental-skip-non-inlinable-function-bodies-without-types /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/AsyncDeadline.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/FileScanBatchSize.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/JpegThumbnailFallback.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/NEFExifThumbnail.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/NewObjectThumbnailRetries.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPCodec.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPDataset.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPIPCodec.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPIPDiscovery.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPIPPOSIXChannel.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPIPSocketConnection.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPIPSocketTransport.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPSession.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPTransferDiagnostics.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoCatalog.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoFilter.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoMetadataIdentity.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoRating.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoRatingPairs.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoRatingScan.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoThumbnailDiskCache.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoThumbnailFillQueue.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PhotoThumbnailStore.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STABrowsingSession.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAConnectionCoordinator.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAEvent.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAJpegThumbnail.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAMediaMetadata.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAObjectReader.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAProfileStore.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/ThumbnailCache.swift /private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/VideoRating.swift -target arm64-apple-macos13.0 -disable-cross-import-overlay-search -swift-module-cross-import Darwin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/Darwin.swiftcrossimport/xlocale.swiftoverlay -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server\#FoundationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server\#ObservationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server\#SwiftMacros -disable-implicit-swift-modules -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps -explicit-swift-module-map-file /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer-dependencies-1.json -Xllvm -aarch64-use-tbi -enable-objc-interop -stack-check -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.2.sdk -I /private/tmp/ztransfer-new-object-retry-native/.build/out/Products/Debug -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -F /private/tmp/ztransfer-new-object-retry-native/.build/out/Products/Debug -F /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -module-cache-path /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/SwiftExplicitPrecompiledModules -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format\=dwarf -dwarf-version\=4 -swift-version 5 -Onone -D SWIFT_PACKAGE -D DEBUG -D SWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE -D Xcode -serialize-debugging-options -enable-experimental-feature DebugDescriptionMacro -empty-abi-descriptor -validate-clang-modules-once -clang-build-session-file /private/tmp/ztransfer-new-object-retry-native/.build/out/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /private/tmp -enable-anonymous-context-mangled-names -file-compilation-dir /private/tmp -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -ivfsstatcache -Xcc /private/tmp/ztransfer-new-object-retry-native/.build/out/SDKStatCaches.noindex/macosx27.2-26B118-a0facfad118c1a7a18f0aad9463f6549a7ff82d74745d5ef33555b35c4238456.sdkstatcache -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -Xcc -I/private/tmp/ztransfer-new-object-retry-native/.build/out/Products/Debug/include -Xcc -I/private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/DerivedSources-normal/arm64 -Xcc -I/private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/DerivedSources/arm64 -Xcc -I/private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/DerivedSources -Xcc -DSWIFT_PACKAGE -Xcc -DDEBUG\=1 -no-auto-bridging-header-chaining -module-name ZTransfer -package-name ztransfer_new_object_retry_native -const-gather-protocols-file /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer_const_extract_protocols.json -disable-clang-spi -clang-target arm64-apple-macos27.2 -target-sdk-version 27.2 -target-sdk-name macosx27.2 -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -emit-module-doc-path /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer.swiftdoc -emit-module-source-info-path /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer.swiftsourceinfo -emit-objc-header-path /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer-Swift.h -serialize-diagnostics-path /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer-primary-emit-module.dia -emit-dependencies-path /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer-primary-emit-module.d -parse-as-library -o /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer.swiftmodule -emit-abi-descriptor-path /private/tmp/ztransfer-new-object-retry-native/.build/out/Intermediates.noindex/ThumbnailRetryNative.build/Debug/ZTransfer-t.build/Objects-normal/arm64/ZTransfer.abi.json
+error: Build failed
+error: fatalError

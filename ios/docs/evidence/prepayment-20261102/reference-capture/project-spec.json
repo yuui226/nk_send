@@ -1,0 +1,38 @@
+{
+  "name": "ReleaseReferenceCapture",
+  "settings": {
+    "base": {
+      "IPHONEOS_DEPLOYMENT_TARGET": "16.0",
+      "SWIFT_VERSION": "5.0",
+      "GENERATE_INFOPLIST_FILE": "YES"
+    }
+  },
+  "targets": {
+    "ReleaseReferenceCapture": {
+      "type": "bundle.ui-testing",
+      "platform": "iOS",
+      "sources": [
+        "/Users/orys/code/nk_send/ios/docs/evidence/prepayment-20261102/reference-capture/ReleaseReferenceCapture.swift"
+      ],
+      "settings": {
+        "base": {
+          "PRODUCT_BUNDLE_IDENTIFIER": "com.ztransfer.releasecapture"
+        }
+      }
+    }
+  },
+  "schemes": {
+    "ReleaseReferenceCapture": {
+      "build": {
+        "targets": {
+          "ReleaseReferenceCapture": "all"
+        }
+      },
+      "test": {
+        "targets": [
+          "ReleaseReferenceCapture"
+        ]
+      }
+    }
+  }
+}

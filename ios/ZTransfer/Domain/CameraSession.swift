@@ -57,7 +57,6 @@ actor CameraSession {
     /// signal pill can render Android's STA-specific state instead of
     /// collapsing every PTP/IP connection into a generic Wi‑Fi glyph.
     nonisolated let wirelessMode: WirelessMode?
-    nonisolated let recoveredFromSessionID: ObjectIdentifier?
     private let thumbnailStore: PhotoThumbnailStore
     private nonisolated let decodedThumbnailCache = PhotoDecodedThumbnailCache()
     private let exifStore = PhotoExifStore()
@@ -68,16 +67,13 @@ actor CameraSession {
         self.repository = repository; self.usbTransport = transport; self.transportDeviceID = deviceID
         self.usbIdentity = repository.usbSessionIdentity ?? USBSessionIdentity(token: sessionToken)
         self.isUSB = true; self.wirelessMode = nil
-        self.recoveredFromSessionID = nil
     }
 
     /// Creates a network-backed session. The repository's PTPSession is the
     /// serialized command channel for thumbnails, reads and downloads.
     init(repository: CameraRepository, wirelessMode: WirelessMode = .ap,
-         recoveredFromSessionID: ObjectIdentifier? = nil,
          thumbnailStore: PhotoThumbnailStore = PhotoThumbnailStore()) {
         self.thumbnailStore = thumbnailStore
-        self.recoveredFromSessionID = recoveredFromSessionID
         self.repository = repository; self.usbTransport = nil; self.transportDeviceID = nil; self.usbIdentity = nil; self.isUSB = false; self.wirelessMode = wirelessMode
     }
 
@@ -137,9 +133,21 @@ actor CameraSession {
         try Task.checkCancellation()
     }
 
-    func thumbnail(handle: UInt32, priority: CameraRequestKind = .visibleThumbnail) async throws -> Data {
-        return try await repository.thumbnail(handle: handle, priority: priority)
+    func thumbnail(handle: UInt32, file: CameraFile? = nil,
+                   priority: CameraRequestKind = .visibleThumbnail) async throws -> Data {
+        let retry = await thumbnailStore.isNewObjectRetry(handle)
+        return try await repository.thumbnail(handle: handle, file: file, priority: priority, retryNewObject: retry)
     }
+
+    func registerNewThumbnailObjects(_ files: [CameraFile]) async {
+        guard !files.isEmpty else { return }
+        let identity = await thumbnailCacheIdentity()
+        let direct = await repository.usesDirectThumbnailRead()
+        await thumbnailStore.registerNewObjects(files, identity: identity, directSTA: direct)
+    }
+    func thumbnailRetryWakes() async -> AsyncStream<Void> { await thumbnailStore.retryWakes() }
+    func blockedThumbnailRetryHandles() async -> Set<UInt32> { await thumbnailStore.blockedRetryHandles() }
+    func stopThumbnailRetries() async { await thumbnailStore.stopRetries() }
 
     /// Metadata-aware path used by the photo grid. It follows Android's
     /// memory → negative → disk → shared request → camera read order.
@@ -155,7 +163,7 @@ actor CameraSession {
                 self.processAndCacheThumbnail(data, file: file)
             },
             validate: { !$0.isEmpty },
-            fetch: { try await self.thumbnail(handle: file.id, priority: .visibleThumbnail) }
+            fetch: { try await self.thumbnail(handle: file.id, file: file, priority: .visibleThumbnail) }
         )
     }
 
@@ -218,7 +226,7 @@ actor CameraSession {
             identity: identity,
             directSTA: direct,
             validate: validator,
-            fetch: { try await self.thumbnail(handle: file.id, priority: .backgroundThumbnail) }
+            fetch: { try await self.thumbnail(handle: file.id, file: file, priority: .backgroundThumbnail) }
         )
         if outcome.isSettled { await thumbnailStore.publish(handle: file.id) }
         else if sequential { await repository.discardRejectedThumbnail(handle: file.id) }
@@ -292,6 +300,7 @@ actor CameraSession {
     /// session. Active PTP work may finish its own protocol cleanup; queued
     /// work receives cancellation and cannot leak into a replacement session.
     func beginShutdown(reason: String = "camera session closed") async {
+        await thumbnailStore.stopRetries()
         await repository.beginShutdown(reason: reason)
     }
 
@@ -497,6 +506,10 @@ actor CameraSession {
         try await repository.capturePhoto()
     }
 
+    func capturePhotoIfCurrent(_ permission: PTPCommandPermission) async throws -> Bool {
+        try await repository.capturePhotoIfCurrent(permission)
+    }
+
     func remoteDeviceModel() async -> String? { await repository.remoteDeviceModel() }
 
     func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor? {
@@ -565,6 +578,7 @@ protocol RemoteCameraControlling: Sendable {
     func probeLegacyVideoTime() async throws -> String
     func probeMovieFormat() async throws -> String
     func capturePhoto() async throws
+    func capturePhotoIfCurrent(_ permission: PTPCommandPermission) async throws -> Bool
     func remoteProperty(_ property: RemoteProperty) async throws -> RemotePropertyDescriptor?
     func setRemoteProperty(_ descriptor: RemotePropertyDescriptor, value: UInt64) async throws
     func focusAt(trackingX: UInt32, trackingY: UInt32,
@@ -589,6 +603,15 @@ protocol RemoteCameraControlling: Sendable {
 }
 
 extension RemoteCameraControlling {
+    func capturePhotoIfCurrent(_ permission: PTPCommandPermission) async throws -> Bool {
+        guard permission.isCurrent else { return false }
+        let request = Task {
+            guard permission.isCurrent else { return false }
+            try await capturePhoto()
+            return true
+        }
+        return try await request.value
+    }
     func remoteKeepalive() async { }
     func setRemoteSessionActive(_ active: Bool) async { await setRemoteActive(active) }
 

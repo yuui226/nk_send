@@ -1,0 +1,103 @@
+// AndroidX Compose 1.7.6; Apache-2.0. Source jar URLs and full-file hashes are in numeric-value-verification.json.
+/*
+ * Copyright 2020 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+// Source lines 1180-1206
+    // roll back. The
+    internal fun updateTarget(targetState: S) {
+        // This is needed because child animations rely on this target state and the state pair to
+        // update their animation specs
+        if (this.targetState != targetState) {
+            // Starting state should be the "next" state when waypoints are impl'ed
+            segment = SegmentImpl(this.targetState, targetState)
+            if (currentState != this.targetState) {
+                transitionState.currentState = this.targetState
+            }
+            this.targetState = targetState
+            if (!isRunning) {
+                updateChildrenNeeded = true
+            }
+
+            // If target state is changed, reset all the animations to be re-created in the
+            // next frame w/ their new target value. Child animations target values are updated in
+            // the side effect that may not have happened when this function in invoked.
+            resetAnimations()
+        }
+    }
+
+    private fun resetAnimations() {
+        _animations.fastForEach { it.resetAnimation() }
+        _transitions.fastForEach { it.resetAnimations() }
+    }
+
+
+// Source lines 1456-1468
+        private val interruptionSpec: FiniteAnimationSpec<T>
+
+        init {
+            val visibilityThreshold: T? = visibilityThresholdMap.get(typeConverter)?.let {
+                val vector = typeConverter.convertToVector(initialValue)
+                for (id in 0 until vector.size) {
+                    vector[id] = it
+                }
+                typeConverter.convertFromVector(vector)
+            }
+            interruptionSpec = spring(visibilityThreshold = visibilityThreshold)
+        }
+
+
+// Source lines 1485-1495
+                return
+            }
+            val specWithoutDelay =
+                if (isInterrupted && !isSeeking) {
+                    // When interrupted, use the default spring, unless the spec is also a spring.
+                    if (animationSpec is SpringSpec<*>) animationSpec else interruptionSpec
+                } else {
+                    animationSpec
+                }
+            val spec =
+                if (playTimeNanos <= 0L) {
+
+// Source lines 1570-1596
+        @OptIn(InternalAnimationApi::class)
+        internal fun updateTargetValue(
+            targetValue: T,
+            animationSpec: FiniteAnimationSpec<T>
+        ) {
+            if (useOnlyInitialValue && targetValue == initialValueAnimation?.targetValue) {
+                return // we're already animating to the target value through the initial value
+            }
+            if (this.targetValue == targetValue && resetSnapValue == NoReset) {
+                return // nothing to change. Just continue the existing animation.
+            }
+            this.targetValue = targetValue
+            this.animationSpec = animationSpec
+            val initialValue = if (resetSnapValue == ResetAnimationSnap) targetValue else value
+            updateAnimation(initialValue, isInterrupted = !isFinished)
+            isFinished = resetSnapValue == ResetAnimationSnap
+            // This is needed because the target change could happen during a transition
+            if (resetSnapValue >= 0f) {
+                val duration = animation.durationNanos
+                value = animation.getValueFromNanos((duration * resetSnapValue).toLong())
+            } else if (resetSnapValue == ResetAnimationSnap) {
+                value = targetValue
+            }
+            useOnlyInitialValue = false
+            resetSnapValue = NoReset
+        }
+

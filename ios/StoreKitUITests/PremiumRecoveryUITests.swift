@@ -181,7 +181,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         add(shot)
     }
 
-    func testAnnualToLifetimeKeepsRenewalManagementAfterRelaunch() {
+    func testAnnualRenewalShowsDateWithoutPurchaseOptionsAfterRelaunch() {
         let app = XCUIApplication()
         app.launchArguments = ["-app_language", "zh-Hans", "--trace-storekit-startup"]
         addTeardownBlock { app.terminate() }
@@ -190,81 +190,55 @@ final class PremiumRecoveryUITests: XCTestCase {
         let unlock = app.buttons["解锁高级版"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 10))
         tapWhenStable(unlock)
-        let annualBuy = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "购买一年高级版")).firstMatch
-        XCTAssertTrue(annualBuy.waitForExistence(timeout: 10))
-        reveal(annualBuy, in: app)
-        tapWhenStable(annualBuy)
+        let buy = app.buttons["premium-purchase-action"]
+        XCTAssertTrue(buy.waitForExistence(timeout: 10))
+        reveal(buy, in: app)
+        tapWhenStable(buy)
         confirmLocalPurchase()
         XCTAssertTrue(app.buttons["高级版"].waitForExistence(timeout: 10))
         dismissPurchaseCompletion()
-        let closed = NSPredicate { _, _ in !app.buttons["premium-close"].exists }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: nil)], timeout: 5), .completed,
-                       "Annual purchase must close the purchase page")
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !app.buttons["premium-close"].exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
 
-        let manage = app.buttons["管理订阅"].firstMatch
-        XCTAssertTrue(manage.waitForExistence(timeout: 10))
-        tapWhenStable(manage)
-        XCTAssertTrue(app.staticTexts["自动续订已开启"].waitForExistence(timeout: 10))
+        let manage = app.buttons["premium-settings-renewal"]
         let nextRenewal = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "年费下次续费日期 ")).firstMatch
-        XCTAssertTrue(nextRenewal.exists)
-        let annualPlan = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "一年高级版")).firstMatch
-        XCTAssertFalse(annualPlan.isEnabled, "An active annual subscriber must not buy another annual term")
-        let lifetimeBuy = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "购买永久高级版")).firstMatch
-        reveal(lifetimeBuy, in: app)
-        tapWhenStable(lifetimeBuy)
-        let disclosure = app.alerts["永久高级版"]
-        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
-        XCTAssertTrue(disclosure.staticTexts["购买永久版不会自动取消年费，请在购买后前往苹果订阅管理取消续订，避免重复扣费。"].exists)
-        disclosure.buttons["取消"].tap()
-        XCTAssertTrue(lifetimeBuy.isEnabled)
-        XCTAssertFalse(XCUIApplication(bundleIdentifier: "com.apple.springboard").otherElements["payment-sheet"].exists)
-
-        tapWhenStable(lifetimeBuy)
-        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
-        disclosure.buttons["继续购买"].tap()
-        confirmLocalPurchase()
-        let followup = app.staticTexts["永久版已生效。请管理原年费订阅，确认关闭自动续订。"]
-        XCTAssertTrue(followup.waitForExistence(timeout: 10), app.debugDescription)
-        dismissPurchaseCompletion()
-        XCTAssertTrue(app.staticTexts["自动续订已开启"].exists)
-        XCTAssertFalse(lifetimeBuy.exists)
-        XCTAssertTrue(app.buttons["premium-close"].exists, "Keep the management page open after upgrading")
-        attachScreenshot(app, name: "annual-to-lifetime-cancellation-guidance")
-
-        app.terminate()
-        app.launch()
-        openSettings(app)
-        XCTAssertTrue(app.buttons["高级版"].waitForExistence(timeout: 10))
-        XCTAssertTrue(manage.waitForExistence(timeout: 10))
-        tapWhenStable(manage)
-        XCTAssertTrue(followup.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["自动续订已开启"].exists)
-        XCTAssertTrue(nextRenewal.exists)
-        XCTAssertFalse(lifetimeBuy.exists)
-        attachScreenshot(app, name: "annual-management-after-lifetime-cold-launch")
+        for launch in 0..<2 {
+            if launch > 0 {
+                app.terminate()
+                app.launch()
+                openSettings(app)
+                XCTAssertTrue(app.buttons["高级版"].waitForExistence(timeout: 10))
+            }
+            XCTAssertTrue(manage.waitForExistence(timeout: 10))
+            XCTAssertEqual(manage.label, "续费")
+            tapWhenStable(manage)
+            XCTAssertTrue(nextRenewal.waitForExistence(timeout: 10))
+            assertAnnualRenewalHasNoPurchaseOptions(app)
+            XCTAssertTrue(app.staticTexts["续费"].exists)
+            XCTAssertFalse(app.staticTexts["功能"].exists)
+            let inlineManagement = app.buttons["premium-manage"]
+            XCTAssertEqual(inlineManagement.frame.midY, nextRenewal.frame.midY, accuracy: 1)
+            attachScreenshot(app, name: "annual-renewal-no-upgrade-launch-\(launch)")
+        }
 
         cancelAnnualRenewalOnApplePage(app, manageLabel: "管理订阅")
-        XCTAssertTrue(app.staticTexts["自动续订已关闭"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["永久高级版"].exists)
-        XCTAssertFalse(followup.exists, "Stop asking to cancel only after Apple confirms renewal is off")
+        let validUntil = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "有效期至 ")).firstMatch
+        XCTAssertTrue(validUntil.waitForExistence(timeout: 10))
         XCTAssertFalse(nextRenewal.exists)
-        XCTAssertFalse(annualPlan.exists)
-        XCTAssertFalse(lifetimeBuy.exists)
-        attachScreenshot(app, name: "lifetime-after-cancelling-annual-renewal")
+        XCTAssertTrue(app.buttons["高级版"].exists)
+        assertAnnualRenewalHasNoPurchaseOptions(app)
+        attachScreenshot(app, name: "annual-cancelled-no-upgrade-keeps-paid-term")
+    }
 
-        app.terminate()
-        app.launch()
-        openSettings(app)
-        XCTAssertTrue(app.buttons["高级版"].waitForExistence(timeout: 10))
-        XCTAssertTrue(manage.waitForExistence(timeout: 10))
-        tapWhenStable(manage)
-        XCTAssertTrue(app.staticTexts["自动续订已关闭"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["永久高级版"].exists)
-        XCTAssertFalse(followup.exists)
-        XCTAssertFalse(nextRenewal.exists)
-        XCTAssertFalse(annualPlan.exists)
-        XCTAssertFalse(lifetimeBuy.exists)
-        attachScreenshot(app, name: "lifetime-and-cancelled-annual-after-relaunch")
+    private func assertAnnualRenewalHasNoPurchaseOptions(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["premium-manage"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["premium-plan-annual"].exists)
+        XCTAssertFalse(app.buttons["premium-plan-lifetime"].exists)
+        XCTAssertFalse(app.buttons["premium-purchase-action"].exists)
+        XCTAssertFalse(app.buttons["premium-restore"].exists)
+        XCTAssertFalse(app.buttons["premium-options"].exists)
     }
 
     func testAppleSubscriptionManagementCancelsRenewalAndKeepsPaidTerm() {
@@ -288,14 +262,15 @@ final class PremiumRecoveryUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
 
-        let manage = app.buttons["Manage subscription"].firstMatch
+        let manage = app.buttons["premium-settings-renewal"]
         XCTAssertTrue(manage.waitForExistence(timeout: 10))
         tapWhenStable(manage)
-        XCTAssertTrue(app.staticTexts["Auto-renewal is on"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Annual renewal on ")).firstMatch.waitForExistence(timeout: 10))
+        assertAnnualRenewalHasNoPurchaseOptions(app)
         cancelAnnualRenewalOnApplePage(app, manageLabel: "Manage subscription")
-        XCTAssertTrue(app.staticTexts["Auto-renewal is off"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Auto-renewal is off"].exists)
         let validUntil = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Valid until ")).firstMatch
-        XCTAssertTrue(validUntil.exists)
+        XCTAssertTrue(validUntil.waitForExistence(timeout: 10))
         let paidUntilDate = String(validUntil.label.dropFirst("Valid until ".count))
         XCTAssertTrue(app.buttons["Pro"].exists, "Cancellation keeps the already-paid annual term")
         attachScreenshot(app, name: "annual-cancellation-return-keeps-paid-term")
@@ -304,11 +279,12 @@ final class PremiumRecoveryUITests: XCTestCase {
         openSettings(app)
         XCTAssertTrue(app.buttons["Pro"].waitForExistence(timeout: 10))
         tapWhenStable(manage)
-        XCTAssertTrue(app.staticTexts["Auto-renewal is off"].waitForExistence(timeout: 10))
-        XCTAssertTrue(validUntil.exists)
+        XCTAssertTrue(validUntil.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Auto-renewal is off"].exists)
+        assertAnnualRenewalHasNoPurchaseOptions(app)
         attachScreenshot(app, name: "annual-cancellation-after-relaunch")
 
-        let panel = app.scrollViews["premium-purchase-panel"]
+        let panel = app.descendants(matching: .any).matching(identifier: "premium-purchase-panel").firstMatch
         let systemManage = panel.buttons["Manage subscription"]
         revealFully(systemManage, in: panel, app: app)
         tapWhenStable(systemManage)
@@ -336,7 +312,6 @@ final class PremiumRecoveryUITests: XCTestCase {
             !applePage.exists && panel.exists
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [returned], timeout: 10), .completed)
-        XCTAssertTrue(app.staticTexts["Auto-renewal is on"].waitForExistence(timeout: 10), app.debugDescription)
         let nextRenewal = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Annual renewal on ")).firstMatch
         XCTAssertTrue(nextRenewal.exists)
         XCTAssertEqual(nextRenewal.label, "Annual renewal on \(paidUntilDate)")
@@ -350,15 +325,15 @@ final class PremiumRecoveryUITests: XCTestCase {
         openSettings(app)
         XCTAssertTrue(app.buttons["Pro"].waitForExistence(timeout: 10))
         tapWhenStable(manage)
-        XCTAssertTrue(app.staticTexts["Auto-renewal is on"].waitForExistence(timeout: 10))
-        XCTAssertTrue(nextRenewal.exists)
+        XCTAssertTrue(nextRenewal.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Auto-renewal is on"].exists)
         XCTAssertEqual(nextRenewal.label, "Annual renewal on \(paidUntilDate)")
         XCTAssertFalse(validUntil.exists)
         attachScreenshot(app, name: "annual-reenabled-after-relaunch")
     }
 
     private func cancelAnnualRenewalOnApplePage(_ app: XCUIApplication, manageLabel: String) {
-        let panel = app.scrollViews["premium-purchase-panel"]
+        let panel = app.descendants(matching: .any).matching(identifier: "premium-purchase-panel").firstMatch
         let systemManage = panel.buttons[manageLabel]
         revealFully(systemManage, in: panel, app: app)
         tapWhenStable(systemManage)
@@ -396,7 +371,9 @@ final class PremiumRecoveryUITests: XCTestCase {
         // text element. Still require Apple's complete no-charge statement.
         XCTAssertTrue(sheet.staticTexts.matching(NSPredicate(format: "label CONTAINS %@",
             "For testing purposes only. You will not be charged for confirming this purchase.")).firstMatch.exists)
-        sheet.buttons["footer"].tap()
+        // The compact system sheet can still be sliding in when its AX
+        // elements first exist. Wait for its actual confirmation to settle.
+        tapWhenStable(sheet.buttons["footer"])
     }
 
     func testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames() {
@@ -548,7 +525,7 @@ final class PremiumRecoveryUITests: XCTestCase {
         tapWhenStable(unlock)
         let lifetime = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Lifetime Pro")).firstMatch
         XCTAssertTrue(lifetime.waitForExistence(timeout: 10))
-        let purchasePanel = app.scrollViews["premium-purchase-panel"]
+        let purchasePanel = app.descendants(matching: .any).matching(identifier: "premium-purchase-panel").firstMatch
         XCTAssertTrue(purchasePanel.waitForExistence(timeout: 10))
         revealFully(lifetime, in: purchasePanel, app: app)
         tapWhenStable(lifetime)
@@ -1250,12 +1227,12 @@ final class PremiumRecoveryUITests: XCTestCase {
 
     func testPurchasePageLayoutInAllLanguages() {
         let copies = [
-            (language: "zh-Hans", unlock: "解锁高级版", annual: "一年高级版", lifetime: "永久高级版",
-             restore: "恢复购买", redeem: "兑换优惠码", terms: "年费每年扣费一次", buy: "购买一年高级版"),
-            (language: "zh-Hant", unlock: "解鎖高級版", annual: "一年高級版", lifetime: "永久高級版",
-             restore: "恢復購買", redeem: "兌換優惠碼", terms: "年費每年扣費一次", buy: "購買一年高級版"),
-            (language: "en", unlock: "Unlock Pro", annual: "Annual Pro", lifetime: "Lifetime Pro",
-             restore: "Restore purchases", redeem: "Redeem offer code", terms: "Annual Pro is billed once a year", buy: "Buy Annual Pro")
+            (language: "zh-Hans", unlock: "解锁高级版", restore: "恢复购买",
+             terms: "年费版按年自动续订", restored: "未找到有效的高级版购买记录"),
+            (language: "zh-Hant", unlock: "解鎖高級版", restore: "恢復購買",
+             terms: "年費版按年自動續訂", restored: "未找到有效的高級版購買記錄"),
+            (language: "en", unlock: "Unlock Pro", restore: "Restore purchases",
+             terms: "Annual Pro renews yearly", restored: "No active Pro purchase found")
         ]
         let app = XCUIApplication()
         addTeardownBlock { app.terminate() }
@@ -1266,40 +1243,62 @@ final class PremiumRecoveryUITests: XCTestCase {
             let unlock = app.buttons[copy.unlock]
             XCTAssertTrue(unlock.waitForExistence(timeout: 10), app.debugDescription)
             tapWhenStable(unlock)
-            let panel = app.scrollViews["premium-purchase-panel"]
-            XCTAssertTrue(panel.waitForExistence(timeout: 10))
-            XCTAssertTrue(app.frame.contains(panel.frame), "The scroll viewport must fit the screen: \(panel.frame)")
-            revealFully(panel.buttons["premium-close"], in: panel, app: app, scrollDown: true)
-            attachScreenshot(app, name: "premium-layout-\(copy.language)-top")
-
-            let annual = panel.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", copy.annual)).firstMatch
-            revealFully(annual, in: panel, app: app)
-            XCTAssertTrue(annual.isEnabled)
-            XCTAssertTrue(annual.label.contains("39.99"), annual.label)
-            XCTAssertTrue(annual.label.contains("3.33"), annual.label)
-            let lifetime = panel.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", copy.lifetime)).firstMatch
-            revealFully(lifetime, in: panel, app: app)
-            XCTAssertTrue(lifetime.isEnabled)
-            XCTAssertTrue(lifetime.label.contains("99.99"), lifetime.label)
-            attachScreenshot(app, name: "premium-layout-\(copy.language)-plans")
-
-            let terms = panel.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", copy.terms)).firstMatch
-            revealFully(terms, in: panel, app: app)
-            let buy = panel.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", copy.buy)).firstMatch
+            let panel = app.descendants(matching: .any).matching(identifier: "premium-purchase-panel").firstMatch
+            let close = app.buttons["premium-close"]
+            XCTAssertTrue(close.waitForExistence(timeout: 10))
+            XCTAssertTrue(app.frame.contains(panel.frame), "The panel must fit the screen")
+            XCTAssertTrue(close.isHittable, "The fixed header remains reachable")
+            let annual = app.buttons["premium-plan-annual"]
+            let lifetime = app.buttons["premium-plan-lifetime"]
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                annual.isEnabled && lifetime.isEnabled
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+            XCTAssertTrue(annual.label.contains("39.90"), annual.label)
+            XCTAssertTrue(annual.label.contains("≈"), "The monthly reference stays subordinate to the annual total")
+            XCTAssertTrue(lifetime.label.contains("99.90"), lifetime.label)
+            XCTAssertTrue(panel.buttons["premium-restore"].exists)
+            XCTAssertFalse(app.buttons["premium-options"].exists)
+            XCTAssertFalse(panel.buttons["legal-link-privacy"].exists)
+            XCTAssertFalse(panel.buttons["legal-link-terms"].exists)
+            let disclosure = panel.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", copy.terms)).firstMatch
+            XCTAssertTrue(disclosure.exists)
+            let buy = app.buttons["premium-purchase-action"]
             revealFully(buy, in: panel, app: app)
-            XCTAssertTrue(buy.isEnabled)
-            let restore = panel.buttons[copy.restore]
-            let redeem = panel.buttons[copy.redeem]
+            let originalPanel = panel.frame
+            let originalCTA = buy.frame
+            for (index, plan) in [lifetime, annual, lifetime, annual].enumerated() {
+                revealFully(plan, in: panel, app: app)
+                tapWhenStable(plan)
+                XCTAssertTrue(plan.isSelected)
+                XCTAssertEqual(panel.frame.minY, originalPanel.minY, accuracy: 0.5)
+                XCTAssertEqual(panel.frame.height, originalPanel.height, accuracy: 0.5)
+                XCTAssertEqual(buy.frame.height, originalCTA.height, accuracy: 0.5)
+                XCTAssertTrue(disclosure.exists, "Selecting lifetime must not remove the annual disclosure")
+                if index < 2 { attachScreenshot(app, name: "premium-compact-\(copy.language)-\(index)") }
+            }
+            let restore = panel.buttons["premium-restore"]
+            XCTAssertEqual(restore.label, copy.restore)
             revealFully(restore, in: panel, app: app)
-            revealFully(redeem, in: panel, app: app)
-            XCTAssertLessThanOrEqual(restore.frame.maxX, redeem.frame.minX + 1)
-            attachScreenshot(app, name: "premium-layout-\(copy.language)-actions")
-
-            let close = panel.buttons["premium-close"]
-            revealFully(close, in: panel, app: app, scrollDown: true)
+            tapWhenStable(restore)
+            let authentication = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                .alerts["Sign in with Apple Account"]
+            if authentication.waitForExistence(timeout: 3) {
+                // Explicit restore may authenticate; only acknowledge Xcode's
+                // simulated login, never a real Apple Account credential prompt.
+                let simulation = authentication.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@",
+                    "simulate authenticating", "[Environment: Xcode]")).firstMatch
+                guard simulation.exists else {
+                    XCTFail("Refusing to acknowledge a non-Xcode authentication prompt")
+                    return
+                }
+                authentication.buttons["OK"].tap()
+            }
+            XCTAssertTrue(app.staticTexts[copy.restored].waitForExistence(timeout: 15), app.debugDescription)
             tapWhenStable(close)
             XCTAssertTrue(unlock.waitForExistence(timeout: 5))
-            XCTAssertFalse(panel.exists)
+            XCTAssertTrue(app.buttons["legal-link-privacy"].exists)
+            XCTAssertTrue(app.buttons["legal-link-terms"].exists)
             app.terminate()
         }
     }

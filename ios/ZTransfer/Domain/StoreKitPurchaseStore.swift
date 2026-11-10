@@ -310,8 +310,18 @@ final class StoreKitPurchaseStore: ObservableObject {
     func manage(in scene: UIWindowScene) async {
         guard operation == .idle else { return }
         operation = .managing
+        clearMessage()
         defer { operation = .idle; refresh() }
-        do { try await AppStore.showManageSubscriptions(in: scene) }
+        do {
+            // Route to this app's verified/product-provided subscription group
+            // rather than relying on the system's generic group discovery.
+            // Keep the older API for iOS 16 or unavailable group metadata.
+            if #available(iOS 17.0, *), let subscriptionGroupID {
+                try await AppStore.showManageSubscriptions(in: scene, subscriptionGroupID: subscriptionGroupID)
+            } else {
+                try await AppStore.showManageSubscriptions(in: scene)
+            }
+        }
         catch { messageKey = "iap_manage_failed" }
     }
 

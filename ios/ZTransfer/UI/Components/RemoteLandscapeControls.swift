@@ -56,10 +56,13 @@ struct RemoteLandscapeControls: View {
                 captureCluster.frame(maxHeight: .infinity, alignment: .bottom)
             }
             layer(dock: true) {
-                RemoteLandscapeDock(tools: toolLayout.shownTools + RemoteTool.pinned, control: control, bottom: layout.bottomControls)
+                // 2026-11-08 user rule: rotation has one persistent external
+                // slot; only the fixed lock belongs in the expanded dock.
+                RemoteLandscapeDock(tools: toolLayout.shownTools + [.lock], control: control, bottom: layout.bottomControls)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.top, layout.controlsTopInset)
+            .padding(.bottom, 44) // Keep the 36pt rotation row plus its 8pt gap clear.
         }
     }
 
@@ -130,7 +133,7 @@ struct RemoteLandscapeControls: View {
                 Spacer(minLength: 8)
                 HStack(spacing: 8) {
                     layer(dock: false) { disp }.frame(width: 36, height: 36)
-                    layer(dock: false) { rotate }.frame(width: 36, height: 36)
+                    rotate.frame(width: 36, height: 36)
                 }
                 .padding(.leading, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)

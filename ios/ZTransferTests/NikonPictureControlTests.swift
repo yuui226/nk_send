@@ -85,8 +85,16 @@ final class NikonPictureControlTests: XCTestCase {
             let file = try NikonPictureControlFile(changed)
             XCTAssertThrowsError(try file.encodeClassicPictureControl())
         }
-        for length in [0, 35, 37, 613, 614, 615] {
+        for length in [0, 35, 37, 613, 615] {
             XCTAssertThrowsError(try NikonPictureControlData(item: 209, responseCode: 0x2001, data: Data(repeating: 0, count: length)))
+        }
+        // Android now accepts either complete classic layout for an unused
+        // custom slot. The zero base ID is authoritative, not curve contents.
+        for length in [36, 614] {
+            let unused = Data(repeating: 0, count: length)
+            let parsed = try NikonPictureControlData(item: 209, responseCode: 0x2001, data: unused)
+            XCTAssertTrue(parsed.isEmpty)
+            XCTAssertEqual(parsed.data, unused)
         }
         XCTAssertThrowsError(try NikonPictureControlData(item: 209, responseCode: 0x2019, data: Data(repeating: 0, count: 36)))
         XCTAssertThrowsError(try NikonPictureControlData(item: 1, responseCode: 0x2001, data: Data(repeating: 0, count: 36)))

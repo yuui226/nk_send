@@ -66,6 +66,8 @@ enum AppLocalized {
         decodeAndroidEscapes(
             IOSLocalization.byResource[name]?[language]
                 ?? AndroidLocalization.byResource[name]?[language]
+                ?? IOSLocalization.byResource[name]?["en"]
+                ?? AndroidLocalization.byResource[name]?["en"]
                 ?? name
         )
     }
@@ -191,7 +193,6 @@ struct RootView: View {
     @State private var connectionPhotoListVisible = false
     // Once established, transport loss must not return the user to connection.
     @State private var establishedSession: CameraSession?
-    @State private var workspaceViewID = UUID()
     // The success scene is an entry transition, never a reconnect transition.
     @State private var connectionCelebrationConsumed = false
     // Android starts a new task at Home (MainActivity's NavHost). Retain the
@@ -199,6 +200,7 @@ struct RootView: View {
     // SceneStorage restored an offline photo/monitor page before any connection.
     @State private var workspaceEntered = false
     @State private var monitorPresented = false
+    @State private var staReconnectHint = PhotoListHintState()
 
     private var workspaceSession: CameraSession? { presentation.snapshot.session ?? establishedSession }
     private var workspaceConnected: Bool { workspaceSession != nil && presentation.snapshot.session === workspaceSession }
@@ -234,9 +236,9 @@ struct RootView: View {
                                   onTransportLost: { failedSession in
                                       Task { await connectionModel.handleTransportLost(failedSession) }
                                   })
-                    // Same-body recovery keeps page state while its observed
-                    // list model and transport dependencies are replaced.
-                    .id(workspaceViewID)
+                    // Reset the retained grid projection in the same render
+                    // that changes connection, before an old row can flash.
+                    .id(session.map(ObjectIdentifier.init))
                     .opacity(connectionCelebrationActive ? (connectionPhotoListVisible ? 1 : 0) : 1)
                     .allowsHitTesting(!connectionCelebrationActive || connectionPhotoListVisible)
                 }
@@ -283,6 +285,11 @@ struct RootView: View {
                        })
                 .id(session.map(ObjectIdentifier.init))
         }
+        .overlay { PhotoListHint(state: staReconnectHint) }
+        .onReceive(connectionModel.staReconnectRequests) { _ in
+            staReconnectHint.show(AppLocalized.resource("sta_reconnect_attempting"))
+        }
+        .onDisappear { staReconnectHint.stop() }
         .task(id: presentation.snapshot.effectsEnabled) {
             await transferQueue.setPhotoEffectsEnabled(presentation.snapshot.effectsEnabled)
         }
@@ -314,13 +321,6 @@ struct RootView: View {
                 if let previous = establishedSession,
                    let replacement = connectionModel.cameraSession,
                    previous !== replacement {
-                    if replacement.recoveredFromSessionID == ObjectIdentifier(previous) {
-                        _ = PhotoListViewModel.cached(session: replacement, onTransportLost: {
-                            Task { await connectionModel.handleTransportLost(replacement) }
-                        })
-                    } else {
-                        workspaceViewID = UUID()
-                    }
                     PhotoListViewModel.evict(session: previous)
                 }
                 establishedSession = connectionModel.cameraSession
@@ -329,7 +329,8 @@ struct RootView: View {
                 if let session = connectionModel.cameraSession {
                     Task {
                         guard connectionModel.cameraSession === session else { return }
-                        await transferQueue.attach(session: session, directory: directoryStore.directoryURL)
+                        let root = TransferSaveDestination.load().transferRoot(userDirectory: directoryStore.directoryURL)
+                        await transferQueue.attach(session: session, directory: root)
                         if connectionModel.cameraSession !== session {
                             await transferQueue.detach(ifCurrentSessionIs: session)
                         }
@@ -371,6 +372,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { phase in
             connectionModel.setUSBForegroundActive(phase == .active)
             if phase == .active {
+                gpsCoordinator.resumeAuthorizationIfNeeded()
                 connectionModel.refreshUSBAuthorization()
                 StoreKitPurchaseStore.shared.refresh()
             }
@@ -537,7 +539,7 @@ struct HomeWorkspacePagerIOS: View {
                     } else {
                         LocalPhotoEffectsView(onNavigateUp: {
                             navigate(to: 0)
-                        })
+                        }, pageActive: page == 1)
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
@@ -652,6 +654,7 @@ private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIView
             controller.requestPage(target)
         }
     }
+    @MainActor
     final class Coordinator {
         var parent: VerticalWorkspacePager
         var requestedPage: Int

@@ -1,0 +1,139 @@
+Test Suite 'Selected tests' started at 2026-10-28 19:37:18.160.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-28 19:37:18.160.
+Test Suite 'PhotoRatingScanTests' started at 2026-10-28 19:37:18.160.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testCancelledCacheLookupCannotSupplyTheReplacementScan]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testCancelledCacheLookupCannotSupplyTheReplacementScan]' passed (0.058 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testCancelledReadCannotOverwriteCompletedReplacementScan]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testCancelledReadCannotOverwriteCompletedReplacementScan]' passed (0.037 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testCatalogUpdateDuringSuspendedCacheLookupReplansBeforeLocking]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testCatalogUpdateDuringSuspendedCacheLookupReplansBeforeLocking]' passed (0.034 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testConfirmedShootingDayStartsOnEveryTransportBeforeFullScanFinishes]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testConfirmedShootingDayStartsOnEveryTransportBeforeFullScanFinishes]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testDisableCancelsReadAndEndsRatingPhaseBeforeNextGeneration]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testDisableCancelsReadAndEndsRatingPhaseBeforeNextGeneration]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testEffectiveRatingRangeIsIntersectionAndZeroUsesOtherBoundary]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testEffectiveRatingRangeIsIntersectionAndZeroUsesOtherBoundary]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testEnabledPhotoRangeChangesRebuildWithoutInvalidatingCameraCache]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testEnabledPhotoRangeChangesRebuildWithoutInvalidatingCameraCache]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testFiveDayMigrationRunsOnceAndPreservesExplicitRangesAndOtherFilters]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testFiveDayMigrationRunsOnceAndPreservesExplicitRangesAndOtherFilters]' passed (0.043 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testGenerationChangedWhileInitialInvalidationIsReturningIsNotLost]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testGenerationChangedWhileInitialInvalidationIsReturningIsNotLost]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testNoMatchMessageRequiresConcreteEnabledRatingStillLoadingToHide]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testNoMatchMessageRequiresConcreteEnabledRatingStillLoadingToHide]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testNoMatchMessageWaitsForRealListRatingReadAndSurvivesBusyPause]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testNoMatchMessageWaitsForRealListRatingReadAndSurvivesBusyPause]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testOldReadFinishingCannotDetachReplacementBeforeSecondDisable]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testOldReadFinishingCannotDetachReplacementBeforeSecondDisable]' passed (0.033 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testOrdinaryRatingUpdatesPreserveExplicitDiagnosticCapture]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testOrdinaryRatingUpdatesPreserveExplicitDiagnosticCapture]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPairReadIsOneSourceButProgressCountsBothVisibleFiles]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPairReadIsOneSourceButProgressCountsBothVisibleFiles]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPhotoListRangeEntryRebuildsEnabledRatingScan]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPhotoListRangeEntryRebuildsEnabledRatingScan]' passed (0.089 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanIncludesUnsupportedDaysWithoutMovingIntoOlderIncompleteDay]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanIncludesUnsupportedDaysWithoutMovingIntoOlderIncompleteDay]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanUsesNewestActualDaysForEveryTransportAndKeepsCameraOrder]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanUsesNewestActualDaysForEveryTransportAndKeepsCameraOrder]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanValidatesCalendarDatesAndExtensionsButAllRetainsUndatedMedia]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanValidatesCalendarDatesAndExtensionsButAllRetainsUndatedMedia]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanWaitsForExplicitCompletionOrConfirmedFiniteBoundary]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testPlanWaitsForExplicitCompletionOrConfirmedFiniteBoundary]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRatingCacheUsesGenerationAndEvictsOldestAfter8192Values]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRatingCacheUsesGenerationAndEvictsOldestAfter8192Values]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRatingRangeRestorationDistinguishesMissingFromExplicitAll]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRatingRangeRestorationDistinguishesMissingFromExplicitAll]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRatingReadsFollowFirstSourceAppearanceIncludingRawBeforeJPEG]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRatingReadsFollowFirstSourceAppearanceIncludingRawBeforeJPEG]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRepositoryGenerationNotificationRestartsWithoutAnotherInputUpdate]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testRepositoryGenerationNotificationRestartsWithoutAnotherInputUpdate]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testSTAWaitsForRecentDateBoundaryBeforeStartingReadsMainActor]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testSTAWaitsForRecentDateBoundaryBeforeStartingReadsMainActor]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain]' passed (0.063 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testTenDayLoadingRangePersistsAndCountsCaptureDays]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testTenDayLoadingRangePersistsAndCountsCaptureDays]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testUSBWaitsForCatalogThenOnlyReadsTheSelectedRange]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testUSBWaitsForCatalogThenOnlyReadsTheSelectedRange]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.PhotoRatingScanTests testWidenedRangeCannotLockOldCatalogWhileResumeSnapshotIsSuspended]' started.
+Test Case '-[ZTransferTests.PhotoRatingScanTests testWidenedRangeCannotLockOldCatalogWhileResumeSnapshotIsSuspended]' passed (0.073 seconds).
+Test Suite 'PhotoRatingScanTests' passed at 2026-10-28 19:37:18.793.
+	 Executed 28 tests, with 0 failures (0 unexpected) in 0.623 (0.633) seconds
+Test Suite 'ScanBatchPolicyTests' started at 2026-10-28 19:37:18.794.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testAndroidWarmupGrowthColdAndInterruptedRules]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testAndroidWarmupGrowthColdAndInterruptedRules]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBackupDuplicateInSameBatchPublishesBothStorageMemberships]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBackupDuplicateInSameBatchPublishesBothStorageMemberships]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBoundedIncompleteCatalogKeepsEventsAliveWithoutAuthoritativeCachePruning]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBoundedIncompleteCatalogKeepsEventsAliveWithoutAuthoritativeCachePruning]' passed (0.137 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBoundedPhotoScanRetainsTailAndWiderScopeResumesIt]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBoundedPhotoScanRetainsTailAndWiderScopeResumesIt]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBoundedScanPreservesOlderMemoryAndDiskThumbnails]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testBoundedScanPreservesOlderMemoryAndDiskThumbnails]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testCancelledDualCardBatchResumesOnlyAcceptedHandles]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testCancelledDualCardBatchResumesOnlyAcceptedHandles]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testCompletedResumeRetainsBackupAliasesInNewMediaBaseline]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testCompletedResumeRetainsBackupAliasesInNewMediaBaseline]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testConnectionRecoveryIsInstalledBeforePublishingReplacement]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testConnectionRecoveryIsInstalledBeforePublishingReplacement]' passed (0.040 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletedInflightThumbnailCannotSettleReusedHandle]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletedInflightThumbnailCannotSettleReusedHandle]' passed (0.016 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletedSettledHandleCanFetchNewPhotoReusingThatHandle]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletedSettledHandleCanFetchNewPhotoReusingThatHandle]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletionDuringEnumerationCannotRepublishResumeSnapshot]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletionDuringEnumerationCannotRepublishResumeSnapshot]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletionInvalidatesBoundedScanBeforeWideningScope]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDeletionInvalidatesBoundedScanBeforeWideningScope]' passed (0.056 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDiskFailureStopsScanAndBackgroundPrefetchForTheConnection]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDiskFailureStopsScanAndBackgroundPrefetchForTheConnection]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDiskHitIsDifferentFromDownloadAndNegativeCache]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDiskHitIsDifferentFromDownloadAndNegativeCache]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDualCardProductionScanPreservesOrderAndWarmGrowth]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testDualCardProductionScanPreservesOrderAndWarmGrowth]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testIncompleteMetadataDoesNotDisableDeletionSyncOrNewObjectResolution]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testIncompleteMetadataDoesNotDisableDeletionSyncOrNewObjectResolution]' passed (0.098 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testIncompleteObjectInfoFreezesAdaptiveSizeWithoutDroppingDisplayRow]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testIncompleteObjectInfoFreezesAdaptiveSizeWithoutDroppingDisplayRow]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testLoadingRangeChangesApplyToTheNextScanBatch]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testLoadingRangeChangesApplyToTheNextScanBatch]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testMembershipReplacementUpdatesListBeforeScanEndsWithoutRefetching]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testMembershipReplacementUpdatesListBeforeScanEndsWithoutRefetching]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testMonitorPageAndSessionCleanupHoldIndependentBackgroundOwnership]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testMonitorPageAndSessionCleanupHoldIndependentBackgroundOwnership]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testNonSTAStorageBusyRetriesAndSuccessfulEmptyRemovesBaseline]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testNonSTAStorageBusyRetriesAndSuccessfulEmptyRemovesBaseline]' passed (1.516 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testOrdinaryThumbnailProtocolMissSettlesButTransientErrorsRemainRetryable]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testOrdinaryThumbnailProtocolMissSettlesButTransientErrorsRemainRetryable]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testProductionScanConsumesListCacheFeedback]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testProductionScanConsumesListCacheFeedback]' passed (0.121 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRealDualCardReplacementUpdatesCardTwoFilterDuringScan]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRealDualCardReplacementUpdatesCardTwoFilterDuringScan]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRealSecondCacheWriteFailureStopsWorkerAndPreservesCachedReads]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRealSecondCacheWriteFailureStopsWorkerAndPreservesCachedReads]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRecoveredListKeepsRowsAndDoesNotReplayOldAutomaticTransfers]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRecoveredListKeepsRowsAndDoesNotReplayOldAutomaticTransfers]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRecoveredListTransportFailureRetainsCatalogWithoutAuthoritativeReconcile]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRecoveredListTransportFailureRetainsCatalogWithoutAuthoritativeReconcile]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRecoveredRepositoryAndListReconcileDeletedPrimaryAndNewPhoto]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRecoveredRepositoryAndListReconcileDeletedPrimaryAndNewPhoto]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRejectedStorageQueryPreservesBaselineAndDoesNotBecomeNoCard]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testRejectedStorageQueryPreservesBaselineAndDoesNotBecomeNoCard]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testReviewReadsFreshHandlesAndDeduplicatesAliasedCardsWhileMonitorOwnsCamera]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testReviewReadsFreshHandlesAndDeduplicatesAliasedCardsWhileMonitorOwnsCamera]' passed (0.253 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testShrinkingRangeWhileThumbnailAdmissionWaitsSkipsOlderFiles]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testShrinkingRangeWhileThumbnailAdmissionWaitsSkipsOlderFiles]' passed (0.033 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testSTARecoveryMovesCatalogBaselineToNewSameBodyConnectionOnly]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testSTARecoveryMovesCatalogBaselineToNewSameBodyConnectionOnly]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testTypeSelectionNormalizesOnlyAfterScanAndPersistsWholeSelection]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testTypeSelectionNormalizesOnlyAfterScanAndPersistsWholeSelection]' passed (0.094 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testUSBScanYieldsWithinBatchToPhotoAndResumesWithoutSkippingHandles]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testUSBScanYieldsWithinBatchToPhotoAndResumesWithoutSkippingHandles]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testWideningDuringFinalBatchAutomaticallyResumesRetainedCursor]' started.
+Test Case '-[ZTransferTests.ScanBatchPolicyTests testWideningDuringFinalBatchAutomaticallyResumesRetainedCursor]' passed (0.036 seconds).
+Test Suite 'ScanBatchPolicyTests' passed at 2026-10-28 19:37:21.450.
+	 Executed 35 tests, with 0 failures (0 unexpected) in 2.645 (2.657) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-28 19:37:21.451.
+	 Executed 63 tests, with 0 failures (0 unexpected) in 3.268 (3.291) seconds
+Test Suite 'Selected tests' passed at 2026-10-28 19:37:21.451.
+	 Executed 63 tests, with 0 failures (0 unexpected) in 3.268 (3.291) seconds
+** TEST SUCCEEDED **

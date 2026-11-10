@@ -132,3 +132,24 @@ private struct AnimatedDialogSurface: ViewModifier {
 extension View {
     func androidDialogSurface() -> some View { modifier(DialogSurfaceMotion()) }
 }
+
+/// Children are a fixed header, a hidden measurement body and its ScrollView.
+/// The measurement copy must disable input, accessibility and autonomous effects.
+struct ContentSizedDialogLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 3 else { return .zero }
+        let width = proposal.width ?? 300
+        let p = ProposedViewSize(width: width, height: nil)
+        return CGSize(width: width, height: min(proposal.height ?? 560,
+            subviews[0].sizeThatFits(p).height + subviews[1].sizeThatFits(p).height))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let p = ProposedViewSize(width: bounds.width, height: nil)
+        let header = min(bounds.height, subviews[0].sizeThatFits(p).height)
+        subviews[0].place(at: bounds.origin, anchor: .topLeading, proposal: .init(width: bounds.width, height: header))
+        subviews[1].place(at: CGPoint(x: bounds.minX - bounds.width - 1, y: bounds.minY), anchor: .topLeading, proposal: p)
+        subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.minY + header), anchor: .topLeading,
+                          proposal: .init(width: bounds.width, height: max(0, bounds.height - header)))
+    }
+}

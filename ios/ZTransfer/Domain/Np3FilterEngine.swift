@@ -22,10 +22,11 @@ struct Np3FilterParameters: Codable, Equatable, Sendable {
     let saturation: Int
     let colorBands: [Np3ColorBand]
     let toneCurve: [UInt16]?
+    let colorGrading: Np3ColorGrading
 
     init(contrast: Int = 0, highlights: Int = 0, shadows: Int = 0,
          whites: Int = 0, blacks: Int = 0, saturation: Int = 0,
-         colorBands: [Np3ColorBand], toneCurve: [UInt16]? = nil) {
+         colorBands: [Np3ColorBand], toneCurve: [UInt16]? = nil, colorGrading: Np3ColorGrading = .init()) {
         precondition([contrast, highlights, shadows, whites, blacks, saturation].allSatisfy { (-100...100).contains($0) })
         precondition(colorBands.count == Self.colorBandCenters.count)
         precondition(zip(colorBands, Self.colorBandCenters).allSatisfy { band, center in
@@ -43,6 +44,37 @@ struct Np3FilterParameters: Codable, Equatable, Sendable {
         self.saturation = saturation
         self.colorBands = colorBands
         self.toneCurve = toneCurve
+        precondition(colorGrading.isValid)
+        self.colorGrading = colorGrading
+    }
+
+    static func validToneCurve(_ curve: [UInt16]?) -> Bool {
+        curve.map { $0.count == toneCurvePointCount && $0.allSatisfy { $0 <= toneCurveMaximum } } ?? true
+    }
+
+    var isValid: Bool {
+        [contrast, highlights, shadows, whites, blacks, saturation].allSatisfy { (-100...100).contains($0) } &&
+        colorBands.count == Self.colorBandCenters.count &&
+        zip(colorBands, Self.colorBandCenters).allSatisfy { band, center in
+            band.centerDegrees == center && [band.hue, band.chroma, band.brightness].allSatisfy { (-100...100).contains($0) }
+        } && Self.validToneCurve(toneCurve) && colorGrading.isValid
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case contrast, highlights, shadows, whites, blacks, saturation, colorBands, toneCurve, colorGrading
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        contrast = try values.decode(Int.self, forKey: .contrast)
+        highlights = try values.decode(Int.self, forKey: .highlights)
+        shadows = try values.decode(Int.self, forKey: .shadows)
+        whites = try values.decode(Int.self, forKey: .whites)
+        blacks = try values.decode(Int.self, forKey: .blacks)
+        saturation = try values.decode(Int.self, forKey: .saturation)
+        colorBands = try values.decode([Np3ColorBand].self, forKey: .colorBands)
+        toneCurve = try values.decodeIfPresent([UInt16].self, forKey: .toneCurve)
+        colorGrading = try values.decodeIfPresent(Np3ColorGrading.self, forKey: .colorGrading) ?? .init()
+        guard isValid else { throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid NP3 parameters")) }
     }
 
     /// CuratedNp3Filters stores three unsigned bytes per color band with neutral
@@ -88,31 +120,30 @@ struct Np3FilterEngine: Sendable {
     private static let cancellationCheckInterval = 4 * 1024
 
     let normalizedIntensityPercent: Int
-    private let parameters: Np3FilterParameters
+    private enum Transform: Sendable {
+        case flexible(CompiledFlexibleNp3), classic(CompiledClassicNp3)
+    }
+    private let transform: Transform
     private let strength: Float
     private let preserveAlpha: Bool
-    private let normalizedToneCurve: [Float]?
-    private let saturationAdjustment: Float
-    private let blacksScale: Float
-    private let shadowsScale: Float
-    private let highlightsScale: Float
-    private let whitesScale: Float
-    private let contrastScale: Float
+    private let finishing: LUTColorPipeline.Prepared
 
     init(parameters: Np3FilterParameters, intensityPercent: Int,
-         preserveAlpha: Bool = true) {
-        self.parameters = parameters
+         adjustments: LUTAdjustments = .init(), preserveAlpha: Bool = true) {
+        self.init(parameters: .flexible(parameters), intensityPercent: intensityPercent,
+                  adjustments: adjustments, preserveAlpha: preserveAlpha)
+    }
+
+    init(parameters: PhotoNp3Parameters, intensityPercent: Int,
+         adjustments: LUTAdjustments = .init(), preserveAlpha: Bool = true) {
+        switch parameters {
+        case .flexible(let value): transform = .flexible(CompiledFlexibleNp3(parameters: value))
+        case .classic(let value): transform = .classic(CompiledClassicNp3(parameters: value))
+        }
         normalizedIntensityPercent = Self.normalizeIntensity(intensityPercent)
         strength = Float(normalizedIntensityPercent) / 100
         self.preserveAlpha = preserveAlpha
-        normalizedToneCurve = parameters.toneCurve?.map { Float($0) / Float(Np3FilterParameters.toneCurveMaximum) }
-        saturationAdjustment = Float(parameters.saturation) / 100
-        blacksScale = Float(parameters.blacks) / 100 * 0.12
-        shadowsScale = Float(parameters.shadows) / 100 * 0.18
-        highlightsScale = Float(parameters.highlights) / 100 * 0.18
-        whitesScale = Float(parameters.whites) / 100 * 0.12
-        // Kotlin Float.pow computes through java.lang.Math.pow then casts back.
-        contrastScale = Float(pow(2.0, Double(Float(parameters.contrast) / 100)))
+        finishing = LUTColorPipeline.Prepared(adjustments: adjustments)
     }
 
     static func normalizeIntensity(_ value: Int) -> Int {
@@ -134,8 +165,8 @@ struct Np3FilterEngine: Sendable {
         let maximum = max(red, max(green, blue))
         let minimum = min(red, min(green, blue))
         let delta = maximum - minimum
-        var lightness = (maximum + minimum) / 2
-        var saturation: Float = delta == 0 ? 0 : delta / max(1 - abs(2 * lightness - 1), 0.0001)
+        let lightness = (maximum + minimum) / 2
+        let saturation: Float = delta == 0 ? 0 : delta / max(1 - abs(2 * lightness - 1), 0.0001)
         let originalHue: Float
         if delta == 0 {
             originalHue = 0
@@ -147,43 +178,19 @@ struct Np3FilterEngine: Sendable {
             originalHue = Self.normalizeHue(60 * ((red - green) / delta + 4))
         }
         let colorWeight = Self.neutralProtectionWeight(delta)
-        let leftIndex: Int
-        switch originalHue {
-        case ..<30: leftIndex = 0
-        case ..<60: leftIndex = 1
-        case ..<120: leftIndex = 2
-        case ..<180: leftIndex = 3
-        case ..<240: leftIndex = 4
-        case ..<280: leftIndex = 5
-        case ..<320: leftIndex = 6
-        default: leftIndex = 7
+        let filtered: UInt32
+        switch transform {
+        case .flexible(let controls):
+            filtered = controls.filter(hue: originalHue, saturation: saturation,
+                                       lightness: lightness, colorWeight: colorWeight)
+        case .classic(let controls):
+            filtered = controls.filter(red: red, green: green, blue: blue, hue: originalHue,
+                                       saturation: saturation, lightness: lightness, colorWeight: colorWeight)
         }
-        let rightIndex = leftIndex == 7 ? 0 : leftIndex + 1
-        let start = Np3FilterParameters.colorBandCenters[leftIndex]
-        let end: Float = rightIndex == 0 ? 360 : Np3FilterParameters.colorBandCenters[rightIndex]
-        let progress = Self.unit((originalHue - start) / (end - start))
-        let inverse = 1 - progress
-        let left = parameters.colorBands[leftIndex]
-        let right = parameters.colorBands[rightIndex]
-        let hueShift = (Float(left.hue) * inverse + Float(right.hue) * progress) / 100 * 30
-        let chroma = Float(left.chroma) * inverse + Float(right.chroma) * progress
-        let brightness = Float(left.brightness) * inverse + Float(right.brightness) * progress
-        let hue = Self.normalizeHue(originalHue + hueShift * colorWeight)
-        saturation *= 1 + chroma / 100 * colorWeight
-        if saturationAdjustment != 0 {
-            saturation *= 1 + (saturationAdjustment > 0 ? saturationAdjustment * colorWeight : saturationAdjustment)
-        }
-        lightness += brightness / 100 * 0.20 * colorWeight
-        if let normalizedToneCurve {
-            lightness = Self.mapToneCurve(lightness, curve: normalizedToneCurve)
-        } else {
-            lightness = applyTonalControls(lightness)
-        }
-        let filtered = Self.hslToRGB(hue: hue, saturation: Self.unit(saturation), lightness: Self.unit(lightness))
         let r = mixChannel(originalR, filtered: Int(filtered >> 16 & 0xff))
         let g = mixChannel(originalG, filtered: Int(filtered >> 8 & 0xff))
         let b = mixChannel(originalB, filtered: Int(filtered & 0xff))
-        return alpha << 24 | r << 16 | g << 8 | b
+        return finishing.apply(alpha << 24 | r << 16 | g << 8 | b, preserveAlpha: preserveAlpha)
     }
 
     /// Bounded callers may pass a stripe rather than allocating another image.
@@ -212,21 +219,6 @@ struct Np3FilterEngine: Sendable {
         return alpha == 0 ? originalColor : alpha << 24 | mappedRGB & 0x00ff_ffff
     }
 
-    private func applyTonalControls(_ value: Float) -> Float {
-        var lightness = Self.unit(value)
-        // Both weights use the original pre-adjustment lightness in Android.
-        let shadowWeight: Float = shadowsScale != 0 ? 1 - Self.smoothStep(0.18, 0.72, lightness) : 0
-        let highlightWeight: Float = highlightsScale != 0 ? Self.smoothStep(0.28, 0.82, lightness) : 0
-        if blacksScale != 0 {
-            let inverse = 1 - lightness
-            lightness += blacksScale * inverse * inverse * inverse
-        }
-        if shadowsScale != 0 { lightness += shadowsScale * shadowWeight }
-        if highlightsScale != 0 { lightness += highlightsScale * highlightWeight }
-        if whitesScale != 0 { lightness += whitesScale * lightness * lightness * lightness }
-        return Self.unit((lightness - 0.5) * contrastScale + 0.5)
-    }
-
     static func mapToneCurve(_ value: Float, curve: [Float]) -> Float {
         precondition(curve.count == Np3FilterParameters.toneCurvePointCount)
         let position = unit(value) * Float(Np3FilterParameters.toneCurvePointCount - 1)
@@ -251,7 +243,7 @@ struct Np3FilterEngine: Sendable {
         return chroma * (sector & 1 == 0 ? fraction : 1 - fraction)
     }
 
-    private static func hslToRGB(hue: Float, saturation: Float, lightness: Float) -> UInt32 {
+    static func hslToRGB(hue: Float, saturation: Float, lightness: Float) -> UInt32 {
         let chroma = (1 - abs(2 * lightness - 1)) * saturation
         let section = hue / 60
         let sector = Int(section)
@@ -279,10 +271,10 @@ struct Np3FilterEngine: Sendable {
         UInt32(min(max(Int(value.rounded(.toNearestOrAwayFromZero)), 0), 255))
     }
 
-    private static func smoothStep(_ edge0: Float, _ edge1: Float, _ value: Float) -> Float {
+    static func smoothStep(_ edge0: Float, _ edge1: Float, _ value: Float) -> Float {
         let x = unit((value - edge0) / (edge1 - edge0))
         return x * x * (3 - 2 * x)
     }
 
-    private static func unit(_ value: Float) -> Float { min(max(value, 0), 1) }
+    static func unit(_ value: Float) -> Float { min(max(value, 0), 1) }
 }

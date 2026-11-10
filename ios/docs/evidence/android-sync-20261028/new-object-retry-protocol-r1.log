@@ -1,0 +1,48 @@
+Building for debugging...
+[1 / 6]
+[2 / 7] ZTransferProtocol
+[3 / 8] ZTransferProtocol
+[9 / 13] ZTransferProtocol
+[12 / 14] ProtocolTests-product
+[14 / 16] ProtocolTests-product
+[20 / 21] ProtocolTests-product
+Build complete! (3.80秒)
+Test Suite 'Selected tests' started at 2026-10-30 23:37:55.721.
+Test Suite 'ProtocolTests.xctest' started at 2026-10-30 23:37:55.722.
+Test Suite 'JpegThumbnailFallbackTests' started at 2026-10-30 23:37:55.722.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testCancelledRequestDoesNotReadHeaderOrBecomeAMiss]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testCancelledRequestDoesNotReadHeaderOrBecomeAMiss]' passed (0.001 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testExistingThumbnailAndWrongHandleNeverReadHeader]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testExistingThumbnailAndWrongHandleNeverReadHeader]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testJPEGIFD1IsReadWithoutRawDimensionValidationOrMarkerGuessing]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testJPEGIFD1IsReadWithoutRawDimensionValidationOrMarkerGuessing]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testMissingAndSuccessfulEmptyResponseReadExactlyOnePrefix]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testMissingAndSuccessfulEmptyResponseReadExactlyOnePrefix]' passed (0.001 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testOnlySuccessfulEmptyOrMissingJPEGSchedulesABoundedRead]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testOnlySuccessfulEmptyOrMissingJPEGSchedulesABoundedRead]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testPartialReadRejectionAndEmptyPayloadStayMisses]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testPartialReadRejectionAndEmptyPayloadStayMisses]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testSmallZeroAndMaximumFileSizesCannotOverflowOrOverread]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testSmallZeroAndMaximumFileSizesCannotOverflowOrOverread]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testTruncatedExifOrOutOfRangeThumbnailDoesNotTriggerMoreReads]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testTruncatedExifOrOutOfRangeThumbnailDoesNotTriggerMoreReads]' passed (0.000 seconds).
+Test Suite 'JpegThumbnailFallbackTests' passed at 2026-10-30 23:37:55.726.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'STAMetadataTests' started at 2026-10-30 23:37:55.726.
+Test Case '-[ProtocolTests.STAMetadataTests testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads]' started.
+Test Case '-[ProtocolTests.STAMetadataTests testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads]' passed (0.048 seconds).
+Test Case '-[ProtocolTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects]' started.
+/Users/orys/code/nk_send/ios/ProtocolTests/STAProfileAndMetadataTests.swift:415: error: -[ProtocolTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects] : XCTAssertEqual failed: ("0 bytes") is not equal to ("702 bytes")
+/Users/orys/code/nk_send/ios/ProtocolTests/STABrowsingSessionTests.swift:253: error: -[ProtocolTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects] : XCTAssertEqual failed: ("20 bytes") is not equal to ("20 bytes")
+/Users/orys/code/nk_send/ios/ProtocolTests/STAProfileAndMetadataTests.swift:427: error: -[ProtocolTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects] : XCTAssertEqual failed: ("0 bytes") is not equal to ("702 bytes")
+Test Case '-[ProtocolTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects]' failed (0.144 seconds).
+Test Case '-[ProtocolTests.STAMetadataTests testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest]' started.
+Test Case '-[ProtocolTests.STAMetadataTests testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest]' passed (0.019 seconds).
+Test Suite 'STAMetadataTests' failed at 2026-10-30 23:37:55.937.
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.211 (0.211) seconds
+Test Suite 'ProtocolTests.xctest' failed at 2026-10-30 23:37:55.937.
+	 Executed 11 tests, with 3 failures (0 unexpected) in 0.214 (0.215) seconds
+Test Suite 'Selected tests' failed at 2026-10-30 23:37:55.937.
+	 Executed 11 tests, with 3 failures (0 unexpected) in 0.214 (0.215) seconds
+Note: Some test targets reported failures:
+  - ProtocolTests (XCTest)

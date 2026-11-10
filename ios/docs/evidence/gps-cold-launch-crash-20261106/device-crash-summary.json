@@ -1,0 +1,186 @@
+[
+  {
+    "timestamp": "2026-11-06 23:16:17.00 +0800",
+    "model": "iPhone15,5",
+    "bundleInfo": {
+      "CFBundleShortVersionString": "2.05",
+      "CFBundleVersion": "79",
+      "CFBundleIdentifier": "com.ztransfer.ios"
+    },
+    "exception": {
+      "codes": "0x0000000000000000, 0x0000000000000000",
+      "rawCodes": [
+        0,
+        0
+      ],
+      "type": "EXC_CRASH",
+      "signal": "SIGABRT"
+    },
+    "termination": {
+      "namespace": "SIGNAL",
+      "signal": "SIGABRT"
+    },
+    "exceptionStack": [
+      {
+        "symbol": "__exceptionPreprocess",
+        "symbolLocation": 120
+      },
+      {
+        "symbol": "objc_exception_throw",
+        "symbolLocation": 88
+      },
+      {
+        "symbol": "_userInfoForFileAndLine",
+        "symbolLocation": 0
+      },
+      {
+        "symbol": "-[CBCentralManager initWithDelegate:queue:options:].cold.2",
+        "symbolLocation": 64
+      },
+      {
+        "symbol": "-[CBCentralManager initWithDelegate:queue:options:]",
+        "symbolLocation": 700
+      },
+      {
+        "symbol": "@nonobjc CBCentralManager.init(delegate:queue:options:)",
+        "symbolLocation": 156
+      },
+      {
+        "symbol": "CBCentralManager.__allocating_init(delegate:queue:options:)",
+        "symbolLocation": 60
+      },
+      {
+        "symbol": "NikonGPSBluetoothClient.ensureCentral()",
+        "symbolLocation": 452
+      },
+      {
+        "symbol": "NikonGPSBluetoothClient.start()",
+        "symbolLocation": 1220
+      },
+      {
+        "symbol": "protocol witness for GPSBluetoothTransport.start() in conformance NikonGPSBluetoothClient",
+        "symbolLocation": 12
+      },
+      {
+        "symbol": "GPSCoordinator.beginRunning()",
+        "symbolLocation": 1932
+      },
+      {
+        "symbol": "GPSCoordinator.continueAfterLocationAuthorization()",
+        "symbolLocation": 1244
+      },
+      {
+        "symbol": "GPSCoordinator.resumeAuthorizationIfNeeded()",
+        "symbolLocation": 1040
+      },
+      {
+        "symbol": "closure #12 in RootView.body.getter",
+        "symbolLocation": 456
+      },
+      {
+        "symbol": "_ValueActionModifier.sendAction(old:)",
+        "symbolLocation": 264
+      },
+      {
+        "symbol": "partial apply for closure #2 in ValueActionDispatcher.updateValue()",
+        "symbolLocation": 208
+      },
+      {
+        "symbol": "UpdateGroup.Action.callAsFunction()",
+        "symbolLocation": 184
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-11-06 23:16:19.00 +0800",
+    "model": "iPhone15,5",
+    "bundleInfo": {
+      "CFBundleShortVersionString": "2.05",
+      "CFBundleVersion": "79",
+      "CFBundleIdentifier": "com.ztransfer.ios"
+    },
+    "exception": {
+      "codes": "0x0000000000000000, 0x0000000000000000",
+      "rawCodes": [
+        0,
+        0
+      ],
+      "type": "EXC_CRASH",
+      "signal": "SIGABRT"
+    },
+    "termination": {
+      "namespace": "SIGNAL",
+      "signal": "SIGABRT"
+    },
+    "exceptionStack": [
+      {
+        "symbol": "__exceptionPreprocess",
+        "symbolLocation": 120
+      },
+      {
+        "symbol": "objc_exception_throw",
+        "symbolLocation": 88
+      },
+      {
+        "symbol": "_userInfoForFileAndLine",
+        "symbolLocation": 0
+      },
+      {
+        "symbol": "-[CBCentralManager initWithDelegate:queue:options:].cold.2",
+        "symbolLocation": 64
+      },
+      {
+        "symbol": "-[CBCentralManager initWithDelegate:queue:options:]",
+        "symbolLocation": 700
+      },
+      {
+        "symbol": "@nonobjc CBCentralManager.init(delegate:queue:options:)",
+        "symbolLocation": 156
+      },
+      {
+        "symbol": "CBCentralManager.__allocating_init(delegate:queue:options:)",
+        "symbolLocation": 60
+      },
+      {
+        "symbol": "NikonGPSBluetoothClient.ensureCentral()",
+        "symbolLocation": 452
+      },
+      {
+        "symbol": "NikonGPSBluetoothClient.start()",
+        "symbolLocation": 1220
+      },
+      {
+        "symbol": "protocol witness for GPSBluetoothTransport.start() in conformance NikonGPSBluetoothClient",
+        "symbolLocation": 12
+      },
+      {
+        "symbol": "GPSCoordinator.beginRunning()",
+        "symbolLocation": 1932
+      },
+      {
+        "symbol": "GPSCoordinator.continueAfterLocationAuthorization()",
+        "symbolLocation": 1244
+      },
+      {
+        "symbol": "GPSCoordinator.resumeAuthorizationIfNeeded()",
+        "symbolLocation": 1040
+      },
+      {
+        "symbol": "closure #12 in RootView.body.getter",
+        "symbolLocation": 456
+      },
+      {
+        "symbol": "_ValueActionModifier.sendAction(old:)",
+        "symbolLocation": 264
+      },
+      {
+        "symbol": "partial apply for closure #2 in ValueActionDispatcher.updateValue()",
+        "symbolLocation": 208
+      },
+      {
+        "symbol": "UpdateGroup.Action.callAsFunction()",
+        "symbolLocation": 184
+      }
+    ]
+  }
+]

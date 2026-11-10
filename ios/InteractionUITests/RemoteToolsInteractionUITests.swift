@@ -2,6 +2,89 @@ import XCTest
 
 @MainActor
 final class RemoteToolsInteractionUITests: XCTestCase {
+    func testPresetFirstFolderConfirmationCancellationLeavesEditorInteractive() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--remote-tools-ui-test", "--remote-preset-ui-test", "--remote-preset-empty-folder-ui-test",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        app.buttons["test-preset-open"].tap()
+        let empty = app.buttons["C9 · Empty"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 10)); empty.tap()
+        let folder = app.buttons["remote-preset-folder"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 5)); folder.tap()
+        let confirm = app.buttons["OK"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+        let cancel = app.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 20)); cancel.tap()
+        XCTAssertTrue(folder.waitForExistence(timeout: 5))
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: folder)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        let back = app.buttons["remote-preset-back"]
+        XCTAssertTrue(back.isEnabled); back.tap()
+        XCTAssertTrue(empty.waitForExistence(timeout: 5)); XCTAssertTrue(empty.isEnabled)
+        XCTAssertEqual(app.staticTexts["test-preset-events"].label, "ready")
+    }
+
+    func testPresetUserFileCanWriteEmptyC9ActivateClearAndReturnFromPicker() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--remote-tools-ui-test", "--remote-preset-ui-test",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        // Synthetic, neutral NP3 without a curve. The production file reader
+        // still validates its container, fields and camera dataset conversion.
+        func integer(_ value: UInt32) -> Data {
+            Data([UInt8(truncatingIfNeeded: value >> 24), UInt8(truncatingIfNeeded: value >> 16),
+                  UInt8(truncatingIfNeeded: value >> 8), UInt8(truncatingIfNeeded: value)])
+        }
+        var bytes = Data([78, 67, 80, 0])
+        var name = Data("Test Neutral".utf8); name.append(Data(repeating: 0, count: 20 - name.count))
+        var fields: [(UInt32, Data)] = [(0x100, Data("0300".utf8)), (0x200, name),
+            (0x300, Data([0, 0xC3])), (0x400, Data([0, 0])), (0x500, Data([255, 1]))]
+        for tag in stride(from: UInt32(0x600), through: 0xB00, by: 0x100) { fields.append((tag, Data([128, 4]))) }
+        fields += [(0xC00, Data([255, 0])), (0xD00, Data([255, 0])), (0xE00, Data([255, 4]))]
+        for tag in stride(from: UInt32(0xF00), through: 0x1300, by: 0x100) { fields.append((tag, Data([255, 1]))) }
+        fields += [(0x1400, Data([128, 1])), (0x1500, Data([255, 10])), (0x1600, Data([128, 4]))]
+        for (tag, value) in fields { bytes += integer(tag) + integer(UInt32(value.count)) + value }
+        bytes += Data(repeating: 0, count: 4)
+        app.launchEnvironment["ZTRANSFER_TEST_NP3"] = bytes.base64EncodedString()
+        app.launch(); defer { app.terminate() }
+        app.buttons["test-preset-open"].tap()
+        let edit = app.buttons["remote-preset-edit-209"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 10)); XCTAssertTrue(edit.isEnabled)
+        // Enter via the empty row, not by setting editingSlot in test code.
+        app.buttons["C9 · Empty"].tap()
+        let preset = app.buttons["User Neutral"]
+        XCTAssertTrue(preset.waitForExistence(timeout: 5))
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: preset)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        preset.tap()
+        let events = app.staticTexts["test-preset-events"]
+        func waitForEvent(_ value: String) {
+            let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", value), object: events)
+            XCTAssertEqual(XCTWaiter.wait(for: [expected], timeout: 5), .completed, events.label)
+        }
+        waitForEvent("write=209:Test Neutral")
+        let written = app.buttons["C9 · Test Neutral"]
+        XCTAssertTrue(written.waitForExistence(timeout: 5)); written.tap()
+        waitForEvent("activate=209")
+        edit.tap()
+        let folder = app.buttons["remote-preset-folder"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 5)); folder.tap()
+        let cancel = app.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 20)); cancel.tap()
+        XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isEnabled)
+        let clear = app.buttons["remote-preset-clear"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5)); clear.tap()
+        let confirm = app.buttons["OK"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+        waitForEvent("clear=209")
+        XCTAssertTrue(app.buttons["C9 · Empty"].waitForExistence(timeout: 5))
+        XCTAssertFalse(events.label.contains("notice="), events.label)
+        let image = XCTAttachment(screenshot: app.screenshot())
+        image.name = "preset-C9-write-activate-picker-clear"; image.lifetime = .keepAlways; add(image)
+    }
+
     func testRotationCyclesBothLandscapesAndLockRetainsLayout() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -1,5 +1,20 @@
 import Foundation
 
+/// Order a current handle snapshot by the camera's bulk capture-date index.
+/// Equal/unknown dates keep the camera's original order, never numeric handles
+/// or file names. Unknown dates retain the existing merge's first-read priority.
+func newestReviewHandles(_ handles: [UInt32], captureDates: [UInt32: String]) -> [UInt32] {
+    guard !captureDates.isEmpty else { return handles }
+    return handles.enumerated().sorted { a, b in
+        switch (captureDates[a.element], captureDates[b.element]) {
+        case let (.some(left), .some(right)) where left != right: return left > right
+        case (nil, .some): return true
+        case (.some, nil): return false
+        default: return a.offset < b.offset
+        }
+    }.map(\.element)
+}
+
 /// Android RemoteReviewFrameGate: pause at transaction boundaries, keeping the
 /// accepted packet alive. Cancelling a waiter must never cancel that packet.
 @MainActor

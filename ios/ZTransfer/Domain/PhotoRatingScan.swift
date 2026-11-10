@@ -254,10 +254,13 @@ struct PhotoRatingScanInput: Sendable, Equatable {
     let recentThumbnailReadyDays: Int
     let ratingDays: Int
     let photoLoadingDays: Int
+    let appliedPhotoLoadingDays: Int
+    let hasCompletedFileScan: Bool
 
     init(files: [CameraFile], paused: Bool, useObjectRating: Bool,
          staConnection: Bool, listLoading: Bool, recentThumbnailReadyDays: Int,
-         ratingDays: Int, photoLoadingDays: Int) {
+         ratingDays: Int, photoLoadingDays: Int,
+         appliedPhotoLoadingDays: Int, hasCompletedFileScan: Bool) {
         self.files = files
         self.paused = paused
         self.useObjectRating = useObjectRating
@@ -266,7 +269,15 @@ struct PhotoRatingScanInput: Sendable, Equatable {
         self.recentThumbnailReadyDays = recentThumbnailReadyDays
         self.ratingDays = ratingDays
         self.photoLoadingDays = photoLoadingDays
+        self.appliedPhotoLoadingDays = appliedPhotoLoadingDays
+        self.hasCompletedFileScan = hasCompletedFileScan
     }
+}
+
+struct PhotoRatingPlan: Equatable, Sendable {
+    let files: [CameraFile]
+    let ready: Bool
+    let effectiveDays: Int
 }
 
 enum PhotoRatingScanPolicy {
@@ -274,12 +285,9 @@ enum PhotoRatingScanPolicy {
     static let stillExtensions: Set<String> = [".jpg", ".jpeg", ".nef", ".nrw"]
 
     static func effectiveDays(ratingDays: Int, photoLoadingDays: Int) -> Int {
-        switch (ratingDays, photoLoadingDays) {
-        case (0, let photo) where photo > 0: return photo
-        case (let rating, 0) where rating > 0: return rating
-        case (0, 0): return 0
-        default: return min(ratingDays, photoLoadingDays)
-        }
+        if ratingDays <= 0 { return max(photoLoadingDays, 0) }
+        if photoLoadingDays <= 0 { return ratingDays }
+        return min(ratingDays, photoLoadingDays)
     }
 
     /// Android deliberately uses the catalog's first eight characters here,
@@ -302,27 +310,23 @@ enum PhotoRatingScanPolicy {
         files.filter { fileExtensions.contains($0.fileExtension) }
     }
 
-    static func eligibleFiles(_ files: [CameraFile], staConnection: Bool,
-                              effectiveDays: Int, sessionHandles: Set<UInt32>,
-                              sessionInitialized: Bool) -> [CameraFile] {
-        let photos = ratingFiles(files).filter { !sessionInitialized || sessionHandles.contains($0.id) }
-        guard staConnection else { return photos }
-        let selectedDays = dates(photos, limit: effectiveDays)
-        guard let cutoff = selectedDays.last else { return [] }
-        return photos.filter { file in
-            guard let captureDate = file.captureDate, captureDate.count >= 8 else { return false }
-            return String(captureDate.prefix(8)) >= cutoff
+    /// Android PhotoRatingRange.kt: every transport uses the same full-catalog
+    /// shooting-day boundary, including days containing only unsupported files.
+    /// A paused scan is not a completed catalog; a scope handoff has no old total.
+    static func plan(_ input: PhotoRatingScanInput) -> PhotoRatingPlan {
+        let days = effectiveDays(ratingDays: input.ratingDays, photoLoadingDays: input.photoLoadingDays)
+        guard max(input.appliedPhotoLoadingDays, 0) == max(input.photoLoadingDays, 0) else {
+            return PhotoRatingPlan(files: [], ready: false, effectiveDays: days)
         }
-    }
-
-    static func rangeReady(_ input: PhotoRatingScanInput, effectiveDays: Int) -> Bool {
-        guard input.staConnection else { return true }
-        let knownDates = dates(input.files).count
-        if effectiveDays == 0 {
-            return !input.listLoading && (knownDates == 0 || input.recentThumbnailReadyDays >= knownDates)
-        }
-        return input.recentThumbnailReadyDays >= effectiveDays ||
-            (!input.listLoading && knownDates < effectiveDays)
+        let range = newestCaptureDaysRange(input.files, days: days)
+        let selected = ratingFiles(input.files).filter { days == 0 || range?.contains($0.captureDate) == true }
+        let catalogComplete = input.hasCompletedFileScan && !input.listLoading
+        let ready = catalogComplete || (days > 0 && input.recentThumbnailReadyDays >= days && range != nil &&
+            Set(input.files.compactMap { file -> String? in
+                guard range?.contains(file.captureDate) == true else { return nil }
+                return file.captureDate.map { String($0.prefix(8)) }
+            }).count >= days)
+        return PhotoRatingPlan(files: selected, ready: ready, effectiveDays: days)
     }
 }
 
@@ -341,14 +345,13 @@ final class PhotoRatingScanController: ObservableObject {
     private var generation = -1
     private var generationReady = false
     private var clearedGeneration: Int?
-    private var sessionHandles = Set<UInt32>()
-    private var sessionInitialized = false
     private var scanStarted = false
     private var localRatings = [UInt32: PhotoRatingValue]()
     private var evaluationTask: Task<Void, Never>?
     private var scanTask: Task<Void, Never>?
     private var phaseStarted = false
     private var revision = 0
+    private var inputRevision = 0
     private var observedGeneration = -1
     private var generationTask: Task<Void, Never>?
     private(set) var activeEvaluationCount = 0
@@ -398,6 +401,7 @@ final class PhotoRatingScanController: ObservableObject {
             beginFreshGeneration(invalidateCache: false)
         }
         guard !scanStarted else { return }
+        inputRevision &+= 1
         scheduleEvaluation()
     }
 
@@ -409,8 +413,6 @@ final class PhotoRatingScanController: ObservableObject {
         scanStarted = false
         evaluationTask?.cancel(); evaluationTask = nil
         scanTask?.cancel(); scanTask = nil
-        sessionHandles.removeAll()
-        sessionInitialized = false
         localRatings.removeAll()
         phaseStarted = false
         state = PhotoRatingScan()
@@ -424,8 +426,6 @@ final class PhotoRatingScanController: ObservableObject {
         evaluationTask?.cancel(); evaluationTask = nil
         scanTask?.cancel(); scanTask = nil
         phaseStarted = false
-        sessionHandles.removeAll()
-        sessionInitialized = false
         scanStarted = false
         localRatings.removeAll()
         state = PhotoRatingScan()
@@ -441,12 +441,10 @@ final class PhotoRatingScanController: ObservableObject {
         evaluationTask?.cancel(); evaluationTask = nil
         scanTask?.cancel(); scanTask = nil
         phaseStarted = false
-        sessionHandles.removeAll()
-        sessionInitialized = false
         scanStarted = false
         generationReady = false
         localRatings.removeAll()
-        state = PhotoRatingScan(loading: true, waitingForRange: latestInput?.staConnection == true)
+        state = PhotoRatingScan(loading: true, waitingForRange: true)
         PhotoRatingDiagnostics.note("scan generation pending source=\(latestInput?.useObjectRating == true ? "object" : "header")")
         let token = revision
         evaluationTask = Task { [weak self, io] in
@@ -474,40 +472,24 @@ final class PhotoRatingScanController: ObservableObject {
     }
 
     private func evaluate(token: Int) async {
+        let inputToken = inputRevision
         activeEvaluationCount += 1
         defer {
             activeEvaluationCount -= 1
-            if token == revision { evaluationTask = nil }
+            if token == revision {
+                evaluationTask = nil
+                if inputToken != inputRevision { scheduleEvaluation() }
+            }
         }
         guard token == revision, enabled, generationReady, !scanStarted, let input = latestInput else { return }
-        let effectiveDays = PhotoRatingScanPolicy.effectiveDays(
-            ratingDays: input.ratingDays, photoLoadingDays: input.photoLoadingDays
-        )
-        guard PhotoRatingScanPolicy.rangeReady(input, effectiveDays: effectiveDays) else {
+        let plan = PhotoRatingScanPolicy.plan(input)
+        guard plan.ready else {
             state = PhotoRatingScan(loading: true,
-                                    total: PhotoRatingScanPolicy.ratingFiles(input.files).count,
+                                    total: plan.files.count,
                                     waitingForRange: true)
             return
         }
-        if input.files.isEmpty {
-            sessionHandles.removeAll(); sessionInitialized = false; localRatings.removeAll()
-        } else if !sessionInitialized && !input.paused {
-            sessionHandles.formUnion(input.files.map(\.id))
-            let dateCount = PhotoRatingScanPolicy.dates(input.files).count
-            sessionInitialized = effectiveDays == 0 || dateCount >= effectiveDays || !input.listLoading
-        }
-        let eligible = PhotoRatingScanPolicy.eligibleFiles(
-            input.files, staConnection: input.staConnection,
-            effectiveDays: effectiveDays, sessionHandles: sessionHandles,
-            sessionInitialized: sessionInitialized
-        )
-        if input.staConnection && effectiveDays > 0 &&
-            PhotoRatingScanPolicy.dates(eligible).count < effectiveDays && input.listLoading {
-            state = PhotoRatingScan(loading: true,
-                                    total: PhotoRatingScanPolicy.ratingFiles(eligible).count,
-                                    waitingForRange: true)
-            return
-        }
+        let eligible = plan.files
         let sources = photoRatingSources(eligible)
         var seenSources = Set<UInt32>()
         // Android's associate retains the input row order before distinctBy.
@@ -515,12 +497,13 @@ final class PhotoRatingScanController: ObservableObject {
         let uniqueSources = eligible.compactMap { sources[$0.id] }.filter { file in
             seenSources.insert(file.id).inserted
         }
-        localRatings = localRatings.filter { entry in
-            sources.values.contains(where: { $0.id == entry.key })
-        }
+        localRatings = localRatings.filter { seenSources.contains($0.key) }
         for file in uniqueSources where localRatings[file.id] == nil {
             let cached = await io.cached(file.id)
-            guard !Task.isCancelled, token == revision, enabled else { return }
+            // Unlike Android's synchronous map lookup, this cache is actor
+            // isolated. A scope/catalog update during the await must be planned
+            // again before locking a request snapshot.
+            guard !Task.isCancelled, token == revision, inputToken == inputRevision, enabled else { return }
             if let cached {
                 localRatings[file.id] = .known(cached.value)
             }
@@ -550,8 +533,8 @@ final class PhotoRatingScanController: ObservableObject {
         state = PhotoRatingScan(
             values: visible,
             loading: loading,
-            completed: sources.values.reduce(0) { $0 + (localRatings[$1.id] == nil ? 0 : 1) },
-            total: PhotoRatingScanPolicy.ratingFiles(eligible).count,
+            completed: visible.count,
+            total: eligible.count,
             complete: complete,
             waitingForRange: false
         )

@@ -29,11 +29,13 @@ struct PhotoListAdmissionHarness: View {
         preferences.set(burst, forKey: "collapse_burst_photos")
         preferences.set(TransferStorageMode.unified.rawValue, forKey: TransferStorageMode.persistenceKey)
         defaults = preferences
-        let lastID = ProcessInfo.processInfo.arguments.contains("--scroll-hold-fixture") ? 760 : burst ? 703 : 702
+        let dateGroups = ProcessInfo.processInfo.arguments.contains("--date-group-motion-fixture")
+        let lastID = dateGroups ? 718 : ProcessInfo.processInfo.arguments.contains("--scroll-hold-fixture") ? 760 : burst ? 703 : 702
         let syntheticFiles = (701...lastID).map { id in
             CameraFile(id: UInt32(id), storageID: 1, format: 0x3801, size: 10,
                 fileName: String(format: "DSC_%04d.JPG", id),
-                captureDate: burst || id == 701 ? "20261016T100000" : "20261016T110000", isProtected: false)
+                captureDate: dateGroups && id >= 710 ? "20261015T110000"
+                    : burst || id == 701 ? "20261016T100000" : "20261016T110000", isProtected: false)
         }
         let files = ProcessInfo.processInfo.arguments.contains("--preview-motion-fixture")
             ? Array(DebugCameraData.shared.files.filter { $0.fileExtension.lowercased() == ".jpg" }.prefix(3))

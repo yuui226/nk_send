@@ -14,6 +14,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     private let lifecycleLock = NSLock()
     private let receiveBufferLock = NSLock()
     private var closed = false
+    private var staHandshake = false
     private var eventTask: Task<Void, Never>?
     private var eventDeliveryTask: Task<Void, Never>?
     private var eventContinuation: AsyncStream<STAEvent>.Continuation?
@@ -25,9 +26,13 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     private(set) var connectionNumber: UInt32 = 0
     private(set) var responderGUID: String?
 
-    private var isClosed: Bool {
+    var isClosed: Bool {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }; return closed
     }
+
+    private var hasSTAHandshakeDeadline: Bool { lifecycleLock.withLock { staHandshake } }
+
+    func completeSTAHandshake() { lifecycleLock.withLock { staHandshake = false } }
 
     private func setActiveAbort(_ state: PTPIPAbortState) {
         lifecycleLock.lock(); activeAbort = state; lifecycleLock.unlock()
@@ -68,19 +73,23 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     static func open(host: String, port: UInt16 = 15740, localAddress: String? = nil,
                      staInitiatorID: Data? = nil, expectedGUID: String? = nil,
                      connectionParameters: NWParameters? = nil,
-                     backend: PTPIPSocketBackend = .networkFramework) async throws -> PTPIPSocketTransport {
+                     backend: PTPIPSocketBackend = .networkFramework,
+                     trace: STAConnectionTrace? = nil) async throws -> PTPIPSocketTransport {
         let parameters = connectionParameters ?? parameters(localAddress: localAddress, sta: staInitiatorID != nil)
         let command = PTPIPSocketConnection(host: host, port: port, localAddress: localAddress, parameters: parameters, backend: backend)
         let event = PTPIPSocketConnection(host: host, port: port, localAddress: localAddress, parameters: parameters,
                                          backend: backend, isCommandChannel: false)
         let transport = PTPIPSocketTransport(host: host, port: port, command: command, event: event)
+        transport.staHandshake = staInitiatorID != nil
+        return try await withTaskCancellationHandler {
         do {
             try await transport.start(command, timeout: 3_000_000_000)
+            trace?.note("CommandSocket=connected")
             let initialization = try staInitiatorID.map { try PTPIPCodec.staInitCommandRequest(initiatorID: $0) }
                 ?? PTPIPCodec.initCommandRequest()
             let ack = try await transport.exchangeInitialization(initialization, on: command)
             if ack.type == .initFail { throw STAConnectionError.cameraRefused }
-            guard ack.type == .initCommandAck, ack.payload.count >= 4 else { throw PTPSessionError.invalidResponse }
+            guard ack.type == .initCommandAck, ack.payload.count >= (staInitiatorID == nil ? 4 : 20) else { throw PTPSessionError.invalidResponse }
             transport.connectionNumber = ack.payload.readUInt32LE(at: 0)
             if ack.payload.count >= 20 {
                 transport.responderGUID = ack.payload[4..<20].map { String(format: "%02x", $0) }.joined()
@@ -89,6 +98,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
                 throw STAConnectionError.unexpectedResponder(expected: expectedGUID, actual: transport.responderGUID)
             }
             try await transport.start(event, timeout: 3_000_000_000)
+            trace?.note("EventSocket=connected")
             let connectionNumber = transport.connectionNumber
             let eventAck = try await transport.exchangeInitialization(
                 PTPIPCodec.initEventRequest(connectionNumber: connectionNumber), on: event)
@@ -99,6 +109,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
             transport.close()
             throw error
         }
+        } onCancel: { transport.close() }
     }
 
     func close() {
@@ -122,54 +133,16 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     /// CloseSession even when its caller has been cancelled. Retire only a
     /// session that reached a successful OpenSession response.
     static func retireOpenedSession(_ session: PTPSession, socket: PTPIPSocketTransport,
-                                    opened: Bool) async {
+                                    opened: Bool, timeoutNanoseconds: UInt64 = PTPConstants.cameraReadTimeoutNanoseconds) async {
         let cleanup = Task.detached {
             if opened {
                 _ = try? await session.executeResponse(operation: PTPConstants.closeSession,
-                                                       timeoutNanoseconds: PTPConstants.cameraReadTimeoutNanoseconds)
+                                                       timeoutNanoseconds: timeoutNanoseconds)
             }
             await session.invalidate()
             socket.close()
         }
         await cleanup.value
-    }
-
-    /// Only called before starting the continuous reader. Missing pacing events
-    /// never undo the already-acknowledged pairing (NikonCamera.completeInitialPairing).
-    func waitForPairingEvent(timeoutNanoseconds: UInt64 = 8_000_000_000) async {
-        let usesSocketTimeout = event.network == nil
-        let operation: @Sendable () async throws -> Void = {
-            let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(clamping: timeoutNanoseconds)))
-            while !Task.isCancelled {
-                var readTimeout: UInt64?
-                if usesSocketTimeout {
-                    let remaining = ContinuousClock.now.duration(to: deadline)
-                    guard remaining > .zero else { return }
-                    // completeInitialPairing sets SO_TIMEOUT from the remaining
-                    // whole-millisecond budget before each packet; fragmented
-                    // reads inside that packet each receive the same budget.
-                    let parts = remaining.components
-                    let milliseconds = max(1, parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000)
-                    readTimeout = UInt64(milliseconds) * 1_000_000
-                }
-                let packet = try await self.receive(on: self.event, timeoutNanoseconds: readTimeout)
-                if packet.type == .ping {
-                    try await self.send(try PTPIPCodec.encode(type: .pong), on: self.event)
-                } else if packet.type == .event {
-                    var reader = PTPDataReader(packet.payload)
-                    if reader.readUInt16() == 0x4008 { return }
-                }
-            }
-            throw CancellationError()
-        }
-        if usesSocketTimeout {
-            // Wait until the actual reader finishes. A detached total timer
-            // could return while an old read still owns the event socket.
-            _ = try? await AsyncDeadline.run(operation: operation)
-        } else {
-            _ = try? await AsyncDeadline.run(nanoseconds: timeoutNanoseconds,
-                                            timeoutError: PTPSessionError.timeout, operation: operation)
-        }
     }
 
     func startEvents(onEvent: (@Sendable (STAEvent) async -> Void)? = nil) {
@@ -219,9 +192,16 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
         // Cancellation of one thumbnail/catalog request must never cancel the
         // shared NWConnection. The uncancelled PTPSession recovery task sends
         // PTP/IP Cancel while this receiver drains to COMMAND_RESPONSE.
-        defer { state.finishReceiver() }
+        let deadline = hasSTAHandshakeDeadline ? STAHandshakeDeadline(nanoseconds: readTimeoutNanoseconds) : nil
+        var responseCompleted = false
+        defer {
+            state.finishReceiver()
+            // An incomplete handshake response must not be followed by a
+            // CloseSession or another reader on a desynchronized stream.
+            if deadline != nil && !responseCompleted { close() }
+        }
         let request = try PTPIPCodec.commandRequest(from: ptpCommand, dataPhase: data == nil ? 1 : 2)
-        try await send(request)
+        try await send(request, permission: PTPCommandContext.permission)
         if let data {
             let transaction = ptpCommand.readUInt32LE(at: 8)
             var startPayload = Data(); startPayload.append(contentsOf: transaction.littleEndianBytes); startPayload.append(contentsOf: UInt64(data.count).littleEndianBytes)
@@ -232,7 +212,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
         var received = Data()
         while true {
             let packet = try await receive(on: self.command, activity: state,
-                                            timeoutNanoseconds: command.network == nil ? readTimeoutNanoseconds : nil)
+                timeoutNanoseconds: command.network == nil ? readTimeoutNanoseconds : nil, deadline: deadline)
             if packet.type == .ping {
                 try await send(try PTPIPCodec.encode(type: .pong), on: self.command)
                 continue
@@ -241,6 +221,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
                 if try state.consumeDrainPacket(packet) {
                     let response = try PTPIPCodec.commandResponseContainer(packet.payload)
                     state.markResponseSeen()
+                    responseCompleted = true
                     return (response, received)
                 }
                 continue
@@ -256,6 +237,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
                 guard packet.payload.count >= 6 else { throw PTPSessionError.invalidResponse }
                 let response = try PTPIPCodec.commandResponseContainer(packet.payload)
                 state.markResponseSeen()
+                responseCompleted = true
                 return (response, received)
             default:
                 continue
@@ -339,6 +321,16 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     var usesSocketReadTimeouts: Bool { command.network == nil }
 
     private func exchangeInitialization(_ packet: Data, on connection: PTPIPSocketConnection) async throws -> PTPIPPacket {
+        if hasSTAHandshakeDeadline {
+            try await send(packet, on: connection)
+            let deadline = STAHandshakeDeadline(nanoseconds: 5_000_000_000)
+            while true {
+                let reply = try await receive(on: connection, timeoutNanoseconds: 5_000_000_000, deadline: deadline)
+                if reply.type == .ping {
+                    try await send(try PTPIPCodec.encode(type: .pong), on: connection)
+                } else { return reply }
+            }
+        }
         if connection.network == nil {
             return try await AsyncDeadline.run {
                 try await self.send(packet, on: connection)
@@ -412,11 +404,14 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
         }, onCancel: { connection.cancel() })
     }
 
-    private func send(_ data: Data, on connection: PTPIPSocketConnection? = nil) async throws {
+    private func send(_ data: Data, on connection: PTPIPSocketConnection? = nil,
+                      permission: PTPCommandPermission? = nil) async throws {
         let connection = connection ?? command
-        guard let network = connection.network else { return try await connection.sendPOSIX(data) }
+        guard let network = connection.network else { return try await connection.sendPOSIX(data, permission: permission) }
         try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                do { try permission?.check() }
+                catch { continuation.resume(throwing: error); return }
                 network.send(content: data, completion: .contentProcessed { error in
                     if let error { continuation.resume(throwing: error) } else { continuation.resume() }
                 })
@@ -429,21 +424,23 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
     }
 
     private func receive(on connection: PTPIPSocketConnection, activity: PTPIPAbortState? = nil,
-                         timeoutNanoseconds: UInt64? = nil, coalesceReads: Bool = true,
+                         timeoutNanoseconds: UInt64? = nil, deadline: STAHandshakeDeadline? = nil, coalesceReads: Bool = true,
                          onActivity: @Sendable () -> Void = {}, diagnostics: PTPTransferDiagnostics? = nil) async throws -> PTPIPPacket {
         let header = try await readExactly(8, on: connection, activity: activity,
                                            timeoutNanoseconds: timeoutNanoseconds,
+                                           deadline: deadline,
                                            coalesceReads: coalesceReads, onActivity: onActivity, diagnostics: diagnostics)
         let length = Int(header.readUInt32LE(at: 0))
         guard length >= 8, length <= PTPIPCodec.maxPacketLength else { throw PTPIPCodecError.malformedLength }
         let body = try await readExactly(length - 8, on: connection, activity: activity,
                                          timeoutNanoseconds: timeoutNanoseconds,
+                                         deadline: deadline,
                                          coalesceReads: coalesceReads, onActivity: onActivity, diagnostics: diagnostics)
         return try PTPIPCodec.decode(header: header, body: body)
     }
 
     private func readExactly(_ count: Int, on connection: PTPIPSocketConnection, activity: PTPIPAbortState? = nil,
-                             timeoutNanoseconds: UInt64? = nil, coalesceReads: Bool,
+                             timeoutNanoseconds: UInt64? = nil, deadline: STAHandshakeDeadline? = nil, coalesceReads: Bool,
                              onActivity: @Sendable () -> Void = {}, diagnostics: PTPTransferDiagnostics? = nil) async throws -> Data {
         if count == 0 { return Data() }
         // Defer allocating an assembly buffer. Network.framework commonly
@@ -453,6 +450,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
         var result = Data()
         var reservedAssemblyCapacity = false
         while result.count < count {
+            let readTimeout = try deadline?.remainingNanoseconds() ?? timeoutNanoseconds
             let remaining = count - result.count
             let buffered = takeBuffered(upTo: remaining, for: connection)
             if !buffered.isEmpty {
@@ -477,9 +475,9 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
                 // The socket bounds each blocking recv. Do not race a second
                 // task timer against a partially received header/body.
                 chunk = try await connection.receivePOSIX(maximumLength: maximumLength, diagnostics: diagnostics,
-                                                          readTimeoutNanoseconds: timeoutNanoseconds)
-            } else if let timeoutNanoseconds {
-                chunk = try await AsyncDeadline.run(nanoseconds: timeoutNanoseconds, timeoutError: PTPSessionError.timeout) {
+                                                          readTimeoutNanoseconds: readTimeout)
+            } else if let readTimeout {
+                chunk = try await AsyncDeadline.run(nanoseconds: readTimeout, timeoutError: PTPSessionError.timeout) {
                     try await self.readChunk(minimumLength: minimumLength,
                                              maximumLength: maximumLength,
                                              on: connection, diagnostics: diagnostics)
@@ -489,6 +487,7 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
                                             maximumLength: maximumLength,
                                             on: connection, diagnostics: diagnostics)
             }
+            _ = try deadline?.remainingNanoseconds()
             activity?.recordRead()
             onActivity()
             if let readStarted { diagnostics?.read(bytes: chunk.count, waitedMS: PTPTransferDiagnostics.milliseconds(since: readStarted)) }

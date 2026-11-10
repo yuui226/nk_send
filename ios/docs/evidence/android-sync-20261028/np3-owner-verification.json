@@ -1,0 +1,928 @@
+{
+  "tasks": "N15/N18 partial — applied configuration restoration, owner guards and control preferences",
+  "recordedAt": "2026-10-30T21:07:39.851964+08:00",
+  "androidTarget": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "iosBase": "58d9b6ed81c8f92e155b4402f8b05e88fda421ed",
+  "runs": [
+    {
+      "session": 93216,
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-np3-owner-20261030.log",
+      "logSHA256": "f5985f9f82af9f08478f9af864e6c627f5fcb268170e9ff845e2069c70befa9e",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-owner-r1-tests.log",
+      "retainedLogSHA256": "d5737b7f91a63367ea6ce9a607bef99bf6e65798cbbd6563a6887c43786edbb3",
+      "xcresult": "/tmp/ztransfer-np3-owner-20261030.xcresult",
+      "count": 29,
+      "tests": [
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3StoreTests testCorruptMismatchedOversizedSnapshotsAndLabelsFailIndependently",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3StoreTests testDirectoryReplacementInvalidatesCustomDraftsButRetainsQueuedValueAndBuiltin",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3StoreTests testFolderNotificationsAreSharedDeduplicatedAndCancelled",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3StoreTests testNormalizationRetainsPrivateRecipeAndFinishingWithoutMergingRoles",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3StoreTests testRenamingUpdatesOnlyLabelAndDuplicateLabelsMatchCatalogOrder",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3StoreTests testRolesRestorePrivateRecipesWithoutSourceAndDisableIsIndependent",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3StoreTests testSourceHintsSurviveOffRefreshOnlyAfterReadAndAreIndependentSnapshots",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "session": 94009,
+      "exitCode": 65,
+      "log": "/tmp/ztransfer-np3-owner-20261030-r2.log",
+      "logSHA256": "3942e1115bea69c486e01f2f9d429ffc9b94bb6f41eb92ecefb18fe08a798611",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-owner-r2-tests.log",
+      "retainedLogSHA256": "bd38f0e04e38064feabdb9ec34dc8eebc1ba54ee9c436c9d487aee6baf126f9e",
+      "xcresult": "/tmp/ztransfer-np3-owner-20261030-r2.xcresult",
+      "count": 0,
+      "tests": []
+    },
+    {
+      "session": 54246,
+      "exitCode": 0,
+      "log": "/tmp/ztransfer-np3-owner-20261030-r3.log",
+      "logSHA256": "c7473e16e91de8ce29aa602c20e68b68fa35081859687dbc6b62d57e723932f1",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-owner-r3-tests.log",
+      "retainedLogSHA256": "87e5bbf84c4cb7619f5e6e8d0dce15494f80ad2c3ac765a7be2d55879a847316",
+      "xcresult": "/tmp/ztransfer-np3-owner-20261030-r3.xcresult",
+      "count": 76,
+      "tests": [
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testConverterRevisionsShareMemoryButDetachedCustomKeysRemainValid",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testEveryControlAndBoundaryHasDeterministicRoundTrip",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testMalformedAndDuplicateEntriesDoNotConsumeAValidMemorySlot",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testOldPreferencesAndMissingControlMemoryAreNeutral",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testPassiveImportedRecipeRefreshKeepsOffAndActiveCubeSeparate",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testSettingsCodableMemoryAndPixelIdentityStayIndependentOfAppliedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testBackgroundSelectionPreparationCannotChangeRoleUntilAccepted",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testBothEffectsStoresRestoreRoleRecipeBeforeRendering",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testBoundedCacheEvictionAndPrivateSnapshotReload",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testBoundedLUTReadChecksActualSizeAndCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testBoundedLUTReadRejectsGrowthAfterMetadataAndAcceptsExactLimit",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testCameraAndLocalRecipesRemainIndependentAcrossRecreation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testColorEditorsRespectModulesAndOnlyActiveSelectionsExcludeEachOther",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testColorModuleMasksGatePreviewCommitAndRenderedOutputInBothScopes",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testCompactLUTWheelPreviewsCancelsAndCommitsOnlyOnRelease",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testConcurrentCacheReadAndFailureRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testCorruptSnapshotDomainsAndTrailingBytesNeverRestore",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testCubeSurvivesBothEditorCommitPathsAndUsesLUTModule",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testDigestMemoryMigratesSourceStrengthAndKeepsRoleSnapshotsIndependent",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testFavoriteToggleIsIdempotent",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testFolderFailureDistinguishesRootFromUnreadableChild",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testFolderPreparationDoesNotReplaceBookmarkUntilAccepted",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testLegacyCacheSnapshotMigratesOnlyAfterValidation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testLegacyRoleRestoreUsesSameFallbackForControlsAndRenderedSelection",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testLiveRolesShareFavoritesAndFolderWithoutOverwritingEachOther",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testLUTIOQueueOwnerCancelsItsObsoletePendingAndActiveResults",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testLUTKeepsRememberedBuiltinFilterAcrossBothScopesAndRestart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testLUTRequestTimeoutDoesNotStartAnotherReaderUntilBlockedWorkReturns",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testLUTScanCountsAllEntriesAndStopsAtOneCategoryLevel",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testMaximumSizeLUTsRespectDefaultBudgetAndActiveValuesSurviveEviction",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testModuleCommandClearsOnlyItsLUTRoleAndNeverReactivates",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testOutputIdentityIncludesEveryLUTAdjustmentAndSurvivesSnapshotCoding",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testPhotoAndMonitorFolderBookmarksRestoreIndependently",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testPruneDuringWriteHandoffRetainsFileUntilCancelledWriterReleasesOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testRecipeCopiesOwnSnapshotWithoutRuntimePinningOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testRestoredRecipeDefersSnapshotDecodingUntilCacheMiss",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testRoleRecipeRestoresPrivateSnapshotWithoutOriginalSource",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testSelectionStrengthAndFavoritesRestoreAcrossInstances",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testSharedPresetQueueDiscardsCancelledAcceptedReadBeforeNextOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testSharedPresetQueueKeepsOtherOwnersFIFOAndDrainsCleanupAfterThrowingDelivery",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testSnapshotPruningRetainsBothRolesActiveRecipesAndPreparedWrites",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testSnapshotWriteFailurePreservesSavedRoleAndDoesNotPublishNewLUT",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testTransferDraftCommitDiscardAndSnapshotCleanupKeepSavedRecipeIndependent",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testTurningLUTOffReopensBothEditorsAndPreservesOtherRole",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTStoreTests testWorkerSnapshotReaderRejectsOversizedFileAndDoesNotPublish",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testCancelOffResetCloseAndInactiveOwnerRejectLateProviderResults",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testEditorReleaseCancelsItsRequestAndObserverWithoutRetainingHost",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testFreshSelectionAndRejectedCandidatePreserveAppliedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testLateCancelledScanCannotCommitFolderBeforeNewerReplacement",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testListedNameRefreshSurvivesBadNewBytesWithoutChangingRecipeName",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testQueuedScanTimeoutAndCancellationDoNotCancelAnotherEditorRead",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testRefreshAlwaysReadsButDoesNotEnableOffOrResetUnchangedDraft",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testReplacementClearsBothCustomDraftsButKeepsBuiltinsAndBlocksStaleSaves",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testResetWithoutMatchingSourceDoesNotBorrowAnotherRolesURI",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testSameFolderAndFailedOrInactiveReplacementKeepRolesAndSourceHints",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testScanFailureRetainsListRecipeAndSavedRoleOnlyCompleteDeletionDisablesDraft",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3EditorStateTests testTimeoutEndsUIRequestAndDiscardsLateReadWithoutChangingSelection",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testBothEntriesRestoreTheirOwnRecipeAndControlMemoryWithoutSourceIO",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testBothPrivateRecipesAreAvailableBeforePreferenceIDValidation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testCorruptOneRoleDoesNotDiscardOtherRoleFrameOrMemory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testGlobalReplacementClearsInactiveLocalPreferencesAndLiveTransferButNotCapturedTask",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testNewerValidSelectionCannotBeOverwrittenByOldDirectoryDraft",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testOffRetainsRecipeAndControlsAndSameDirectoryDoesNotClearThem",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testReplacementPreservesBuiltinControlsAndOtherEffectsWhileClearingDetachedCustomMemory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testTransferAppliedControlsStaySeparateFromRememberedDraftAcrossRestart",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "session": 50883,
+      "exitCode": null,
+      "log": "/tmp/ztransfer-np3-owner-20261030-r4.log",
+      "logSHA256": "86a420773a7e13ec6940a4c558e12e8eace2a5fd335a695f5dede7cec30646a1",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-owner-r4-tests.log",
+      "retainedLogSHA256": "259d65d7df8b9edd30c97384c57b09e1195d3fa5e0beed4b78debc1907d69d7b",
+      "xcresult": "/tmp/ztransfer-np3-owner-20261030-r4.xcresult",
+      "count": 98,
+      "tests": [
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testConverterRevisionsShareMemoryButDetachedCustomKeysRemainValid",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testEveryControlAndBoundaryHasDeterministicRoundTrip",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testMalformedAndDuplicateEntriesDoNotConsumeAValidMemorySlot",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testOldPreferencesAndMissingControlMemoryAreNeutral",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testPassiveImportedRecipeRefreshKeepsOffAndActiveCubeSeparate",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoFilterPreferencesTests testSettingsCodableMemoryAndPixelIdentityStayIndependentOfAppliedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testBothEntriesRestoreTheirOwnRecipeAndControlMemoryWithoutSourceIO",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testBothPrivateRecipesAreAvailableBeforePreferenceIDValidation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testCorruptOneRoleDoesNotDiscardOtherRoleFrameOrMemory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testGlobalReplacementClearsInactiveLocalPreferencesAndLiveTransferButNotCapturedTask",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testNewerValidSelectionCannotBeOverwrittenByOldDirectoryDraft",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testOffRetainsRecipeAndControlsAndSameDirectoryDoesNotClearThem",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testReplacementPreservesBuiltinControlsAndOtherEffectsWhileClearingDetachedCustomMemory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.PhotoNp3OwnerTests testTransferAppliedControlsStaySeparateFromRememberedDraftAcrossRestart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testPrivateNP3RecipeSurvivesSourceReplacementAndFailureRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving",
+          "result": "passed"
+        }
+      ],
+      "terminalOutputNote": "The terminal poll output was lost at context compaction. The session is no longer available; do not infer its exit code. Independent xcresult summary confirms Passed, 98 passed, zero failures.",
+      "independentSummary": "ios/docs/evidence/android-sync-20261028/np3-owner-r4-summary.json",
+      "independentSummarySHA256": "cf40ed7c887e679ef8f4e21d615af2872a97602169a2da1e58cdbe8097c656e9"
+    }
+  ],
+  "finalRunTests": 98,
+  "uniquePassedMethods": 156,
+  "sourceSHA256": {
+    "ios/ZTransfer/Domain/PhotoEffects.swift": "860f3301699f8773fb62b763a40268312293146605a98af105104ea62fd755f1",
+    "ios/ZTransfer/Domain/PhotoFilterPreferences.swift": "9b2d865ffb76b5aec4ec1e5bf7454657423ac25f86efe1545db216c4aa75751a",
+    "ios/ZTransfer/Domain/PhotoNp3Store.swift": "1016176843b14fe010160ea9253b2fd98be67ffd88388618cbd61e82277c53e4",
+    "ios/ZTransfer/Domain/PhotoNp3SnapshotCodec.swift": "23b658927ac20fef04cc834f0ce5c777e1307910eb82fbfac7fbe88b36c6071a",
+    "ios/ZTransfer/Domain/PhotoNp3EditorState.swift": "daeccd0c911bca3fa75be511222c33438343535f0a329faa8337626015c5ed64",
+    "ios/ZTransfer/Domain/TransferQueue.swift": "8bc684f2a2ec6562d9de5bc3ce5ba3b9e8b7d4c6a9ec5cbbc8225a6abf268127",
+    "ios/ZTransfer/UI/SettingsView.swift": "ba99621d357ac98561eebadd5a5174741ff8a8291c7981faf3005f3f7b423f79",
+    "ios/ZTransfer/UI/PhotoEffectsEditorView.swift": "dc8ac1b103a928e57311fa7cf3489a42d8f1fd7b0b0a40b39b63d4d278f6994d",
+    "ios/ZTransferTests/PhotoFilterPreferencesTests.swift": "b4d09affe77f4b2d4bc060d3fc4e943a09759d390f536930a23f96c791c87076",
+    "ios/ZTransferTests/PhotoLUTEditorStateTests.swift": "1b3f3d13a55d5deec208156aeece70d69bd66834326ba4b4c5921133cbb8a45f",
+    "ios/ZTransferTests/DomainModelTests.swift": "c1da2aac74c78797d1d12492e33042bffeb52792cd861806b3c3c2f22351fee9",
+    "ios/Package.swift": "40228750d7e350fbc071aeba5280f8b467704f670be1cc53530700b876381fdc",
+    "ios/ZTransfer.xcodeproj/project.pbxproj": "dc2c34ae2fa9df28dde940100c4d871347805c88bc76ba89e0b4a6d07b681d6b"
+  },
+  "androidSourceSHA256": {
+    "app/src/main/java/com/ztransfer/effects/PhotoFilterAdjustments.kt": "c30d1d94fe8a20ba481e97d33498228ea4f449c33b76855d12b5ed3c6d32bf13",
+    "app/src/main/java/com/ztransfer/effects/PhotoEffectFavorites.kt": "27ac8a1e50467bf70997948f3ec02b7084ff08312064a96532fe05bd8960b916",
+    "app/src/main/java/com/ztransfer/filter/PhotoFilterIdentity.kt": "d3d0b2fa3f1464b54b1590b55931bf208993f8b859b1b4af6e8ec058d9399c63",
+    "app/src/main/java/com/ztransfer/viewmodel/PhotoPresetDirectoryState.kt": "85e410dcd8b6082724e580423c9d1ec1824a7d53c016ac70c00bc27d0b24a9ee",
+    "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt": "1d984bc12933efae7d252f1c54c3418db3d5936a5766b315511287b3809c387e",
+    "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsPreferences.kt": "f8cabfa4b83ca34cee032df3fc7b491ac94db8d3f4e7374cef9ed3f60b0bb1f9",
+    "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt": "1146526c869d9abda6433fe6db3cdef44419707358b0a1d1317ad7b287ab1c87",
+    "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt": "a892f5e95344d51f12ae8a69190321d60c13f24cca6bb32accdbd7e9fef19b9c",
+    "app/src/test/java/com/ztransfer/effects/PhotoFilterAdjustmentsTest.kt": "583e2dfc979173639addde4fd535e55643d3fecd1658101a4a3dd8fc6c5f4305",
+    "app/src/test/java/com/ztransfer/ui/screen/LocalPhotoEffectsPreferencesTest.kt": "b3be1544c8d777ad8562655f034c339f1278a70d2a34c0d89cc73b817067273b",
+    "app/src/androidTest/java/com/ztransfer/ui/screen/PhotoFilterAdjustmentsInstrumentation.kt": "369d81e7d8a002fb7869c318e37d4ec21a03f0384aa3b155b0982bd6aef50858"
+  },
+  "notes": [
+    "r1 29/29 existing store/LUT editor/batch checks.",
+    "r2 test fixture omitted @MainActor, causing test compilation failure; zero methods executed.",
+    "r3 76/76 includes 6 preferences, 8 owner, 12 editor state, 11 real LUT editor/component, 39 LUT store checks.",
+    "r4 98/98 additionally verifies the actual SettingsView commit writes NP3 role and all 62 transfer queue scenarios remain green.",
+    "Preferences use version-independent custom keys; detached custom memories survive. Four controls, Int32 parsing, ranges and deterministic codecs follow Android source tests.",
+    "Transfer remembered controls and applied controls remain separate across restart; Android strength restoration intentionally uses the newest remembered detent map. Local preferences remain independent.",
+    "PhotoEffectsStore restores both immutable private recipes before validating raw preference IDs; no source-file IO during NP3 restoration.",
+    "Global source folder observer clears stale live settings and stored local settings even without a mounted workbench, retaining built-ins, frame settings and captured task values.",
+    "SettingsView now guards and commits role configuration with LUT/effects. Its current source lookup covers saved roles; newly selected source comes with the still-pending N16 editor binding.",
+    "Existing strength wheel now mutates its selection value instead of reconstructing and dropping typed recipe/finishing."
+  ],
+  "remaining": [
+    "N16 actual NP3 picker/chooser/editor binding for both entries, including live source URI on commit",
+    "N17 adjustment panel and default/confirm interaction",
+    "N18 complete UI memory/owner lifecycle validation, N20 shared favorites",
+    "N15 metadata sort final URI/Unicode rules noted in project memory"
+  ],
+  "notRun": [
+    "Kotlin/JUnit execution for this owner phase",
+    "full Android instrumentation execution",
+    "full UI automation or System Files/cloud-provider interaction",
+    "physical iPhone/camera",
+    "CPU/FPS/power measurements"
+  ],
+  "installedOnPhone": false,
+  "committed": false,
+  "pushed": false
+}

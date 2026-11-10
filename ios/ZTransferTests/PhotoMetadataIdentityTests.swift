@@ -2,6 +2,21 @@ import XCTest
 @testable import ZTransfer
 
 final class PhotoMetadataIdentityTests: XCTestCase {
+    func testUnidentifiedBodiesUseSessionLocalThumbnailDirectories() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = PhotoThumbnailDiskCache(root: root)
+        let first = CameraRepository(session: PTPSession(transport: STAScriptTransport([])))
+        let second = CameraRepository(session: PTPSession(transport: STAScriptTransport([])))
+        let firstKey = await first.thumbnailCacheIdentity(), sameKey = await first.thumbnailCacheIdentity()
+        let secondKey = await second.thumbnailCacheIdentity()
+        XCTAssertEqual(firstKey, sameKey)
+        XCTAssertNotEqual(firstKey, secondKey)
+        let firstCache = disk.openCamera(identity: firstKey)
+        XCTAssertTrue(firstCache.write(Data([1]), as: "same-handle.jpg"))
+        XCTAssertNil(disk.openCamera(identity: secondKey).find("same-handle.jpg"))
+    }
+
     func testUSBThumbnailDiskCacheIsReusedOnlyByTheSameWirelessBody() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

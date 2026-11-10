@@ -1,0 +1,7 @@
+2026-11-08 Debug 2.05(79) 20261108-113420
+Command: IOS_DEVICE_ID=<existing iPhone 15 Plus> bash ios/dist-debug-ios/d-b-ios.command
+BUILD SUCCEEDED; process exit 0
+Device build 18s; packaging 1s; installation 13s; total 32s
+Physical-device installation: 1 succeeded, 0 failed.
+App launched. Existing data retained; no uninstall.
+No physical STA pairing result yet.

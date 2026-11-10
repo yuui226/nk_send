@@ -5,6 +5,74 @@ import Combine
 
 @MainActor
 final class PictureControlPanelModelTests: XCTestCase {
+    func testUserDocumentWriteReadsActualFileAndKeepsEditorAfterImportFailures() async throws {
+        for scenario in ["valid", "invalid", "unsupported", "denied"] {
+            let suite = "preset-document-write-\(UUID())"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+            defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: root) }
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            var bytes = SyntheticPictureControlFixture.data(withCurve: false)
+            if scenario == "invalid" { bytes = Data([1, 2, 3]) }
+            if scenario == "unsupported", let version = bytes.range(of: Data("0300".utf8)) {
+                bytes.replaceSubrange(version, with: Data("0399".utf8))
+            }
+            try bytes.write(to: root.appendingPathComponent("User.NP3"))
+            let folders = PictureControlFolderState(defaults: defaults, queue: PresetIOQueue(),
+                fileAccess: .init(start: { _ in scenario != "denied" }, stop: { _ in }),
+                scan: { _, _, ticket in
+                    try RemoteLUTFolderAccess.prepareFolder(root, fileExtension: "np3",
+                        operations: .init(start: { _ in true }, stop: { _ in }), checkCancelled: ticket.checkCancellation)
+                })
+            folders.changeFolder(root)
+            let deadline = ContinuousClock.now + .seconds(3)
+            while folders.scanning && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+            XCTAssertFalse(folders.scanning)
+            let file = try XCTUnwrap(folders.files.first)
+            var writes: [Int] = [], notices: [String] = [], busy: [Bool] = []
+            let model = PictureControlPanelModel(folders: folders, current: { true }, allowed: { true },
+                busy: { busy.append($0); return true }, readOverview: { _ in
+                    .init(slots: [.init(slot: 209, availability: .empty, selectable: false)],
+                          selected: 8, canActivate: true, canEdit: true)
+                }, change: { slot, change, _ in
+                    guard case let .write(parsed) = change else { return XCTFail("Expected write") }
+                    XCTAssertEqual(parsed.name, "Test Neutral")
+                    writes.append(slot)
+                })
+            defer { model.close() }
+            model.notice = { notices.append($0) }
+            await model.refresh(); model.editingSlot = 209
+            model.act(.write(209, .document(file)))
+            await drain(model)
+            XCTAssertEqual(busy, [true, false], scenario)
+            XCTAssertNil(model.pending)
+            if scenario == "valid" {
+                XCTAssertEqual(writes, [209]); XCTAssertNil(model.editingSlot); XCTAssertTrue(notices.isEmpty)
+            } else {
+                XCTAssertTrue(writes.isEmpty); XCTAssertEqual(model.editingSlot, 209)
+                let key = scenario == "invalid" ? "picture_control_file_invalid" :
+                    scenario == "unsupported" ? "picture_control_file_unsupported" : "picture_control_file_read_failed"
+                XCTAssertEqual(notices, [AppLocalized.resource(key)], scenario)
+            }
+        }
+    }
+
+    func testUnselectableOccupiedSlotCannotActivateOrOpenEditorButEmptySlotCan() async {
+        let empty = PictureControlSlotInfo(slot: 201, availability: .empty, selectable: false)
+        let hidden = PictureControlSlotInfo(slot: 202, availability: .occupied, selectable: false)
+        let available = PictureControlSlotInfo(slot: 203, availability: .occupied, selectable: true)
+        let model = PictureControlPanelModel(folders: PictureControlFolderState(), current: { true },
+            allowed: { true }, busy: { _ in XCTFail("Unavailable action became busy"); return true },
+            readOverview: { _ in .init(slots: [empty, hidden, available], selected: 1, canActivate: true, canEdit: true) },
+            change: { _, _, _ in XCTFail("Unavailable slot must not mutate") })
+        defer { model.close() }
+        await model.refresh()
+        XCTAssertTrue(model.canEdit(empty))
+        XCTAssertFalse(model.canEdit(hidden))
+        XCTAssertTrue(model.canEdit(available))
+        model.act(.activate(202)); model.act(.clear(202))
+        XCTAssertNil(model.pending)
+    }
     func testLateInitialReadFailureCannotDismissReplacementPanel() async throws {
         let entered = GateTestLatch(), release = GateTestLatch()
         var shown = "old", notices: [String] = []

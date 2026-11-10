@@ -167,7 +167,7 @@ final class PhotoEffectsBatchTests: XCTestCase {
     }
 
     @MainActor
-    func testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled() async {
+    func testStoredRetiredCatalogAndInvalidFiltersAreDisabled() async {
         let suite = "effects-migration-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -176,8 +176,8 @@ final class PhotoEffectsBatchTests: XCTestCase {
         legacy.selectedFilter = .init(preset: .init(id: "forest_verdure", name: "森屿青"), intensityPercent: 79)
         defaults.set(try! JSONEncoder().encode(legacy), forKey: "photoEffectsSettings.v1")
         let restored = PhotoEffectsStore(defaults: defaults)
-        XCTAssertEqual(restored.settings.selectedFilter?.preset.id, Np3FilterCatalog.presets[0].id)
-        XCTAssertEqual(restored.settings.selectedFilter?.normalizedIntensityPercent, 80)
+        XCTAssertNil(restored.settings.selectedFilter)
+        XCTAssertFalse(restored.settings.photoFilterEnabled)
         legacy.selectedFilter = .init(preset: .init(id: "missing", name: "Missing"), intensityPercent: 80)
         restored.update(legacy)
         XCTAssertFalse(restored.settings.photoFilterEnabled)

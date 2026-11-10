@@ -13,13 +13,14 @@ struct RemoteExposureTile: View {
     var autoBusy = false
     var effectiveISO: UInt64? = nil
     var tileHeight: CGFloat = 54
+    var enabled = true
     // Only the tile drawing subscribes to display frames, not the monitor.
     @State private var motion = RemoteParameterWheelDriver()
     @State private var presentation = RemoteParameterPresentationCache()
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         let configuration = presentation.configuration(descriptor: descriptor, autoEnabled: autoEnabled,
-            hasAutoControl: autoEnabled != nil && autoToggle != nil)
+            hasAutoControl: autoEnabled != nil && autoToggle != nil, enabled: enabled)
         let value = autoEnabled == true
             ? effectiveISO.map { presentation.label(.iso, value: $0) } ?? "—"
             : descriptor.map { presentation.label($0.property, value: $0.current) } ?? "—"
@@ -53,14 +54,15 @@ final class RemoteParameterPresentationCache {
     init(format: @escaping (RemoteProperty, UInt64) -> String = RemoteExposureParameters.monitorFormat) {
         self.format = format
     }
-    func configuration(descriptor: RemotePropertyDescriptor?, autoEnabled: Bool?, hasAutoControl: Bool)
+    func configuration(descriptor: RemotePropertyDescriptor?, autoEnabled: Bool?, hasAutoControl: Bool, enabled: Bool = true)
         -> RemoteParameterWheel.Configuration {
         if let cachedConfiguration, cachedConfiguration.descriptor == descriptor,
-           cachedConfiguration.autoEnabled == autoEnabled, cachedConfiguration.hasAutoControl == hasAutoControl {
+           cachedConfiguration.autoEnabled == autoEnabled, cachedConfiguration.hasAutoControl == hasAutoControl,
+           cachedConfiguration.enabled == enabled {
             return cachedConfiguration
         }
         let next = RemoteParameterWheel.Configuration(descriptor: descriptor,
-            autoEnabled: autoEnabled, hasAutoControl: hasAutoControl)
+            autoEnabled: autoEnabled, hasAutoControl: hasAutoControl, enabled: enabled)
         cachedConfiguration = next
         return next
     }

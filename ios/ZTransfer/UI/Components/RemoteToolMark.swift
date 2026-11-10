@@ -30,6 +30,7 @@ struct RemoteToolMark: View {
         case .fps: text("FPS", 10.5)
         case .lut: text("LUT", 10)
         case .meter: text("±EV", 10)
+        case .selfTimer: RemoteSelfTimerIcon().foregroundStyle(tint)
         case .computerControl: text("PC", 11)
         case .whiteBalance: text("WB", 11)
         case .focusMode: text("MODE", 9)

@@ -1,0 +1,39 @@
+Building for debugging...
+[2 / 4] ProtocolTests-product
+[4 / 6] ProtocolTests-product
+[9 / 10] ProtocolTests-product
+Build complete! (2.13秒)
+Test Suite 'Selected tests' started at 2026-10-30 23:39:55.705.
+Test Suite 'ProtocolTests.xctest' started at 2026-10-30 23:39:55.705.
+Test Suite 'JpegThumbnailFallbackTests' started at 2026-10-30 23:39:55.705.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testCancelledRequestDoesNotReadHeaderOrBecomeAMiss]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testCancelledRequestDoesNotReadHeaderOrBecomeAMiss]' passed (0.001 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testExistingThumbnailAndWrongHandleNeverReadHeader]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testExistingThumbnailAndWrongHandleNeverReadHeader]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testJPEGIFD1IsReadWithoutRawDimensionValidationOrMarkerGuessing]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testJPEGIFD1IsReadWithoutRawDimensionValidationOrMarkerGuessing]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testMissingAndSuccessfulEmptyResponseReadExactlyOnePrefix]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testMissingAndSuccessfulEmptyResponseReadExactlyOnePrefix]' passed (0.001 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testOnlySuccessfulEmptyOrMissingJPEGSchedulesABoundedRead]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testOnlySuccessfulEmptyOrMissingJPEGSchedulesABoundedRead]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testPartialReadRejectionAndEmptyPayloadStayMisses]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testPartialReadRejectionAndEmptyPayloadStayMisses]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testSmallZeroAndMaximumFileSizesCannotOverflowOrOverread]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testSmallZeroAndMaximumFileSizesCannotOverflowOrOverread]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testTruncatedExifOrOutOfRangeThumbnailDoesNotTriggerMoreReads]' started.
+Test Case '-[ProtocolTests.JpegThumbnailFallbackTests testTruncatedExifOrOutOfRangeThumbnailDoesNotTriggerMoreReads]' passed (0.000 seconds).
+Test Suite 'JpegThumbnailFallbackTests' passed at 2026-10-30 23:39:55.709.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'STAMetadataTests' started at 2026-10-30 23:39:55.709.
+Test Case '-[ProtocolTests.STAMetadataTests testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads]' started.
+Test Case '-[ProtocolTests.STAMetadataTests testJpegThumbnailReadsOneBoundedPreviewAndProtectsItFromLaterHeaderReads]' passed (0.029 seconds).
+Test Case '-[ProtocolTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects]' started.
+Test Case '-[ProtocolTests.STAMetadataTests testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects]' passed (0.020 seconds).
+Test Case '-[ProtocolTests.STAMetadataTests testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest]' started.
+Test Case '-[ProtocolTests.STAMetadataTests testRawRejectedPrefixProbeCanLoadOnNextVisibleRequest]' passed (0.019 seconds).
+Test Suite 'STAMetadataTests' passed at 2026-10-30 23:39:55.776.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.067 (0.068) seconds
+Test Suite 'ProtocolTests.xctest' passed at 2026-10-30 23:39:55.776.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.070 (0.071) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 23:39:55.776.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.070 (0.072) seconds

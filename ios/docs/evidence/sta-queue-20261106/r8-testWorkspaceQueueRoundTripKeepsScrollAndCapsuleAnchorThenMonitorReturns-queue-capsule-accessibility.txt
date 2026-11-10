@@ -1,0 +1,76 @@
+Attributes: Application, 0x1121b3200, pid: 64963, label: 'Z传'
+Element subtree:
+ →Application, 0x1121b3200, pid: 64963, label: 'Z传'
+    Window (Main), 0x1121b30c0, {{0.0, 0.0}, {402.0, 874.0}}
+      Other, 0x1121b2f80, {{0.0, 0.0}, {402.0, 874.0}}
+        Other, 0x1121b2e40, {{0.0, 0.0}, {402.0, 874.0}}
+          Other, 0x1121b2d00, {{0.0, 0.0}, {402.0, 874.0}}
+            Other, 0x1121b2bc0, {{0.0, 0.0}, {402.0, 874.0}}
+              Other, 0x1121b2a80, {{0.0, 62.0}, {402.0, 778.0}}
+              Other, 0x1121b2940, {{0.0, 0.0}, {402.0, 874.0}}
+                Button, 0x1121b2800, {{154.0, 803.7}, {94.0, 28.3}}, label: '诊断日志'
+                  Image, 0x1121b0000, {{167.0, 811.7}, {12.0, 12.0}}, identifier: 'timer', label: 'Timer'
+                  StaticText, 0x1121b0140, {{154.0, 803.7}, {94.0, 28.3}}, label: '诊断日志'
+                Other, 0x1121b0280, {{0.0, 0.0}, {402.0, 874.0}}
+                  ScrollView, 0x1121b03c0, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x1121b0500, {{0.0, 62.0}, {402.0, 342.0}}
+                      Other, 0x1121b0640, {{12.0, 126.0}, {378.0, 182.0}}
+                        Other, 0x1121b0780, {{12.0, 126.0}, {203.7, 74.0}}, identifier: 'queue_status_group'
+                          Other, 0x1121b08c0, {{-0.7, 117.3}, {226.7, 95.3}}
+                        Other, 0x1121b0a00, {{12.0, 126.0}, {203.7, 74.0}}, identifier: 'queue_status_group'
+                        Other, 0x1121b0b40, {{92.3, 156.0}, {12.0, 14.0}}, identifier: 'queue_status_group', label: 'Paused'
+                        Other, 0x1121b0c80, {{179.7, 151.0}, {26.0, 24.0}}, identifier: 'queue_status_group', label: '1 transfer tasks remaining'
+                          Other, 0x1121b0dc0, {{187.8, 154.5}, {9.3, 17.0}}, label: '1'
+                            StaticText, 0x1121b0f00, {{187.8, 154.5}, {9.3, 17.0}}, label: '1'
+                            StaticText, 0x1121b1040, {{197.2, 156.0}, {0.0, 14.0}}
+                        Other, 0x1121b1180, {{223.7, 126.0}, {166.3, 74.0}}, identifier: 'queue_status_group'
+                          Other, 0x1121b12c0, {{213.7, 117.3}, {189.0, 95.3}}
+                        Other, 0x1121b1400, {{223.7, 126.0}, {166.3, 74.0}}, identifier: 'queue_status_group'
+                        Other, 0x1121b1540, {{295.7, 152.0}, {22.0, 22.0}}, identifier: 'queue_status_group', label: 'Idle'
+                        Other, 0x1121b1680, {{12.0, 208.0}, {378.0, 100.0}}
+                        Other, 0x1121b17c0, {{12.0, 208.0}, {378.0, 92.0}}
+                        Other, 0x1121b1900, {{12.0, 208.0}, {378.0, 92.0}}
+                          Other, 0x1121b1a40, {{-0.7, 200.3}, {403.3, 113.7}}
+                        Image, 0x1121b1b80, {{26.0, 203.0}, {68.0, 102.0}}
+                        Other, 0x1121b1cc0, {{74.0, 268.0}, {22.0, 22.0}}
+                        StaticText, 0x1121b1e00, {{108.0, 231.7}, {270.0, 20.0}}, label: 'DSC_0702.JPG'
+                        StaticText, 0x1121b1f40, {{115.0, 260.7}, {21.3, 12.0}}, label: '10 B'
+                        Other, 0x1121b2080, {{17.0, 238.0}, {2.7, 32.0}}
+                      Other, 0x1121b21c0, {{12.0, 126.0}, {378.0, 182.0}}
+                      Other, 0x1121b2300, {{12.0, 126.0}, {378.0, 182.0}}
+                  Other, 0x1121b2440, {{0.0, 62.0}, {402.0, 778.0}}
+                  Button, 0x1121b2580, {{324.0, 758.0}, {58.0, 58.0}}, identifier: 'queue-clear-all', label: 'Clear queue'
+                    Other, 0x1121b26c0, {{324.0, 758.0}, {58.0, 58.0}}
+                    Other, 0x1121dbd40, {{324.0, 758.0}, {58.0, 58.0}}
+                Other, 0x1121dbe80, {{12.0, 62.0}, {88.0, 36.0}}
+                  Button, 0x1121d8500, {{12.0, 62.0}, {40.0, 36.0}}, identifier: 'workspace-queue-back'
+                    Other, 0x1121d83c0, {{12.0, 62.0}, {40.0, 36.0}}
+                    Other, 0x112197700, {{12.0, 62.0}, {40.0, 36.0}}
+                    Button, 0x112197e80, {{12.0, 62.0}, {40.0, 36.0}}, identifier: 'arrow.left', label: 'Left'
+                  Other, 0x112197ac0, {{60.0, 62.0}, {40.0, 36.0}}, identifier: 'photo-list-signal', label: 'Wireless camera connected'
+                    Button, 0x112197980, {{60.0, 62.0}, {40.0, 36.0}}, Disabled
+                      Other, 0x112197840, {{60.0, 62.0}, {40.0, 36.0}}
+                      Other, 0x1122b4000, {{60.0, 62.0}, {40.0, 36.0}}
+                      Button, 0x1122b4140, {{60.0, 62.0}, {40.0, 36.0}}, label: 'Wireless camera connected', Disabled
+                Button, 0x1122b4280, {{358.0, 64.0}, {32.0, 32.0}}, label: 'Start transfers'
+                  Other, 0x1122b43c0, {{358.0, 64.0}, {32.0, 32.0}}
+                  Other, 0x1122b4500, {{358.0, 64.0}, {32.0, 32.0}}
+                Button, 0x1122b4640, {{348.7, 62.0}, {41.3, 36.0}}, identifier: 'workspace-queue-open', label: 'Transfer', Disabled
+                  Other, 0x1122b4780, {{390.0, 62.0}, {0.0, 36.0}}
+                  Other, 0x1122b48c0, {{364.7, 71.5}, {9.3, 17.0}}, label: '1', Disabled
+                    StaticText, 0x1122b4a00, {{364.7, 71.5}, {9.3, 17.0}}, label: '1', Disabled
+                    StaticText, 0x1122b4b40, {{374.0, 73.0}, {0.0, 14.0}}, Disabled
+                Other, 0x1122b4c80, {{0.0, 0.0}, {0.0, 0.0}}, identifier: 'workspace-queue-open', label: 'Transfer'
+                StaticText, 0x1122b4dc0, {{0.0, 830.3}, {65.7, 9.7}}, identifier: 'admission-flight-state', label: 'flights=0;held=0'
+              Button, 0x1122b4f00, {{45.8, 702.0}, {25.3, 12.0}}, identifier: 'clear-trace', label: 'Clear'
+              Button, 0x1122b5040, {{98.3, 702.0}, {24.3, 12.0}}, identifier: 'read-trace', label: 'Read'
+              StaticText, 0x1122b5180, {{140.5, 702.0}, {27.0, 12.0}}, identifier: 'interaction-trace', label: 'Trace', value: []
+              Button, 0x1122b52c0, {{175.5, 702.0}, {54.7, 12.0}}, identifier: 'admission-connection', label: 'Disconnect'
+              StaticText, 0x1122b5400, {{238.2, 702.0}, {127.3, 12.0}}, identifier: 'admission-state', label: 'count=1;waiting=1;done=0'
+Path to element:
+ →Application, 0x1121b3200, pid: 64963, label: 'Z传'
+Query chain:
+ →Find: Target Application 'com.ztransfer.ios'
+  Output: {
+    Application, 0x1122b5540, pid: 64963, label: 'Z传'
+  }

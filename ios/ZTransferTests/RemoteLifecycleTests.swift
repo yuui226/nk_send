@@ -280,6 +280,123 @@ final class RemoteLifecycleTests: XCTestCase {
         return model
     }
 
+    func testSelfTimerManualFocusAndObjectAddedConfirmationPreserveOneShot() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.setProperty(.init(property: .stillFocusMode, dataType: 2, writable: true, current: 4, values: [0, 4]))
+        let model = makeModel(camera: camera)
+        model.configureSelfTimer(seconds: 2)
+        model.start()
+        try await waitFor { model.state.liveViewStable }
+        let priorIdle = UIApplication.shared.isIdleTimerDisabled
+        XCTAssertTrue(model.requestPhoto())
+        XCTAssertFalse(model.requestPhoto())
+        XCTAssertTrue(UIApplication.shared.isIdleTimerDisabled)
+        try await waitFor(timeout: 4) { await camera.log.contains("capture") }
+        await camera.queueEvents([.init(code: 0x4002, handle: 7)])
+        try await waitFor { !model.selfTimer.active }
+        let log = await camera.log
+        XCTAssertEqual(log.filter { $0 == "capture" }.count, 1)
+        XCTAssertFalse(log.contains("halfpress:start"))
+        XCTAssertEqual(model.state.capture, .idle)
+        XCTAssertEqual(UIApplication.shared.isIdleTimerDisabled, priorIdle)
+    }
+
+    func testSelfTimerCancelledAutofocusDrainsBeforeLiveViewCloses() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.delayFocus(milliseconds: 400)
+        let model = makeModel(camera: camera)
+        model.configureSelfTimer(seconds: 2)
+        model.start()
+        try await waitFor { model.state.liveViewStable }
+        XCTAssertTrue(model.requestPhoto())
+        try await waitFor(timeout: 4) { await camera.log.contains("halfpress:start") }
+        model.cancelSelfTimer()
+        XCTAssertTrue(model.selfTimer.active)
+        XCTAssertFalse(model.requestPhoto())
+        await model.stopAndWait()
+        let log = await camera.log
+        XCTAssertFalse(log.contains("capture"))
+        XCTAssertFalse(log.contains("halfpress:cancelled"))
+        let focusEnd = try XCTUnwrap(log.firstIndex(of: "halfpress:end"))
+        let end = try XCTUnwrap(log.firstIndex(of: "end"))
+        XCTAssertLessThan(focusEnd, end)
+    }
+
+    func testSelfTimerPhysicalMovieSwitchDuringFocusNeverStartsPhotoOrMovie() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.delayFocus(milliseconds: 400)
+        let model = makeModel(camera: camera)
+        model.configureSelfTimer(seconds: 2)
+        model.start()
+        try await waitFor { model.state.liveViewStable }
+        XCTAssertTrue(model.requestPhoto())
+        try await waitFor(timeout: 4) { await camera.log.contains("halfpress:start") }
+        await camera.changeMovieMode(true)
+        try await waitFor { !model.selfTimer.active }
+        let log = await camera.log
+        XCTAssertFalse(log.contains("capture"))
+        XCTAssertFalse(log.contains("movie:start"))
+        XCTAssertTrue(model.movieMode)
+        XCTAssertEqual(model.exposureDescriptors[.iso]?.property, .movieISO)
+    }
+
+    func testSelfTimerFocusFailureShowsAndroidHintAndDoesNotShoot() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.queueFocusResults([.init(trackingStarted: false, polls: 1, timedOut: true)])
+        let model = makeModel(camera: camera)
+        model.configureSelfTimer(seconds: 2)
+        model.start()
+        try await waitFor { model.state.liveViewStable }
+        XCTAssertTrue(model.requestPhoto())
+        try await waitFor(timeout: 4) { !model.selfTimer.active }
+        XCTAssertEqual(model.interactionHint, AppLocalized.resource("remote_self_timer_focus_failed"))
+        let log = await camera.log
+        XCTAssertFalse(log.contains("capture"))
+    }
+
+    func testSelfTimerAllContextInvalidationsCancelBeforeFocus() async throws {
+        for context in 0..<6 {
+            let camera = RemoteLifecycleCamera(), model = makeModel(camera: camera)
+            model.configureSelfTimer(seconds: 2)
+            model.start()
+            try await waitFor { model.state.liveViewStable }
+            XCTAssertTrue(model.requestPhoto())
+            switch context {
+            case 0: model.configureSelfTimer(foreground: false)
+            case 1: model.configureSelfTimer(connected: false)
+            case 2: model.configureSelfTimer(editing: true)
+            case 3: model.configureSelfTimer(visible: false)
+            case 4: model.configureSelfTimer(seconds: 5)
+            default: model.setPhotoReviewActive(true)
+            }
+            try await waitFor { !model.selfTimer.active }
+            let log = await camera.log
+            XCTAssertFalse(log.contains("halfpress:start"))
+            XCTAssertFalse(log.contains("capture"))
+            await model.stopAndWait()
+        }
+    }
+
+    func testSelfTimerBlocksCameraWritesReviewAndManualShutterPaths() async throws {
+        let camera = RemoteLifecycleCamera(), model = makeModel(camera: camera)
+        model.configureSelfTimer(seconds: 20)
+        model.start()
+        try await waitFor { model.state.liveViewStable }
+        XCTAssertTrue(model.requestPhoto())
+        XCTAssertFalse(model.reviewAllowed)
+        XCTAssertFalse(model.cameraToolWritesAllowed)
+        XCTAssertFalse(model.pictureControlWritesAllowed)
+        let before = await camera.log
+        model.capture(); model.beginHalfPress(); model.focus(at: .init(x: 0.5, y: 0.5))
+        model.setComputerControl(true); model.setAutoISO(!model.autoISOEnabled)
+        model.setExposure(.iso, value: 1)
+        try await Task.sleep(for: .milliseconds(50))
+        let after = Array((await camera.log).dropFirst(before.count))
+        XCTAssertFalse(after.contains("capture") || after.contains("halfpress:start") || after.contains("tapfocus:start"))
+        XCTAssertFalse(after.contains { $0.hasPrefix("write:") })
+        await model.selfTimer.cancelAndWait()
+    }
+
     func testFocusHandoffSharesVisibilityAndRejectsObsoleteCompletion() {
         var handoff = RemoteFocusHandoff()
         let locked = RemoteFocusHandoff.Input(nonce: 1, phase: .locked, eligible: true, hasCameraFrames: true)
@@ -1590,6 +1707,43 @@ final class RemoteLifecycleTests: XCTestCase {
         let calls = await camera.log
         XCTAssertEqual(calls.filter { $0 == "property:angleLevel" }.count, 3)
         model.setLevelVisible(false)
+        XCTAssertNil(model.levelRoll)
+        XCTAssertNil(model.levelPitch)
+    }
+
+    func testReviewReturnRestartsUnavailableLevelPropertyWithoutTogglingTool() async throws {
+        let camera = RemoteLifecycleCamera()
+        await camera.markUnsupported(.angleLevel)
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await model.stopAndWait() }
+        model.start()
+        model.setLevelVisible(true)
+        try await waitFor { await camera.log.filter { $0 == "property:angleLevel" }.count == 3 }
+        model.setPhotoReviewActive(true)
+        await camera.markSupported(.angleLevel)
+        await camera.setProperty(.init(property: .angleLevel, dataType: 5, writable: false,
+                                      current: 23_514_322, values: []))
+        XCTAssertNil(model.levelRoll)
+        model.setPhotoReviewActive(false)
+        try await waitFor { model.levelRoll != nil }
+        XCTAssertEqual(try XCTUnwrap(model.levelRoll), -1.2, accuracy: 0.01)
+        XCTAssertTrue(model.levelVisible)
+    }
+
+    func testLevelPropertyReplyAfterOpeningReviewCannotRestoreOverlay() async throws {
+        let camera = RemoteLifecycleCamera()
+        let entered = GateTestLatch(), release = GateTestLatch()
+        await camera.setProperty(.init(property: .angleLevel, dataType: 5, writable: false,
+                                      current: 23_514_322, values: []))
+        await camera.holdNextProperty(.angleLevel) { await entered.signal(); await release.wait() }
+        let model = makeModel(camera: camera)
+        addTeardownBlock { await release.signal(); await model.stopAndWait() }
+        model.start()
+        model.setLevelVisible(true)
+        await entered.wait()
+        model.setPhotoReviewActive(true)
+        await release.signal()
+        try await Task.sleep(for: .milliseconds(300))
         XCTAssertNil(model.levelRoll)
         XCTAssertNil(model.levelPitch)
     }
@@ -3401,6 +3555,7 @@ private actor RemoteLifecycleCamera: RemoteCameraControlling {
     func delayProperty(_ property: RemoteProperty, milliseconds: Int) { propertyDelays[property] = milliseconds }
     func failProperty(_ property: RemoteProperty, error: PTPSessionError) { propertyErrors[property] = error }
     func markUnsupported(_ property: RemoteProperty) { unsupported.insert(property) }
+    func markSupported(_ property: RemoteProperty) { unsupported.remove(property) }
     func holdNextMeterRefresh(_ probe: @escaping @Sendable () async -> Void) { meterRefreshProbe = probe }
     func restoreRefresh(_ property: RemoteProperty) { refreshFailures.remove(property) }
     func failRefresh(_ property: RemoteProperty) { refreshFailures.insert(property) }

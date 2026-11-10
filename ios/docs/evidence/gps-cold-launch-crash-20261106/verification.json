@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-06",
+  "androidBaseline": "eafc461d36da712260ebb262f034d7da70450ae6",
+  "uniquePassedMethods": 68,
+  "gpsProtocolModels": 61,
+  "presentation": 3,
+  "ui": 4,
+  "baseline": "2 methods, 15 failing assertions",
+  "finalR1": "7 model failures caused by synchronous stop callback; 1 UI failure from empty accessibility label",
+  "finalR2": "64 model/presentation passed; 3 UI passed; 1 UI label failure",
+  "uiR3": "7/7 passed, TEST SUCCEEDED, exit 0",
+  "deviceCrashReportsRead": 2,
+  "crashVerifiedAt": "CBCentralManager initialization assertion after GPS authorization continuation",
+  "deviceFixInstalled": false,
+  "deviceFixVerified": false,
+  "physicalNikonGPSVerified": false,
+  "commit": false,
+  "push": false,
+  "xcresult": "/tmp/ztransfer-gps-launch-20261106-ui-r3.xcresult",
+  "sourceFiles": [
+    "ios/GPSTests/GPSProtocolTests.swift",
+    "ios/InteractionUITests/PhotoEffectsMasterUITests.swift",
+    "ios/ZTransfer/Domain/ConnectionViewModel.swift",
+    "ios/ZTransfer/Domain/GPSCoordinator.swift",
+    "ios/ZTransfer/Domain/GPSState.swift",
+    "ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift",
+    "ios/ZTransfer/Info.plist",
+    "ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift",
+    "ios/ZTransfer/UI/Connection/GPSConnectionControl.swift",
+    "ios/project.yml"
+  ],
+  "screenshotsViewed": [
+    "r2-attachments/BA56EB4F-7B87-4E1F-8D8B-8F5D71729C9D.png",
+    "final-attachments/4E157AB5-4017-4034-935B-268ED8B09B2F.png"
+  ]
+}

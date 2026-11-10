@@ -1,0 +1,9 @@
+{
+  "ios/ZTransfer/UI/PremiumPurchaseView.swift": "5d1f60c2c97e20b3162c80bf89e92efa09785ddb996cb72b5b2ad3431aa3dd6d",
+  "ios/ZTransfer/App/IOSLocalization.swift": "d69bdc38b6fa3ffd9156ad31d1041b528e4b57b1ed0a4ba0095a666cbc1f958b",
+  "ios/StoreKitUITests/PremiumRecoveryUITests.swift": "50e3398d6d6ebb72c384071554fa75aa4cac5ab4a9c991743c5149de8340dacf",
+  "ios/StoreKitTests/StoreKitPurchaseTests.swift": "dbaf80f51f7bc0efd892528ec90f143c5923c9ab523ccd458415d4ab4994cfb4",
+  "ios/PopupUITests/PremiumPurchaseUITests.swift": "75b4816404206f4af6f712ea48fdec3230f697a354a49abdbb77cafa4ab9b7bd",
+  "ios/ZTransfer/Domain/StoreKitPurchaseStore.swift": "0a969a450a8f1598d34a670c1fe13fec8eef200fa704f30be0e5ec736be25e6d",
+  "ios/ZTransfer/UI/Components/AndroidDialogPresentation.swift": "1df66a777ff1e74ca56a9280faabc8af2a32d2cdc3ee7459f855b1f32299caab"
+}

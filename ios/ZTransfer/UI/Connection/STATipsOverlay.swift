@@ -39,6 +39,9 @@ struct STATipsOverlay: View {
                     .zTransferTypography(.bodySmall)
                     .foregroundStyle(ZTransferColors.secondaryText)
             } else {
+                Text(AppLocalized.resource("tip_sta_no_mobile_data"))
+                    .zTransferTypography(.bodySmall)
+                    .fixedSize(horizontal: false, vertical: true)
                 tipBlock(
                     label: AppLocalized.resource("tip_sta_first_connection"),
                     body: AppLocalized.resource("tip_sta_step_hotspot") + "\n" + AppLocalized.resource("tip_sta_network_alternative"),

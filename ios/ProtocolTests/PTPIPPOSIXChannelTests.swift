@@ -10,6 +10,20 @@ import XCTest
 
 @MainActor
 final class PTPIPPOSIXChannelTests: XCTestCase {
+    func testSocketErrorsPreserveActualPOSIXCauseForPresentation() {
+        for code in [ECONNREFUSED, ECONNRESET, EHOSTUNREACH, ENOBUFS] {
+            let error = PTPIPPOSIXChannel.ChannelError.system(code) as NSError
+            XCTAssertEqual(error.domain, NSPOSIXErrorDomain)
+            XCTAssertEqual(error.code, Int(code))
+            XCTAssertEqual(error.localizedDescription,
+                           NSError(domain: NSPOSIXErrorDomain, code: Int(code)).localizedDescription)
+            XCTAssertFalse(error.localizedDescription.contains("ChannelError"))
+        }
+        XCTAssertEqual((PTPIPPOSIXChannel.ChannelError.timeout as NSError).code, Int(ETIMEDOUT))
+        XCTAssertEqual((PTPIPPOSIXChannel.ChannelError.closed as NSError).code, Int(ENOTCONN))
+        XCTAssertEqual((PTPIPPOSIXChannel.ChannelError.invalidAddress as NSError).code, Int(EINVAL))
+    }
+
     func testSocketTimeoutRoundsUpWithoutAccidentallyDisablingDeadline() {
         for nanoseconds: UInt64 in [0, 1, 999, 1000] {
             let timeout = PTPIPPOSIXChannel.receiveTimeout(nanoseconds: nanoseconds)

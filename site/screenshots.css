@@ -1,0 +1,93 @@
+@charset "UTF-8";
+/* Original app pixels stay untouched. Crops and photo overlays share one coordinate space. */
+.app-crop { position: relative; display: block; width: 100%; overflow: hidden; background: #f3f3f8; isolation: isolate; }
+.app-crop > img { position: absolute; display: block; max-width: none; object-fit: fill; pointer-events: none; user-select: none; }
+.shot-card { position: relative; min-width: 0; overflow: hidden; border-radius: 18px; background: #f3f3f8; box-shadow: 0 20px 55px #253d2012,0 1px 3px #253d200d; }
+.hero-proof .app-crop { border-radius: 12px; }
+
+/* A complete gallery and its filter sheet, with the real settings alongside. */
+.gallery-story { display: grid; grid-template-columns: 1.05fr 1fr; grid-template-rows: auto 1fr; grid-template-areas: "visual heading" "visual settings"; gap: 32px 70px; align-items: start; }
+.gallery-story > * { min-width: 0; }
+.gallery-heading { grid-area: heading; }
+.gallery-settings { grid-area: settings; }
+.app-showcase { grid-area: visual; width: 100%; max-width: 585px; margin: 0 auto; align-self: center; }
+.showcase-stage { display: grid; grid-template-columns: 1.6fr 1fr; align-items: center; gap: 18px; padding: 20px 0; }
+.showcase-selection .shot-main { transform: rotate(-2deg); }
+.showcase-selection .shot-detail { transform: translateY(22px) rotate(2deg); border-radius: 17px; box-shadow: 0 20px 45px #253d2020; }
+.transfer-visual { width: min(370px,100%); margin: 0 auto; }
+.transfer-visual .shot-card { border-radius: 16px; box-shadow: 0 15px 35px #253d2010; }
+
+/* One preview, followed by every effect control. */
+.effects-real { min-width: 0; width: 100%; }
+.editor-composition { width: min(400px,100%); margin-inline: auto; padding: 17px; border: 1px solid #d4ddcc; border-radius: 24px; background: #f4f4f7; box-shadow: 0 25px 65px #293b2410; }
+.editor-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 14px; font-size: 17px; font-weight: 550; color: #202622; }
+.editor-heading .icon { width: 20px; height: 20px; color: #37899b; }
+.editor-preview { overflow: hidden; border-radius: 12px; }
+.editor-preview > img { display: block; width: 100%; height: auto; aspect-ratio: 3/2; object-fit: cover; }
+.editor-settings { display: grid; gap: 8px; margin-top: 14px; }
+.editor-setting { overflow: hidden; border-radius: 13px; }
+
+/* An upright, full-width phone screen restores the app's actual edge spacing. */
+.remote-layout { display: grid; grid-template-columns: .92fr 1fr; grid-template-areas: "phone heading" "phone tools"; grid-template-rows: auto 1fr; align-items: start; gap: 28px 100px; }
+.remote-heading { grid-area: heading; }
+.remote-tools { grid-area: tools; min-width: 0; }
+.remote-device { grid-area: phone; width: min(352px,100%); margin: 0 auto; align-self: center; }
+.phone-shell { position: relative; padding: 8px; border: 1px solid #6d766d; border-radius: 41px; background: linear-gradient(135deg,#4f5951,#111813 20%,#101511 70%,#444e45); box-shadow: inset 0 0 0 2px #151b16,0 30px 70px #02080366; }
+.phone-shell::before,.phone-shell::after { content: ""; position: absolute; right: -3px; width: 3px; background: #7f8a7c; border-radius: 0 2px 2px 0; }
+.phone-shell::before { top: 17%; height: 9%; }
+.phone-shell::after { top: 29%; height: 6%; }
+.remote-composition { position: relative; overflow: hidden; border-radius: 32px; background: #f3f3f8; }
+.remote-scene { position: absolute; left: 3.333333%; top: 8.242754%; width: 93.240741%; height: 30.298913%; overflow: hidden; border-radius: 4.170804% / 6.278027%; color: white; container-type: inline-size; }
+.remote-scene > img { width: 100%; height: 100%; object-fit: cover; }
+.scene-focus { position: absolute; left: 34%; top: 18%; width: 24%; height: 28%; border: 1px solid #e0f5b7c4; border-radius: 3px; }
+.scene-mode { position: absolute; display: flex; gap: 14px; top: 4%; left: 4%; font-size: 3.3cqw; font-weight: 650; text-shadow: 0 1px 4px #0008; }
+.scene-fps { position: absolute; right: 2.5%; bottom: 3%; padding: 1% 2%; border-radius: 12px; background: #12211866; font-size: 2.9cqw; font-weight: 600; }
+.scene-meter { position: absolute; right: 2.4%; top: 5%; height: 53%; width: 5.5%; border: 1px solid #fff4; border-radius: 8px; background: #0c201955; }
+.scene-meter::before { content: ""; position: absolute; inset: 6% 20% 6% 40%; background: repeating-linear-gradient(to bottom,#ffffffe0 0 1px,transparent 1px 10%); }
+.scene-meter::after { content: ""; position: absolute; top: 49%; left: -2px; border-left: 5px solid #8ee2b4; border-block: 3px solid transparent; }
+
+@media (max-width:1100px) {
+  .gallery-story { gap: 28px 40px; }
+  .showcase-stage { gap: 14px; }
+  .remote-layout { column-gap: 58px; }
+  .remote-layout { grid-template-areas: "heading heading" "phone tools"; grid-template-rows: auto 1fr; }
+  .remote-heading h2 br { display: none; }
+  .remote-device { width: min(340px,100%); align-self: start; }
+}
+@media (max-width:900px) {
+  .gallery-story { grid-template-columns: 1fr; grid-template-areas: "heading" "visual" "settings"; gap: 32px; }
+  .gallery-heading { max-width: 650px; }
+  .gallery-heading h2 br { display: none; }
+  .gallery-story .app-showcase { max-width: 575px; }
+  .gallery-settings { width: 100%; max-width: 650px; margin-inline: auto; }
+  .showcase-stage { grid-template-columns: 1.6fr 1fr; gap: 24px; }
+  .remote-layout { grid-template-columns: .9fr 1fr; column-gap: 35px; }
+  .remote-heading h2 { font-size: 37px; }
+  .remote-heading .section-lead { font-size: 14px; }
+  .phone-shell { padding: 6px; border-radius: 33px; }
+  .remote-composition { border-radius: 26px; }
+}
+@media (max-width:759px) {
+  .gallery-story { gap: 28px; }
+  .gallery-heading h2 br { display: block; }
+  .app-showcase { max-width: 540px; }
+  .showcase-stage { grid-template-columns: 1.65fr 1fr; gap: 16px; padding-block: 10px; }
+  .showcase-selection .shot-detail { transform: translateY(12px) rotate(2deg); border-radius: 12px; }
+  .shot-card { border-radius: 12px; }
+  .gallery-settings { max-width: 570px; }
+  .editor-composition { width: min(400px,100%); padding: 13px; border-radius: 21px; }
+  .editor-heading { font-size: 16px; padding-bottom: 12px; }
+  .editor-settings { gap: 7px; margin-top: 12px; }
+  .editor-setting { border-radius: 11px; }
+  .remote-layout { grid-template-columns: 1fr; grid-template-areas: "heading" "phone" "tools"; gap: 38px; }
+  .remote-device { width: min(330px,calc(100% - 12px)); }
+  .remote-heading h2 { font-size: 38px; }
+  .remote-heading h2 br { display: block; }
+  .remote-tools { width: 100%; max-width: 570px; margin-inline: auto; }
+  .phone-shell { padding: 7px; border-radius: 37px; }
+  .remote-composition { border-radius: 29px; }
+}
+@media (max-width:360px) {
+  .showcase-stage { gap: 12px; }
+  .remote-heading h2 { font-size: 34px; }
+}

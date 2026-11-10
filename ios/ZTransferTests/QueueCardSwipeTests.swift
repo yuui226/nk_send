@@ -23,20 +23,20 @@ final class QueueRemovalCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(matches(model.snapshot))
     }
-    func testClearLeavingAndReenteringCancelsOldCleanupAndAllowsNewClear() async throws {
+    func testClearLeavingFinishesOldTargetsAndAllowsNewClear() async throws {
         let (queue, model, suite) = await fixture()
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-        _ = await queue.enqueue([file(1), file(2), file(3)])
+        let ids = await queue.enqueue([file(1), file(2), file(3)])
         try await wait(model) { $0.items.count == 3 }
-        let removal = QueueRemovalCoordinator()
+        let removal = QueueRemovalCoordinator(automaticFrames: false, visibleRows: { ids.map { ($0, 0) } })
         removal.clear(model: model)
         XCTAssertTrue(removal.isClearing)
-        XCTAssertEqual(removal.removingIDs.count, 3)
-        try await wait(model) { $0.items.allSatisfy { $0.status == .cancelled } }
+        try await wait(model) { $0.items.allSatisfy { $0.status == .cancelled } && removal.removingIDs.count == 3 }
         removal.leave()
-        try await Task.sleep(for: .milliseconds(400))
-        XCTAssertEqual(model.snapshot.items.count, 3, "Leaving cancels both delayed deletions")
+        try await wait(model) { $0.items.isEmpty }
         XCTAssertFalse(removal.isClearing); XCTAssertTrue(removal.removingIDs.isEmpty)
+        _ = await queue.enqueue(file(4))
+        try await wait(model) { $0.items.count == 1 }
         removal.clear(model: model)
         try await wait(model) { $0.items.isEmpty }
         try await Task.sleep(for: .milliseconds(100))
@@ -44,39 +44,45 @@ final class QueueRemovalCoordinatorTests: XCTestCase {
         XCTAssertFalse(removal.isClearing); XCTAssertTrue(removal.removingIDs.isEmpty)
         removal.leave()
     }
-    func testDisposedSingleSwipeRemainsCancelledButClearCleansOffscreenCards() async throws {
+    func testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames() async throws {
         let (queue, model, suite) = await fixture()
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let enqueued = await queue.enqueue(file(1))
         let id = try XCTUnwrap(enqueued)
         try await wait(model) { $0.items.count == 1 }
-        let removal = QueueRemovalCoordinator()
+        var viewport: [(UUID, CGFloat)] = [(id, 0)]
+        let removal = QueueRemovalCoordinator(automaticFrames: false, visibleRows: { viewport })
         removal.withdraw(id, model: model)
-        removal.abandon(id)
+        try await wait(model) { $0.items.first?.status == .cancelled && removal.removingIDs.contains(id) && removal.isWaitingForFrames }
+        viewport = []
         try await Task.sleep(for: .milliseconds(400))
         XCTAssertEqual(model.snapshot.items.map(\.status), [.cancelled])
+        removal.advance(0); removal.advance(280_000_000)
+        try await wait(model) { $0.items.isEmpty }
+        _ = await queue.enqueue(file(2))
+        try await wait(model) { $0.items.count == 1 }
         removal.clear(model: model)
-        removal.abandon(id)
         XCTAssertTrue(removal.isClearing)
         try await wait(model) { $0.items.isEmpty }
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertFalse(removal.isClearing)
         removal.leave()
     }
-    func testClearFallbackIncludesNewTerminalTasksButProtectsNewWaitingWork() async throws {
+    func testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork() async throws {
         let (queue, model, suite) = await fixture()
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-        _ = await queue.enqueue([file(1), file(2)])
+        let ids = await queue.enqueue([file(1), file(2)])
         try await wait(model) { $0.items.count == 2 }
-        let removal = QueueRemovalCoordinator()
+        let removal = QueueRemovalCoordinator(automaticFrames: false, visibleRows: { ids.map { ($0, 0) } })
         removal.clear(model: model)
-        try await wait(model) { $0.items.allSatisfy { $0.status == .cancelled } }
+        try await wait(model) { $0.items.allSatisfy { $0.status == .cancelled } && removal.removingIDs.count == 2 && removal.isWaitingForFrames }
         let newIDs = await queue.enqueue([file(3), file(4)])
         await queue.withdraw(id: newIDs[1])
         try await wait(model) { $0.items.count == 4 && $0.items.last?.status == .cancelled }
         let visibility = model.snapshot.actionVisibility(excluding: removal.removingIDs, suppressAll: removal.isClearing)
         XCTAssertFalse(visibility.hasClearable); XCTAssertFalse(visibility.hasRetryable)
-        try await wait(model) { $0.items.map(\.file.id) == [3] }
+        removal.advance(0); removal.advance(300_000_000)
+        try await wait(model) { $0.items.map(\.file.id) == [3, 4] }
         XCTAssertEqual(model.snapshot.items.first?.status, .waiting)
         removal.synchronize(liveIDs: Set(model.snapshot.items.map(\.id)))
         XCTAssertTrue(removal.removingIDs.isEmpty)
@@ -94,7 +100,7 @@ final class QueueRemovalCoordinatorTests: XCTestCase {
         }
         XCTAssertNil(released)
         try await Task.sleep(for: .milliseconds(400))
-        XCTAssertEqual(model.snapshot.items.map(\.status), [.cancelled])
+        XCTAssertTrue(model.snapshot.items.isEmpty)
     }
 }
 
@@ -389,7 +395,8 @@ final class QueueCardPresentationTests: XCTestCase {
         }
 
         // Unmount the actual screen after withdraw but before collapse ends.
-        // Android cancels that item's removal coroutine and leaves it cancelled.
+        // Android's new page-owned finally cleans the captured target even
+        // when the item/whole page disappears before its animation ends.
         _ = await queue.enqueue(file(3))
         try await Task.sleep(for: .milliseconds(300))
         let marker = try XCTUnwrap(findMarkers(in: host.view).first)
@@ -402,8 +409,8 @@ final class QueueCardPresentationTests: XCTestCase {
         XCTAssertEqual(model.snapshot.items.first?.status, .cancelled)
         visibility.visible = false
         try await Task.sleep(for: .milliseconds(400))
-        XCTAssertEqual(model.snapshot.items.map(\.file.id), [3], "Leaving must not run a detached deletion")
-        XCTAssertEqual(model.snapshot.items.first?.status, .cancelled)
+        XCTAssertTrue(model.snapshot.items.isEmpty, "Leaving must finish only the captured removal")
+        _ = await queue.enqueue(file(4))
         visibility.visible = true
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(findMarkers(in: host.view).count, 1)

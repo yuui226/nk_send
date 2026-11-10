@@ -1,0 +1,43 @@
+// AndroidX Compose 1.7.6; Apache-2.0. Source jar URLs and full-file hashes are in numeric-value-verification.json.
+/*
+ * Copyright 2020 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+// Source lines 1060-1067
+
+private val DefaultAlphaAndScaleSpring = spring<Float>(stiffness = Spring.StiffnessMediumLow)
+
+private val DefaultOffsetAnimationSpec = spring(
+    stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntOffset.VisibilityThreshold
+)
+
+private class EnterExitTransitionModifierNode(
+
+// Source lines 1204-1217
+    val slideSpec: Transition.Segment<EnterExitState>.() -> FiniteAnimationSpec<IntOffset> = {
+        when {
+            EnterExitState.PreEnter isTransitioningTo EnterExitState.Visible -> {
+                enter.data.slide?.animationSpec ?: DefaultOffsetAnimationSpec
+            }
+
+            EnterExitState.Visible isTransitioningTo EnterExitState.PostExit -> {
+                exit.data.slide?.animationSpec ?: DefaultOffsetAnimationSpec
+            }
+
+            else -> DefaultOffsetAnimationSpec
+        }
+    }
+

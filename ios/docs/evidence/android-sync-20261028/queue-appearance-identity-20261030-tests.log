@@ -1,0 +1,4 @@
+/Users/orys/code/nk_send/ios/ZTransfer/UI/Components/QueueProgressScope.swift:23:48: error: conformance of 'QueueProgressSubscription' to protocol 'ObservableObject' crosses into main actor-isolated code and can cause data races [#ConformanceIsolation]
+   |                                                |- error: conformance of 'QueueProgressSubscription' to protocol 'ObservableObject' crosses into main actor-isolated code and can cause data races [#ConformanceIsolation]
+Testing failed:
+** TEST FAILED **

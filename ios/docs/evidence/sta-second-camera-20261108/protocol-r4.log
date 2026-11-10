@@ -1,0 +1,31 @@
+Building for debugging...
+[1 / 5]
+[2 / 6] ZTransferProtocol
+[3 / 7] ZTransferProtocol
+[8 / 11] ZTransferProtocol
+[9 / 12] ZTransferProtocol
+[12 / 15] ProtocolTests-product
+[14 / 17] ProtocolTests-product
+[19 / 21] ProtocolTests-product
+Build complete! (3.06秒)
+Test Suite 'Selected tests' started at 2026-11-08 11:32:56.128.
+Test Suite 'ProtocolTests.xctest' started at 2026-11-08 11:32:56.130.
+Test Suite 'STAConnectionDiagnosticsTests' started at 2026-11-08 11:32:56.130.
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests test201FHintSurvivesBoundedFailureChainAndMissingNeedsExplicitRetry]' started.
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests test201FHintSurvivesBoundedFailureChainAndMissingNeedsExplicitRetry]' passed (0.001 seconds).
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testCharacterBudgetNeverSplitsAttemptOrSurrogatePair]' started.
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testCharacterBudgetNeverSplitsAttemptOrSurrogatePair]' passed (0.008 seconds).
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testCompletionFreezesElapsedAndCannotBeOverwritten]' started.
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testCompletionFreezesElapsedAndCannotBeOverwritten]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testNewDiscoveryAndClearRejectStaleCallbacks]' started.
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testNewDiscoveryAndClearRejectStaleCallbacks]' passed (0.000 seconds).
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testOversizedAttemptDroppedWholeAndNewestBlocksBounded]' started.
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testOversizedAttemptDroppedWholeAndNewestBlocksBounded]' passed (0.002 seconds).
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testTraceRecordsElapsedAndDeltaPreservingFirstAndLatest128]' started.
+Test Case '-[ProtocolTests.STAConnectionDiagnosticsTests testTraceRecordsElapsedAndDeltaPreservingFirstAndLatest128]' passed (0.001 seconds).
+Test Suite 'STAConnectionDiagnosticsTests' passed at 2026-11-08 11:32:56.144.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.013 (0.014) seconds
+Test Suite 'ProtocolTests.xctest' passed at 2026-11-08 11:32:56.144.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.013 (0.014) seconds
+Test Suite 'Selected tests' passed at 2026-11-08 11:32:56.144.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.013 (0.016) seconds

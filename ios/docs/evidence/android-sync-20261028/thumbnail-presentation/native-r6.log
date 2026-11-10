@@ -1,0 +1,94 @@
+Building for debugging...
+[Planning deferred tasks]
+[5 / 19] ZTransfer
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPTransferDiagnostics.swift:36:78: warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 34 |     private let emit: @Sendable (String) -> Void
+ 35 | 
+ 36 |     init(emit: @escaping @Sendable (String) -> Void = PTPTransferDiagnostics.persist) {
+    |                                                                              `- warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 37 |         self.emit = emit
+ 38 |     }
+[14 / 28] ZTransfer
+[18 / 27] ZTransfer
+[19 / 26] ZTransfer
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAConnectionCoordinator.swift:60:75: warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+ 58 |             do {
+ 59 |                 let camera = try await connect(candidate, preferred, expectedGUID,
+ 60 |                     pairingReconnectUsed && preferred == .pairedComputer, reportStage)
+    |                                                                           `- warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+ 61 |                 guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
+ 62 |                 reachedStorage = true
+
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAConnectionCoordinator.swift:104:71: warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+102 |         do {
+103 |             let camera = try await connect(candidate, alternate, expectedGUID,
+104 |                 pairingReconnectUsed && alternate == .pairedComputer, reportStage)
+    |                                                                       `- warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+105 |             guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
+106 |             guard profiles.isPaired(camera.guid) else {
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPTransferDiagnostics.swift:36:78: warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 34 |     private let emit: @Sendable (String) -> Void
+ 35 | 
+ 36 |     init(emit: @escaping @Sendable (String) -> Void = PTPTransferDiagnostics.persist) {
+    |                                                                              `- warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 37 |         self.emit = emit
+ 38 |     }
+[23 / 26] ThumbnailTests-product
+[29 / 32] ThumbnailTests-product
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:188:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+186 |         let stream = await store.retryWakes()
+187 |         var iterator = stream.makeAsyncIterator()
+188 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+189 |         XCTAssertNil(end)
+190 |     }
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:188:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+186 |         let stream = await store.retryWakes()
+187 |         var iterator = stream.makeAsyncIterator()
+188 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+189 |         XCTAssertNil(end)
+190 |     }
+[35 / 37] ThumbnailTests-product
+Build complete! (3.93秒)
+Test Suite 'Selected tests' started at 2026-10-31 00:37:13.229.
+Test Suite 'ThumbnailTests.xctest' started at 2026-10-31 00:37:13.230.
+Test Suite 'PhotoThumbnailPresentationTests' started at 2026-10-31 00:37:13.230.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCachedCellDoesNotSubscribeOrReadAndDisabledCellKeepsImage]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCachedCellDoesNotSubscribeOrReadAndDisabledCellKeepsImage]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCancelledReadAndReusedGenerationCannotPublishLateImage]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCancelledReadAndReusedGenerationCannotPublishLateImage]' passed (0.032 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCatalogLookupMatchesCurrentArrayAfterMixedBatchesAndReorder]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCatalogLookupMatchesCurrentArrayAfterMixedBatchesAndReorder]' passed (0.021 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCurrentCatalogLookupTracksMembershipDeletionReuseAndRecoveryCopy]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testCurrentCatalogLookupTracksMembershipDeletionReuseAndRecoveryCopy]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testFadeStartsAtFirstFrameAndMatchesAndroid180msCurve]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testFadeStartsAtFirstFrameAndMatchesAndroid180msCurve]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testInterruptedBatchFadeResumesFromDisplayedValueAndCacheStartsOpaque]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testInterruptedBatchFadeResumesFromDisplayedValueAndCacheStartsOpaque]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testInterruptedStackReversalKeepsDisplayedAlphaAndReusesOldLayer]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testInterruptedStackReversalKeepsDisplayedAlphaAndReusesOldLayer]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testLateStorePublicationFillsMountedCellWithoutAnotherRemoteRead]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testLateStorePublicationFillsMountedCellWithoutAnotherRemoteRead]' passed (0.032 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testLocalOnlyMissRetriesWhenRemoteGateChangesWithoutClearingReadyImage]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testLocalOnlyMissRetriesWhenRemoteGateChangesWithoutClearingReadyImage]' passed (0.008 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testMissWaitsForItsNotificationThenReadsCacheAndStopsObserving]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testMissWaitsForItsNotificationThenReadsCacheAndStopsObserving]' passed (0.008 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testSameKeyPayloadUpdateDoesNotRestartAnActiveStackFade]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testSameKeyPayloadUpdateDoesNotRestartAnActiveStackFade]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testStackCrossfadeUses180msEntranceAnd160msExit]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testStackCrossfadeUses180msEntranceAnd160msExit]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testStackGeometryUsesAndroidAnglesAndFixedOffsets]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testStackGeometryUsesAndroidAnglesAndFixedOffsets]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testStackTailChangesDoNotAnimateAndAliasUpdatesCurrentPayload]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testStackTailChangesDoNotAnimateAndAliasUpdatesCurrentPayload]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testVisibleBurstMembershipKeepsFilteredOrderAndHasNoHiddenMembers]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPresentationTests testVisibleBurstMembershipKeepsFilteredOrderAndHasNoHiddenMembers]' passed (0.000 seconds).
+Test Suite 'PhotoThumbnailPresentationTests' passed at 2026-10-31 00:37:13.336.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.105 (0.106) seconds
+Test Suite 'ThumbnailTests.xctest' passed at 2026-10-31 00:37:13.336.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.105 (0.106) seconds
+Test Suite 'Selected tests' passed at 2026-10-31 00:37:13.336.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.105 (0.107) seconds

@@ -1,0 +1,7 @@
+{
+  "ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift": "d9a740b5b96e1cf734c8c8ba7d325a65ec2a2f9c54b33a1e4bae5f183bbf571e",
+  "ios/ZTransfer/Domain/GPSState.swift": "a96d57cf03bf257f86f8e9717bc538c53e6e918936cbccb4d935066d239ca8e6",
+  "ios/ZTransfer/Domain/GPSCoordinator.swift": "22c73a6b27080523750bf04b6aae04f3f54b656e5ac0e73265db14fe0eeac201",
+  "ios/ZTransfer/App/IOSLocalization.swift": "d51914956df5464ed56cab3aa116b04ae69e096ce4a4b524159822bb33f48675",
+  "ios/GPSTests/GPSProtocolTests.swift": "095d2e39c85240de71185cb92f37c6fe920996e7e8bf769d5a91818275197f19"
+}

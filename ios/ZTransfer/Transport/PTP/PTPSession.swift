@@ -150,6 +150,18 @@ actor PTPSession {
         return try await body(commands)
     }
 
+    /// The final preflight also runs in the transport's dispatch context.
+    /// An unsent shutter leaves this session usable and needs no PTP Cancel.
+    func executeResponseIfCurrent(operation: UInt16, parameters: [UInt32],
+                                  permission: PTPCommandPermission) async throws -> PTPResponse? {
+        guard permission.isCurrent else { return nil }
+        do {
+            return try await PTPCommandContext.$permission.withValue(permission) {
+                try await executeResponse(operation: operation, parameters: parameters)
+            }
+        } catch is PTPCommandNotSent { return nil }
+    }
+
     private func performSequence(owner: UUID, operation: UInt16, parameters: [UInt32], data: Data?,
                                  timeoutNanoseconds: UInt64?) async throws -> PTPResponse {
         guard sequenceOwner == owner else { throw PTPSessionError.invalidated }
@@ -198,6 +210,7 @@ actor PTPSession {
                          timeoutNanoseconds: UInt64, sink: PTPDataSink? = nil) async throws -> PTPResponse {
         // A request cancelled while waiting must never allocate an ID or touch I/O.
         try Task.checkCancellation()
+        try PTPCommandContext.check()
         guard !invalidated else { throw PTPSessionError.invalidated }
         let transactionID = nextTransactionID
         nextTransactionID = nextTransactionID == UInt32.max ? 1 : nextTransactionID + 1
@@ -280,6 +293,7 @@ actor PTPSession {
                 }
             } else {
                 let operation: @Sendable () async throws -> (response: Data, payload: Data, received: UInt64, declared: UInt64?) = {
+                    try PTPCommandContext.check()
                     let reply = try await transport.sendPTP(command: command, data: data,
                                                             readTimeoutNanoseconds: timeoutNanoseconds)
                     return (reply.response, reply.payload, UInt64(reply.payload.count), nil)
@@ -315,6 +329,10 @@ actor PTPSession {
                         )
                     }
                 } catch {
+                    if error is PTPCommandNotSent {
+                        drainedAfterAbort = true
+                        throw error
+                    }
                     if transport.managesCommandTimeouts, error is CancellationError {
                         // ImageCapture requests already on the wire are awaited
                         // above. A cancellation reaching here occurred before
@@ -340,12 +358,20 @@ actor PTPSession {
         } catch let error as PTPSessionError {
             // A negative PTP response consumed the complete transaction; busy or
             // unsupported must not poison this session's remaining commands.
-            if case .responseCode = error {} else if !drainedAfterAbort { invalidate() }
+            if case .responseCode = error {} else if !drainedAfterAbort {
+                CameraRuntimeDiagnostics.record(.transportFailure,
+                    "operation=\(String(format: "%04X", operation)) transaction=\(transactionID) error=\(error) cancelled=\(Task.isCancelled)")
+                invalidate()
+            }
             throw error
         } catch {
             // The transport may still complete a timed-out/cancelled operation.
             // Never send another command on this channel or accept its late reply.
-            if !drainedAfterAbort { invalidate() }
+            if !drainedAfterAbort {
+                CameraRuntimeDiagnostics.record(.transportFailure,
+                    "operation=\(String(format: "%04X", operation)) transaction=\(transactionID) error=\(error) domain=\((error as NSError).domain) code=\((error as NSError).code) cancelled=\(Task.isCancelled)")
+                invalidate()
+            }
             throw error
         }
     }

@@ -1,0 +1,56 @@
+{
+  "commit": "204b33fea77a7d49d41e0719121edad71d7f44c7",
+  "files": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 17169,
+      "sha256": "3989eed995a97063852225d66eae3fb3e53d2fdc7579bc3e54bc8bccd24c1d4f",
+      "matches_source": true
+    },
+    {
+      "path": "screenshots.css",
+      "status": 200,
+      "bytes": 13660,
+      "sha256": "970736ff2549459a35545b1970d35648d437b681faae8d68bd24ecf120b2768d",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/README.md",
+      "status": 200,
+      "bytes": 1065,
+      "sha256": "2d51a55208ec2b49ba01f327e16578b14e210ae53b944ae20b3e3a727dba3785",
+      "matches_source": true
+    },
+    {
+      "path": "assets/effects-coast.webp",
+      "status": 200,
+      "bytes": 147036,
+      "sha256": "cefdcf439fa636ff2f1674a2f1d96bf2265f56660de4132488a9f81973a5c0bc",
+      "matches_source": true
+    }
+  ],
+  "preserved_existing_files_unchanged": true,
+  "preserved_file_count": 10,
+  "browser_viewports_checked": [
+    [
+      1440,
+      1000
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      320,
+      740
+    ]
+  ],
+  "source_pixel_validation": "Original App screenshots remain unchanged. Only the effect photo preview uses the generated coastal scene. All five control groups remain visible; provenance in effects-photo/asset-source.md.",
+  "app_backend_unchanged": true,
+  "api_server_login_performed_this_update": false
+}

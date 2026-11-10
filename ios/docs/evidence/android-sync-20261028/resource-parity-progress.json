@@ -1,0 +1,92 @@
+{
+  "task": "N24",
+  "status": "in_progress",
+  "android_revision": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "ledger_completed": 17,
+  "ledger_total": 26,
+  "resource_keys": 926,
+  "per_language": {
+    "en": 926,
+    "zh": 925,
+    "hant": 921
+  },
+  "exact_source_dictionary_parity": true,
+  "static_literal_lookups_checked": 488,
+  "unresolved_static_literals": [],
+  "dynamic_prefixes_audited": [
+    "photo_filter_builtin_",
+    "photo_filter_category_"
+  ],
+  "android_xml_sha256": {
+    "values/monitor_help.xml": "b378ddf068df72997520e507c1af09cbccdd65a3ba4e425365f7ed37e75a7d0f",
+    "values/colors.xml": "245e4c3a208b2891232a39516ca38bd4dd34c23ea8ac6f7caee69693cd5e0760",
+    "values/themes.xml": "63805a49fbb77cdaf0a8995152cc407150ba65dece83a12c8e32a94315b277ae",
+    "values/posture_diagnostic.xml": "b4a9fa6a6ce36b11b59fe20588aa2f07186ebd7f449f703077fd0a4ecd4ff699",
+    "values/crop.xml": "dfc5251f0b49e7a01aba12ea1bf51c1a0e796dcc8fe8b29cc6ac54b71f5d71dc",
+    "values/picture_controls.xml": "2d61112ade45da3d899bc01fe34c39a9fc496f5451194e67b2d01d19ee0fd68b",
+    "values/strings.xml": "ebef3f7de9cf309624b6bda166d54d6759cb742ddaeb30b5d6a8e8c126c29b10",
+    "values/remote_tools.xml": "64780e4e7a71ff6a409f38581af51ea2dfae5ad13ed70b02c3ca0e5fe47fb494",
+    "values/monitor_disp.xml": "86bad6e7deb670f0c461aefdcd5fb3297535e88a9672c4a7d667535e57c9c404",
+    "values/photo_np3.xml": "e076a42680fee1090ad20b886a008fd1782e73da7df3bee2305ded99c1362246",
+    "values/settings_help.xml": "b9d515b1a9e850a59fda5e6f0ac35242fe4e739277a81d876ae9c1ecae4efcaa",
+    "values/ic_launcher_background.xml": "60204011620dba1d4be5ae5a50147f7a1cd8ce134aa3772f45b72247420735dc",
+    "values-zh/monitor_help.xml": "e9e8863f83f6d83ec55e02019d6c8c9e166047e8d6f86e9c30d06067fde8359e",
+    "values-zh/posture_diagnostic.xml": "907cbb4cd9b611d2610d298b5500033f36d12888eb98c60d0086f0893efeabad",
+    "values-zh/crop.xml": "c97427fca839241e4b58c61beabc8b7ae4ef557803c4ff54348a9b2f236e7021",
+    "values-zh/picture_controls.xml": "21e311394307fa26a1377339d1d0be54ed918b585bc5d703463ada4effeeb2b7",
+    "values-zh/strings.xml": "b19ec55c12233542823911a45ca36bd21b95a134c57a8f869c1790d1b9649e7c",
+    "values-zh/remote_tools.xml": "69b0a7c3af734fef8c318ac3d00609016d46c9c109deb841169bba43625d6c62",
+    "values-zh/monitor_disp.xml": "c70570a296c4abaa5b756568b29876d0f3ad9051259036aa30635c1917ecef0a",
+    "values-zh/photo_np3.xml": "745e0b344a139cfd4864ef3ae27a58f9aede341d69801a1c4c33e37dbc5d5806",
+    "values-zh/settings_help.xml": "3fcb1c5556edf0511a4fe3487c0f230da6d33c4907b042c3258f890be1d8cb2e",
+    "values-b+zh+Hant/monitor_help.xml": "a37ecd6cba250020df1b2b10626f79bded3a0045354284fa693f2078f9d3b568",
+    "values-b+zh+Hant/posture_diagnostic.xml": "da0659dd8a6626e1c4e9e09a2653fb535e9f8187b1cf33181916e4c6f5ea9f87",
+    "values-b+zh+Hant/crop.xml": "28e9cfe8262e0c09997a7657bbb2a9b96a9cbf223ee1d812699ff48287ec7bc9",
+    "values-b+zh+Hant/picture_controls.xml": "5a78bf4d20e33903750f3ead870e7899d4b845a05372783aa5fd94ea113a432e",
+    "values-b+zh+Hant/strings.xml": "0cb31036060f1cf6d2fe106de74f566f488e29dbbb16fbae3b54f3efb91d467a",
+    "values-b+zh+Hant/remote_tools.xml": "646fd01ba9b50882c5729ac03d1d2d05d013a68226204230ed1729cadac10be3",
+    "values-b+zh+Hant/monitor_disp.xml": "211cbc825dedb0e68b09f42ec719e1f3d30edb8cb3f1270de7692d59aba3953c",
+    "values-b+zh+Hant/photo_np3.xml": "424b729d3526d849842c17def57a90ca7de92bd8c485992f459e59493fbf7527",
+    "values-b+zh+Hant/settings_help.xml": "76ab616b067812f7f73a804a5491ef9f93b30aaacc39c14328af4bdeb0edfdfb"
+  },
+  "native": {
+    "executed": 2,
+    "failed": 0,
+    "log": "resource-parity/native-r1.log",
+    "scope": "Actual Foundation AppLocalized enum extracted verbatim; production AndroidLocalization/IOSLocalization tables. Tests cover four absent Hant frame names, selected/default language, unknown key and latest effect/no-network copy."
+  },
+  "ios": {
+    "build_for_testing_succeeded": true,
+    "executed_methods": 0,
+    "log": "resource-parity/ios-build.log.gz",
+    "uncompressed_sha256": "2cdd2be8f505743b8cdb79805a08a571b33c542b2a907650db38ba90643db478",
+    "built_bundle_version": "2.02",
+    "built_bundle_build": "75"
+  },
+  "changes": [
+    "Generator accepts --android-root and --check; rejects missing locale inputs before changing output. Reads the frozen Android checkout, not stale Android files on the iOS branch.",
+    "926 source-key rows match Android exactly. Four used Hant frame names correctly fall back to Android default English rather than displaying resource IDs.",
+    "Marketing version 2.02/build75; settings Debug -D rule retained.",
+    "renewal_needed source copy updated to No network/无网络/無網路; no new StoreKit or Android entitlement behavior connected."
+  ],
+  "not_yet_verified": [
+    "Whole-entry and help-window runtime regressions; simulator still awaits existing first-launch authorization.",
+    "Actual iOS localization tests (native extraction is not an iOS UI run)."
+  ],
+  "source_sha256": {
+    "ios/scripts/sync-android-localization.py": "1deaf06de86f6bdf3ea6a77d0f7fa50df20fac964e6d1eb650128411615ca09d",
+    "ios/project.yml": "57588cdb3009779b7efa19978c8bdc7e914d2260dd6fe5192402292d8663740a",
+    "ios/ZTransfer/App/AndroidLocalization.swift": "c86242acfb3a051ef7abe3cf6c390628a6ed0e860bbeef97400971792639472d",
+    "ios/ZTransfer/App/IOSLocalization.swift": "b1b130e3da453b9264f8ee1666053d53f3e7c9d240fba005f99d63df8c77446c",
+    "ios/ZTransfer/App/RootView.swift": "1b2b8162e0ccbc6a9837fdb3601e53486b9db5fef2a49f58af0d20516f14ee56",
+    "ios/ZTransfer/UI/SettingsView.swift": "42e7c621d83de81f472e289a6d82d5b41c4a093339662667f8c78f05b134f5f2",
+    "ios/ZTransferTests/AndroidResourceFallbackTests.swift": "6618788a4245b74f73816e95ea33226bb5247d6bbe6bdaede05c766eb9ff18a3",
+    "ios/ZTransferTests/IncrementalLocalizationTests.swift": "ddd4e44e00c981ac7ff29f3e5597be9f50116aba68be9cc8a213333b413db490"
+  },
+  "final_verification": {
+    "status": "complete",
+    "date": "2026-10-31",
+    "evidence": "resumed-runtime/final-verification.json",
+    "note": "Supersedes historical runtime blockers and pending-runtime fields above; original per-run results remain unchanged."
+  }
+}

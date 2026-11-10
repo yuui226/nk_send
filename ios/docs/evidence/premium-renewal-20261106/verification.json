@@ -1,0 +1,35 @@
+{
+  "status": "complete-development-side",
+  "tasks": {
+    "secondaryActions": "5/5",
+    "renewalPanel": "4/4",
+    "ctaCopy": "1/1"
+  },
+  "finalTests": {
+    "uiMethods": 3,
+    "storeKitMethods": 3,
+    "uiFixtures": "all prepare/cleanup passed",
+    "scopes": [
+      "SE3 annual purchase, relaunch, management cancellation, no upgrade",
+      "17Pro annual cancellation, relaunch, resubscribe, relaunch",
+      "SE3 free purchase page: 3 languages, 12 plan changes, manual restore",
+      "expired annual may repurchase annual, then expire and purchase lifetime",
+      "legacy co-owned annual/lifetime, refund and expiry",
+      "fresh store automatic annual recovery without manual sync/prices"
+    ]
+  },
+  "results": {
+    "annualUI": "ztransfer-storekit-ui.Y1hZwb",
+    "managementUI": "ztransfer-storekit-ui.tz0j20",
+    "freeUI": "ztransfer-storekit-ui.kqkTJN",
+    "models": "/tmp/ztransfer-premium-renewal-final-models-20261106.xcresult"
+  },
+  "intermediateFailure": "ztransfer-storekit-ui.TeY7jH: annual purchase did not deliver before renewal assertions; confirmation helper now waits for stable hittable system button; rerun passed",
+  "reviewedFinalScreenshots": 13,
+  "postTestChange": "Three-language CTA suffix removal, static checks only; see cta-copy-followup.json. No new UI screenshots after copy change.",
+  "limitations": [
+    "Local Xcode StoreKit, not real sandbox",
+    "No physical-device install or verification",
+    "No archive/upload/commit/push"
+  ]
+}

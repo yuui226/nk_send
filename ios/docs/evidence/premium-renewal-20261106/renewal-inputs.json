@@ -1,0 +1,9 @@
+{
+  "ios/ZTransfer/UI/PremiumPurchaseView.swift": "ffb54218ada08e88e1d70adf4f98563e3fda9cc455fa317de9ca8a535dd5d705",
+  "ios/ZTransfer/Domain/StoreKitPurchaseStore.swift": "81c56e9ed321f02e60d1de9a005128b6a2f2041bb08a39b73e131fd7c1c67590",
+  "ios/ZTransfer/UI/SettingsView.swift": "38209807e497624e2b4ab6ec8f6837839c8b77da4c5fe4d663e4cc60e5949981",
+  "ios/ZTransfer/UI/Components/TipLightbulbButton.swift": "9aef14ed1033e21ae7e7ad97deb7c517c14ab71ff91cd653d58b98afc45618c5",
+  "ios/ZTransfer/App/IOSLocalization.swift": "4357676d8a0f89c18ae77eba657c9fd366ce4a9220e0708ae457d1bad579f28d",
+  "ios/StoreKitUITests/PremiumRecoveryUITests.swift": "1b083fe06a607ef846eeb4a9b37030e28930bc536894d960bbbb0cc1ed9d873e",
+  "ios/PopupUITests/PremiumPurchaseUITests.swift": "45249b3fe0310cd16337732f9e1030d7585f3252448217c0b1f281fe84fa5245"
+}

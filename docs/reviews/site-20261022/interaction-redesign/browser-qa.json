@@ -1,0 +1,127 @@
+{
+  "viewports": [
+    {
+      "size": {
+        "width": 320,
+        "height": 568
+      },
+      "checked": 47,
+      "maxDelta": 0,
+      "issues": []
+    },
+    {
+      "size": {
+        "width": 390,
+        "height": 844
+      },
+      "checked": 47,
+      "maxDelta": 0,
+      "issues": []
+    },
+    {
+      "size": {
+        "width": 768,
+        "height": 1024
+      },
+      "checked": 47,
+      "maxDelta": 0,
+      "issues": []
+    },
+    {
+      "size": {
+        "width": 1024,
+        "height": 768
+      },
+      "checked": 47,
+      "maxDelta": 0,
+      "issues": []
+    },
+    {
+      "size": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checked": 47,
+      "maxDelta": 0,
+      "issues": []
+    }
+  ],
+  "breakpoints": [
+    {
+      "hiddenText": false,
+      "menu": "grid",
+      "overflow": 0,
+      "width": 759
+    },
+    {
+      "hiddenText": false,
+      "menu": "none",
+      "overflow": 0,
+      "width": 760
+    },
+    {
+      "hiddenText": false,
+      "menu": "none",
+      "overflow": 0,
+      "width": 900
+    },
+    {
+      "hiddenText": false,
+      "menu": "none",
+      "overflow": 0,
+      "width": 901
+    },
+    {
+      "hiddenText": false,
+      "menu": "none",
+      "overflow": 0,
+      "width": 1100
+    },
+    {
+      "hiddenText": false,
+      "menu": "none",
+      "overflow": 0,
+      "width": 1101
+    }
+  ],
+  "keyboard": [
+    {
+      "check": "monitor End",
+      "focus": "monitor-category-4",
+      "selected": "monitor-category-4"
+    },
+    {
+      "check": "monitor Home+Right",
+      "focus": "monitor-category-1",
+      "selected": "monitor-category-1"
+    },
+    {
+      "check": "connection Down",
+      "selected": "connect-usb"
+    },
+    {
+      "check": "FAQ End",
+      "selected": "faq-question-5"
+    },
+    {
+      "check": "menu open Tab",
+      "expanded": "true",
+      "focus": "探索功能"
+    },
+    {
+      "check": "menu Escape",
+      "expanded": "false",
+      "focus": "menu-toggle"
+    }
+  ],
+  "noScript": {
+    "visibleDescriptions": 47,
+    "visibleFaq": 6,
+    "visibleConnections": 3,
+    "visibleGroupHeadings": 10
+  },
+  "consoleErrors": [],
+  "limitations": [
+    "未使用真实移动设备或原生系统减弱动态效果设置；CSS已提供prefers-reduced-motion全局关闭动效。"
+  ]
+}

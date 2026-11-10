@@ -411,35 +411,6 @@ struct PhotoFrameMetadataSettings: Codable, Equatable, Sendable {
     }
 }
 
-/// Android chooser category order and initial scroll use the same visible list.
-struct PhotoFilterChooserState {
-    var isPresented = false
-    var category: PhotoEffectFilterCategory = .all
-
-    func items(in settings: PhotoEffectsSettings) -> [PhotoFilterPreset] {
-        settings.orderedFilters.filter { preset in
-            switch category {
-            case .all: return true
-            case .favorites: return settings.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id))
-            default: return preset.category == category
-            }
-        }
-    }
-
-    func initialItemID(in settings: PhotoEffectsSettings) -> String? {
-        let visible = items(in: settings)
-        if settings.photoFilterEnabled,
-           let selected = settings.selectedFilter?.preset.id,
-           visible.contains(where: { $0.id == selected }) { return selected }
-        return visible.first?.id
-    }
-
-    mutating func select(_ id: String?, in settings: inout PhotoEffectsSettings) {
-        settings.selectFilter(id)
-        isPresented = false
-    }
-}
-
 enum PhotoEffectFilterCategory: String, CaseIterable, Identifiable, Sendable {
     case all, favorites, landscape, portrait, monochrome, film, cinematic, color
     var id: String { rawValue }
@@ -487,15 +458,43 @@ struct PhotoFilterSelection: Codable, Equatable, Sendable {
     let preset: PhotoFilterPreset
     var intensityPercent: Int
     var lutAdjustments: LUTAdjustments
+    var photoRecipe: PhotoNp3Recipe? {
+        if let np3Recipe { return np3Recipe }
+        guard let builtin = Np3FilterCatalog.preset(id: preset.id) else { return nil }
+        return .init(preset: preset, parameters: .flexible(builtin.parameters))
+    }
     let snapshotOwner: PhotoLUTSnapshotOwner?
+    /// Small NP3 recipes are values owned by each draft/task. They never reload
+    /// a source URL or consult a later editor selection during export/retry.
+    let np3Recipe: PhotoNp3Recipe?
     var normalizedIntensityPercent: Int { Np3FilterEngine.normalizeIntensity(intensityPercent) }
+    var hasPhotoFilterRecipe: Bool { np3Recipe != nil || PhotoFilterCatalog.resolve(preset.id) != nil }
 
     init(preset: PhotoFilterPreset, intensityPercent: Int, lutAdjustments: LUTAdjustments = .init()) {
+        self.init(preset: preset, intensityPercent: intensityPercent, lutAdjustments: lutAdjustments, storedNP3: nil)
+    }
+
+    private init(preset: PhotoFilterPreset, intensityPercent: Int, lutAdjustments: LUTAdjustments,
+                 storedNP3: PhotoNp3Recipe?) {
         self.preset = preset
         self.intensityPercent = intensityPercent
         self.lutAdjustments = lutAdjustments.normalized
+        np3Recipe = storedNP3
         snapshotOwner = preset.id.hasPrefix("cube:")
             ? PhotoLUTRuntime.snapshotOwner(digest: String(preset.id.dropFirst(5))) : nil
+    }
+
+    init(np3Recipe recipe: PhotoNp3Recipe, intensityPercent: Int, lutAdjustments: LUTAdjustments = .init()) throws {
+        // Validate the same bounded recipe that persistence accepts. Built-in
+        // file matches retain their existing catalog identity and pixel path.
+        if PhotoNp3RecipeKind.from(id: recipe.preset.id) == nil {
+            guard let known = PhotoFilterCatalog.resolve(recipe.preset.id) else { throw PhotoNp3SnapshotError.invalid }
+            self.init(preset: known, intensityPercent: intensityPercent, lutAdjustments: lutAdjustments)
+            return
+        }
+        _ = try PhotoNp3SnapshotCodec.encode(recipe)
+        self.init(preset: recipe.preset, intensityPercent: intensityPercent,
+                  lutAdjustments: lutAdjustments, storedNP3: recipe)
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -503,12 +502,32 @@ struct PhotoFilterSelection: Codable, Equatable, Sendable {
             && lhs.lutAdjustments == rhs.lutAdjustments
     }
 
-    private enum CodingKeys: String, CodingKey { case preset, intensityPercent, lutAdjustments }
+    private enum CodingKeys: String, CodingKey { case preset, intensityPercent, lutAdjustments, np3Snapshot }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(preset: try values.decode(PhotoFilterPreset.self, forKey: .preset),
-                  intensityPercent: try values.decode(Int.self, forKey: .intensityPercent),
-                  lutAdjustments: try values.decodeIfPresent(LUTAdjustments.self, forKey: .lutAdjustments) ?? .init())
+        let preset = try values.decode(PhotoFilterPreset.self, forKey: .preset)
+        let intensity = try values.decode(Int.self, forKey: .intensityPercent)
+        let adjustments = try values.decodeIfPresent(LUTAdjustments.self, forKey: .lutAdjustments) ?? .init()
+        if let encoded = try? values.decode(String.self, forKey: .np3Snapshot),
+           encoded.utf8.count <= PhotoNp3SnapshotCodec.maximumBase64Length,
+           let bytes = Data(base64Encoded: encoded), let recipe = try? PhotoNp3SnapshotCodec.decode(bytes),
+           recipe.preset.id == preset.id {
+            try self.init(np3Recipe: recipe, intensityPercent: intensity, lutAdjustments: adjustments)
+        } else {
+            // A damaged private filter must not erase unrelated frame/grain
+            // preferences. Normalization disables this unresolved selection.
+            self.init(preset: preset, intensityPercent: intensity, lutAdjustments: adjustments)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(preset, forKey: .preset)
+        try values.encode(intensityPercent, forKey: .intensityPercent)
+        try values.encode(lutAdjustments, forKey: .lutAdjustments)
+        if let np3Recipe {
+            try values.encode(PhotoNp3SnapshotCodec.encode(np3Recipe).base64EncodedString(), forKey: .np3Snapshot)
+        }
     }
 }
 
@@ -554,17 +573,18 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
             // Android keeps NP3 choice/strength separate from the LUT recipe.
             // Activating a Cube disables NP3 without discarding its memory.
             if newValue?.preset.id.hasPrefix("cube:") == true,
-               let previous = selectedFilter, PhotoFilterCatalog.resolve(previous.preset.id) != nil {
+               let previous = selectedFilter, previous.hasPhotoFilterRecipe {
                 rememberedBuiltinFilter = previous
             }
         }
     }
     var rememberedBuiltinFilter: PhotoFilterSelection?
     var builtinFilterSelection: PhotoFilterSelection? {
-        if let selectedFilter, PhotoFilterCatalog.resolve(selectedFilter.preset.id) != nil { return selectedFilter }
+        if let selectedFilter, selectedFilter.hasPhotoFilterRecipe { return selectedFilter }
         return rememberedBuiltinFilter
     }
     var filterIntensities: [String: Int] = [:]
+    var filterAdjustments: [String: LUTAdjustments] = [:]
     /// Android orderWithFavorites preserves the order in which favorites were
     /// added. A Set silently changes the wheel and category chooser ordering.
     var favoriteFilterIDs: [String] = []
@@ -582,7 +602,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     init() {}
 
     static func filterKey(_ id: String) -> String {
-        Np3FilterCatalog.preset(id: id)?.catalogKey ?? id
+        PhotoFilterPreferences.catalogKey(id) ?? id
     }
 
     var orderedFilters: [PhotoFilterPreset] {
@@ -614,9 +634,35 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         } else { photoFilterEnabled = false; return }
         let key = Self.filterKey(id)
         let intensity = filterIntensities[key] ?? Np3FilterEngine.defaultIntensityPercent
-        selectedFilter = .init(preset: preset, intensityPercent: intensity)
+        selectedFilter = .init(preset: preset, intensityPercent: intensity, lutAdjustments: filterAdjustments[key] ?? .init())
         photoFilterEnabled = true
         filterIntensities[key] = intensity
+    }
+
+    /// Imported recipes remain values owned by the draft/queue. Passive source
+    /// refresh updates the remembered NP3 while an active LUT stays active.
+    @discardableResult
+    mutating func selectPhotoFilter(_ recipe: PhotoNp3Recipe, explicit: Bool) -> Bool {
+        let key = Self.filterKey(recipe.preset.id)
+        guard let selection = try? PhotoFilterSelection(np3Recipe: recipe,
+            intensityPercent: filterIntensities[key] ?? Np3FilterEngine.defaultIntensityPercent,
+            lutAdjustments: filterAdjustments[key] ?? .init()) else { return false }
+        if !explicit, selectedFilter?.preset.id.hasPrefix("cube:") == true {
+            rememberedBuiltinFilter = selection
+        } else {
+            selectedFilter = selection
+            if explicit { photoFilterEnabled = true }
+        }
+        filterIntensities[key] = selection.normalizedIntensityPercent
+        return true
+    }
+
+    mutating func clearNP3DirectorySettings() {
+        filterIntensities = filterIntensities.filter { !PhotoFilterPreferences.isCustomKey($0.key) }
+        filterAdjustments = filterAdjustments.filter { !PhotoFilterPreferences.isCustomKey($0.key) }
+        favoriteFilterIDs.removeAll { PhotoFilterPreferences.isCustomKey(Self.filterKey($0)) }
+        if selectedFilter?.np3Recipe != nil { selectedFilter = nil; photoFilterEnabled = false }
+        if rememberedBuiltinFilter?.np3Recipe != nil { rememberedBuiltinFilter = nil }
     }
 
     mutating func toggleFilterFavorite(_ id: String) {
@@ -643,6 +689,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
     func persistingEditorPreferences(from draft: Self) -> Self {
         var result = self
         result.filterIntensities = draft.filterIntensities
+        result.filterAdjustments = draft.filterAdjustments
         result.grainIntensities = draft.grainIntensities
         result.favoriteFilterIDs = draft.favoriteFilterIDs
         result.favoriteFrameEffects = draft.favoriteFrameEffects
@@ -659,7 +706,7 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case photoFrameEnabled, photoFrameBorderEnabled, photoEffectModules, photoFramePreset, watermark,
-             metadata, metadataByPreset, photoFilterEnabled, selectedFilter, rememberedBuiltinFilter, filterIntensities, favoriteFilterIDs,
+             metadata, metadataByPreset, photoFilterEnabled, selectedFilter, rememberedBuiltinFilter, filterIntensities, filterAdjustments, favoriteFilterIDs,
              favoriteFramePresets, favoriteFrameEffects, photoGrain, grainIntensities
     }
 
@@ -678,9 +725,21 @@ struct PhotoEffectsSettings: Codable, Equatable, Sendable {
         selectedFilter = try c.decodeIfPresent(PhotoFilterSelection.self, forKey: .selectedFilter)
         rememberedBuiltinFilter = try c.decodeIfPresent(PhotoFilterSelection.self, forKey: .rememberedBuiltinFilter)
         filterIntensities = try c.decodeIfPresent([String: Int].self, forKey: .filterIntensities) ?? [:]
+        filterAdjustments = try c.decodeIfPresent([String: LUTAdjustments].self, forKey: .filterAdjustments) ?? [:]
         favoriteFilterIDs = try c.decodeIfPresent([String].self, forKey: .favoriteFilterIDs) ?? []
         favoriteFramePresets = try c.decodeIfPresent(Set<PhotoFramePreset>.self, forKey: .favoriteFramePresets) ?? []
         favoriteFrameEffects = try c.decodeIfPresent([PhotoFrameFavorite].self, forKey: .favoriteFrameEffects) ?? []
+        // User-approved removal of the bundled catalog (2026-11-05). Queue
+        // snapshots also decode here: discard retired selections before a
+        // restored export reaches the renderer, preserving every other effect.
+        func retired(_ value: PhotoFilterSelection?) -> Bool {
+            guard let value else { return false }
+            return value.np3Recipe == nil && !value.preset.id.hasPrefix("cube:") &&
+                PhotoNp3RecipeKind.from(id: value.preset.id) == nil &&
+                PhotoFilterCatalog.resolve(value.preset.id) == nil
+        }
+        if retired(selectedFilter) { selectedFilter = nil; photoFilterEnabled = false }
+        if retired(rememberedBuiltinFilter) { rememberedBuiltinFilter = nil }
     }
 }
 
@@ -698,6 +757,7 @@ func nextPhotoFilterSelections(for settings: PhotoEffectsSettings) -> [PhotoFilt
         return PhotoFilterSelection(
             preset: preset,
             intensityPercent: settings.filterIntensities[key] ?? 80,
+            lutAdjustments: settings.filterAdjustments[key] ?? .init(),
         )
     }
 }
@@ -706,6 +766,7 @@ func photoEffectsPreviewPixelSettings(_ settings: PhotoEffectsSettings) -> Photo
     var result = settings
     result.rememberedBuiltinFilter = nil
     result.filterIntensities = [:]
+    result.filterAdjustments = [:]
     result.grainIntensities = [:]
     result.photoGrain = result.photoGrain.isEnabled ? result.photoGrain.normalized : .off
     result.favoriteFilterIDs = []
@@ -804,8 +865,7 @@ struct PhotoColorEffectEditorVisibility: Equatable {
     init(settings: PhotoEffectsSettings, isPro: Bool) {
         let modules = effectivePhotoEffectModules(settings.photoEffectModules, isPro: isPro)
         let activeCube = settings.photoFilterEnabled && settings.colorEffectModule == .lut
-        let activeFilter = settings.photoFilterEnabled &&
-            settings.selectedFilter.flatMap { PhotoFilterCatalog.resolve($0.preset.id) } != nil
+        let activeFilter = settings.photoFilterEnabled && settings.selectedFilter?.hasPhotoFilterRecipe == true
         filter = photoEffectModuleIsVisible(modules, .filter) && !activeCube
         lut = photoEffectModuleIsVisible(modules, .lut) && !activeFilter
     }
@@ -1027,12 +1087,31 @@ final class PhotoEffectsStore: ObservableObject {
     private let key: String
     private let scope: Scope
     private let premiumAccess: PremiumAccess
+    let np3Store: PhotoNp3Store
+    let filterFavorites: SharedPhotoFilterFavorites
+    private var np3Role: PhotoNp3Store.Role { scope == .cameraTransfer ? .transfer : .local }
+    private let localEffectsDefaults: UserDefaults
+    private var np3FolderObservation: AnyCancellable?
+    private var lutFolderObservation: AnyCancellable?
+    private var filterFavoritesObservation: AnyCancellable?
+    private var observedLUTStore: PhotoLUTStore?
     private var watermarkImportGeneration: UInt64 = 0
 
     init(defaults: UserDefaults = .standard, scope: Scope = .cameraTransfer,
          legacyDefaults: UserDefaults? = nil, premiumAccess: PremiumAccess = .shared,
-         lutStore: PhotoLUTStore? = nil) {
+         lutStore: PhotoLUTStore? = nil, np3Store: PhotoNp3Store? = nil,
+         filterFavorites: SharedPhotoFilterFavorites? = nil) {
         self.premiumAccess = premiumAccess
+        let sourceStore = np3Store ?? PhotoNp3Store(defaults: defaults)
+        self.np3Store = sourceStore
+        localEffectsDefaults = defaults === UserDefaults.standard
+            ? (UserDefaults(suiteName: "local_photo_effects") ?? defaults) : defaults
+        // Android restores both private recipes before validating preference
+        // IDs. Only immutable recipe values are shared; controls remain scoped.
+        var recipes: [String: PhotoNp3Recipe] = [:]
+        for role: PhotoNp3Store.Role in [.transfer, .local] {
+            if let recipe = sourceStore.restore(role), recipes[recipe.preset.id] == nil { recipes[recipe.preset.id] = recipe }
+        }
         // Android isolates phone-photo effects in the `local_photo_effects`
         // preference file.  UserDefaults suites provide the same isolation;
         // injected defaults are still honored for camera-transfer tests.
@@ -1043,32 +1122,33 @@ final class PhotoEffectsStore: ObservableObject {
         self.scope = scope
         isEnabled = scope == .cameraTransfer ? (resolvedDefaults.object(forKey: "photo_effects_enabled") as? Bool ?? true) : true
         key = scope == .cameraTransfer ? "photoEffectsSettings.v1" : "localPhotoEffectsSettings.v1"
-        if scope == .cameraTransfer, let value = Self.restoreAndroidTransferSettings(defaults: self.defaults) {
+        var restoredSettings: PhotoEffectsSettings
+        if scope == .cameraTransfer, let value = Self.restoreAndroidTransferSettings(defaults: self.defaults, recipes: recipes) {
             let restored = Self.normalized(value, scope: scope)
-            settings = restored
+            restoredSettings = restored
             // Android folds the legacy one-value intensity into the per-filter
             // map during restore, then removes the old key immediately.
             Self.persistAndroidTransferSettings(restored, defaults: self.defaults)
-        } else if scope == .localPhotos, let value = Self.restoreAndroidLocalSettings(defaults: self.defaults) {
+        } else if scope == .localPhotos, let value = Self.restoreAndroidLocalSettings(defaults: self.defaults, recipes: recipes) {
             let restored = Self.normalized(value, scope: scope)
-            settings = restored
+            restoredSettings = restored
             Self.persistAndroidLocalSettings(restored, defaults: self.defaults)
         } else if let data = self.defaults.data(forKey: key), let value = try? JSONDecoder().decode(PhotoEffectsSettings.self, from: data) {
             var migrated = value
             let flag = scope == .cameraTransfer ? "photo_effect_grain_introduced" : "grain_introduced"
             migrated.photoEffectModules = restorePhotoEffectModules(value.photoEffectModules, grainIntroduced: resolvedDefaults.bool(forKey: flag))
-            settings = Self.normalized(migrated, scope: scope)
+            restoredSettings = Self.normalized(migrated, scope: scope)
         } else if scope == .localPhotos,
                   let value = Self.migrateLegacyLocalFavorites(
                     from: legacyDefaults ?? (defaults === UserDefaults.standard ? .standard : defaults)
                   ) {
-            settings = Self.normalized(value, scope: scope)
-            Self.persistAndroidLocalSettings(settings, defaults: self.defaults)
-            if let data = try? JSONEncoder().encode(settings) { self.defaults.set(data, forKey: key) }
+            restoredSettings = Self.normalized(value, scope: scope)
+            Self.persistAndroidLocalSettings(restoredSettings, defaults: self.defaults)
+            if let data = try? JSONEncoder().encode(restoredSettings) { self.defaults.set(data, forKey: key) }
         } else {
-            settings = PhotoEffectsSettings()
+            restoredSettings = PhotoEffectsSettings()
             if let first = PhotoFilterCatalog.presets.first {
-                settings.selectedFilter = .init(preset: first, intensityPercent: Np3FilterEngine.defaultIntensityPercent)
+                restoredSettings.selectedFilter = .init(preset: first, intensityPercent: Np3FilterEngine.defaultIntensityPercent)
             }
             if scope == .localPhotos {
                 // Android saves the initial local workbench snapshot as soon
@@ -1076,23 +1156,102 @@ final class PhotoEffectsStore: ObservableObject {
                 // initialized even if the user leaves without editing, so a
                 // later camera-setting favorite is never mistaken for a
                 // first-run migration source.
-                Self.persistAndroidLocalSettings(settings, defaults: self.defaults)
-                if let data = try? JSONEncoder().encode(settings) {
+                Self.persistAndroidLocalSettings(restoredSettings, defaults: self.defaults)
+                if let data = try? JSONEncoder().encode(restoredSettings) {
                     self.defaults.set(data, forKey: key)
                 }
             }
+        }
+        // Restore configurations before creating the shared favorites marker;
+        // a favorites-only migration must not hide an older JSON configuration.
+        let favorites = filterFavorites ?? SharedPhotoFilterFavorites(
+            defaults: scope == .localPhotos ? (legacyDefaults ?? defaults) : defaults,
+            legacyLocal: localEffectsDefaults)
+        self.filterFavorites = favorites
+        restoredSettings.favoriteFilterIDs = favorites.values
+        settings = restoredSettings
+        filterFavoritesObservation = favorites.changes.dropFirst().sink { [weak self] keys in
+            guard let self, self.settings.favoriteFilterIDs != keys else { return }
+            var value = self.settings
+            value.favoriteFilterIDs = keys
+            self.settings = value
         }
         // LUT identity belongs to its role store, not the NP3 preference ID.
         // The original defaults argument intentionally keeps the shared photo-LUT
         // directory separate from the local-effects preference suite.
         let roleStore = lutStore ?? PhotoLUTStore(
             role: scope == .cameraTransfer ? .camera : .local, defaults: defaults)
+        observedLUTStore = roleStore
         if photoEffectModuleIsVisible(settings.photoEffectModules, .lut),
            let selection = roleStore.restoreSelection() {
             var restored = settings
             restored.selectedFilter = selection
             restored.photoFilterEnabled = true
             update(restored)
+        }
+        var previousFolder = sourceStore.folder
+        lutFolderObservation = roleStore.folderChanges.sink { [weak self] in
+            guard let self, self.settings.colorEffectModule == .lut else { return }
+            var cleared = self.settings
+            cleared.photoFilterEnabled = false
+            cleared.selectedFilter = cleared.rememberedBuiltinFilter
+            self.update(cleared)
+        }
+        np3FolderObservation = sourceStore.observeFolderChanges { [weak self] in
+            guard let self else { return }
+            let current = self.np3Store.folder
+            let replaced = previousFolder != nil && previousFolder != current
+            previousFolder = current
+            guard replaced else { return }
+            self.filterFavorites.removeCustom()
+            var cleared = self.settings
+            cleared.clearNP3DirectorySettings()
+            self.update(cleared)
+            if self.scope == .cameraTransfer {
+                // The workbench need not be mounted for its stale controls to
+                // disappear. Its live store, if any, receives the same event.
+                Self.clearStoredLocalNP3(defaults: self.localEffectsDefaults)
+            }
+        }
+    }
+
+    func canCommitNP3(_ value: PhotoEffectsSettings, source: String?) -> Bool {
+        if let selected = value.selectedFilter,
+           PhotoNp3RecipeKind.from(id: selected.preset.id) != nil, selected.np3Recipe == nil { return false }
+        return np3Store.isSelectionCurrent(np3Role, preset: value.builtinFilterSelection?.preset, source: source)
+    }
+
+    func savedNP3Source(for value: PhotoEffectsSettings) -> String? {
+        guard let id = value.builtinFilterSelection?.preset.id, np3Store.savedID(np3Role) == id else { return nil }
+        return np3Store.source(np3Role)
+    }
+
+    /// Called at the transfer editor's commit boundary, or immediately by the
+    /// local editor. Remembering detents alone must not call this method.
+    @discardableResult
+    func commitFromEditor(_ value: PhotoEffectsSettings, np3Source: String?) -> Bool {
+        guard canCommitNP3(value, source: np3Source),
+              (try? np3Store.save(np3Role, recipe: value.builtinFilterSelection?.photoRecipe, source: np3Source)) == true else { return false }
+        updateFromEditor(value)
+        return true
+    }
+
+    private static func clearStoredLocalNP3(defaults: UserDefaults) {
+        if let id = defaults.string(forKey: "filter_id"), PhotoFilterPreferences.isCustomKey(PhotoEffectsSettings.filterKey(id)) {
+            defaults.removeObject(forKey: "filter_id")
+            defaults.set(false, forKey: "filter_enabled")
+            defaults.removeObject(forKey: "filter_intensity")
+        }
+        let intensities = PhotoFilterPreferences.decodeIntensities(defaults.string(forKey: "filter_intensities_v1"))
+            .filter { !PhotoFilterPreferences.isCustomKey($0.key) }
+        let adjustments = PhotoFilterPreferences.decodeAdjustments(defaults.string(forKey: "filter_adjustments_v1"))
+            .filter { !PhotoFilterPreferences.isCustomKey($0.key) }
+        defaults.set(PhotoFilterPreferences.encodeIntensities(intensities), forKey: "filter_intensities_v1")
+        defaults.set(PhotoFilterPreferences.encodeAdjustments(adjustments), forKey: "filter_adjustments_v1")
+        let key = "localPhotoEffectsSettings.v1"
+        if let data = defaults.data(forKey: key), var snapshot = try? JSONDecoder().decode(PhotoEffectsSettings.self, from: data) {
+            snapshot.clearNP3DirectorySettings()
+            if let encoded = try? JSONEncoder().encode(snapshot) { defaults.set(encoded, forKey: key) }
         }
     }
 
@@ -1106,6 +1265,9 @@ final class PhotoEffectsStore: ObservableObject {
 
     func update(_ value: PhotoEffectsSettings) {
         var normalized = Self.normalized(value, scope: scope)
+        // Favorite taps write the shared store directly. Closing an old draft,
+        // importing a watermark or saving a local recipe cannot roll them back.
+        normalized.favoriteFilterIDs = filterFavorites.values
         if value.photoGrain != settings.photoGrain || scope == .localPhotos {
             normalized.grainIntensities[normalized.photoGrain.style.rawValue] = normalized.photoGrain.normalizedIntensity
         }
@@ -1147,15 +1309,22 @@ final class PhotoEffectsStore: ObservableObject {
         update(accepted)
     }
 
-    /// Transfer settings persist favorites/metadata immediately, independently
+    /// Transfer settings persist parameter memory and frame preferences immediately, independently
     /// of applying the active effects draft. Use the same permission boundary
     /// as an explicit save, including a refund while the popup is open.
     func persistEditorPreferences(from draft: PhotoEffectsSettings) {
-        let value = settings.persistingEditorPreferences(from: draft)
+        var value = settings.persistingEditorPreferences(from: draft)
+        value.favoriteFilterIDs = filterFavorites.values
         if value != settings { updateFromEditor(value) }
     }
 
     func beginDraft() -> PhotoEffectsSettings { settings }
+
+    func toggleFilterFavorite(_ selection: PhotoFilterSelection) {
+        guard let key = PhotoFilterPreferences.catalogKey(selection.preset.id),
+              !PhotoFilterPreferences.isCustomKey(key) || selection.np3Recipe != nil else { return }
+        filterFavorites.toggle(key)
+    }
 
     func beginWatermarkImageImport() -> UInt64? {
         guard premiumAccess.isPro, !watermarkImageImporting else { return nil }
@@ -1334,8 +1503,17 @@ final class PhotoEffectsStore: ObservableObject {
         result.grainIntensities = normalizedPhotoGrainIntensities(value.grainIntensities)
         if scope == .localPhotos { result.grainIntensities[result.photoGrain.style.rawValue] = result.photoGrain.normalizedIntensity }
         if let remembered = value.rememberedBuiltinFilter {
-            result.rememberedBuiltinFilter = PhotoFilterCatalog.resolve(remembered.preset.id).map {
-                PhotoFilterSelection(preset: $0, intensityPercent: remembered.normalizedIntensityPercent)
+            if remembered.np3Recipe != nil {
+                var normalized = remembered
+                normalized.intensityPercent = remembered.normalizedIntensityPercent
+                normalized.lutAdjustments = remembered.lutAdjustments.normalized
+                result.rememberedBuiltinFilter = normalized
+            }
+            else {
+                result.rememberedBuiltinFilter = PhotoFilterCatalog.resolve(remembered.preset.id).map {
+                    PhotoFilterSelection(preset: $0, intensityPercent: remembered.normalizedIntensityPercent,
+                                         lutAdjustments: remembered.lutAdjustments)
+                }
             }
         }
         result.applyModuleVisibility(value.photoEffectModules)
@@ -1355,17 +1533,24 @@ final class PhotoEffectsStore: ObservableObject {
         watermark.sizePercent = min(max(watermark.sizePercent, PhotoFrameWatermark.sizeRange.lowerBound), PhotoFrameWatermark.sizeRange.upperBound)
         watermark.opacityPercent = min(max(watermark.opacityPercent, PhotoFrameWatermark.opacityRange.lowerBound), PhotoFrameWatermark.opacityRange.upperBound)
         result.watermark = watermark
-        let validFilterKeys = Set(Np3FilterCatalog.presets.map(\.catalogKey))
         result.filterIntensities = value.filterIntensities.reduce(into: [:]) { partial, item in
             let key = Np3FilterCatalog.preset(id: item.key)?.catalogKey ?? item.key
-            guard validFilterKeys.contains(key), partial[key] == nil else { return }
+            guard PhotoFilterPreferences.accepts(key), partial[key] == nil else { return }
             partial[key] = Np3FilterEngine.normalizeIntensity(item.value)
         }
+        result.filterAdjustments = PhotoFilterPreferences.normalizeAdjustments(value.filterAdjustments)
         var seenFilters = Set<String>()
         result.favoriteFilterIDs = value.favoriteFilterIDs.map(PhotoEffectsSettings.filterKey)
-            .filter { validFilterKeys.contains($0) && seenFilters.insert($0).inserted }
+            .filter { PhotoFilterPreferences.accepts($0) && seenFilters.insert($0).inserted }
         if let selected = value.selectedFilter {
-            if selected.preset.id.hasPrefix("cube:"),
+            if selected.np3Recipe != nil {
+                var normalized = selected
+                normalized.intensityPercent = selected.normalizedIntensityPercent
+                normalized.lutAdjustments = selected.lutAdjustments.normalized
+                result.selectedFilter = normalized
+                let key = PhotoEffectsSettings.filterKey(selected.preset.id)
+                if result.filterIntensities[key] == nil { result.filterIntensities[key] = normalized.intensityPercent }
+            } else if selected.preset.id.hasPrefix("cube:"),
                PhotoLUTRuntime.contains(digest: String(selected.preset.id.dropFirst(5))) {
                 // Cube recipes are content-addressed runtime tables, not NP3
                 // catalog entries. Keep their original display name and strength.
@@ -1375,7 +1560,8 @@ final class PhotoEffectsStore: ObservableObject {
                 result.selectedFilter = normalized
             } else if let preset = PhotoFilterCatalog.resolve(selected.preset.id) {
                 let intensity = selected.normalizedIntensityPercent
-                result.selectedFilter = .init(preset: preset, intensityPercent: intensity)
+                result.selectedFilter = .init(preset: preset, intensityPercent: intensity,
+                                              lutAdjustments: selected.lutAdjustments)
                 let key = PhotoEffectsSettings.filterKey(preset.id)
                 if result.filterIntensities[key] == nil {
                     result.filterIntensities[key] = intensity
@@ -1452,7 +1638,15 @@ final class PhotoEffectsStore: ObservableObject {
     /// private JSON blob, which made an existing Android configuration appear
     /// lost after switching platforms.  Read and write the Android keys
     /// directly; the old blob remains as a one-way fallback for upgrades.
-    private static func restoreAndroidTransferSettings(defaults: UserDefaults) -> PhotoEffectsSettings? {
+    private static func restoredFilter(_ id: String, intensity: Int, adjustments: LUTAdjustments,
+                                       recipes: [String: PhotoNp3Recipe]) -> PhotoFilterSelection? {
+        if let preset = PhotoFilterCatalog.resolve(id) {
+            return .init(preset: preset, intensityPercent: intensity, lutAdjustments: adjustments)
+        }
+        return recipes[id].flatMap { try? .init(np3Recipe: $0, intensityPercent: intensity, lutAdjustments: adjustments) }
+    }
+
+    private static func restoreAndroidTransferSettings(defaults: UserDefaults, recipes: [String: PhotoNp3Recipe]) -> PhotoEffectsSettings? {
         // Favorites, per-filter intensities and metadata are committed while
         // the secondary editor is still open on Android. Treat every effect
         // preference as a valid restore marker so an app termination before
@@ -1467,11 +1661,16 @@ final class PhotoEffectsStore: ObservableObject {
             "photo_frame_watermark_opacity", "photo_frame_watermark_effect",
             "photo_filter_enabled", "photo_filter_selected_id", "photo_filter_intensity",
             "photo_filter_intensities_v1", "favorite_photo_filters_v1",
+            PhotoFilterPreferences.adjustmentsKey, PhotoFilterPreferences.appliedAdjustmentsKey,
             "favorite_frame_effects_v1", "photo_effect_modules",
             "photo_grain_style", "photo_grain_enabled", "photo_grain_intensity",
             "photo_grain_intensity_fine", "photo_grain_intensity_medium", "photo_grain_intensity_coarse",
         ]
-        guard markerKeys.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
+        guard markerKeys.contains(where: {
+            // Shared favorites no longer establish a camera-effects recipe.
+            if $0 == PhotoFilterFavorites.key && PhotoFilterFavorites.hasMigrated(defaults) { return false }
+            return defaults.object(forKey: $0) != nil
+        }) else { return nil }
         var value = PhotoEffectsSettings()
         value.photoEffectModules = restorePhotoEffectModules(defaults.object(forKey: "photo_effect_modules") as? Int ?? allPhotoEffectModules,
             grainIntroduced: defaults.bool(forKey: "photo_effect_grain_introduced"))
@@ -1483,11 +1682,13 @@ final class PhotoEffectsStore: ObservableObject {
         value.photoFrameBorderEnabled = defaults.object(forKey: "photo_frame_border_enabled") as? Bool ?? true
         value.photoFramePreset = PhotoFramePreset(rawValue: defaults.string(forKey: "photo_frame_preset") ?? "MIST") ?? .mist
         let storedFilterID = defaults.string(forKey: "photo_filter_selected_id")
-        let restoredPreset = storedFilterID.flatMap(PhotoFilterCatalog.resolve)
+        let restoredPreset = storedFilterID.flatMap { PhotoFilterCatalog.resolve($0) ?? recipes[$0]?.preset }
             ?? PhotoFilterCatalog.presets.first
         var intensities = decodeAndroidIntensities(
             defaults.string(forKey: "photo_filter_intensities_v1")
         )
+        value.filterAdjustments = PhotoFilterPreferences.decodeAdjustments(defaults.string(forKey: PhotoFilterPreferences.adjustmentsKey))
+        let applied = PhotoFilterPreferences.decodeAdjustments(defaults.string(forKey: PhotoFilterPreferences.appliedAdjustmentsKey))
         if let restoredPreset {
             let key = PhotoEffectsSettings.filterKey(restoredPreset.id)
             let legacy = defaults.object(forKey: "photo_filter_intensity") as? Int
@@ -1495,9 +1696,8 @@ final class PhotoEffectsStore: ObservableObject {
                 ?? legacy.map(Np3FilterEngine.normalizeIntensity)
                 ?? Np3FilterEngine.defaultIntensityPercent
             intensities[key] = intensity
-            value.selectedFilter = PhotoFilterSelection(
-                preset: restoredPreset, intensityPercent: intensity
-            )
+            value.selectedFilter = restoredFilter(restoredPreset.id, intensity: intensity,
+                adjustments: applied[key] ?? .init(), recipes: recipes)
         }
         value.filterIntensities = intensities
         value.photoFilterEnabled = storedFilterID == restoredPreset?.id &&
@@ -1541,8 +1741,10 @@ final class PhotoEffectsStore: ObservableObject {
         if let selected = value.builtinFilterSelection { defaults.set(selected.preset.id, forKey: "photo_filter_selected_id") }
         else { defaults.removeObject(forKey: "photo_filter_selected_id") }
         defaults.set(encodeAndroidIntensities(value.filterIntensities), forKey: "photo_filter_intensities_v1")
+        defaults.set(PhotoFilterPreferences.encodeAdjustments(value.filterAdjustments), forKey: PhotoFilterPreferences.adjustmentsKey)
+        let applied = value.builtinFilterSelection.map { [PhotoEffectsSettings.filterKey($0.preset.id): $0.lutAdjustments] } ?? [:]
+        defaults.set(PhotoFilterPreferences.encodeAdjustments(applied), forKey: PhotoFilterPreferences.appliedAdjustmentsKey)
         defaults.removeObject(forKey: "photo_filter_intensity")
-        defaults.set(encodeAndroidFavorites(value.favoriteFilterIDs), forKey: "favorite_photo_filters_v1")
         defaults.set(value.watermark.enabled, forKey: "photo_frame_branding_enabled")
         defaults.set(value.watermark.content.rawValue, forKey: "photo_frame_watermark_content")
         defaults.set(value.watermark.text, forKey: "photo_frame_watermark_text")
@@ -1558,7 +1760,7 @@ final class PhotoEffectsStore: ObservableObject {
         defaults.set(encodeAndroidFrameFavorites(value.favoriteFrameEffects), forKey: "favorite_frame_effects_v1")
     }
 
-    private static func restoreAndroidLocalSettings(defaults: UserDefaults) -> PhotoEffectsSettings? {
+    private static func restoreAndroidLocalSettings(defaults: UserDefaults, recipes: [String: PhotoNp3Recipe]) -> PhotoEffectsSettings? {
         let markers = ["settings_version", "frame_preset", "visible_modules", "grain_style", "grain_enabled", "grain_intensity"]
             + PhotoGrainStyle.allCases.map { "grain_intensity_\($0.rawValue)" }
         guard markers.contains(where: { defaults.object(forKey: $0) != nil }) else { return nil }
@@ -1577,9 +1779,12 @@ final class PhotoEffectsStore: ObservableObject {
         value.photoFilterEnabled = defaults.object(forKey: "filter_enabled") as? Bool ?? false
         let intensities = decodeAndroidIntensities(defaults.string(forKey: "filter_intensities_v1"))
         value.filterIntensities = intensities
-        if let id = defaults.string(forKey: "filter_id"), let preset = PhotoFilterCatalog.resolve(id) {
-            let key = Np3FilterCatalog.preset(id: id)?.catalogKey ?? id
-            value.selectedFilter = PhotoFilterSelection(preset: preset, intensityPercent: intensities[key] ?? (defaults.object(forKey: "filter_intensity") as? Int ?? Np3FilterEngine.defaultIntensityPercent))
+        value.filterAdjustments = PhotoFilterPreferences.decodeAdjustments(defaults.string(forKey: "filter_adjustments_v1"))
+        if let id = defaults.string(forKey: "filter_id") {
+            let key = PhotoEffectsSettings.filterKey(id)
+            value.selectedFilter = restoredFilter(id,
+                intensity: intensities[key] ?? (defaults.object(forKey: "filter_intensity") as? Int ?? Np3FilterEngine.defaultIntensityPercent),
+                adjustments: value.filterAdjustments[key] ?? .init(), recipes: recipes)
         }
         value.favoriteFilterIDs = decodeAndroidFavorites(defaults.string(forKey: "favorite_photo_filters_v1"))
         value.watermark = PhotoFrameWatermark(
@@ -1621,29 +1826,19 @@ final class PhotoEffectsStore: ObservableObject {
         if let selected = value.builtinFilterSelection { defaults.set(selected.preset.id, forKey: "filter_id") } else { defaults.removeObject(forKey: "filter_id") }
         defaults.set(value.photoFilterEnabled && value.colorEffectModule == .filter && value.builtinFilterSelection != nil, forKey: "filter_enabled")
         defaults.set(encodeAndroidIntensities(value.filterIntensities), forKey: "filter_intensities_v1")
+        defaults.set(PhotoFilterPreferences.encodeAdjustments(value.filterAdjustments), forKey: "filter_adjustments_v1")
         defaults.removeObject(forKey: "filter_intensity")
-        defaults.set(encodeAndroidFavorites(value.favoriteFilterIDs), forKey: "favorite_photo_filters_v1")
         defaults.set(encodeAndroidFrameFavorites(value.favoriteFrameEffects), forKey: "favorite_frame_effects_v1")
     }
 
     private static func decodeAndroidFavorites(_ raw: String?) -> [String] {
         raw?.split(separator: ";").map { String($0).split(separator: ",").first.map(String.init) ?? "" }.filter { !$0.isEmpty } ?? []
     }
-    private static func encodeAndroidFavorites(_ ids: [String]) -> String { ids.joined(separator: ";") }
     private static func decodeAndroidIntensities(_ raw: String?) -> [String: Int] {
-        var result: [String: Int] = [:]
-        let validKeys = Set(Np3FilterCatalog.presets.map(\.catalogKey))
-        for entry in (raw ?? "").split(separator: ";") {
-            let f = entry.split(separator: ",", omittingEmptySubsequences: false)
-            guard f.count == 2, let n = Int(f[1]) else { continue }
-            let key = String(f[0])
-            guard validKeys.contains(key), result[key] == nil else { continue }
-            result[key] = Np3FilterEngine.normalizeIntensity(n)
-        }
-        return result
+        PhotoFilterPreferences.decodeIntensities(raw)
     }
     private static func encodeAndroidIntensities(_ values: [String: Int]) -> String {
-        values.keys.sorted().compactMap { key in values[key].map { "\(key),\(Np3FilterEngine.normalizeIntensity($0))" } }.joined(separator: ";")
+        PhotoFilterPreferences.encodeIntensities(values)
     }
     private static func decodeAndroidFrameFavorites(_ raw: String?, watermark: PhotoFrameWatermark) -> [PhotoFrameFavorite] {
         var seen = Set<PhotoFramePreset>()
@@ -1800,40 +1995,17 @@ enum PhotoEffectsJPEGEncoder {
         ]
 
         let tiffSource = sourceProperties?[kCGImagePropertyTIFFDictionary] as? NSDictionary
-        let tiffKeys: [CFString] = [
-            kCGImagePropertyTIFFMake, kCGImagePropertyTIFFModel,
-            kCGImagePropertyTIFFSoftware, kCGImagePropertyTIFFDateTime,
-        ]
-        let tiff = copiedValues(from: tiffSource, keys: tiffKeys)
+        let tiff = PhotoCaptureExif.copiedValues(from: tiffSource, fields: PhotoCaptureExif.tiff)
         if !tiff.isEmpty { properties[kCGImagePropertyTIFFDictionary] = tiff }
 
         let exifSource = sourceProperties?[kCGImagePropertyExifDictionary] as? NSDictionary
-        let exifKeys: [CFString] = [
-            kCGImagePropertyExifDateTimeOriginal, kCGImagePropertyExifDateTimeDigitized,
-            kCGImagePropertyExifExposureTime, kCGImagePropertyExifFNumber,
-            kCGImagePropertyExifISOSpeedRatings, kCGImagePropertyExifFocalLength,
-            kCGImagePropertyExifFocalLenIn35mmFilm, kCGImagePropertyExifLensMake,
-            kCGImagePropertyExifLensModel, kCGImagePropertyExifExposureProgram,
-            kCGImagePropertyExifExposureBiasValue, kCGImagePropertyExifMeteringMode,
-            kCGImagePropertyExifFlash, kCGImagePropertyExifWhiteBalance,
-            kCGImagePropertyExifColorSpace,
-        ]
-        var exif = copiedValues(from: exifSource, keys: exifKeys)
+        var exif = PhotoCaptureExif.copiedValues(from: exifSource, fields: PhotoCaptureExif.exif)
         exif[kCGImagePropertyExifPixelXDimension] = image.width
         exif[kCGImagePropertyExifPixelYDimension] = image.height
         properties[kCGImagePropertyExifDictionary] = exif
 
         let gpsSource = sourceProperties?[kCGImagePropertyGPSDictionary] as? NSDictionary
-        let gpsKeys: [CFString] = [
-            kCGImagePropertyGPSVersion, kCGImagePropertyGPSLatitudeRef,
-            kCGImagePropertyGPSLatitude, kCGImagePropertyGPSLongitudeRef,
-            kCGImagePropertyGPSLongitude, kCGImagePropertyGPSAltitudeRef,
-            kCGImagePropertyGPSAltitude, kCGImagePropertyGPSTimeStamp,
-            kCGImagePropertyGPSDateStamp, kCGImagePropertyGPSProcessingMethod,
-            kCGImagePropertyGPSSpeedRef, kCGImagePropertyGPSSpeed,
-            kCGImagePropertyGPSTrackRef, kCGImagePropertyGPSTrack,
-        ]
-        var gps = copiedValues(from: gpsSource, keys: gpsKeys)
+        var gps = PhotoCaptureExif.copiedValues(from: gpsSource, fields: PhotoCaptureExif.gps)
         if let latitude = cameraMetadata?.latitude,
            let longitude = cameraMetadata?.longitude,
            validPhotoFrameCoordinates(latitude, longitude) {
@@ -1858,13 +2030,4 @@ enum PhotoEffectsJPEGEncoder {
         return data as Data
     }
 
-    private static func copiedValues(
-        from source: NSDictionary?, keys: [CFString]
-    ) -> [CFString: Any] {
-        var result: [CFString: Any] = [:]
-        for key in keys {
-            if let value = source?[key] { result[key] = value }
-        }
-        return result
-    }
 }

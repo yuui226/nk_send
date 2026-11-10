@@ -22,7 +22,7 @@ import UIKit
         draft.setIntensity(64)
         draft.setAdjustments(.init(contrast: 20, saturation: -30))
         XCTAssertEqual(saved.restoreSelection(), original)
-        XCTAssertEqual(defaults.integer(forKey: "lut_adjustments_v1:\(next.digest):intensity"), 64,
+        XCTAssertEqual(defaults.integer(forKey: "lut_adjustments_v2:transfer:\(next.digest):intensity"), 64,
                        "Per-LUT parameter memory is shared immediately, independent of role commit")
         await draft.pruneSnapshots()
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(old.digest).bin").path))
@@ -45,8 +45,8 @@ import UIKit
         XCTAssertNil(cold.restoreSelection())
     }
 
-    func testLUTKeepsRememberedBuiltinFilterAcrossBothScopesAndRestart() throws {
-        let np3 = try XCTUnwrap(PhotoFilterCatalog.presets.dropFirst(3).first)
+    func testLUTKeepsRememberedImportedFilterAcrossBothScopesAndRestart() throws {
+        let np3 = try XCTUnwrap(TestPhotoFilterCatalog.presets.dropFirst(3).first)
         let lut = try CubeLUTParser.parse(Data(("TITLE independent-np3\nLUT_3D_SIZE 2\n"
             + String(repeating: "0 0 0\n", count: 8)).utf8))
         for scope: PhotoEffectsStore.Scope in [.cameraTransfer, .localPhotos] {
@@ -58,14 +58,14 @@ import UIKit
             let store = PhotoLUTStore(role: role, defaults: defaults, directory: directory)
             let effects = PhotoEffectsStore(defaults: defaults, scope: scope, lutStore: store)
             var draft = effects.beginDraft()
-            draft.selectFilter(np3.id)
+            draft.selectTestFilter(np3.id)
             draft.filterIntensities[PhotoEffectsSettings.filterKey(np3.id)] = 62
             draft.selectedFilter?.intensityPercent = 62
             let remembered = draft.selectedFilter
-            draft.selectFilter(nil)
+            draft.selectTestFilter(nil)
             draft.selectedFilter = try store.selectLUT(lut, name: "Cube", sourceIdentifier: "cube.cube")
             draft.photoFilterEnabled = true
-            effects.updateFromEditor(draft)
+            XCTAssertTrue(effects.commitFromEditor(draft, np3Source: nil))
             let key = scope == .cameraTransfer ? "photo_filter_selected_id" : "filter_id"
             XCTAssertEqual(defaults.string(forKey: key), np3.id, "LUT must not overwrite NP3 identity")
             let reopened = PhotoEffectsStore(defaults: defaults, scope: scope, lutStore: store)
@@ -478,7 +478,7 @@ import UIKit
             return prepared
         }, onTimeout: { XCTFail("Unexpected timeout") }, deliver: { result in
             if case .success(let prepared) = result {
-                _ = store.acceptSelection(prepared, name: "Late", sourceIdentifier: "late")
+                _ = try? store.acceptSelection(prepared, name: "Late", sourceIdentifier: "late")
             }
             XCTFail("Cancelled prepared result must not be delivered")
         })
@@ -502,7 +502,7 @@ import UIKit
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(newLUT.digest).bin").path))
         XCTAssertEqual(store.restoreSelection(), old)
         XCTAssertEqual(store.selectedIdentifier, "old")
-        let accepted = store.acceptSelection(prepared, name: "New", sourceIdentifier: "new")
+        let accepted = try store.acceptSelection(prepared, name: "New", sourceIdentifier: "new")
         XCTAssertEqual(store.restoreSelection(), accepted)
         XCTAssertEqual(accepted.preset.id, "cube:\(newLUT.digest)")
     }
@@ -804,7 +804,7 @@ import UIKit
         XCTAssertEqual(androidPhotoFrameOutputName(sourceName: "a.jpg", settings: settings), original)
     }
 
-    func testDigestMemoryMigratesSourceStrengthAndKeepsRoleSnapshotsIndependent() throws {
+    func testDigestMemoryMigratesSourceStrengthAndKeepsRoleParametersIndependent() throws {
         let suite = "lut-adjustment-memory-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -817,9 +817,9 @@ import UIKit
         XCTAssertEqual(try camera.selectLUT(black, name: "A", sourceIdentifier: "original").intensityPercent, 38)
         camera.setAdjustments(.init(contrast: 25, saturation: -30, highlights: 40, shadows: -50))
         let cameraRecipe = try XCTUnwrap(camera.restoreSelection())
-        let shared = try local.selectLUT(black, name: "A copy", sourceIdentifier: "another")
-        XCTAssertEqual(shared.intensityPercent, 38)
-        XCTAssertEqual(shared.lutAdjustments, cameraRecipe.lutAdjustments)
+        let independent = try local.selectLUT(black, name: "A copy", sourceIdentifier: "another")
+        XCTAssertEqual(independent.intensityPercent, 80)
+        XCTAssertTrue(independent.lutAdjustments.isNeutral)
         local.setIntensity(99)
         local.setAdjustments(.init(contrast: -70))
         XCTAssertEqual(camera.restoreSelection(), cameraRecipe)
@@ -946,7 +946,7 @@ import UIKit
     }
 
     func testTurningLUTOffReopensBothEditorsAndPreservesOtherRole() throws {
-        let np3 = try XCTUnwrap(PhotoFilterCatalog.presets.first)
+        let np3 = try XCTUnwrap(TestPhotoFilterCatalog.presets.first)
         for role: PhotoLUTStore.Role in [.camera, .local] {
             let suite = "lut-off-\(UUID().uuidString)"
             let defaults = UserDefaults(suiteName: suite)!
@@ -969,10 +969,10 @@ import UIKit
             XCTAssertNil(PhotoLUTStore(role: role, defaults: defaults).selectedIdentifier)
             XCTAssertEqual(PhotoLUTStore(role: otherRole, defaults: defaults).selectedIdentifier, "other")
             XCTAssertEqual(current.intensityPercent, 64)
-            draft.selectFilter(np3.id)
+            draft.selectTestFilter(np3.id)
             XCTAssertTrue(draft.photoFilterEnabled)
             XCTAssertFalse(PhotoColorEffectEditorVisibility(settings: draft, isPro: true).lut)
-            draft.selectFilter(nil)
+            draft.selectTestFilter(nil)
             XCTAssertTrue(PhotoColorEffectEditorVisibility(settings: draft, isPro: true).lut)
             let remembered = draft.selectedFilter
             disablePhotoLUTDraft(&draft, lutStore: current)
@@ -995,7 +995,7 @@ import UIKit
             other.select("other-recipe")
             var draft = PhotoEffectsSettings()
             draft.photoEffectModules = PhotoEffectModule.lut.rawValue
-            draft.selectFilter(try XCTUnwrap(PhotoFilterCatalog.presets.first).id)
+            draft.selectTestFilter(try XCTUnwrap(TestPhotoFilterCatalog.presets.first).id)
             let rememberedNP3 = draft.selectedFilter
             draft.selectedFilter = .init(preset: .init(id: "cube:\(lut.digest)", name: "Keep name"), intensityPercent: 64)
             draft.photoFilterEnabled = true
@@ -1028,7 +1028,7 @@ import UIKit
     func testColorModuleMasksGatePreviewCommitAndRenderedOutputInBothScopes() throws {
         let lut = try CubeLUTParser.parse(Data(("LUT_3D_SIZE 2\n" + String(repeating: "0 0 0\n", count: 8)).utf8))
         PhotoLUTRuntime.register(lut)
-        let presets = [try XCTUnwrap(PhotoFilterCatalog.presets.first),
+        let presets = [try XCTUnwrap(TestPhotoFilterCatalog.presets.first),
                        PhotoFilterPreset(id: "cube:\(lut.digest)", name: "Black cube")]
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -1046,7 +1046,7 @@ import UIKit
                 var reference = PhotoEffectsSettings()
                 reference.photoFrameEnabled = false
                 reference.photoFilterEnabled = true
-                reference.selectedFilter = .init(preset: preset, intensityPercent: 80)
+                reference.selectedFilter = testPhotoFilterSelection(preset: preset, intensityPercent: 80)
                 let enabledPNG = try XCTUnwrap(PhotoEffectsRenderer.render(source, settings: reference).pngData())
                 reference.photoFilterEnabled = false
                 let disabledPNG = try XCTUnwrap(PhotoEffectsRenderer.render(source, settings: reference).pngData())
@@ -1075,14 +1075,14 @@ import UIKit
     }
 
     func testColorEditorsRespectModulesAndOnlyActiveSelectionsExcludeEachOther() throws {
-        let np3 = try XCTUnwrap(PhotoFilterCatalog.presets.first)
+        let np3 = try XCTUnwrap(TestPhotoFilterCatalog.presets.first)
         let cube = PhotoFilterPreset(id: "cube:" + String(repeating: "a", count: 64), name: "Cube")
         for isPro in [false, true] {
             for mask in 1...15 {
                 for preset in [np3, cube] {
                     var settings = PhotoEffectsSettings()
                     settings.photoEffectModules = mask
-                    settings.selectedFilter = .init(preset: preset, intensityPercent: 80)
+                    settings.selectedFilter = testPhotoFilterSelection(preset: preset, intensityPercent: 80)
                     let hasFilter = mask & PhotoEffectModule.filter.rawValue != 0
                     let hasLUT = mask & PhotoEffectModule.lut.rawValue != 0
                     settings.photoFilterEnabled = false
@@ -1093,7 +1093,7 @@ import UIKit
                     visibility = .init(settings: settings, isPro: isPro)
                     XCTAssertEqual(visibility.filter, hasFilter && preset.id == np3.id)
                     XCTAssertEqual(visibility.lut, hasLUT && preset.id == cube.id)
-                    settings.selectFilter(nil)
+                    settings.selectTestFilter(nil)
                     visibility = .init(settings: settings, isPro: isPro)
                     XCTAssertEqual(visibility.filter, hasFilter)
                     XCTAssertEqual(visibility.lut, hasLUT)
@@ -1121,7 +1121,7 @@ import UIKit
             let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
             return Array(UnsafeBufferPointer(start: bytes, count: 4))
         }
-        let selection = PhotoFilterSelection(
+        let selection = testPhotoFilterSelection(
             preset: PhotoFilterPreset(id: "cube:\(lut.digest)", name: "Original LUT name"),
             intensityPercent: 64)
         for scope: PhotoEffectsStore.Scope in [.cameraTransfer, .localPhotos] {

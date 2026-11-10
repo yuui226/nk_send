@@ -40,6 +40,7 @@ final class NikonPictureControlProtocolTests: XCTestCase {
                 if (19...22).contains(mode) {
                     steps += [.init(0x90CC, [201, 0, bank], reply: dataset()), .init(0x90CC, [201, 1, bank], reply: dataset()),
                               .init(0x1015, [property], reply: staInteger(UInt16(5))),
+                              .init(0x1014, [property], reply: descriptor(movie: movie)),
                               .init(0x1016, [property], outgoing: staInteger(UInt16(201))),
                               .init(0x1015, [property], reply: staInteger(UInt16(201)))]
                 }
@@ -92,6 +93,7 @@ final class NikonPictureControlProtocolTests: XCTestCase {
             .init(0x1015, [0xD200], reply: staInteger(UInt16(5))),
             .init(0x90CD, [209, 0, 0], outgoing: encoded),
             .init(0x90CC, [209, 0, 0], reply: encoded), .init(0x90CC, [209, 1, 0], reply: defaultHeader),
+            .init(0x1014, [0xD200], reply: descriptor()),
             .init(0x1016, [0xD200], outgoing: staInteger(UInt16(209))),
             .init(0x1015, [0xD200], reply: staInteger(UInt16(209)))
         ])
@@ -122,6 +124,7 @@ final class NikonPictureControlProtocolTests: XCTestCase {
             .init(0x90CC, [209, 0, 0], reply: encoded), .init(0x90CC, [209, 1, 0], reply: encoded),
             .init(0x90CD, [209, 0, 0], outgoing: previous),
             .init(0x90CC, [209, 0, 0], reply: previous), .init(0x90CC, [209, 1, 0], reply: previous),
+            .init(0x1014, [0xD200], reply: descriptor()),
             .init(0x1016, [0xD200], outgoing: staInteger(UInt16(5))),
             .init(0x1015, [0xD200], reply: staInteger(UInt16(5)))
         ])

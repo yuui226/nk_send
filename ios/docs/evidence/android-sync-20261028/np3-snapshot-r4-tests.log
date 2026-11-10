@@ -1,0 +1,284 @@
+Test Suite 'Selected tests' started at 2026-10-30 20:08:01.858.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 20:08:01.859.
+Test Suite 'Np3AndroidGoldenTests' started at 2026-10-30 20:08:01.859.
+Test Case '-[ZTransferTests.Np3AndroidGoldenTests testAllFiftyPresetsMatchAndroidPixelOracle]' started.
+Test Case '-[ZTransferTests.Np3AndroidGoldenTests testAllFiftyPresetsMatchAndroidPixelOracle]' passed (0.013 seconds).
+Test Suite 'Np3AndroidGoldenTests' passed at 2026-10-30 20:08:01.874.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.013 (0.014) seconds
+Test Suite 'PhotoEffectsBatchTests' started at 2026-10-30 20:08:01.874.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testBatchBoundsConcurrencyAndSettlesEverySourceIncludingFailures]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testCancellationPropagatesInsteadOfCountingAsAnOutputFailure]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testDisabledDecorationDoesNotEnableGenerationThroughItsRememberedWatermark]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testEmptySelectionReportsZeroOnce]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureClassificationUsesUnderlyingErrorPriorityAndBoundedChain]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testFailureDetailsAreBoundedRetainedAndClearedForNextBatch]' passed (0.004 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testPartialProgressCountsFailuresAndStaleResultsCannotReplaceANewSelection]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testSelectionPreservesOrderAndRejectsCancelledPickerOrReplacementWhileGenerating]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testStoredLegacyFilterSlugsMigrateToAndroidIdentityAndInvalidFiltersAreDisabled]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testTerminalStatesAndLifecycleCancellation]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings]' started.
+Test Case '-[ZTransferTests.PhotoEffectsBatchTests testWorkbenchPreferencesAreIndependentFromCameraTransferSettings]' passed (0.024 seconds).
+Test Suite 'PhotoEffectsBatchTests' passed at 2026-10-30 20:08:01.968.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.090 (0.094) seconds
+Test Suite 'PhotoNp3ParserTests' started at 2026-10-30 20:08:01.968.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllGradingRegionsAndMasksSurviveAndInactiveGradingCanonicalizes]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllGradingRegionsAndMasksSurviveAndInactiveGradingCanonicalizes]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllRequiredFieldsRejectMissingAndWrongLength]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllRequiredFieldsRejectMissingAndWrongLength]' passed (0.027 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllSixControlsAndEightBandsAreReadWithoutClamping]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testAllSixControlsAndEightBandsAreReadWithoutClamping]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testBoundedReaderAcceptsShortChunksAndStopsAtOneOverflowByte]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testBoundedReaderAcceptsShortChunksAndStopsAtOneOverflowByte]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicInvalidAndUnsupportedControlsAreNotSilentlyDropped]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicInvalidAndUnsupportedControlsAreNotSilentlyDropped]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicMonochromeAndFixedCreativeTonesKeepIndependentDensity]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicMonochromeAndFixedCreativeTonesKeepIndependentDensity]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicQuarterStepsAndAutoRetainTheirExactMeaning]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testClassicQuarterStepsAndAutoRetainTheirExactMeaning]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testCurveEditingMetadataIsNotDoubleAppliedAndReservedLayoutIsRejected]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testCurveEditingMetadataIsNotDoubleAppliedAndReservedLayoutIsRejected]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryKnownClassicStyleAnd0310ContainerIsRoutedByBase]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryKnownClassicStyleAnd0310ContainerIsRoutedByBase]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryTruncationAndMalformedContainerIsInvalid]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testEveryTruncationAndMalformedContainerIsInvalid]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testIndependentFlexibleSamplesPreserveIdentityCommentsAndCurve]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testIndependentFlexibleSamplesPreserveIdentityCommentsAndCurve]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testLegacyParameterDecodingDefaultsGradingAndRejectsUnsafeShapes]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testLegacyParameterDecodingDefaultsGradingAndRejectsUnsafeShapes]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testNamesPreserveASCIIAndRejectMalformedOrUnsupportedEncoding]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testNamesPreserveASCIIAndRejectMalformedOrUnsupportedEncoding]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testOutOfRangeColorDetailAndGradingValuesAreNotClamped]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testOutOfRangeColorDetailAndGradingValuesAreNotClamped]' passed (0.027 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testQuickAndDetailControlsAreValidatedWithoutSecondSharpeningPass]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testQuickAndDetailControlsAreValidatedWithoutSecondSharpeningPass]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testReaderCancellationStallAndProviderFailureRemainDistinct]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testReaderCancellationStallAndProviderFailureRemainDistinct]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testRealFileHandleUsesTheSameReadLimitAndDoesNotRetainSource]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testRealFileHandleUsesTheSameReadLimitAndDoesNotRetainSource]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testSixPairedClassicCameraExportsRetainEveryCurveSampleAndSourceName]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testSixPairedClassicCameraExportsRetainEveryCurveSampleAndSourceName]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testTLVOrderDoesNotChangeParametersAndSourceBytesCannotMutateRecipe]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testTLVOrderDoesNotChangeParametersAndSourceBytesCannotMutateRecipe]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testUnknownVersionsFieldsAndEncodingsRemainUnsupported]' started.
+Test Case '-[ZTransferTests.PhotoNp3ParserTests testUnknownVersionsFieldsAndEncodingsRemainUnsupported]' passed (0.005 seconds).
+Test Suite 'PhotoNp3ParserTests' passed at 2026-10-30 20:08:02.121.
+	 Executed 20 tests, with 0 failures (0 unexpected) in 0.146 (0.153) seconds
+Test Suite 'PhotoNp3RenderingTests' started at 2026-10-30 20:08:02.122.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testAll1648ConfigurationsMatchCurrentAndroidByteForByte]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testAll1648ConfigurationsMatchCurrentAndroidByteForByte]' passed (0.826 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testApplicationFilterPathActuallyAppliesFinishing]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testApplicationFilterPathActuallyAppliesFinishing]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCancellationStopsBothNewPixelPathsAtBoundedBatch]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCancellationStopsBothNewPixelPathsAtBoundedBatch]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testClassicAutomaticAndCurveOwnership]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testClassicAutomaticAndCurveOwnership]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCreativeEffectZeroPreservesDevelopedSource]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testCreativeEffectZeroPreservesDevelopedSource]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testEachGradingRegionBrightnessWorksWithoutTint]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testEachGradingRegionBrightnessWorksWithoutTint]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testFinishingIsOnceAfterStrengthAndKeepsTransparentPixels]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testFinishingIsOnceAfterStrengthAndKeepsTransparentPixels]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testGradingRegionsBalanceBlendAndHueWrap]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testGradingRegionsBalanceBlendAndHueWrap]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testNeutralGradingHasNoCompiledTables]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testNeutralGradingHasNoCompiledTables]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTintPreservesLuminanceAndGrayRampHasNoBandJumps]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTintPreservesLuminanceAndGrayRampHasNoBandJumps]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTypedBitmapSerialAndPreviewMatchAndPreserveSource]' started.
+Test Case '-[ZTransferTests.PhotoNp3RenderingTests testTypedBitmapSerialAndPreviewMatchAndPreserveSource]' passed (0.833 seconds).
+Test Suite 'PhotoNp3RenderingTests' passed at 2026-10-30 20:08:03.848.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 1.723 (1.726) seconds
+Test Suite 'PhotoNp3SnapshotCodecTests' started at 2026-10-30 20:08:03.848.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testAll69AndroidSnapshotsMatchBothDirectionsIncludingModifiedUTF]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testAll69AndroidSnapshotsMatchBothDirectionsIncludingModifiedUTF]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testChecksummedMalformedControlsCurvesAndGradingCannotReachRenderer]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testChecksummedMalformedControlsCurvesAndGradingCannotReachRenderer]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testClassicKindsIDsAndBaseCannotBeSubstituted]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testClassicKindsIDsAndBaseCannotBeSubstituted]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testEveryTruncationBitCorruptionAndOversizeIsRejected]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testEveryTruncationBitCorruptionAndOversizeIsRejected]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testInvalidPrivateSnapshotDoesNotDiscardOtherSettings]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testInvalidPrivateSnapshotDoesNotDiscardOtherSettings]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testNamesRejectBlankControlsAndUTF16OverLimit]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testNamesRejectBlankControlsAndUTF16OverLimit]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testOriginalFlexibleV1HashRemainsExactAndInactiveMetadataUsesV3]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testOriginalFlexibleV1HashRemainsExactAndInactiveMetadataUsesV3]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testRestoredPrivateRecipeActuallyRendersWithoutSourceFile]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testRestoredPrivateRecipeActuallyRendersWithoutSourceFile]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testSelectionCodableOwnsRecipeAndRetainsRenderingIdentity]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testSelectionCodableOwnsRecipeAndRetainsRenderingIdentity]' passed (0.003 seconds).
+Test Suite 'PhotoNp3SnapshotCodecTests' passed at 2026-10-30 20:08:03.906.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.055 (0.058) seconds
+Test Suite 'PhotoNp3StoreTests' started at 2026-10-30 20:08:03.906.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testCorruptMismatchedOversizedSnapshotsAndLabelsFailIndependently]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testCorruptMismatchedOversizedSnapshotsAndLabelsFailIndependently]' passed (0.033 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testDirectoryReplacementInvalidatesCustomDraftsButRetainsQueuedValueAndBuiltin]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testDirectoryReplacementInvalidatesCustomDraftsButRetainsQueuedValueAndBuiltin]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testFolderNotificationsAreSharedDeduplicatedAndCancelled]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testFolderNotificationsAreSharedDeduplicatedAndCancelled]' passed (0.038 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testNormalizationRetainsPrivateRecipeAndFinishingWithoutMergingRoles]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testNormalizationRetainsPrivateRecipeAndFinishingWithoutMergingRoles]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRenamingUpdatesOnlyLabelAndDuplicateLabelsMatchCatalogOrder]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRenamingUpdatesOnlyLabelAndDuplicateLabelsMatchCatalogOrder]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRolesRestorePrivateRecipesWithoutSourceAndDisableIsIndependent]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRolesRestorePrivateRecipesWithoutSourceAndDisableIsIndependent]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testSourceHintsSurviveOffRefreshOnlyAfterReadAndAreIndependentSnapshots]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testSourceHintsSurviveOffRefreshOnlyAfterReadAndAreIndependentSnapshots]' passed (0.006 seconds).
+Test Suite 'PhotoNp3StoreTests' passed at 2026-10-30 20:08:04.036.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.128 (0.130) seconds
+Test Suite 'TransferQueueScenarioTests' started at 2026-10-30 20:08:04.037.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder]' passed (0.027 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade]' passed (0.077 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure]' passed (0.219 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication]' passed (0.033 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal]' started.
+2026-10-30 20:08:04.631629+0800 ZTransfer[86660:36629490] [connection] [C1 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal]' passed (0.187 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication]' passed (0.088 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne]' passed (0.031 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication]' passed (0.031 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired]' passed (0.065 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders]' passed (0.037 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused]' passed (0.271 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges]' started.
+2026-10-30 20:08:05.781789+0800 ZTransfer[86660:36629500] [connection] nw_socket_handle_socket_event [C3:1] Socket SO_ERROR [61: Connection refused]
+2026-10-30 20:08:05.782087+0800 ZTransfer[86660:36629500] [connection] nw_endpoint_flow_failed_with_error [C3 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges]' passed (0.234 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe]' passed (0.043 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt]' passed (0.038 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPrivateNP3RecipeSurvivesSourceReplacementAndFailureRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPrivateNP3RecipeSurvivesSourceReplacementAndFailureRetry]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction]' passed (0.037 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval]' passed (0.032 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart]' passed (0.054 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart]' passed (0.046 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving]' passed (0.023 seconds).
+Test Suite 'TransferQueueScenarioTests' passed at 2026-10-30 20:08:06.348.
+	 Executed 62 tests, with 0 failures (0 unexpected) in 2.292 (2.311) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 20:08:06.348.
+	 Executed 121 tests, with 0 failures (0 unexpected) in 4.447 (4.489) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 20:08:06.348.
+	 Executed 121 tests, with 0 failures (0 unexpected) in 4.447 (4.490) seconds
+2026-10-30 20:08:06.378 xcodebuild[86402:36626729] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:08:06.379 xcodebuild[86402:36626729] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:08:06.663 xcodebuild[86402:36626729] [MT] IDETestOperationsObserverDebug: 25.243 elapsed -- Testing started completed.
+2026-10-30 20:08:06.663 xcodebuild[86402:36626729] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-30 20:08:06.663 xcodebuild[86402:36626729] [MT] IDETestOperationsObserverDebug: 25.243 sec, +25.243 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-np3-snapshot-20261030-r4.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

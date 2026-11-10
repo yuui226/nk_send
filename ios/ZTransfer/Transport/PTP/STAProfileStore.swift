@@ -21,7 +21,7 @@ struct STACameraProfile: Equatable, Sendable {
 final class STAProfileStore: @unchecked Sendable {
     private let preferences: UserDefaults
     private let pairing: UserDefaults
-    private let lock = NSRecursiveLock()
+    private static let pairingStateLock = NSRecursiveLock()
     private let now: @Sendable () -> Double
     private static let marker = "sta_paired_"
     private static let verifiedMarker = "sta_pairing_verified_v2_"
@@ -33,7 +33,7 @@ final class STAProfileStore: @unchecked Sendable {
          pairing: UserDefaults = UserDefaults(suiteName: "ptpip_identity")!,
          now: @escaping @Sendable () -> Double = { Date().timeIntervalSince1970 * 1000 }) {
         self.preferences = preferences; self.pairing = pairing; self.now = now
-        migrate()
+        locked { migrate() }
     }
 
     static func normalizeGUID(_ value: String?) -> String? {
@@ -70,7 +70,8 @@ final class STAProfileStore: @unchecked Sendable {
         locked { isPaired(guid) && !hasTrustedPairing(guid) }
     }
 
-    /// Only the successful post-reconnect DeviceInfo/album validation may call this.
+    /// Fresh pairing requires its valid monitor frame; legacy markers require
+    /// DeviceInfo/album verification. Call only after the relevant proof succeeds.
     func confirmVerifiedPairing(_ guid: String?) {
         locked {
             guard let guid = Self.normalizeGUID(guid) else { return }
@@ -88,6 +89,15 @@ final class STAProfileStore: @unchecked Sendable {
             pairing.removeObject(forKey: Self.verifiedMarker + guid)
             pairing.synchronize()
         }
+    }
+
+    /// Reset and final writes share a process-wide lock, including separate
+    /// store instances. Recheck cancellation inside it, never before waiting.
+    func confirmVerifiedPairingUnlessCancelled(_ guid: String?) throws {
+        try locked { try Task.checkCancellation(); confirmVerifiedPairing(guid) }
+    }
+    func invalidatePairingUnlessCancelled(_ guid: String?) throws {
+        try locked { try Task.checkCancellation(); invalidatePairing(guid) }
     }
 
     func markPaired(_ guid: String?) {
@@ -146,6 +156,13 @@ final class STAProfileStore: @unchecked Sendable {
                 if let model = nonblank(model) { preferences.set(model, forKey: key(guid, "device_model")) }
             } else { preferences.removeObject(forKey: "last_sta_responder_guid_v1") }
             preferences.synchronize()
+        }
+    }
+
+    func rememberUnlessCancelled(guid: String?, ip: String, identity: STAInitiatorIdentity, model: String? = nil) throws {
+        try locked {
+            try Task.checkCancellation()
+            remember(guid: guid, ip: ip, identity: identity, model: model)
         }
     }
 
@@ -210,7 +227,7 @@ final class STAProfileStore: @unchecked Sendable {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
         return value
     }
-    private func locked<T>(_ operation: () -> T) -> T {
-        lock.lock(); defer { lock.unlock() }; return operation()
+    private func locked<T>(_ operation: () throws -> T) rethrows -> T {
+        Self.pairingStateLock.lock(); defer { Self.pairingStateLock.unlock() }; return try operation()
     }
 }

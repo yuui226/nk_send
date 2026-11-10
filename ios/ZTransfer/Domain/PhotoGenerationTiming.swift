@@ -13,8 +13,9 @@ enum PhotoGenerationClock {
 
 extension TransferQueueItem {
     /// Android TransferTask.queue/start/pause/finishFrameGeneration.
-    mutating func queueFrameGeneration() {
+    mutating func queueFrameGeneration(pendingCheck: Bool = false) {
         isGeneratingFrame = true
+        frameGenerationPendingCheck = pendingCheck
         frameGenerationSkipped = false
         frameError = nil
         frameGenerationStartedAtElapsedMs = nil
@@ -23,6 +24,7 @@ extension TransferQueueItem {
     }
     mutating func startFrameGeneration(now: Int64) {
         isGeneratingFrame = true
+        frameGenerationPendingCheck = false
         frameGenerationSkipped = false
         frameError = nil
         frameGenerationStartedAtElapsedMs = now
@@ -32,6 +34,7 @@ extension TransferQueueItem {
         frameError = nil
         frameGenerationSkipped = effects?.hasEffect == true
         isGeneratingFrame = false
+        frameGenerationPendingCheck = false
         frameGenerationStartedAtElapsedMs = nil
         frameGenerationElapsedMs = nil
     }
@@ -47,6 +50,7 @@ extension TransferQueueItem {
             frameGenerationAccumulatedMs + max(0, now - $0)
         } ?? (frameGenerationAccumulatedMs > 0 ? frameGenerationAccumulatedMs : nil)
         isGeneratingFrame = false
+        frameGenerationPendingCheck = false
         frameGenerationStartedAtElapsedMs = nil
         frameGenerationElapsedMs = savedOutput ? elapsed : nil
     }
@@ -55,4 +59,20 @@ extension TransferQueueItem {
         // A paused crop waiting for metadata hides the stopwatch, just as on Android.
         return frameGenerationStartedAtElapsedMs.map { frameGenerationAccumulatedMs + max(0, now - $0) }
     }
+}
+
+/// Android canConfirmPhotoGeneration: this only proves missing output for
+/// display admission. Exact recipe matching remains in the serial worker.
+func canConfirmPhotoGeneration(sourceName: String, knownOutputNames: Set<String>?,
+                               sameSourceInProgress: Bool, cropRequested: Bool, hasSavedCrop: Bool) -> Bool {
+    if cropRequested { return !hasSavedCrop }
+    guard !sameSourceInProgress, let knownOutputNames else { return false }
+    let prefix = (sourceName as NSString).deletingPathExtension.lowercased() + "_"
+    return !knownOutputNames.contains { $0.lowercased().hasPrefix(prefix) }
+}
+
+/// Android clearQueueTargetIds. Busy includes preflight, queued and running
+/// generation. Download completion during an exit must not enlarge this set.
+func clearQueueTargetIDs(_ items: [TransferQueueItem]) -> Set<UUID> {
+    Set(items.lazy.filter { $0.status != .transferring && !$0.isGeneratingFrame }.map(\.id))
 }

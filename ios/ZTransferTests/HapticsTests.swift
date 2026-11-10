@@ -5,6 +5,28 @@ import UIKit
 
 @MainActor
 final class HapticsTests: XCTestCase {
+    func testWheelHoldConfirmsOnlyOnRecognitionAndSuppressesNestedFeedback() {
+        let suite = "wheel-hold-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var events: [HapticFeedbackEvent] = []
+        let haptics = ZTransferHaptics(defaults: defaults) { events.append($0) }
+        var actions = 0
+        haptics.confirmLongPress {
+            actions += 1
+            haptics.play(.navigation)
+            haptics.confirmLongPress { actions += 1 }
+        }
+        XCTAssertEqual(events, [.feedback(.holdConfirmed)])
+        XCTAssertEqual(actions, 2)
+        haptics.play(.selection)
+        XCTAssertEqual(events, [.feedback(.holdConfirmed), .feedback(.selection)])
+        defaults.set(false, forKey: HapticPreference.key)
+        haptics.confirmLongPress { actions += 1 }
+        XCTAssertEqual(actions, 3)
+        XCTAssertEqual(events.count, 2, "Disabling haptics leaves the action usable")
+    }
+
     func testControlOwnedLongPressCompletesCancelsAndDoesNotSuppressNextAction() {
         let suite = "long-press-owner-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!

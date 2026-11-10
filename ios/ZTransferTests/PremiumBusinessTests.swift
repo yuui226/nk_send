@@ -141,7 +141,7 @@ final class PremiumBusinessTests: XCTestCase {
         for mode in 0..<4 {
             var settings = PhotoEffectsSettings()
             settings.photoFilterEnabled = true
-            settings.selectedFilter = .init(preset: settings.orderedFilters[0], intensityPercent: 80)
+            settings.selectedFilter = testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80)
             settings.photoFrameEnabled = mode != 0
             settings.photoFrameBorderEnabled = mode >= 2
             settings.photoFramePreset = mode == 2 ? .immersive : .minimal
@@ -195,7 +195,7 @@ final class PremiumBusinessTests: XCTestCase {
             exposureCompensation: nil, dateTime: nil, latitude: 30, longitude: 120,
             altitude: nil, city: "Stale city", region: "Stale region")
         let backend = QueuePlaceQueryCounter()
-        let resolver = PhotoFramePlaceResolver { _, _, _ in await backend.query() }
+        let resolver = PhotoFramePlaceResolver { _, _, _ in PhotoPlaceLookupResult(await backend.query()) }
         var renderedImages: [Data] = []
         for (allowed, expectedCalls) in [(false, 0), (true, 1), (false, 1)] {
             let output = try await TransferQueue.renderFrameFile(source: source, settings: settings,
@@ -264,9 +264,9 @@ final class PremiumBusinessTests: XCTestCase {
                 initial.watermark.enabled = true
                 initial.watermark.text = "Preserve my parameters"
                 initial.photoFrameBorderEnabled = true
-                initial.selectedFilter = .init(preset: try XCTUnwrap(PhotoFilterCatalog.presets.first), intensityPercent: 64)
+                initial.selectedFilter = testPhotoFilterSelection(preset: try XCTUnwrap(TestPhotoFilterCatalog.presets.first), intensityPercent: 64)
                 initial.photoFilterEnabled = true
-                store.update(initial)
+                XCTAssertTrue(store.commitFromEditor(initial, np3Source: nil))
                 if !isPro { access.replace(with: .free) }
                 var draft = store.beginDraft()
                 draft.applyModuleVisibility(PhotoEffectModule.lut.rawValue, isPro: isPro)
@@ -280,7 +280,7 @@ final class PremiumBusinessTests: XCTestCase {
                 XCTAssertFalse(store.settings.photoFilterEnabled)
                 XCTAssertEqual(store.settings.watermark.text, initial.watermark.text)
                 draft.applyModuleVisibility(allPhotoEffectModules, isPro: isPro)
-                store.updateFromEditor(draft)
+                XCTAssertTrue(store.commitFromEditor(draft, np3Source: nil))
                 let restored = PhotoEffectsStore(defaults: defaults, scope: scope, premiumAccess: access).settings
                 XCTAssertFalse(restored.photoFilterEnabled)
                 XCTAssertFalse(restored.photoFrameBorderEnabled)
@@ -599,8 +599,8 @@ final class PremiumBusinessTests: XCTestCase {
         draft.watermark.text = "Late text edit"
         draft.favoriteFrameEffects[0].watermark.sizePercent = 30
         draft.favoriteFrameEffects[0].watermark.opacityPercent = 10
-        let filter = try XCTUnwrap(Np3FilterCatalog.presets.first)
-        draft.toggleFilterFavorite(filter.id)
+        let filter = try XCTUnwrap(TestPhotoFilterCatalog.np3Presets.first)
+        store.toggleFilterFavorite(testPhotoFilterSelection(preset: .init(id: filter.id, name: filter.name), intensityPercent: 80))
         access.replace(with: .free)
         store.persistEditorPreferences(from: draft)
         XCTAssertEqual(store.settings.watermark, saved.watermark)
@@ -1003,7 +1003,12 @@ final class PremiumBusinessTests: XCTestCase {
     private func renderedJPEG(source: URL, settings: PhotoEffectsSettings) throws -> Data {
         let input = try XCTUnwrap(UIImage(contentsOfFile: source.path))
         let image = try PhotoEffectsRenderer.render(input, settings: settings)
-        return try XCTUnwrap(PhotoEffectsJPEGEncoder.encode(image, copyingMetadataFrom: source))
+        let jpeg = try XCTUnwrap(PhotoEffectsJPEGEncoder.encode(image, copyingMetadataFrom: source))
+        // N12 adds an APP15 identity to exported files for effect deduplication.
+        // Keep the exact-byte assertion, including the captured recipe's tag.
+        return try XCTUnwrap(PhotoEffectIdentityJPEG.inserting(
+            photoEffectOutputIdentity(sourceName: source.lastPathComponent, settings: settings,
+                                      renderedPlace: nil), into: jpeg))
     }
 
     private func attachJPEG(_ data: Data, name: String) {

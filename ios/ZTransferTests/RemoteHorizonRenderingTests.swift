@@ -4,11 +4,14 @@ import XCTest
 
 @MainActor
 final class RemoteHorizonRenderingTests: XCTestCase {
-    private final class Inputs: ObservableObject { @Published var roll: Float = 0 }
+    private final class Inputs: ObservableObject {
+        @Published var roll: Float = 0
+        @Published var pitch: Float?
+    }
     private struct LiveOverlay: View {
         @ObservedObject var inputs: Inputs
         var body: some View {
-            RemoteHorizonOverlay(roll: inputs.roll, pitch: nil).equatable()
+            RemoteHorizonOverlay(roll: inputs.roll, pitch: inputs.pitch).equatable()
                 .frame(width: 400, height: 300).background(.black).ignoresSafeArea()
         }
     }
@@ -46,6 +49,15 @@ final class RemoteHorizonRenderingTests: XCTestCase {
         XCTAssertGreaterThan(green(horizontal, x: 230, y: 150), 100)
         XCTAssertLessThan(green(vertical, x: 230, y: 150), 20)
         XCTAssertGreaterThan(green(vertical, x: 200, y: 180), 100)
+        input.roll = 0
+        try await Task.sleep(for: .milliseconds(300))
+        let beforePitch = try pixels()
+        input.pitch = 20
+        try await Task.sleep(for: .milliseconds(300))
+        let afterPitch = try pixels()
+        XCTAssertLessThan([113, 187].map { green(beforePitch, x: 220, y: $0) }.max() ?? 0, 20)
+        XCTAssertGreaterThan([113, 187].map { green(afterPitch, x: 220, y: $0) }.max() ?? 0, 100,
+                             "A pitch-only change must reach the equatable overlay and draw its own chord")
     }
 
     private func raster(roll: Float, pitch: Float?, size: CGSize = CGSize(width: 400, height: 300)) throws -> (Int, Int, [UInt8]) {

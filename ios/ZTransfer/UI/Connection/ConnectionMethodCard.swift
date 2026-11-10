@@ -27,73 +27,31 @@ enum STAConnectButtonState: Int {
     }
 }
 
-/// Android HomeScreen.kt's Wi-Fi feedback has priority over the steps inside
-/// one reserved slot. AP probing is .connecting in ConnectionViewModel;
-/// STA search/pair/connect changes only its action label, never this feedback.
+/// User-directed difference (2026-11-06): AP discovery/retry stays silent so
+/// its setup steps remain visible. STA retains its explicit failure feedback;
+/// search/pair/connect progress only changes the STA action label.
 enum ConnectionCardWirelessFeedback: Hashable {
-    case probing, notFound, refused, failed, reconnecting, staFailure(String)
+    case staFailure(String)
 
-    static let probingDelay: Duration = .milliseconds(350)
-
-    static func isAPProbing(_ state: ConnectionState) -> Bool {
-        state.wirelessMode == .ap && state.usbPhase != .connected && state.wifiPhase == .connecting
-    }
-
-    static func resolve(_ state: ConnectionState, mode: WirelessMode,
-                        showAPProbing: Bool) -> Self? {
-        guard state.wirelessMode == mode else { return nil }
-        if mode == .sta {
-            if case let .failed(message) = state.wifiPhase { return .staFailure(message) }
-            return nil
-        }
-        // USB owns the connection once verified; a late network callback must
-        // not flash AP feedback while the Wi-Fi card is leaving the scene.
-        guard state.usbPhase != .connected else { return nil }
-        switch state.wifiPhase {
-        case .connecting: return showAPProbing ? .probing : nil
-        case .reconnecting: return .reconnecting
-        case .failed:
-            switch state.wifiFailureKind {
-            case .notFound: return .notFound
-            case .refused: return .refused
-            case .failed, .none: return .failed
-            }
-        default: return nil
-        }
+    static func resolve(_ state: ConnectionState, mode: WirelessMode) -> Self? {
+        guard mode == .sta, state.wirelessMode == mode,
+              case let .failed(message) = state.wifiPhase else { return nil }
+        return .staFailure(message)
     }
 
     var title: String {
-        let key = switch self {
-        case .probing: "wifi_identifying_camera"
-        case .notFound: "wifi_camera_not_found"
-        case .refused: "wifi_camera_refused"
-        case .failed: "wifi_camera_connection_failed"
-        case .reconnecting: "wifi_connection_interrupted"
-        case .staFailure: "sta_camera_not_found_short"
-        }
-        return AppLocalized.resource(key)
+        AppLocalized.resource("connection_failed_short")
     }
 
     var message: String? {
         switch self {
-        case .probing: nil
-        case .notFound: AppLocalized.resource("wifi_connect_camera")
-        case .refused: AppLocalized.resource("wifi_check_camera_connection")
-        case .failed: AppLocalized.resource("wifi_restart_camera")
-        case .reconnecting: AppLocalized.resource("wifi_reconnecting")
         case let .staFailure(message): message
         }
     }
 
     var accent: Color {
-        switch self {
-        case .probing: ZTransferColors.accentBlue
-        case .staFailure: ZTransferColors.statusError
-        default: ZTransferColors.accentOrange
-        }
+        ZTransferColors.statusError
     }
-
-    var busy: Bool { self == .probing || self == .reconnecting }
 }
 
 struct ConnectionMethodCard: View {
@@ -124,13 +82,9 @@ struct ConnectionMethodCard: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var tipRects: [TipPopupTrigger: CGRect] = [:]
     @State private var cardWindowFrame = CGRect.zero
-    @State private var showAPProbing = false
 
     private var accent: Color { mode == .usb ? ZTransferColors.accentOrange : ZTransferColors.accentBlue }
     private var isSTA: Bool { state.wirelessMode == .sta }
-    private var isAPProbing: Bool {
-        mode == .wifi && scenePhase == .active && ConnectionCardWirelessFeedback.isAPProbing(state)
-    }
     private var buttonSkin: ZTransferButtonSkin { .init(storedValue: skinPreset) }
     private var materialForeground: Color {
         zTransferButtonForeground(skin: buttonSkin, scheme: colorScheme)
@@ -163,6 +117,13 @@ struct ConnectionMethodCard: View {
                 cardSurface
             }
             celebrationLayer
+            // HomeScreen.ConnectionMethodCard puts the GPS wash above both
+            // the surface and the independent flying badge (Android zIndex 5).
+            // Keep it inside the shared motion host so all card elements dim
+            // together without flattening the native glass or clipping shadows.
+            RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius)
+                .fill(ZTransferColors.background.opacity(dimmed ? 0.28 : 0))
+                .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -178,14 +139,6 @@ struct ConnectionMethodCard: View {
         }
         .zIndex(selected ? 3 : 0)
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.32), value: dimmed)
-        .task(id: isAPProbing) {
-            showAPProbing = false
-            guard isAPProbing else { return }
-            do { try await Task.sleep(for: ConnectionCardWirelessFeedback.probingDelay) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            showAPProbing = true
-        }
     }
 
     private var cardSurface: some View {
@@ -254,12 +207,9 @@ struct ConnectionMethodCard: View {
         .frame(maxWidth: .infinity)
         .frame(height: height)
         .background(connectionCardBackground)
-        .overlay {
-            // Android dims with a background wash, not by making text transparent.
-            RoundedRectangle(cornerRadius: ConnectionLayout.cardRadius)
-                .fill(ZTransferColors.background.opacity(dimmed ? 0.28 : 0))
-                .allowsHitTesting(false)
-        }
+        // Hit-test blocking alone does not propagate the disabled appearance
+        // or accessibility state to native glass buttons, including help.
+        .disabled(dimmed)
         .allowsHitTesting(!dimmed)
     }
 
@@ -410,8 +360,7 @@ struct ConnectionMethodCard: View {
     }
 
     private func wirelessModeContent(_ wirelessMode: WirelessMode) -> some View {
-        let feedback = ConnectionCardWirelessFeedback.resolve(
-            state, mode: wirelessMode, showAPProbing: showAPProbing)
+        let feedback = ConnectionCardWirelessFeedback.resolve(state, mode: wirelessMode)
         return VStack(alignment: .leading, spacing: 0) {
             // Android's weight(1f) slot must consume only the space left by the
             // header/tabs/footer. A flexible frame alone still propagates the
@@ -420,9 +369,11 @@ struct ConnectionMethodCard: View {
                 ZStack(alignment: .topLeading) {
                     Group {
                         if let feedback {
-                            ConnectionFeedback(title: feedback.title, message: feedback.message,
-                                lineLimit: 3, titleLineLimit: 2, verticalPadding: 5,
-                                textSpacing: 0, accent: feedback.accent, busy: feedback.busy)
+                            ScrollView(.vertical) {
+                                ConnectionFeedback(title: feedback.title, message: feedback.message,
+                                    lineLimit: nil, titleLineLimit: nil, verticalPadding: 5,
+                                    textSpacing: 0, accent: feedback.accent, busy: false)
+                            }
                         } else {
                             instructions(for: wirelessMode)
                         }
@@ -473,9 +424,9 @@ struct ConnectionMethodCard: View {
                 .buttonStyle(ZTransferGlassButtonStyle(
                     cornerRadius: 14,
                     liquidGlassBoundary: true,
-                    // Android keeps CONNECTED at full opacity while disabling
-                    // repeat taps; don't dim the whole label mid-transition.
-                    disabledAlpha: 1
+                    // Android preserves CONNECTED during its transition, but
+                    // GPS-disabled idle/search actions use normal disabled ink.
+                    disabledAlpha: state.wifiPhase == .connected ? 1 : 0.45
                 ))
                 .accessibilityLabel(staButtonState.title)
                 .accessibilityIdentifier("sta-connect-control")

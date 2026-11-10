@@ -17,10 +17,10 @@ struct QueueItemPlacementMotion {
         CGSize(width: CGFloat(x.delta) / density, height: CGFloat(y.delta) / density)
     }
 
-    mutating func place(at point: CGPoint, scale: CGFloat) {
+    mutating func place(at point: CGPoint, scale: CGFloat, animated: Bool = true) {
         guard point.x.isFinite, point.y.isFinite, scale.isFinite, scale > 0 else { return }
         let pixels = CGPoint(x: floor(point.x * scale + 0.5), y: floor(point.y * scale + 0.5))
-        guard let previous = position, density == scale else {
+        guard animated, let previous = position, density == scale else {
             reset()
             position = pixels
             density = scale
@@ -100,8 +100,9 @@ private final class QueueItemPlacementClock: ObservableObject {
             if !owner.motion.isRunning { owner.stop() }
         }
     }
-    func place(at point: CGPoint, scale: CGFloat) {
-        motion.place(at: point, scale: scale)
+    func place(at point: CGPoint, scale: CGFloat, animated: Bool) {
+        motion.place(at: point, scale: scale, animated: animated)
+        if !motion.isRunning { stop(); return }
         guard motion.isRunning, link == nil else { return }
         let link = CADisplayLink(target: Target(self), selector: #selector(Target.frame(_:)))
         self.link = link
@@ -120,6 +121,7 @@ private struct QueueItemPlacementKey: PreferenceKey {
 
 struct QueueItemPlacement: ViewModifier {
     static let coordinateSpace = "transfer-queue-content-placement"
+    var enabled = true
     @Environment(\.displayScale) private var displayScale
     @StateObject private var clock = QueueItemPlacementClock()
     @State private var origin: CGPoint?
@@ -138,14 +140,17 @@ struct QueueItemPlacement: ViewModifier {
             .onPreferenceChange(QueueItemPlacementKey.self) { point in
                 guard let point else { return }
                 origin = point
-                if visible { clock.place(at: point, scale: displayScale) }
+                if visible { clock.place(at: point, scale: displayScale, animated: enabled) }
             }
             .onChange(of: displayScale) { scale in
-                if visible, let origin { clock.place(at: origin, scale: scale) }
+                if visible, let origin { clock.place(at: origin, scale: scale, animated: enabled) }
+            }
+            .onChange(of: enabled) { enabled in
+                if visible, let origin { clock.place(at: origin, scale: displayScale, animated: enabled) }
             }
             .onAppear {
                 visible = true
-                if let origin { clock.place(at: origin, scale: displayScale) }
+                if let origin { clock.place(at: origin, scale: displayScale, animated: enabled) }
             }
             .onDisappear { visible = false; clock.reset() }
     }

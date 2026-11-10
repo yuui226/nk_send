@@ -1,0 +1,91 @@
+Test Suite 'Selected tests' started at 2026-10-30 20:27:51.095.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 20:27:51.095.
+Test Suite 'PhotoLUTEditorStateTests' started at 2026-10-30 20:27:51.095.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails]' passed (0.214 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites]' passed (0.070 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints]' passed (0.160 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied]' passed (0.084 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected]' passed (0.133 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal]' passed (0.486 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole]' passed (0.067 seconds).
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately]' started.
+Test Case '-[ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately]' passed (0.066 seconds).
+Test Suite 'PhotoLUTEditorStateTests' passed at 2026-10-30 20:27:52.417.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 1.317 (1.322) seconds
+Test Suite 'PhotoNp3EditorStateTests' started at 2026-10-30 20:27:52.417.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testCancelOffResetCloseAndInactiveOwnerRejectLateProviderResults]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testCancelOffResetCloseAndInactiveOwnerRejectLateProviderResults]' passed (0.120 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testEditorReleaseCancelsItsRequestAndObserverWithoutRetainingHost]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testEditorReleaseCancelsItsRequestAndObserverWithoutRetainingHost]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testFreshSelectionAndRejectedCandidatePreserveAppliedRecipe]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testFreshSelectionAndRejectedCandidatePreserveAppliedRecipe]' passed (0.037 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testListedNameRefreshSurvivesBadNewBytesWithoutChangingRecipeName]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testListedNameRefreshSurvivesBadNewBytesWithoutChangingRecipeName]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testQueuedScanTimeoutAndCancellationDoNotCancelAnotherEditorRead]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testQueuedScanTimeoutAndCancellationDoNotCancelAnotherEditorRead]' passed (0.230 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testRefreshAlwaysReadsButDoesNotEnableOffOrResetUnchangedDraft]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testRefreshAlwaysReadsButDoesNotEnableOffOrResetUnchangedDraft]' passed (0.028 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testReplacementClearsBothCustomDraftsButKeepsBuiltinsAndBlocksStaleSaves]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testReplacementClearsBothCustomDraftsButKeepsBuiltinsAndBlocksStaleSaves]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testResetWithoutMatchingSourceDoesNotBorrowAnotherRolesURI]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testResetWithoutMatchingSourceDoesNotBorrowAnotherRolesURI]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testSameFolderAndFailedOrInactiveReplacementKeepRolesAndSourceHints]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testSameFolderAndFailedOrInactiveReplacementKeepRolesAndSourceHints]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testScanFailureRetainsListRecipeAndSavedRoleOnlyCompleteDeletionDisablesDraft]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testScanFailureRetainsListRecipeAndSavedRoleOnlyCompleteDeletionDisablesDraft]' passed (0.033 seconds).
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testTimeoutEndsUIRequestAndDiscardsLateReadWithoutChangingSelection]' started.
+Test Case '-[ZTransferTests.PhotoNp3EditorStateTests testTimeoutEndsUIRequestAndDiscardsLateReadWithoutChangingSelection]' passed (0.096 seconds).
+Test Suite 'PhotoNp3EditorStateTests' passed at 2026-10-30 20:27:53.056.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.634 (0.638) seconds
+Test Suite 'PhotoNp3FileProviderTests' started at 2026-10-30 20:27:53.056.
+Test Case '-[ZTransferTests.PhotoNp3FileProviderTests testBookmarkResolvedLocationDoesNotChangeStoredSourceIdentity]' started.
+Test Case '-[ZTransferTests.PhotoNp3FileProviderTests testBookmarkResolvedLocationDoesNotChangeStoredSourceIdentity]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.PhotoNp3FileProviderTests testDeniedInvalidBookmarkTraversalAndPostLeaseCancellationFailCleanly]' started.
+2026-10-30 20:27:53.069286+0800 ZTransfer[88028:36648970] [bookmark] BookmarkData: invalid bookmark length
+Test Case '-[ZTransferTests.PhotoNp3FileProviderTests testDeniedInvalidBookmarkTraversalAndPostLeaseCancellationFailCleanly]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.PhotoNp3FileProviderTests testRealDirectoryScanIsMetadataOnlyAndReadsFreshBoundedNP3WithBalancedScopes]' started.
+Test Case '-[ZTransferTests.PhotoNp3FileProviderTests testRealDirectoryScanIsMetadataOnlyAndReadsFreshBoundedNP3WithBalancedScopes]' passed (0.009 seconds).
+Test Suite 'PhotoNp3FileProviderTests' passed at 2026-10-30 20:27:53.081.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.024 (0.025) seconds
+Test Suite 'RemoteLUTLoadQueueTests' started at 2026-10-30 20:27:53.081.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCachedFileAlwaysRechecksMetadataAndDoesNotCacheMidReadEdits]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCachedFileAlwaysRechecksMetadataAndDoesNotCacheMidReadEdits]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCancellationInvalidatesOlderResult]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCancellationInvalidatesOlderResult]' passed (0.057 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testOversizedFileIsRejectedBeforeCacheHitOrByteRead]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testOversizedFileIsRejectedBeforeCacheHitOrByteRead]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testParsedCacheInvalidationAndBothCapacityLimits]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testParsedCacheInvalidationAndBothCapacityLimits]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testRevokedScopeInvalidatesCachedTableBeforeRetry]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testRevokedScopeInvalidatesCachedTableBeforeRetry]' passed (0.003 seconds).
+Test Suite 'RemoteLUTLoadQueueTests' passed at 2026-10-30 20:27:53.151.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.068 (0.070) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 20:27:53.152.
+	 Executed 30 tests, with 0 failures (0 unexpected) in 2.044 (2.056) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 20:27:53.152.
+	 Executed 30 tests, with 0 failures (0 unexpected) in 2.044 (2.057) seconds
+2026-10-30 20:27:53.180 xcodebuild[87797:36646764] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:27:53.180 xcodebuild[87797:36646764] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:27:53.455 xcodebuild[87797:36646764] [MT] IDETestOperationsObserverDebug: 22.149 elapsed -- Testing started completed.
+2026-10-30 20:27:53.455 xcodebuild[87797:36646764] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-30 20:27:53.455 xcodebuild[87797:36646764] [MT] IDETestOperationsObserverDebug: 22.149 sec, +22.149 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-np3-editor-20261030-r2.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

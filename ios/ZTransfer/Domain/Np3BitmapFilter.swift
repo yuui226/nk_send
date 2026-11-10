@@ -35,7 +35,15 @@ private struct Np3TaskCancellationProbe: @unchecked Sendable {
 /// alpha ARGB values, never misinterpreted premultiplied RGBA bytes.
 enum Np3BitmapFilter {
     static func apply(_ image: CGImage, parameters: Np3FilterParameters,
-                      intensityPercent: Int, execution: PhotoFilterExecution = .preview) throws -> CGImage {
+                      intensityPercent: Int, adjustments: LUTAdjustments = .init(),
+                      execution: PhotoFilterExecution = .preview) throws -> CGImage {
+        try apply(image, parameters: .flexible(parameters), intensityPercent: intensityPercent,
+                  adjustments: adjustments, execution: execution)
+    }
+
+    static func apply(_ image: CGImage, parameters: PhotoNp3Parameters,
+                      intensityPercent: Int, adjustments: LUTAdjustments = .init(),
+                      execution: PhotoFilterExecution = .preview) throws -> CGImage {
         try Task.checkCancellation()
         let (rowBytes, overflow) = image.width.multipliedReportingOverflow(by: 4)
         let (_, sizeOverflow) = rowBytes.multipliedReportingOverflow(by: image.height)
@@ -49,7 +57,8 @@ enum Np3BitmapFilter {
         context.setBlendMode(.copy)
         context.interpolationQuality = .none
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        let engine = Np3FilterEngine(parameters: parameters, intensityPercent: intensityPercent)
+        let engine = Np3FilterEngine(parameters: parameters, intensityPercent: intensityPercent,
+                                     adjustments: adjustments)
         let workerCount = execution.workers(width: image.width, height: image.height)
         let rowChunk = max(1, (image.height + workerCount - 1) / workerCount)
         let pixelBuffer = Np3ConcurrentPixelBuffer(

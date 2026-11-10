@@ -63,11 +63,11 @@ final class StoreKitPurchaseTests: XCTestCase {
         let annual = try XCTUnwrap(f.store.products[.annual])
         let lifetime = try XCTUnwrap(f.store.products[.lifetime])
         XCTAssertEqual(annual.type, .autoRenewable)
-        XCTAssertEqual(annual.price, Decimal(string: "39.99"))
+        XCTAssertEqual(annual.price, Decimal(string: "39.90"))
         XCTAssertEqual(annual.subscription?.subscriptionPeriod.value, 1)
         XCTAssertEqual(annual.subscription?.subscriptionPeriod.unit, .year)
         XCTAssertEqual(lifetime.type, .nonConsumable)
-        XCTAssertEqual(lifetime.price, Decimal(string: "99.99"))
+        XCTAssertEqual(lifetime.price, Decimal(string: "99.90"))
         XCTAssertFalse(annual.isFamilyShareable)
         XCTAssertFalse(lifetime.isFamilyShareable)
     }
@@ -155,6 +155,33 @@ final class StoreKitPurchaseTests: XCTestCase {
         try f.session.expireSubscription(productIdentifier: PremiumProduct.annual.rawValue)
         f.store.refresh()
         try await eventually { f.entitlements.entitlement == .free }
+    }
+
+    func testExpiredAnnualCanChooseAnnualAgainThenLifetime() async throws {
+        let f = try await fixture()
+        await f.store.purchase(.annual)
+        try await eventually { f.entitlements.access.isPro && f.store.renewal.willAutoRenew == true }
+        let firstAnnual = try XCTUnwrap(f.session.allTransactions().last)
+        try f.session.disableAutoRenewForTransaction(identifier: firstAnnual.identifier)
+        f.store.refresh()
+        try await eventually { f.store.renewal.willAutoRenew == false }
+        XCTAssertTrue(f.entitlements.access.isPro, "Cancellation preserves the paid term")
+
+        try f.session.expireSubscription(productIdentifier: PremiumProduct.annual.rawValue)
+        f.store.refresh()
+        try await eventually { f.entitlements.entitlement == .free }
+        // Expired annual ownership does not permanently restrict plan choice.
+        await f.store.purchase(.annual)
+        try await eventually {
+            if case .annual = f.entitlements.entitlement { return true }
+            return false
+        }
+        try f.session.expireSubscription(productIdentifier: PremiumProduct.annual.rawValue)
+        f.store.refresh()
+        try await eventually { f.entitlements.entitlement == .free }
+        await f.store.purchase(.lifetime)
+        try await eventually { f.entitlements.entitlement == .lifetime }
+        XCTAssertEqual(f.store.purchaseCelebration, 3)
     }
 
     func testPendingPurchaseGrantsNothingUntilApproved() async throws {
@@ -262,6 +289,25 @@ final class StoreKitPurchaseTests: XCTestCase {
         await recovered.restore()
         XCTAssertEqual(entitlements.entitlement, .lifetime)
         XCTAssertEqual(recovered.messageKey, "iap_restored")
+    }
+
+    func testFreshStoreRecoversAnnualWithoutManualSyncOrPrices() async throws {
+        let f = try await fixture()
+        await f.store.purchase(.annual)
+        try await eventually { f.entitlements.access.isPro }
+        await f.store.stop()
+        let entitlements = PremiumEntitlementStore(access: PremiumAccess())
+        let recovered = StoreKitPurchaseStore(entitlementStore: entitlements)
+        addTeardownBlock { await recovered.stop() }
+        recovered.start()
+        try await eventually {
+            if case .annual = entitlements.entitlement { return true }
+            return false
+        }
+        XCTAssertTrue(recovered.products.isEmpty)
+        XCTAssertEqual(recovered.operation, .idle)
+        XCTAssertEqual(recovered.purchaseCelebration, 0)
+        XCTAssertNil(recovered.messageKey)
     }
 
     /// The confirmation scan must never turn into a permanent local grant.

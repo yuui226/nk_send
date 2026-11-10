@@ -47,6 +47,14 @@ final class PhotoLUTEditorState: ObservableObject {
             self?.catalogCache = nil
         }.store(in: &observations)
         request.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
+        store.folderChanges.sink { [weak self] in
+            guard let self else { return }
+            self.cancelPending()
+            self.replaceFiles([])
+            self.folderFailure = nil
+            self.settingsExpanded = false
+            self.categorySelection = .init()
+        }.store(in: &observations)
     }
 
     var loading: Bool { request.loading }
@@ -124,6 +132,7 @@ final class PhotoLUTEditorState: ObservableObject {
 
     func scanFolder(_ replacement: URL?, onDisable: @escaping () -> Void) {
         let bookmark = access.bookmarkData
+        let revision = store.folderRevision
         guard replacement != nil || bookmark != nil else {
             cancelPending()
             replaceFiles([])
@@ -144,10 +153,10 @@ final class PhotoLUTEditorState: ObservableObject {
             self.notice = Notice(resource: "lut_read_timeout")
         }, deliver: { [weak self] result in
             guard let self else { return }
+            guard self.store.folderRevision == revision else { return }
             switch result {
             case .success(let (prepared, previous)):
-                self.access.commit(prepared)
-                self.store.setFolderBookmark(self.access.bookmarkData)
+                self.store.acceptFolder(prepared, replacing: replacement != nil, previous: previous)
                 self.replaceFiles(prepared.files)
                 self.folderFailure = nil
                 if (replacement != nil && previous?.standardizedFileURL != replacement?.standardizedFileURL)
@@ -176,6 +185,7 @@ final class PhotoLUTEditorState: ObservableObject {
         guard let file = catalog.filesByIdentifier[identifier] else { return }
         let bookmark = access.bookmarkData
         let directory = store.snapshotDirectory
+        let revision = store.folderRevision
         loadingOrigin = Date()
         request.submit(selectionIdentifier: identifier, action: { ticket in
             let lut = try RemoteLUTFolderAccess.parseBookmark(bookmark, file: file, checkCancelled: ticket.checkCancellation)
@@ -186,9 +196,10 @@ final class PhotoLUTEditorState: ObservableObject {
             guard let self else { return }
             switch result {
             case .success(let prepared):
-                guard shouldAccept() else { return }
-                let selection = self.store.acceptSelection(prepared,
+                guard shouldAccept(), self.store.folderRevision == revision,
+                      let selection = try? self.store.acceptSelection(prepared,
                     name: file.label.isEmpty ? file.name : file.label, sourceIdentifier: file.identifier)
+                else { return }
                 onSelect(selection)
                 self.reconcileCategory()
             case .failure(let error):

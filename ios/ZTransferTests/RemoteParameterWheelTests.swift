@@ -205,6 +205,27 @@ final class RemoteParameterWheelTests: XCTestCase {
         XCTAssertEqual(opened, 1)
     }
 
+    @MainActor
+    func testCountdownDisablesBothParameterDragAndAutoHitRegion() {
+        let cache = RemoteParameterPresentationCache()
+        let descriptor = RemotePropertyDescriptor(property: .iso, writable: true, current: 400, values: iso)
+        let enabled = cache.configuration(descriptor: descriptor, autoEnabled: false, hasAutoControl: true)
+        let disabled = cache.configuration(descriptor: descriptor, autoEnabled: false, hasAutoControl: true, enabled: false)
+        var wheel = RemoteParameterWheel()
+        wheel.configure(enabled); wheel.beginDrag()
+        XCTAssertTrue(wheel.dragging)
+        wheel.configure(disabled)
+        XCTAssertFalse(wheel.dragging)
+        XCTAssertFalse(wheel.configuration.valueWritable)
+        let view = RemoteParameterInput.InputView(frame: CGRect(x: 0, y: 0, width: 180, height: 54))
+        view.configure(.init(configuration: disabled, autoBusy: false, identifier: "iso", label: "ISO", value: "400",
+            onOpenList: { XCTFail("Disabled parameter list") }, onAutoToggle: { XCTFail("Disabled AUTO region") },
+            onBegin: { XCTFail("Disabled drag") }, onDrag: { _ in XCTFail("Disabled drag delta") }, onEnd: {}))
+        view.deliver([.tap(CGPoint(x: 170, y: 10)), .tap(CGPoint(x: 90, y: 30)), .begin, .delta(18), .end])
+        let restored = cache.configuration(descriptor: descriptor, autoEnabled: false, hasAutoControl: true)
+        XCTAssertTrue(restored.valueWritable)
+    }
+
     func testPointerHandoffRetainsSlopAndAvoidsJumpBetweenFingers() {
         let bounds = CGRect(x: 0, y: 0, width: 180, height: 54)
         var input = RemoteParameterTouch()

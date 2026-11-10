@@ -2,6 +2,33 @@ import XCTest
 
 @MainActor
 final class PhotoPreviewInteractionUITests: XCTestCase {
+    func testDateGroupsCanCollapseAndRevealTheirOriginalCellsRepeatedly() {
+        continueAfterFailure = false
+        let app = launchHoldFixture(["--date-group-motion-fixture"])
+        defer { app.terminate() }
+        let date = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "photo-date-")).firstMatch
+        XCTAssertTrue(date.waitForExistence(timeout: 5))
+        let cells = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "photo-cell-"))
+        XCTAssertTrue(cells.firstMatch.waitForExistence(timeout: 5))
+        let identity = cells.firstMatch.identifier
+        let cell = app.descendants(matching: .any).matching(identifier: identity).firstMatch
+        let nextDate = app.buttons["photo-date-20261015"]
+        var closedPosition: CGFloat?
+        for _ in 0..<2 {
+            date.tap()
+            let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !cell.exists }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
+            XCTAssertTrue(nextDate.waitForExistence(timeout: 5))
+            XCTAssertTrue(nextDate.isHittable)
+            if let closedPosition { XCTAssertEqual(nextDate.frame.minY, closedPosition, accuracy: 1) }
+            else { closedPosition = nextDate.frame.minY }
+            date.tap()
+            XCTAssertTrue(cell.waitForExistence(timeout: 5))
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "date-group-restored"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     func testHeaderButtonsKeepTheirSlotsAcrossDisconnectQueueAndReconnect() throws {
         continueAfterFailure = false
         let app = launchHoldFixture()
@@ -62,7 +89,8 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
     private func launchHoldFixture(_ arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--list-admission-ui-test", "--photo-preview-ui-test", "--photo-hold-trace",
-            "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-app_language", "en", "-haptics_enabled", "YES"] + arguments
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-app_language", "en", "-haptics_enabled", "YES",
+            "-photo_loading_range_days", "0"] + arguments
         app.launch()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "enqueue-day-")).firstMatch.waitForExistence(timeout: 10))
         return app
@@ -104,13 +132,33 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
         for _ in 0..<2 {
             pill.tap()
             XCTAssertTrue(app.buttons["workspace-queue-back"].waitForExistence(timeout: 3))
-            XCTAssertEqual(pill.frame.maxX, rightEdge, accuracy: 1)
+            let queueShot = XCTAttachment(screenshot: app.screenshot())
+            queueShot.name = "queue-capsule-hidden"; queueShot.lifetime = .keepAlways; add(queueShot)
+            let queueTree = XCTAttachment(string: app.debugDescription)
+            queueTree.name = "queue-capsule-accessibility"; queueTree.lifetime = .keepAlways; add(queueTree)
+            // XCTest can retain a clipped descendant's AX glyph bounds even
+            // when its actual viewport is zero. Component tests assert that
+            // width; here verify action revocation and the remaining control.
+            XCTAssertFalse(pill.isEnabled)
+            let start = app.buttons["Start transfers"]
+            XCTAssertTrue(start.isEnabled)
+            XCTAssertEqual(start.frame.maxX, rightEdge, accuracy: 1)
             app.buttons["workspace-queue-back"].tap()
             XCTAssertTrue(app.buttons["popup-trigger-settings"].waitForExistence(timeout: 3))
             let returned = app.descendants(matching: .any)[identifier].firstMatch
             XCTAssertEqual(returned.frame.minY, frame.minY, accuracy: 2)
             XCTAssertEqual(pill.frame.maxX, rightEdge, accuracy: 1)
         }
+        // The hidden retained capsule must not intercept Start in the same
+        // trailing slot. Use cached originals; this makes no camera request.
+        pill.tap()
+        XCTAssertTrue(app.buttons["workspace-queue-back"].waitForExistence(timeout: 3))
+        app.buttons["Start transfers"].tap()
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "done=1"),
+                                                 object: app.staticTexts["admission-state"])
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 5), .completed)
+        app.buttons["workspace-queue-back"].tap()
+        XCTAssertTrue(app.buttons["popup-trigger-settings"].waitForExistence(timeout: 3))
         // The off-top monitor affordance first expands, then enters monitor.
         func monitorEntry() throws -> XCUIElement {
             try XCTUnwrap(app.buttons.matching(identifier: "workspace-monitor-open").allElementsBoundByIndex.first { $0.isHittable })
@@ -129,7 +177,9 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
         let trace = try readHoldTrace(app, name: "workspace-page-updates")
         let starts = trace.enumerated().filter { $0.element.event.hasPrefix("workspace-") &&
             ($0.element.event.hasSuffix("-enter") || $0.element.event.hasSuffix("-exit")) }
-        XCTAssertEqual(starts.count, 6)
+        // Three queue round trips (including the Start-button check), then
+        // one monitor round trip: no extra transition may start between them.
+        XCTAssertEqual(starts.count, 8)
         for (index, start) in starts {
             let end = try XCTUnwrap(trace[(index + 1)...].firstIndex { $0.event.hasSuffix("-settled") })
             let updates = trace[(index + 1)..<end].filter { $0.event == "files-workspace-body" }.count

@@ -1,0 +1,34 @@
+Test Suite 'Selected tests' started at 2026-10-28 20:33:02.525.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-28 20:33:02.526.
+Test Suite 'QueueSummaryLayoutTests' started at 2026-10-28 20:33:02.526.
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens]' started.
+QUEUE_SUMMARY_TRACE download:nil/nil/true/active
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/D0A12955-6080-4A27-83F5-80B4CF9A9FDB/tmp/queue-summary-320-idle.png
+QUEUE_SUMMARY_TRACE download:nil/nil/true/active
+QUEUE_SUMMARY_TRACE download:nil/nil/true/active
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:84: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertEqual failed: ("2") is not equal to ("3")
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/D0A12955-6080-4A27-83F5-80B4CF9A9FDB/tmp/queue-summary-320-busy.png
+QUEUE_SUMMARY_TRACE download:DSC_0003.JPG/DSC_0003.JPG/true/active
+QUEUE_SUMMARY_TRACE download:DSC_0003.JPG/DSC_0003.JPG/true/active
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:102: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertTrue failed
+QUEUE_SUMMARY_TRACE download:nil/nil/true/active
+QUEUE_SUMMARY_TRACE download:nil/nil/false/active
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/D0A12955-6080-4A27-83F5-80B4CF9A9FDB/tmp/queue-summary-600-idle.png
+QUEUE_SUMMARY_TRACE download:nil/nil/true/active
+QUEUE_SUMMARY_TRACE download:nil/nil/true/active
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:84: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertEqual failed: ("2") is not equal to ("3")
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/D0A12955-6080-4A27-83F5-80B4CF9A9FDB/tmp/queue-summary-600-busy.png
+QUEUE_SUMMARY_TRACE download:DSC_0003.JPG/DSC_0003.JPG/true/active
+QUEUE_SUMMARY_TRACE download:DSC_0003.JPG/DSC_0003.JPG/true/active
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:102: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertTrue failed
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens]' failed (14.739 seconds).
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation]' started.
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation]' passed (1.299 seconds).
+Test Suite 'QueueSummaryLayoutTests' failed at 2026-10-28 20:33:18.566.
+	 Executed 2 tests, with 4 failures (0 unexpected) in 16.038 (16.040) seconds
+Test Suite 'ZTransferTests.xctest' failed at 2026-10-28 20:33:18.567.
+	 Executed 2 tests, with 4 failures (0 unexpected) in 16.038 (16.041) seconds
+Test Suite 'Selected tests' failed at 2026-10-28 20:33:18.568.
+	 Executed 2 tests, with 4 failures (0 unexpected) in 16.038 (16.043) seconds
+Test session results, code coverage, and logs:
+** TEST FAILED **

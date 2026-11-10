@@ -1,0 +1,220 @@
+{
+  "date": "2026-11-06",
+  "tasks": {
+    "complete": 3,
+    "total": 3
+  },
+  "environment": "iOS 26.5 Simulator FC8ECF06-0A56-4949-B64C-3EE06870025E",
+  "finalTests": {
+    "r5": 9,
+    "r6": 1,
+    "differentMethods": 10,
+    "unresolvedFailures": 0
+  },
+  "history": {
+    "r1": "Test compile failure: CoreFoundation conditional cast; fixed test only.",
+    "r2": "Baseline reproduced missing liquid glass material, six pixel assertions failed.",
+    "r3": "drawHierarchy while visibility CATransaction remained open produced a transparent capture.",
+    "r4": "Commit visibility transaction before capture; liquid glass checks passed.",
+    "r5": "Final implementation: 9 component/layout/lifetime tests passed, including five themes in light/dark.",
+    "r6": "Same implementation: real settings/effects and local workbench menu/help/back/close interaction passed."
+  },
+  "pixelComparisons": [
+    {
+      "skin": "liquidGlass",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 0.06492332175925926
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 0.07653356481481481
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 0.0732421875
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.09827112268518519
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.10698784722222222
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.10724103009259259
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "titanium",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 0.5071976273148148
+    },
+    {
+      "skin": "titanium",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 0.5922670717592593
+    },
+    {
+      "skin": "titanium",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 0.5783781828703703
+    },
+    {
+      "skin": "titanium",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "titanium",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "titanium",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "wood",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 2.0917607060185186
+    },
+    {
+      "skin": "wood",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 2.4247685185185186
+    },
+    {
+      "skin": "wood",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 2.4066840277777777
+    },
+    {
+      "skin": "wood",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "wood",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "wood",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "cameraControls",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 1.1186342592592593
+    },
+    {
+      "skin": "cameraControls",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 1.4429615162037037
+    },
+    {
+      "skin": "cameraControls",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 1.4146773726851851
+    },
+    {
+      "skin": "cameraControls",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "cameraControls",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "cameraControls",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    }
+  ],
+  "fullSettingsMeanRGBDifference": 0.467335,
+  "video": {
+    "path": "/tmp/ztransfer-bulb-popup-final-20261106.mov",
+    "sha256": "dd748d586f3fdb56199d8615b8a7fc277b495c8e9fe06276f9e6a910ba385954",
+    "review": "30 fps opening and closing contact sheets inspected: no premature full-panel flash, continuous mesh entry/exit. Not a device frame-rate benchmark."
+  },
+  "imagesVisuallyReviewed": "All four r2 baseline images; r5 four liquid-glass images and two complete settings images. Other theme pairs numerically compared by the test.",
+  "scope": "Capture and hide within one display callback; unchanged animation clock/curves/mesh geometry, static bulb and unread dot. No new idle timers. Lifetime/reversal/layout regression passed.",
+  "limitations": [
+    "No real-device installation or camera testing.",
+    "No physical-device CPU/GPU/thermal or frame-rate measurements.",
+    "firstImageMs logs include hosting/layout/display scheduling and are not isolated capture cost."
+  ],
+  "inputs": "inputs-final.json",
+  "supersededBy": "../popup-source-flash-20261106/verification.json",
+  "subsequentUserRegression": "User observed a full-panel flash before opening on device. Prior same-callback invisibility assumption and video-based no-flash conclusion were insufficient; see follow-up negative-control and synchronous visibility checks."
+}

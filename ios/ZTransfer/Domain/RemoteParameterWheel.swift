@@ -9,15 +9,18 @@ struct RemoteParameterWheel {
         let descriptor: RemotePropertyDescriptor?
         let autoEnabled: Bool?
         let hasAutoControl: Bool
+        let enabled: Bool
         let valueWritable: Bool
         let writable: Bool
         let anchor: Int
         let downSign: Int
         var values: [UInt64] { descriptor?.values ?? [] }
-        init(descriptor: RemotePropertyDescriptor? = nil, autoEnabled: Bool? = nil, hasAutoControl: Bool = false) {
+        init(descriptor: RemotePropertyDescriptor? = nil, autoEnabled: Bool? = nil, hasAutoControl: Bool = false,
+             enabled: Bool = true) {
             self.descriptor = descriptor; self.autoEnabled = autoEnabled; self.hasAutoControl = hasAutoControl
+            self.enabled = enabled
             let values = descriptor?.values ?? []
-            valueWritable = descriptor?.writable == true && !values.isEmpty
+            valueWritable = enabled && descriptor?.writable == true && !values.isEmpty
             writable = valueWritable && autoEnabled != true
             // Android remember(param): compute once per descriptor change,
             // never scan the enum for every visible row on every display frame.

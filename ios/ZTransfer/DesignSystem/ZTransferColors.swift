@@ -247,7 +247,8 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
                 style: nativeGlass ? .continuous : .circular))
             .background {
                 ZTransferButtonMaterialSurface(
-                    skin: skin, cornerRadius: cornerRadius, panel: panel,
+                    skin: skin, cornerRadius: cornerRadius,
+                    panel: panel,
                     surfaceColor: surfaceColor,
                     active: active, activeColor: activeColor, activeOutline: activeOutline,
                     liquidGlassBoundary: liquidGlassBoundary,
@@ -279,6 +280,17 @@ struct ZTransferGlassButtonStyle: PrimitiveButtonStyle {
         case .frostedGlass, .liquidGlass, .wood, .cameraControls, .titanium:
             if let tint { label.foregroundStyle(tint) } else { label }
         }
+    }
+}
+
+extension ZTransferGlassButtonStyle {
+    /// Help, back and close are complete buttons in every theme, including
+    /// inside a popup. Only embedded controls use the panel's flat face.
+    static func iconControl(cornerRadius: CGFloat = 20,
+                            tint: Color? = nil, materialContentColor: Color? = nil,
+                            sourceFile: StaticString = #fileID, sourceLine: UInt = #line) -> Self {
+        Self(tint: tint, cornerRadius: cornerRadius,
+             materialContentColor: materialContentColor, sourceFile: sourceFile, sourceLine: sourceLine)
     }
 }
 

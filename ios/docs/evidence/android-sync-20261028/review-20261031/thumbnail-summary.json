@@ -1,0 +1,52 @@
+{
+  "devicesAndConfigurations": [
+    {
+      "device": {
+        "architecture": "arm64",
+        "deviceId": "CA046456-B859-45F4-9CB3-2C6E2F8E03B0",
+        "deviceName": "iPhone 17 Pro",
+        "modelName": "iPhone 17 Pro",
+        "osBuildNumber": "23F77",
+        "osVersion": "26.5",
+        "platform": "iOS Simulator"
+      },
+      "expectedFailures": 0,
+      "failedTests": 0,
+      "passedTests": 80,
+      "skippedTests": 0,
+      "testPlanConfiguration": {
+        "configurationId": "1",
+        "configurationName": "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription": "ZTransfer \u00b7 Built with macOS 27.0.1",
+  "expectedFailures": 0,
+  "failedTests": 0,
+  "finishTime": 1793422336.115,
+  "passedTests": 80,
+  "result": "Passed",
+  "runtimeWarnings": [
+    {
+      "issueType": "Runtime Warning",
+      "message": "Accessing a SceneStorage value outside of being installed on a View or outside SwiftUI App Lifecycle. This will always return the default value."
+    },
+    {
+      "issueType": "Runtime Warning",
+      "message": "Accessing a SceneStorage value outside of being installed on a View or outside SwiftUI App Lifecycle. This will always return the default value."
+    }
+  ],
+  "skippedTests": 0,
+  "startTime": 1793422283.286,
+  "statistics": [],
+  "testFailures": [],
+  "title": "Test - ZTransfer",
+  "topInsights": [
+    {
+      "category": "Longest Test Runs",
+      "impact": "58% of duration",
+      "text": "1 longest test run with outlier durations exceeding 2.20s (three standard deviations)"
+    }
+  ],
+  "totalTestCount": 80
+}

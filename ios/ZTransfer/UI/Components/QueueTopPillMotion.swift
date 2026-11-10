@@ -51,104 +51,19 @@ struct QueuePillFadeMotion {
     var exitFinished: Bool { phase == .postExit && !alpha.isRunning }
 }
 
-/// One number layer in AnimatedQueuePillCount. The count container owns
-/// direction and lifetime; opacity finishing alone must not discard the slide.
-struct QueuePillCountLayerMotion {
-    private(set) var fade: QueuePillFadeMotion
-    private(set) var offset: ZTransferScalarAnimation
-    private let halfHeightPixels: Float
-    private var frame: Int64?
-    var isRunning: Bool { fade.alpha.isRunning || offset.isRunning }
-    var exitFinished: Bool { fade.exitFinished && !offset.isRunning }
-    var displayedOffsetPixels: Float { floor(offset.value + 0.5) }
-
-    init(initiallyVisible: Bool, heightPixels: Int, direction: Int) {
-        let halfHeight = Float(max(0, heightPixels) / 2)
-        halfHeightPixels = halfHeight
-        fade = .init(initiallyVisible: initiallyVisible, enterMilliseconds: 160,
-                     enterDelayMilliseconds: 0, exitMilliseconds: 120)
-        offset = .init(value: initiallyVisible ? 0 : halfHeight * Float(direction),
-                       retainsEndVelocity: true)
-    }
-
-    mutating func setVisible(_ visible: Bool, direction: Int, atFrameNanos: Int64? = nil) {
-        let origin = atFrameNanos ?? frame
-        fade.setVisible(visible, atFrameNanos: origin)
-        let displayed = displayedOffsetPixels
-        offset.retarget(visible ? 0 : -halfHeightPixels * Float(direction),
-                        using: .criticallyDampedSpring(stiffness: 400, threshold: 1),
-                        fromDisplayedValue: displayed, force: true, atFrameNanos: origin)
-    }
-
-    mutating func restart(atFrameNanos: Int64?) {
-        let visible = fade.phase == .visible
-        fade.setVisible(visible, atFrameNanos: atFrameNanos, force: true)
-        let displayed = displayedOffsetPixels
-        let target = offset.target
-        offset.retarget(target, using: .criticallyDampedSpring(stiffness: 400, threshold: 1),
-                        fromDisplayedValue: displayed, force: true, atFrameNanos: atFrameNanos)
-    }
-
-    mutating func advance(_ nanos: Int64) {
-        fade.advance(nanos)
-        offset.advance(frameNanos: nanos)
-        frame = isRunning ? nanos : nil
-    }
-}
-
-/// Number-keyed ownership mirrors AnimatedContent's retained visible list.
-/// Already-exiting layers keep the exit direction chosen when they left.
-struct QueuePillCountMotion {
-    struct Layer: Identifiable {
-        let count: Int
-        var motion: QueuePillCountLayerMotion
-        var id: Int { count }
-    }
-    private(set) var current: Int
-    private(set) var layers: [Layer]
-    private let heightPixels: Int
-    private var frame: Int64?
-    var isRunning: Bool { layers.contains { $0.motion.isRunning } }
-
-    init(count: Int, heightPixels: Int) {
-        current = count
-        self.heightPixels = heightPixels
-        layers = [.init(count: count, motion: .init(initiallyVisible: true,
-                                                    heightPixels: heightPixels, direction: 1))]
-    }
-
-    mutating func update(_ next: Int) {
-        guard next != current else { return }
-        let previous = current
-        let direction = next < previous ? 1 : -1
-        current = next
-        if !layers.contains(where: { $0.count == next }) {
-            layers.append(.init(count: next, motion: .init(initiallyVisible: false,
-                                                           heightPixels: heightPixels, direction: direction)))
-        }
-        for index in layers.indices {
-            let count = layers[index].count
-            if count == next || count == previous {
-                layers[index].motion.setVisible(count == next, direction: direction, atFrameNanos: frame)
-            } else {
-                layers[index].motion.restart(atFrameNanos: frame)
-            }
-        }
-    }
-
-    mutating func advance(_ nanos: Int64) {
-        for index in layers.indices { layers[index].motion.advance(nanos) }
-        layers.removeAll { $0.count != current && $0.motion.exitFinished }
-        frame = isRunning ? nanos : nil
-    }
-}
-
 struct QueuePillPresentation: Equatable {
     let mode: QueuePillVisualMode
     let count: Int
     /// Keep the real sample so numeric transitions know the direction without
     /// parsing localized/formatted text. Outgoing modes retain this snapshot.
     let speed: Int64?
+    var showDone = true
+}
+
+func queuePillVisibilityFeather(width: CGFloat, naturalWidth: CGFloat, transitioning: Bool) -> Double {
+    guard transitioning, naturalWidth > 0 else { return 0 }
+    let fraction = min(1, max(0, Double((1 - width / naturalWidth) / 0.18)))
+    return fraction * fraction * (3 - 2 * fraction)
 }
 
 func transferSpeedText(_ bytesPerSecond: Int64) -> String {
@@ -258,7 +173,7 @@ struct QueuePillWidthMeasurement {
     private var maximum: CGFloat = 0
 
     mutating func measure(_ width: CGFloat, key: QueuePillWidthKey) {
-        guard width.isFinite, width > 0 else { return }
+        guard width.isFinite, width >= 0 else { return }
         if self.key != key { maximum = width }
         else if key.mode == .counting { maximum = max(maximum, width) }
         self.key = key
@@ -271,11 +186,11 @@ struct QueuePillWidthMeasurement {
 struct QueueTopPillWidthMotion {
     private var animation: ZTransferScalarAnimation?
     private var density: CGFloat = 1
-    var width: CGFloat? { animation.map { CGFloat($0.value) / density } }
+    var width: CGFloat? { animation.map { max(0, CGFloat($0.value) / density) } }
     var isRunning: Bool { animation?.isRunning ?? false }
 
     mutating func update(width: CGFloat, scale: CGFloat) {
-        guard width.isFinite, width > 0, scale.isFinite, scale > 0 else { return }
+        guard width.isFinite, width >= 0, scale.isFinite, scale > 0 else { return }
         let pixels = Float(floor(width * scale + 0.5))
         if animation == nil || scale != density {
             animation = .init(value: pixels)
@@ -293,7 +208,7 @@ struct QueuePillTaskSummary {
     private(set) var downloadRemaining = 0
     private(set) var generationRemaining = 0
     private(set) var activeDownload: TransferQueueItem?
-    private(set) var progressOwner: TransferQueueItem?
+    var progressOwner: TransferQueueItem? { activeDownload }
     private(set) var hasCancelled = false
     var hasActive: Bool { activeDownload != nil || generationRemaining > 0 }
     var allDone: Bool { downloadRemaining == 0 && generationRemaining == 0 }
@@ -309,13 +224,12 @@ struct QueuePillTaskSummary {
     }
 
     init(items: [TransferQueueItem]) {
-        var firstGenerating: TransferQueueItem?
-        var firstWaiting: TransferQueueItem?
         for item in items {
             switch item.status {
             case .waiting:
-                downloadRemaining += 1
-                if firstWaiting == nil { firstWaiting = item }
+                if !item.isGeneratingFrame {
+                    downloadRemaining += 1
+                }
             case .transferring:
                 if !item.isGeneratingFrame {
                     downloadRemaining += 1
@@ -324,41 +238,9 @@ struct QueuePillTaskSummary {
             case .cancelled: hasCancelled = true
             case .completed, .failed: break
             }
-            if item.isGeneratingFrame {
+            if item.isQueuedForFrameGeneration {
                 generationRemaining += 1
-                if firstGenerating == nil { firstGenerating = item }
             }
         }
-        progressOwner = activeDownload ?? firstGenerating ?? firstWaiting
-    }
-}
-
-/// Display cadence only (user request 2026-10-19). Transfer sampling/progress
-/// remain untouched. Publish the first valid sample immediately, then at most
-/// twice per second; coalesce to the latest value without an averaging lag.
-struct QueuePillSpeedCadence {
-    static let interval: TimeInterval = 0.5
-    private(set) var value: Int64?
-    private(set) var deadline: TimeInterval?
-    private var latest: Int64?
-    private var lastPublication: TimeInterval?
-
-    mutating func update(_ sample: Int64?, at now: TimeInterval) {
-        guard let sample else { self = .init(); return }
-        guard sample > 0 else { return } // preserve speed across a file preparation gap
-        latest = sample
-        if value == nil || now >= (lastPublication ?? now) + Self.interval {
-            publish(at: now)
-        } else {
-            deadline = sample == value ? nil : lastPublication.map { $0 + Self.interval }
-        }
-    }
-    mutating func advance(_ now: TimeInterval) {
-        if let deadline, now >= deadline { publish(at: now) }
-    }
-    private mutating func publish(at now: TimeInterval) {
-        value = latest
-        lastPublication = now
-        deadline = nil
     }
 }

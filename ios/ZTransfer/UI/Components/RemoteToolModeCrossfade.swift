@@ -5,12 +5,14 @@ import UIKit
 /// changes retain their current opacity and dispose old content only at rest.
 struct RemoteToolModeTransition {
     let durationMilliseconds: Int64
+    let exitDurationMilliseconds: Int64
     private(set) var target: Bool
     private(set) var modes: [Bool]
     private var opacity: [Bool: ZTransferScalarAnimation]
 
-    init(movie: Bool, durationMilliseconds: Int64 = 160) {
+    init(movie: Bool, durationMilliseconds: Int64 = 160, exitDurationMilliseconds: Int64? = nil) {
         self.durationMilliseconds = durationMilliseconds
+        self.exitDurationMilliseconds = exitDurationMilliseconds ?? durationMilliseconds
         target = movie
         modes = [movie]
         opacity = [movie: ZTransferScalarAnimation(value: 1)]
@@ -30,7 +32,8 @@ struct RemoteToolModeTransition {
             // Transition.kt substitutes its default critical spring when a
             // tween is interrupted, retaining the last displayed velocity.
             let spec: ZTransferAndroidMotion = opacity[mode]?.isRunning == true
-                ? .criticallyDampedSpring(stiffness: 1500) : .tween(milliseconds: durationMilliseconds)
+                ? .criticallyDampedSpring(stiffness: 1500)
+                : .tween(milliseconds: mode == movie ? durationMilliseconds : exitDurationMilliseconds)
             opacity[mode]?.retarget(mode == movie ? 1 : 0, using: spec)
         }
     }
@@ -53,8 +56,9 @@ final class RemoteToolModeClock: NSObject, ObservableObject {
     private var displayLink: CADisplayLink?
     var clockRunning: Bool { displayLink != nil }
 
-    init(movie: Bool, durationMilliseconds: Int64 = 160) {
-        transition = RemoteToolModeTransition(movie: movie, durationMilliseconds: durationMilliseconds)
+    init(movie: Bool, durationMilliseconds: Int64 = 160, exitDurationMilliseconds: Int64? = nil) {
+        transition = RemoteToolModeTransition(movie: movie, durationMilliseconds: durationMilliseconds,
+                                             exitDurationMilliseconds: exitDurationMilliseconds)
         modes = [movie]
         super.init()
         publish()
@@ -89,7 +93,8 @@ final class RemoteToolModeClock: NSObject, ObservableObject {
     func invalidate() { displayLink?.invalidate(); displayLink = nil }
     func reset(movie: Bool) {
         invalidate()
-        transition = RemoteToolModeTransition(movie: movie, durationMilliseconds: transition.durationMilliseconds)
+        transition = RemoteToolModeTransition(movie: movie, durationMilliseconds: transition.durationMilliseconds,
+                                             exitDurationMilliseconds: transition.exitDurationMilliseconds)
         publish()
     }
 }
@@ -107,20 +112,33 @@ struct AndroidOpacity: ViewModifier {
 /// Compose Crossfade for two modes, shared by the 160ms monitor toolbar and
 /// 180ms preview histogram. Retains interrupted layers without ticking parents.
 struct AndroidBooleanCrossfade<Content: View>: View {
+    private struct Presentation: Equatable {
+        let selected: Bool
+        let active: Bool
+    }
     let selected: Bool
+    let alignment: Alignment
+    let isActive: Bool
+    let incomingAbove: Bool
     @ViewBuilder let content: (Bool) -> Content
     @StateObject private var clock: RemoteToolModeClock
+    private var presentation: Presentation { Presentation(selected: selected, active: isActive) }
 
-    init(selected: Bool, durationMilliseconds: Int64 = 160,
+    init(selected: Bool, durationMilliseconds: Int64 = 160, exitDurationMilliseconds: Int64? = nil,
+         alignment: Alignment = .center, isActive: Bool = true, incomingAbove: Bool = false,
          @ViewBuilder content: @escaping (Bool) -> Content) {
         self.selected = selected
+        self.alignment = alignment
+        self.isActive = isActive
+        self.incomingAbove = incomingAbove
         self.content = content
         _clock = StateObject(wrappedValue: RemoteToolModeClock(movie: selected,
-                                                            durationMilliseconds: durationMilliseconds))
+                                                            durationMilliseconds: durationMilliseconds,
+                                                            exitDurationMilliseconds: exitDurationMilliseconds))
     }
 
     var body: some View {
-        ZStack(alignment: .center) {
+        ZStack(alignment: alignment) {
             ForEach(clock.modes, id: \.self) { mode in
                 content(mode)
                     .modifier(AndroidOpacity(opacity: clock.opacity(mode)))
@@ -136,10 +154,16 @@ struct AndroidBooleanCrossfade<Content: View>: View {
                                 .accessibilityHidden(true)
                         }
                     }
+                    .zIndex(incomingAbove && mode == selected ? 1 : 0)
             }
         }
-        .onChange(of: selected) { clock.setTarget($0) }
-        .onAppear { clock.setTarget(selected) }
+        // Both inputs may change in one transaction (close/reopen or first
+        // navigation). Consume the new pair, not a captured previous flag.
+        .onChange(of: presentation) { value in
+            if value.active { clock.setTarget(value.selected) }
+            else { clock.reset(movie: value.selected) }
+        }
+        .onAppear { if isActive { clock.setTarget(selected) } else { clock.reset(movie: selected) } }
         .onDisappear { clock.reset(movie: selected) }
     }
 }

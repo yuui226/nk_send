@@ -1,0 +1,10 @@
+2026-11-07 00:06:02.252 Df bluetoothd[6621:18fbc6] [com.apple.bluetooth:Server.Security] New link key created for device [device-hash]
+2026-11-07 00:06:02.260 Df bluetoothd[6621:24d441] [com.apple.bluetooth:Server.Security] Pairing complete for device [camera-address]
+2026-11-07 00:06:02.261 Df bluetoothd[6621:24d441] [com.apple.bluetooth:Server.Security] Device [camera-address] ClassicSMPSupported:0 encryptionMode:0
+2026-11-07 00:06:02.261 Df bluetoothd[6621:24d441] [com.apple.bluetooth:Server.Security] pairingComplete result:0 device->isDerivedFromLE:0 connectionSupportsClassicSMP:0 fCTKDDisabled:0 isPendingClassicSMP:0 address:<private>
+2026-11-07 00:06:02.261 Df bluetoothd[6621:24d441] [com.apple.bluetooth:Server.LE.Security] LeSecurityManager::classicDevicePaired Non CTKD Device address:<private>
+2026-11-07 00:06:02.261 Df bluetoothd[6621:24d441] [com.apple.bluetooth:Server.Security] Sending 'pairing complete' event for device [camera-address] with result 0
+2026-11-07 00:06:02.452 Df bluetoothd[6621:24d441] [com.apple.bluetooth:CBStackController] DeviceConnected: CBDevice [device-or-session-uuid], BDA <private>, CnS 0x80 < WirelessiAP >, SupS 0x80 < WirelessiAP >, result 310000/0x4BAF0 BT_SUCCESS
+2026-11-07 00:06:03.096 Df accessoryd[6731:24d6a7] [com.apple.accessories.core.iap2:Accessory Authentication] bAuthPassed=1
+2026-11-07 00:06:03.099 Df accessoryd[6731:24d6a7] [com.apple.accessories.core:Connection2] Authentication status changed for connection [device-or-session-uuid]! oldAuthStatus: [Unknown], newAuthStatus: [Passed], authType: [Protocol], wasAuthenticated: NO, isAuthenticated: YES
+2026-11-07 00:06:03.341 Df bluetoothd[6621:24d688] [com.apple.bluetooth:Server.Core] Received disconnection result for "Wireless IAP" profile on device [camera-address] - result was 0 - reason was 10927

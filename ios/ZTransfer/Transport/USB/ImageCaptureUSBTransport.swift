@@ -343,6 +343,7 @@ final class ImageCaptureUSBTransport: NSObject, CameraTransport, @unchecked Send
     private func requestPTP(command: Data, data: Data?, camera: ICCameraDevice,
                             isCurrent: @escaping @Sendable () -> Bool) async throws -> (response: Data, payload: Data) {
         try await waitUntilOperationsResume()
+        try PTPCommandContext.check()
         guard isCurrent() else { throw CameraTransportError.disconnected }
         let box = ThrowingContinuationBox<(Data, Data)>()
         Self.trace("PTP submit header=\(command.prefix(12).map { String(format: "%02x", $0) }.joined())")

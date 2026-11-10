@@ -1,0 +1,530 @@
+--- a/ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift
++++ b/ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift
+@@ -10,10 +10,10 @@
+     let initial: PhotoFilterState
+     let availableExtensions: [String]
+     let availableStorageSlots: [UInt32]
+-    let suggestedDate: String?
+     let ratingProgress: PhotoRatingProgress
+     let showProtectionFilter: Bool
+     let onChange: (PhotoFilterState) -> Void
++    let onReset: () -> Void
+ 
+     @State private var working: PhotoFilterState
+     @State private var editingDate = false
+@@ -29,18 +29,19 @@
+     init(isPresented: Binding<Bool>, anchor: Anchor<CGRect>,
+          initial: PhotoFilterState,
+          availableExtensions: [String], availableStorageSlots: [UInt32],
+-         suggestedDate: String?, ratingProgress: PhotoRatingProgress,
++         ratingProgress: PhotoRatingProgress,
+          showProtectionFilter: Bool = true,
+-         onChange: @escaping (PhotoFilterState) -> Void) {
++         onChange: @escaping (PhotoFilterState) -> Void,
++         onReset: @escaping () -> Void) {
+         _isPresented = isPresented
+         self.anchor = anchor
+         self.initial = initial
+         self.availableExtensions = availableExtensions.map { $0.lowercased() }
+         self.availableStorageSlots = availableStorageSlots
+-        self.suggestedDate = suggestedDate
+         self.ratingProgress = ratingProgress
+         self.showProtectionFilter = showProtectionFilter
+         self.onChange = onChange
++        self.onReset = onReset
+         _working = State(initialValue: initial)
+     }
+ 
+@@ -201,7 +202,6 @@
+             }
+             if !availableStorageSlots.isEmpty {
+                 divider
+-                section(AppLocalized.resource("filter_section_storage"))
+                 HStack(spacing: 8) {
+                     ForEach(availableStorageSlots, id: \.self) { slot in
+                         FilterChip(label: AppLocalized.formattedResource("filter_storage_slot", ["%1$d": String(slot)]),
+@@ -229,11 +229,20 @@
+                     FilterClearButton { commit(working.withDateRange(nil)) }
+                 }
+             }
++            divider
++            FilterChip(label: AppLocalized.resource("reset_filters"), selected: false,
++                       systemImage: "arrow.clockwise") {
++                // Android 89018097: explicit reset also clears STA's hidden
++                // protection preference; ordinary edits must preserve it.
++                working = PhotoFilterState()
++                onReset()
++            }
++            .accessibilityIdentifier("photo-filter-reset")
+         }
+     }
+ 
+     private var dateEditor: some View {
+-        PhotoFilterDateEditor(current: working.dateRange, suggestedDate: suggestedDate,
++        PhotoFilterDateEditor(current: working.dateRange,
+                               onBack: { editingDate = false }) { range in
+             commit(working.withDateRange(range))
+             editingDate = false
+@@ -362,12 +371,6 @@
+         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: showRatingTip ? 0.34 : 0.26), value: showRatingTip)
+     }
+ 
+-    private func section(_ title: String) -> some View {
+-        Text(title).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+-            .foregroundStyle(ZTransferColors.secondaryText)
+-            .padding(.bottom, 8)
+-    }
+-
+     private var divider: some View {
+         Rectangle().fill(ZTransferColors.secondaryText.opacity(0.16)).frame(height: 1).padding(.vertical, 13)
+     }
+@@ -447,25 +450,19 @@
+ /// Opening the filter popup itself must not parse or initialize date drafts.
+ @MainActor
+ private struct PhotoFilterDateEditor: View {
+-    private let dates = PhotoFilterDates()
+     let onBack: () -> Void
+     let onApply: (PhotoDateRange?) -> Void
+-    @State private var startDate: Date
+-    @State private var endDate: Date
+-
+-    init(current: PhotoDateRange?, suggestedDate: String?,
++    @State private var draft: PhotoFilterDateDraft
++
++    init(current: PhotoDateRange?,
+          onBack: @escaping () -> Void, onApply: @escaping (PhotoDateRange?) -> Void) {
+         self.onBack = onBack
+         self.onApply = onApply
+-        let initialDate = dates.date(from: current?.end)
+-            ?? dates.date(from: suggestedDate)
+-            ?? dates.calendar.startOfDay(for: Date())
+-        _startDate = State(initialValue: dates.date(from: current?.start) ?? initialDate)
+-        _endDate = State(initialValue: initialDate)
++        _draft = State(initialValue: PhotoFilterDateDraft(current: current))
+     }
+ 
+     var body: some View {
+-        let years = dates.years(start: startDate, end: endDate)
++        let years = draft.years
+         return VStack(alignment: .leading, spacing: 12) {
+             HStack(spacing: 8) {
+                 Button { onBack() } label: {
+@@ -475,8 +472,8 @@
+                     .zTransferTypography(.titleMedium, weight: .semibold)
+                 Spacer(minLength: 0)
+             }
+-            DateEndpointEditor(label: AppLocalized.resource("date_start"), date: $startDate, years: years)
+-            DateEndpointEditor(label: AppLocalized.resource("date_end"), date: $endDate, years: years)
++            DateEndpointEditor(date: $draft.upperDate, years: years)
++            DateEndpointEditor(date: $draft.lowerDate, years: years)
+             HStack(spacing: 8) {
+                 Button(AppLocalized.resource("clear")) {
+                     onApply(nil)
+@@ -484,7 +481,7 @@
+                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 11, panel: true))
+                 .frame(maxWidth: .infinity, minHeight: 40)
+                 Button(AppLocalized.resource("done")) {
+-                    onApply(dates.range(start: startDate, end: endDate))
++                    onApply(draft.range)
+                 }
+                 .buttonStyle(ZTransferGlassButtonStyle(
+                     cornerRadius: 11,
+@@ -494,12 +491,6 @@
+                 ))
+                 .frame(maxWidth: .infinity, minHeight: 40)
+             }
+-        }
+-        .onChange(of: startDate) { value in
+-            if value > endDate { endDate = value }
+-        }
+-        .onChange(of: endDate) { value in
+-            if value < startDate { startDate = value }
+         }
+     }
+ 
+--- a/ios/ZTransfer/UI/PhotoFilterComponents.swift
++++ b/ios/ZTransfer/UI/PhotoFilterComponents.swift
+@@ -97,7 +97,6 @@
+ }
+ 
+ struct DateEndpointEditor: View {
+-    let label: String
+     @Binding var date: Date
+     let years: [Int]
+     private let dates = PhotoFilterDates()
+@@ -108,13 +107,10 @@
+         let day = calendar.component(.day, from: date)
+         let days = Array(1...calendar.range(of: .day, in: .month, for: date)!.count)
+         VStack(alignment: .leading, spacing: 6) {
+-            HStack {
+-                Text(label).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
+-                Spacer(minLength: 0)
+-                Text(dates.shortDate(date))
+-                    .zTransferText(size: ZTransferMetrics.caption)
+-                    .foregroundStyle(ZTransferColors.secondaryText)
+-            }
++            Text(dates.shortDate(date))
++                .zTransferText(size: ZTransferMetrics.caption)
++                .foregroundStyle(ZTransferColors.secondaryText)
++                .frame(maxWidth: .infinity, alignment: .trailing)
+             GeometryReader { geometry in
+                 let available = max(0, geometry.size.width - 16)
+                 let unit = available / 3.3
+--- a/ios/ZTransfer/UI/PhotoListView.swift
++++ b/ios/ZTransfer/UI/PhotoListView.swift
+@@ -1005,10 +1005,10 @@
+                         : model.availableFilterExtensions,
+                     availableStorageSlots: model.availableStorageSlots.count > 1
+                         ? model.availableStorageSlots : [],
+-                    suggestedDate: model.latestKnownCaptureDay,
+                     ratingProgress: model.ratingProgress,
+                     showProtectionFilter: model.protectionFilteringEnabled,
+-                    onChange: applyFilter
++                    onChange: applyFilter,
++                    onReset: model.clearFilter
+                 )
+             }
+         }
+@@ -1496,7 +1496,8 @@
+         }
+     }
+ 
+-    private func applyFilter(_ filter: PhotoFilterState) {
++    private func applyFilter(_ requested: PhotoFilterState) {
++        let filter = model.filterForPersistence(requested)
+         // Android keeps the rating loader and its date range out of the
+         // visible-grid filter. Only a concrete star (or another filter field)
+         // starts the 600 ms cascade/reflow animation.
+--- a/ios/ZTransfer/Domain/PhotoFilter.swift
++++ b/ios/ZTransfer/Domain/PhotoFilter.swift
+@@ -43,6 +43,25 @@
+     func range(start: Date, end: Date) -> PhotoDateRange {
+         PhotoDateRange(start: key(min(start, end)), end: key(max(start, end)))
+     }
++}
++
++/// Android 89018097 DateRangeEditor: snapshot local today on entry. The two
++/// rows are independent drafts; normalize only when the user applies them.
++struct PhotoFilterDateDraft {
++    private let dates: PhotoFilterDates
++    private let today: Date
++    var upperDate: Date
++    var lowerDate: Date
++
++    init(current: PhotoDateRange?, now: Date = Date(), dates: PhotoFilterDates = PhotoFilterDates()) {
++        self.dates = dates
++        today = dates.calendar.startOfDay(for: now)
++        upperDate = dates.date(from: current?.end) ?? today
++        lowerDate = dates.date(from: current?.start) ?? today
++    }
++
++    var years: [Int] { dates.years(start: upperDate, end: lowerDate, now: today) }
++    var range: PhotoDateRange { dates.range(start: upperDate, end: lowerDate) }
+ }
+ 
+ struct PhotoDateRange: Equatable, Sendable, Codable {
+--- a/ios/ZTransfer/Domain/PhotoListViewModel.swift
++++ b/ios/ZTransfer/Domain/PhotoListViewModel.swift
+@@ -53,7 +53,6 @@
+     /// same catalog-scoped cache here so opening Filter is a constant-time
+     /// state change instead of a fresh walk over every camera file.
+     private(set) var availableFilterExtensions: [String] = []
+-    private(set) var latestKnownCaptureDay: String?
+     /// Mirrors Android's `isLoadingFiles`/`hasCompletedFileScan` pair.  The
+     /// view may receive several published batches before the scan completes.
+     @Published private(set) var isLoadingFiles = false
+@@ -586,15 +585,10 @@
+         if scopedFiles != displayedFiles {
+             displayedFiles = scopedFiles
+             var extensions = Set<String>()
+-            var latestDay: String?
+             for file in scopedFiles {
+                 extensions.insert(file.fileExtension.lowercased())
+-                if let day = validPhotoCaptureDay(file.captureDate), latestDay == nil || day > latestDay! {
+-                    latestDay = day
+-                }
+             }
+             availableFilterExtensions = extensions.sorted()
+-            latestKnownCaptureDay = latestDay
+             let groups = PhotoCatalogGrouping.bursts(in: scopedFiles)
+             if burstGroups != groups { burstGroups = groups }
+             let ids = groups.reduce(into: [UInt32: String]()) { result, group in
+@@ -821,6 +815,14 @@
+             guard !Task.isCancelled else { return }
+             await self?.reload(generation: generation, resumeSnapshot: snapshot)
+         }
++    }
++
++    /// Android criteriaForPersistence reads live state, not the popup's old
++    /// capture. A later STA edit must never revive protection after reset.
++    func filterForPersistence(_ requested: PhotoFilterState) -> PhotoFilterState {
++        var next = requested
++        if !protectionFilteringEnabled { next.protectedOnly = filter.protectedOnly }
++        return next
+     }
+ 
+     func setFilter(_ requested: PhotoFilterState) {
+--- a/ios/ZTransfer/Domain/RemoteSelfTimer.swift
++++ b/ios/ZTransfer/Domain/RemoteSelfTimer.swift
+@@ -5,7 +5,8 @@
+ /// Per-second notifications reach only the shutter; active edges update gates.
+ @MainActor
+ final class RemoteSelfTimer: ObservableObject {
+-    static let options = [0, 2, 5, 10, 20]
++    // Android 89018097; restoring the removed 20-second value falls back to off.
++    static let options = [0, 2, 3, 5, 10, 30]
+     @Published private(set) var active = false
+     @Published private(set) var remainingSeconds = 0
+     @Published private(set) var focusing = false
+--- a/ios/ZTransferTests/RemoteSelfTimerTests.swift
++++ b/ios/ZTransferTests/RemoteSelfTimerTests.swift
+@@ -30,8 +30,9 @@
+                 XCTAssertEqual(image.size, size)
+                 let placement = RemoteCameraToolMenuPlacement(host: size,
+                     anchor: CGRect(x: size.width - 60, y: landscape ? size.height - 60 : 60, width: 30, height: 36),
+-                    landscape: landscape, width: 80, contentHeight: 180)
+-                let top = placement.frame.minY + 3 * 36
++                    landscape: landscape, width: 80, contentHeight: CGFloat(RemoteSelfTimer.options.count) * 36)
++                let selectedIndex = try XCTUnwrap(RemoteSelfTimer.options.firstIndex(of: 10))
++                let top = placement.frame.minY + CGFloat(selectedIndex) * 36
+                 func pixel(_ point: CGPoint) throws -> [UInt8] {
+                     let crop = try XCTUnwrap(image.cgImage?.cropping(to: CGRect(x: point.x * image.scale,
+                         y: point.y * image.scale, width: 1, height: 1)))
+@@ -163,7 +164,44 @@
+         XCTAssertEqual(defaults.integer(forKey: "remote_self_timer_seconds"), 0)
+         prefs.layout(movie: false).setVisible(.selfTimer, true)
+         XCTAssertEqual(prefs.selfTimerSeconds, 0)
+-        XCTAssertEqual(RemoteSelfTimer.options, [0, 2, 5, 10, 20])
++        XCTAssertEqual(RemoteSelfTimer.options, [0, 2, 3, 5, 10, 30])
++    }
++
++    func testNewTimerChoicesPersistAndRemovedTwentySecondsRestoresOff() throws {
++        let name = "RemoteSelfTimerTests." + UUID().uuidString
++        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
++        defer { defaults.removePersistentDomain(forName: name) }
++        defaults.set(20, forKey: "remote_self_timer_seconds")
++        let prefs = RemoteToolPreferences(defaults: defaults)
++        XCTAssertEqual(prefs.selfTimerSeconds, 0)
++        for seconds in [3, 30] {
++            prefs.selfTimerSeconds = seconds
++            XCTAssertEqual(RemoteToolPreferences(defaults: defaults).selfTimerSeconds, seconds)
++        }
++        prefs.layout(movie: false).setVisible(.selfTimer, false)
++        XCTAssertEqual(RemoteToolPreferences(defaults: defaults).selfTimerSeconds, 0)
++    }
++
++    func testNewTimerChoicesKeepDeadlineAndFireExactlyOnce() async throws {
++        for seconds in [3, 30] {
++            let clock = TimerClock()
++            var shots = 0, sleeps = 0
++            let start = clock.now
++            let timer = RemoteSelfTimer(now: { clock.now }, sleep: { interval in
++                sleeps += 1
++                clock.now = clock.now.advanced(by: interval)
++            })
++            var values: [Int] = []
++            let observation = timer.$remainingSeconds.sink { values.append($0) }
++            defer { observation.cancel() }
++            XCTAssertTrue(timer.start(seconds: seconds, isValid: { true }, focus: { true },
++                                      capture: { _ in shots += 1 }, onFailure: { _ in XCTFail() }))
++            await settle { !timer.active }
++            XCTAssertEqual(values.first(where: { $0 > 0 }), seconds)
++            XCTAssertEqual(shots, 1)
++            XCTAssertEqual(start.duration(to: clock.now), .seconds(seconds))
++            XCTAssertEqual(sleeps, seconds, "Only integer-second wakeups, not display-frame work")
++        }
+     }
+ 
+     func testBusyRetriesBoundedAndCancellationBetweenRepliesStopsAnotherShutter() async throws {
+--- a/ios/ZTransferTests/DomainModelTests.swift
++++ b/ios/ZTransferTests/DomainModelTests.swift
+@@ -477,6 +477,38 @@
+                 XCTAssertEqual(dates.years(start: old, end: future, now: now), Array(1980...2030))
+             }
+         }
++    }
++
++    func testDateDraftStartsAtPhoneLocalTodayAndKeepsItsEntryYearBounds() throws {
++        var calendar = Calendar(identifier: .gregorian)
++        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
++        let dates = PhotoFilterDates(systemCalendar: calendar)
++        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-12-31T18:00:00Z"))
++        var draft = PhotoFilterDateDraft(current: nil, now: now, dates: dates)
++        XCTAssertEqual(dates.key(draft.upperDate), "20270101")
++        XCTAssertEqual(draft.upperDate, draft.lowerDate)
++        draft.upperDate = dates.clamped(year: 1982, month: 6, day: 1)
++        XCTAssertEqual(dates.key(draft.lowerDate), "20270101", "Changing the upper row cannot clamp the lower row")
++        XCTAssertEqual(draft.years, Array(1982...2028))
++        XCTAssertEqual(draft.range, PhotoDateRange(start: "19820601", end: "20270101"))
++        let reopened = PhotoFilterDateDraft(current: nil, now: now.addingTimeInterval(86400), dates: dates)
++        XCTAssertEqual(dates.key(reopened.upperDate), "20270102", "Reentry takes a new today snapshot")
++    }
++
++    func testDateDraftKeepsEndpointsIndependentAndNormalizesOnlyAppliedRange() throws {
++        let dates = PhotoFilterDates()
++        let current = PhotoDateRange(start: "20240131", end: "20240331")
++        var draft = PhotoFilterDateDraft(current: current, dates: dates)
++        XCTAssertEqual(dates.key(draft.upperDate), "20240331")
++        XCTAssertEqual(dates.key(draft.lowerDate), "20240131")
++        draft.lowerDate = dates.clamped(year: 2025, month: 2, day: 31)
++        XCTAssertEqual(dates.key(draft.lowerDate), "20250228")
++        XCTAssertEqual(dates.key(draft.upperDate), "20240331")
++        draft.upperDate = dates.clamped(year: 2024, month: 2, day: 31)
++        XCTAssertEqual(draft.range, PhotoDateRange(start: "20240229", end: "20250228"))
++        XCTAssertEqual(dates.key(draft.upperDate), "20240229", "Applying does not swap the visible rows")
++        let discarded = PhotoFilterDateDraft(current: current, dates: dates)
++        XCTAssertEqual(discarded.range, current, "Back/reentry must discard unapplied changes")
+     }
+ 
+     func testWorkspaceDiscoveryRemainsPausedUntilReturnSettles() {
+--- a/ios/ZTransferTests/PhotoRatingScanTests.swift
++++ b/ios/ZTransferTests/PhotoRatingScanTests.swift
+@@ -2,6 +2,72 @@
+ @testable import ZTransfer
+ 
+ final class PhotoRatingScanTests: XCTestCase {
++    @MainActor
++    func testResetClearsPersistedFiltersIncludingSTAProtectionAndLateEditsUseLiveState() {
++        let saved = PhotoFilterPersistence.load()
++        let savedRange = PhotoFilterPersistence.loadPhotoLoadingRange()
++        defer { PhotoFilterPersistence.save(saved); PhotoFilterPersistence.savePhotoLoadingRange(savedRange) }
++        PhotoFilterPersistence.savePhotoLoadingRange(.three)
++        for sta in [false, true] {
++            let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
++                PhotoScanResult(files: [], removedHandles: [], addedHandles: [],
++                    handleQueriesSucceeded: true, metadataComplete: true)
++            }, setRemoteGate: { _ in }, sequentialLoading: sta)
++            defer { model.cancelRatingScan(); model.cancelLoading() }
++            model.setFilter(PhotoFilterState(extensions: [".nef"], protectedOnly: true,
++                ratingEnabled: true, rating: 4, ratingDays: 0, burstOnly: true,
++                untransferredOnly: true, storageSlot: 2,
++                dateRange: PhotoDateRange(start: "20240101", end: "20260101")))
++            let ordinaryEdit = model.filterForPersistence(PhotoFilterState())
++            XCTAssertEqual(ordinaryEdit.protectedOnly, sta, "Only unavailable STA protection is preserved")
++            model.clearFilter()
++            XCTAssertEqual(model.filter, PhotoFilterState())
++            XCTAssertEqual(PhotoFilterPersistence.load(), PhotoFilterState())
++            XCTAssertEqual(PhotoFilterPersistence.loadPhotoLoadingRange(), .three,
++                           "Reset filters must not reset the independent thumbnail loading scope")
++            if sta {
++                var lateEdit = PhotoFilterState(protectedOnly: true, ratingDays: 1)
++                lateEdit = model.filterForPersistence(lateEdit)
++                model.setFilter(lateEdit)
++                XCTAssertFalse(model.filter.protectedOnly)
++                XCTAssertFalse(PhotoFilterPersistence.load().protectedOnly)
++                XCTAssertEqual(PhotoFilterPersistence.load().ratingDays, 1)
++            }
++        }
++    }
++
++    @MainActor
++    func testResetWhileRatingReadIsInFlightDiscardsLateResultAndRestoresDefaultRange() async throws {
++        let saved = PhotoFilterPersistence.load()
++        defer { PhotoFilterPersistence.save(saved) }
++        PhotoFilterPersistence.save(PhotoFilterState())
++        let gate = RatingLookupGate(), stub = Stub()
++        let files = [file(1, "A.JPG", "20261016T120000")]
++        let io = PhotoRatingScanIO(generation: { await stub.generation },
++            invalidate: { await stub.invalidate() }, cached: { _ in nil },
++            beginPhase: { await stub.begin() }, endPhase: { await stub.end() },
++            read: { _, _ in await gate.lookup()?.value })
++        let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
++            PhotoScanResult(files: files, removedHandles: [], addedHandles: [],
++                handleQueriesSucceeded: true, metadataComplete: true)
++        }, setRemoteGate: { _ in }, ratingIO: io)
++        defer { model.cancelRatingScan(); model.cancelLoading() }
++        await model.reload()
++        model.setFilter(PhotoFilterState(ratingEnabled: true, rating: 5, ratingDays: 0))
++        for _ in 0..<100 where await gate.calls < 1 { try await Task.sleep(for: .milliseconds(5)) }
++        let calls = await gate.calls
++        XCTAssertEqual(calls, 1)
++        XCTAssertTrue(model.ratingScan.loading)
++        model.clearFilter()
++        XCTAssertEqual(model.filter, PhotoFilterState())
++        XCTAssertEqual(model.ratingScan, PhotoRatingScan())
++        XCTAssertEqual(model.sections.flatMap(\.files), files)
++        await gate.release(1, value: PhotoRatingCacheEntry(value: 5, origin: "cancelled-by-reset"))
++        try await Task.sleep(for: .milliseconds(30))
++        XCTAssertEqual(model.ratingScan, PhotoRatingScan(), "A late camera response cannot restore reset ratings")
++        XCTAssertEqual(PhotoFilterPersistence.load(), PhotoFilterState())
++    }
++
+     @MainActor
+     func testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain() async throws {
+         let gate = RatingLookupGate(), stub = Stub()
+--- a/ios/ZTransferTests/NativeAttentionMotionTests.swift
++++ b/ios/ZTransferTests/NativeAttentionMotionTests.swift
+@@ -853,7 +853,7 @@
+                         var popup = PhotoFilterPopupOverlay(isPresented: $input.visible, anchor: anchor,
+                             initial: PhotoFilterState(ratingEnabled: input.enabled),
+                             availableExtensions: [".jpg", ".nef", ".mp4"], availableStorageSlots: [1, 2],
+-                            suggestedDate: "20261018", ratingProgress: input.progress, onChange: { _ in })
++                            ratingProgress: input.progress, onChange: { _ in }, onReset: {})
+                         let _ = popup.didRender = { frames.popup += 1 }
+                         popup
+                     }
+--- a/ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift
++++ b/ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift
+@@ -146,8 +146,8 @@
+             if let anchor = anchors[.filter] {
+                 PhotoFilterPopupOverlay(isPresented: $presented, anchor: anchor, initial: filter,
+                     availableExtensions: [".jpg", ".nef"] + (0..<24).map { ".ext\($0)" },
+-                    availableStorageSlots: [1, 2], suggestedDate: "20261019", ratingProgress: progress,
+-                    onChange: { filter = $0 })
++                    availableStorageSlots: [1, 2], ratingProgress: progress,
++                    onChange: { filter = $0 }, onReset: { filter = PhotoFilterState() })
+             }
+         }
+     }
+--- a/ios/ZTransfer/App/AndroidLocalization.swift
++++ b/ios/ZTransfer/App/AndroidLocalization.swift
+@@ -731,10 +731,8 @@
+         "contact_support": ["zh": "客服", "en": "Support", "hant": "客服"],
+         "copy_code": ["zh": "复制", "en": "Copy", "hant": "複製"],
+         "date_day": ["zh": "日", "en": "Day", "hant": "日"],
+-        "date_end": ["zh": "结束", "en": "End", "hant": "結束"],
+         "date_month": ["zh": "月", "en": "Month", "hant": "月"],
+         "date_range": ["zh": "日期范围", "en": "Date range", "hant": "日期範圍"],
+-        "date_start": ["zh": "开始", "en": "Start", "hant": "開始"],
+         "date_year": ["zh": "年", "en": "Year", "hant": "年"],
+         "defer_transfer_start": ["zh": "选完再传", "en": "Transfer after selecting", "hant": "選完再傳"],
+         "defer_transfer_start_summary": ["en": "Selected photos are queued without transferring immediately. Enable this when choosing photos in full-screen preview.", "zh": "挑选入队后不会立即传输，适合预览大图挑选照片时开启。", "hant": "挑選加入佇列後不會立即傳輸，適合預覽大圖挑選照片時開啟。"],
+@@ -804,7 +802,6 @@
+         "filter_section_date": ["zh": "拍摄日期", "en": "Date taken", "hant": "拍攝日期"],
+         "filter_section_file_type": ["zh": "文件类型", "en": "File type", "hant": "檔案類型"],
+         "filter_section_status": ["zh": "状态", "en": "Status", "hant": "狀態"],
+-        "filter_section_storage": ["zh": "存储卡", "en": "Storage card", "hant": "記憶卡"],
+         "filter_storage_slot": ["zh": "卡 %1$d", "en": "Card %1$d", "hant": "卡 %1$d"],
+         "filter_title": ["zh": "筛选", "en": "Filter", "hant": "篩選"],
+         "filter_untransferred": ["zh": "未传", "en": "Pending", "hant": "未傳"],
+@@ -1437,6 +1434,7 @@
+         "remote_self_timer_focus_failed": ["en": "Focus failed. Please try again.", "zh": "未合焦，请重试", "hant": "未合焦，請重試"],
+         "remote_self_timer_seconds": ["en": "%1$ds", "zh": "%1$d秒", "hant": "%1$d秒"],
+         "remote_tool_self_timer": ["en": "Self-timer", "zh": "延时拍照", "hant": "延時拍照"],
++        "reset_filters": ["en": "Reset filters", "zh": "重置筛选", "hant": "重設篩選"],
+     ]
+     static let hant: [String: String] = [
+         "%1$d": "%1$d",
+--- a/ios/docs/iOS全功能快速测试清单.md
++++ b/ios/docs/iOS全功能快速测试清单.md
+@@ -69,9 +69,9 @@
+ - [ ] **C02｜加载范围与新照片。**设置较短加载范围，观察较早日期；随后用相机新拍一张。→ 历史缩略图服从范围，新拍照片及时出现且加载缩略图，不被历史范围拦住。监看拍摄后的同类情况还要做 H03。
+ - [ ] **C03｜连拍分组。**开／关连拍成组，展开一组、进入成员预览再返回／折叠。→ 数量、成员、顺序正确，不丢图、不跳到别组。
+ - [ ] **C04｜组合筛选。**依次试格式、保护、连拍、未传输，最后组合两个条件。→ 只显示符合条件的照片；无结果有正常空状态；不支持的相机能力不假装可用。
+-- [ ] **C05｜日期与卡槽。**设置起止日期，再清除；跨月切一次日期；双卡机分别选卡 1／卡 2。→ 日期合法、范围生效；卡槽对应正确，不混图。单卡机把双卡部分记为不适用。
++- [ ] **C05｜日期与卡槽。**无日期筛选时进入日期页，两个日期均应为手机当地今天；已有范围较新日期在上。把上面调到下面之前，跨月／闰年调一次，再点完成；返回不保存，再次进入检查。→ 两行独立、不跟随跳动，完成后才按先后归一化；返回丢弃草稿、清除只清日期。双卡机分别选卡 1／卡 2，对应正确、不混图；单卡部分记为不适用。
+ - [ ] **C06｜评级加载与停止。**开启评级，加载中立即停止，再重开；完成后选不同星级与加载范围。→ 停止确实终止本轮并丢弃已加载评级，下次重新加载；不无限转圈、不把部分结果当完整。卡片原有照片不受破坏。
+-- [ ] **C07｜清除与弹窗。**设置多个条件后清除筛选，反复打开／关闭筛选窗，拖动日期和范围拨轮。→ 各条件正确重置、列表恢复；弹窗高度稳定，角标与选项不重叠，拨轮不被父级滚动抢走。
++- [ ] **C07｜重置与弹窗。**设置多个条件并开启评级读取，点筛选窗底部“重置筛选”；关开弹窗、重启检查，再开评级读取。STA 下额外检查从 USB/AP 留下的保护筛选。→ 窗口保持打开、条件恢复默认，评级关闭并丢弃已读数据、范围回到 5 日，下次重新读；隐藏的保护条件也清除，照片加载范围不变。日期／范围拨轮正常拖动，弹窗高度稳定，角标不遮挡。
+ - [ ] **C08｜照片操作模式。**先用“点击传输／长按预览”，再换成相反模式，各试点击、长按、快速滚动。→ 行为与设置一致；长按及时生效，不需按一秒多；滚动不会误传，长按后松手不再补一次点击。
+ 
+ ## D｜照片预览、裁切与入队
+@@ -137,7 +137,7 @@
+ - [ ] **H09｜监看 LUT 异常。**快速连续选 A→B→C，选无效文件，关闭菜单后退出／重进监看。→ 最终选择与画面一致，旧异步结果不覆盖新选择；失败可恢复，不卡死；不篡改 F、G 的照片调色配置。
+ - [ ] **H10｜相机预设选择。**打开相机 Picture Control，切已有可选预设；如有 U 档，切物理模式后再试。→ 相机实际值同步；受模式限制时明确提示，不冒充设置成功；无内置 NP3 自动写入。
+ - [ ] **H11｜用户 NP3 写入。**仅在支持且有空闲 C 槽时，选自己的目录，将已知兼容文件写入空槽并启用；试清除确认的取消和确认。→ 目标槽正确，取消不修改；写入／清除失败可恢复，不碰其他槽；不支持的灵活颜色文件有对应提示。
+-- [ ] **H12｜延时拍照。**试 0、2、5、10、20 秒；倒计时中再点快门取消，并分别试退出监看、进回看、后台、断连、切视频模式。→ 只存在一个倒计时，取消后不迟到拍摄；正常倒计时结束才按模式对焦／拍摄；隐藏延时工具后归零，视频模式不误出现照片倒计时。
++- [ ] **H12｜延时拍照。**试关闭、2、3、5、10、30 秒；旧版保存 20 秒的配置升级后应为关闭。倒计时中再点快门取消，并分别试退出监看、进回看、后台、断连、切视频模式。→ 只存在一个倒计时，取消后不迟到拍摄；正常倒计时结束才按模式对焦／拍摄；隐藏延时工具后归零，视频模式不误出现照片倒计时。
+ - [ ] **H13｜相机视频与电脑控制。**支持时切电影模式，开始／停止相机录制并回看文件；另试电脑控制开关和模式限制。→ 录像在相机上实际开始和结束、文件可用；限制状态可理解。不能把相机录制误认成 iOS 手机端录制。
+ - [ ] **H14｜监看中断。**监看中断线／关闭相机，再恢复；另试锁屏／回前台后重新进入。→ 停止无效取帧，错误可理解、能退出重连，无黑屏永久卡住；不重复触发先前快门或倒计时。
+ 

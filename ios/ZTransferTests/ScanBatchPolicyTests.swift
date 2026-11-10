@@ -2,6 +2,116 @@ import XCTest
 @testable import ZTransfer
 
 final class ScanBatchPolicyTests: XCTestCase {
+    func testReviewKnownNewestPhotoIsNotHiddenBehindUnloadedOldFilesWhenIndexUnavailable() async throws {
+        let wire = STAScriptTransport([
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([2])),
+            .init(PTPConstants.getObjectInfo, [2], payload: objectInfo(2, date: "20261108T120000")),
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([2, 90, 91])),
+            .init(PTPConstants.getObjectInfo, [91], payload: objectInfo(91, date: "20261101T120000")),
+            .init(PTPConstants.getObjectInfo, [90], payload: objectInfo(90, date: "20261031T120000"))
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire))
+        let album = try await repository.scanCatalog()
+        XCTAssertEqual(album.files.first?.id, 2, "The photo list already knows the latest capture")
+        let catalog = try await repository.openRemoteReviewCatalog()
+        let photos = try await catalog.loadNextPage(pageSize: 1)
+        XCTAssertEqual(photos.first?.file.id, 2, "Review must start with the same known latest capture")
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 1, "One unknown head is enough; do not scan the remaining old files before showing the latest")
+    }
+
+    func testReviewUsesFreshDatesForReusedCardAndRefreshesAgainAfterNewCapture() async throws {
+        let info = PTPDeviceInfo(standardVersion: 100, vendorExtensionID: 10,
+            vendorExtensionVersion: 100, vendorExtensionDescription: "Nikon", functionalMode: 0,
+            manufacturer: "Nikon", model: "Z50_2", version: "1", serialNumber: "review",
+            operations: [PTPConstants.getObjectsMetadata], events: [], properties: [], captureFormats: [], imageFormats: [])
+        func index(_ entries: [(UInt32, UInt8)]) -> Data {
+            var data = staInteger(UInt32(100)) + staInteger(UInt32(entries.count))
+            for (id, day) in entries {
+                data.append(staInteger(id)); data.append(Data(repeating: 0, count: 5))
+                data.append(contentsOf: [0, 0, 12, day, 11]); data.append(staInteger(UInt16(2026)))
+            }
+            return data
+        }
+        let wire = STAScriptTransport([
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+            // The old body's larger-numbered file is last in the raw array.
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([2, 90])),
+            .init(PTPConstants.getObjectsMetadata, [1, 0, 0], payload: index([(90, 1), (2, 8), (999, 9)])),
+            .init(PTPConstants.getObjectInfo, [2], payload: objectInfo(2, date: "20261108T120000", name: "DSC_0002.JPG")),
+            .init(PTPConstants.getObjectInfo, [90], payload: objectInfo(90, date: "20261101T120000", name: "DSC_9999.JPG")),
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([2, 3, 90])),
+            .init(PTPConstants.getObjectsMetadata, [1, 0, 0], payload: index([(90, 1), (2, 8), (3, 9), (999, 10)])),
+            .init(PTPConstants.getObjectInfo, [3], payload: objectInfo(3, date: "20261109T120000")),
+            .init(PTPConstants.getObjectInfo, [2], payload: objectInfo(2, date: "20261108T120000"))
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire), deviceInfo: info)
+        await repository.setRemoteActive(true)
+        let first = try await repository.openRemoteReviewCatalog()
+        let oldPage = try await first.loadNextPage(pageSize: 1)
+        XCTAssertEqual(oldPage.map(\.file.id), [2])
+        let reopened = try await repository.openRemoteReviewCatalog()
+        let newPage = try await reopened.loadNextPage(pageSize: 1)
+        XCTAssertEqual(newPage.map(\.file.id), [3])
+        XCTAssertFalse(newPage.contains { $0.id == 999 }, "An index entry absent from current handles must never be shown")
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0, "Only page metadata plus one lookahead is read, not the entire card")
+    }
+
+    func testReviewRejectedDateIndexKeepsLazyCameraOrderWithoutFailingReview() async throws {
+        let info = PTPDeviceInfo(standardVersion: 100, vendorExtensionID: 10,
+            vendorExtensionVersion: 100, vendorExtensionDescription: "", functionalMode: 0,
+            manufacturer: "", model: "", version: "", serialNumber: "",
+            operations: [PTPConstants.getObjectsMetadata], events: [], properties: [], captureFormats: [], imageFormats: [])
+        let wire = STAScriptTransport([
+            .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([1, 2])),
+            .init(PTPConstants.getObjectsMetadata, [1, 0, 0], response: 0x2005),
+            .init(PTPConstants.getObjectInfo, [2], payload: objectInfo(2)),
+            .init(PTPConstants.getObjectInfo, [1], payload: objectInfo(1))
+        ])
+        let repository = CameraRepository(session: PTPSession(transport: wire), deviceInfo: info)
+        let catalog = try await repository.openRemoteReviewCatalog()
+        let photos = try await catalog.loadNextPage()
+        XCTAssertEqual(photos.map(\.file.id), [2, 1])
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testSameSessionRefreshDoesNotUseCachedOlderDaysToStopNewestDayMidBatch() async throws {
+        for scope in [PhotoLoadingRange.one, .three, .five, .ten] {
+            let album = STAAlbumAccess(storageIDs: [1], prefetchedHandles: nil,
+                directObjectRead: false, deviceInfo: nil)
+            let previousIDs = (1...scope.days).map(UInt32.init)
+            let newIDs = (UInt32(scope.days + 1)...UInt32(scope.days + 7)).map { $0 }
+            let wire = STAScriptTransport([
+                .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array(previousIDs))
+            ] + previousIDs.reversed().map { id in
+                .init(PTPConstants.getObjectInfo, [id], payload: objectInfo(id, date: String(format: "202610%02dT120000", id)))
+            } + [
+                .init(PTPConstants.getStorageIDs, payload: staU32Array([1])),
+                .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array(previousIDs + newIDs))
+            ] + newIDs.reversed().map { id in
+                .init(PTPConstants.getObjectInfo, [id], payload: objectInfo(id, date: "20261108T120000"))
+            })
+            let repository = CameraRepository(session: PTPSession(transport: wire), staAlbum: album)
+            _ = try await repository.scanCatalog(loadingRange: scope)
+            let result = try await repository.scanCatalog(preserveExisting: true, detectNewHandles: true,
+                loadingRange: scope, nextBatchSize: { 3 })
+            XCTAssertEqual(Set(result.files.filter { $0.captureDate == "20261108T120000" }.map(\.id)), Set(newIDs))
+            let range = try XCTUnwrap(newestCaptureDaysRange(result.files, days: scope.days))
+            XCTAssertEqual(range.end, "20261108")
+            XCTAssertEqual(Set(result.files.filter { range.contains($0.captureDate) }
+                .compactMap { validPhotoCaptureDay($0.captureDate) }).count, scope.days)
+            XCTAssertFalse(result.stoppedAtLoadingRange, "No newly read metadata has crossed into an older day")
+            let remaining = await wire.remaining
+            XCTAssertEqual(remaining, 0)
+        }
+    }
+
     func testUSBScanYieldsWithinBatchToPhotoAndResumesWithoutSkippingHandles() async throws {
         let target = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
@@ -306,120 +416,95 @@ final class ScanBatchPolicyTests: XCTestCase {
     }
 
     @MainActor
-    func testRecoveredRepositoryAndListReconcileDeletedPrimaryAndNewPhoto() async throws {
-        let guid = String(repeating: "1", count: 32)
+    func testNewConnectionReadsCurrentDualCardFilesWithoutPublishingDeletedPrimary() async throws {
         let album = STAAlbumAccess(storageIDs: [1, 0x10001], prefetchedHandles: nil,
             directObjectRead: false, deviceInfo: nil)
-        let oldWire = STAScriptTransport([
-            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([2])),
-            .init(PTPConstants.getObjectHandles, [0x10001, .max, 0], payload: staU32Array([1])),
-            .init(PTPConstants.getObjectInfo, [2], payload: objectInfo(2, storage: 1, date: "20261001T120000", name: "old.JPG")),
-            .init(PTPConstants.getObjectInfo, [1], payload: objectInfo(1, storage: 0x10001, date: "20261001T120000", name: "old.JPG"))
-        ])
-        let oldRepository = CameraRepository(session: PTPSession(transport: oldWire), staAlbum: album,
-            transportCameraIdentifier: guid)
-        let oldResult = try await oldRepository.scanCatalog()
-        let old = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in oldResult },
-            setRemoteGate: { _ in }, sequentialLoading: true)
-        old.load()
-        for _ in 0..<200 where old.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
-        let snapshot = await oldRepository.staCatalogRecovery()
-        let newWire = STAScriptTransport([
-            .init(PTPConstants.getStorageIDs, [], payload: staU32Array([1, 0x10001])),
+        let wire = STAScriptTransport([
             .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([3])),
             .init(PTPConstants.getObjectHandles, [0x10001, .max, 0], payload: staU32Array([1])),
-            .init(PTPConstants.getObjectInfo, [3], payload: objectInfo(3, storage: 1, date: "20261001T130000", name: "new.JPG"))
+            .init(PTPConstants.getObjectInfo, [3], payload: objectInfo(3, storage: 1, date: "20261001T130000", name: "new.JPG")),
+            .init(PTPConstants.getObjectInfo, [1], payload: objectInfo(1, storage: 0x10001, date: "20261001T120000", name: "old.JPG"))
         ])
-        let repository = CameraRepository(session: PTPSession(transport: newWire), staAlbum: album,
-            transportCameraIdentifier: guid)
-        let restored = await repository.restoreSTACatalog(try XCTUnwrap(snapshot))
-        XCTAssertTrue(restored)
-        let replacement = PhotoListViewModel(scanCatalog: { preserve, cursor, detect, next, batch in
-            try await repository.scanCatalog(preserveExisting: preserve, resumeSnapshot: cursor,
-                detectNewHandles: detect, nextBatchSize: next, onBatch: batch)
+        let repository = CameraRepository(session: PTPSession(transport: wire), staAlbum: album)
+        let published = STARecorder<[UInt32]>()
+        let model = PhotoListViewModel(scanCatalog: { preserve, cursor, detect, next, batch in
+            XCTAssertFalse(preserve)
+            XCTAssertFalse(detect)
+            XCTAssertNil(cursor)
+            return try await repository.scanCatalog(preserveExisting: preserve, resumeSnapshot: cursor,
+                detectNewHandles: detect, nextBatchSize: next) { files in
+                    await published.append(files.map(\.id))
+                    try await batch(files)
+                }
         }, prefetchBatch: { files in
             let ids = Set(files.map(\.id))
             return ThumbnailBatchResult(settled: ids, cached: ids)
         }, canFill: { true }, setRemoteGate: { _ in }, sequentialLoading: true)
-        var automatic: [UInt32] = []
-        replacement.setNewMediaHandler { automatic += $0.map(\.id) }
-        replacement.inheritCatalog(from: old)
-        replacement.load()
-        XCTAssertEqual(replacement.availableFiles.map(\.id), [2])
-        for _ in 0..<200 where replacement.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertTrue(replacement.hasCompletedFileScan)
-        XCTAssertEqual(Set(replacement.availableFiles.map(\.id)), [3, 1])
-        XCTAssertEqual(replacement.availableFiles.first(where: { $0.id == 1 })?.storageIDs, [0x10001])
-        XCTAssertEqual(automatic, [3])
-        for wire in [oldWire, newWire] { let remaining = await wire.remaining; XCTAssertEqual(remaining, 0) }
+        model.setNewMediaHandler { _ in XCTFail("Initial discovery is not a new capture event") }
+        model.load()
+        XCTAssertTrue(model.availableFiles.isEmpty)
+        for _ in 0..<200 where model.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(model.hasCompletedFileScan)
+        XCTAssertEqual(model.availableFiles.map(\.id), [3, 1])
+        XCTAssertEqual(model.availableFiles.first(where: { $0.id == 1 })?.storageIDs, [0x10001])
+        let rows = await published.values.flatMap { $0 }
+        XCTAssertEqual(rows, [3, 1])
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
     }
 
     @MainActor
-    func testRecoveredListTransportFailureRetainsCatalogWithoutAuthoritativeReconcile() async throws {
-        let file = CameraFile(id: 7, storageID: 1, format: 0x3801, size: 100,
-            fileName: "7.JPG", captureDate: "20261001T120000", isProtected: false)
-        let old = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
-            PhotoScanResult(files: [file], removedHandles: [], addedHandles: [],
-                handleQueriesSucceeded: true, metadataComplete: true, filterStorageIDs: [1])
-        }, setRemoteGate: { _ in }, sequentialLoading: true)
-        old.load()
-        for _ in 0..<200 where old.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
+    func testNewConnectionFailureStaysEmptyWithoutAuthoritativeCacheReconcile() async throws {
         var losses = 0
-        let replacement = PhotoListViewModel(scanCatalog: { preserve, _, detect, _, _ in
-            XCTAssertTrue(preserve && detect)
+        let model = PhotoListViewModel(scanCatalog: { preserve, cursor, detect, _, _ in
+            XCTAssertFalse(preserve)
+            XCTAssertFalse(detect)
+            XCTAssertNil(cursor)
             throw CameraRepositoryError.transportLost
         }, reconcileCache: { _, _ in XCTFail("Failure is not authoritative") },
             setRemoteGate: { _ in }, sequentialLoading: true, onTransportLost: { losses += 1 })
-        replacement.setNewMediaHandler { _ in XCTFail("No new media on failure") }
-        replacement.inheritCatalog(from: old)
-        replacement.load()
-        for _ in 0..<200 where replacement.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
+        model.setNewMediaHandler { _ in XCTFail("No new media on failure") }
+        model.load()
+        for _ in 0..<200 where model.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(losses, 1)
-        XCTAssertEqual(replacement.availableFiles.map(\.id), [7])
-        XCTAssertEqual(replacement.loadState, .loaded)
-        XCTAssertFalse(replacement.hasCompletedFileScan)
-        XCTAssertEqual(replacement.availableStorageSlots, old.availableStorageSlots)
+        XCTAssertTrue(model.availableFiles.isEmpty)
+        XCTAssertTrue(model.sections.isEmpty)
+        XCTAssertFalse(model.hasCompletedFileScan)
+        if case .failed = model.loadState {} else { XCTFail("Expected disconnected failure") }
     }
+
     @MainActor
-    func testRecoveredListKeepsRowsAndDoesNotReplayOldAutomaticTransfers() async throws {
-        let oldFile = CameraFile(id: 7, storageID: 1, format: 0x3801, size: 100,
-            fileName: "7.JPG", captureDate: "20261001T120000", isProtected: false)
-        let newFile = CameraFile(id: 8, storageID: 1, format: 0x3801, size: 100,
-            fileName: "8.JPG", captureDate: "20261001T130000", isProtected: false)
-        let old = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
-            PhotoScanResult(files: [oldFile], removedHandles: [], addedHandles: [],
-                handleQueriesSucceeded: true, metadataComplete: true, filterStorageIDs: [1])
-        }, setRemoteGate: { _ in }, sequentialLoading: true)
-        old.load()
-        for _ in 0..<200 where old.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(old.availableFiles.map(\.id), [7])
+    func testInitialListWaitsForCurrentCameraFilesAndDoesNotReplayAutomaticTransfers() async throws {
+        let files = [8, 7].map { id in CameraFile(id: UInt32(id), storageID: 1,
+            format: 0x3801, size: 100, fileName: "\(id).JPG", captureDate: "20261001T130000", isProtected: false) }
+        let entered = GateTestLatch(), release = GateTestLatch()
         let requests = STARecorder<Bool>()
-        let replacement = PhotoListViewModel(scanCatalog: { preserve, cursor, detect, _, onBatch in
-            await requests.append(preserve && detect && cursor == nil)
-            try await onBatch([newFile])
-            return PhotoScanResult(files: [newFile, oldFile], removedHandles: [], addedHandles: [7, 8],
+        let model = PhotoListViewModel(scanCatalog: { preserve, cursor, detect, _, onBatch in
+            await requests.append(!preserve && !detect && cursor == nil)
+            await entered.signal()
+            await release.wait()
+            try await onBatch(files)
+            return PhotoScanResult(files: files, removedHandles: [], addedHandles: [],
                 handleQueriesSucceeded: true, metadataComplete: true, filterStorageIDs: [1])
         }, prefetchBatch: { files in
             let ids = Set(files.map(\.id))
             return ThumbnailBatchResult(settled: ids, cached: ids)
         }, canFill: { true }, setRemoteGate: { _ in }, sequentialLoading: true)
-        var automatic: [UInt32] = []
-        replacement.setNewMediaHandler { automatic += $0.map(\.id) }
-        replacement.inheritCatalog(from: old)
-        XCTAssertEqual(replacement.availableFiles.map(\.id), [7])
-        XCTAssertEqual(replacement.availableStorageSlots, old.availableStorageSlots)
-        XCTAssertFalse(replacement.hasCompletedFileScan)
-        replacement.load()
-        XCTAssertEqual(replacement.availableFiles.map(\.id), [7])
-        for _ in 0..<200 where replacement.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertTrue(replacement.hasCompletedFileScan)
-        XCTAssertEqual(replacement.availableFiles.map(\.id), [8, 7])
-        XCTAssertEqual(automatic, [8])
+        model.setNewMediaHandler { _ in XCTFail("Reconnect must not transfer the whole initial catalog") }
+        model.load()
+        await entered.wait()
+        XCTAssertTrue(model.availableFiles.isEmpty)
+        XCTAssertTrue(model.sections.isEmpty)
+        await release.signal()
+        for _ in 0..<200 where model.isLoadingFiles { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(model.hasCompletedFileScan)
+        XCTAssertEqual(model.availableFiles.map(\.id), [8, 7])
+        model.load() // Same-connection page entry keeps the completed catalog.
         let flags = await requests.values
         XCTAssertEqual(flags, [true])
     }
     @MainActor
-    func testConnectionRecoveryIsInstalledBeforePublishingReplacement() async throws {
+    func testReconnectionPublishesFreshSessionWithoutCatalogInheritance() async throws {
         let preferences = UserDefaults(suiteName: "sta_connection")!
         let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
         let previous = keys.map { preferences.object(forKey: $0) }
@@ -449,15 +534,18 @@ final class ScanBatchPolicyTests: XCTestCase {
             _ = try await old.scanCatalog()
             await model.handleTransportLost(source)
             XCTAssertNil(model.cameraSession)
-            // Cancelling discovery must retain recovery for a later same-body retry.
+            // A cancelled attempt or pairing reset must not reintroduce old catalog rows.
             model.cancelWiFiConnection()
             if reset { await model.resetSTAPairing() }
             await model.connectSelectedWiFi(reconnect: true)
             let replacement = try XCTUnwrap(model.cameraSession)
             XCTAssertFalse(source === replacement)
-            XCTAssertEqual(replacement.recoveredFromSessionID, reset ? nil : ObjectIdentifier(source))
-            let transferred = await next.staCatalogRecovery()
-            XCTAssertEqual(transferred != nil, !reset)
+            let cursor = await next.scanSnapshotForResume()
+            XCTAssertNil(cursor)
+            let list = PhotoListViewModel.cached(session: replacement)
+            XCTAssertTrue(list.availableFiles.isEmpty)
+            XCTAssertTrue(list.sections.isEmpty)
+            PhotoListViewModel.evict(session: replacement)
             await model.handleTransportLost(source) // Late old failure cannot retire replacement.
             XCTAssertTrue(model.cameraSession === replacement)
         }
@@ -1106,7 +1194,7 @@ final class ScanBatchPolicyTests: XCTestCase {
         let initial = try await repository.scanCatalog()
         XCTAssertEqual(initial.files.map(\.id), [6, 4, 2])
         // All handles were accepted, including aliases omitted from visible rows.
-        let snapshot = PhotoScanSnapshot(storageIDs: [1, 0x10001],
+        let snapshot = PhotoScanSnapshot(sessionID: repository.catalogSessionID, storageIDs: [1, 0x10001],
             handleOrders: [(1, [2, 4, 6]), (0x10001, [1, 3, 5])],
             processedHandles: [1, 2, 3, 4, 5, 6], handleQueriesSucceeded: true,
             filterStorageIDs: [1, 0x10001], directStorageIDsByHandle: [:])
@@ -1119,58 +1207,65 @@ final class ScanBatchPolicyTests: XCTestCase {
         XCTAssertEqual(remaining, 0)
     }
 
-    func testSTARecoveryMovesCatalogBaselineToNewSameBodyConnectionOnly() async throws {
-        let guid = String(repeating: "1", count: 32)
-        let album = STAAlbumAccess(storageIDs: [1, 0x10001], prefetchedHandles: nil,
+    func testForeignScanSnapshotCannotSeedAnotherConnectionEvenForSameBody() async throws {
+        let album = STAAlbumAccess(storageIDs: [1], prefetchedHandles: nil,
             directObjectRead: false, deviceInfo: nil)
-        let handles: [STAExchange] = [
-            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([2, 4, 6])),
-            .init(PTPConstants.getObjectHandles, [0x10001, .max, 0], payload: staU32Array([1, 3, 5]))
-        ]
-        func metadata(_ ids: [UInt32]) -> [STAExchange] {
-            ids.map { id in
-                let pair = (id + 1) / 2
-                return .init(PTPConstants.getObjectInfo, [id], payload: objectInfo(id,
-                    storage: id % 2 == 0 ? 1 : 0x10001,
-                    date: "20261001T12000\(pair)", name: "\(pair).JPG"))
-            }
+        let oldWire = STAScriptTransport([
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([1, 2, 3])),
+            .init(PTPConstants.getObjectInfo, [3], payload: objectInfo(3, date: "20261108T120000")),
+            .init(PTPConstants.getObjectInfo, [2], payload: objectInfo(2, date: "20261104T120000")),
+            .init(PTPConstants.getObjectInfo, [1], payload: objectInfo(1, date: "20261101T120000"))
+        ])
+        let source = CameraRepository(session: PTPSession(transport: oldWire), staAlbum: album,
+            transportCameraIdentifier: "same-camera")
+        _ = try await source.scanCatalog(loadingRange: .one)
+        let value = await source.scanSnapshotForResume()
+        let oldSnapshot = try XCTUnwrap(value)
+        let wire = STAScriptTransport([
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([4])),
+            .init(PTPConstants.getObjectInfo, [4], payload: objectInfo(4, date: "20261108T130000"))
+        ])
+        let replacement = CameraRepository(session: PTPSession(transport: wire), staAlbum: album,
+            transportCameraIdentifier: "same-camera")
+        let result = try await replacement.scanCatalog(preserveExisting: true, resumeSnapshot: oldSnapshot)
+        XCTAssertEqual(result.files.map(\.id), [4])
+        for transport in [oldWire, wire] {
+            let remaining = await transport.remaining
+            XCTAssertEqual(remaining, 0)
         }
-        let oldWire = STAScriptTransport(handles + metadata([6, 5, 4, 3, 2, 1]))
+    }
+
+    func testNewConnectionRereadsReusedHandlesAndNeverRestoresDeletedFiles() async throws {
+        let guid = String(repeating: "1", count: 32)
+        let album = STAAlbumAccess(storageIDs: [1], prefetchedHandles: nil,
+            directObjectRead: false, deviceInfo: nil)
+        let oldWire = STAScriptTransport([
+            .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([6, 7])),
+            .init(PTPConstants.getObjectInfo, [7], payload: objectInfo(7, name: "deleted.JPG")),
+            .init(PTPConstants.getObjectInfo, [6], payload: objectInfo(6, name: "also-deleted.JPG"))
+        ])
         let old = CameraRepository(session: PTPSession(transport: oldWire), staAlbum: album,
             transportCameraIdentifier: guid)
         _ = try await old.scanCatalog()
         await old.beginShutdown()
-        let saved = await old.staCatalogRecovery()
-        let recovery = try XCTUnwrap(saved)
-        let newWire = STAScriptTransport([
-            .init(PTPConstants.getStorageIDs, [], payload: staU32Array([1, 0x10001]))
-        ] + handles + metadata([5, 3, 1]))
-        let replacement = CameraRepository(session: PTPSession(transport: newWire), staAlbum: album,
-            transportCameraIdentifier: guid)
-        let generation = await replacement.photoRatingGeneration()
-        let restored = await replacement.restoreSTACatalog(recovery)
-        XCTAssertTrue(restored)
-        let nextGeneration = await replacement.photoRatingGeneration()
-        XCTAssertGreaterThan(nextGeneration, generation)
-        let cursor = await replacement.scanSnapshotForResume()
-        XCTAssertNil(cursor)
-        let result = try await replacement.scanCatalog(preserveExisting: true, detectNewHandles: true)
-        XCTAssertEqual(result.files.map(\.id), [6, 4, 2])
-        XCTAssertTrue(result.files.allSatisfy { $0.storageIDs == [1, 0x10001] })
-        XCTAssertTrue(result.addedHandles.isEmpty)
-        XCTAssertTrue(result.removedHandles.isEmpty)
-        let repeated = await replacement.restoreSTACatalog(recovery)
-        XCTAssertFalse(repeated)
-        for identity in [String(repeating: "2", count: 32), nil] as [String?] {
-            let other = CameraRepository(session: PTPSession(transport: STAScriptTransport([])),
-                staAlbum: album, transportCameraIdentifier: identity)
-            let accepted = await other.restoreSTACatalog(recovery)
-            XCTAssertFalse(accepted)
+        for identity in [guid, String(repeating: "2", count: 32), nil] as [String?] {
+            let wire = STAScriptTransport([
+                .init(PTPConstants.getObjectHandles, [1, .max, 0], payload: staU32Array([7, 8])),
+                .init(PTPConstants.getObjectInfo, [8], payload: objectInfo(8, date: "20261108T130000", name: "newest.JPG")),
+                .init(PTPConstants.getObjectInfo, [7], payload: objectInfo(7, date: "20261108T120000", name: "reused.JPG"))
+            ])
+            let repository = CameraRepository(session: PTPSession(transport: wire), staAlbum: album,
+                transportCameraIdentifier: identity)
+            let result = try await repository.scanCatalog()
+            XCTAssertEqual(result.files.map(\.id), [8, 7])
+            XCTAssertEqual(result.files.map(\.fileName), ["newest.JPG", "reused.JPG"])
+            XCTAssertTrue(result.addedHandles.isEmpty)
+            XCTAssertTrue(result.files.allSatisfy { $0.captureDate?.hasPrefix("20261108") == true })
+            let remaining = await wire.remaining
+            XCTAssertEqual(remaining, 0)
         }
-        let ap = CameraRepository(session: PTPSession(transport: STAScriptTransport([])), transportCameraIdentifier: guid)
-        let acceptedAP = await ap.restoreSTACatalog(recovery)
-        XCTAssertFalse(acceptedAP)
-        for wire in [oldWire, newWire] { let remaining = await wire.remaining; XCTAssertEqual(remaining, 0) }
+        let remaining = await oldWire.remaining
+        XCTAssertEqual(remaining, 0)
     }
 
     func testCancelledDualCardBatchResumesOnlyAcceptedHandles() async throws {

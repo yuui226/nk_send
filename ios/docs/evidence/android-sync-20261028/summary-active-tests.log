@@ -1,0 +1,23 @@
+Test Suite 'Selected tests' started at 2026-10-28 20:30:29.980.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-28 20:30:29.981.
+Test Suite 'QueueSummaryLayoutTests' started at 2026-10-28 20:30:29.981.
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens]' started.
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/E3A5FCB3-596E-43C7-8E5F-6BE5EA85B90F/tmp/queue-summary-320-idle.png
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:78: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertEqual failed: ("2") is not equal to ("3")
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/E3A5FCB3-596E-43C7-8E5F-6BE5EA85B90F/tmp/queue-summary-320-busy.png
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:93: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertTrue failed
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/E3A5FCB3-596E-43C7-8E5F-6BE5EA85B90F/tmp/queue-summary-600-idle.png
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:78: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertEqual failed: ("2") is not equal to ("3")
+QUEUE_SUMMARY_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/E3A5FCB3-596E-43C7-8E5F-6BE5EA85B90F/tmp/queue-summary-600-busy.png
+/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:93: error: -[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens] : XCTAssertTrue failed
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens]' failed (3.725 seconds).
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation]' started.
+Test Case '-[ZTransferTests.QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation]' passed (1.290 seconds).
+Test Suite 'QueueSummaryLayoutTests' failed at 2026-10-28 20:30:34.997.
+	 Executed 2 tests, with 4 failures (0 unexpected) in 5.015 (5.016) seconds
+Test Suite 'ZTransferTests.xctest' failed at 2026-10-28 20:30:34.997.
+	 Executed 2 tests, with 4 failures (0 unexpected) in 5.015 (5.017) seconds
+Test Suite 'Selected tests' failed at 2026-10-28 20:30:34.998.
+	 Executed 2 tests, with 4 failures (0 unexpected) in 5.015 (5.017) seconds
+Test session results, code coverage, and logs:
+** TEST FAILED **

@@ -118,16 +118,16 @@ final class PictureControlPanelModel: ObservableObject {
         if opening { dismiss() }
     }
     func canEdit(_ slot: PictureControlSlotInfo) -> Bool {
-        canBrowse && interactionAllowed && allowed() && current() && !loadFailed && overview?.canEdit == true && slot.readable
+        canBrowse && interactionAllowed && allowed() && current() && !loadFailed && overview?.canEdit == true && slot.editable
     }
     func act(_ action: Action) {
         guard canBrowse, interactionAllowed, allowed(), current(), !loadFailed,
               let state = overview, let target = state.slots.first(where: { $0.slot == action.slot }) else { return }
         let permitted: Bool
         switch action {
-        case .activate: permitted = state.canActivate && target.availability == .occupied
-        case .write: permitted = state.canEdit && target.readable
-        case .clear: permitted = state.canEdit && target.availability == .occupied
+        case .activate: permitted = state.canActivate && target.selectable
+        case .write: permitted = state.canEdit && target.editable
+        case .clear: permitted = state.canEdit && target.editable && target.availability == .occupied
         }
         guard permitted, busy(true) else { return }
         feedback()

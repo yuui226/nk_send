@@ -6,7 +6,9 @@ struct RemoteToolsInteractionHarness: View {
     @StateObject private var store = Store()
     @State private var open = false
     var body: some View {
-        if ProcessInfo.processInfo.arguments.contains("--remote-lut-list-ui-test") {
+        if ProcessInfo.processInfo.arguments.contains("--remote-preset-ui-test") {
+            RemotePresetInteractionHarness()
+        } else if ProcessInfo.processInfo.arguments.contains("--remote-lut-list-ui-test") {
             RemoteLUTInteractionHarness()
         } else { monitorEntry }
     }
@@ -220,5 +222,92 @@ private actor RemoteToolMenuTestCamera: RemoteCameraControlling {
     func endSubjectTracking() {}
     func startMovieRecording() -> RemoteMovieStartResult { .init(responseCode: PTPConstants.operationNotSupported, prohibitCondition: nil) }
     func endMovieRecording() -> UInt16 { PTPConstants.responseOK }
+}
+
+/// Real popup, scanner, NP3 reader and model; only the camera and the local
+/// test-directory security grant are substituted. No bundled NP3 is shipped.
+private struct RemotePresetInteractionHarness: View {
+    @StateObject private var store = Store()
+    @State private var open = false
+    @State private var picker = PictureControlFolderPickerState()
+    @Environment(\.scenePhase) private var phase
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                Color.gray.opacity(0.2)
+                VStack(alignment: .leading) {
+                    Button("Presets") { store.panel.open(); open = true }.accessibilityIdentifier("test-preset-open")
+                    Text(store.events).accessibilityIdentifier("test-preset-events")
+                }.padding(20)
+                if open {
+                    RemotePictureControlPanel(model: store.panel, folders: store.folders,
+                        anchor: CGRect(x: 20, y: 20, width: 80, height: 36), hostSize: proxy.size,
+                        dismiss: { open = false }, chooseFolder: { picker.begin(slot: $0) }, pickerActive: picker.active)
+                }
+            }
+        }
+        .fileImporter(isPresented: $picker.active, allowedContentTypes: [.folder]) { result in
+            picker.complete(folder: try? result.get()); finishPicker()
+        }
+        .onChange(of: phase) { if $0 == .active { finishPicker() } }
+        .onDisappear { store.panel.close() }
+    }
+    private func finishPicker() {
+        guard let result = picker.consume(resumed: phase == .active) else { return }
+        if let folder = result.folder { store.folders.changeFolder(folder) }
+        store.panel.editingSlot = result.slot
+        store.panel.interactionAllowed = true
+    }
+    @MainActor private final class Store: ObservableObject {
+        let folders: PictureControlFolderState
+        let root: URL
+        @Published var events = "ready"
+        private var names: [Int: String] = [:]
+        private var selected = 8
+        lazy var panel = PictureControlPanelModel(folders: folders, current: { true }, allowed: { true },
+            busy: { _ in true }, readOverview: { [unowned self] _ in
+                await MainActor.run { self.overview() }
+            }, change: { [unowned self] slot, change, _ in
+                try await MainActor.run { try self.change(slot, change) }
+            })
+        private func overview() -> PictureControlOverview {
+            .init(slots: (201...209).map { .init(slot: $0,
+                availability: names[$0] == nil ? .empty : .occupied, name: names[$0], selectable: names[$0] != nil) },
+                selected: selected, canActivate: true, canEdit: true)
+        }
+        private func change(_ slot: Int, _ change: PictureControlChange) throws {
+            switch change {
+            case .write(let file):
+                _ = try file.encodeClassicPictureControl()
+                names[slot] = file.name; selected = slot; events += ";write=\(slot):\(file.name)"
+            case .activate: selected = slot; events += ";activate=\(slot)"
+            case .clear: names[slot] = nil; selected = 1; events += ";clear=\(slot)"
+            case .restore: break
+            }
+        }
+        init() {
+            let name = "RemotePresetInteractionHarness"
+            let defaults = UserDefaults(suiteName: name)!
+            defaults.removePersistentDomain(forName: name)
+            root = FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: true)
+            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            // The UI runner supplies generated neutral bytes; no user file or
+            // third-party preset is embedded in the application.
+            if let value = ProcessInfo.processInfo.environment["ZTRANSFER_TEST_NP3"], let bytes = Data(base64Encoded: value) {
+                try? bytes.write(to: root.appendingPathComponent("User Neutral.NP3"))
+            }
+            let localGrant = DirectoryAccessOperations(start: { _ in true }, stop: { _ in })
+            folders = PictureControlFolderState(defaults: defaults, queue: PresetIOQueue(), fileAccess: localGrant,
+                scan: { replacement, bookmark, ticket in
+                    let folder = replacement ?? RemoteLUTFolderAccess.resolveBookmark(bookmark)!
+                    return try RemoteLUTFolderAccess.prepareFolder(folder, fileExtension: "np3",
+                        operations: localGrant, checkCancelled: ticket.checkCancellation)
+                })
+            if !ProcessInfo.processInfo.arguments.contains("--remote-preset-empty-folder-ui-test") {
+                folders.changeFolder(root)
+            }
+            panel.notice = { [weak self] message in self?.events += ";notice=\(message)" }
+        }
+    }
 }
 #endif

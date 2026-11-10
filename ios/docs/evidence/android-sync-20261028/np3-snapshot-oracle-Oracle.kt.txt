@@ -1,0 +1,23 @@
+package com.ztransfer.filter
+import java.io.File
+import java.util.Base64
+fun main(args:Array<String>) {
+ fun flexible(curve:Boolean) = PhotoFilterPreset("np3:${"a".repeat(64)}:np3-srgb-v1", "NP3 fixture",
+  Np3PhotoFilterParameters(-100,-57,-3,2,51,100,PHOTO_FILTER_COLOR_BAND_CENTERS.mapIndexed { i,c -> PhotoFilterColorBand(c,i-7,i*12,100-i*11) },if(curve) IntArray(257){it*32767/256} else null))
+ File(args[0]).printWriter().use { out ->
+  fun emit(key:String,p:PhotoFilterPreset) { out.println(key+"|"+Base64.getEncoder().encodeToString(PhotoNp3SnapshotCodec.encode(p))) }
+  for(base in ClassicNp3Style.entries) for(curve in listOf(false,true)) {
+   emit("C:${base.id}:${if(curve)1 else 0}",PhotoFilterPreset("np3:${"c".repeat(64)}:np3-classic-srgb-v1","Classic fixture",
+    ClassicNp3PhotoFilterParameters(base,-128,-6,-128,12,0,0,16,if(base.creative)40 else 100,if(curve)IntArray(257){it*32767/256}else null)))
+  }
+  for(curve in listOf(false,true)) {
+   val p=flexible(curve);emit("F:${if(curve)1 else 0}",p)
+   emit("G:${if(curve)1 else 0}",p.copy(parameters=(p.parameters as Np3PhotoFilterParameters).copy(colorGrading=Np3ColorGrading(Np3ColorGradingRegion(360,100,-100),Np3ColorGradingRegion(127,-27,53),Np3ColorGradingRegion(0,-100,100),71,-43))))
+  }
+  val p=flexible(false)
+  emit("N",p.copy(parameters=(p.parameters as Np3PhotoFilterParameters).copy(colorGrading=Np3ColorGrading(Np3ColorGradingRegion(hue=360),Np3ColorGradingRegion(hue=120),Np3ColorGradingRegion(hue=240),100,-100))))
+  emit("U",p.copy(name="\u5f71\u50cf \uD83D\uDE00\u00e9"))
+  emit("L",p.copy(name="\uD83D\uDE00".repeat(128)))
+ }
+ println("69 independent Android snapshots generated")
+}

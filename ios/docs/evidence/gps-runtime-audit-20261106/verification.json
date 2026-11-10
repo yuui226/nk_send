@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-06",
+  "androidBaseline": "eafc461d36da712260ebb262f034d7da70450ae6",
+  "result": "TEST SUCCEEDED",
+  "exitCode": 0,
+  "uniquePassedTests": 64,
+  "suites": {
+    "GPSProtocolTests": 58,
+    "GPSPresentationPerformanceTests": 3,
+    "nativeAndGestureUI": 3
+  },
+  "newTests": 4,
+  "xcresult": "/tmp/ztransfer-gps-runtime-20261106-r1.xcresult",
+  "systemLocationMainThreadWarningObserved": false,
+  "nativeLocationPromptAndDeniedSettingsReturn": "passed; real CoreLocation and simulator TCC",
+  "cameraTransport": "test double; protocol fixtures also covered",
+  "manualSettingsGrant": "not verified by actual UI; state transitions model-tested",
+  "physicalBluetoothAndCameraGeoWrite": "not tested",
+  "deviceInstall": false,
+  "commit": false,
+  "push": false,
+  "screenshotsViewed": [
+    "FBD282BF-4513-41FF-8872-CB0A9E46D593.png"
+  ]
+}

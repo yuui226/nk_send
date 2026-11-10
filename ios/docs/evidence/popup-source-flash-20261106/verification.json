@@ -1,0 +1,225 @@
+{
+  "date": "2026-11-06",
+  "tasksComplete": 3,
+  "tasksTotal": 3,
+  "scope": "Separate capture source from screen visibility using one transparent UIView ancestor; do not change button style, timing, mesh geometry or interaction state.",
+  "finalTests": {
+    "r5": 10,
+    "r6": 2,
+    "differentMethods": 12,
+    "unresolvedFailures": 0
+  },
+  "sourceVisibility": {
+    "negativeControl": {
+      "observed": 3,
+      "exposed": 3,
+      "change": "Temporarily omitted contentContainer.layer.opacity = 0; fixed source restored in finally."
+    },
+    "final": {
+      "observed": 3,
+      "exposed": 0
+    },
+    "coverage": "Synchronous KVO checks the effective ancestor opacity when a disabled source becomes visible before any mesh exists; paired with three complete UI open/close cycles and existing reversal/layout/lifetime tests."
+  },
+  "history": {
+    "r1": "Two initial component tests passed, including five themes/light/dark capture comparison.",
+    "r2": "New test failed to compile under Swift 6 isolation; fixed main-actor observer closure.",
+    "r3": "No exposure, but incorrect expectation of 6 KVO events failed (2 actual events). KVO is not guaranteed to report same-value assignments.",
+    "r4-baseline": "Negative control failed exposure check (3/3). Also exposed a fixed-450ms completion assumption in the new test; changed to await actual onSettled.",
+    "r5": "All 10 component/layout/reversal/lifetime tests passed.",
+    "r6": "Two real UI methods passed, including three repeated settings open/close cycles and existing effects/workbench actions."
+  },
+  "pixelComparisons": [
+    {
+      "skin": "liquidGlass",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 0.06456163194444445
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 0.07826967592592593
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 0.07429108796296297
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.4646629050925926
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.5331669560185185
+    },
+    {
+      "skin": "liquidGlass",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.5245587384259259
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "frostedGlass",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "titanium",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 0.5071976273148148
+    },
+    {
+      "skin": "titanium",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 0.5756655092592593
+    },
+    {
+      "skin": "titanium",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 0.5925564236111112
+    },
+    {
+      "skin": "titanium",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "titanium",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "titanium",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "wood",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 2.0917607060185186
+    },
+    {
+      "skin": "wood",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 2.4256004050925926
+    },
+    {
+      "skin": "wood",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 2.4076605902777777
+    },
+    {
+      "skin": "wood",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 1.3748191550925926
+    },
+    {
+      "skin": "wood",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 2.3147786458333335
+    },
+    {
+      "skin": "wood",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "cameraControls",
+      "dark": false,
+      "control": "bulb",
+      "meanRGBDifference": 1.1186342592592593
+    },
+    {
+      "skin": "cameraControls",
+      "dark": false,
+      "control": "back",
+      "meanRGBDifference": 1.3967737268518519
+    },
+    {
+      "skin": "cameraControls",
+      "dark": false,
+      "control": "close",
+      "meanRGBDifference": 1.4146773726851851
+    },
+    {
+      "skin": "cameraControls",
+      "dark": true,
+      "control": "bulb",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "cameraControls",
+      "dark": true,
+      "control": "back",
+      "meanRGBDifference": 0.0
+    },
+    {
+      "skin": "cameraControls",
+      "dark": true,
+      "control": "close",
+      "meanRGBDifference": 0.0
+    }
+  ],
+  "fullSettingsMeanRGBDifference": 0.46674958508266473,
+  "visualReview": "Four final light/dark liquid glass capture/live images, repeated-cycle overview, three opening sequences and last closing sequence at 30 fps reviewed. Recordings supplement synchronous visibility assertions; they cannot exclude unsampled device frames.",
+  "video": {
+    "path": "/tmp/ztransfer-popup-flash-20261106-r6.mov",
+    "sha256": "fe12805c0a75217c18a876ed671df8c388e6204752b0bcb022229b1d029c33dc"
+  },
+  "limitations": [
+    "Simulator only; no phone install or device visual/thermal/frame-rate validation.",
+    "Viewport resize/reopen covered; no new dedicated mid-capture size-change test."
+  ],
+  "inputs": "inputs-final.json"
+}

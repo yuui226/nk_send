@@ -94,7 +94,12 @@ actor PhotoThumbnailStore {
         // Like Android's InflightThumb, visible waiters share decoding as well
         // as the remote read, even when the result exceeds the memory budget.
         var visibleResult: VisibleResult?
-        init(task: Task<Data, Error>, waiters: Int = 1) { self.task = task; self.waiters = waiters }
+        var retryDeferred: Bool?
+        var invalidated = false
+        let generation: UInt64
+        init(task: Task<Data, Error>, generation: UInt64, waiters: Int = 1) {
+            self.task = task; self.generation = generation; self.waiters = waiters
+        }
     }
     private final class WaiterToken: @unchecked Sendable {
         let key: String
@@ -113,14 +118,95 @@ actor PhotoThumbnailStore {
     var activeWaiterCount: Int { inFlight.values.reduce(0) { $0 + $1.waiters } }
     private var observers: [UInt32: [UUID: AsyncStream<Void>.Continuation]] = [:]
     private let remoteGate = ThumbnailRemoteGate()
+    private var newObjectRetries = NewObjectThumbnailRetries()
+    private var requestGeneration: UInt64 = 0
+    private var retriesEnabled = true
+    private var retryTask: Task<Void, Never>?
+    private var retryDeadline: Int64?
+    private var retryObservers: [UUID: AsyncStream<Void>.Continuation] = [:]
+    private let nowMilliseconds: @Sendable () -> Int64
 
-    init(disk: PhotoThumbnailDiskCache? = nil, memoryBudget: Int? = nil) {
+    init(disk: PhotoThumbnailDiskCache? = nil, memoryBudget: Int? = nil,
+         nowMilliseconds: @escaping @Sendable () -> Int64 = { Int64(ProcessInfo.processInfo.systemUptime * 1_000) }) {
+        self.nowMilliseconds = nowMilliseconds
         self.disk = disk ?? Self.sharedDisk
         // Android reserves about one eighth of the process heap for bitmap LRU.
         // Data is compressed thumbnail bytes on iOS, so retain the same ratio
         // with a small floor and no arbitrary entry-count eviction.
         self.memory = PhotoThumbnailMemoryCache(budget: memoryBudget ??
             max(4 * 1024 * 1024, Int(ProcessInfo.processInfo.physicalMemory / 8)))
+    }
+
+    deinit { retryTask?.cancel() }
+
+    func registerNewObjects(_ files: [CameraFile], identity: String, directSTA: Bool) {
+        guard retriesEnabled else { return }
+        beginSession(identity: identity)
+        for file in files {
+            newObjectRetries.register(file.id)
+            negative.remove(cacheKeys(for: file, directSTA: directSTA).primary)
+        }
+    }
+    func blockedRetryHandles() -> Set<UInt32> { newObjectRetries.blockedHandles(now: nowMilliseconds()) }
+    func isNewObjectRetry(_ handle: UInt32) -> Bool { newObjectRetries.isRetry(handle) }
+
+    func retryWakes() -> AsyncStream<Void> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        guard retriesEnabled else { continuation.finish(); return stream }
+        retryObservers[id] = continuation
+        continuation.onTermination = { [weak self] _ in Task { await self?.removeRetryObserver(id) } }
+        return stream
+    }
+    private func removeRetryObserver(_ id: UUID) { retryObservers[id] = nil }
+
+    /// Offline cached photos remain usable. Retiring a session only stops the
+    /// retry clock and prevents late failures from scheduling new camera work.
+    func stopRetries() {
+        retriesEnabled = false
+        resetRetries()
+        for observer in retryObservers.values { observer.finish() }
+        retryObservers.removeAll()
+    }
+    private func resetRetries() {
+        requestGeneration &+= 1
+        retryTask?.cancel(); retryTask = nil; retryDeadline = nil
+        newObjectRetries.clear()
+    }
+    private func scheduleRetryWake() {
+        let next = retriesEnabled ? newObjectRetries.nextRetryAt : nil
+        guard next != retryDeadline || (next != nil && retryTask == nil) else { return }
+        retryTask?.cancel(); retryTask = nil; retryDeadline = next
+        guard let next else { return }
+        let generation = requestGeneration
+        let wait = max(1, next - nowMilliseconds())
+        retryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(wait)) } catch { return }
+            await self?.retryTimerFired(deadline: next, generation: generation)
+        }
+    }
+    private func retryTimerFired(deadline: Int64, generation: UInt64) {
+        guard retriesEnabled, requestGeneration == generation, retryDeadline == deadline else { return }
+        retryTask = nil; retryDeadline = nil
+        if !newObjectRetries.takeDue(now: nowMilliseconds()).isEmpty {
+            for observer in retryObservers.values { observer.yield(()) }
+        }
+        scheduleRetryWake()
+    }
+    private func thumbnailSucceeded(_ handle: UInt32) {
+        if newObjectRetries.remove(handle) { scheduleRetryWake() }
+    }
+    private func deferFailure(file: CameraFile, key: String, flight: Flight) -> Bool {
+        if let result = flight.retryDeferred { return result }
+        guard retriesEnabled, !flight.invalidated, flight.generation == requestGeneration else { return false }
+        let deferred = newObjectRetries.failed(file.id, now: nowMilliseconds()) != nil
+        flight.retryDeferred = deferred
+        if deferred { negative.remove(key); scheduleRetryWake() }
+        return deferred
+    }
+    private func checkFlight(_ flight: Flight, identity: String) throws {
+        try Task.checkCancellation()
+        guard cameraIdentity == identity, !flight.invalidated, flight.generation == requestGeneration else { throw CancellationError() }
     }
 
     /// Cancelling a cell removes only its subscription, never camera work.
@@ -148,6 +234,7 @@ actor PhotoThumbnailStore {
 
     func beginSession(identity: String) {
         guard cameraIdentity != identity else { return }
+        resetRetries()
         for flight in inFlight.values { flight.task.cancel() }
         inFlight.removeAll()
         memory.removeAll(keepingCapacity: true)
@@ -169,6 +256,9 @@ actor PhotoThumbnailStore {
     /// of a fresh scan while retaining the per-camera disk cache.
     func resetForScan(identity: String) {
         beginSession(identity: identity)
+        resetRetries()
+        for flight in inFlight.values { flight.task.cancel() }
+        inFlight.removeAll()
         memory.removeAll(keepingCapacity: true)
         negative.removeAll(keepingCapacity: true)
     }
@@ -186,14 +276,15 @@ actor PhotoThumbnailStore {
         guard let expectedIdentity = cameraIdentity else { return nil }
         let keys = cacheKeys(for: file, directSTA: directSTA)
         let key = keys.primary
-        if let value = memory.value(for: key) { return value }
+        if let value = memory.value(for: key) { thumbnailSucceeded(file.id); return value }
         if negative.contains(key) { return nil }
         if let store = cameraStore,
-           let url = store.find(key, legacyName: keys.legacy, alternateName: keys.alternate),
+           let url = store.find(key, alternateName: keys.alternate),
            let raw = try? Data(contentsOf: url), !raw.isEmpty {
             let value = transform(raw)
             if validate(value) {
                 memory.insert(value, for: key)
+                thumbnailSucceeded(file.id)
                 return value
             }
             // A malformed disk entry is not an authoritative no-thumbnail
@@ -201,6 +292,7 @@ actor PhotoThumbnailStore {
             cameraStore?.remove(key, url: url)
         }
         guard allowRemote else { return nil }
+        guard newObjectRetries.canAttempt(file.id, now: nowMilliseconds()) else { return nil }
         // Flights carry raw camera bytes. Android's background lane writes
         // those bytes directly to disk; decoding/cropping belongs only to the
         // visible lane when it reads the cache.
@@ -212,11 +304,17 @@ actor PhotoThumbnailStore {
             let task = Task<Data, Error> {
                 try await self.remoteGate.withPermit { try await fetch() }
             }
-            flight = Flight(task: task)
+            flight = Flight(task: task, generation: requestGeneration)
             inFlight[key] = flight
         }
-        let raw = try await awaitFlight(WaiterToken(key: key, flight: flight))
-        guard cameraIdentity == expectedIdentity else { throw CancellationError() }
+        let raw: Data
+        do { raw = try await awaitFlight(WaiterToken(key: key, flight: flight)) }
+        catch {
+            try checkFlight(flight, identity: expectedIdentity)
+            if !(error is CancellationError) { _ = deferFailure(file: file, key: key, flight: flight) }
+            throw error
+        }
+        try checkFlight(flight, identity: expectedIdentity)
         if let result = flight.visibleResult {
             switch result {
             case .image(let data): return data
@@ -227,6 +325,7 @@ actor PhotoThumbnailStore {
         // the same result, including invalid bytes, without processing again.
         flight.visibleResult = .unavailable
         guard !raw.isEmpty else {
+            if deferFailure(file: file, key: key, flight: flight) { return nil }
             // Direct-STA RAW/video probe misses stay retryable; ordinary
             // GetThumb's empty response remains authoritative.
             if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
@@ -235,12 +334,14 @@ actor PhotoThumbnailStore {
         let processed = transform(raw)
         guard validate(processed) else {
             cameraStore?.remove(key)
+            if deferFailure(file: file, key: key, flight: flight) { return nil }
             if !(directSTA && file.fileExtension != ".jpg") { negative.insert(key) }
             return nil
         }
         flight.visibleResult = .image(processed)
         memory.insert(processed, for: key)
         _ = writeCache(raw, key: key)
+        thumbnailSucceeded(file.id)
         return processed
     }
 
@@ -269,18 +370,19 @@ actor PhotoThumbnailStore {
         let key = keys.primary
         // Android's no-thumbnail set is a settled result, not a transient
         // failure. A disk-fill pass must not keep retrying the same handle.
-        if negative.contains(key), !directSTA || validate == nil { return .settled }
+        if negative.contains(key), !directSTA || file.fileExtension == ".jpg" || validate == nil { return .settled }
         if validate != nil { negative.remove(key) }
         if let store = cameraStore,
-           let url = store.find(key, legacyName: keys.legacy, alternateName: keys.alternate) {
+           let url = store.find(key, alternateName: keys.alternate) {
             // Ordinary Android-compatible fill uses indexed file length.
             // Sequential STA also validates old entries, so an in-place app
             // update cannot keep treating rejected bytes as completed work.
             if let validate {
-                if let raw = try? Data(contentsOf: url), validate(raw) { return .cached }
+                if let raw = try? Data(contentsOf: url), validate(raw) { thumbnailSucceeded(file.id); return .cached }
                 store.remove(key, url: url)
-            } else { return .cached }
+            } else { thumbnailSucceeded(file.id); return .cached }
         }
+        guard newObjectRetries.canAttempt(file.id, now: nowMilliseconds()) else { return .unsettled }
         // All formats participate in the ordered fill, including direct-STA
         // RAW/video. Visibility is never a prerequisite for camera reads.
         guard !diskWritesBlocked else { return .unsettled }
@@ -289,47 +391,75 @@ actor PhotoThumbnailStore {
             let value: Data
             do {
                 value = try await awaitFlight(WaiterToken(key: key, flight: flight))
-            } catch is PrefetchCacheWriteError { return .unsettled }
-            catch is InvalidPrefetchBytes { return .unsettled }
-            guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-            if value.isEmpty && !directSTA { negative.insert(key); return .settled }
-            if let validate, !validate(value) { cameraStore?.remove(key); return .unsettled }
-            guard !value.isEmpty else { return .settled }
+            } catch {
+                try checkFlight(flight, identity: expectedIdentity)
+                if error is PrefetchCacheWriteError { return .unsettled }
+                if !(error is CancellationError) { _ = deferFailure(file: file, key: key, flight: flight) }
+                if error is InvalidPrefetchBytes { return .unsettled }
+                throw error
+            }
+            try checkFlight(flight, identity: expectedIdentity)
+            guard !value.isEmpty else { return finishEmptyPrefetch(file: file, key: key, flight: flight, directSTA: directSTA) }
+            if let validate, !validate(value) {
+                cameraStore?.remove(key)
+                _ = deferFailure(file: file, key: key, flight: flight)
+                return .unsettled
+            }
             guard writeCache(value, key: key) else { return .unsettled }
+            thumbnailSucceeded(file.id)
             return .settled
         }
         // Keep the completion behind the disk write. A visible request that
         // waits for this flight must observe the same cache state as Android
         // and must not start a duplicate GetThumb in the write window.
+        let generation = requestGeneration
         let task = Task<Data, Error> {
             let raw = try await self.remoteGate.withPermit {
                 guard await !self.diskWritesBlocked else { throw PrefetchCacheWriteError() }
                 return try await fetch()
             }
-            if !(raw.isEmpty && !directSTA), let validate, !validate(raw) { throw InvalidPrefetchBytes() }
-            try self.persistPrefetch(raw, key: key, expectedIdentity: expectedIdentity)
+            // Empty responses use the same finite-retry/negative policy in
+            // both lanes. The STA bitmap validator handles nonempty bytes only.
+            if !raw.isEmpty, let validate, !validate(raw) { throw InvalidPrefetchBytes() }
+            try self.persistPrefetch(raw, key: key, expectedIdentity: expectedIdentity, generation: generation)
             return raw
         }
-        let flight = Flight(task: task)
+        let flight = Flight(task: task, generation: generation)
         inFlight[key] = flight
         do {
-            _ = try await awaitFlight(WaiterToken(key: key, flight: flight))
-            guard cameraIdentity == expectedIdentity else { throw CancellationError() }
+            let raw = try await awaitFlight(WaiterToken(key: key, flight: flight))
+            try checkFlight(flight, identity: expectedIdentity)
+            guard !raw.isEmpty else { return finishEmptyPrefetch(file: file, key: key, flight: flight, directSTA: directSTA) }
             // With a validator only usable bytes reach persistence. Ordinary
             // GetThumb also retains its authoritative empty-response handling.
+            thumbnailSucceeded(file.id)
             return .settled
         } catch is InvalidPrefetchBytes {
+            try checkFlight(flight, identity: expectedIdentity)
+            _ = deferFailure(file: file, key: key, flight: flight)
             return .unsettled
         } catch is PrefetchCacheWriteError {
             // A disk failure never settles the item; the connection latch
             // blocks subsequent remote fill while preserving cache reads.
             return .unsettled
-        } catch { throw error }
+        } catch {
+            try checkFlight(flight, identity: expectedIdentity)
+            if !(error is CancellationError) { _ = deferFailure(file: file, key: key, flight: flight) }
+            throw error
+        }
     }
 
-    private func persistPrefetch(_ raw: Data, key: String, expectedIdentity: String) throws {
-        guard cameraIdentity == expectedIdentity else { throw CancellationError() }
-        guard !raw.isEmpty else { negative.insert(key); return }
+    private func finishEmptyPrefetch(file: CameraFile, key: String, flight: Flight, directSTA: Bool) -> ThumbnailPrefetchOutcome {
+        if deferFailure(file: file, key: key, flight: flight) { return .unsettled }
+        guard !(directSTA && file.fileExtension != ".jpg") else { return .unsettled }
+        negative.insert(key)
+        return .settled
+    }
+
+    private func persistPrefetch(_ raw: Data, key: String, expectedIdentity: String, generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard cameraIdentity == expectedIdentity, requestGeneration == generation else { throw CancellationError() }
+        guard !raw.isEmpty else { return }
         guard writeCache(raw, key: key) else { throw PrefetchCacheWriteError() }
     }
 
@@ -343,6 +473,7 @@ actor PhotoThumbnailStore {
     }
 
     func clear() {
+        stopRetries()
         for subscriptions in observers.values {
             for continuation in subscriptions.values { continuation.finish() }
         }
@@ -358,6 +489,8 @@ actor PhotoThumbnailStore {
 
     func reconcile(files: [CameraFile], identity: String, directSTA: Bool) {
         beginSession(identity: identity)
+        newObjectRetries.retainOnly(Set(files.map(\.id)))
+        scheduleRetryWake()
         let names = Set(files.map { cacheKeys(for: $0, directSTA: directSTA).primary })
         pruneSessionState(validKeys: names)
         _ = cameraStore?.reconcile(validNames: names)
@@ -370,10 +503,12 @@ actor PhotoThumbnailStore {
         guard !files.isEmpty else { return }
         beginSession(identity: identity)
         let keys = Set(files.map { cacheKeys(for: $0, directSTA: directSTA).primary })
+        for file in files { newObjectRetries.remove(file.id) }
+        scheduleRetryWake()
         for key in keys {
             memory.remove(key)
             negative.remove(key)
-            if let flight = inFlight.removeValue(forKey: key) { flight.task.cancel() }
+            if let flight = inFlight.removeValue(forKey: key) { flight.invalidated = true; flight.task.cancel() }
         }
     }
 
@@ -381,25 +516,23 @@ actor PhotoThumbnailStore {
         memory.retainOnly(validKeys)
         negative.formIntersection(validKeys)
         for key in Array(inFlight.keys) where !validKeys.contains(key) {
-            inFlight.removeValue(forKey: key)?.task.cancel()
+            if let flight = inFlight.removeValue(forKey: key) { flight.invalidated = true; flight.task.cancel() }
         }
     }
 
-    private func cacheKeys(for file: CameraFile, directSTA: Bool) -> (primary: String, legacy: String?, alternate: String?) {
+    private func cacheKeys(for file: CameraFile, directSTA: Bool) -> (primary: String, alternate: String?) {
         let standard = PhotoThumbnailDiskCache.cacheFileName(
             fileName: file.fileName,
             size: file.size,
             captureDate: file.captureDate
         )
         if directSTA && file.fileExtension == ".jpg" {
-            return (PhotoThumbnailDiskCache.staJpegCacheFileName(handle: file.id, size: file.size), nil, nil)
+            return (PhotoThumbnailDiskCache.staJpegCacheFileName(handle: file.id, size: file.size, captureDate: file.captureDate), nil)
         }
         let primary = directSTA
-            ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size)
+            ? PhotoThumbnailDiskCache.staCacheFileName(handle: file.id, size: file.size, captureDate: file.captureDate)
             : standard
-        return (primary, PhotoThumbnailDiskCache.legacyCacheFileName(
-            fileName: file.fileName, size: file.size, captureDate: file.captureDate),
-            directSTA ? standard : nil)
+        return (primary, directSTA ? standard : nil)
     }
 
     private func awaitFlight(_ token: WaiterToken) async throws -> Data {

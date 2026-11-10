@@ -27,8 +27,8 @@ final class PremiumPurchaseUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)],
                                          timeout: 5), .completed)
             unlock.tap()
-            let restore = app.buttons["恢复购买"]
-            guard restore.waitForExistence(timeout: 5) else {
+            let close = app.buttons["premium-close"]
+            guard close.waitForExistence(timeout: 5) else {
                 XCTFail("Purchase overlay did not open: \(app.debugDescription)")
                 return
             }
@@ -38,15 +38,16 @@ final class PremiumPurchaseUITests: XCTestCase {
             screenshot.name = "premium-purchase-page-\(cycle)"
             screenshot.lifetime = .keepAlways
             add(screenshot)
-            if !restore.isHittable { app.swipeUp() }
-            XCTAssertTrue(restore.isHittable)
-            XCTAssertTrue(app.buttons["兑换优惠码"].exists)
+            XCTAssertFalse(app.buttons["premium-options"].exists)
+            XCTAssertTrue(app.buttons["premium-restore"].exists, "Missing access keeps the recovery action in the bottom row")
+            XCTAssertFalse(app.buttons["兑换优惠码"].exists)
+            XCTAssertFalse(app.buttons["模拟购买年度版"].exists)
+            XCTAssertFalse(app.buttons["模拟购买永久版"].exists)
             // Close the centered purchase overlay, keeping the settings panel.
-            let close = app.buttons["premium-close"]
             if !close.isHittable { app.swipeDown() }
             close.tap()
             XCTAssertTrue(unlock.waitForExistence(timeout: 3))
-            XCTAssertFalse(restore.exists)
+            XCTAssertFalse(close.exists)
         }
     }
 }

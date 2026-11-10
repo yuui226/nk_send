@@ -1,0 +1,17 @@
+{
+  "date": "2026-11-05",
+  "registration_number": "闽公网安备35020302037823号",
+  "number_source": "provided by user",
+  "lookup_url": "https://beian.mps.gov.cn/#/query/webSearch?code=35020302037823",
+  "icon_source": "https://www.gov.cn/images/2018guohui03.png",
+  "icon_usage_source": "https://www.gov.cn/",
+  "icon_bytes": 1628,
+  "icon_dimensions": [
+    14,
+    14
+  ],
+  "icon_sha256": "46cd2348b88c2d0fc46283fabd5ed76d858d0567d6450fee513bfaaa1694cb12",
+  "icon_modified": false,
+  "placement_reference": "https://help.aliyun.com/zh/icp-filing/basic-icp-service/quick-start-for-public-security-network-filing-for-personal-websites",
+  "icp_preserved": "辽ICP备2025050413号-2"
+}

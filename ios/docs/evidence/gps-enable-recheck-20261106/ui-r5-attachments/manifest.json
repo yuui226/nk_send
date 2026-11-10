@@ -1,0 +1,16 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "FC8ECF06-0A56-4949-B64C-3EE06870025E",
+        "deviceName" : "ZTransfer-iOS191-Tests",
+        "exportedFileName" : "516DE652-71BC-4DD6-9E89-9F4115B6ADD3.txt",
+        "isAssociatedWithFailure" : true,
+        "suggestedHumanReadableName" : "Complete Issue Description.txt"
+      }
+    ],
+    "testIdentifier" : "PhotoEffectsMasterUITests/testGPSDeniedNativePermissionCanRecoverThroughSettings()",
+    "testIdentifierURL" : "test://com.apple.xcode/ZTransfer/ZTransferInteractionUITests/PhotoEffectsMasterUITests/testGPSDeniedNativePermissionCanRecoverThroughSettings"
+  }
+]

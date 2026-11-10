@@ -1,0 +1,7 @@
+{
+  "pairing_confirmed": true,
+  "pairing_verification_pending": false,
+  "has_device_id": true,
+  "has_nonce": true,
+  "has_ble_address": true
+}

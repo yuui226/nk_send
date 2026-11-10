@@ -7,8 +7,10 @@ import Foundation
 /// do not prioritize work and additions go after the remaining catalog.
 actor PhotoThumbnailFillQueue {
     private let sequential: Bool
-    private var priority: [UInt32] = []
-    private var regular: [UInt32] = []
+    // Slice popFirst advances an index instead of shifting every remaining
+    // handle. These lanes retain UInt32 IDs only, never photo/bitmap objects.
+    private var priority: ArraySlice<UInt32> = []
+    private var regular: ArraySlice<UInt32> = []
     private var pending = Set<UInt32>()
     private var failed = Set<UInt32>()
     private var failedOrder: [UInt32] = []
@@ -105,13 +107,12 @@ actor PhotoThumbnailFillQueue {
     }
 
     func poll() -> (id: UInt32, revision: Int, owner: UUID)? {
-        let id: UInt32?
-        if !priority.isEmpty { id = removeFirst(&priority) }
-        else if !regular.isEmpty { id = removeFirst(&regular) }
-        else { id = nil }
-        if let id { pending.remove(id) }
-        guard let id, let owner = ownership[id] else { return nil }
-        return (id, revision, owner)
+        // Android removes entries completed by visible cells lazily here.
+        while let id = priority.popFirst() ?? regular.popFirst() {
+            guard pending.remove(id) != nil, let owner = ownership[id] else { continue }
+            return (id, revision, owner)
+        }
+        return nil
     }
 
     func finish(_ id: UInt32, expectedRevision: Int, owner: UUID, settled: Bool) {
@@ -122,29 +123,32 @@ actor PhotoThumbnailFillQueue {
     func returnToFront(_ id: UInt32, expectedRevision: Int, owner: UUID? = nil) {
         guard revision == expectedRevision else { return }
         if let owner, ownership[id] != owner { return }
-        guard !settled.contains(id), !failed.contains(id) else { return }
-        priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
+        guard !settled.contains(id), !failed.contains(id), !pending.contains(id) else { return }
         pending.insert(id)
         guard isInLoadingRange(filesByID[id]) else {
             pending.remove(id)
             return
         }
         if priorityRange?.contains(filesByID[id]?.captureDate) == true {
-            priority.insert(id, at: 0)
+            priority.insert(id, at: priority.startIndex)
         } else {
-            regular.insert(id, at: 0)
+            regular.insert(id, at: regular.startIndex)
         }
     }
 
     func markSettled(_ id: UInt32) {
-        pending.remove(id); failed.remove(id); priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
-        failedOrder.removeAll { $0 == id }
+        pending.remove(id)
+        if failed.remove(id) != nil { failedOrder.removeAll { $0 == id } }
         settled.insert(id)
     }
 
     func markFailed(_ id: UInt32) {
         guard !settled.contains(id) else { return }
-        pending.remove(id); priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
+        // Normal failures were already polled. An external failure of a
+        // still-pending item must remove its old position before later retry.
+        if pending.remove(id) != nil {
+            priority.removeAll { $0 == id }; regular.removeAll { $0 == id }
+        }
         if failed.insert(id).inserted { failedOrder.append(id) }
     }
 
@@ -161,12 +165,13 @@ actor PhotoThumbnailFillQueue {
         }
     }
 
-    func retryFailed() {
+    func retryFailed(excluding blocked: Set<UInt32> = []) {
         // Android keeps the failure insertion order for equal capture times;
         // Swift's standard sort is not stable, so preserve the explicit order.
-        let failedFiles = failedOrder.compactMap { filesByID[$0] }
+        let ready = failed.subtracting(blocked)
+        let failedFiles = failedOrder.filter { ready.contains($0) }.compactMap { filesByID[$0] }
         let files = sequential ? failedFiles : stableNewestFirst(failedFiles)
-        failed.removeAll(); failedOrder.removeAll()
+        failed.subtract(ready); failedOrder.removeAll { ready.contains($0) }
         for file in files {
             enqueue(file.id, priority: priorityRange?.contains(file.captureDate) == true, front: false)
         }
@@ -177,9 +182,9 @@ actor PhotoThumbnailFillQueue {
         guard self.priorityRange != range else { return }
         for file in files { filesByID[file.id] = file }
         self.priorityRange = range
-        let unfinished = stableNewestFirst((priority + regular).compactMap { filesByID[$0] })
-        priority = unfinished.filter { range?.contains($0.captureDate) == true }.map(\.id)
-        regular = unfinished.filter { range?.contains($0.captureDate) != true }.map(\.id)
+        let unfinished = stableNewestFirst((priority + regular).filter { pending.contains($0) }.compactMap { filesByID[$0] })
+        priority = ArraySlice(unfinished.filter { range?.contains($0.captureDate) == true }.map(\.id))
+        regular = ArraySlice(unfinished.filter { range?.contains($0.captureDate) != true }.map(\.id))
         pending = Set(unfinished.map(\.id))
     }
 
@@ -192,7 +197,7 @@ actor PhotoThumbnailFillQueue {
         for file in files { filesByID[file.id] = file }
         loadingRange = range
         let unfinishedIDs = priority + regular + failedOrder
-        let unfinished = unfinishedIDs.compactMap { filesByID[$0] }
+        let unfinished = unfinishedIDs.filter { pending.contains($0) || failed.contains($0) }.compactMap { filesByID[$0] }
         priority.removeAll(); regular.removeAll(); pending.removeAll()
         failed.removeAll(); failedOrder.removeAll()
         revision &+= 1
@@ -211,15 +216,10 @@ actor PhotoThumbnailFillQueue {
         guard isInLoadingRange(filesByID[id]) else { return }
         pending.insert(id)
         if priority {
-            if front { self.priority.insert(id, at: 0) } else { self.priority.append(id) }
+            if front { self.priority.insert(id, at: self.priority.startIndex) } else { self.priority.append(id) }
         } else {
-            if front { regular.insert(id, at: 0) } else { regular.append(id) }
+            if front { regular.insert(id, at: regular.startIndex) } else { regular.append(id) }
         }
-    }
-
-    private func removeFirst(_ queue: inout [UInt32]) -> UInt32 {
-        let id = queue.removeFirst()
-        return id
     }
 
     /// Android's `prioritizedThumbnailFiles` uses a stable newest-first sort.

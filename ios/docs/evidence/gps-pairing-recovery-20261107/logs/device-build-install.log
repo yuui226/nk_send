@@ -1,0 +1,285 @@
+Building and signing iOS Debug app...
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project /Users/orys/code/nk_send/ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination generic/platform=iOS -derivedDataPath /Users/orys/code/nk_send/.build/ios-debug-derived-data CODE_SIGNING_ALLOWED=YES DEVELOPMENT_TEAM=6YY8Y34949 -allowProvisioningUpdates build
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = YES
+    DEVELOPMENT_TEAM = 6YY8Y34949
+
+2026-11-07 00:36:58.107 xcodebuild[6204:43121486] [MT] IDESchemeActionsInvocationRecord: Device <DVTiPhonePlaceholder: 0x7c8386a440 (Any iOS Device | undefined_arch)> is missing operatingSystemVersion, operatingSystemVersionWithBuildNumber.
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'ZTransfer' in project 'ZTransfer' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/orys/code/nk_send/ios/ZTransfer/Resources/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: 1e691fd01bc3c0c322b1b3b334a06bf5
+Build description path: /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/XCBuildData/1e691fd01bc3c0c322b1b3b334a06bf5.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKStatCaches.noindex/iphoneos27.2-24B8118-6890c9e4970e00494a266ff652f095d9.sdkstatcache
+    cd /Users/orys/code/nk_send/ios/ZTransfer.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -o /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKStatCaches.noindex/iphoneos27.2-24B8118-6890c9e4970e00494a266ff652f095d9.sdkstatcache
+
+SwiftDriver ZTransfer normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransfer -Onone @/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftFileList -DDEBUG -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -target arm64-apple-ios16.0 -g -module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -F /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -emit-localized-strings -emit-localized-strings-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64 -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKStatCaches.noindex/iphoneos27.2-24B8118-6890c9e4970e00494a266ff652f095d9.sdkstatcache -output-file-map /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex -sdk-module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer_const_extract_protocols.json -Xcc -iquote -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-generated-files.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-own-target-headers.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-all-target-headers.hmap -Xcc -iquote -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-project-headers.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/include -Xcc -I/Users/orys/code/nk_send/ios/ThirdParty/libjpeg-8bit/src -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources-normal/arm64 -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources/arm64 -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+ProcessInfoPlistFile /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/Info.plist /Users/orys/code/nk_send/ios/ZTransfer/Info.plist (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-infoPlistUtility /Users/orys/code/nk_send/ios/ZTransfer/Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/PkgInfo -expandbuildsettings -format binary -platform iphoneos -additionalcontentfile /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/assetcatalog_generated_info.plist -requiredArchitecture arm64 -o /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/Info.plist
+
+SwiftCompile normal arm64 Compiling\ GPSState.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/GPSState.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/GPSState.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile GPSState.swift
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ ZTransfer (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/Components/AndroidShadowView.swift:164:13: warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+162 | 
+163 | @MainActor
+164 | final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
+    |             `- warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+165 |     var cornerRadius: CGFloat = 0 { didSet { if cornerRadius != oldValue { setNeedsLayout() } } }
+166 |     var elevation: CGFloat = 0 { didSet { if elevation != oldValue { setNeedsLayout() } } }
+
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:657:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 655 |          parseMetadata: MetadataParser? = nil,
+ 656 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 657 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 658 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 659 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/RemoteLUTMetalView.swift:62:28: warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+ 60 |     }
+ 61 | 
+ 62 |     @MainActor final class Coordinator: NSObject, @preconcurrency MTKViewDelegate {
+    |                            `- warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+ 63 |         let device: MTLDevice?
+ 64 |         private let commandQueue: MTLCommandQueue?
+
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:1883:98: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1881 |                                           availableMemory: @escaping @Sendable () -> Int64 = PhotoAllocationBudget.availableMemory,
+1882 |                                           placeResolver: PhotoFramePlaceResolver = .shared,
+1883 |                                           placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                                                  `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1884 |                                           placeAlreadyPrepared: Bool = false) async throws -> URL {
+1885 |         let resolvedMetadata: PhotoFrameMetadata?
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+SwiftCompile normal arm64 Compiling\ GPSCoordinator.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/GPSCoordinator.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/GPSCoordinator.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile GPSCoordinator.swift
+
+SwiftCompile normal arm64 Compiling\ GPSConnectionControl.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Connection/GPSConnectionControl.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/UI/Connection/GPSConnectionControl.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile GPSConnectionControl.swift
+
+SwiftCompile normal arm64 Compiling\ NikonGPSBluetoothClient.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/NikonGPSBluetoothClient.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile NikonGPSBluetoothClient.swift
+
+SwiftDriverJobDiscovery normal arm64 Compiling GPSState.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 Compiling\ RootView.swift /Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:657:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 655 |          parseMetadata: MetadataParser? = nil,
+ 656 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 657 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 658 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 659 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile RootView.swift
+
+SwiftCompile normal arm64 Compiling\ ConnectionPage.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Connection/ConnectionPage.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/UI/Connection/ConnectionPage.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile ConnectionPage.swift
+
+SwiftCompile normal arm64 Compiling\ ConnectionViewModel.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/ConnectionViewModel.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/Domain/ConnectionViewModel.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile ConnectionViewModel.swift
+
+SwiftCompile normal arm64 Compiling\ PhotoPreviewInteractionHarness.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:657:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 655 |          parseMetadata: MetadataParser? = nil,
+ 656 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 657 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 658 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 659 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+
+SwiftCompile normal arm64 /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-SwiftPerFileCompile PhotoPreviewInteractionHarness.swift
+
+SwiftDriverJobDiscovery normal arm64 Compiling GPSCoordinator.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Compiling NikonGPSBluetoothClient.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Compiling ConnectionViewModel.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Compiling ConnectionPage.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Compiling RootView.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Compiling PhotoPreviewInteractionHarness.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Compiling GPSConnectionControl.swift (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for ZTransfer (in target 'ZTransfer' from project 'ZTransfer')
+
+SwiftDriver\ Compilation\ Requirements ZTransfer normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransfer -Onone @/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftFileList -DDEBUG -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -target arm64-apple-ios16.0 -g -module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -F /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -emit-localized-strings -emit-localized-strings-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64 -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKStatCaches.noindex/iphoneos27.2-24B8118-6890c9e4970e00494a266ff652f095d9.sdkstatcache -output-file-map /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex -sdk-module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer_const_extract_protocols.json -Xcc -iquote -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-generated-files.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-own-target-headers.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-all-target-headers.hmap -Xcc -iquote -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-project-headers.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/include -Xcc -I/Users/orys/code/nk_send/ios/ThirdParty/libjpeg-8bit/src -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources-normal/arm64 -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources/arm64 -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver\ Compilation ZTransfer normal arm64 com.apple.xcode.tools.swift.compiler (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name ZTransfer -Onone @/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftFileList -DDEBUG -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -target arm64-apple-ios16.0 -g -module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -F /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -emit-localized-strings -emit-localized-strings-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64 -c -j8 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKStatCaches.noindex/iphoneos27.2-24B8118-6890c9e4970e00494a266ff652f095d9.sdkstatcache -output-file-map /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex -sdk-module-cache-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /Users/orys/code/nk_send/.build/ios-debug-derived-data/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer_const_extract_protocols.json -Xcc -iquote -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-generated-files.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-own-target-headers.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-all-target-headers.hmap -Xcc -iquote -Xcc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-project-headers.hmap -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/include -Xcc -I/Users/orys/code/nk_send/ios/ThirdParty/libjpeg-8bit/src -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources-normal/arm64 -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources/arm64 -Xcc -I/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer-Swift.h -working-directory /Users/orys/code/nk_send/ios -experimental-emit-module-separately -disable-cmo
+
+Copy /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/Project/arm64-apple-ios.swiftsourceinfo /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftsourceinfo (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftsourceinfo /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/Project/arm64-apple-ios.swiftsourceinfo
+
+Copy /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/arm64-apple-ios.swiftdoc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftdoc (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftdoc /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/arm64-apple-ios.swiftdoc
+
+Copy /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/arm64-apple-ios.abi.json /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.abi.json (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.abi.json /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/arm64-apple-ios.abi.json
+
+Copy /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/arm64-apple-ios.swiftmodule /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.swiftmodule/arm64-apple-ios.swiftmodule
+
+Ld /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer.debug.dylib normal (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -Xlinker -reproducible -target arm64-apple-ios16.0 -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphoneos -L/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -F/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphoneos -F/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -filelist /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.LinkFileList -install_name @rpath/ZTransfer.debug.dylib -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -dependency_info -Xlinker /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer_dependency_info.dat -stdlib\=libc++ -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphoneos -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.swiftmodule -Xlinker -alias -Xlinker _main -Xlinker ___debug_main_executable_dylib_entry_point -Xlinker -no_adhoc_codesign -o /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer.debug.dylib
+
+ConstructStubExecutorLinkFileList /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-ExecutorLinkFileList-normal-arm64.txt (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    construct-stub-executor-link-file-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer.debug.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/libPreviewsJITStubExecutor_no_swift_entry_point.a /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/libPreviewsJITStubExecutor.a --output /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-ExecutorLinkFileList-normal-arm64.txt
+note: Using stub executor library with Swift entry point. (in target 'ZTransfer' from project 'ZTransfer')
+
+Ld /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer normal (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -Xlinker -reproducible -target arm64-apple-ios16.0 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -F/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos -Xlinker -rpath -Xlinker @executable_path -Xlinker -rpath -Xlinker @executable_path/Frameworks -rdynamic -Xlinker -no_deduplicate -e ___debug_blank_executor_main -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_dylib -Xlinker /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-DebugDylibPath-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_instlnm -Xlinker /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-DebugDylibInstallName-normal-arm64.txt -Xlinker -filelist -Xlinker /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer-ExecutorLinkFileList-normal-arm64.txt /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer.debug.dylib -Xlinker -no_adhoc_codesign -o /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer
+
+CopySwiftLibs /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-swiftStdLibTool --copy --verbose --sign 2608639CF2037001B4015F97597B57C285BCA6A1 --scan-executable /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer.debug.dylib --scan-folder /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/Frameworks --scan-folder /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/PlugIns --scan-folder /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/SystemExtensions --scan-folder /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/Extensions --platform iphoneos --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+
+ExtractAppIntentsMetadata (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name ZTransfer --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.2.sdk --xcode-version 27B52 --platform-family iOS --deployment-target 16.0 --bundle-identifier com.ztransfer.ios --output /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app --target-triple arm64-apple-ios16.0 --binary-file /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer --dependency-file /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer_dependency_info.dat --stringsdata-file /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftFileList --metadata-file-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer.DependencyMetadataFileList --static-metadata-file-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer.DependencyStaticMetadataFileList --swift-const-vals-list /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/Objects-normal/arm64/ZTransfer.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+2026-11-07 00:37:16.286 appintentsmetadataprocessor[6268:43122057] Starting App Intents metadata extraction
+2026-11-07 00:37:16.289 appintentsmetadataprocessor[6268:43122057] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+CodeSign /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer.debug.dylib (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Apple Development: 8617621998644 (PBXNC49D52)"
+    Provisioning Profile: "iOS Team Provisioning Profile: com.ztransfer.ios"
+                          (346e0c13-2320-409a-9f83-5307c408d270)
+    
+    /usr/bin/codesign --force --sign 2608639CF2037001B4015F97597B57C285BCA6A1 --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/ZTransfer.debug.dylib
+
+CodeSign /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/__preview.dylib (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Apple Development: 8617621998644 (PBXNC49D52)"
+    Provisioning Profile: "iOS Team Provisioning Profile: com.ztransfer.ios"
+                          (346e0c13-2320-409a-9f83-5307c408d270)
+    
+    /usr/bin/codesign --force --sign 2608639CF2037001B4015F97597B57C285BCA6A1 --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/__preview.dylib
+/Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app/__preview.dylib: replacing existing signature
+
+CodeSign /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    
+    Signing Identity:     "Apple Development: 8617621998644 (PBXNC49D52)"
+    Provisioning Profile: "iOS Team Provisioning Profile: com.ztransfer.ios"
+                          (346e0c13-2320-409a-9f83-5307c408d270)
+    
+    /usr/bin/codesign --force --sign 2608639CF2037001B4015F97597B57C285BCA6A1 --entitlements /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ZTransfer.build/Debug-iphoneos/ZTransfer.build/ZTransfer.app.xcent --timestamp\=none --generate-entitlement-der --strip-disallowed-xattrs /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app
+
+Validate /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app (in target 'ZTransfer' from project 'ZTransfer')
+    cd /Users/orys/code/nk_send/ios
+    builtin-validationUtility /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Products/Debug-iphoneos/ZTransfer.app -shallow-bundle -infoplist-subpath Info.plist
+
+PruneExplicitPrecompiledModules /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /Users/orys/code/nk_send/.build/ios-debug-derived-data/SDKExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /Users/orys/code/nk_send/.build/ios-debug-derived-data/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+** BUILD SUCCEEDED **
+
+Device build: 21s
+APP: /Users/orys/code/nk_send/ios/dist-debug-ios/ZTransfer-ios-debug-2.05-20261107-003656.app
+IPA: /Users/orys/code/nk_send/ios/dist-debug-ios/ZTransfer-ios-debug-2.05-20261107-003656.ipa
+Signature verification and packaging: 1s
+Removed old Debug artifact: ZTransfer-ios-debug-2.05-20261107-000352.app
+Removed old Debug artifact: ZTransfer-ios-debug-2.05-20261107-000352.ipa
+Installing and launching on iPhone (00008120-000A08110CF1A01E, localNetwork)...
+App installed:
+• bundleID: com.ztransfer.ios
+• installationURL: file:///private/var/containers/Bundle/Application/2C9E7F9E-2C90-4553-AF03-F239C67EA070/ZTransfer-ios-debug-2.05-20261107-003656.app/
+• launchServicesIdentifier: unknown
+• databaseUUID: C99C2AF5-8139-4153-A1EE-0C8D2F5D42CC
+• databaseSequenceNumber: 1836
+• options: 
+Launched application with com.ztransfer.ios bundle identifier.
+Installed and launched on iPhone (00008120-000A08110CF1A01E).
+Physical-device installation: 1 succeeded, 0 failed.
+Device discovery and installation: 11s
+iOS Debug build complete. Total: 33s

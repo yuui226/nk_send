@@ -45,7 +45,7 @@ final class PhotoLUTEditorStateTests: XCTestCase {
         let effects = PhotoEffectsStore(defaults: fixture.defaults, lutStore: editor.store)
         let state = SettingsState()
         state.draft = effects.beginDraft()
-        state.draft.selectFilter(try XCTUnwrap(PhotoFilterCatalog.presets.dropFirst(3).first).id)
+        state.draft.selectTestFilter(try XCTUnwrap(TestPhotoFilterCatalog.presets.dropFirst(3).first).id)
         let np3 = state.draft.selectedFilter
         let directory = DirectoryAccessStore(defaults: fixture.defaults)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -76,6 +76,7 @@ final class PhotoLUTEditorStateTests: XCTestCase {
         }
         XCTAssertEqual(effects.settings.selectedFilter, chosen)
         XCTAssertEqual(effects.settings.rememberedBuiltinFilter, np3)
+        XCTAssertEqual(PhotoNp3Store(defaults: fixture.defaults).restore(.transfer)?.preset, np3?.preset)
         let coldLUT = PhotoLUTStore(defaults: fixture.defaults, directory: editor.store.snapshotDirectory)
         XCTAssertEqual(coldLUT.restoreSelection(), chosen)
         let coldEffects = PhotoEffectsStore(defaults: fixture.defaults, lutStore: coldLUT)
@@ -216,11 +217,13 @@ final class PhotoLUTEditorStateTests: XCTestCase {
         defer { fixture.clean() }
         let editor = fixture.editor
         let other = PhotoLUTStore(role: .camera, defaults: fixture.defaults, directory: fixture.root.appendingPathComponent("snapshots"))
-        other.select("other-role")
         var draft = PhotoEffectsSettings()
         let disable = { disablePhotoLUTDraft(&draft, lutStore: editor.store) }
         editor.scanFolder(fixture.folder, onDisable: disable)
         try await settle(editor)
+        // A first folder replacement resets both roles. Establish the other
+        // role afterward: this test covers a rescan of that same folder.
+        other.select("other-role")
         let file = try XCTUnwrap(editor.files.first { $0.name == "A.cube" })
         editor.choose(file.identifier, onDisable: disable) { draft.selectedFilter = $0; draft.photoFilterEnabled = true }
         try await settle(editor)
@@ -365,10 +368,64 @@ final class PhotoLUTEditorStateTests: XCTestCase {
         XCTAssertEqual(editor.selectionOptions, [nil, a.identifier])
     }
 
+    func testOtherEntryChangingDirectoryCancelsQueuedReadAndClearsCurrentCatalog() async throws {
+        let queue = LUTIOQueue()
+        let fixture = try Fixture(role: .camera, queue: queue)
+        defer { fixture.clean() }
+        let editor = fixture.editor
+        editor.scanFolder(fixture.folder) {}
+        try await settle(editor)
+        let a = try XCTUnwrap(editor.files.first { $0.name == "A.cube" })
+        editor.choose(a.identifier, onDisable: {}) { _ in }
+        try await settle(editor)
+        editor.store.setIntensity(42)
+        editor.store.commitDraft()
+        let queued = try XCTUnwrap(editor.store.restoreSelection())
+        let local = PhotoLUTEditorState(role: .local, defaults: fixture.defaults,
+            directory: editor.store.snapshotDirectory)
+        defer { local.close() }
+        local.refresh(onDisable: {})
+        try await settle(local)
+        local.choose(a.identifier, onDisable: {}) { _ in }
+        try await settle(local)
+        local.store.setIntensity(92)
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        queue.submit(action: { _ in gate.wait(); return true }, deliver: { _ in })
+        editor.choose(a.identifier, onDisable: {}) { _ in XCTFail("Old folder read published") }
+        XCTAssertTrue(editor.loading)
+        let replacement = fixture.root.appendingPathComponent("replacement")
+        try FileManager.default.createDirectory(at: replacement, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: fixture.folder.appendingPathComponent("A.cube"),
+                                        to: replacement.appendingPathComponent("New.cube"))
+        local.scanFolder(replacement, onDisable: {})
+        try await settle(local)
+        XCTAssertFalse(editor.loading)
+        XCTAssertTrue(editor.files.isEmpty)
+        XCTAssertNil(editor.store.restoreSelection())
+        XCTAssertFalse(editor.store.canCommitSelection(queued))
+        XCTAssertFalse(local.store.hasSelection)
+        var drained = false
+        queue.submit(action: { _ in true }, deliver: { _ in drained = true })
+        gate.signal()
+        for _ in 0..<300 {
+            if drained { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(drained)
+        let new = try XCTUnwrap(local.files.first)
+        local.choose(new.identifier, onDisable: {}) { selection in
+            XCTAssertEqual(selection.intensityPercent, 80)
+            XCTAssertTrue(selection.lutAdjustments.isNeutral)
+        }
+        try await settle(local)
+        XCTAssertEqual(local.store.selectedIdentifier, new.identifier)
+        XCTAssertEqual(queued.intensityPercent, 42)
+    }
+
     private final class SettingsState: ObservableObject {
         @Published var draft = PhotoEffectsSettings()
         @Published var closing = false
-        @Published var chooser = PhotoFilterChooserState()
         @Published var hint: PhotoEffectsHint?
     }
     private struct SettingsHarness: View {
@@ -378,7 +435,7 @@ final class PhotoLUTEditorStateTests: XCTestCase {
         let directory: DirectoryAccessStore
         var body: some View {
             SettingsView(showPhotoEffectsEntry: true, effectsStore: effects, directory: directory,
-                effectsDraft: $state.draft, filterChooser: $state.chooser, effectsHint: $state.hint,
+                effectsDraft: $state.draft, effectsHint: $state.hint,
                 dismissalRequested: state.closing, photoLUTEditor: editor, effectsOnly: true)
         }
     }
@@ -471,9 +528,9 @@ final class PhotoEffectChooserPerformanceTests: XCTestCase {
         ]
         let index = PresetCatalogIndex(files: files, orderedFiles: [files[2], files[0], files[1], files[3]])
         XCTAssertEqual(index.categories, [nil, "A", "未分类"])
-        XCTAssertEqual(index.filesByCategory["A"]?.map(\.identifier), ["a2", "a"])
-        XCTAssertEqual(index.filesByCategory[nil]?.map(\.identifier), ["root"])
-        XCTAssertEqual(index.labelsByCategory["A"], ["film", "Film"])
+        XCTAssertEqual(index.files(in: "A")?.map(\.identifier), ["a2", "a"])
+        XCTAssertEqual(index.files(in: nil)?.map(\.identifier), ["root"])
+        XCTAssertEqual(index.labels(in: "A"), ["film", "Film"])
         XCTAssertEqual(index.labels(uncategorized: "未分类")["root"], "Film · 未分类")
         XCTAssertEqual(index.labels(uncategorized: "未分类")["a2"], "film · A · 3")
         XCTAssertEqual(index.labels(uncategorized: "Uncategorized")["root"], "Film · Uncategorized")

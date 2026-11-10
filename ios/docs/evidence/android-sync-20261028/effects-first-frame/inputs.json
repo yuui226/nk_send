@@ -1,0 +1,5 @@
+{
+  "ios/ZTransfer/Domain/ConflatedPreviewUpdates.swift": "cd7d212bc800330605a4ab3b68e75d58ee1b86183199696b1945584ca6f4e642",
+  "ios/ZTransfer/Domain/PhotoEffectsPreviewTransition.swift": "7986ce6b524c1682fe6fc768b778fd60f4709571c749f3cedfe8d146b704552b",
+  "ios/ZTransferTests/PhotoEffectsPreviewTransitionTests.swift": "18df8a1c1e3921a9e6d3e3c341b0b3290fed1ca93e97422913e1c61546866d1a"
+}

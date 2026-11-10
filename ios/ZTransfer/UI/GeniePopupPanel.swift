@@ -21,6 +21,8 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
     /// Inline overlay panels attach to a fixed-width button at their trailing
     /// edge. Resolve against the actual host width in the same layout pass.
     var trailingAnchorWidth: CGFloat? = nil
+    var mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth
+    var tiltEnabled = true
     var onSettled: ((CGFloat) -> Void)? = nil
     var onProgress: ((CGFloat) -> Void)? = nil
 
@@ -38,7 +40,7 @@ struct GeniePopupPanel<Content: View>: UIViewRepresentable {
         view.configure(target: targetProgress, anchorX: anchorX,
                        anchorWidth: anchorWidth, anchorGap: anchorGap, opensAbove: opensAbove, usesFunnel: usesFunnel,
                        gentleMotion: gentleMotion, gentleAnchorY: gentleAnchorY,
-                       trailingAnchorWidth: trailingAnchorWidth)
+                       trailingAnchorWidth: trailingAnchorWidth, mouthWidth: mouthWidth, tiltEnabled: tiltEnabled)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: GeniePopupHostView,
@@ -92,6 +94,7 @@ final class GeniePopupHostView: UIView {
     }
 
     let host = UIHostingController(rootView: AnyView(EmptyView()))
+    private let contentContainer = UIView()
     private let canvas = UIView()
     private let bands = (0..<GeniePopupMotion.renderBandCount).map { _ in Band() }
     private let capturePadding: CGFloat = 12
@@ -108,6 +111,8 @@ final class GeniePopupHostView: UIView {
     private var anchorX: CGFloat = 0.5
     private var anchorWidth: CGFloat = 0.1
     private var anchorGap: CGFloat = 8
+    private var mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth
+    private var tiltEnabled = true
     private var trailingAnchorWidth: CGFloat?
     private var lastDrawnProgress: CGFloat?
     private var settledTarget: CGFloat?
@@ -126,7 +131,10 @@ final class GeniePopupHostView: UIView {
         host.view.backgroundColor = .clear
         host.view.clipsToBounds = false
         if #available(iOS 16.4, *) { host.safeAreaRegions = [] }
-        addSubview(host.view)
+        contentContainer.backgroundColor = .clear
+        contentContainer.clipsToBounds = false
+        addSubview(contentContainer)
+        contentContainer.addSubview(host.view)
         canvas.backgroundColor = .clear
         canvas.isUserInteractionEnabled = false
         canvas.clipsToBounds = false
@@ -163,7 +171,11 @@ final class GeniePopupHostView: UIView {
     func configure(target next: CGFloat, anchorX: CGFloat,
                    anchorWidth: CGFloat, anchorGap: CGFloat, opensAbove: Bool = false, usesFunnel: Bool = true,
                    gentleMotion: Bool = false, gentleAnchorY: CGFloat = 0.5,
-                   trailingAnchorWidth: CGFloat? = nil) {
+                   trailingAnchorWidth: CGFloat? = nil,
+                   mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth, tiltEnabled: Bool = true) {
+        if self.mouthWidth != mouthWidth || self.tiltEnabled != tiltEnabled { lastDrawnProgress = nil }
+        self.mouthWidth = mouthWidth
+        self.tiltEnabled = tiltEnabled
         self.trailingAnchorWidth = trailingAnchorWidth
         let anchorX = trailingAnchorWidth.map { 1 - $0 / (2 * max(1, bounds.width)) } ?? anchorX
         let anchorWidth = trailingAnchorWidth.map { $0 / max(1, bounds.width) } ?? anchorWidth
@@ -206,6 +218,7 @@ final class GeniePopupHostView: UIView {
             anchorX = x
             anchorWidth = fraction
         }
+        contentContainer.frame = bounds
         host.view.bounds = bounds
         host.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
         canvas.frame = bounds
@@ -229,22 +242,35 @@ final class GeniePopupHostView: UIView {
         defer { capturing = false }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
+        // drawHierarchy may flush the render server while preparing glass.
+        // Android keeps its settled content visible until the closing mesh
+        // replaces it. Hiding that content here creates a blank frame before
+        // collapse. Opening/recapture must still keep the full source hidden.
+        let capturingSettledOpenPanel = progress == 1 && settledTarget == 1 && !hasCapture
+        contentContainer.layer.opacity = capturingSettledOpenPanel ? 1 : 0
         host.view.layer.opacity = 1
         host.view.alpha = 1
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
+        // Capture the source itself; its ancestor independently controls what
+        // may appear on screen during UIKit's synchronous rendering work.
+        CATransaction.commit()
         let rect = bounds.insetBy(dx: -capturePadding, dy: -capturePadding)
         let format = UIGraphicsImageRendererFormat()
         format.scale = window?.screen.scale ?? UIScreen.main.scale
         let image = UIGraphicsImageRenderer(size: rect.size, format: format).image { context in
             context.cgContext.translateBy(x: capturePadding, y: capturePadding)
-            // Popup controls use snapshot-stable panel materials. Render the
-            // laid-out layer, including its inset rim, while the live view is
-            // hidden; drawHierarchy can return transparent data in this state.
-            host.view.layer.render(in: context.cgContext)
+            // Native glass is composited by UIKit's render server. A raw
+            // CALayer render omits its material even when the icon is present.
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
         }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         host.view.layer.opacity = 0
+        // Keep the ancestor hidden for the WHOLE mesh transition. Hosting-view
+        // updates may reset its own opacity; they must not reveal a full panel.
+        contentContainer.layer.opacity = 0
         host.view.isUserInteractionEnabled = false
         host.view.accessibilityElementsHidden = true
         guard let cgImage = image.cgImage else { return false }
@@ -322,6 +348,7 @@ final class GeniePopupHostView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         canvas.isHidden = true
+        contentContainer.layer.opacity = 1
         host.view.layer.opacity = Float(p)
         host.view.layer.setAffineTransform(CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: x, ty: y))
         CATransaction.commit()
@@ -344,12 +371,13 @@ final class GeniePopupHostView: UIView {
         // validGenieAnchor rejects overlapping vertical spans and fades the
         // recorded layer at p, retaining the same open/close clock.
         let renderProgress: CGFloat = usesFunnel ? progress : 1
-        let geometry = GeniePopupMotion.FrameGeometry(progress: renderProgress, source: source, size: size)
+        let geometry = GeniePopupMotion.FrameGeometry(progress: renderProgress, source: source, size: size,
+                                                     mouthWidth: mouthWidth, tiltEnabled: tiltEnabled)
         func row(_ index: Int) -> GeniePopupMotion.Row {
             let section = crossSections[index]
             let original = opensAbove
                 ? GeniePopupMotion.rowAbove(progress: renderProgress, fraction: section.fraction,
-                                             anchor: source, panel: panel)
+                                             anchor: source, panel: panel, mouthWidth: mouthWidth, tiltEnabled: tiltEnabled)
                 : geometry.row(at: section)
             // The Android geometry clamps body fractions to 0...1. Our texture
             // additionally includes overflow outside that body. Preserve that
@@ -410,6 +438,7 @@ final class GeniePopupHostView: UIView {
         canvas.isHidden = true
         host.view.layer.setAffineTransform(.identity)
         host.view.layer.opacity = target == 0 ? 0 : 1
+        contentContainer.layer.opacity = target == 0 ? 0 : 1
         host.view.isUserInteractionEnabled = target == 1
         host.view.accessibilityElementsHidden = target == 0
         if hasCapture {
@@ -424,7 +453,15 @@ final class GeniePopupHostView: UIView {
         settledTarget = target
         reportProgress()
         let settled = target
-        if let onSettled { DispatchQueue.main.async { onSettled(settled) } }
+        if onSettled != nil {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.target == settled, self.progress == settled,
+                      self.settledTarget == settled else { return }
+                // Android rememberUpdatedState: use the current owner after
+                // layout, never an old close callback that can remove a reopen.
+                self.onSettled?(settled)
+            }
+        }
     }
 
     /// Scrims use the same displayed progress as the mesh. Deliver outside
@@ -454,7 +491,7 @@ enum GeniePopupTrigger: String, Hashable {
     case queueRetry, queueClear
     case filter, settings, gps, remoteWhiteBalance, remoteFocusArea, remoteFocusMode, remoteGrid
     case remoteEV, remoteISO, remoteAperture, remoteShutter
-    case remotePictureControl, remoteLUT, photoEffectModules
+    case remotePictureControl, remoteLUT, remoteSelfTimer, photoEffectModules
 }
 
 extension RemoteExposureField {

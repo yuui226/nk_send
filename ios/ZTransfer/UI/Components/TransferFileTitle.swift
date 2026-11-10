@@ -32,15 +32,19 @@ struct TransferFileTitleText: Equatable {
 struct TransferFileTitle: UIViewRepresentable {
     let name: String
     let cancelled: Bool
+    var style: ZTransferTypography = .labelLarge
+    var color: Color?
+    var accessibilityName: String?
     func makeUIView(context: Context) -> TransferFileTitleLabel { TransferFileTitleLabel() }
     func updateUIView(_ view: TransferFileTitleLabel, context: Context) {
         let traits = UITraitCollection(userInterfaceStyle: context.environment.colorScheme == .dark ? .dark : .light)
         view.configure(name: name,
-            primary: UIColor(cancelled ? ZTransferColors.secondaryText : ZTransferColors.primaryText).resolvedColor(with: traits),
-            secondary: UIColor(ZTransferColors.secondaryText).resolvedColor(with: traits))
+            primary: UIColor(color ?? (cancelled ? ZTransferColors.secondaryText : ZTransferColors.primaryText)).resolvedColor(with: traits),
+            secondary: UIColor(color ?? ZTransferColors.secondaryText).resolvedColor(with: traits), fontSize: style.size,
+            accessibilityName: accessibilityName)
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: TransferFileTitleLabel, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? uiView.fullWidth, height: 20)
+        CGSize(width: proposal.width ?? uiView.fullWidth, height: style.lineHeight)
     }
 }
 
@@ -49,9 +53,20 @@ final class TransferFileTitleLabel: UILabel {
     private var primary = UIColor.label
     private var secondary = UIColor.secondaryLabel
     private var fittedWidth: CGFloat?
+    private var fittedScale: CGFloat?
+    private var fittedText: TransferFileTitleText?
+    private var cachedFullWidth: CGFloat?
+    #if DEBUG
+    private(set) var fittingCount = 0
+    #endif
+    private var textSize: CGFloat = 14
+    private var accessibleName = ""
     var fullWidth: CGFloat {
+        if let cachedFullWidth { return cachedFullWidth }
         let full = TransferFileTitleText.fit(fileName, width: .greatestFiniteMagnitude) { attributed($0).size().width }
-        return attributed(full).size().width
+        let width = attributed(full).size().width
+        cachedFullWidth = width
+        return width
     }
 
     override init(frame: CGRect) {
@@ -63,30 +78,45 @@ final class TransferFileTitleLabel: UILabel {
     }
     required init?(coder: NSCoder) { nil }
 
-    func configure(name: String, primary: UIColor, secondary: UIColor) {
-        guard name != fileName || primary != self.primary || secondary != self.secondary else { return }
+    func configure(name: String, primary: UIColor, secondary: UIColor, fontSize: CGFloat = 14, accessibilityName: String? = nil) {
+        accessibleName = accessibilityName ?? name
+        accessibilityLabel = accessibleName
+        guard name != fileName || primary != self.primary || secondary != self.secondary || textSize != fontSize else { return }
+        let geometryChanged = name != fileName || textSize != fontSize
+        textSize = fontSize
         fileName = name; self.primary = primary; self.secondary = secondary
-        accessibilityLabel = name
-        fittedWidth = nil
-        setNeedsLayout()
+        accessibilityLabel = accessibleName
+        if geometryChanged {
+            fittedWidth = nil; fittedText = nil; cachedFullWidth = nil
+            setNeedsLayout()
+        } else if let fittedText {
+            // The summary's success color changes every animation frame.
+            // Recolor the accepted text without repeating the width search.
+            attributedText = attributed(fittedText)
+            accessibilityLabel = accessibleName
+        }
     }
     override func layoutSubviews() {
         super.layoutSubviews()
         let scale = window?.screen.scale ?? UIScreen.main.scale
         let width = (bounds.width * scale).rounded() / scale
-        guard fittedWidth != width else { return }
-        fittedWidth = width
+        guard fittedWidth != width || fittedScale != scale else { return }
+        fittedWidth = width; fittedScale = scale
+        #if DEBUG
+        fittingCount += 1
+        #endif
         let text = TransferFileTitleText.fit(fileName, width: width) {
             ceil(self.attributed($0).size().width * scale) / scale
         }
+        fittedText = text
         attributedText = attributed(text)
-        accessibilityLabel = fileName
+        accessibilityLabel = accessibleName
     }
     private func attributed(_ text: TransferFileTitleText) -> NSAttributedString {
         let result = NSMutableAttributedString(string: text.stem, attributes: [
-            .font: UIFont.systemFont(ofSize: 14, weight: .semibold), .foregroundColor: primary])
+            .font: UIFont.systemFont(ofSize: textSize, weight: .semibold), .foregroundColor: primary])
         result.append(NSAttributedString(string: text.suffix, attributes: [
-            .font: UIFont.systemFont(ofSize: 14, weight: .regular), .foregroundColor: secondary]))
+            .font: UIFont.systemFont(ofSize: textSize, weight: .regular), .foregroundColor: secondary]))
         return result
     }
 }

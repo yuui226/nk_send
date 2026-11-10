@@ -1,0 +1,125 @@
+Test Suite 'Selected tests' started at 2026-10-28 16:34:27.501.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-28 16:34:27.502.
+Test Suite 'JpegCropHeaderTests' started at 2026-10-28 16:34:27.503.
+Test Case '-[ZTransferTests.JpegCropHeaderTests testLargeICCBeforeSOFSurvivesProductionCrop]' started.
+Test Case '-[ZTransferTests.JpegCropHeaderTests testLargeICCBeforeSOFSurvivesProductionCrop]' passed (0.102 seconds).
+Test Case '-[ZTransferTests.JpegCropHeaderTests testProductionCropAcceptsLargeHeadersThroughExactReadLimitAndRejectsBeyondIt]' started.
+2026-10-28 16:34:27.682607+0800 ZTransfer[48776:34213968] [ZTransfer] makeImagePlus:3799: *** ERROR: 'JPEG'-_reader->initImage[0] failed err=7
+2026-10-28 16:34:27.709903+0800 ZTransfer[48776:34213968] [ZTransfer] makeImagePlus:3799: *** ERROR: 'JPEG'-_reader->initImage[0] failed err=7
+Test Case '-[ZTransferTests.JpegCropHeaderTests testProductionCropAcceptsLargeHeadersThroughExactReadLimitAndRejectsBeyondIt]' passed (0.138 seconds).
+Test Case '-[ZTransferTests.JpegCropHeaderTests testReadsSOFDimensionsAndSampling]' started.
+Test Case '-[ZTransferTests.JpegCropHeaderTests testReadsSOFDimensionsAndSampling]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.JpegCropHeaderTests testRejectsBrokenExifAndTruncatedSegmentsInsteadOfUsingFrameGeometry]' started.
+Test Case '-[ZTransferTests.JpegCropHeaderTests testRejectsBrokenExifAndTruncatedSegmentsInsteadOfUsingFrameGeometry]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.JpegCropHeaderTests testRejectsEveryIncompletePrefixAndInvalidComponentSampling]' started.
+Test Case '-[ZTransferTests.JpegCropHeaderTests testRejectsEveryIncompletePrefixAndInvalidComponentSampling]' passed (0.002 seconds).
+Test Suite 'JpegCropHeaderTests' passed at 2026-10-28 16:34:27.757.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.247 (0.254) seconds
+Test Suite 'LosslessCropIntegrityTests' started at 2026-10-28 16:34:27.758.
+Test Case '-[ZTransferTests.LosslessCropIntegrityTests testValidHeaderWithTruncatedEntropyFailsNativeAndProcessorThenRetries]' started.
+2026-10-28 16:34:27.851630+0800 ZTransfer[48776:34214394] [connection] nw_socket_handle_socket_event [C1:1] Socket SO_ERROR [61: Connection refused]
+2026-10-28 16:34:27.852452+0800 ZTransfer[48776:34214394] [connection] nw_endpoint_flow_failed_with_error [C1 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.LosslessCropIntegrityTests testValidHeaderWithTruncatedEntropyFailsNativeAndProcessorThenRetries]' passed (0.972 seconds).
+Test Suite 'LosslessCropIntegrityTests' passed at 2026-10-28 16:34:28.731.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.972 (0.973) seconds
+Test Suite 'LosslessCropLifecycleTests' started at 2026-10-28 16:34:28.731.
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testCancellationAfterNativeWorkRemovesOnlyOwnedStaging]' started.
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testCancellationAfterNativeWorkRemovesOnlyOwnedStaging]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testConcurrentCropsOwnSeparateStagingAndPublicationNames]' started.
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testConcurrentCropsOwnSeparateStagingAndPublicationNames]' passed (0.035 seconds).
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testPreCancelledCropDoesNotCreateStaging]' started.
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testPreCancelledCropDoesNotCreateStaging]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testStartupCleanupRemovesOldSessionsButPreservesActiveAndUnknownDirectories]' started.
+Test Case '-[ZTransferTests.LosslessCropLifecycleTests testStartupCleanupRemovesOldSessionsButPreservesActiveAndUnknownDirectories]' passed (0.019 seconds).
+Test Suite 'LosslessCropLifecycleTests' passed at 2026-10-28 16:34:28.821.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.085 (0.090) seconds
+Test Suite 'LosslessCropMetadataTests' started at 2026-10-28 16:34:28.822.
+Test Case '-[ZTransferTests.LosslessCropMetadataTests testWhitelistRebuildRemovesThumbnailAndPreservesICCOrientationGPSAndDimensions]' started.
+Test Case '-[ZTransferTests.LosslessCropMetadataTests testWhitelistRebuildRemovesThumbnailAndPreservesICCOrientationGPSAndDimensions]' passed (0.930 seconds).
+Test Suite 'LosslessCropMetadataTests' passed at 2026-10-28 16:34:29.754.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.930 (0.932) seconds
+Test Suite 'LosslessCropProcessorTests' started at 2026-10-28 16:34:29.754.
+Test Case '-[ZTransferTests.LosslessCropProcessorTests testOutputNameMatchesAndroidConvention]' started.
+Test Case '-[ZTransferTests.LosslessCropProcessorTests testOutputNameMatchesAndroidConvention]' passed (0.003 seconds).
+Test Suite 'LosslessCropProcessorTests' passed at 2026-10-28 16:34:29.759.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.003 (0.005) seconds
+Test Suite 'PhotoCaptureExifTests' started at 2026-10-28 16:34:29.760.
+Test Case '-[ZTransferTests.PhotoCaptureExifTests testEffectJPEGPreservesPreciseExposureAndAdditionalCaptureFields]' started.
+2026-10-28 16:34:29.871073+0800 ZTransfer[48776:34214394] [connection] [C1 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.PhotoCaptureExifTests testEffectJPEGPreservesPreciseExposureAndAdditionalCaptureFields]' passed (0.152 seconds).
+Test Suite 'PhotoCaptureExifTests' passed at 2026-10-28 16:34:29.914.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.152 (0.154) seconds
+Test Suite 'PhotoCaptureLocationTests' started at 2026-10-28 16:34:29.914.
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testLocationValidationAllowsAxesAndSeaLevelButRejectsPlaceholders]' started.
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testLocationValidationAllowsAxesAndSeaLevelButRejectsPlaceholders]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal]' started.
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:38: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08")
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:39: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08")
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal]' failed (2.375 seconds).
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testNoFallbackDoesNotInventGPSAndFailedGPSValidationCleansStaging]' started.
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testNoFallbackDoesNotInventGPSAndFailedGPSValidationCleansStaging]' passed (0.268 seconds).
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testPartialInvalidGPSDiscardsStaleAltitudeOnlyWhenRecovering]' started.
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testPartialInvalidGPSDiscardsStaleAltitudeOnlyWhenRecovering]' passed (0.124 seconds).
+Test Suite 'PhotoCaptureLocationTests' failed at 2026-10-28 16:34:32.689.
+	 Executed 4 tests, with 2 failures (0 unexpected) in 2.770 (2.775) seconds
+Test Suite 'PhotoMetadataPipelineTests' started at 2026-10-28 16:34:32.689.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testAllOriginalPathsContinueSecondDownloadWhileCropIsBlocked]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testAllOriginalPathsContinueSecondDownloadWhileCropIsBlocked]' passed (0.163 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testBlockedParserDoesNotBlockDownloadsAndBudgetFailureKeepsOriginal]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testBlockedParserDoesNotBlockDownloadsAndBudgetFailureKeepsOriginal]' passed (0.055 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCloseDropsPendingSpoolButRetainsActiveParserUntilItReturns]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCloseDropsPendingSpoolButRetainsActiveParserUntilItReturns]' passed (0.046 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testClosingGenerationPreservesActiveCropPublicationAndDropsWaitingCrop]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testClosingGenerationPreservesActiveCropPublicationAndDropsWaitingCrop]' passed (0.028 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropAndPlainEffectShareOneComputeSlot]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropAndPlainEffectShareOneComputeSlot]' passed (0.034 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropReceivesItsPreparedCameraLocationForBothRecipeRoutes]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropReceivesItsPreparedCameraLocationForBothRecipeRoutes]' passed (0.045 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropWaitsForMetadataThenAccumulatesCropAndEffectTime]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testCropWaitsForMetadataThenAccumulatesCropAndEffectTime]' passed (0.028 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDisabledGateStillSavesCropAndMarksOnlyEffectsSkipped]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDisabledGateStillSavesCropAndMarksOnlyEffectsSkipped]' passed (0.036 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDuplicatePendingRequestsShareFailedReadWithoutCachingFailure]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testDuplicatePendingRequestsShareFailedReadWithoutCachingFailure]' passed (0.037 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEffectFailureRetryReusesPublishedCropWithoutRepeatingCrop]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEffectFailureRetryReusesPublishedCropWithoutRepeatingCrop]' passed (0.067 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEnablingDuringCropPausesForMetadataAndResumesWithoutRecropping]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testEnablingDuringCropPausesForMetadataAndResumesWithoutRecropping]' passed (0.080 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testExifDateFallsBackToTIFFThroughBothConsumers]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testExifDateFallsBackToTIFFThroughBothConsumers]' passed (0.008 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFailureAndWorkerTimeExistingOutputHaveNoCompletedGenerationDuration]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFailureAndWorkerTimeExistingOutputHaveNoCompletedGenerationDuration]' passed (0.064 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFiveSecondsPreparationThenHalfSecondRenderRecordsOnlyHalfSecond]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testFiveSecondsPreparationThenHalfSecondRenderRecordsOnlyHalfSecond]' passed (0.032 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testOneFailedRenderDoesNotLoseAnotherSharedPreparationWaiter]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testOneFailedRenderDoesNotLoseAnotherSharedPreparationWaiter]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testPhotoExifFormattingMatchesAndroidAndFrameMetadata]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testPhotoExifFormattingMatchesAndroidAndFrameMetadata]' passed (0.125 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testRuntimeSwitchSkipsOnlyWaitingWorkAndReenableRetainsRecipe]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testRuntimeSwitchSkipsOnlyWaitingWorkAndReenableRetainsRecipe]' passed (0.079 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSecondRenderDoesNotCountFirstWorkersFiveSeconds]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSecondRenderDoesNotCountFirstWorkersFiveSeconds]' passed (0.104 seconds).
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSkippedComputationsCannotGrowBlockedPreparationPastCapacity]' started.
+Test Case '-[ZTransferTests.PhotoMetadataPipelineTests testSkippedComputationsCannotGrowBlockedPreparationPastCapacity]' passed (0.082 seconds).
+Test Suite 'PhotoMetadataPipelineTests' passed at 2026-10-28 16:34:33.847.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 1.138 (1.157) seconds
+Test Suite 'ZTransferTests.xctest' failed at 2026-10-28 16:34:33.847.
+	 Executed 36 tests, with 2 failures (0 unexpected) in 6.297 (6.345) seconds
+Test Suite 'Selected tests' failed at 2026-10-28 16:34:33.848.
+	 Executed 36 tests, with 2 failures (0 unexpected) in 6.297 (6.347) seconds
+2026-10-28 16:34:33.951 xcodebuild[48202:34208851] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:34:33.961 xcodebuild[48202:34208851] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:34:34.374 xcodebuild[48202:34208851] [MT] IDETestOperationsObserverDebug: 63.633 elapsed -- Testing started completed.
+2026-10-28 16:34:34.374 xcodebuild[48202:34208851] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-28 16:34:34.374 xcodebuild[48202:34208851] [MT] IDETestOperationsObserverDebug: 63.633 sec, +63.633 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-sync-crop-location-20261028.xcresult
+
+Failing tests:
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+
+** TEST FAILED **
+
+Testing started

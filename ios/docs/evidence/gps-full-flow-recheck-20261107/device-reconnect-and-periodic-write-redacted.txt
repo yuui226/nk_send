@@ -1,0 +1,80 @@
+2026-11-07T02:07:22Z BLE state=connecting("Z50_2_[redacted]")
+2026-11-07T02:07:30Z BLE state=connecting("Z50_2_[redacted]")
+2026-11-07T02:07:30Z BLE pairing handshake
+2026-11-07T02:07:31Z GATT write uuid=00002000-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:07:31Z pairing stage3 sent
+2026-11-07T02:07:31Z GATT write uuid=00002000-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:07:32Z ID queued
+2026-11-07T02:07:32Z GATT write uuid=00002002-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:07:32Z BLE state=ready("Z50_2_[redacted]")
+2026-11-07T02:07:32Z location pipeline started
+2026-11-07T02:07:32Z location fix accuracy=3.8950139999999998
+2026-11-07T02:07:32Z GEO queued accuracy=3m
+2026-11-07T02:07:32Z location fix accuracy=3.817410719035531
+2026-11-07T02:07:32Z location fix accuracy=3.8950139999999998
+2026-11-07T02:07:32Z location fix accuracy=3.751414809545421
+2026-11-07T02:07:32Z location fix accuracy=3.7514016109119774
+2026-11-07T02:07:32Z GATT write uuid=00002007-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:07:32Z GEO write success=true
+2026-11-07T02:07:38Z location fix accuracy=3.68754963657202
+2026-11-07T02:07:53Z location fix accuracy=3.6292772585947595
+2026-11-07T02:08:08Z location fix accuracy=3.573853563665768
+2026-11-07T02:08:23Z location fix accuracy=3.5210459887598122
+2026-11-07T02:08:33Z GEO queued accuracy=3m
+2026-11-07T02:08:33Z GATT write uuid=00002007-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:08:33Z GEO write success=true
+2026-11-07T02:08:38Z location fix accuracy=3.470703378347548
+2026-11-07T02:08:47Z location fix accuracy=3.47166836663099
+2026-11-07T02:08:53Z location fix accuracy=3.4211380148559747
+2026-11-07T02:09:08Z location fix accuracy=3.375253222829034
+2026-11-07T02:09:23Z location fix accuracy=3.3313062561689377
+2026-11-07T02:09:24Z BLE disconnected error=The specified device has disconnected from us.
+2026-11-07T02:09:24Z BLE state=disconnected
+2026-11-07T02:09:25Z BLE start savedIdentity=true
+2026-11-07T02:09:25Z BLE reconnecting known camera
+2026-11-07T02:09:25Z BLE state=connecting("Z50_2_[redacted]")
+2026-11-07T02:09:33Z BLE state=connecting("Z50_2_[redacted]")
+2026-11-07T02:09:34Z BLE pairing handshake
+2026-11-07T02:09:34Z GATT write uuid=00002000-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:34Z pairing stage3 sent
+2026-11-07T02:09:34Z GATT write uuid=00002000-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:36Z ID queued
+2026-11-07T02:09:36Z GATT write uuid=00002002-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:36Z BLE state=ready("Z50_2_[redacted]")
+2026-11-07T02:09:36Z location pipeline started
+2026-11-07T02:09:36Z location fix accuracy=3.3950139999999998
+2026-11-07T02:09:36Z GEO queued accuracy=3m
+2026-11-07T02:09:36Z location fix accuracy=3.3313062561689377
+2026-11-07T02:09:36Z location fix accuracy=3.3950139999999998
+2026-11-07T02:09:36Z location fix accuracy=3.2881616232697173
+2026-11-07T02:09:36Z location fix accuracy=3.288152737539465
+2026-11-07T02:09:36Z GATT write uuid=00002007-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:36Z GEO write success=true
+2026-11-07T02:09:42Z location fix accuracy=3.2451127900877252
+2026-11-07T02:09:43Z set enabled=false
+2026-11-07T02:09:43Z BLE stopped
+2026-11-07T02:09:50Z set enabled=true
+2026-11-07T02:09:50Z GPS session started
+2026-11-07T02:09:50Z BLE start savedIdentity=true
+2026-11-07T02:09:50Z BLE reconnecting known camera
+2026-11-07T02:09:50Z BLE state=connecting("Z50_2_[redacted]")
+2026-11-07T02:09:50Z location warmup started during BLE reconnect
+2026-11-07T02:09:51Z BLE state=connecting("Z50_2_[redacted]")
+2026-11-07T02:09:52Z BLE pairing handshake
+2026-11-07T02:09:52Z GATT write uuid=00002000-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:52Z pairing stage3 sent
+2026-11-07T02:09:52Z GATT write uuid=00002000-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:53Z ID queued
+2026-11-07T02:09:53Z GATT write uuid=00002002-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:53Z BLE state=ready("Z50_2_[redacted]")
+2026-11-07T02:09:53Z location pipeline started
+2026-11-07T02:09:53Z location fix accuracy=3.295014
+2026-11-07T02:09:53Z location fix accuracy=3.204332512060329
+2026-11-07T02:09:53Z location fix accuracy=3.295014
+2026-11-07T02:09:53Z location fix accuracy=3.2044571991996857
+2026-11-07T02:09:53Z GEO queued accuracy=3m
+2026-11-07T02:09:53Z location fix accuracy=3.204457204491813
+2026-11-07T02:09:53Z GATT write uuid=00002007-3DD4-4255-8D62-6DC7B9BD5561 acknowledged
+2026-11-07T02:09:53Z GEO write success=true
+2026-11-07T02:09:58Z set enabled=false
+2026-11-07T02:09:58Z BLE stopped

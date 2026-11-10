@@ -1,0 +1,1192 @@
+{
+  "tasks": [
+    "N10",
+    "N09-N11-queue-regression"
+  ],
+  "androidTarget": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "iosBase": "58d9b6ed81c8f92e155b4402f8b05e88fda421ed",
+  "runs": [
+    {
+      "log": "/tmp/ztransfer-queue-appearance-20261030.log",
+      "logSHA256": "e7eb6a0167beb1148bcdf172a9a0c875f698666479df9cb21e4948ff8363ae2d",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-20261030-tests.log",
+      "retainedLogSHA256": "7dcf4b56f3f12c88aa7b65e87c279d5c9b430882adc547ab6766951c3cf09281",
+      "xcresult": "/tmp/ztransfer-queue-appearance-20261030.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": []
+    },
+    {
+      "log": "/tmp/ztransfer-queue-appearance-fixed-20261030.log",
+      "logSHA256": "dfe6fd7ca580d18966000d467cc34d91a262751f1adf16e4799805b031e667f2",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-fixed-20261030-tests.log",
+      "retainedLogSHA256": "bfffeb742ba72d5b6bdc35fab2769c6ab3206789ac16b819672d854945ae35b6",
+      "xcresult": "/tmp/ztransfer-queue-appearance-fixed-20261030.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": [
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testFirstLayoutAndEmptyListResetDoNotFadeHistory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testInsertionReplacementAndReorderUseKeysWithoutResettingThePreviousMap",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testPreviousNearestRangeSeparatesOrdinaryScrollAndFarJump",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock",
+          "result": "failed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testFiniteFadeUses180msFastOutSlowInAndDoesNotRestart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testLeavingOrBackgroundingFinishesWithoutReplayAndDoesNotRetainOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testClearLeavingFinishesOldTargetsAndAllowsNewClear",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testPendingTasksDoNotRetainTheirScreenOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testAlreadyDeletedRowNeverRestoresOnLateAnimationCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testCleanupWaitsForActualFramesAndReleasesTheWaiterOnCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testClearImmediatelyDropsOffscreenTargetsButPreservesNewWorkAndPausedVisibleRows",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testOpacityLeadsHeightAndBothStayMonotonic",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testPageExitFinishesCapturedClearButCannotTouchTasksAddedAfterward",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testPlacementDoesNotChaseHeightCollapseAndResumesFromFinalPosition",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testTimelineUsesFirstDeliveredFrameAndSupportsScaledStagger",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testVisibleTargetsStaggerByPositionWithBoundedDelayAndNoDuplicate",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-queue-appearance-layout-20261030.log",
+      "logSHA256": "e3468422810c634bcbd18cb6ec69516be42659a5500c1e9fdae45d5c96815563",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-layout-20261030-tests.log",
+      "retainedLogSHA256": "150c2e65f68b101c904421c4e5ff41f0ebe6fe169deec3e19887839f98579185",
+      "xcresult": "/tmp/ztransfer-queue-appearance-layout-20261030.xcresult",
+      "exitCode": 0,
+      "result": "passed",
+      "tests": [
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testFirstLayoutAndEmptyListResetDoNotFadeHistory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testInsertionReplacementAndReorderUseKeysWithoutResettingThePreviousMap",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testPreviousNearestRangeSeparatesOrdinaryScrollAndFarJump",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testFiniteFadeUses180msFastOutSlowInAndDoesNotRestart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testLeavingOrBackgroundingFinishesWithoutReplayAndDoesNotRetainOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testClearLeavingFinishesOldTargetsAndAllowsNewClear",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testPendingTasksDoNotRetainTheirScreenOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testAlreadyDeletedRowNeverRestoresOnLateAnimationCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testCleanupWaitsForActualFramesAndReleasesTheWaiterOnCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testClearImmediatelyDropsOffscreenTargetsButPreservesNewWorkAndPausedVisibleRows",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testOpacityLeadsHeightAndBothStayMonotonic",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testPageExitFinishesCapturedClearButCannotTouchTasksAddedAfterward",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testPlacementDoesNotChaseHeightCollapseAndResumesFromFinalPosition",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testTimelineUsesFirstDeliveredFrameAndSupportsScaledStagger",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testVisibleTargetsStaggerByPositionWithBoundedDelayAndNoDuplicate",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-queue-appearance-scroll-20261030.log",
+      "logSHA256": "64ecc924f9baa1c3ec1c496f49feac402886a42c08c71eb238228bdaa6fb64e0",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-scroll-20261030-tests.log",
+      "retainedLogSHA256": "dce635caeda799d6004bd1390dbf5136d86afc528cfc56876a64e02871760bc0",
+      "xcresult": "/tmp/ztransfer-queue-appearance-scroll-20261030.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": [
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testOffscreenInsertionAndScrollingBackDoNotReplayAppearance",
+          "result": "failed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-queue-appearance-identity-20261030.log",
+      "logSHA256": "750e32302c3834f9d277c648d885ad87f4ba8b2680544664cbcdfcb7eb283388",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-identity-20261030-tests.log",
+      "retainedLogSHA256": "a030bacb31f8006bdad03ca3c5fa36f7d5a4c4e1fb6a0d7ed6fa514cffea7f58",
+      "xcresult": "/tmp/ztransfer-queue-appearance-identity-20261030.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": []
+    },
+    {
+      "log": "/tmp/ztransfer-queue-appearance-stable-20261030.log",
+      "logSHA256": "88fcfff28aa1f9e9742a84334460476ea349ea6722680d39c5551ea9bcfeba14",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-stable-20261030-tests.log",
+      "retainedLogSHA256": "d84423b7815d9fba2cbcdb3820d56c8376d72731e1ca728bc59a1313284cc8be",
+      "xcresult": "/tmp/ztransfer-queue-appearance-stable-20261030.xcresult",
+      "exitCode": 0,
+      "result": "passed",
+      "tests": [
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testOffscreenInsertionAndScrollingBackDoNotReplayAppearance",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueProgressInvalidationTests testOnlyActiveScopeReevaluatesAndSubscriptionMovesWithTask",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-queue-appearance-final-20261030.log",
+      "logSHA256": "9515bcbade96ccc87700cb50371f218b252af57715526f5da231b8cfe801c657",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-final-20261030-tests.log",
+      "retainedLogSHA256": "74895d8f34e1a285ee711d8a1ed1aa28a97e4bc07404bb93659a80abf40bfeb6",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult",
+      "exitCode": 0,
+      "result": "passed",
+      "tests": [
+        {
+          "name": "ZTransferTests.DomainModelTests testQueueItemPlacementSamplesShortAxisUntilVectorFinishes",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.DomainModelTests testQueueItemPlacementUsesPhysicalPixelSpringAndPreservesPositionOnInterruption",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testFirstLayoutAndEmptyListResetDoNotFadeHistory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testInsertionReplacementAndReorderUseKeysWithoutResettingThePreviousMap",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testPreviousNearestRangeSeparatesOrdinaryScrollAndFarJump",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCardPresentationTests testOriginalSkipDoesNotHideRealDownloadOrConflateDerivedSkip",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCardPresentationTests testRealQueueSurfaceSwipesBothDirectionsThenWithdrawsAndCollapses",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCardProgressVisibilityTests testClockStopsOnCompletionResetAndOwnerRelease",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCardProgressVisibilityTests testFailureAndRetryReverseFromDisplayedOpacityThenSettle",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCardProgressVisibilityTests testMountIsQuietAndCompletionRetainsProgressForExactDelayAndFade",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testCoalescedNewTerminalFailuresCountRegardlessOfOrderingAndRemoval",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testCoalescedSuccessSuppliesRealEvidenceIncludingZeroGenerationTime",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testFailedDownloadOrEffectsCannotCelebrateEvenAfterSuccessfulDownload",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testGenerationSkipPendingCheckAndActualOutputEvidence",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testHistoricalFailuresDoNotPoisonLaterBatchAndPauseHandoffDoesNotFinish",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testInitialTerminalHistoryAndLaterIdleUpdatesNeverEmit",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testRemovedFailureAndMissingWorkRemainUnsuccessful",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testRemovedSuccessfulWorkIsRetainedButNextBatchResets",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testSnapshotMemoKeepsOneEventAcrossDisplayRecompositions",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testSuccessfulDownloadEmitsOnceAndSkippedOnlyDoesNotCelebrate",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueCompletionTests testWidthVisibilityReversesSameSpringAndFeatherOnlyAppliesToVisibility",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueConfirmationLayoutTests testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testOffscreenInsertionAndScrollingBackDoNotReplayAppearance",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testFiniteFadeUses180msFastOutSlowInAndDoesNotRestart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testLeavingDiscardsThePendingLayoutCheckpoint",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testLeavingOrBackgroundingFinishesWithoutReplayAndDoesNotRetainOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueClockTests testChangesStartWithoutGeometryAndUseIntegerHalfLineHeight",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueClockTests testRemountUsesLatestValueAndDoesNotReplayHiddenChanges",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueClockTests testSameTextPublishesNothingAndUnmountOrHiddenInputStopsClock",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueLayoutTests testActualCarryAndInterruptedShrinkKeepRightAnchorAndLeaveNoGhostDigits",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueLayoutTests testOnlyChangedFractionPixelsMoveWhilePrefixAndUnitStayStill",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testAndroidNumericParserVectorsAndPlaceIdentity",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testFallbackAndSuffixIdentityCollisionNeverLoseTheNumericGroup",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testInterrupted99To100To9ReusesDepartingDigitsWithoutJumping",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testLeadingAndFractionPlacesKeepIdentityAndDepartAtZeroTargetWidth",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testNumericOrderingConversionSaturatesLikeAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testOnlyChangedPlaceRollsWithAndroid180160120Timings",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testSameFormattedLabelDoesNotChangeDirectionBaselineOrRestartMotion",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testUnchangedInFlightDigitIsRetargetedWhenParentSnapshotChanges",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueNumericValueTests testUnitChangeRetainsWholeOldLabelAndReversalReusesItsLayer",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueuePillCompletionRenderingTests testActualPillCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueuePillCompletionRenderingTests testPhysicalMaterialCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueuePillCompletionRenderingTests testRetainedContentCannotForcePaintedSurfaceOutsideProposedWidth",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueuePillReadoutTests testDoneFillFadesWithContentAndReversesWithoutAVisualJump",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueuePillReadoutTests testSpeedSamplerExactBoundaryAndInvalidValuesDoNotDelay",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueuePillReadoutTests testSpeedSamplerFirstValidAndPerDownloadReset",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueuePillRenderingTests testAnimatedWidthsRemainPinnedToTrailingViewportIncludingOverflow",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueProgressInvalidationTests testOnlyActiveScopeReevaluatesAndSubscriptionMovesWithTask",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testClearLeavingFinishesOldTargetsAndAllowsNewClear",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalCoordinatorTests testPendingTasksDoNotRetainTheirScreenOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testAlreadyDeletedRowNeverRestoresOnLateAnimationCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testCleanupWaitsForActualFramesAndReleasesTheWaiterOnCancellation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testClearImmediatelyDropsOffscreenTargetsButPreservesNewWorkAndPausedVisibleRows",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testOpacityLeadsHeightAndBothStayMonotonic",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testPageExitFinishesCapturedClearButCannotTouchTasksAddedAfterward",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testPlacementDoesNotChaseHeightCollapseAndResumesFromFinalPosition",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testTimelineUsesFirstDeliveredFrameAndSupportsScaledStagger",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueRemovalTests testVisibleTargetsStaggerByPositionWithBoundedDelayAndNoDuplicate",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryLayoutTests testLastGenerationBadgeDoesNotExpandDepartingRowsAndNewWorkKeepsTheSlot",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryLayoutTests testProductionQueueKeepsSummaryAboveHistoryOnPortraitAndCompactLayouts",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testDownloadFillHoldConflatesFastOwnersAndUsesFinalStatistics",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testDownloadNeverBorrowsWrongProgressOrCompletesFailureAndHiddenDisplaySnaps",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testFastGenerationHistoryRemainsBoundedAndNeverReplaysInvisibleCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testGenerationFailureSkipMissingAndRetryNeverReplaySuccess",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testGenerationMotionExactTimingsAndLowerExitTravel",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testGenerationRowsHoldSuccessfulFirstThenMoveBoundedQueueUp",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testHiddenChecksAndPrefetchedSuccessHaveNoVisibleLifecycle",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testIndependentCountsAndPriorityNeverInventDownloadsOrFutureEffects",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testLastGenerationDepartureKeepsRowsAndNewWorkNeverUsesIdleSnapshot",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testPausedAndTerminalStatesDoNotRetainWrongFileOrClock",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testPendingCheckAndLegacyCropProtectionDoNotDoubleCount",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testSecondRowSuccessNeverDisplacesRunningFirstRow",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testStableSummaryGeometryDoesNotUseCountsOrQueueActivity",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueSummaryTests testSummarySpeedIdentityRetentionAndIdleClearing",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueTopControlRenderingTests testDoneDeadlineSurvivesTerminalMetadataAndOldFailureHistory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueTopControlRenderingTests testRealClusterTransitionsInDarkPhysicalTheme",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueTopControlRenderingTests testRealClusterTransitionsInLiquidGlass",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueTopControlRenderingTests testRealClusterTransitionsInPhysicalTheme",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.TransferSpeedQueueTests testProductionQueueSamplesSpeedButPublishesEveryByteAndResetsForNextFile",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-queue-appearance-checkpoint-20261030.log",
+      "logSHA256": "10665bc58dba69542416f5ee9a713fee6f42696c41c4fdc8b7babc28457ba74d",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/queue-appearance-checkpoint-20261030-tests.log",
+      "retainedLogSHA256": "ea792496c6230bcec4f144582104bdcd7a380138fc8af0f2791f9e2843261c5b",
+      "xcresult": "/tmp/ztransfer-queue-appearance-checkpoint-20261030.xcresult",
+      "exitCode": 0,
+      "result": "passed",
+      "tests": [
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testFirstLayoutAndEmptyListResetDoNotFadeHistory",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testInsertionReplacementAndReorderUseKeysWithoutResettingThePreviousMap",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueAppearanceKeyMapTests testPreviousNearestRangeSeparatesOrdinaryScrollAndFarJump",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testOffscreenInsertionAndScrollingBackDoNotReplayAppearance",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceLayoutTests testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testFiniteFadeUses180msFastOutSlowInAndDoesNotRestart",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testLeavingDiscardsThePendingLayoutCheckpoint",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testLeavingOrBackgroundingFinishesWithoutReplayAndDoesNotRetainOwner",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueItemAppearanceTests testOldLayoutCannotConsumeAnInsertionBeforeItsOwnLayout",
+          "result": "passed"
+        },
+        {
+          "name": "ZTransferTests.QueueProgressInvalidationTests testOnlyActiveScopeReevaluatesAndSubscriptionMovesWithTask",
+          "result": "passed"
+        }
+      ]
+    }
+  ],
+  "latestSourceHashes": [
+    {
+      "path": "ios/ZTransfer.xcodeproj/project.pbxproj",
+      "sha256": "79807dedee23896f32e0c4b149d3c1d4635fb16fec5efb248e16f7cd6d5003d9"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/TransferQueue.swift",
+      "sha256": "3b75100993b979dcefcf3ef686df100529f4f24fd8c19d62388a4a52540b38f7"
+    },
+    {
+      "path": "ios/ZTransfer/Domain/TransferQueueViewModel.swift",
+      "sha256": "02e989848038833c1cfdda5123f9b56469feb1bf1be6451dcff21b32a9b37e51"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueAnimatedValue.swift",
+      "sha256": "4b3c6bdb809908b726e8f2ff7b142a5c1158f680edc7dc40105b1ddef3c07fed"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueItemAppearance.swift",
+      "sha256": "8fec09babadae7df63cc42308133269973f93dd263f99a18eef4b1a7da2f9bc2"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueItemPlacement.swift",
+      "sha256": "4b6eaf6c297846012c96f12f10df044d2f2eb3e5e4fd6c0d1fb572d47289ed85"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueNumericValueMotion.swift",
+      "sha256": "8c8e7f0ec234fab97bd555785176ad0d0b5da88aaae4659333d11f14134e64be"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueProgressScope.swift",
+      "sha256": "3e6230be6ff0c27ddcf594e6ae388eee2652a37f71c9e133eec35b80a1fc8a09"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueRemovalCoordinator.swift",
+      "sha256": "6a2074d68b6ce0c57368d49c9e7d5f066d93a908eae1e2eeec8989c2d55ce350"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueRemovalMotion.swift",
+      "sha256": "dc8b5cb497bc1f13377c88f5251ea5cf07aac2fa5f23d4f270f4b11727dda4c5"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/QueueTopPillMotion.swift",
+      "sha256": "fcf9b69efbe8475bea06ae5aa898ec11880f206bfe1ac76f489654208f0d3a3c"
+    },
+    {
+      "path": "ios/ZTransfer/UI/Components/TransferQueueStatusCards.swift",
+      "sha256": "fc2760e2b3348574479b554d4e25e76233c5613631aeb3cc52824ef7da5f2614"
+    },
+    {
+      "path": "ios/ZTransfer/UI/PhotoListView.swift",
+      "sha256": "8f6d51d482f76550224cd9a6bc915f4d61c0b1215cf20bf5fc07bb5fc0909a87"
+    },
+    {
+      "path": "ios/ZTransfer/UI/TransferQueueView.swift",
+      "sha256": "ac37f35ba2940a705853f44c3539c5167509dc235278c9bf877fbb3fc278d415"
+    },
+    {
+      "path": "ios/ZTransferTests/DomainModelTests.swift",
+      "sha256": "6b23d0da0b243d3d3b05a806ad22293ab7f07d0eac172b40bc3d808f15caf148"
+    },
+    {
+      "path": "ios/ZTransferTests/NativeAttentionMotionTests.swift",
+      "sha256": "6cfc7be2e665972ab3c5036f247480476265e80ea2a9673d3467b175bc87112c"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueCardSwipeTests.swift",
+      "sha256": "bef642a4fc82968b8e8876d5f7334cd07946add255fa62ff818091b0cb45db99"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueCompletionTests.swift",
+      "sha256": "8b772bc9dcccd96ec62a8660cad7f7af4f1d6c40ee9c0225011e9ec492cd8519"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueItemAppearanceTests.swift",
+      "sha256": "3f101210eb27de66bf4d82932c9b5c4e9b93e5d8be7896cb7214caa1c5315222"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueNumericValueLayoutTests.swift",
+      "sha256": "21493fa2bd34516bb37ac8f819f60f24d141ea8f180ba7852981979a90ec41a4"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueNumericValueTests.swift",
+      "sha256": "11f88b5c0d8814d82bdc1c818578908274a456e34c85dd521edab535054e36c1"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueRemovalLayoutTests.swift",
+      "sha256": "1364dda15a257c22490396479d2693631e4829562cc8c2701f2f9415f03a4cd2"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueRemovalTests.swift",
+      "sha256": "1178805530207e685d0b24db15606afa82f26db06625df61580a01396c154be9"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueSummaryLayoutTests.swift",
+      "sha256": "81a5bf0e8bd19c00024760491183e295a3ecd51c61422c9fd5198e0789931543"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueSummaryTests.swift",
+      "sha256": "41ae09e983101b6083daf438eaf093994d873e5cdf0171d16096699bd94ce8eb"
+    },
+    {
+      "path": "ios/ZTransferTests/QueueTopControlTests.swift",
+      "sha256": "8e52b4e8b53e8893b1cc2053599b8a40a54686124655ceead4700bfbfc07f778"
+    },
+    {
+      "path": "ios/ZTransferTests/TransferSpeedQueueTests.swift",
+      "sha256": "945b4be2a4f830fe8e2c7c53ec1888d1bcb9cbe06ab17421aae112c279a3280a"
+    },
+    {
+      "path": "ios/project.yml",
+      "sha256": "677d8a7415a79705acb0b069aa17e4424ae8d1e0c10029919ea5275d3df4c9eb"
+    }
+  ],
+  "androidSources": [
+    {
+      "path": "app/build.gradle.kts",
+      "sha256": "c1b692a757cafdee03004d18bee89b5126670d9b42372fa4a62055d72ff250fb"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/AnimatedQueuePillCount.kt",
+      "sha256": "d31dc130336687ba2777a46a1597cf89cac1e6a8bf972765d747db75e5046ede"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt",
+      "sha256": "62f3153944d8e9ebe237fa1b1969f66fcaac4a55ece871801b5a5f398fa550f9"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/QueueRemovalMotion.kt",
+      "sha256": "7c8491a167f727ae8413520bc14f132332e8ac154003063c356d039bd1313950"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/TransferProgressMotion.kt",
+      "sha256": "3af348d6cbd81c89807703baf602813b4abf7cd8b4a4719ba819476617fe2305"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/TransferQueueStatusCards.kt",
+      "sha256": "5999892c0962c3409f03230f6259371ea855c4f676538daed24208cfdb51dd50"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt",
+      "sha256": "3a64ee6d1c3d3a736d81b5d1f736202691df98b63bec6de405fcb8e4b6f51f16"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/QueueNumericLabelTest.kt",
+      "sha256": "878516cc2b5de75ae1c905cfcaeccab37335e95476bd02b723da14371d9cfb4d"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/QueueRemovalMotionTest.kt",
+      "sha256": "d6c07fb53fec37c998db3e9b712366845078dd4eea38bdc589028f2a4453fba4"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/TransferProgressMotionTest.kt",
+      "sha256": "372d6ac2a1e61607a3c4e1a727fc6069254e211db1304286722cf7642c89e1c9"
+    }
+  ],
+  "upstreamSources": [
+    {
+      "url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation/1.7.6/foundation-1.7.6-sources.jar",
+      "cachedPath": "/tmp/ztransfer-numeric-compose-1.7.6/foundation-sources.jar",
+      "sha256": "0bf091a6b6054ce0ff8b8b01a4d6ee6ba8a8b70edcfac77ff2ee5b91c9f37dec"
+    }
+  ],
+  "upstreamExcerpts": [
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-compose-LazyListScrollPosition.kt.txt",
+      "sha256": "47d82acec0eb6eb1ea6cd5606228d17f03fc650d8a14ef2f0fbd507eb09c93c4",
+      "archiveEntry": "commonMain/androidx/compose/foundation/lazy/LazyListScrollPosition.kt",
+      "sourceSHA256": "47d82acec0eb6eb1ea6cd5606228d17f03fc650d8a14ef2f0fbd507eb09c93c4"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-compose-LazyLayoutNearestRangeState.kt.txt",
+      "sha256": "940e7ecb2812439bce5e44db90f39e976dd7cc902a29318f70913efb27c59394",
+      "archiveEntry": "commonMain/androidx/compose/foundation/lazy/layout/LazyLayoutNearestRangeState.kt",
+      "sourceSHA256": "940e7ecb2812439bce5e44db90f39e976dd7cc902a29318f70913efb27c59394"
+    },
+    {
+      "upstreamFile": "LazyLayoutItemAnimator.kt",
+      "upstreamSHA256": "13e9bc111217e6e45b63f48047681c9c7c4945505fdb709a44ccd3429c76e181",
+      "path": "ios/docs/evidence/android-sync-20261028/numeric-compose-LazyLayoutItemAnimator.kt.txt",
+      "sha256": "975279e73360536c171203e4f6713a61bc4e6888fe35b3c6979199d38caf63d6"
+    },
+    {
+      "upstreamFile": "LazyLayoutItemAnimation.kt",
+      "upstreamSHA256": "cb696c77b9667248d2cdadbf6da5080463cb0dc665bc7ce0fe134498f71a7aa0",
+      "path": "ios/docs/evidence/android-sync-20261028/numeric-compose-LazyLayoutItemAnimation.kt.txt",
+      "sha256": "7eb32e73a9dc0bfd9208e06ab64bcbb3714409c7019c07e108535820b32bfa98"
+    }
+  ],
+  "images": [
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-appearance-settled.png",
+      "sha256": "25422dbb7ad75d92baa8bd1569cbe7af7577e9a342cce4540ae389be50fa6781",
+      "testIdentifier": "QueueItemAppearanceLayoutTests/testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock()",
+      "attachmentFile": "51108A86-BDAB-4B1F-B1A3-697BCA104800.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-appearance-middle.png",
+      "sha256": "47c4b36b7ec7130b9c389a3dc2f8826fcb186ba3548287ddd620281fc365df31",
+      "testIdentifier": "QueueItemAppearanceLayoutTests/testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock()",
+      "attachmentFile": "5F2F0595-43BF-4BAC-B7F1-23164428BCA7.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-appearance-hidden.png",
+      "sha256": "b9f4f4a75542e40651601bf9b9a201e1d410d5116ba1cbb437e992d2deb311e6",
+      "testIdentifier": "QueueItemAppearanceLayoutTests/testRealLayoutCheckpointFadesOnlyInsertedRowAndBackgroundStopsItsClock()",
+      "attachmentFile": "0931849C-FED6-4F50-9D45-96F786C5FD77.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-numeric-carry-settled.png",
+      "sha256": "de2ef0111961dcb5c7a83b59f71c7369fac12599e07ba65b0ccaa03ebcff6da9",
+      "testIdentifier": "QueueNumericValueLayoutTests/testActualCarryAndInterruptedShrinkKeepRightAnchorAndLeaveNoGhostDigits()",
+      "attachmentFile": "68DBE1D1-B7B2-4BF8-9884-7BEC288327FC.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-numeric-carry-interrupted.png",
+      "sha256": "02c2de807c24509e4439240e8101ffb4901759b6c68d7eb797feda39aba02152",
+      "testIdentifier": "QueueNumericValueLayoutTests/testActualCarryAndInterruptedShrinkKeepRightAnchorAndLeaveNoGhostDigits()",
+      "attachmentFile": "B778E945-92D6-41EB-AC92-FEE7BC9684D1.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-numeric-carry-initial.png",
+      "sha256": "de2ef0111961dcb5c7a83b59f71c7369fac12599e07ba65b0ccaa03ebcff6da9",
+      "testIdentifier": "QueueNumericValueLayoutTests/testActualCarryAndInterruptedShrinkKeepRightAnchorAndLeaveNoGhostDigits()",
+      "attachmentFile": "95022C2E-674A-4CC8-AA2D-02E257A5453F.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-numeric-place-middle.png",
+      "sha256": "c374aa2dfead3edbe4a57084508d2453ec8f150031c1cc5188a81999aefe4cd7",
+      "testIdentifier": "QueueNumericValueLayoutTests/testOnlyChangedFractionPixelsMoveWhilePrefixAndUnitStayStill()",
+      "attachmentFile": "2A24582C-3803-44B5-8DA6-C67F19E31534.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-numeric-place-initial.png",
+      "sha256": "31a562cdea57815fdb47ca32865c03f2eaa9230289744240262eae1da0ff1b90",
+      "testIdentifier": "QueueNumericValueLayoutTests/testOnlyChangedFractionPixelsMoveWhilePrefixAndUnitStayStill()",
+      "attachmentFile": "6B3D2670-227A-4813-B83C-413B9073595C.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-removal-fade-before-collapse.png",
+      "sha256": "dd652f5e7ab8b34474e349f25cc3fc7d04681b2f3ed25c994b707c08cc26c6b9",
+      "testIdentifier": "QueueRemovalLayoutTests/testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows()",
+      "attachmentFile": "AB32D1EA-079D-49B5-8336-093249A7B4E3.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-final-queue-removal-initial.png",
+      "sha256": "3a47f41b7a5afba29d934d6b18f2487f710b824f9d3500c2a24e4efd1ee17c48",
+      "testIdentifier": "QueueRemovalLayoutTests/testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows()",
+      "attachmentFile": "D47B46A5-B35D-4514-BF10-1EC0E589D65F.png",
+      "xcresult": "/tmp/ztransfer-queue-appearance-final-20261030.xcresult"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-checkpoint-queue-appearance-hidden.png",
+      "sha256": "f52a044f84391bb766aa26c1099ae4ca63b529d3c2c3f34f6b83440962fd6dd5"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-checkpoint-queue-appearance-middle.png",
+      "sha256": "5a77d8550745716b66d504edcc74212fbf59e736ddb89796374c8db34b76d357"
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/appearance-checkpoint-queue-appearance-settled.png",
+      "sha256": "f960694063c12d702f2a04602a0d901b14d0573c318ed5ce050c1a4f63085cb7"
+    }
+  ],
+  "attachmentExportManifest": {
+    "path": "ios/docs/evidence/android-sync-20261028/appearance-final-attachments.json",
+    "sha256": "1bc222db51011bcfa361b26c631be12905167ea323e9f91b2d7689991c7a198f"
+  },
+  "uniquePassedMethods": 147,
+  "successfulExecutions": 197,
+  "scope": [
+    "Previous layout key map; 30-item sliding window plus 100 neighbors; initial/empty-page reset; stable-key insertion, reorder, replacement and distant scrolling.",
+    "180ms FastOutSlowIn finite leaf opacity; no restart while active; background/disappear stop; stale layout revisions cannot consume new insertions.",
+    "Actual SwiftUI/UIKit lazy viewport, offscreen insertion, return scrolling, normalized rendered alpha, and physical placement/removal coexistence.",
+    "Progress subscriptions switch without structural branches; 40-row scope test proves only the active row invalidates and every card retains its State identity.",
+    "Final broad run 146/146 passed; subsequent layout-revision race fix 10/10 passed. These are separate runs, not a single 147-method run."
+  ],
+  "failuresAndRepairs": [
+    "Initial compile: nested test Source needed MainActor isolation.",
+    "First pixel assertion sampled the old black card still springing underneath the transparent new card; manual appearance held at zero until placement settled before comparing alpha.",
+    "Scroll fixture initially targeted estimated lazy content size once; it now follows corrected bounds until the target is physically visible, and throws on timeout.",
+    "Stable progress subscription uses the project's preconcurrency ObservableObject conformance at its MainActor Combine boundary."
+  ],
+  "limitations": [
+    "No Kotlin or full UI automation suite; no physical camera, phone install, CPU, power or frame-rate acceptance; no commit/push.",
+    "Opacity captures use drawHierarchy; they prove the component alpha and do not claim real-device end-to-end frame performance.",
+    "Old evidence manifests remain immutable; current source hashes here describe the subsequent appearance and subscription fixes."
+  ],
+  "postTestChanges": [
+    "Moved the progress-subscription documentation beside the extracted scope. No executable changes after the last test run."
+  ]
+}

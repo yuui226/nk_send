@@ -380,12 +380,16 @@ enum PhotoEffectsRenderer {
             }
             return UIImage(cgImage: filtered, scale: image.scale, orientation: image.imageOrientation)
         }
-        guard let preset = Np3FilterCatalog.preset(id: selection.preset.id) else {
+        let parameters = selection.np3Recipe?.parameters ?? Np3FilterCatalog.preset(id: selection.preset.id).map {
+            PhotoNp3Parameters.flexible($0.parameters)
+        }
+        guard let parameters else {
             throw PhotoEffectsRenderError.unknownFilter
         }
         guard let source = processingCGImage(image) else { throw PhotoEffectsRenderError.invalidBitmap }
-        let filtered = try Np3BitmapFilter.apply(source, parameters: preset.parameters,
-                                                  intensityPercent: selection.normalizedIntensityPercent, execution: execution)
+        let filtered = try Np3BitmapFilter.apply(source, parameters: parameters,
+                                                intensityPercent: selection.normalizedIntensityPercent,
+                                                adjustments: selection.lutAdjustments, execution: execution)
         return UIImage(cgImage: filtered, scale: image.scale, orientation: image.imageOrientation)
     }
 

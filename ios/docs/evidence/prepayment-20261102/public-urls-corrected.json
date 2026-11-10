@@ -1,0 +1,59 @@
+{
+  "checkedAt": "2026-11-02T14:57:30.854531+08:00",
+  "results": [
+    {
+      "url": "https://www.ztransfer.top/ios/privacy/",
+      "result": "200 https://www.ztransfer.top/ios/privacy/",
+      "error": "",
+      "exitCode": 0,
+      "bytes": 12618,
+      "sha256": "f9ea7ac4b4a31b7918775f2853cbb14022056f3e4ee73f4e04e0d941335862f1",
+      "unfilledMarkers": false
+    },
+    {
+      "url": "https://www.ztransfer.top/ios/terms/",
+      "result": "200 https://www.ztransfer.top/ios/terms/",
+      "error": "",
+      "exitCode": 0,
+      "bytes": 7564,
+      "sha256": "ea599ab3422fbdc10ef16250bd7b444cb6608ee624a7b70e299babf6ecc6082d",
+      "unfilledMarkers": false
+    },
+    {
+      "url": "https://www.ztransfer.top/ios/support/",
+      "result": "200 https://www.ztransfer.top/ios/support/",
+      "error": "",
+      "exitCode": 0,
+      "bytes": 5460,
+      "sha256": "3892e5471f7b49aa0f656cba37e64b2b31058376d12e0b8eb9f399f1de410197",
+      "unfilledMarkers": false
+    },
+    {
+      "url": "https://www.ztransfer.top/ios/en/privacy/",
+      "result": "200 https://www.ztransfer.top/ios/en/privacy/",
+      "error": "",
+      "exitCode": 0,
+      "bytes": 12136,
+      "sha256": "12b969d5012c8b24c3895b59a39e9cbbaee990e61c296ca6a1e5ebe2950cd5bd",
+      "unfilledMarkers": false
+    },
+    {
+      "url": "https://www.ztransfer.top/ios/en/terms/",
+      "result": "200 https://www.ztransfer.top/ios/en/terms/",
+      "error": "",
+      "exitCode": 0,
+      "bytes": 7536,
+      "sha256": "0fe6b6b22338ada3f2f97b1c50266b0bb1ea694ed29eed60f450987eefcfdb94",
+      "unfilledMarkers": false
+    },
+    {
+      "url": "https://www.ztransfer.top/ios/en/support/",
+      "result": "200 https://www.ztransfer.top/ios/en/support/",
+      "error": "",
+      "exitCode": 0,
+      "bytes": 4045,
+      "sha256": "edabd434a6084fe0f6eb39266791d4ef182daa3a650b66b43e10f08cce6440a9",
+      "unfilledMarkers": false
+    }
+  ]
+}

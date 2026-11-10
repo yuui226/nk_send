@@ -25,6 +25,7 @@ final class PictureControlFolderState: ObservableObject {
     private let request: LUTRequestController
     private let queue: PresetIOQueue
     private let timeout: Duration
+    private let fileAccess: DirectoryAccessOperations
     private var closed = false
     private var restoration: PresetIOQueue.Ticket?
     private let resolve: @Sendable (Data?) -> RemoteLUTFolderAccess.ResolvedFolder?
@@ -32,6 +33,7 @@ final class PictureControlFolderState: ObservableObject {
 
     init(defaults: UserDefaults = .standard, queue: PresetIOQueue = .shared,
          timeout: Duration = .seconds(10),
+         fileAccess: DirectoryAccessOperations = .system,
          resolve: @escaping @Sendable (Data?) -> RemoteLUTFolderAccess.ResolvedFolder? = RemoteLUTFolderAccess.prepareResolution,
          scan: @escaping @Sendable (URL?, Data?, PresetIOQueue.Ticket) throws -> RemoteLUTFolderAccess.PreparedFolder = { replacement, bookmark, ticket in
              if let replacement {
@@ -41,7 +43,7 @@ final class PictureControlFolderState: ObservableObject {
          }) {
         access = RemoteLUTFolderAccess(defaults: defaults, scope: .pictureControl)
         self.resolve = resolve
-        self.queue = queue; self.timeout = timeout; self.scan = scan
+        self.queue = queue; self.timeout = timeout; self.scan = scan; self.fileAccess = fileAccess
         request = LUTRequestController(queue: queue)
         if let bookmark = access.bookmarkData {
             isRestoring = true
@@ -109,11 +111,13 @@ final class PictureControlFolderState: ObservableObject {
     }
     func read(_ file: PresetFile) async throws -> NikonPictureControlFile {
         let bookmark = access.bookmarkData
+        let fileAccess = fileAccess
         let read = PresetAsyncRead<NikonPictureControlFile>(queue: queue, timeout: timeout)
         return try await read.perform { ticket in
             let parsed: NikonPictureControlFile
             do {
-                parsed = try RemoteLUTFolderAccess.withScopedFile(bookmark, file: file, checkCancelled: ticket.checkCancellation) { url in
+                parsed = try RemoteLUTFolderAccess.withScopedFile(bookmark, file: file, operations: fileAccess,
+                    checkCancelled: ticket.checkCancellation) { url in
                     guard let stream = InputStream(url: url) else { throw PictureControlImportFailure.read }
                     stream.open(); defer { stream.close() }
                     return try NikonPictureControlFile.read(stream, checkpoint: ticket.checkCancellation)

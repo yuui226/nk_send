@@ -1,0 +1,21 @@
+Test Suite 'Selected tests' started at 2026-10-30 15:43:44.079.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 15:43:44.079.
+Test Suite 'QueuePillCompletionRenderingTests' started at 2026-10-30 15:43:44.080.
+Test Case '-[ZTransferTests.QueuePillCompletionRenderingTests testActualPillCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges]' started.
+Test Case '-[ZTransferTests.QueuePillCompletionRenderingTests testActualPillCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges]' passed (4.044 seconds).
+Test Case '-[ZTransferTests.QueuePillCompletionRenderingTests testPhysicalMaterialCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges]' started.
+Test Case '-[ZTransferTests.QueuePillCompletionRenderingTests testPhysicalMaterialCompletionKeepsTrailingEdgeAndSpringsThroughBothChanges]' passed (4.049 seconds).
+Test Case '-[ZTransferTests.QueuePillCompletionRenderingTests testRetainedContentCannotForcePaintedSurfaceOutsideProposedWidth]' started.
+Test Case '-[ZTransferTests.QueuePillCompletionRenderingTests testRetainedContentCannotForcePaintedSurfaceOutsideProposedWidth]' passed (0.147 seconds).
+Test Suite 'QueuePillCompletionRenderingTests' passed at 2026-10-30 15:43:52.321.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 8.240 (8.242) seconds
+Test Suite 'QueueTopControlRenderingTests' started at 2026-10-30 15:43:52.321.
+Test Case '-[ZTransferTests.QueueTopControlRenderingTests testDoneDeadlineSurvivesTerminalMetadataAndOldFailureHistory]' started.
+Test Case '-[ZTransferTests.QueueTopControlRenderingTests testDoneDeadlineSurvivesTerminalMetadataAndOldFailureHistory]' passed (2.361 seconds).
+Test Suite 'QueueTopControlRenderingTests' passed at 2026-10-30 15:43:54.683.
+	 Executed 1 test, with 0 failures (0 unexpected) in 2.361 (2.362) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 15:43:54.684.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 10.602 (10.604) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 15:43:54.684.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 10.602 (10.605) seconds
+** TEST SUCCEEDED **

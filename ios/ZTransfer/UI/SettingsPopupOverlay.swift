@@ -25,7 +25,10 @@ struct SettingsPopupOverlay: View {
          effectPreviewExif: PhotoExif? = nil, effectPreviewSourceName: String = "", onEffectPreviewRequested: @escaping () -> Void = {},
          onPhotoLoadingRangeChanged: @escaping (PhotoLoadingRange) -> Void = { _ in },
          effectsOnly: Bool = false, effectPreviewInitialRotationQuarterTurns: Int = 0,
+         photoFilterSession: PhotoFilterEditorSession? = nil,
          onDismissed: @escaping () -> Void = {}) {
+        _photoFilterLifetime = StateObject(wrappedValue: photoFilterSession.map(PhotoFilterEditorLifetime.init)
+            ?? PhotoFilterEditorLifetime(store: effectsStore.np3Store, role: .transfer))
         _isPresented = isPresented
         self.showPhotoEffectsEntry = showPhotoEffectsEntry
         self.effectsStore = effectsStore
@@ -45,9 +48,11 @@ struct SettingsPopupOverlay: View {
     @State private var effectsDraft = PhotoEffectsSettings()
     @StateObject private var photoLUTLifetime = PhotoLUTEditorLifetime(role: .camera)
     private var photoLUTEditor: PhotoLUTEditorState { photoLUTLifetime.editor }
-    @State private var filterChooser = PhotoFilterChooserState()
+    @StateObject private var photoFilterLifetime: PhotoFilterEditorLifetime
+    private var photoFilterSession: PhotoFilterEditorSession { photoFilterLifetime.session }
     @State private var effectsHint: PhotoEffectsHint?
-    @State private var contentHeight: CGFloat?
+    @State private var panelHeight = SettingsPanelHeight()
+    @State private var heightMeasured = false
     @State private var presentationID = 0
     @State private var showingPremium = false
     @State private var backdropProgress = SettingsBackdropProgress()
@@ -62,6 +67,7 @@ struct SettingsPopupOverlay: View {
         }
         .zIndex(100)
         .photoEffectsHint($effectsHint, duration: 1.8, multilineDuration: 3.6)
+        .onDisappear { photoFilterSession.end() }
         .onChange(of: effectsDraft) { value in
             effectsStore.persistEditorPreferences(from: value)
         }
@@ -97,10 +103,9 @@ struct SettingsPopupOverlay: View {
                         effectsStore: effectsStore,
                         directory: directory,
                         effectsDraft: $effectsDraft,
-                        filterChooser: $filterChooser,
                         effectsHint: $effectsHint,
                         dismissalRequested: !isPresented,
-                        photoLUTEditor: photoLUTEditor,
+                        photoLUTEditor: photoLUTEditor, photoFilterSession: photoFilterSession,
                         popupMotionPaused: !isPresented || showingPremium,
                         effectsOnly: effectsOnly,
                         effectPreviewInitialRotationQuarterTurns: effectPreviewInitialRotationQuarterTurns,
@@ -113,7 +118,8 @@ struct SettingsPopupOverlay: View {
                             // A retired page can deliver a late preference when
                             // reopening. Only the current presentation may size it.
                             guard measuringPresentation == presentationID else { return }
-                            if contentHeight != height { contentHeight = height }
+                            panelHeight.update(height)
+                            if !heightMeasured { heightMeasured = true }
                         },
                         onShowPremium: { showingPremium = true },
                         onPlayFireworks: { fireworks.launch() },
@@ -123,7 +129,7 @@ struct SettingsPopupOverlay: View {
                     trigger: .settings,
                     // Lay out the complete scroll column while hidden. Its
                     // measured height must exist before the first visible frame.
-                    targetProgress: isPresented && contentHeight != nil ? 1 : 0,
+                    targetProgress: isPresented && heightMeasured ? 1 : 0,
                     anchorX: sourceAnchor.midX / max(1, panelWidth),
                     anchorWidth: sourceAnchor.width / max(1, panelWidth),
                     anchorGap: max(0, -sourceAnchor.maxY),
@@ -139,15 +145,13 @@ struct SettingsPopupOverlay: View {
                 .frame(width: panelWidth)
                 // Natural whole-page height, capped by the available viewport.
                 // The provisional full height is never used by the animation.
-                .frame(height: effectsOnly ? availableHeight : min(contentHeight ?? availableHeight, availableHeight), alignment: .top)
+                .modifier(SettingsPanelHeightModifier(height: panelHeight, availableHeight: availableHeight,
+                                                      fillsViewport: effectsOnly))
                 .padding(.horizontal, panelLeft)
                 .padding(.top, panelTop)
                 .allowsHitTesting(!showingPremium)
                 PhotoLUTChooserPresentation(editor: photoLUTEditor, draft: $effectsDraft)
-                AndroidDialogPresentation(isPresented: filterChooser.isPresented) {
-                    PhotoFilterChooserOverlay(draft: $effectsDraft, state: $filterChooser,
-                        onFilterSelected: { photoLUTEditor.cancelPending() })
-                }
+                PhotoNP3ChooserPresentation(session: photoFilterSession, draft: $effectsDraft)
                 AndroidDialogPresentation(isPresented: showingPremium) {
                     PremiumPurchaseView(onClose: { showingPremium = false },
                                         onCelebrate: { fireworks.launch() })
@@ -167,7 +171,7 @@ struct SettingsPopupOverlay: View {
                 } else {
                     showingPremium = false
                     photoLUTEditor.close()
-                    filterChooser = PhotoFilterChooserState()
+                    photoFilterSession.end()
                     effectsHint = nil
                 }
             }
@@ -182,15 +186,41 @@ struct SettingsPopupOverlay: View {
         photoLUTEditor.resetForPresentation()
         let stored = effectsStore.beginDraft()
         effectsDraft = effectsOnly ? photoEffectsEditorDraft(stored) : stored
-        filterChooser = PhotoFilterChooserState()
+        let filterVisible = PhotoColorEffectEditorVisibility(settings: effectsDraft, isPro: PremiumEntitlementStore.shared.access.isPro).filter
+        photoFilterSession.begin(draft: $effectsDraft, active: effectsOnly && filterVisible) { [photoLUTEditor] in
+            photoLUTEditor.cancelPending(); photoLUTEditor.store.select(nil)
+        }
         effectsHint = nil
-        contentHeight = nil
+        panelHeight.reset()
+        heightMeasured = false
         presentationID &+= 1
     }
 
     private func close() {
         guard isPresented else { return }
         isPresented = false
+    }
+}
+
+/// Module transitions report their actual interpolated height. Observe that
+/// at the frame alone, rather than rebuilding the preview and editor each tick.
+@MainActor
+private final class SettingsPanelHeight: ObservableObject {
+    @Published private(set) var value: CGFloat?
+    func update(_ height: CGFloat) {
+        guard height.isFinite, height > 0, value != height else { return }
+        value = height
+    }
+    func reset() { value = nil }
+}
+
+private struct SettingsPanelHeightModifier: ViewModifier {
+    @ObservedObject var height: SettingsPanelHeight
+    let availableHeight: CGFloat
+    let fillsViewport: Bool
+    func body(content: Content) -> some View {
+        content.frame(height: fillsViewport ? availableHeight : min(height.value ?? availableHeight, availableHeight),
+                      alignment: .top)
     }
 }
 

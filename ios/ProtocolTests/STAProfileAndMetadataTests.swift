@@ -394,6 +394,42 @@ final class STAMetadataTests: XCTestCase {
         XCTAssertEqual(remaining, 0)
     }
 
+    func testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects() async throws {
+        let first: UInt32 = 0x29000071, other: UInt32 = 0x29000072
+        var empty = Data(repeating: 0, count: 128 * 1024)
+        empty.replaceSubrange(0..<4, with: [255, 216, 255, 218])
+        let jpeg = try thumbnailJPEG()
+        var ready = empty
+        ready.replaceSubrange(1000..<(1000 + jpeg.count), with: jpeg)
+        let wire = STAScriptTransport([
+            .init(0x9421, [first], payload: staInteger(UInt64(1_000_000))),
+            .init(0x9431, [first, 0, 0, 128 * 1024, 0], payload: empty),
+            .init(0x9421, [other], payload: staInteger(UInt64(1_000_000))),
+            .init(0x9431, [other, 0, 0, 128 * 1024, 0], payload: ready),
+            // The retry keeps ObjectInfo but must reread this early prefix.
+            .init(0x9431, [first, 0, 0, 128 * 1024, 0], payload: ready),
+        ])
+        let reader = STAObjectReader(session: PTPSession(transport: wire), operations: [0x9431])
+        let missing = try await reader.thumbnail(handle: first)
+        XCTAssertTrue(missing.isEmpty)
+        let otherImage = try await reader.thumbnail(handle: other)
+        XCTAssertEqual(otherImage, jpeg)
+        let metadata = await reader.cachedFile(handle: first)
+        await reader.prepareNewObjectThumbnailRetry(handle: first)
+        let retired = await reader.cachedMetadataHeader(handle: first, length: 1)
+        let retainedHeader = await reader.cachedMetadataHeader(handle: other, length: 128 * 1024)
+        let retainedMetadata = await reader.cachedFile(handle: first)
+        XCTAssertNil(retired)
+        XCTAssertEqual(retainedHeader, ready)
+        XCTAssertEqual(retainedMetadata, metadata)
+        let cachedOther = try await reader.thumbnail(handle: other)
+        XCTAssertEqual(cachedOther, otherImage)
+        let newImage = try await reader.thumbnail(handle: first)
+        XCTAssertEqual(newImage, jpeg)
+        let remaining = await wire.remaining
+        XCTAssertEqual(remaining, 0)
+    }
+
     private func thumbnailJPEG(width: Int = 16, height: Int = 12) throws -> Data {
         let pixels = Data(repeating: 127, count: width * height * 3)
         let provider = try XCTUnwrap(CGDataProvider(data: pixels as CFData))

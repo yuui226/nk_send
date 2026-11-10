@@ -82,7 +82,6 @@
 "其他" = "Other";
 "再次返回退出" = "Go back again to exit";
 "写入文件失败：%1$s" = "Failed to write file: %1$s";
-"冷调日吻" = "Cool Sun Kiss";
 "功能" = "Feature";
 "加入传输队列后不会立即开始传输，方便继续预览挑选照片。" = "Items added to the transfer queue do not start transferring immediately, so you can keep previewing and selecting photos.";
 "卡 %1$d" = "Card %1$d";
@@ -95,7 +94,6 @@
 "可多选照片，共用当前滤镜、边框和水印，效果图另存。" = "Select multiple photos to apply the same filter, frame, and watermark. Edited photos are saved as new copies.";
 "可将「Wi-Fi 连接」加入相机的 i 菜单，之后按 i 键即可快速开启。" = "Add “Wi-Fi connection” to the camera's i menu, then press i to turn it on quickly.";
 "可读性" = "Legibility";
-"和煦" = "Soft Harmony";
 "品牌" = "Brand";
 "品牌内嵌" = "Brand Inset";
 "品牌留白" = "Brand Gallery";
@@ -112,18 +110,13 @@
 "在新设备输入此激活码即可换机，本机会恢复成免费版。请勿滥用，滥用会导致激活码失效。" = "Enter this code on the new device to switch — this one reverts to Free. Don\\'t misuse it: misuse disables the code.";
 "地址" = "Address";
 "型号" = "Model";
-"城市绿意" = "Urban Green";
-"墨绿暗影" = "Green Shadows";
 "复制" = "Copy";
 "复制不完整 %1$d/%2$d" = "Copy incomplete %1$d/%2$d";
 "复制支付链接（在电脑浏览器打开即显示二维码）" = "Copy payment link (open on a computer to show the QR)";
 "复制日志" = "Copy log";
-"复古活力" = "Vintage Vibe";
-"夕照柔光" = "Sunset Glow";
 "外观" = "Appearance";
 "大小" = "Size";
 "大小：%1$s" = "Size: %1$s";
-"天空薄雾" = "Sky Mist";
 "字体" = "Font";
 "存储不可用" = "Storage unavailable";
 "存储卡" = "Storage card";
@@ -177,7 +170,6 @@
 "微信扫码支付后，回到 Z传 自动激活" = "After paying with WeChat, return to ZTransfer for automatic activation";
 "必须更新" = "Update required";
 "忽略此版本" = "Ignore this version";
-"恋爱柔光" = "Love Glow";
 "恢复录制" = "Resume recording";
 "我要换机" = "Switch device";
 "手机" = "Phone";
@@ -235,23 +227,14 @@
 "日期" = "Date";
 "日期格式" = "Date format";
 "日期范围" = "Date range";
-"旧日色彩" = "Vintage Color";
 "时效" = "Duration";
 "时间格式" = "Time format";
 "明暗" = "Light & dark";
-"晨曦" = "Dawn Hues";
 "智能" = "Auto";
 "暂停录制" = "Pause recording";
 "暂时无法获取地点名称，请稍后重试" = "Couldn’t find a place name. Try again later.";
-"暖夜微光" = "Warm Lowlight";
 "暖白" = "Warm white";
-"暖秋" = "Cozy Autumn";
-"暖街" = "Warm Street";
-"暖调人像" = "Warm Portrait";
-"暖阳亲吻" = "Warm Sun Kiss";
 "暗夜" = "Cinema";
-"暗房胶片" = "Darkroom Film";
-"暮色余温" = "Dusk Ember";
 "曝光参数" = "Exposure";
 "更快的连接方式" = "A faster way to connect";
 "更换 Logo" = "Replace logo";
@@ -270,15 +253,10 @@
 "未知日期" = "Unknown date";
 "未获得 USB 权限，请重新插线并允许访问" = "USB permission was not granted. Reconnect the cable and allow access.";
 "未设置" = "Not set";
-"松石蓝" = "Turquoise Blue";
 "构图参考线" = "Framing grid";
-"柔光" = "Soft Glow";
-"柔暖人像" = "Soft Portrait";
-"柠黄负片" = "Lemon Negative";
 "检查中…" = "Checking…";
 "检查失败，请检查网络" = "Check failed. Check your network.";
 "检查更新" = "Check for updates";
-"森屿青" = "Forest Verdure";
 "正在下载…" = "Downloading…";
 "正在下载… %1$d%%" = "Downloading… %1$d%%";
 "正在传输文件…" = "Transferring files…";
@@ -317,18 +295,15 @@
 "海拔" = "Altitude";
 "海拔：%1$d 米" = "Altitude: %1$d m";
 "深色" = "Dark";
-"清柔" = "Gentle Clarity";
 "清空" = "Clear";
 "清空队列" = "Clear queue";
 "清空队列？" = "Clear the queue?";
-"清透人像" = "Clear Portrait";
 "清除 GPS 配对" = "Clear GPS pairing";
 "清除 GPS 配对？" = "Clear GPS pairing?";
 "清除筛选" = "Clear filters";
 "滤镜·边框·水印" = "Filter · Frame · Watermark";
 "滤镜强度" = "Intensity";
 "滤镜：%1$s · %2$d%%" = "Filter: %1$s · %2$d%%";
-"漂白银盐" = "Bleached Silver";
 "激活" = "Activate";
 "激活中…" = "Activating…";
 "激活失败（%1$s）" = "Activation failed (%1$s)";
@@ -336,7 +311,6 @@
 "激活成功，感谢支持！" = "Activated — thank you!";
 "激活时会将设备标识发送至激活服务器，仅用于授权验证。" = "Activation sends this device\\'s identifier to the activation server, used only for license verification.";
 "激活码不存在" = "Activation code not found";
-"濑户蓝" = "Setouchi Blue";
 "点击 连接相机" = "Connect button";
 "点击：传输\\n长按：预览" = "Tap: transfer\\nHold: preview";
 "点击：预览\\n长按：传输" = "Tap: preview\\nHold: transfer";
@@ -349,9 +323,7 @@
 "父对象不存在" = "Parent object does not exist";
 "版本 %1$s" = "Version %1$s";
 "状态" = "Status";
-"玫瑰旧片" = "Rose Vintage";
 "玫瑰棕" = "Rosewood";
-"琥珀负片" = "Amber Negative";
 "生成 %1$s" = "Generation %1$s";
 "生成中" = "Generating";
 "生成失败" = "Generation failed";
@@ -359,8 +331,6 @@
 "生成并保存" = "Generate and save";
 "生成并保存（%1$d）" = "Generate and save (%1$d)";
 "生成效果图" = "Generate effect images";
-"电影暮影" = "Cinematic Dusk";
-"电影蓝" = "Cinema Blue";
 "界面皮肤" = "UI Skin";
 "监看\\n遥控" = "Live\\nRemote";
 "监看直方图" = "Live view histogram";
@@ -395,10 +365,7 @@
 "筛选类型" = "Filter by type";
 "简白" = "Minimal";
 "简约" = "Simple";
-"粉彩柔光" = "Pastel Pink";
 "系统拒绝改名与复制" = "System refused to rename or copy the file";
-"红青负片" = "Red Cyan";
-"经典胶片" = "Classic Film";
 "经纬度" = "Coordinates";
 "结束" = "End";
 "续费" = "Renew";
@@ -408,20 +375,11 @@
 "编辑衬线" = "Editorial serif";
 "自动" = "Auto";
 "自动 ISO" = "Auto ISO";
-"自然联结" = "Natural Link";
 "自由定制" = "Custom";
 "自适应" = "Adaptive";
 "色彩档案" = "Color Archive";
-"苔绿情绪" = "Moss Mood";
-"英伦黑白" = "British Mono";
-"茶青负片" = "Teal Negative";
 "获取下载链接失败" = "Couldn\\'t get download link";
 "菜单 → 自定义设定菜单 → 控制 → 自定义 i 菜单 → 选个顺手的格子 → Wi-Fi 连接" = "MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection";
-"落日胶片" = "Sunset Film";
-"蓝色记忆" = "Blue Memory";
-"蓝调时刻" = "Blue Hour";
-"蕨影" = "Fern Shade";
-"蜜糖暖调" = "Honey Warm";
 "规范不兼容" = "Incompatible specification";
 "视频暂不支持播放" = "Video playback isn’t supported yet";
 "解锁" = "Unlock";
@@ -460,7 +418,6 @@
 "超过 %1$d MB，请解锁高级版" = "Over %1$d MB — unlock Pro";
 "超过 4 GB" = "Over 4 GB";
 "跳过" = "Skipped";
-"轻柔胶片" = "Soft Film";
 "输入激活码" = "Enter code";
 "边框" = "Frame";
 "边框·右侧" = "Frame right";
@@ -505,7 +462,6 @@
 "重试" = "Retry";
 "重试失败任务" = "Retry failed tasks";
 "重试失败任务？" = "Retry failed tasks?";
-"金色黄昏" = "Golden Dusk";
 "钛合金" = "Titanium";
 "铭牌" = "Plaque";
 "错误 (0x%1$s)" = "Error (0x%1$s)";
@@ -516,11 +472,7 @@
 "阴影" = "Shadow";
 "限时特惠" = "Limited-time offer";
 "雾白" = "Mist";
-"雾蓝哑光" = "Matte Blue";
 "雾霾蓝" = "Mist blue";
-"青橙电影" = "Teal and Orange";
-"青色负片" = "Cyan Negative";
-"静谧微风" = "Calm Breeze";
 "非法包长度 %1$d：连接数据已损坏" = "Invalid packet length %1$d: connection data corrupted";
 "音频电平" = "Audio levels";
 "预览暂时不可用" = "Preview temporarily unavailable";
@@ -537,8 +489,6 @@
 "高级版已解锁" = "Pro unlocked";
 "高级版授权已过期，请连接网络后重开 App 自动续期。" = "Pro license expired — connect to the internet and reopen to renew automatically.";
 "高级版支持换机，妥善保存激活码即可" = "Pro supports switching devices · Keep your activation code safe";
-"鲜活胶片" = "Vital Film";
-"黄绿负片" = "Lime Negative";
 "默认" = "Default";
 "默认水印" = "Default";
 "（可多选）" = "(Select multiple photos)";
@@ -642,3 +592,49 @@
 "photo_grain_coarse" = "Coarse grain";
 "photo_grain_intensity_summary" = "%1$s %2$d%%";
 "photo_grain_hint" = "Choose a grain size and adjust its strength. Each size remembers its own strength.";
+
+"photo_np3_selected_source" = "Selected filter";
+
+"photo_filter_folder" = "Select folder";
+
+"photo_filter_folder_hint" = "Choose a folder containing .np3 files. One level of subfolders is used as categories.\n\nPreset effects are simulated by the app and may differ from in-camera photos.";
+
+"photo_filter_folder_empty" = "No NP3 files in this folder";
+
+"photo_np3_invalid" = "Invalid NP3 file";
+
+"photo_np3_unsupported" = "This NP3 preset is not supported yet";
+
+"photo_np3_too_large" = "NP3 file is too large";
+
+"photo_np3_read_failed" = "Could not read the preset";
+
+"photo_np3_read_timeout" = "Preset read timed out";
+
+"photo_filter_category_all" = "All";
+
+"photo_filter_category_favorites" = "Favorites";
+
+"photo_filter_category_landscape" = "Landscape";
+
+"photo_filter_category_portrait" = "Portrait";
+
+"photo_filter_category_monochrome" = "Monochrome";
+
+"photo_filter_category_film" = "Film";
+
+"photo_filter_category_cinematic" = "Cinema";
+
+"photo_filter_category_color" = "Color";
+
+"photo_filter_settings" = "Adjust";
+
+"photo_color_reset" = "Reset adjustments";
+
+"sta_pairing_incomplete" = "Pairing incomplete. Check the camera and retry.";
+
+"sta_camera_check_photos" = "The card may have no photos.";
+
+"sta_camera_refused_repair" = "Camera refused the connection. Create a new network profile on the camera and pair again.";
+
+"tip_sta_no_mobile_data" = "Photo transfers do not use mobile data.";

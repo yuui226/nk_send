@@ -158,7 +158,8 @@ private final class STABonjourDiscovery: NSObject, @preconcurrency NetServiceBro
     private var timeoutTask: Task<Void, Never>?
 
     static func discover() async -> [String] {
-        for type in ["_ptp._tcp.", "_nikon._tcp."] {
+        let types = ["_ptp._tcp.", "_nikon._tcp."]
+        for (index, type) in types.enumerated() {
             guard !Task.isCancelled else { return [] }
             let scan = STABonjourDiscovery()
             scan.browser.delegate = scan
@@ -168,7 +169,9 @@ private final class STABonjourDiscovery: NSObject, @preconcurrency NetServiceBro
             scan.services.forEach { $0.stop() }
             guard !Task.isCancelled else { return [] }
             if !scan.addresses.isEmpty { return scan.addresses }
-            do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return [] }
+            if index < types.count - 1 {
+                do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return [] }
+            }
         }
         return []
     }

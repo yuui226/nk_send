@@ -84,39 +84,42 @@ enum GeniePopupMotion {
         private let anchor: CGRect
         private let panel: CGRect
         private let mouthWidth: CGFloat
+        private let tiltEnabled: Bool
 
         init(progress: CGFloat, source: CGRect, size: CGSize,
-             mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth) {
+             mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth, tiltEnabled: Bool = true) {
             self.progress = GeniePopupMotion.progress(progress)
             self.anchor = source
             self.panel = CGRect(origin: .zero, size: size)
             self.mouthWidth = mouthWidth
+            self.tiltEnabled = tiltEnabled
         }
 
         init(progress: CGFloat, anchor: CGRect, panel: CGRect,
-             mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth) {
+             mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth, tiltEnabled: Bool = true) {
             self.progress = GeniePopupMotion.progress(progress)
             self.anchor = anchor
             self.panel = panel
             self.mouthWidth = mouthWidth
+            self.tiltEnabled = tiltEnabled
         }
 
         func row(at section: CrossSection) -> Row {
             GeniePopupMotion.row(progress: progress, fraction: section.fraction,
-                                 anchor: anchor, panel: panel, mouthWidth: mouthWidth)
+                                 anchor: anchor, panel: panel, mouthWidth: mouthWidth, tiltEnabled: tiltEnabled)
         }
     }
 
     /// Convenience form used by the geometry tests and UIKit panel.
     static func row(progress: CGFloat, fraction: CGFloat, source: CGRect, size: CGSize,
-                    mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth) -> Row {
+                    mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth, tiltEnabled: Bool = true) -> Row {
         row(progress: progress, fraction: fraction, anchor: source,
-            panel: CGRect(origin: .zero, size: size), mouthWidth: mouthWidth)
+            panel: CGRect(origin: .zero, size: size), mouthWidth: mouthWidth, tiltEnabled: tiltEnabled)
     }
 
     /// Port of Android `genieRow`; panel coordinates are local to the popup.
     static func row(progress: CGFloat, fraction: CGFloat, anchor: CGRect, panel: CGRect,
-                    mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth) -> Row {
+                    mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth, tiltEnabled: Bool = true) -> Row {
         let p = Self.progress(progress)
         let v = Self.progress(fraction)
         if p == 1 {
@@ -134,7 +137,7 @@ enum GeniePopupMotion {
                 height: anchor.height
             )
             let row = Self.row(progress: p, fraction: v, anchor: mirrored,
-                               panel: panel, mouthWidth: mouthWidth)
+                               panel: panel, mouthWidth: mouthWidth, tiltEnabled: tiltEnabled)
             return Row(left: panel.minX + panel.maxX - row.right,
                        right: panel.minX + panel.maxX - row.left,
                        y: row.y, tilt: -row.tilt)
@@ -161,11 +164,11 @@ enum GeniePopupMotion {
         let left = center - width / 2 + bow
         let right = center + width / 2 - bow * 0.15
         let bentV = v + 0.4 * (1 - p) * (v * v - v)
-        let mouthTilt = min(seedWidth * 0.14, panel.width * 0.045) * (1 - length)
-        let bodyTilt = min(
+        let mouthTilt = tiltEnabled ? min(seedWidth * 0.14, panel.width * 0.045) * (1 - length) : 0
+        let bodyTilt = tiltEnabled ? min(
             min((right - left) * 0.07, panel.width * 0.035),
             panel.height * length * 0.12
-        ) * envelope * v * v
+        ) * envelope * v * v : 0
         let tilt = min(
             min(mouthTilt + bodyTilt, (right - left) * 0.14),
             panel.width * 0.045
@@ -177,13 +180,13 @@ enum GeniePopupMotion {
 
     /// Above-anchor reflection from Android `genieRowAbove`.
     static func rowAbove(progress: CGFloat, fraction: CGFloat, anchor: CGRect,
-                         panel: CGRect, mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth) -> Row {
+                         panel: CGRect, mouthWidth: CGFloat = GeniePopupMotion.zMarkWidth, tiltEnabled: Bool = true) -> Row {
         func mirrored(_ rect: CGRect) -> CGRect {
             CGRect(x: rect.minX, y: -rect.maxY, width: rect.width, height: rect.height)
         }
         let row = Self.row(progress: progress, fraction: 1 - fraction,
                            anchor: mirrored(anchor), panel: mirrored(panel),
-                           mouthWidth: mouthWidth)
+                           mouthWidth: mouthWidth, tiltEnabled: tiltEnabled)
         // Android genieRow returns panel-local coordinates; our row() returns
         // coordinates in the supplied panel's space. Reflect that absolute y
         // directly, otherwise adding panel.maxY shifts every band down by a

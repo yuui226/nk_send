@@ -1,0 +1,104 @@
+{
+  "date": "2026-11-06",
+  "tasks": "A01-A04: 4/4 development verification complete",
+  "androidCommit": "89018097b1f98aaaa85e01e31c966a34e364a65b",
+  "androidReferences": [
+    "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt:FilterOverlay, DateRangeEditor",
+    "app/src/main/java/com/ztransfer/ui/components/GlassButton.kt",
+    "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation/1.5.4/animation-1.5.4-sources.jar (SizeTransform, commonMain/androidx/compose/animation/AnimatedContent.kt)"
+  ],
+  "animation": {
+    "fadeInMilliseconds": 150,
+    "fadeOutMilliseconds": 100,
+    "heightMass": 1,
+    "heightStiffness": 400,
+    "heightDamping": 40,
+    "pressVisualHoldMilliseconds": 90,
+    "pressDownMilliseconds": 80
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "passed": 17,
+      "failed": 2,
+      "buildOrTestSucceeded": false
+    },
+    {
+      "round": 2,
+      "passed": 18,
+      "failed": 1,
+      "buildOrTestSucceeded": false
+    },
+    {
+      "round": 3,
+      "passed": 19,
+      "failed": 0,
+      "buildOrTestSucceeded": true
+    },
+    {
+      "round": 4,
+      "passed": 0,
+      "failed": 0,
+      "buildOrTestSucceeded": false
+    },
+    {
+      "round": 5,
+      "passed": 7,
+      "failed": 0,
+      "buildOrTestSucceeded": true
+    },
+    {
+      "round": 6,
+      "passed": 5,
+      "failed": 0,
+      "buildOrTestSucceeded": true
+    },
+    {
+      "round": 7,
+      "passed": 7,
+      "failed": 0,
+      "buildOrTestSucceeded": true
+    }
+  ],
+  "distinctTestsWithFinalPassingResults": 19,
+  "passingTests": [
+    "ZTransferInteractionUITests.PhotoEffectsMasterUITests testFilterDateButtonsFillRowsAndBackDiscardsOnlyDraft",
+    "ZTransferInteractionUITests.PhotoEffectsMasterUITests testFilterPopupScrollAndWheelKeepIndependentOwnership",
+    "ZTransferInteractionUITests.PhotoEffectsMasterUITests testFilterResetKeepsPanelOpenAndQuickRepeatedTapsHavePressFeedback",
+    "ZTransferTests.PhotoFilterPresentationPerformanceTests testCompactFilterRowKeepsStarSlotAndRangeHelpWithinPanel",
+    "ZTransferTests.PhotoFilterPresentationPerformanceTests testFullPopupProgressDoesNotRemeasureAndCloseReopenKeepsSameHost",
+    "ZTransferTests.PhotoFilterPresentationPerformanceTests testProgressProjectionIgnoresDictionaryOnlyChangesAndRetainsEveryStatus",
+    "ZTransferTests.PhotoFilterPresentationPerformanceTests testProgressUpdatesOnlyChipAndNativePulseKeepsIdentityAndLifecycle",
+    "ZTransferTests.RemoteToolModeTransitionTests testFilterClockReleasesWhenHiddenAndPreservesDurationsOnReopen",
+    "ZTransferTests.RemoteToolModeTransitionTests testFilterPagesUseIndependentFadeDurationsAndKeepReversalContinuous",
+    "ZTransferTests.RemoteToolModeTransitionTests testInitialModeIsImmediatelyOpaqueWithoutAnimation",
+    "ZTransferTests.RemoteToolModeTransitionTests testModeChangeRetainsBothLayoutsUntilAndroidTweenFinishes",
+    "ZTransferTests.RemoteToolModeTransitionTests testPreviewHistogramUses180MillisecondsAndKeepsInterruptionContinuity",
+    "ZTransferTests.RemoteToolModeTransitionTests testRapidReturnUsesCurrentAlphaAndDoesNotDuplicateOrRemoveActiveLayer",
+    "ZTransferTests.RemoteToolSlotMotionTests testEditorHeightFirstMeasurementAndExitAreImmediate",
+    "ZTransferTests.RemoteToolSlotMotionTests testFixedSlotsKeepReflowOnExitAndRemoveDetachedSlots",
+    "ZTransferTests.RemoteToolSlotMotionTests testHiddenIconFadesWithoutWigglingAndLeavingEditRetainsPosition",
+    "ZTransferTests.RemoteToolSlotMotionTests testRecorderExpansionAnimatesNormalSlotsWithoutAnEntryFlight",
+    "ZTransferTests.RemoteToolSlotMotionTests testRetargetedPositionDoesNotJumpAndBothAxesFinishTogether",
+    "ZTransferTests.RemoteToolSlotMotionTests testWiggleDelayReverseAndDragRestart"
+  ],
+  "notes": [
+    "r1: one new model test asserted settlement before the new tween received its first frame; one UI test incorrectly equated AX bounds (including 3.2pt stroke) with the 40pt label. Corrected test assumptions.",
+    "r2: model regression passed; overly strict AX height expectation still failed. Screenshot and shared frosted surface source confirm full-height button layout.",
+    "r3: 19 tests passed; video inspection still found intermediate vertical offset. Functional pass alone did not complete this task.",
+    "r4: compile failed on Animatable main-actor isolation; fixed with nonisolated animatableData.",
+    "r5/r6: interaction tests passed, but intermediate frames still shifted. Shared Genie synchronous-layout experiment did not fix it and was fully reverted.",
+    "r7: 7 impacted component/UI tests passed; outgoing tall page no longer forces an oversized, centered hosting root. Entry/back frame sequences visually checked: fixed top, continuous resize and fades. Remaining 12 shared transition/slot tests passed in r3 and their implementation remained unchanged.",
+    "Quick repeated reset has two actions and pressed/release frame trace; long scroll/wheel ownership still passes.",
+    "Back discards draft; Done commits; Clear removes date only; close/reopen presents main filter form.",
+    "No phone installation, hardware validation, Release/archive/upload, commit or push."
+  ],
+  "files": {
+    "ios/ZTransfer/UI/PhotoFilterPopupOverlay.swift": "821c6f961cdbdc7605d3061f67be65581b89c18cdf0fb456340882f0f66ecfdd",
+    "ios/ZTransfer/UI/PhotoFilterComponents.swift": "b557f6f4fee3501a1e1ab3b94ff6aef3a15d9b92cb44f7bf74219ad0172761a3",
+    "ios/ZTransfer/UI/Components/RemoteToolModeCrossfade.swift": "12d1f697977adfee3f0306673cc1d8e92e25f20b245eea3a08209f151884e3c9",
+    "ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift": "eb28513c21150104adf7338ce287c992cb2ca57feb4d95e6448adc58dfa22841",
+    "ios/ZTransferTests/RemoteToolModeTransitionTests.swift": "e59e1a5fb102181a79f21c1e5200b8a2c2691fc220e34e017d4c4d38cad1c41a",
+    "ios/InteractionUITests/PhotoEffectsMasterUITests.swift": "9cf8afb35f84ba3bd39a71ea37d7e4a69aed2f36c6f573965f22828bf7a1449b"
+  }
+}

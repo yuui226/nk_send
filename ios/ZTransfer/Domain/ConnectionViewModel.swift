@@ -15,6 +15,7 @@ extension ImageCaptureUSBTransport: ConnectionUSBDiscoverySource {}
 
 @MainActor
 final class ConnectionViewModel: ObservableObject {
+    let staReconnectRequests = PassthroughSubject<Void, Never>()
     @Published private(set) var state = ConnectionState() {
         didSet { updatePlaceAvailability() }
     }
@@ -67,11 +68,10 @@ final class ConnectionViewModel: ObservableObject {
     private var connectionDiscoveryPaused = false
     private(set) var establishedWorkspaceMode: CameraPresentationMode?
     private var staWorkspaceEstablished = false
-    private var staRecovery: (source: ObjectIdentifier, catalog: STACatalogRecovery)?
     private var usbWorkspaceEstablished = false
     private var usbForegroundActive = true
-    private var gpsConnectionPaused = UserDefaults(suiteName: GPSPreferences.suiteName)?
-        .bool(forKey: GPSPreferences.enabled) ?? false
+    // Root observes this launch's GPS state; an old disk flag cannot pause AP discovery.
+    private var gpsConnectionPaused = false
     private let wirelessPreferences = UserDefaults(suiteName: "sta_connection")!
     @Published private(set) var pairedCameraCount = 0
     @Published private(set) var pairedCameraModels: [String] = []
@@ -291,7 +291,6 @@ final class ConnectionViewModel: ObservableObject {
 
     func resetSTAPairing() async {
         guard cameraSession == nil else { return }
-        staRecovery = nil
         cancelWiFiConnection()
         wifiRetryAttempt = 0
         await wifiCleanupTask?.value
@@ -353,18 +352,8 @@ final class ConnectionViewModel: ObservableObject {
                     if self.wifiGeneration == generation { await self.wifiService.disconnect() }
                     return
                 }
-                var recoveredFrom: ObjectIdentifier?
-                if mode == .sta, let recovery = self.staRecovery,
-                   await repository.restoreSTACatalog(recovery.catalog) {
-                    recoveredFrom = recovery.source
-                }
-                try Task.checkCancellation()
-                guard self.wifiGeneration == generation, self.state.wirelessMode == mode,
-                      self.cameraSession == nil, self.state.usbPhase != .connecting else { return }
-                self.staRecovery = nil
                 self.cameraRepository = repository
-                self.cameraSession = CameraSession(repository: repository, wirelessMode: mode,
-                    recoveredFromSessionID: recoveredFrom)
+                self.cameraSession = CameraSession(repository: repository, wirelessMode: mode)
                 self.rememberPresentationMode(mode == .sta ? .sta : .ap)
                 if mode == .sta { self.staWorkspaceEstablished = true }
                 self.state.wifiPhase = .connected
@@ -394,7 +383,9 @@ final class ConnectionViewModel: ObservableObject {
                 await self.refreshSTAProfiles()
                 if mode == .sta {
                     let profiles = self.wifiService.profiles
-                    if reconnect || profiles.hasReusableProfile {
+                    if STAFailurePolicy.requiresExplicitRetry(error) {
+                        self.wifiRetryTask?.cancel(); self.wifiRetryTask = nil
+                    } else if reconnect || profiles.hasReusableProfile {
                         self.scheduleSTARetry(generation: generation)
                     }
                 }
@@ -407,9 +398,11 @@ final class ConnectionViewModel: ObservableObject {
         guard generation == wifiGeneration, state.wirelessMode == .sta,
               cameraSession == nil, !Task.isCancelled else { return }
         switch stage {
-        case .discovering(let ip): state.wifiPhase = .discovering; state.staProgressIP = ip
+        case .discovering(let ip):
+            if state.wifiPhase != .pairing { state.wifiPhase = .discovering }
+            state.staProgressIP = ip
         case .pairing: state.wifiPhase = .pairing
-        case .connecting: state.wifiPhase = .connecting
+        case .connecting: if state.wifiPhase != .pairing { state.wifiPhase = .connecting }
         }
     }
 
@@ -434,6 +427,9 @@ final class ConnectionViewModel: ObservableObject {
               !usbWorkspaceEstablished, state.selectedDeviceID == nil,
               cameraSession == nil, state.wirelessMode == .sta,
               state.usbPhase != .connecting else { return }
+        // Android acknowledges every eligible tap, including an already-active
+        // discovery, without creating another connection attempt.
+        staReconnectRequests.send(())
         guard wifiConnectTask == nil else { return }
         wifiRetryTask?.cancel()
         wifiRetryTask = nil
@@ -445,9 +441,7 @@ final class ConnectionViewModel: ObservableObject {
         guard wifiGeneration == generation, state.wifiPhase == .connected else { return }
         if let previousSession = cameraSession {
             await previousSession.beginShutdown(reason: "wireless transport lost")
-            let recovery = mode == .sta ? await previousSession.repository.staCatalogRecovery() : nil
             guard wifiGeneration == generation, cameraSession === previousSession else { return }
-            staRecovery = recovery.map { (ObjectIdentifier(previousSession), $0) }
         }
         cameraSession = nil; cameraRepository = nil
         state.wifiPhase = .reconnecting
@@ -486,13 +480,17 @@ final class ConnectionViewModel: ObservableObject {
     private func wifiErrorMessage(_ error: Error) -> String {
         let failure = error as? STAConnectionFailure
         let cause = failure?.cause ?? error
+        if state.wirelessMode == .sta,
+           let key = STAFailurePolicy.messageResource(error, knownCamera: failure?.knownCamera == true) {
+            return AppLocalized.resource(key)
+        }
         switch cause {
         case STAConnectionError.cameraRefused:
             return AppLocalized.resource(failure?.knownCamera == true ? "sta_camera_refused_retrying" : "sta_camera_refused_repair")
         case STAConnectionError.pairingRequired, STAConnectionError.pairingNotConfirmed: return AppLocalized.resource("sta_camera_refused_repair")
         case STAConnectionError.noMedia: return AppLocalized.resource("sta_camera_no_media")
         case STAConnectionError.notFound: return AppLocalized.resource("sta_camera_not_found")
-        case STAConnectionError.pairingCompleted: return "Nikon pairing completed; reconnect required"
+        case is STAPairingCompleted: return "Nikon pairing completed; reconnect required"
         case STAConnectionError.albumUnavailable(let response):
             return String(format: "STA album access unavailable (0x%04X)", response)
         case STAConnectionError.initializationFailed(let response):
@@ -546,7 +544,6 @@ final class ConnectionViewModel: ObservableObject {
             return
         }
         guard cameraSession == nil else { usbConnectTask = nil; return }
-        staRecovery = nil
         cancelWiFiConnection()
         await wifiCleanupTask?.value
         state.usbPhase = .connecting
@@ -729,7 +726,6 @@ final class ConnectionViewModel: ObservableObject {
         // is unchanged: it supersedes a remembered USB presentation.
         rememberPresentationMode(wirelessMode == .sta ? .sta : .ap)
         guard state.wirelessMode != wirelessMode else { return }
-        staRecovery = nil
         cancelWiFiConnection()
         state.wirelessMode = wirelessMode
         state.wifiFailureKind = nil

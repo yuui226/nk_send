@@ -1,0 +1,15 @@
+Test Suite 'Selected tests' started at 2026-10-30 22:00:11.549.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 22:00:11.549.
+Test Suite 'PhotoFilterCategoryParityTests' started at 2026-10-30 22:00:11.550.
+Test Case '-[ZTransferTests.PhotoFilterCategoryParityTests testAllFiftyCategoriesMatchAndroidFallbackMetadata]' started.
+Test Case '-[ZTransferTests.PhotoFilterCategoryParityTests testAllFiftyCategoriesMatchAndroidFallbackMetadata]' passed (0.041 seconds).
+Test Case '-[ZTransferTests.PhotoFilterCategoryParityTests testChooserFavoritesPositionAndOffPreserveRecipe]' started.
+Test Case '-[ZTransferTests.PhotoFilterCategoryParityTests testChooserFavoritesPositionAndOffPreserveRecipe]' passed (0.111 seconds).
+Test Suite 'PhotoFilterCategoryParityTests' passed at 2026-10-30 22:00:11.703.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.152 (0.154) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 22:00:11.704.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.152 (0.154) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 22:00:11.704.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.152 (0.155) seconds
+Test session results, code coverage, and logs:
+** TEST SUCCEEDED **

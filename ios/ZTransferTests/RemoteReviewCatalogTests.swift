@@ -2,6 +2,13 @@ import XCTest
 @testable import ZTransfer
 
 final class RemoteReviewCatalogTests: XCTestCase {
+    func testIndexedDateOrderKeepsEqualAndMissingDatesStableWithoutAdoptingAbsentHandles() {
+        let result = newestReviewHandles([90, 2, 3, 7, 8], captureDates: [
+            90: "20261101T120000", 2: "20261108T120000", 3: "20261108T120000", 999: "20261109T120000"
+        ])
+        XCTAssertEqual(result, [7, 8, 2, 3, 90])
+        XCTAssertEqual(newestReviewHandles([90, 2, 3], captureDates: [:]), [90, 2, 3])
+    }
     @MainActor
     func testFramePauseWaitsForAcceptedPacketAndBlocksNextRead() async throws {
         let gate = RemoteReviewFrameGate()

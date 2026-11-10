@@ -3,11 +3,27 @@ import Foundation
 import Combine
 import Network
 
-/// Android uses a 32-entry access-order cache with distinct success/failure TTLs.
+/// Backend outcomes stay distinct: only a real empty/error response backs off.
+/// Timeout, cancellation and unavailable connectivity never poison later exports.
+enum PhotoPlaceLookupResult: Equatable, Sendable {
+    case found(PhotoFramePlace), empty, error, unavailable
+    init(_ place: PhotoFramePlace?) {
+        if let place, place.city != nil || place.region != nil { self = .found(place) }
+        else { self = .empty }
+    }
+    var place: PhotoFramePlace? { if case .found(let place) = self { return place }; return nil }
+    var cacheLifetime: TimeInterval? {
+        switch self { case .found: 86_400; case .empty: 15; case .error: 5; case .unavailable: nil }
+    }
+}
+
+/// Android PhotoPlaceLookupCache: 32-entry access-order cache, success 24h,
+/// explicit empty 15s, backend error 5s, no unavailable/timeout/cancel entries.
 struct PhotoFramePlaceCache {
     struct Entry {
-        let place: PhotoFramePlace?
+        let result: PhotoPlaceLookupResult
         let time: TimeInterval
+        var place: PhotoFramePlace? { result.place }
     }
     private var entries: [String: Entry] = [:]
     private var order: [String] = []
@@ -20,69 +36,67 @@ struct PhotoFramePlaceCache {
 
     mutating func entry(for key: String, now: TimeInterval) -> Entry? {
         guard let entry = entries[key] else { return nil }
+        let age = now - entry.time
+        guard let lifetime = entry.result.cacheLifetime, age >= 0, age < lifetime else {
+            entries[key] = nil; order.removeAll { $0 == key }; return nil
+        }
         touch(key)
-        return now - entry.time < (entry.place == nil ? 60 : 86_400) ? entry : nil
+        return entry
     }
 
-    mutating func insert(_ place: PhotoFramePlace?, for key: String, now: TimeInterval) {
-        entries[key] = Entry(place: place, time: now)
+    mutating func insert(_ result: PhotoPlaceLookupResult, for key: String, now: TimeInterval) {
+        guard result.cacheLifetime != nil else { return }
+        entries[key] = Entry(result: result, time: now)
         touch(key)
         if order.count > 32 { entries.removeValue(forKey: order.removeFirst()) }
     }
-
     private mutating func touch(_ key: String) {
-        order.removeAll { $0 == key }
-        order.append(key)
+        order.removeAll { $0 == key }; order.append(key)
     }
 }
 
 actor PhotoFramePlaceResolver {
     static let shared = PhotoFramePlaceResolver()
-    typealias Query = @Sendable (Double, Double, Locale) async -> PhotoFramePlace?
+    static let requestTimeout: Duration = .seconds(3)
+    typealias Query = @Sendable (Double, Double, Locale) async throws -> PhotoPlaceLookupResult
     private struct Request {
         let key: String
         let latitude: Double
         let longitude: Double
         let locale: Locale
         let allowed: @Sendable () async -> Bool
-        let deadline: ContinuousClock.Instant
+        let budget: Duration
         let continuation: CheckedContinuation<PhotoFramePlace?, Never>
-        let timer: Task<Void, Never>
     }
     private var cache = PhotoFramePlaceCache()
     private let query: Query
     private var requests: [UUID: Request] = [:]
     private var waiting: [UUID] = []
-    private var attempted: Set<UUID> = []
     private var active: UUID?
+    private var deadline: ContinuousClock.Instant?
+    private var timer: Task<Void, Never>?
     private var worker: Task<Void, Never>?
     var pendingCount: Int { requests.count }
 
     init(query: @escaping Query = PhotoFramePlaceResolver.systemQuery) { self.query = query }
 
-    func resolve(latitude: Double, longitude: Double, timeout: Duration = .seconds(1), locale: Locale = photoFramePlaceLocale(),
+    func resolve(latitude: Double, longitude: Double, timeout: Duration = PhotoFramePlaceResolver.requestTimeout, locale: Locale = photoFramePlaceLocale(),
                  allowed: @escaping @Sendable () async -> Bool = { true }) async -> PhotoFramePlace? {
         guard !Task.isCancelled, validPhotoFrameCoordinates(latitude, longitude) else { return nil }
         let key = PhotoFramePlaceCache.key(latitude: latitude, longitude: longitude, locale: locale)
         if let cached = cache.entry(for: key, now: ProcessInfo.processInfo.systemUptime) { return cached.place }
-        let budget = min(max(timeout, .zero), .seconds(1))
+        let budget = min(max(timeout, .zero), Self.requestTimeout)
         guard budget > .zero else { return nil }
         let id = UUID()
-        let deadline = ContinuousClock.now.advanced(by: budget)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard !Task.isCancelled else { continuation.resume(returning: nil); return }
-                let timer = Task { [weak self] in
-                    do { try await Task.sleep(until: deadline, clock: .continuous) }
-                    catch { return }
-                    await self?.finish(id, place: nil)
-                }
                 requests[id] = Request(key: key, latitude: latitude, longitude: longitude,
-                    locale: locale, allowed: allowed, deadline: deadline, continuation: continuation, timer: timer)
+                    locale: locale, allowed: allowed, budget: budget, continuation: continuation)
                 waiting.append(id)
                 startNext()
             }
-        } onCancel: { Task { await self.finish(id, place: nil) } }
+        } onCancel: { Task { await self.finish(id, result: nil) } }
     }
 
     private func startNext() {
@@ -90,72 +104,66 @@ actor PhotoFramePlaceResolver {
         while !waiting.isEmpty {
             let id = waiting.removeFirst()
             guard let request = requests[id] else { continue }
-            if ContinuousClock.now >= request.deadline {
-                requests.removeValue(forKey: id)
-                request.timer.cancel()
-                request.continuation.resume(returning: nil)
-                continue
-            }
+            // Waiting behind another request consumes no backend timeout budget.
+            // A completed same-coordinate request may now satisfy this waiter.
             if let cached = cache.entry(for: request.key, now: ProcessInfo.processInfo.systemUptime) {
-                requests.removeValue(forKey: id)
-                request.timer.cancel()
+                requests[id] = nil
                 request.continuation.resume(returning: cached.place)
                 continue
             }
             active = id
+            let deadline = ContinuousClock.now.advanced(by: request.budget)
+            self.deadline = deadline
+            timer = Task { [weak self] in
+                do { try await Task.sleep(until: deadline, clock: .continuous) }
+                catch { return }
+                await self?.finish(id, result: nil)
+            }
             let query = self.query
             worker = Task { [weak self] in
-                guard !Task.isCancelled, await self?.beginQuery(id) == true else {
-                    await self?.finish(id, place: nil)
-                    return
+                guard !Task.isCancelled, await request.allowed(), !Task.isCancelled else {
+                    await self?.finish(id, result: nil); return
                 }
-                let result = await query(request.latitude, request.longitude, request.locale)
-                await self?.finish(id, place: result)
+                do {
+                    let result = try await query(request.latitude, request.longitude, request.locale)
+                    await self?.finish(id, result: Task.isCancelled ? nil : result)
+                } catch is CancellationError { await self?.finish(id, result: nil) }
+                catch { await self?.finish(id, result: Task.isCancelled ? nil : .error) }
             }
             return
         }
     }
 
-    private func beginQuery(_ id: UUID) async -> Bool {
-        guard let request = requests[id], await request.allowed(),
-              !Task.isCancelled, active == id, requests[id] != nil,
-              ContinuousClock.now < request.deadline else { return false }
-        attempted.insert(id)
-        return true
-    }
-
-    /// Complete the caller independently of the backend. A late callback cannot
-    /// overwrite a timeout's negative cache entry or complete a newer request.
-    private func finish(_ id: UUID, place: PhotoFramePlace?) {
+    /// IDs isolate late callbacks. The serial owner releases on cancellation;
+    /// the system adapter actively resumes its continuation when cancelled too.
+    private func finish(_ id: UUID, result: PhotoPlaceLookupResult?) {
         guard let request = requests.removeValue(forKey: id) else { return }
-        request.timer.cancel()
         waiting.removeAll { $0 == id }
-        var result = place
-        if ContinuousClock.now >= request.deadline { result = nil }
-        if result?.city == nil && result?.region == nil { result = nil }
-        let didAttempt = attempted.remove(id) != nil
+        var completed = result
         if active == id {
-            if didAttempt { cache.insert(result, for: request.key, now: ProcessInfo.processInfo.systemUptime) }
-            active = nil
-            worker?.cancel()
-            worker = nil
+            if let deadline, ContinuousClock.now >= deadline { completed = nil }
+            if case .found(let place)? = completed { completed = PhotoPlaceLookupResult(place) }
+            if let completed { cache.insert(completed, for: request.key, now: ProcessInfo.processInfo.systemUptime) }
+            active = nil; deadline = nil
+            timer?.cancel(); timer = nil
+            worker?.cancel(); worker = nil
         }
-        request.continuation.resume(returning: result)
+        request.continuation.resume(returning: completed?.place)
         startNext()
     }
 
     @MainActor
-    private static func systemQuery(latitude: Double, longitude: Double, locale: Locale) async -> PhotoFramePlace? {
+    private static func systemQuery(latitude: Double, longitude: Double, locale: Locale) async -> PhotoPlaceLookupResult {
         let request = PhotoFrameSystemGeocoder()
         return await withTaskCancellationHandler {
-            guard !Task.isCancelled else { return nil }
+            guard !Task.isCancelled else { return .unavailable }
             return await request.lookup(latitude: latitude, longitude: longitude, locale: locale)
         } onCancel: { Task { @MainActor in request.cancel() } }
     }
 
     func enriching(_ metadata: PhotoFrameMetadata, settings: PhotoFrameMetadataSettings,
                    allowed: @escaping @Sendable () async -> Bool,
-                   timeout: Duration = .seconds(1), locale: Locale = photoFramePlaceLocale()) async -> PhotoFrameMetadata {
+                   timeout: Duration = PhotoFramePlaceResolver.requestTimeout, locale: Locale = photoFramePlaceLocale()) async -> PhotoFrameMetadata {
         func replacingPlace(_ place: PhotoFramePlace?) -> PhotoFrameMetadata {
             PhotoFrameMetadata(make: metadata.make, model: metadata.model, lensModel: metadata.lensModel,
                 focalLength: metadata.focalLength, aperture: metadata.aperture, shutter: metadata.shutter,
@@ -182,19 +190,38 @@ actor PhotoFramePlaceResolver {
 private final class PhotoFrameSystemGeocoder {
     private let coder = CLGeocoder()
     private var cancelled = false
-    func lookup(latitude: Double, longitude: Double, locale: Locale) async -> PhotoFramePlace? {
-        guard !cancelled, !Task.isCancelled else { return nil }
+    private var continuation: CheckedContinuation<PhotoPlaceLookupResult, Never>?
+    func lookup(latitude: Double, longitude: Double, locale: Locale) async -> PhotoPlaceLookupResult {
+        guard !cancelled, !Task.isCancelled else { return .unavailable }
         return await withCheckedContinuation { continuation in
-            coder.reverseGeocodeLocation(CLLocation(latitude: latitude, longitude: longitude), preferredLocale: locale) { marks, _ in
-                let place = marks?.first.map {
-                    photoFramePlace(city: $0.locality, district: $0.subLocality,
-                        subAdmin: $0.subAdministrativeArea, admin: $0.administrativeArea, countryCode: $0.isoCountryCode)
+            self.continuation = continuation
+            coder.reverseGeocodeLocation(CLLocation(latitude: latitude, longitude: longitude), preferredLocale: locale) { [weak self] marks, error in
+                let result: PhotoPlaceLookupResult
+                if let error {
+                    let error = error as NSError
+                    if error.domain == kCLErrorDomain && error.code == CLError.Code.geocodeFoundNoResult.rawValue { result = .empty }
+                    else if error.domain == kCLErrorDomain && error.code == CLError.Code.geocodeCanceled.rawValue { result = .unavailable }
+                    else { result = .error }
+                } else {
+                    let place = marks?.first.map {
+                        photoFramePlace(city: $0.locality, district: $0.subLocality,
+                            subAdmin: $0.subAdministrativeArea, admin: $0.administrativeArea, countryCode: $0.isoCountryCode)
+                    }
+                    result = PhotoPlaceLookupResult(place)
                 }
-                continuation.resume(returning: place)
+                Task { @MainActor [weak self] in self?.finish(result) }
             }
         }
     }
-    func cancel() { cancelled = true; coder.cancelGeocode() }
+    private func finish(_ result: PhotoPlaceLookupResult) {
+        let pending = continuation; continuation = nil
+        pending?.resume(returning: result)
+    }
+    func cancel() {
+        cancelled = true
+        finish(.unavailable)
+        coder.cancelGeocode()
+    }
 }
 
 

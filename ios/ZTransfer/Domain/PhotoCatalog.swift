@@ -151,11 +151,10 @@ func collapsedPhotoPreviewEntries(files: [CameraFile], burstIDByFile: [UInt32: S
     let burstIDs = burstIDByFile ?? PhotoCatalogGrouping.bursts(in: files).reduce(into: [:]) { result, group in
         for file in group.files { result[file.id] = group.id }
     }
-    let visibleGroups = Dictionary(grouping: files.compactMap { file -> (String, CameraFile)? in
-        burstIDs[file.id].map { ($0, file) }
-    }, by: \.0).mapValues { $0.map(\.1) }
+    let visibleGroups = visiblePhotoBurstMembers(files: files, burstIDs: burstIDs)
     var collected = Set<String>()
     var result: [PhotoPreviewEntry] = []
+    result.reserveCapacity(files.count)
     for file in files {
         guard let id = burstIDs[file.id], let members = visibleGroups[id], members.count >= 2 else {
             result.append(.photo(file, burstID: burstIDs[file.id])); continue

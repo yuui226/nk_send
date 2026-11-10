@@ -1,0 +1,618 @@
+--- before-task/GPSCoordinator.swift
++++ ios/ZTransfer/Domain/GPSCoordinator.swift
+@@ -1,6 +1,8 @@
+ @preconcurrency import CoreLocation
+ import Combine
+ import Contacts
++import CoreBluetooth
++import UIKit
+ import Foundation
+ 
+ func gpsBackgroundLocationModeEnabled(_ modes: [String]?) -> Bool {
+@@ -46,6 +48,11 @@
+         return manager
+     }
+     private let now: @MainActor () -> Date
++    private let locationServicesEnabled: @MainActor () -> Bool
++    private let bluetoothAuthorization: @MainActor () -> CBManagerAuthorization
++    private let applicationIsActive: @MainActor () -> Bool
++    private var requestingLocationAuthorization = false
++    private var requestedBackgroundAuthorization = false
+     private let writeSleep: @Sendable (UInt64) async throws -> Void
+     private let defaults: UserDefaults
+     private let recoverySleep: @Sendable (UInt64) async throws -> Void
+@@ -79,10 +86,16 @@
+          bluetooth: (any GPSBluetoothTransport)? = nil,
+          locationManager: CLLocationManager? = nil,
+          now: @escaping @MainActor () -> Date = { Date() },
++         locationServicesEnabled: @escaping @MainActor () -> Bool = { CLLocationManager.locationServicesEnabled() },
++         bluetoothAuthorization: @escaping @MainActor () -> CBManagerAuthorization = { CBManager.authorization },
++         applicationIsActive: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .active },
+          writeSleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+          warmupSleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+          recoverySleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }) {
+         self.now = now
++        self.locationServicesEnabled = locationServicesEnabled
++        self.bluetoothAuthorization = bluetoothAuthorization
++        self.applicationIsActive = applicationIsActive
+         self.writeSleep = writeSleep
+         self.locationManagerStorage = locationManager
+         self.recoverySleep = recoverySleep
+@@ -162,18 +175,7 @@
+             state.message = AppLocalized.resource("gps_ap_unavailable")
+             return
+         }
+-        switch locationManager.authorizationStatus {
+-        case .notDetermined: locationManager.requestWhenInUseAuthorization()
+-        case .authorizedAlways: beginRunning()
+-        case .authorizedWhenInUse:
+-            locationManager.requestAlwaysAuthorization()
+-            beginRunning()
+-        default: state = GPSState(
+-            enabled: true,
+-            status: .error,
+-            message: AppLocalized.resource("gps_permission_required")
+-        )
+-        }
++        continueAfterLocationAuthorization()
+     }
+ 
+     /// NikonGpsService.syncLocationNow: a late tap cannot enable GPS, write
+@@ -200,21 +202,97 @@
+         }
+         awaitingPairingAction = false
+         reconnectTask?.cancel(); reconnectTask = nil
++        continueAfterLocationAuthorization()
++    }
++
++    /// Re-read system authorization on a user retry; never infer permissions
++    /// from localized error text or confuse powered-off Bluetooth with denial.
++    func retryOrOpenSettings(openSettings: () -> Void) {
++        guard state.enabled, !apModeBlocked else { return }
++        if let issue = currentPermissionIssue() {
++            presentPermissionIssue(issue)
++            if issue.canOpenAppSettings { openSettings() }
++        } else {
++            retry()
++        }
++    }
++
++    /// Requests made before the scene is active may not show a system prompt.
++    /// Resume only authorization work here, not unrelated camera/pairing errors.
++    func resumeAuthorizationIfNeeded() {
++        guard state.enabled, !apModeBlocked, applicationIsActive() else { return }
++        if state.status == .starting || state.permissionIssue != nil {
++            continueAfterLocationAuthorization()
++        }
++        requestBackgroundAuthorizationIfReady()
++    }
++
++    private func currentPermissionIssue() -> GPSPermissionIssue? {
++        switch locationManager.authorizationStatus {
++        case .denied:
++            return locationServicesEnabled() ? .locationDenied : .locationServicesDisabled
++        case .restricted:
++            return .locationRestricted
++        case .notDetermined:
++            // The first missing grant is requested before looking at later ones.
++            // Core Location reports global shutdown as denied. Avoid an extra
++            // synchronous system-service query on the normal first-use path.
++            return nil
++        default: break
++        }
++        switch bluetoothAuthorization() {
++        case .denied: return .bluetoothDenied
++        case .restricted: return .bluetoothRestricted
++        default: return nil
++        }
++    }
++
++    private func presentPermissionIssue(_ issue: GPSPermissionIssue) {
++        writeTask?.cancel(); writeTask = nil
++        writeTimeoutTask?.cancel(); writeTimeoutTask = nil
++        reconnectTask?.cancel(); reconnectTask = nil
++        readyTransitionTask?.cancel(); readyTransitionTask = nil
++        writeGeneration &+= 1
++        geoWriteInFlight = false
++        latestLocation = nil
++        latestLocationDuringWrite = nil
++        pendingAltitudeRefresh = false
++        stopLocationUpdates()
++        state.status = .error
++        state.permissionIssue = issue
++        state.message = issue.message
++    }
++
++    private func continueAfterLocationAuthorization() {
++        guard state.enabled, !apModeBlocked else { return }
++        if let issue = currentPermissionIssue() {
++            presentPermissionIssue(issue)
++            return
++        }
+         switch locationManager.authorizationStatus {
+         case .notDetermined:
++            state.permissionIssue = nil
++            state.status = .starting
++            state.message = nil
++            guard applicationIsActive(), !requestingLocationAuthorization else { return }
++            requestingLocationAuthorization = true
++            GPSDiagnostics.record("request foreground location authorization")
+             locationManager.requestWhenInUseAuthorization()
+-        case .authorizedAlways:
++        case .authorizedAlways, .authorizedWhenInUse:
+             beginRunning()
+-        case .authorizedWhenInUse:
+-            locationManager.requestAlwaysAuthorization()
+-            beginRunning()
+-        case .denied, .restricted:
+-            state.status = .error
+-            state.message = AppLocalized.resource("gps_permission_required")
+-        @unknown default:
+-            state.status = .error
+-            state.message = AppLocalized.resource("gps_permission_required")
+-        }
++        default: break
++        }
++    }
++
++    private func requestBackgroundAuthorizationIfReady() {
++        // Do not stack Always and Bluetooth prompts after the first location
++        // grant. Request the existing background capability after BLE is ready.
++        guard state.enabled, !apModeBlocked, applicationIsActive(),
++              !requestedBackgroundAuthorization,
++              locationManager.authorizationStatus == .authorizedWhenInUse,
++              case .ready = bluetooth.state else { return }
++        requestedBackgroundAuthorization = true
++        locationManager.requestAlwaysAuthorization()
+     }
+ 
+     /// Android's HomeScreen informs the GPS foreground service whenever an AP
+@@ -241,7 +319,7 @@
+         } else if state.enabled {
+             state.message = nil
+             state.status = .starting
+-            beginRunning()
++            continueAfterLocationAuthorization()
+         }
+     }
+ 
+@@ -386,6 +464,16 @@
+         guard !apModeBlocked else {
+             state.status = .apUnavailable
+             state.message = AppLocalized.resource("gps_ap_unavailable")
++            return
++        }
++        if let issue = currentPermissionIssue() {
++            presentPermissionIssue(issue)
++            return
++        }
++        if state.permissionIssue != nil { state.message = nil }
++        state.permissionIssue = nil
++        if bluetoothAuthorization() == .notDetermined, !applicationIsActive() {
++            state.status = .starting
+             return
+         }
+         locationManager.desiredAccuracy = frequency.desiredAccuracy
+@@ -457,27 +545,22 @@
+     }
+ 
+     private func resumeEnabledSession() {
+-        guard state.enabled else { return }
+-        switch locationManager.authorizationStatus {
+-        case .authorizedAlways:
+-            beginRunning()
+-        case .authorizedWhenInUse:
+-            locationManager.requestAlwaysAuthorization()
+-            beginRunning()
+-        case .notDetermined:
+-            locationManager.requestWhenInUseAuthorization()
+-        default:
+-            state.status = .error
+-            state.message = AppLocalized.resource("gps_permission_required")
+-        }
++        continueAfterLocationAuthorization()
+     }
+ 
+     func applyBluetoothState(_ value: NikonGPSBluetoothState) {
+         guard state.enabled else { return }
+         GPSDiagnostics.record("BLE state=\(String(describing: value))")
++        if state.permissionIssue != nil, let issue = currentPermissionIssue() {
++            // Late scan/disconnect events cannot replace permission guidance
++            // or schedule reconnects while the permission is still blocked.
++            presentPermissionIssue(issue)
++            return
++        }
+         switch value {
+         case .unauthorized:
+             applyBluetoothFailure("Bluetooth permission required")
++            if let issue = currentPermissionIssue() { presentPermissionIssue(issue) }
+         case .unavailable:
+             applyBluetoothFailure("Bluetooth unavailable")
+             latestLocation = nil
+@@ -496,6 +579,12 @@
+         case .pairing: state.status = .pairing
+         case .cameraConfirm: state.status = .cameraConfirm
+         case .ready(let name):
++            if let issue = currentPermissionIssue() {
++                presentPermissionIssue(issue)
++                return
++            }
++            state.permissionIssue = nil
++            requestBackgroundAuthorizationIfReady()
+             locationWarmupRequested = false
+             lastWrite = nil
+             bluetoothFailureOwnsRecovery = false
+@@ -584,23 +673,18 @@
+     }
+ 
+     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
++        if manager.authorizationStatus != .notDetermined {
++            requestingLocationAuthorization = false
++        }
+         guard state.enabled else { return }
+-        switch manager.authorizationStatus {
+-        case .authorizedAlways:
+-            beginRunning()
+-        case .authorizedWhenInUse:
+-            manager.requestAlwaysAuthorization()
+-            beginRunning()
+-        case .denied, .restricted:
+-            stopLocationUpdates()
+-            state.status = .error
+-            state.message = AppLocalized.resource("gps_permission_required")
+-        default: break
+-        }
++        // Initial notDetermined callbacks are not authorization failures and
++        // must not dispatch another prompt while the first one is visible.
++        if manager.authorizationStatus == .notDetermined { return }
++        continueAfterLocationAuthorization()
+     }
+ 
+     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+-        guard state.enabled, case .ready = bluetooth.state,
++        guard state.enabled, !apModeBlocked, state.permissionIssue == nil, case .ready = bluetooth.state,
+               let location = locations.last, location.horizontalAccuracy >= 0 else { return }
+         latestLocation = location
+         if geoWriteInFlight { latestLocationDuringWrite = location }
+@@ -636,9 +720,9 @@
+         case .keepWaiting:
+             GPSDiagnostics.record("location fix temporarily unavailable")
+         case .permissionRequired:
+-            stopLocationUpdates()
+-            state.status = .error
+-            state.message = AppLocalized.resource("gps_permission_required")
++            let issue = currentPermissionIssue() ??
++                (locationServicesEnabled() ? .locationDenied : .locationServicesDisabled)
++            presentPermissionIssue(issue)
+         case .locationUnavailable:
+             stopLocationUpdates()
+             state.status = .error
+@@ -647,7 +731,7 @@
+     }
+ 
+     func scheduleWriteIfDue(force: Bool = false, afterFailure: Bool = false) {
+-        guard state.enabled, !apModeBlocked, case .ready = bluetooth.state else { return }
++        guard state.enabled, !apModeBlocked, state.permissionIssue == nil, case .ready = bluetooth.state else { return }
+         if geoWriteInFlight {
+             if force { pendingAltitudeRefresh = true }
+             return
+@@ -684,7 +768,7 @@
+ 
+     private func writeCurrentFix() {
+         writeTask = nil
+-        guard state.enabled, !apModeBlocked else { return }
++        guard state.enabled, !apModeBlocked, state.permissionIssue == nil else { return }
+         guard let location = latestLocation else { state.status = .waitingFix; return }
+         guard case .ready = bluetooth.state else { return }
+         guard !geoWriteInFlight else { return }
+--- before-task/GPSState.swift
++++ ios/ZTransfer/Domain/GPSState.swift
+@@ -77,6 +77,7 @@
+     var accuracyMeters: Double?
+     var lastSentAt: Date?
+     var message: String?
++    var permissionIssue: GPSPermissionIssue?
+ 
+     /// Android GpsState.canSyncNow is presentation eligibility, not proof of a
+     /// live session. Zero coordinates are valid for camera GEO writes.
+@@ -86,6 +87,19 @@
+         case .pairingSuccess, .connected, .waitingFix, .ready: return true
+         default: return false
+         }
++    }
++}
++
++/// iOS distinguishes unrequested access, per-app denial and system-wide
++/// restrictions. Android's enableGps requests missing access before starting;
++/// an unrequested iOS permission must likewise never send the user to Settings.
++enum GPSPermissionIssue: String, Equatable, Sendable {
++    case locationDenied, locationRestricted, locationServicesDisabled
++    case bluetoothDenied, bluetoothRestricted
++
++    var message: String { AppLocalized.resource("gps_ios_" + rawValue) }
++    var canOpenAppSettings: Bool {
++        self == .locationDenied || self == .bluetoothDenied
+     }
+ }
+ 
+--- before-task/GPSConnectionControl.swift
++++ ios/ZTransfer/UI/Connection/GPSConnectionControl.swift
+@@ -260,6 +260,13 @@
+             }
+             .id(showConnectionSteps ? "guide" : (hasCoordinates ? "location" : "empty"))
+             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
++            if let issue = coordinator.state.permissionIssue {
++                Text(issue.message)
++                    .zTransferText(size: 12)
++                    .foregroundStyle(ZTransferColors.accentOrange)
++                    .fixedSize(horizontal: false, vertical: true)
++                    .accessibilityIdentifier("gps-permission-guidance")
++            }
+             controlRow()
+                 .frame(height: 42)
+         }
+@@ -681,16 +688,10 @@
+             haptics.play(.action)
+             if !coordinator.state.enabled { coordinator.setEnabled(true) }
+             else if coordinator.state.status == .error {
+-                let message = coordinator.state.message ?? ""
+-                let needsSettings = message == AppLocalized.resource("gps_bluetooth_required") ||
+-                    message == AppLocalized.resource("gps_permission_required") ||
+-                    !CLLocationManager.locationServicesEnabled()
+-                if needsSettings {
++                coordinator.retryOrOpenSettings {
+                     if let settings = URL(string: UIApplication.openSettingsURLString) {
+                         UIApplication.shared.open(settings)
+                     }
+-                } else {
+-                    coordinator.retry()
+                 }
+             }
+             else if !requiresHoldToDisable && coordinator.state.status != .apUnavailable { coordinator.setEnabled(false) }
+--- before-task/RootView.swift
++++ ios/ZTransfer/App/RootView.swift
+@@ -373,6 +373,7 @@
+         .onChange(of: scenePhase) { phase in
+             connectionModel.setUSBForegroundActive(phase == .active)
+             if phase == .active {
++                gpsCoordinator.resumeAuthorizationIfNeeded()
+                 connectionModel.refreshUSBAuthorization()
+                 StoreKitPurchaseStore.shared.refresh()
+             }
+--- before-task/IOSLocalization.swift
++++ ios/ZTransfer/App/IOSLocalization.swift
+@@ -5,6 +5,12 @@
+ /// guidance and setup steps live here so regeneration cannot remove them.
+ enum IOSLocalization {
+     static let byResource: [String: [String: String]] = [
++        // Native recovery guidance; missing grants are requested in the app.
++        "gps_ios_locationDenied": ["zh": "请在设置中允许 Z传访问定位，返回后自动继续。", "en": "Allow location access for ZTransfer in Settings, then return to continue.", "hant": "請在設定中允許 Z傳取用定位，返回後自動繼續。"],
++        "gps_ios_locationRestricted": ["zh": "定位权限受系统限制，请检查屏幕使用时间或设备管理限制。", "en": "Location access is restricted. Check Screen Time or device management restrictions.", "hant": "定位權限受系統限制，請檢查螢幕使用時間或裝置管理限制。"],
++        "gps_ios_locationServicesDisabled": ["zh": "请打开手机“设置 → 隐私与安全性 → 定位服务”的总开关，再返回开启 GPS。", "en": "Turn on Location Services in Settings → Privacy & Security → Location Services, then return to enable GPS.", "hant": "請開啟手機「設定 → 隱私權與安全性 → 定位服務」的總開關，再返回啟用 GPS。"],
++        "gps_ios_bluetoothDenied": ["zh": "请在设置中允许 Z传使用蓝牙，返回后自动继续。", "en": "Allow Bluetooth access for ZTransfer in Settings, then return to continue.", "hant": "請在設定中允許 Z傳使用藍牙，返回後自動繼續。"],
++        "gps_ios_bluetoothRestricted": ["zh": "蓝牙权限受系统限制，请检查屏幕使用时间或设备管理限制。", "en": "Bluetooth access is restricted. Check Screen Time or device management restrictions.", "hant": "藍牙權限受系統限制，請檢查螢幕使用時間或裝置管理限制。"],
+         // User-requested NP3 directory wording (2026-11-06).
+         "photo_filter_set_folder": ["zh": "设置NP3文件目录", "en": "Set NP3 folder", "hant": "設定NP3檔案目錄"],
+         // User-approved iOS difference (2026-10-21): NP3 files are supplied by the user.
+--- before-task/GPSProtocolTests.swift
++++ ios/GPSTests/GPSProtocolTests.swift
+@@ -44,6 +44,204 @@
+     }
+ 
+     #if !SWIFT_PACKAGE
++    @MainActor
++    func testFirstGPSGrantRequestsLocationBeforeBluetoothAndDoesNotOpenSettings() {
++        let suite = "GPSFirstPermission-\(UUID())", manager = GPSControlledLocationManager()
++        let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++        defer { defaults.removePersistentDomain(forName: suite) }
++        manager.authorization = .notDetermined
++        var servicesQueries = 0
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++            locationServicesEnabled: { servicesQueries += 1; return true }, bluetoothAuthorization: { .notDetermined }, applicationIsActive: { true })
++        defer { coordinator.setEnabled(false) }
++        var settings = 0
++        coordinator.setEnabled(true)
++        coordinator.retryOrOpenSettings { settings += 1 }
++        coordinator.locationManagerDidChangeAuthorization(manager)
++        XCTAssertEqual(manager.foregroundRequests, 1)
++        XCTAssertEqual(settings, 0)
++        XCTAssertEqual(transport.starts, 0)
++        XCTAssertEqual(servicesQueries, 0)
++        XCTAssertNil(coordinator.state.permissionIssue)
++        manager.authorization = .authorizedWhenInUse
++        coordinator.locationManagerDidChangeAuthorization(manager)
++        XCTAssertEqual(transport.starts, 1)
++        XCTAssertEqual(manager.backgroundRequests, 0, "Do not overlap initial BLE and Always prompts")
++        transport.emit(.ready("Camera"))
++        XCTAssertEqual(manager.backgroundRequests, 1)
++        coordinator.resumeAuthorizationIfNeeded()
++        XCTAssertEqual(manager.backgroundRequests, 1)
++    }
++
++    @MainActor
++    func testGPSLocationServicesOffExplainsGlobalSwitchWithoutOpeningAppSettings() {
++        let suite = "GPSSystemPermission-\(UUID())", manager = GPSControlledLocationManager()
++        let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++        defer { defaults.removePersistentDomain(forName: suite) }
++        var services = false, settings = 0
++        manager.authorization = .denied
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++            locationServicesEnabled: { services }, bluetoothAuthorization: { .notDetermined }, applicationIsActive: { true })
++        defer { coordinator.setEnabled(false) }
++        coordinator.setEnabled(true)
++        coordinator.retryOrOpenSettings { settings += 1 }
++        XCTAssertEqual(coordinator.state.permissionIssue, .locationServicesDisabled)
++        XCTAssertEqual(settings, 0)
++        XCTAssertEqual(manager.foregroundRequests, 0)
++        XCTAssertEqual(transport.starts, 0)
++        services = true
++        manager.authorization = .notDetermined
++        coordinator.resumeAuthorizationIfNeeded()
++        XCTAssertNil(coordinator.state.permissionIssue)
++        XCTAssertEqual(manager.foregroundRequests, 1)
++        manager.authorization = .authorizedWhenInUse
++        coordinator.locationManagerDidChangeAuthorization(manager)
++        XCTAssertEqual(transport.starts, 1)
++    }
++
++    @MainActor
++    func testOnlyActualAppDenialsOpenSettingsAndGrantedReturnResumes() {
++        let cases: [(CLAuthorizationStatus, CBManagerAuthorization, GPSPermissionIssue, Bool)] = [
++            (.denied, .notDetermined, .locationDenied, true),
++            (.restricted, .notDetermined, .locationRestricted, false),
++            (.authorizedWhenInUse, .denied, .bluetoothDenied, true),
++            (.authorizedAlways, .restricted, .bluetoothRestricted, false),
++        ]
++        for (location, initialBluetooth, issue, opensSettings) in cases {
++            let suite = "GPSDeniedPermission-\(UUID())", manager = GPSControlledLocationManager()
++            let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++            defer { defaults.removePersistentDomain(forName: suite) }
++            manager.authorization = location
++            var bluetooth = initialBluetooth, settings = 0
++            let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++                locationServicesEnabled: { true }, bluetoothAuthorization: { bluetooth }, applicationIsActive: { true })
++            coordinator.setEnabled(true)
++            coordinator.retryOrOpenSettings { settings += 1 }
++            XCTAssertEqual(coordinator.state.permissionIssue, issue)
++            XCTAssertEqual(settings, opensSettings ? 1 : 0)
++            XCTAssertEqual(transport.starts, 0)
++            manager.authorization = .authorizedWhenInUse
++            bluetooth = .allowedAlways
++            coordinator.resumeAuthorizationIfNeeded()
++            XCTAssertNil(coordinator.state.permissionIssue)
++            XCTAssertEqual(transport.starts, 1)
++            coordinator.setEnabled(false)
++        }
++    }
++
++    @MainActor
++    func testGPSBluetoothPowerOffRetriesWithoutOpeningAppSettings() {
++        let suite = "GPSBluetoothPower-\(UUID())", manager = GPSControlledLocationManager()
++        let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++        defer { defaults.removePersistentDomain(forName: suite) }
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++            locationServicesEnabled: { true }, bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
++        defer { coordinator.setEnabled(false) }
++        coordinator.setEnabled(true)
++        transport.emit(.unavailable)
++        var settings = 0
++        coordinator.retryOrOpenSettings { settings += 1 }
++        XCTAssertEqual(settings, 0)
++        XCTAssertEqual(transport.starts, 2)
++        XCTAssertNil(coordinator.state.permissionIssue)
++    }
++
++    @MainActor
++    func testGPSDefersFirstPromptUntilActiveAndDoesNotReviveDisabledSession() {
++        let suite = "GPSForegroundPermission-\(UUID())", manager = GPSControlledLocationManager()
++        let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++        defer { defaults.removePersistentDomain(forName: suite) }
++        var active = false
++        manager.authorization = .notDetermined
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++            locationServicesEnabled: { true }, bluetoothAuthorization: { .notDetermined }, applicationIsActive: { active })
++        coordinator.setEnabled(true)
++        XCTAssertEqual(manager.foregroundRequests, 0)
++        active = true
++        coordinator.resumeAuthorizationIfNeeded()
++        XCTAssertEqual(manager.foregroundRequests, 1)
++        coordinator.setEnabled(false)
++        manager.authorization = .authorizedWhenInUse
++        coordinator.locationManagerDidChangeAuthorization(manager)
++        coordinator.resumeAuthorizationIfNeeded()
++        XCTAssertEqual(transport.starts, 0)
++        XCTAssertFalse(coordinator.state.enabled)
++    }
++
++    @MainActor
++    func testExistingLocationGrantDefersFirstBluetoothPromptUntilActive() {
++        let suite = "GPSDeferredBluetooth-\(UUID())", manager = GPSControlledLocationManager()
++        let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++        defer { defaults.removePersistentDomain(forName: suite) }
++        var active = false
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++            locationServicesEnabled: { true }, bluetoothAuthorization: { .notDetermined }, applicationIsActive: { active })
++        defer { coordinator.setEnabled(false) }
++        coordinator.setEnabled(true)
++        XCTAssertEqual(transport.starts, 0)
++        XCTAssertEqual(coordinator.state.status, .starting)
++        active = true
++        coordinator.resumeAuthorizationIfNeeded()
++        XCTAssertEqual(transport.starts, 1)
++        XCTAssertEqual(manager.foregroundRequests, 0)
++        XCTAssertEqual(manager.backgroundRequests, 0)
++    }
++
++    @MainActor
++    func testPermissionReturnDoesNotRetryCameraPairingErrorsOrAPBlockedGPS() {
++        let suite = "GPSPermissionOwnership-\(UUID())", manager = GPSControlledLocationManager()
++        let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++        defer { defaults.removePersistentDomain(forName: suite) }
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++            locationServicesEnabled: { true }, bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
++        defer { coordinator.setEnabled(false) }
++        coordinator.setEnabled(true)
++        transport.emit(.failed("Camera pairing handshake timeout"))
++        coordinator.resumeAuthorizationIfNeeded()
++        XCTAssertEqual(transport.starts, 1)
++        coordinator.setAPModeBlocked(true)
++        manager.authorization = .notDetermined
++        coordinator.resumeAuthorizationIfNeeded()
++        coordinator.retryOrOpenSettings { XCTFail("AP must retain ownership") }
++        XCTAssertEqual(manager.foregroundRequests, 0)
++        XCTAssertEqual(coordinator.state.status, .apUnavailable)
++    }
++
++    @MainActor
++    func testGPSRevocationBlocksLateReadyAndCancelsPendingWriteACK() async throws {
++        let suite = "GPSRevocation-\(UUID())", manager = GPSControlledLocationManager()
++        let defaults = UserDefaults(suiteName: suite)!, transport = GPSControlledTransport()
++        defer { defaults.removePersistentDomain(forName: suite) }
++        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager,
++            locationServicesEnabled: { true }, bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
++        defer { coordinator.setEnabled(false) }
++        coordinator.setEnabled(true)
++        transport.emit(.ready("Camera"))
++        coordinator.locationManager(manager, didUpdateLocations: [CLLocation(latitude: 31, longitude: 121)])
++        for _ in 0..<100 where transport.payloads.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
++        XCTAssertEqual(transport.payloads.count, 1)
++        manager.authorization = .denied
++        coordinator.locationManagerDidChangeAuthorization(manager)
++        transport.complete(0, success: true)
++        transport.emit(.scanning)
++        transport.emit(.disconnected)
++        transport.emit(.ready("Camera"))
++        coordinator.locationManager(manager, didUpdateLocations: [CLLocation(latitude: 32, longitude: 122)])
++        coordinator.scheduleWriteIfDue(force: true)
++        await Task.yield()
++        XCTAssertEqual(coordinator.state.permissionIssue, .locationDenied)
++        XCTAssertNil(coordinator.state.lastSentAt)
++        XCTAssertFalse(manager.updating)
++        XCTAssertFalse(coordinator.hasScheduledBluetoothRecovery)
++        XCTAssertEqual(transport.payloads.count, 1)
++    }
++
++    func testGPSPermissionDescriptionsPresentInBuiltApp() {
++        for key in ["NSLocationWhenInUseUsageDescription", "NSLocationAlwaysAndWhenInUseUsageDescription", "NSBluetoothAlwaysUsageDescription"] {
++            XCTAssertFalse((Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "").isEmpty, key)
++        }
++    }
++
+     func testManualSyncPresentationMatchesEveryAndroidStatus() {
+         let allowed: Set<GPSStatus> = [.pairingSuccess, .connected, .waitingFix, .ready]
+         let statuses: [GPSStatus] = [.off, .starting, .searching, .needsCamera, .connecting,
+@@ -1298,8 +1496,12 @@
+         get { controlledDelegate }
+         set { controlledDelegate = newValue }
+     }
+-    override var authorizationStatus: CLAuthorizationStatus { .authorizedWhenInUse }
+-    override func requestAlwaysAuthorization() {}
++    var authorization: CLAuthorizationStatus = .authorizedWhenInUse
++    private(set) var foregroundRequests = 0
++    private(set) var backgroundRequests = 0
++    override var authorizationStatus: CLAuthorizationStatus { authorization }
++    override func requestWhenInUseAuthorization() { foregroundRequests += 1 }
++    override func requestAlwaysAuthorization() { backgroundRequests += 1 }
+     override func startUpdatingLocation() { starts += 1; updating = true }
+     override func stopUpdatingLocation() { stops += 1; updating = false }
+ }

@@ -1,0 +1,69 @@
+Test Suite 'Selected tests' started at 2026-10-30 20:24:36.203.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 20:24:36.203.
+Test Suite 'PhotoNp3SnapshotCodecTests' started at 2026-10-30 20:24:36.204.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testAll69AndroidSnapshotsMatchBothDirectionsIncludingModifiedUTF]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testAll69AndroidSnapshotsMatchBothDirectionsIncludingModifiedUTF]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testChecksummedMalformedControlsCurvesAndGradingCannotReachRenderer]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testChecksummedMalformedControlsCurvesAndGradingCannotReachRenderer]' passed (0.015 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testClassicKindsIDsAndBaseCannotBeSubstituted]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testClassicKindsIDsAndBaseCannotBeSubstituted]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testEveryTruncationBitCorruptionAndOversizeIsRejected]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testEveryTruncationBitCorruptionAndOversizeIsRejected]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testInvalidPrivateSnapshotDoesNotDiscardOtherSettings]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testInvalidPrivateSnapshotDoesNotDiscardOtherSettings]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testNamesRejectBlankControlsAndUTF16OverLimit]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testNamesRejectBlankControlsAndUTF16OverLimit]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testOriginalFlexibleV1HashRemainsExactAndInactiveMetadataUsesV3]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testOriginalFlexibleV1HashRemainsExactAndInactiveMetadataUsesV3]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testRestoredPrivateRecipeActuallyRendersWithoutSourceFile]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testRestoredPrivateRecipeActuallyRendersWithoutSourceFile]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testSelectionCodableOwnsRecipeAndRetainsRenderingIdentity]' started.
+Test Case '-[ZTransferTests.PhotoNp3SnapshotCodecTests testSelectionCodableOwnsRecipeAndRetainsRenderingIdentity]' passed (0.003 seconds).
+Test Suite 'PhotoNp3SnapshotCodecTests' passed at 2026-10-30 20:24:36.291.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.083 (0.087) seconds
+Test Suite 'PhotoNp3StoreTests' started at 2026-10-30 20:24:36.291.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testCorruptMismatchedOversizedSnapshotsAndLabelsFailIndependently]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testCorruptMismatchedOversizedSnapshotsAndLabelsFailIndependently]' passed (0.043 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testDirectoryReplacementInvalidatesCustomDraftsButRetainsQueuedValueAndBuiltin]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testDirectoryReplacementInvalidatesCustomDraftsButRetainsQueuedValueAndBuiltin]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testFolderNotificationsAreSharedDeduplicatedAndCancelled]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testFolderNotificationsAreSharedDeduplicatedAndCancelled]' passed (0.045 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testNormalizationRetainsPrivateRecipeAndFinishingWithoutMergingRoles]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testNormalizationRetainsPrivateRecipeAndFinishingWithoutMergingRoles]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRenamingUpdatesOnlyLabelAndDuplicateLabelsMatchCatalogOrder]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRenamingUpdatesOnlyLabelAndDuplicateLabelsMatchCatalogOrder]' passed (0.010 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRolesRestorePrivateRecipesWithoutSourceAndDisableIsIndependent]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testRolesRestorePrivateRecipesWithoutSourceAndDisableIsIndependent]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testSourceHintsSurviveOffRefreshOnlyAfterReadAndAreIndependentSnapshots]' started.
+Test Case '-[ZTransferTests.PhotoNp3StoreTests testSourceHintsSurviveOffRefreshOnlyAfterReadAndAreIndependentSnapshots]' passed (0.011 seconds).
+Test Suite 'PhotoNp3StoreTests' passed at 2026-10-30 20:24:36.444.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.151 (0.153) seconds
+Test Suite 'RemoteLUTLoadQueueTests' started at 2026-10-30 20:24:36.445.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCachedFileAlwaysRechecksMetadataAndDoesNotCacheMidReadEdits]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCachedFileAlwaysRechecksMetadataAndDoesNotCacheMidReadEdits]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCancellationInvalidatesOlderResult]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testCancellationInvalidatesOlderResult]' passed (0.060 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testOversizedFileIsRejectedBeforeCacheHitOrByteRead]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testOversizedFileIsRejectedBeforeCacheHitOrByteRead]' passed (0.003 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testParsedCacheInvalidationAndBothCapacityLimits]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testParsedCacheInvalidationAndBothCapacityLimits]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testRevokedScopeInvalidatesCachedTableBeforeRetry]' started.
+Test Case '-[ZTransferTests.RemoteLUTLoadQueueTests testRevokedScopeInvalidatesCachedTableBeforeRetry]' passed (0.018 seconds).
+Test Suite 'RemoteLUTLoadQueueTests' passed at 2026-10-30 20:24:36.532.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.085 (0.087) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 20:24:36.532.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.319 (0.329) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 20:24:36.532.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.319 (0.329) seconds
+2026-10-30 20:24:36.563 xcodebuild[87392:36641169] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:24:36.563 xcodebuild[87392:36641169] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 20:24:36.846 xcodebuild[87392:36641169] [MT] IDETestOperationsObserverDebug: 23.613 elapsed -- Testing started completed.
+2026-10-30 20:24:36.846 xcodebuild[87392:36641169] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-30 20:24:36.846 xcodebuild[87392:36641169] [MT] IDETestOperationsObserverDebug: 23.613 sec, +23.613 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-np3-editor-20261030.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

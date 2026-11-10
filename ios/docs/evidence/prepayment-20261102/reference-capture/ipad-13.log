@@ -1,0 +1,132 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test-without-building -project /var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-release-capture-20261102-vpmw_giy/ReleaseReferenceCapture.xcodeproj -scheme ReleaseReferenceCapture -configuration Debug -destination "platform=iOS Simulator,id=24B58D40-0F5F-4B1D-AC9E-5D294B304579" -derivedDataPath /var/folders/rr/fss4jpkd4j75hmdqk75km2x80000gn/T/ztransfer-release-capture-20261102-vpmw_giy/DerivedData -parallel-testing-enabled NO -resultBundlePath /Users/orys/code/nk_send/ios/docs/evidence/prepayment-20261102/reference-capture/ipad-13.xcresult "-only-testing:ReleaseReferenceCapture/ReleaseReferenceCapture/testCurrentReleaseHomeAndSettings" CODE_SIGN_IDENTITY=-
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = -
+
+Writing result bundle at path:
+	/Users/orys/code/nk_send/ios/docs/evidence/prepayment-20261102/reference-capture/ipad-13.xcresult
+
+2026-11-02 15:49:58.944660+0800 ReleaseReferenceCapture-Runner[69674:39262108] [Default] Running tests...
+2026-11-02 15:49:58.983797+0800 ReleaseReferenceCapture-Runner[69674:39262108] [UIKit App Config] Update the Info.plist: Launch screens will soon be required.
+objc[69674]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x1089b8310) and /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x108a34398). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-11-02 15:50:02.656.
+Test Suite 'ReleaseReferenceCapture.xctest' started at 2026-11-02 15:50:02.663.
+Test Suite 'ReleaseReferenceCapture' started at 2026-11-02 15:50:02.668.
+Test Case '-[ReleaseReferenceCapture.ReleaseReferenceCapture testCurrentReleaseHomeAndSettings]' started.
+    t =     0.00s Start Test at 2026-11-02 15:50:02.670
+    t =     0.39s Set Up
+    t =     0.42s Open com.ztransfer.ios
+    t =     0.42s     Launch com.ztransfer.ios
+    t =     0.75s         Setting up automation session
+    t =     1.83s         Wait for com.ztransfer.ios to idle
+    t =     6.35s Waiting 20.0s for "popup-trigger-settings" Button to exist
+    t =     7.43s     Checking `Expect predicate `existsNoRetry == 1` for object "popup-trigger-settings" Button`
+    t =     7.43s         Checking existence of `"popup-trigger-settings" Button`
+    t =     7.67s Tap "popup-trigger-settings" Button
+    t =     7.67s     Wait for com.ztransfer.ios to idle
+    t =     7.67s     Find the "popup-trigger-settings" Button
+    t =     7.76s     Check for interrupting elements affecting "popup-trigger-settings" Button
+    t =     7.86s         Wait for com.apple.springboard to idle
+    t =     8.01s     Synthesize event
+    t =     8.44s     Wait for com.ztransfer.ios to idle
+    t =     8.85s Waiting 5.0s for Button (First Match) to exist
+    t =     9.93s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =     9.93s         Checking existence of `Button (First Match)`
+    t =    10.06s Find the Button (First Match)
+    t =    10.20s Find the "语言" Button
+    t =    10.34s Tap "语言" Button
+    t =    10.34s     Wait for com.ztransfer.ios to idle
+    t =    10.34s     Find the "语言" Button
+    t =    10.49s     Check for interrupting elements affecting "语言" Button
+    t =    10.61s         Wait for com.apple.springboard to idle
+    t =    10.66s     Synthesize event
+    t =    10.99s     Wait for com.ztransfer.ios to idle
+    t =    11.27s Waiting 5.0s for "popup-trigger-settings" Button to exist
+    t =    12.35s     Checking `Expect predicate `existsNoRetry == 1` for object "popup-trigger-settings" Button`
+    t =    12.35s         Checking existence of `"popup-trigger-settings" Button`
+    t =    13.01s Tap "popup-trigger-settings" Button
+    t =    13.01s     Wait for com.ztransfer.ios to idle
+    t =    13.02s     Find the "popup-trigger-settings" Button
+    t =    13.10s     Check for interrupting elements affecting "popup-trigger-settings" Button
+    t =    13.17s         Wait for com.apple.springboard to idle
+    t =    13.21s     Synthesize event
+    t =    13.52s     Wait for com.ztransfer.ios to idle
+    t =    13.74s Waiting 5.0s for Button (First Match) to exist
+    t =    14.82s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    14.82s         Checking existence of `Button (First Match)`
+    t =    14.98s Find the Button (First Match)
+    t =    15.17s Find the "Language" Button
+    t =    15.35s Tap "Language" Button
+    t =    15.35s     Wait for com.ztransfer.ios to idle
+    t =    15.36s     Find the "Language" Button
+    t =    15.51s     Check for interrupting elements affecting "Language" Button
+    t =    15.62s         Wait for com.apple.springboard to idle
+    t =    15.68s     Synthesize event
+    t =    16.00s     Wait for com.ztransfer.ios to idle
+    t =    16.23s Waiting 5.0s for "popup-trigger-settings" Button to exist
+    t =    17.30s     Checking `Expect predicate `existsNoRetry == 1` for object "popup-trigger-settings" Button`
+    t =    17.30s         Checking existence of `"popup-trigger-settings" Button`
+    t =    17.91s Tap "popup-trigger-settings" Button
+    t =    17.91s     Wait for com.ztransfer.ios to idle
+    t =    17.91s     Find the "popup-trigger-settings" Button
+    t =    18.00s     Check for interrupting elements affecting "popup-trigger-settings" Button
+    t =    18.08s         Wait for com.apple.springboard to idle
+    t =    18.11s     Synthesize event
+    t =    18.41s     Wait for com.ztransfer.ios to idle
+    t =    18.60s Waiting 5.0s for Button (First Match) to exist
+    t =    19.67s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    19.67s         Checking existence of `Button (First Match)`
+    t =    19.80s Find the Button (First Match)
+    t =    19.97s Find the "语言" Button
+    t =    20.12s Tap "关闭" Button
+    t =    20.12s     Wait for com.ztransfer.ios to idle
+    t =    20.14s     Find the "关闭" Button
+    t =    20.30s     Check for interrupting elements affecting "xmark" Button
+    t =    20.42s         Wait for com.apple.springboard to idle
+    t =    20.47s     Synthesize event
+    t =    20.78s     Wait for com.ztransfer.ios to idle
+    t =    21.96s Checking existence of `"debug-simulator-entry" Button`
+    t =    22.89s Find the Application 'com.ztransfer.ios'
+    t =    23.32s Added attachment named '01-connect'
+    t =    23.32s Tap "popup-trigger-settings" Button
+    t =    23.32s     Wait for com.ztransfer.ios to idle
+    t =    23.32s     Find the "popup-trigger-settings" Button
+    t =    23.42s     Check for interrupting elements affecting "popup-trigger-settings" Button
+    t =    23.49s         Wait for com.apple.springboard to idle
+    t =    23.52s     Synthesize event
+    t =    23.82s     Wait for com.ztransfer.ios to idle
+    t =    24.04s Waiting 5.0s for "关闭" Button to exist
+    t =    25.11s     Checking `Expect predicate `existsNoRetry == 1` for object "关闭" Button`
+    t =    25.11s         Checking existence of `"关闭" Button`
+    t =    25.25s Find the "语言" Button
+    t =    26.21s Find the Application 'com.ztransfer.ios'
+    t =    26.70s Added attachment named '02-settings'
+    t =    26.70s Tap "关闭" Button
+    t =    26.70s     Wait for com.ztransfer.ios to idle
+    t =    26.71s     Find the "关闭" Button
+    t =    26.85s     Check for interrupting elements affecting "xmark" Button
+    t =    26.96s         Wait for com.apple.springboard to idle
+    t =    27.00s     Synthesize event
+    t =    27.31s     Wait for com.ztransfer.ios to idle
+    t =    27.48s Find the "popup-trigger-settings" Button
+    t =    27.60s Terminate com.ztransfer.ios:69699
+    t =    28.62s Tear Down
+Test Case '-[ReleaseReferenceCapture.ReleaseReferenceCapture testCurrentReleaseHomeAndSettings]' passed (29.139 seconds).
+Test Suite 'ReleaseReferenceCapture' passed at 2026-11-02 15:50:31.810.
+	 Executed 1 test, with 0 failures (0 unexpected) in 29.139 (29.141) seconds
+Test Suite 'ReleaseReferenceCapture.xctest' passed at 2026-11-02 15:50:31.810.
+	 Executed 1 test, with 0 failures (0 unexpected) in 29.139 (29.148) seconds
+Test Suite 'Selected tests' passed at 2026-11-02 15:50:31.811.
+	 Executed 1 test, with 0 failures (0 unexpected) in 29.139 (29.155) seconds
+2026-11-02 15:50:32.235 xcodebuild[69629:39261524] [MT] IDETestOperationsObserverDebug: 36.629 elapsed -- Testing started completed.
+2026-11-02 15:50:32.235 xcodebuild[69629:39261524] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-02 15:50:32.235 xcodebuild[69629:39261524] [MT] IDETestOperationsObserverDebug: 36.629 sec, +36.629 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/orys/code/nk_send/ios/docs/evidence/prepayment-20261102/reference-capture/ipad-13.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

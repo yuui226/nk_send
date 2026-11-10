@@ -1,0 +1,4 @@
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoRatingScanTests.swift:449:41: error: 'CropPermitLatch' is inaccessible due to 'private' protection level
+    |                                         `- error: 'CropPermitLatch' is inaccessible due to 'private' protection level
+Testing failed:
+** TEST FAILED **

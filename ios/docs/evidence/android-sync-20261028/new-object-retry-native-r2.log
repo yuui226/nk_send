@@ -1,0 +1,142 @@
+Building for debugging...
+[Planning deferred tasks]
+[5 / 28] ZTransfer
+[14 / 37] ZTransfer
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPTransferDiagnostics.swift:36:78: warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 34 |     private let emit: @Sendable (String) -> Void
+ 35 | 
+ 36 |     init(emit: @escaping @Sendable (String) -> Void = PTPTransferDiagnostics.persist) {
+    |                                                                              `- warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 37 |         self.emit = emit
+ 38 |     }
+[15 / 37] ZTransfer
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/PTPTransferDiagnostics.swift:36:78: warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 34 |     private let emit: @Sendable (String) -> Void
+ 35 | 
+ 36 |     init(emit: @escaping @Sendable (String) -> Void = PTPTransferDiagnostics.persist) {
+    |                                                                              `- warning: converting non-Sendable function value to '@Sendable (String) -> Void' may introduce data races
+ 37 |         self.emit = emit
+ 38 |     }
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAConnectionCoordinator.swift:60:75: warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+ 58 |             do {
+ 59 |                 let camera = try await connect(candidate, preferred, expectedGUID,
+ 60 |                     pairingReconnectUsed && preferred == .pairedComputer, reportStage)
+    |                                                                           `- warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+ 61 |                 guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
+ 62 |                 reachedStorage = true
+
+/private/tmp/ztransfer-new-object-retry-native/Sources/ZTransfer/STAConnectionCoordinator.swift:104:71: warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+102 |         do {
+103 |             let camera = try await connect(candidate, alternate, expectedGUID,
+104 |                 pairingReconnectUsed && alternate == .pairedComputer, reportStage)
+    |                                                                       `- warning: converting non-Sendable function value to '@Sendable (STAConnectionStage) async -> Void' may introduce data races
+105 |             guard !Task.isCancelled else { await camera.close(); throw CancellationError() }
+106 |             guard profiles.isPaired(camera.guid) else {
+[22 / 37] ZTransfer
+[27 / 38] ThumbnailTests-product
+[37 / 57]
+[38 / 57]
+[41 / 57]
+[42 / 57]
+[46 / 57] ThumbnailTests-product
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:169:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+167 |         let stream = await store.retryWakes()
+168 |         var iterator = stream.makeAsyncIterator()
+169 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+170 |         XCTAssertNil(end)
+171 |     }
+/private/tmp/ztransfer-new-object-retry-native/Tests/ThumbnailTests/NewObjectThumbnailRetryTests.swift:169:13: warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+167 |         let stream = await store.retryWakes()
+168 |         var iterator = stream.makeAsyncIterator()
+169 |         let end = await iterator.next()
+    |             |- warning: constant 'end' inferred to have type 'Void?', which may be unexpected
+    |             `- note: add an explicit type annotation to silence this warning
+170 |         XCTAssertNil(end)
+171 |     }
+[51 / 57] ThumbnailTests-product
+[53 / 57] ThumbnailTests-product
+Build complete! (7.61秒)
+Test Suite 'All tests' started at 2026-10-30 23:33:44.694.
+Test Suite 'ThumbnailTests.xctest' started at 2026-10-30 23:33:44.695.
+Test Suite 'NewObjectThumbnailRetryTests' started at 2026-10-30 23:33:44.695.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testAndroidFiniteBudgetAndJoinedFailureBoundaries]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testAndroidFiniteBudgetAndJoinedFailureBoundaries]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testBothStoreLanesWaitAndStopAfterThreeRetries]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testBothStoreLanesWaitAndStopAfterThreeRetries]' passed (0.008 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testIndependentDeadlinesAndRemovalReset]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testIndependentDeadlinesAndRemovalReset]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testLateInFlightResultAfterDeletionCannotRecreateRetryOrCache]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testLateInFlightResultAfterDeletionCannotRecreateRetryOrCache]' passed (0.009 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testRealTimerWakesOnceWithoutOwningCameraIO]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testRealTimerWakesOnceWithoutOwningCameraIO]' passed (0.314 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSharedVisibleAndPrefetchFailureConsumesOnlyOneAttempt]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSharedVisibleAndPrefetchFailureConsumesOnlyOneAttempt]' passed (0.020 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSuccessHistoricalMissAndHandleReuseKeepIndependentPolicies]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testSuccessHistoricalMissAndHandleReuseKeepIndependentPolicies]' passed (0.007 seconds).
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testTransportFailureRetriesButCancellationDoesNotSpendBudget]' started.
+Test Case '-[ThumbnailTests.NewObjectThumbnailRetryTests testTransportFailureRetriesButCancellationDoesNotSpendBudget]' passed (0.004 seconds).
+Test Suite 'NewObjectThumbnailRetryTests' passed at 2026-10-30 23:33:45.059.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.363 (0.364) seconds
+Test Suite 'PhotoThumbnailPerformanceTests' started at 2026-10-30 23:33:45.059.
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testByteBoundedAccessOrderOverwriteRemovalAndOversizedEntry]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testByteBoundedAccessOrderOverwriteRemovalAndOversizedEntry]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testCancellingOneVisibleWaiterPreservesSharedDecodeForRemainingOwner]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testCancellingOneVisibleWaiterPreservesSharedDecodeForRemainingOwner]' passed (0.019 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testConcurrentVisibleLoadsDecodeOnceEvenIfTooLargeForMemory]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testConcurrentVisibleLoadsDecodeOnceEvenIfTooLargeForMemory]' passed (0.027 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testLargeCatalogAccessKeepsExactValuesAndBoundedCost]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testLargeCatalogAccessKeepsExactValuesAndBoundedCost]' passed (0.162 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testProductionEvictionUsesDiskThenInvalidationAndResetReloadCorrectly]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testProductionEvictionUsesDiskThenInvalidationAndResetReloadCorrectly]' passed (0.006 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testRandomAccessMatchesExistingArrayPolicyAcrossReplacementAndPruning]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailPerformanceTests testRandomAccessMatchesExistingArrayPolicyAcrossReplacementAndPruning]' passed (0.077 seconds).
+Test Suite 'PhotoThumbnailPerformanceTests' passed at 2026-10-30 23:33:45.353.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.293 (0.294) seconds
+Test Suite 'PhotoThumbnailStoreTests' started at 2026-10-30 23:33:45.353.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testAuthoritativeRemovalClearsNegativeStateForReusedObject]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testAuthoritativeRemovalClearsNegativeStateForReusedObject]' passed (0.002 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testCacheOnlyPreviewGateDoesNotFetchAndRemoteLoadResumesLater]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testCacheOnlyPreviewGateDoesNotFetchAndRemoteLoadResumesLater]' passed (0.002 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testConcurrentLoadsShareOneRemoteReadAndThenUseMemoryCache]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testConcurrentLoadsShareOneRemoteReadAndThenUseMemoryCache]' passed (0.022 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testDirectSTARawEmptyProbeRemainsRetryable]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testDirectSTARawEmptyProbeRemainsRetryable]' passed (0.002 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testDirectSTARawPrefetchDoesNotWaitForVisibility]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testDirectSTARawPrefetchDoesNotWaitForVisibility]' passed (0.002 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testDiskWriteFailureBlocksFurtherFetchesUntilNewStoreSession]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testDiskWriteFailureBlocksFurtherFetchesUntilNewStoreSession]' passed (0.003 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testEmptyPrefetchSettlesNegativeCache]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testEmptyPrefetchSettlesNegativeCache]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testEnhancedSTAJpegRejectsEveryOldCacheRouteAndReusesNewEntry]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testEnhancedSTAJpegRejectsEveryOldCacheRouteAndReusesNewEntry]' passed (0.004 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testLeavingCellOnlyCancelsObservationWhileSequentialFetchCompletes]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testLeavingCellOnlyCancelsObservationWhileSequentialFetchCompletes]' passed (0.063 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testMalformedDiskEntryIsDeletedAndRefetchedInsteadOfNegativelyCached]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testMalformedDiskEntryIsDeletedAndRefetchedInsteadOfNegativelyCached]' passed (0.003 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testNewPhotosBypassHistoricalRangeAcrossPauseRetryAndRescan]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testNewPhotosBypassHistoricalRangeAcrossPauseRetryAndRescan]' passed (0.001 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testPrefetchStoresRawBytesAndVisibleLoadProcessesExactlyOnce]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testPrefetchStoresRawBytesAndVisibleLoadProcessesExactlyOnce]' passed (0.002 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testRejectedNEFBytesAreNotPersistedAndImmediateRetryDoesNotReuseFailedFlight]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testRejectedNEFBytesAreNotPersistedAndImmediateRetryDoesNotReuseFailedFlight]' passed (0.005 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testRemovalClearsPendingAndFailedOwnersBeforeHandleReuse]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testRemovalClearsPendingAndFailedOwnersBeforeHandleReuse]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testSequentialQueueIgnoresFiltersAndAppendsNewFilesWithoutRestart]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testSequentialQueueIgnoresFiltersAndAppendsNewFilesWithoutRestart]' passed (0.000 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testSequentialSTAIncludesNEFAndRejectsBadDiskAndRemoteBytes]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testSequentialSTAIncludesNEFAndRejectsBadDiskAndRemoteBytes]' passed (0.004 seconds).
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testSharedPrefetchWaitersReceiveTheSameWriteFailure]' started.
+Test Case '-[ThumbnailTests.PhotoThumbnailStoreTests testSharedPrefetchWaitersReceiveTheSameWriteFailure]' passed (0.031 seconds).
+Test Suite 'PhotoThumbnailStoreTests' passed at 2026-10-30 23:33:45.502.
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.147 (0.149) seconds
+Test Suite 'ThumbnailTests.xctest' passed at 2026-10-30 23:33:45.502.
+	 Executed 31 tests, with 0 failures (0 unexpected) in 0.803 (0.807) seconds
+Test Suite 'All tests' passed at 2026-10-30 23:33:45.502.
+	 Executed 31 tests, with 0 failures (0 unexpected) in 0.803 (0.807) seconds
+P32: 20000 hits in 50000-entry thumbnail LRU: 0.044405833 seconds
+◇ Test run started.
+↳ Testing Library Version: 2403
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

@@ -40,6 +40,7 @@ final class RemoteToolPreferences: ObservableObject {
     @Published var level: Bool { didSet { save(level, oldValue, "remote_level") } }
     @Published var focusFrame: Bool { didSet { save(focusFrame, oldValue, "remote_focus_frame") } }
     @Published var meter: Bool { didSet { save(meter, oldValue, "remote_exposure_meter") } }
+    @Published var selfTimerSeconds: Int { didSet { save(selfTimerSeconds, oldValue, "remote_self_timer_seconds") } }
     @Published var locked: Bool { didSet { save(locked, oldValue, "remote_layout_locked") } }
     @Published var lockedRotation: Int { didSet { save(lockedRotation, oldValue, "remote_locked_rotation") } }
     @Published var desqueeze: Double { didSet { save(desqueeze, oldValue, "remote_desqueeze_multiplier") } }
@@ -80,6 +81,8 @@ final class RemoteToolPreferences: ObservableObject {
         level = bool("remote_level")
         focusFrame = bool("remote_focus_frame", true)
         meter = bool("remote_exposure_meter")
+        let timerSeconds = defaults.integer(forKey: "remote_self_timer_seconds")
+        selfTimerSeconds = RemoteSelfTimer.options.contains(timerSeconds) ? timerSeconds : 0
         locked = bool("remote_layout_locked")
         lockedRotation = min(2, max(0, defaults.integer(forKey: "remote_locked_rotation")))
         desqueeze = RemoteDisplayOptions.normalizedDesqueeze(defaults.object(forKey: "remote_desqueeze_multiplier") == nil ? 1 : defaults.double(forKey: "remote_desqueeze_multiplier"))
@@ -106,6 +109,7 @@ final class RemoteToolPreferences: ObservableObject {
         case .level: level = false
         case .focusFrame: focusFrame = false
         case .meter: meter = false
+        case .selfTimer: selfTimerSeconds = 0
         case .waveform: waveform = .off
         case .lock: locked = false
         case .computerControl: computerControl = false

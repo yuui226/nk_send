@@ -59,6 +59,17 @@ final class ZTransferHaptics {
 
     func completeLongPress(_ action: () -> Void) {
         completeProgressiveHold()
+        performConfirmedAction(action)
+    }
+
+    /// Wheels stay silent until a detent changes or their hold action succeeds.
+    /// Keep the same confirmation suppression as progressive holds elsewhere.
+    func confirmLongPress(_ action: () -> Void) {
+        play(.holdConfirmed)
+        performConfirmedAction(action)
+    }
+
+    private func performConfirmedAction(_ action: () -> Void) {
         Self.confirmationDepth += 1
         defer { Self.confirmationDepth -= 1 }
         action()

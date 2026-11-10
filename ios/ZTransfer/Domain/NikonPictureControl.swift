@@ -98,15 +98,16 @@ struct NikonPictureControlData: Equatable, Sendable {
             try pictureControlRequire(source[31] == 0 || (source[31] == 1 && source.count == 610), "Invalid or truncated V2 Picture Control curve")
             return
         }
-        isEmpty = source.allSatisfy { $0 == 0 }
+        // Z8: only BasePictureControl=0 defines an unused custom slot;
+        // the remaining bytes are unspecified, including full curve storage.
+        baseItem = Int(source[0]) | Int(source[1]) << 8
+        isEmpty = baseItem == 0
         if isEmpty {
-            try pictureControlRequire(Self.customSlots.contains(item) && source.count == 36,
+            try pictureControlRequire(Self.customSlots.contains(item),
                                       "Invalid empty Picture Control data")
-            baseItem = 0; name = ""; curve = nil
+            name = ""; curve = nil
             return
         }
-        baseItem = Int(source[0]) | Int(source[1]) << 8
-        try pictureControlRequire(baseItem != 0, "Missing Picture Control base")
         let nameBytes = Array(source[2..<22])
         let length = nameBytes.firstIndex(of: 0) ?? nameBytes.count
         try pictureControlRequire((1...19).contains(length) && nameBytes.prefix(length).allSatisfy { (32...126).contains($0) },

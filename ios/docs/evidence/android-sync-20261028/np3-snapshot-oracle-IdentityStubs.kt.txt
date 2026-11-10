@@ -1,0 +1,3 @@
+package com.ztransfer.filter
+object PhotoNp3Parser { const val CONVERTER_VERSION="np3-srgb-v1"; const val CLASSIC_CONVERTER_VERSION="np3-classic-srgb-v1" }
+object BuiltInPhotoFilters { fun catalogKey(id:String):String? = error("Built-in catalog is not used by custom snapshot tests") }

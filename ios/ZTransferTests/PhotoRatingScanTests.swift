@@ -3,6 +3,72 @@ import XCTest
 
 final class PhotoRatingScanTests: XCTestCase {
     @MainActor
+    func testResetClearsPersistedFiltersIncludingSTAProtectionAndLateEditsUseLiveState() {
+        let saved = PhotoFilterPersistence.load()
+        let savedRange = PhotoFilterPersistence.loadPhotoLoadingRange()
+        defer { PhotoFilterPersistence.save(saved); PhotoFilterPersistence.savePhotoLoadingRange(savedRange) }
+        PhotoFilterPersistence.savePhotoLoadingRange(.three)
+        for sta in [false, true] {
+            let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
+                PhotoScanResult(files: [], removedHandles: [], addedHandles: [],
+                    handleQueriesSucceeded: true, metadataComplete: true)
+            }, setRemoteGate: { _ in }, sequentialLoading: sta)
+            defer { model.cancelRatingScan(); model.cancelLoading() }
+            model.setFilter(PhotoFilterState(extensions: [".nef"], protectedOnly: true,
+                ratingEnabled: true, rating: 4, ratingDays: 0, burstOnly: true,
+                untransferredOnly: true, storageSlot: 2,
+                dateRange: PhotoDateRange(start: "20240101", end: "20260101")))
+            let ordinaryEdit = model.filterForPersistence(PhotoFilterState())
+            XCTAssertEqual(ordinaryEdit.protectedOnly, sta, "Only unavailable STA protection is preserved")
+            model.clearFilter()
+            XCTAssertEqual(model.filter, PhotoFilterState())
+            XCTAssertEqual(PhotoFilterPersistence.load(), PhotoFilterState())
+            XCTAssertEqual(PhotoFilterPersistence.loadPhotoLoadingRange(), .three,
+                           "Reset filters must not reset the independent thumbnail loading scope")
+            if sta {
+                var lateEdit = PhotoFilterState(protectedOnly: true, ratingDays: 1)
+                lateEdit = model.filterForPersistence(lateEdit)
+                model.setFilter(lateEdit)
+                XCTAssertFalse(model.filter.protectedOnly)
+                XCTAssertFalse(PhotoFilterPersistence.load().protectedOnly)
+                XCTAssertEqual(PhotoFilterPersistence.load().ratingDays, 1)
+            }
+        }
+    }
+
+    @MainActor
+    func testResetWhileRatingReadIsInFlightDiscardsLateResultAndRestoresDefaultRange() async throws {
+        let saved = PhotoFilterPersistence.load()
+        defer { PhotoFilterPersistence.save(saved) }
+        PhotoFilterPersistence.save(PhotoFilterState())
+        let gate = RatingLookupGate(), stub = Stub()
+        let files = [file(1, "A.JPG", "20261016T120000")]
+        let io = PhotoRatingScanIO(generation: { await stub.generation },
+            invalidate: { await stub.invalidate() }, cached: { _ in nil },
+            beginPhase: { await stub.begin() }, endPhase: { await stub.end() },
+            read: { _, _ in await gate.lookup()?.value })
+        let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
+            PhotoScanResult(files: files, removedHandles: [], addedHandles: [],
+                handleQueriesSucceeded: true, metadataComplete: true)
+        }, setRemoteGate: { _ in }, ratingIO: io)
+        defer { model.cancelRatingScan(); model.cancelLoading() }
+        await model.reload()
+        model.setFilter(PhotoFilterState(ratingEnabled: true, rating: 5, ratingDays: 0))
+        for _ in 0..<100 where await gate.calls < 1 { try await Task.sleep(for: .milliseconds(5)) }
+        let calls = await gate.calls
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(model.ratingScan.loading)
+        model.clearFilter()
+        XCTAssertEqual(model.filter, PhotoFilterState())
+        XCTAssertEqual(model.ratingScan, PhotoRatingScan())
+        XCTAssertEqual(model.sections.flatMap(\.files), files)
+        await gate.release(1, value: PhotoRatingCacheEntry(value: 5, origin: "cancelled-by-reset"))
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(model.ratingScan, PhotoRatingScan(), "A late camera response cannot restore reset ratings")
+        XCTAssertEqual(PhotoFilterPersistence.load(), PhotoFilterState())
+    }
+
+    @MainActor
     func testStoppingPartialScanDiscardsValuesAndRestartReadsEveryFileAgain() async throws {
         let gate = RatingLookupGate(), stub = Stub()
         let model = PhotoRatingScanController(io: PhotoRatingScanIO(
@@ -270,7 +336,7 @@ final class PhotoRatingScanTests: XCTestCase {
         }
     }
 
-    private func file(_ id: UInt32, _ name: String, _ date: String) -> CameraFile {
+    private func file(_ id: UInt32, _ name: String, _ date: String?) -> CameraFile {
         CameraFile(id: id, storageID: 1, format: 0x3801, size: 1,
                    fileName: name, captureDate: date, isProtected: false)
     }
@@ -278,13 +344,16 @@ final class PhotoRatingScanTests: XCTestCase {
     private func input(_ files: [CameraFile], sta: Bool = true,
                        loading: Bool = true, readyDays: Int = 0,
                        ratingDays: Int = 3, photoDays: Int = 0,
-                       paused: Bool = false) -> PhotoRatingScanInput {
+                       paused: Bool = false, complete: Bool? = nil,
+                       appliedPhotoDays: Int? = nil) -> PhotoRatingScanInput {
         PhotoRatingScanInput(files: files, paused: paused,
                              useObjectRating: !sta, staConnection: sta,
                              listLoading: loading,
                              recentThumbnailReadyDays: readyDays,
                              ratingDays: ratingDays,
-                             photoLoadingDays: photoDays)
+                             photoLoadingDays: photoDays,
+                             appliedPhotoLoadingDays: appliedPhotoDays ?? photoDays,
+                             hasCompletedFileScan: complete ?? !loading)
     }
 
     @MainActor
@@ -311,6 +380,224 @@ final class PhotoRatingScanTests: XCTestCase {
         XCTAssertEqual(PhotoRatingScanPolicy.effectiveDays(ratingDays: 0, photoLoadingDays: 5), 5)
         XCTAssertEqual(PhotoRatingScanPolicy.effectiveDays(ratingDays: 3, photoLoadingDays: 0), 3)
         XCTAssertEqual(PhotoRatingScanPolicy.effectiveDays(ratingDays: 0, photoLoadingDays: 0), 0)
+        XCTAssertEqual(PhotoRatingScanPolicy.effectiveDays(ratingDays: -1, photoLoadingDays: -3), 0)
+        XCTAssertEqual(PhotoRatingScanPolicy.effectiveDays(ratingDays: -1, photoLoadingDays: 5), 5)
+        XCTAssertEqual(PhotoRatingScanPolicy.effectiveDays(ratingDays: 3, photoLoadingDays: -1), 3)
+    }
+
+    // Literal rules from Android PhotoRatingRangeTest; source order and the
+    // full catalog's actual shooting days are shared across USB/AP/STA.
+    func testPlanUsesNewestActualDaysForEveryTransportAndKeepsCameraOrder() {
+        let files = [file(1, "OLD.JPG", "20260901"), file(2, "NEW.NEF", "20261102"),
+                     file(3, "MID.MOV", "20261029"), file(4, "NEW.JPG", "20261102"),
+                     file(5, "OTHER.NRW", "20261010"), file(6, "UNDATED.JPG", nil)]
+        for sta in [false, true] {
+            for (rating, photo, expected) in [(1, 0, [2, 4]), (3, 0, [2, 3, 4, 5]),
+                (5, 1, [2, 4]), (0, 3, [2, 3, 4, 5]), (3, 5, [2, 3, 4, 5]),
+                (5, 0, [1, 2, 3, 4, 5]), (0, 0, [1, 2, 3, 4, 5, 6])] {
+                let plan = PhotoRatingScanPolicy.plan(input(files, sta: sta, loading: false,
+                    ratingDays: rating, photoDays: photo))
+                XCTAssertTrue(plan.ready)
+                XCTAssertEqual(plan.files.map { Int($0.id) }, expected)
+            }
+        }
+    }
+
+    func testPlanWaitsForExplicitCompletionOrConfirmedFiniteBoundary() {
+        let files = [file(1, "A.JPG", "20261102"), file(2, "B.JPG", "20261029"),
+                     file(3, "C.JPG", "20261010")]
+        for sta in [false, true] {
+            // Paused/empty/short catalogs are not complete, even with a stale
+            // large thumbnail-ready count. All-days always waits for completion.
+            for subset in [[], Array(files.prefix(1)), files] {
+                for days in [0, 5] {
+                    let plan = PhotoRatingScanPolicy.plan(input(subset, sta: sta, loading: false,
+                        readyDays: 100, ratingDays: days, complete: false))
+                    XCTAssertFalse(plan.ready)
+                }
+                XCTAssertTrue(PhotoRatingScanPolicy.plan(input(subset, sta: sta,
+                    loading: false, ratingDays: 5, complete: true)).ready)
+            }
+            XCTAssertFalse(PhotoRatingScanPolicy.plan(input(files, sta: sta, loading: true,
+                readyDays: 2, ratingDays: 3, complete: true)).ready)
+            XCTAssertTrue(PhotoRatingScanPolicy.plan(input(files, sta: sta, loading: true,
+                readyDays: 3, ratingDays: 3, complete: false)).ready)
+            XCTAssertFalse(PhotoRatingScanPolicy.plan(input(files, sta: sta, loading: true,
+                readyDays: 100, ratingDays: 0, complete: true)).ready)
+            let handoff = PhotoRatingScanPolicy.plan(input(files, sta: sta, loading: false,
+                readyDays: 100, ratingDays: 5, photoDays: 5, appliedPhotoDays: 1))
+            XCTAssertFalse(handoff.ready)
+            XCTAssertTrue(handoff.files.isEmpty, "Old scope cannot supply a misleading progress total")
+        }
+    }
+
+    func testPlanIncludesUnsupportedDaysWithoutMovingIntoOlderIncompleteDay() {
+        let files = [file(1, "ONLY.TIFF", "20261102"), file(2, "PHOTO.JPG", "20261029")]
+        let latest = PhotoRatingScanPolicy.plan(input(files, readyDays: 1, ratingDays: 1))
+        XCTAssertTrue(latest.ready)
+        XCTAssertTrue(latest.files.isEmpty)
+        let two = PhotoRatingScanPolicy.plan(input(files, readyDays: 1, ratingDays: 2))
+        XCTAssertFalse(two.ready)
+        XCTAssertEqual(two.files.map(\.id), [2])
+        XCTAssertTrue(PhotoRatingScanPolicy.plan(input(files, readyDays: 2, ratingDays: 2)).ready)
+    }
+
+    func testPlanValidatesCalendarDatesAndExtensionsButAllRetainsUndatedMedia() {
+        let dates: [String?] = ["20260301T120000", nil, "bad", "20260229", "20261301",
+                               "20261232", "00000101", "20260010", "２０２６０３０１"]
+        let files = dates.enumerated().map { file(UInt32($0.offset), "\($0.offset).JPG", $0.element) }
+        XCTAssertEqual(PhotoRatingScanPolicy.plan(input(files, loading: false, ratingDays: 5)).files.map(\.id), [0])
+        XCTAssertEqual(PhotoRatingScanPolicy.plan(input(files, loading: false, ratingDays: 0)).files, files)
+        XCTAssertFalse(PhotoRatingScanPolicy.plan(input(Array(files.dropFirst()), readyDays: 100, ratingDays: 1)).ready)
+        let names = ["A.JPG", "B.jpeg", "C.NEF", "D.nRw", "E.MOV", "F.mp4", "G.TIFF", "H.PNG", "I.BIN", "no_extension"]
+        let formats = names.enumerated().map { file(UInt32($0.offset), $0.element, "20261102") }
+        for days in [0, 1] {
+            XCTAssertEqual(PhotoRatingScanPolicy.plan(input(formats, loading: false, ratingDays: days)).files,
+                           Array(formats.prefix(6)))
+        }
+        for (day, valid) in [("20000229", true), ("19000229", false), ("20240229", true),
+                             ("15000229", false), ("00010101", true), ("99991231", true)] {
+            XCTAssertEqual(validPhotoCaptureDay(day) != nil, valid)
+        }
+    }
+
+    @MainActor
+    func testUSBWaitsForCatalogThenOnlyReadsTheSelectedRange() async {
+        let stub = Stub()
+        let scanner = controller(stub)
+        defer { scanner.cancel() }
+        let files = [file(1, "NEW.JPG", "20261102"), file(2, "OLDER.JPG", "20261029")]
+        scanner.update(input(files, sta: false, loading: false, ratingDays: 1, complete: false), enabled: true)
+        await waitUntil { scanner.state.waitingForRange && scanner.state.total == 1 }
+        XCTAssertTrue(scanner.state.waitingForRange)
+        let before = await stub.snapshot()
+        XCTAssertEqual(before.2, 0)
+        scanner.update(input(files, sta: false, loading: false, ratingDays: 1), enabled: true)
+        await waitUntil { scanner.state.complete }
+        XCTAssertEqual(scanner.state.total, 1)
+        let after = await stub.snapshot()
+        XCTAssertEqual(after.3, [1])
+    }
+
+    @MainActor
+    func testCatalogUpdateDuringSuspendedCacheLookupReplansBeforeLocking() async throws {
+        let gate = RatingLookupGate(), stub = Stub()
+        let scanner = PhotoRatingScanController(io: PhotoRatingScanIO(
+            generation: { await stub.generation }, invalidate: { await stub.invalidate() },
+            cached: { _ in await gate.lookup() }, beginPhase: { await stub.begin() },
+            endPhase: { await stub.end() }, read: { file, _ in await stub.read(file) }))
+        defer { scanner.cancel() }
+        let old = [file(1, "A.JPG", "20261102")]
+        scanner.update(input(old, loading: false, ratingDays: 1, paused: true), enabled: true)
+        for _ in 0..<100 where await gate.calls < 1 { try await Task.sleep(for: .milliseconds(5)) }
+        scanner.update(input(old + [file(2, "B.JPG", "20261102")], loading: false, ratingDays: 1), enabled: true)
+        await gate.release(1, value: PhotoRatingCacheEntry(value: 5, origin: "stale-plan"))
+        for _ in 0..<100 where await gate.calls < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        await gate.release(2, value: nil)
+        for _ in 0..<100 where await gate.calls < 3 { try await Task.sleep(for: .milliseconds(5)) }
+        await gate.release(3, value: nil)
+        await waitUntil { scanner.state.complete }
+        XCTAssertTrue(scanner.state.complete)
+        XCTAssertEqual(scanner.state.total, 2)
+        let reads = await stub.snapshot()
+        XCTAssertEqual(reads.3, [1, 2])
+    }
+
+    @MainActor
+    func testWidenedRangeCannotLockOldCatalogWhileResumeSnapshotIsSuspended() async throws {
+        let savedRange = PhotoFilterPersistence.loadPhotoLoadingRange()
+        let savedFilter = PhotoFilterPersistence.load()
+        PhotoFilterPersistence.savePhotoLoadingRange(.one)
+        defer {
+            PhotoFilterPersistence.savePhotoLoadingRange(savedRange)
+            PhotoFilterPersistence.save(savedFilter)
+        }
+        let stub = Stub(), resumeGate = RatingLookupGate(), scans = STARecorder<Int>()
+        let entered = expectation(description: "resume waits for catalog cursor")
+        let files = [file(1, "A.JPG", "20261102"), file(2, "B.JPG", "20261029"),
+                     file(3, "C.JPG", "20261010")]
+        let model = PhotoListViewModel(scanCatalog: { _, _, _, _, _ in
+            let first = await scans.values.isEmpty
+            await scans.append(first ? 1 : 2)
+            return PhotoScanResult(files: first ? [files[0]] : files,
+                removedHandles: [], addedHandles: [], handleQueriesSucceeded: true,
+                metadataComplete: true, filterStorageIDs: [1],
+                stoppedAtLoadingRange: first, loadingRangeAtStop: first ? .one : nil)
+        }, resumeSnapshotProvider: {
+            entered.fulfill()
+            _ = await resumeGate.lookup()
+            return nil
+        }, setRemoteGate: { _ in }, sequentialLoading: true, ratingIO: PhotoRatingScanIO(
+            generation: { await stub.generation }, invalidate: { await stub.invalidate() },
+            cached: { _ in nil }, beginPhase: { await stub.begin() }, endPhase: { await stub.end() },
+            read: { file, _ in await stub.read(file) }))
+        defer { model.cancelLoading(); model.cancelRatingScan() }
+        model.load()
+        await waitUntil { model.hasCompletedFileScan }
+        model.setFilter(PhotoFilterState(ratingEnabled: true, ratingDays: 3))
+        await waitUntil { model.ratingScan.complete }
+        model.setPhotoLoadingRange(.three)
+        XCTAssertFalse(model.hasCompletedFileScan, "Close readiness before the asynchronous cursor lookup")
+        await fulfillment(of: [entered], timeout: 2)
+        await waitUntil { model.ratingScan.waitingForRange }
+        XCTAssertTrue(model.ratingScan.waitingForRange)
+        let before = await stub.snapshot()
+        XCTAssertEqual(before.3, [1])
+        // A quick second range change must neither restore old completion nor
+        // orphan the pending resume task.
+        model.setPhotoLoadingRange(.all)
+        await resumeGate.release(1, value: nil)
+        await waitUntil { model.ratingScan.complete && model.ratingScan.total == 3 }
+        XCTAssertTrue(model.hasCompletedFileScan)
+        XCTAssertEqual(model.ratingScan.completed, 3)
+        let after = await stub.snapshot()
+        XCTAssertEqual(after.3, [1, 1, 2, 3])
+        let scanCalls = await scans.values
+        XCTAssertEqual(scanCalls, [1, 2])
+    }
+
+    @MainActor
+    func testConfirmedShootingDayStartsOnEveryTransportBeforeFullScanFinishes() async throws {
+        let savedRange = PhotoFilterPersistence.loadPhotoLoadingRange()
+        let savedFilter = PhotoFilterPersistence.load()
+        PhotoFilterPersistence.savePhotoLoadingRange(.all)
+        defer {
+            PhotoFilterPersistence.savePhotoLoadingRange(savedRange)
+            PhotoFilterPersistence.save(savedFilter)
+        }
+        for sequential in [false, true] {
+            let stub = Stub(), gate = RatingLookupGate()
+            let boundary = expectation(description: "shooting-day boundary published")
+            let files = [file(1, "NEW.JPG", "20261102"), file(2, "OLD.JPG", "20261029")]
+            let model = PhotoListViewModel(scanCatalog: { _, _, _, _, publish in
+                try await publish([files[0]])
+                try await publish([files[1]])
+                boundary.fulfill()
+                _ = await gate.lookup()
+                return PhotoScanResult(files: files, removedHandles: [], addedHandles: [],
+                    handleQueriesSucceeded: true, metadataComplete: true, filterStorageIDs: [1])
+            }, prefetchBatch: { batch in
+                let ids = Set(batch.map(\.id))
+                return ThumbnailBatchResult(settled: ids, cached: ids)
+            }, canFill: { true }, setRemoteGate: { _ in }, sequentialLoading: sequential, ratingIO: PhotoRatingScanIO(
+                generation: { await stub.generation }, invalidate: { await stub.invalidate() },
+                cached: { _ in nil }, beginPhase: { await stub.begin() }, endPhase: { await stub.end() },
+                read: { file, _ in await stub.read(file) }))
+            defer { model.cancelLoading(); model.cancelRatingScan() }
+            model.setFilter(PhotoFilterState(ratingEnabled: true, ratingDays: 1))
+            model.load()
+            await fulfillment(of: [boundary], timeout: 2)
+            await waitUntil { model.ratingScan.complete }
+            XCTAssertTrue(model.isLoadingFiles)
+            XCTAssertFalse(model.hasCompletedFileScan)
+            XCTAssertTrue(model.ratingScan.complete, "Readiness updates must wake the controller without UI participation")
+            XCTAssertEqual(model.ratingScan.total, 1)
+            let reads = await stub.snapshot()
+            XCTAssertEqual(reads.3, [1])
+            await gate.release(1, value: nil)
+            await waitUntil { model.hasCompletedFileScan }
+            XCTAssertEqual(model.ratingScan.total, 1, "Later catalog emissions cannot expand a locked rating pass")
+        }
     }
 
     func testRatingCacheUsesGenerationAndEvictsOldestAfter8192Values() {

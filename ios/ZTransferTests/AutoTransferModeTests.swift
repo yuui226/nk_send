@@ -210,11 +210,11 @@ final class AutoTransferModeTests: XCTestCase {
         XCTAssertEqual(AndroidLocalization.byResource["auto_transfer_video"],
                        ["zh": "视频", "en": "Video", "hant": "影片"])
         XCTAssertEqual(AndroidLocalization.byResource["auto_transfer_new_media_summary"]?["zh"],
-                       "按档位自动加入新增文件：全部、JPG、RAW（NEF 照片）或视频（MOV/MP4）。不影响已有任务和手动传输。")
+                       "按所选类型，将新拍摄的全部、JPG、RAW 或视频自动加入队列。")
         XCTAssertEqual(AndroidLocalization.byResource["auto_transfer_new_media_summary"]?["en"],
-                       "New files are queued automatically by mode: All, JPG, RAW (NEF photos), or Video (MOV/MP4). Existing tasks and manual transfers are unaffected.")
+                       "Automatically queue newly captured files of the selected type: all, JPG, RAW, or video.")
         XCTAssertEqual(AndroidLocalization.byResource["auto_transfer_new_media_summary"]?["hant"],
-                       "依檔位自動加入新增檔案：全部、JPG、RAW（NEF 照片）或影片（MOV/MP4）。不影響既有任務與手動傳輸。")
+                       "依所選類型，將新拍攝的全部、JPG、RAW 或影片自動加入佇列。")
     }
 
     private func isolatedSuite() -> String {

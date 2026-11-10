@@ -1,0 +1,26 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "24B58D40-0F5F-4B1D-AC9E-5D294B304579",
+        "deviceName" : "ZTransfer Release ipad-13",
+        "exportedFileName" : "CF69A193-623E-4F91-9EF1-60342693D9A4.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "02-settings_0_3CCA2C1B-6F00-46BC-93BD-53375530B038.png",
+        "timestamp" : 1793605829.367
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "24B58D40-0F5F-4B1D-AC9E-5D294B304579",
+        "deviceName" : "ZTransfer Release ipad-13",
+        "exportedFileName" : "6444C76C-B01C-4B14-9239-7414678258F0.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "01-connect_0_2B1CC899-1223-43A0-BE3F-02C45526EB24.png",
+        "timestamp" : 1793605825.985
+      }
+    ],
+    "testIdentifier" : "ReleaseReferenceCapture/testCurrentReleaseHomeAndSettings()",
+    "testIdentifierURL" : "test://com.apple.xcode/ReleaseReferenceCapture/ReleaseReferenceCapture/ReleaseReferenceCapture/testCurrentReleaseHomeAndSettings"
+  }
+]

@@ -1,0 +1,4 @@
+/Users/orys/code/nk_send/ios/ZTransferTests/ModalPresentationTests.swift:164:33: error: cannot find 'PhotoFilterChooserOverlay' in scope
+    |                                 `- error: cannot find 'PhotoFilterChooserOverlay' in scope
+Test session results, code coverage, and logs:
+** TEST FAILED **

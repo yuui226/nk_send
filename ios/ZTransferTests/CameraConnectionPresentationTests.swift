@@ -152,6 +152,8 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
         @Published var state = ConnectionState()
         @Published var phase = ScenePhase.active
         @Published var visible = true
+        @Published var dimmed = false
+        var connectionMode: CameraConnectionMode = .wifi
         var helpRects: [TipPopupTrigger: CGRect] = [:]
     }
     private struct HelpRects: PreferenceKey {
@@ -166,7 +168,7 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
         var body: some View {
             Group {
                 if input.visible {
-                    ConnectionMethodCard(mode: .wifi, state: input.state, height: 310, dimmed: false,
+                    ConnectionMethodCard(mode: input.connectionMode, state: input.state, height: 310, dimmed: input.dimmed,
                         attentionActive: false, attentionOrigin: .distantPast,
                         selected: false, celebrationStart: nil, staHelpViewed: true, apHelpViewed: true)
                 } else { Color.clear.frame(height: 310) }
@@ -190,7 +192,8 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
         let defaults: UserDefaults
         let suite = "ConnectionCard-\(UUID())"
         let previousLanguage = UserDefaults.standard.object(forKey: "app_language")
-        init(mode: WirelessMode, skin: ZTransferButtonSkin = .titanium) throws {
+        init(mode: WirelessMode, skin: ZTransferButtonSkin = .titanium,
+             connectionMode: CameraConnectionMode = .wifi, scheme: ColorScheme = .light) throws {
             let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
             previousWindow = scene.windows.first(where: { $0.isKeyWindow })
             window = UIWindow(windowScene: scene)
@@ -199,8 +202,9 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
             defaults.set(skin.rawValue, forKey: "skin_preset")
             UserDefaults.standard.set("en", forKey: "app_language")
             input.state.wirelessMode = mode
+            input.connectionMode = connectionMode
             window.rootViewController = UIHostingController(rootView: Card(input: input)
-                .defaultAppStorage(defaults).preferredColorScheme(.light))
+                .defaultAppStorage(defaults).preferredColorScheme(scheme))
             window.makeKeyAndVisible()
         }
         func close() {
@@ -265,53 +269,85 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
     private let header = CGRect(x: 0, y: 0, width: 161, height: 108)
     private let content = CGRect(x: 14, y: 112, width: 133, height: 96)
 
-    func testWirelessFeedbackKeepsAndroidPriorityTextAndBusyTreatment() throws {
+    func testGPSDimsCompleteCardIncludingBadgeAndButtonsThenRestoresWithoutMoving() async throws {
+        let modes: [(CameraConnectionMode, WirelessMode)] = [(.usb, .ap), (.wifi, .ap), (.wifi, .sta)]
+        for skin in [ZTransferButtonSkin.liquidGlass, .titanium] {
+            for scheme in [ColorScheme.light, .dark] {
+                for (connection, wireless) in modes {
+                    let fixture = try Fixture(mode: wireless, skin: skin,
+                                              connectionMode: connection, scheme: scheme)
+                    defer { fixture.close() }
+                    let label = "gps-card-\(skin)-\(scheme)-\(connection)-\(wireless)"
+                    try await Task.sleep(for: .milliseconds(400))
+                    let enabled = try capture(fixture, name: "\(label)-enabled")
+                    let help = connection == .wifi ? try helpRect(fixture, mode: wireless) : nil
+                    fixture.input.dimmed = true
+                    try await Task.sleep(for: .milliseconds(400))
+                    let disabled = try capture(fixture, name: "\(label)-disabled")
+                    let format = UIGraphicsImageRendererFormat(); format.scale = enabled.scale
+                    let washOnly = UIGraphicsImageRenderer(size: enabled.size, format: format).image { context in
+                        enabled.draw(at: .zero)
+                        UIColor(ZTransferColors.background)
+                            .resolvedColor(with: UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light))
+                            .withAlphaComponent(0.28).setFill()
+                        context.fill(CGRect(origin: .zero, size: enabled.size))
+                    }
+                    // The flying badge is a sibling of the surface. Checking
+                    // its actual rendered pixels catches an incorrectly scoped wash.
+                    XCTAssertGreaterThan(try difference(enabled, disabled,
+                        in: CGRect(x: 14, y: 16, width: 42, height: 42)), 1, label)
+                    XCTAssertGreaterThan(try difference(enabled, disabled, in: content), 0.5, label)
+                    if let help {
+                        XCTAssertEqual(try helpRect(fixture, mode: wireless), help, label)
+                        XCTAssertGreaterThan(try difference(washOnly, disabled, in: help), 1,
+                                             "Help must adopt disabled material, not just the card wash: \(label)")
+                        if wireless == .sta {
+                            XCTAssertGreaterThan(try difference(enabled, disabled,
+                                in: CGRect(x: 111, y: help.minY, width: 34, height: 34)), 1, label)
+                            XCTAssertGreaterThan(try difference(washOnly, disabled,
+                                in: CGRect(x: 14, y: 252, width: 133, height: 42)), 1,
+                                "Idle connect must not reuse CONNECTED's full-opacity exception: \(label)")
+                        }
+                    }
+                    fixture.input.dimmed = false
+                    try await Task.sleep(for: .milliseconds(400))
+                    let restored = try capture(fixture, name: "\(label)-restored")
+                    XCTAssertLessThan(try difference(enabled, restored,
+                        in: CGRect(x: 0, y: 0, width: 161, height: 310)), 0.6, label)
+                    if let help { XCTAssertEqual(try helpRect(fixture, mode: wireless), help, label) }
+                }
+            }
+        }
+    }
+
+    func testAPDiscoveryAndFailuresStaySilentWhileSTAErrorsRemainVisible() throws {
         let fixture = try Fixture(mode: .ap); defer { fixture.close() }
         var state = fixture.input.state
-        let expected: [(WiFiConnectionPhase, WiFiFailureKind?, ConnectionCardWirelessFeedback?, String?)] = [
-            (.idle, nil, nil, nil), (.discovering, nil, nil, nil),
-            (.connecting, nil, .probing, "Identifying camera…"),
-            (.failed("raw socket error"), .notFound, .notFound, "Camera not detected"),
-            (.failed("raw socket error"), .refused, .refused, "Camera refused connection"),
-            (.failed("raw socket error"), .failed, .failed, "Could not connect to camera"),
-            (.reconnecting, nil, .reconnecting, "Connection interrupted"), (.connected, nil, nil, nil)
-        ]
-        let traits = UITraitCollection(userInterfaceStyle: .light)
-        for (phase, failure, feedback, title) in expected {
-            state.wifiPhase = phase; state.wifiFailureKind = failure
-            let actual = ConnectionCardWirelessFeedback.resolve(state, mode: .ap, showAPProbing: true)
-            XCTAssertEqual(actual, feedback)
-            XCTAssertEqual(actual?.title, title)
-            if let actual {
-                XCTAssertEqual(actual.busy, phase == .connecting || phase == .reconnecting)
-                XCTAssertNotEqual(actual.message, "raw socket error")
-                let color = phase == .connecting ? ZTransferColors.accentBlue : ZTransferColors.accentOrange
-                XCTAssertEqual(UIColor(actual.accent).resolvedColor(with: traits),
-                               UIColor(color).resolvedColor(with: traits))
+        for phase in [WiFiConnectionPhase.idle, .discovering, .pairing, .connecting,
+                      .failed("transport detail"), .reconnecting, .connected] {
+            for kind in [WiFiFailureKind?.none, .notFound, .refused, .failed] {
+                state.wifiPhase = phase; state.wifiFailureKind = kind
+                XCTAssertNil(ConnectionCardWirelessFeedback.resolve(state, mode: .ap))
+                var usb = state; usb.usbPhase = .connected
+                XCTAssertNil(ConnectionCardWirelessFeedback.resolve(usb, mode: .ap))
             }
-            var usb = state; usb.usbPhase = .connected
-            XCTAssertNil(ConnectionCardWirelessFeedback.resolve(usb, mode: .ap, showAPProbing: true))
-            XCTAssertFalse(ConnectionCardWirelessFeedback.isAPProbing(usb))
         }
-        state.wifiPhase = .connecting
-        XCTAssertTrue(ConnectionCardWirelessFeedback.isAPProbing(state))
-        XCTAssertNil(ConnectionCardWirelessFeedback.resolve(state, mode: .ap, showAPProbing: false))
         state.wirelessMode = .sta
         for phase in [WiFiConnectionPhase.idle, .discovering, .pairing, .connecting, .connected, .reconnecting] {
             state.wifiPhase = phase
-            XCTAssertNil(ConnectionCardWirelessFeedback.resolve(state, mode: .sta, showAPProbing: true))
-            XCTAssertNil(ConnectionCardWirelessFeedback.resolve(state, mode: .ap, showAPProbing: true))
-            XCTAssertFalse(ConnectionCardWirelessFeedback.isAPProbing(state))
+            XCTAssertNil(ConnectionCardWirelessFeedback.resolve(state, mode: .sta))
+            XCTAssertNil(ConnectionCardWirelessFeedback.resolve(state, mode: .ap))
         }
         state.wifiPhase = .failed("Camera pairing was cancelled")
-        let failure = try XCTUnwrap(ConnectionCardWirelessFeedback.resolve(state, mode: .sta, showAPProbing: true))
+        let failure = try XCTUnwrap(ConnectionCardWirelessFeedback.resolve(state, mode: .sta))
+        XCTAssertEqual(failure.title, "Connection failed")
         XCTAssertEqual(failure.message, "Camera pairing was cancelled")
-        XCTAssertFalse(failure.busy)
+        let traits = UITraitCollection(userInterfaceStyle: .light)
         XCTAssertEqual(UIColor(failure.accent).resolvedColor(with: traits),
                        UIColor(ZTransferColors.statusError).resolvedColor(with: traits))
     }
 
-    func testEnglishAPFeedbackKeepsHeaderTabsAndHelpInsideCardThroughFailureAndRecovery() async throws {
+    func testEnglishAPStepsStayVisibleThroughFailureAndRecovery() async throws {
         let fixture = try Fixture(mode: .ap); defer { fixture.close() }
         try await Task.sleep(for: .milliseconds(450))
         let idle = try capture(fixture, name: "english-ap-idle")
@@ -330,8 +366,7 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
             XCTAssertLessThan(try difference(idle, current, in: header), 0.15,
                               "\(name): title/tabs must not move behind the independently positioned badge")
             let delta = try difference(idle, current, in: content)
-            if phase == .idle || phase == .connected { XCTAssertLessThan(delta, 0.15, name) }
-            else { XCTAssertGreaterThan(delta, 1, "\(name): feedback must replace the actual visible steps") }
+            XCTAssertLessThan(delta, 0.15, "\(name): background AP discovery must not replace setup steps")
         }
     }
 
@@ -348,7 +383,8 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
         let actionBounds = action.convert(action.bounds, to: fixture.window)
         let phases: [WiFiConnectionPhase] = [.discovering, .pairing, .connecting, .connected,
             .failed("The camera could not be found. Connect the camera to the phone's personal hotspot and try again."),
-            .failed("The camera refused the connection."), .idle]
+            .failed("The camera refused the connection."),
+            .failed(AppLocalized.resource("sta_pairing_incomplete")), .failed(AppLocalized.resource("sta_camera_check_photos")), .idle]
         for (index, phase) in phases.enumerated() {
             fixture.input.state.wifiPhase = phase
             try await Task.sleep(for: .milliseconds(340))
@@ -362,21 +398,21 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
         }
     }
 
-    func testAPProbingDelayCancelsOnStateBackgroundAndUnmountBeforePublishing() async throws {
+    func testAPStepsRemainVisibleDuringLongProbeBackgroundAndRemount() async throws {
         let fixture = try Fixture(mode: .ap); defer { fixture.close() }
         try await Task.sleep(for: .milliseconds(450))
         let idle = try capture(fixture)
         fixture.input.state.wifiPhase = .connecting
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertLessThan(try difference(idle, capture(fixture), in: content), 0.15,
-                          "A quick AP probe must not flash feedback before the 350ms delay")
+                          "A quick AP probe must not replace setup steps")
         fixture.input.state.wifiPhase = .idle
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertLessThan(try difference(idle, capture(fixture), in: content), 0.15,
                           "A cancelled probe must not publish late feedback")
         fixture.input.state.wifiPhase = .connecting
         try await Task.sleep(for: .milliseconds(720))
-        XCTAssertGreaterThan(try difference(idle, capture(fixture, name: "english-ap-delayed-probing"), in: content), 1)
+        XCTAssertLessThan(try difference(idle, capture(fixture, name: "english-ap-long-probe"), in: content), 0.15)
         fixture.input.phase = .inactive
         try await Task.sleep(for: .milliseconds(340))
         XCTAssertLessThan(try difference(idle, capture(fixture), in: content), 0.15)
@@ -388,7 +424,7 @@ final class ConnectionMethodCardLayoutTests: XCTestCase {
         fixture.input.visible = true
         try await Task.sleep(for: .milliseconds(80))
         XCTAssertLessThan(try difference(idle, capture(fixture), in: content), 0.15,
-                          "A remounted card starts its own delay; the departed task cannot publish")
+                          "A remounted AP card must show setup steps immediately")
         fixture.input.state.wifiPhase = .connected
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertLessThan(try difference(idle, capture(fixture), in: content), 0.15)

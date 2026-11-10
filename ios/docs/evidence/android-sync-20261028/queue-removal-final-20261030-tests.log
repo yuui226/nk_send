@@ -1,0 +1,747 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project ios/ZTransfer.xcodeproj -scheme ZTransfer -configuration Debug -destination "platform=iOS Simulator,id=B6B4E291-173A-4BFE-BB9C-2D1F62643C49" -derivedDataPath /tmp/ztransfer-removal-derived-20261021 -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath /tmp/ztransfer-queue-removal-final-20261030.xcresult "-only-testing:ZTransferTests/QueueRemovalTests" "-only-testing:ZTransferTests/QueueRemovalCoordinatorTests" "-only-testing:ZTransferTests/QueueCardProgressVisibilityTests" "-only-testing:ZTransferTests/QueueCardPresentationTests" "-only-testing:ZTransferTests/TransferQueueScenarioTests" "-only-testing:ZTransferTests/QueueConfirmationLayoutTests" "-only-testing:ZTransferTests/QueueRemovalLayoutTests" CODE_SIGN_IDENTITY=- test
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = -
+
+Writing result bundle at path:
+	/tmp/ztransfer-queue-removal-final-20261030.xcresult
+
+note: Using codesigning identity override: -
+ComputePackagePrebuildTargetDependencyGraph
+
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/Components/AndroidShadowView.swift:164:13: warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+162 | 
+163 | @MainActor
+164 | final class AndroidShadowHost: UIView, @preconcurrency MTKViewDelegate {
+    |             `- warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+165 |     var cornerRadius: CGFloat = 0 { didSet { if cornerRadius != oldValue { setNeedsLayout() } } }
+166 |     var elevation: CGFloat = 0 { didSet { if elevation != oldValue { setNeedsLayout() } } }
+
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/RemoteLUTMetalView.swift:62:28: warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+ 60 |     }
+ 61 | 
+ 62 |     @MainActor final class Coordinator: NSObject, @preconcurrency MTKViewDelegate {
+    |                            `- warning: '@preconcurrency' on conformance to 'MTKViewDelegate' has no effect
+ 63 |         let device: MTLDevice?
+ 64 |         private let commandQueue: MTLCommandQueue?
+
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:1797:98: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1795 |                                           availableMemory: @escaping @Sendable () -> Int64 = PhotoAllocationBudget.availableMemory,
+1796 |                                           placeResolver: PhotoFramePlaceResolver = .shared,
+1797 |                                           placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                                                  `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1798 |                                           placeAlreadyPrepared: Bool = false) async throws -> URL {
+1799 |         let resolvedMetadata: PhotoFrameMetadata?
+SwiftCompile normal arm64 Compiling\ TransferQueue.swift /Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:1797:98: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1795 |                                           availableMemory: @escaping @Sendable () -> Int64 = PhotoAllocationBudget.availableMemory,
+1796 |                                           placeResolver: PhotoFramePlaceResolver = .shared,
+1797 |                                           placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                                                  `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1798 |                                           placeAlreadyPrepared: Bool = false) async throws -> URL {
+1799 |         let resolvedMetadata: PhotoFrameMetadata?
+SwiftCompile normal arm64 Compiling\ RootView.swift /Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:662:36: warning: main actor-isolated property 'selection' can not be referenced from a nonisolated context
+604 | 
+605 | private struct VerticalWorkspacePager<FirstPage: View, SecondPage: View>: UIViewControllerRepresentable {
+662 |             requestedPage = parent.selection
+    |                                    `- warning: main actor-isolated property 'selection' can not be referenced from a nonisolated context
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:663:21: warning: call to main actor-isolated initializer 'init(rootView:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+661 |             self.parent = parent
+662 |             requestedPage = parent.selection
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+    |                     `- warning: call to main actor-isolated initializer 'init(rootView:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+665 |             if #available(iOS 16.4, *) {
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:663:51: warning: conformance of 'FirstPage' to protocol 'View' may be isolated and cannot be passed to main actor-isolated context [#IsolatedConformances]
+661 |             self.parent = parent
+662 |             requestedPage = parent.selection
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+    |                                                   `- warning: conformance of 'FirstPage' to protocol 'View' may be isolated and cannot be passed to main actor-isolated context [#IsolatedConformances]
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+665 |             if #available(iOS 16.4, *) {
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:663:51: warning: call to main actor-isolated initializer 'init(insets:content:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+661 |             self.parent = parent
+662 |             requestedPage = parent.selection
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+    |                                                   `- warning: call to main actor-isolated initializer 'init(insets:content:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+665 |             if #available(iOS 16.4, *) {
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:663:116: warning: main actor-isolated property 'firstPage' can not be referenced from a nonisolated context
+608 |     let onTransitionBegan: (Int) -> Void
+609 |     let onTransitionSettled: (Int) -> Void
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+    |                                                                                                                    `- warning: main actor-isolated property 'firstPage' can not be referenced from a nonisolated context
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+665 |             if #available(iOS 16.4, *) {
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:664:22: warning: call to main actor-isolated initializer 'init(rootView:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+662 |             requestedPage = parent.selection
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+    |                      `- warning: call to main actor-isolated initializer 'init(rootView:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+665 |             if #available(iOS 16.4, *) {
+666 |                 first.safeAreaRegions = []
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:664:52: warning: conformance of 'SecondPage' to protocol 'View' may be isolated and cannot be passed to main actor-isolated context [#IsolatedConformances]
+662 |             requestedPage = parent.selection
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+    |                                                    `- warning: conformance of 'SecondPage' to protocol 'View' may be isolated and cannot be passed to main actor-isolated context [#IsolatedConformances]
+665 |             if #available(iOS 16.4, *) {
+666 |                 first.safeAreaRegions = []
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:664:52: warning: call to main actor-isolated initializer 'init(insets:content:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+662 |             requestedPage = parent.selection
+663 |             first = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.firstPage))
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+    |                                                    `- warning: call to main actor-isolated initializer 'init(insets:content:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+665 |             if #available(iOS 16.4, *) {
+666 |                 first.safeAreaRegions = []
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:664:117: warning: main actor-isolated property 'secondPage' can not be referenced from a nonisolated context
+609 |     let onTransitionSettled: (Int) -> Void
+610 |     let firstPage: FirstPage
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+    |                                                                                                                     `- warning: main actor-isolated property 'secondPage' can not be referenced from a nonisolated context
+665 |             if #available(iOS 16.4, *) {
+666 |                 first.safeAreaRegions = []
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:666:23: warning: main actor-isolated property 'safeAreaRegions' can not be mutated from a nonisolated context
+664 |             second = UIHostingController(rootView: WorkspaceSafeAreaPage(insets: parent.pageInsets, content: parent.secondPage))
+665 |             if #available(iOS 16.4, *) {
+666 |                 first.safeAreaRegions = []
+    |                       `- warning: main actor-isolated property 'safeAreaRegions' can not be mutated from a nonisolated context
+667 |                 second.safeAreaRegions = []
+668 |             }
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:667:24: warning: main actor-isolated property 'safeAreaRegions' can not be mutated from a nonisolated context
+665 |             if #available(iOS 16.4, *) {
+666 |                 first.safeAreaRegions = []
+667 |                 second.safeAreaRegions = []
+    |                        `- warning: main actor-isolated property 'safeAreaRegions' can not be mutated from a nonisolated context
+668 |             }
+669 |             first.view.backgroundColor = .clear
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:669:24: warning: main actor-isolated property 'backgroundColor' can not be mutated from a nonisolated context
+667 |                 second.safeAreaRegions = []
+668 |             }
+669 |             first.view.backgroundColor = .clear
+    |                        `- warning: main actor-isolated property 'backgroundColor' can not be mutated from a nonisolated context
+670 |             second.view.backgroundColor = .clear
+671 |         }
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:669:19: warning: main actor-isolated property 'view' can not be referenced from a nonisolated context
+667 |                 second.safeAreaRegions = []
+668 |             }
+669 |             first.view.backgroundColor = .clear
+    |                   `- warning: main actor-isolated property 'view' can not be referenced from a nonisolated context
+670 |             second.view.backgroundColor = .clear
+671 |         }
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:670:25: warning: main actor-isolated property 'backgroundColor' can not be mutated from a nonisolated context
+668 |             }
+669 |             first.view.backgroundColor = .clear
+670 |             second.view.backgroundColor = .clear
+    |                         `- warning: main actor-isolated property 'backgroundColor' can not be mutated from a nonisolated context
+671 |         }
+672 |     }
+
+/Users/orys/code/nk_send/ios/ZTransfer/App/RootView.swift:670:20: warning: main actor-isolated property 'view' can not be referenced from a nonisolated context
+668 |             }
+669 |             first.view.backgroundColor = .clear
+670 |             second.view.backgroundColor = .clear
+    |                    `- warning: main actor-isolated property 'view' can not be referenced from a nonisolated context
+671 |         }
+672 |     }
+
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+SwiftCompile normal arm64 Compiling\ RemoteView.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/RemoteView.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/UI/RemoteView.swift:308:64: warning: 'weak' ownership of capture 'tools' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+ 301 |         .animation(ZTransferMotion.standard, value: layoutOrientation)
+ 302 |         .statusBarHidden(false)
+ 308 |             model.onComputerControlPreferenceChanged = { [weak tools] enabled in
+     |                                                                |- warning: 'weak' ownership of capture 'tools' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+     |                                                                `- note: explicitly assign the capture list item to silence
+ 309 |                 tools?.computerControl = enabled
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/RemoteView.swift:350:43: warning: 'weak' ownership of capture 'model' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+ 343 |         // of the app stays portrait; this page rotates its own canvas to match
+ 344 |         // the device instead of changing the application's interface size.
+ 350 |             lutMonitor.onNotice = { [weak model] key in
+     |                                           |- warning: 'weak' ownership of capture 'model' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
+     |                                           `- note: explicitly assign the capture list item to silence
+ 351 |                 model?.showMonitorHint(AppLocalized.resource(key), source: .lut)
+SwiftCompile normal arm64 Compiling\ QueueRetryInteractionHarness.swift,\ QueueSwipeInteractionHarness.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/QueueRetryInteractionHarness.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/QueueSwipeInteractionHarness.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/Components/QueueSwipeInteractionHarness.swift:38:37: warning: 'appendInterpolation' is deprecated: Localized string interpolation produces an unlocalized, debug description for this type of value. Use a type supported by LocalizedStringKey.StringInterpolation or initialize a LocalizedStringResource instead with an interpolated value that conforms to CustomLocalizedStringResourceConvertible. [#DeprecatedDeclaration]
+ 36 |                         Button("Arm busy") { armBusy = true }
+ 37 |                             .accessibilityIdentifier("queue-swipe-arm-busy")
+ 38 |                         Text("drag=\(dragObserved);busy=\(model.snapshot.isTransferring)")
+    |                                     `- warning: 'appendInterpolation' is deprecated: Localized string interpolation produces an unlocalized, debug description for this type of value. Use a type supported by LocalizedStringKey.StringInterpolation or initialize a LocalizedStringResource instead with an interpolated value that conforms to CustomLocalizedStringResourceConvertible. [#DeprecatedDeclaration]
+ 39 |                             .accessibilityIdentifier("queue-swipe-busy-state")
+ 40 |                     }
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/Components/QueueSwipeInteractionHarness.swift:38:58: warning: 'appendInterpolation' is deprecated: Localized string interpolation produces an unlocalized, debug description for this type of value. Use a type supported by LocalizedStringKey.StringInterpolation or initialize a LocalizedStringResource instead with an interpolated value that conforms to CustomLocalizedStringResourceConvertible. [#DeprecatedDeclaration]
+ 36 |                         Button("Arm busy") { armBusy = true }
+ 37 |                             .accessibilityIdentifier("queue-swipe-arm-busy")
+ 38 |                         Text("drag=\(dragObserved);busy=\(model.snapshot.isTransferring)")
+    |                                                          `- warning: 'appendInterpolation' is deprecated: Localized string interpolation produces an unlocalized, debug description for this type of value. Use a type supported by LocalizedStringKey.StringInterpolation or initialize a LocalizedStringResource instead with an interpolated value that conforms to CustomLocalizedStringResourceConvertible. [#DeprecatedDeclaration]
+ 39 |                             .accessibilityIdentifier("queue-swipe-busy-state")
+ 40 |                     }
+SwiftCompile normal arm64 Compiling\ ZTransferApp.swift /Users/orys/code/nk_send/ios/ZTransfer/App/ZTransferApp.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+SwiftCompile normal arm64 Compiling\ PhotoPreviewInteractionHarness.swift,\ PhotoPreviewView.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/PhotoPreviewInteractionHarness.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/PhotoPreviewView.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+SwiftCompile normal arm64 Compiling\ PhotoEffectsSettingsHarness.swift /Users/orys/code/nk_send/ios/ZTransfer/UI/Components/PhotoEffectsSettingsHarness.swift (in target 'ZTransfer' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransfer/Domain/TransferQueue.swift:637:65: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 635 |          parseMetadata: MetadataParser? = nil,
+ 636 |          placeResolver: PhotoFramePlaceResolver = .shared,
+ 637 |          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
+     |                                                                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+ 638 |          renderCrop: @escaping CropRenderer = { task, source, directory, location in
+ 639 |              try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
+
+/Users/orys/code/nk_send/ios/ZTransfer/UI/Components/PhotoEffectsSettingsHarness.swift:35:44: warning: 'appendInterpolation' is deprecated: Localized string interpolation produces an unlocalized, debug description for this type of value. Use a type supported by LocalizedStringKey.StringInterpolation or initialize a LocalizedStringResource instead with an interpolated value that conforms to CustomLocalizedStringResourceConvertible. [#DeprecatedDeclaration]
+33 |             effectsDraft: $draft, filterChooser: $chooser, effectsHint: $hint, dismissalRequested: false)
+34 |             .overlay(alignment: .top) {
+35 |                 Text("gate=\(gate);recipe=\(effects.settings.photoFrameEnabled)")
+   |                                            `- warning: 'appendInterpolation' is deprecated: Localized string interpolation produces an unlocalized, debug description for this type of value. Use a type supported by LocalizedStringKey.StringInterpolation or initialize a LocalizedStringResource instead with an interpolated value that conforms to CustomLocalizedStringResourceConvertible. [#DeprecatedDeclaration]
+36 |                     .font(.system(size: 9)).allowsHitTesting(false)
+37 |                     .accessibilityIdentifier("effects-master-test-state")
+2026-10-30 16:26:08.700 appintentsmetadataprocessor[70473:36389567] Starting appintentsmetadataprocessor export
+2026-10-30 16:26:08.704 appintentsmetadataprocessor[70473:36389567] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+ProcessInfoPlistFile /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist /Users/orys/code/nk_send/ios/ZTransfer/Info.plist (in target 'ZTransfer' from project 'ZTransfer')
+
+/Users/orys/code/nk_send/ios/ZTransferTests/PremiumBusinessTests.swift:505:14: warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 503 | 
+ 504 |     func testQuotaCountsOnlyRealSuccessAndDoesNotBlockLocalShortcuts() async throws {
+ 505 |         let (defaults, usage, directory) = try fixture()
+     |              `- warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 506 |         for _ in 0..<24 { usage.recordTransfer(id: UUID(), isPro: false) }
+ 507 |         let queue = TransferQueue(defaults: UserDefaults(suiteName: "QueueLegacy.\(UUID())")!, premiumAccess: PremiumAccess(.free), freeUsage: usage)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/PremiumBusinessTests.swift:525:14: warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 523 | 
+ 524 |     func testSizeLimitAllowsBoundaryAndRejectsUnknownLargeSizeWithoutBlockingNext() async throws {
+ 525 |         let (defaults, usage, directory) = try fixture()
+     |              `- warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 526 |         let queue = TransferQueue(defaults: UserDefaults(suiteName: "QueueLegacy.\(UUID())")!, premiumAccess: PremiumAccess(.free), freeUsage: usage)
+ 527 |         let camera = PremiumTestCamera()
+
+/Users/orys/code/nk_send/ios/ZTransferTests/PremiumBusinessTests.swift:540:14: warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 538 | 
+ 539 |     func testQueuedAndRetriedWatermarksStayFrozenButNewTasksUseCurrentAccess() async throws {
+ 540 |         let (defaults, usage, directory) = try fixture()
+     |              `- warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 541 |         let access = PremiumAccess(.lifetime)
+ 542 |         let queue = TransferQueue(defaults: UserDefaults(suiteName: "QueueLegacy.\(UUID())")!, premiumAccess: access, freeUsage: usage)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/PremiumBusinessTests.swift:659:14: warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 657 |     /// accidentally satisfy the snapshot assertion.
+ 658 |     func testRenderedWatermarksStayFrozenAcrossRefundAndUpgrade() async throws {
+ 659 |         let (defaults, usage, directory) = try fixture()
+     |              `- warning: immutable value 'defaults' was never used; consider replacing with '_' or removing it [#NoUsage]
+ 660 |         let access = PremiumAccess(.lifetime)
+ 661 |         let queue = TransferQueue(defaults: UserDefaults(suiteName: directory.lastPathComponent)!, premiumAccess: access, freeUsage: usage)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/PremiumBusinessTests.swift:883:18: warning: weak variable 'oldOwner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 881 |         preference.photoFilterEnabled = true
+ 882 |         let expected = try await LocalPhotoOutput.render(sourceURL: source, settings: preference)
+ 883 |         weak var oldOwner = preference.selectedFilter?.snapshotOwner
+     |                  `- warning: weak variable 'oldOwner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 884 |         model.generate(settings: preference)
+ 885 |         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+SwiftCompile normal arm64 Compiling\ CameraIOGateTests.swift,\ DomainModelTests.swift /Users/orys/code/nk_send/ios/ZTransferTests/CameraIOGateTests.swift /Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1439:21: warning: call to main actor-isolated initializer 'init(frame:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1430 |     }
+ 1431 | 
+ 1439 |         let label = TransferFileTitleLabel(frame: CGRect(x: 0, y: 0, width: 140, height: 20))
+      |                     `- warning: call to main actor-isolated initializer 'init(frame:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1440 |         let name = "A_VERY_LONG_CAMERA_FILENAME_123456.JPG"
+ 1441 |         label.configure(name: name, primary: .black, secondary: .gray)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1441:15: warning: call to main actor-isolated instance method 'configure(name:primary:secondary:fontSize:accessibilityName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1430 |     }
+ 1431 | 
+ 1441 |         label.configure(name: name, primary: .black, secondary: .gray)
+      |               `- warning: call to main actor-isolated instance method 'configure(name:primary:secondary:fontSize:accessibilityName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1442 |         label.layoutIfNeeded()
+ 1443 |         let text = try XCTUnwrap(label.attributedText)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1442:15: warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1430 |     }
+ 1431 | 
+ 1442 |         label.layoutIfNeeded()
+      |               `- warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1443 |         let text = try XCTUnwrap(label.attributedText)
+ 1444 |         XCTAssertTrue(text.string.contains("…"))
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1443:40: warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1441 |         label.configure(name: name, primary: .black, secondary: .gray)
+ 1442 |         label.layoutIfNeeded()
+ 1443 |         let text = try XCTUnwrap(label.attributedText)
+      |                                        `- warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1444 |         XCTAssertTrue(text.string.contains("…"))
+ 1445 |         XCTAssertTrue(text.string.hasSuffix(".JPG"))
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1447:30: warning: main actor-isolated property 'accessibilityLabel' can not be referenced from a nonisolated autoclosure
+ 1445 |         XCTAssertTrue(text.string.hasSuffix(".JPG"))
+ 1446 |         XCTAssertLessThanOrEqual(text.size().width, 140)
+ 1447 |         XCTAssertEqual(label.accessibilityLabel, name)
+      |                              `- warning: main actor-isolated property 'accessibilityLabel' can not be referenced from a nonisolated autoclosure
+ 1448 |         XCTAssertEqual(text.attribute(.foregroundColor, at: text.length - 1, effectiveRange: nil) as? UIColor, .gray)
+ 1449 |         XCTAssertEqual(text.attribute(.font, at: text.length - 1, effectiveRange: nil) as? UIFont,
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1451:15: warning: main actor-isolated property 'frame' can not be mutated from a nonisolated context
+ 1430 |     }
+ 1431 | 
+ 1451 |         label.frame.size.width = 500
+      |               `- warning: main actor-isolated property 'frame' can not be mutated from a nonisolated context
+ 1452 |         label.setNeedsLayout(); label.layoutIfNeeded()
+ 1453 |         XCTAssertEqual(label.attributedText?.string, name)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1452:15: warning: call to main actor-isolated instance method 'setNeedsLayout()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1430 |     }
+ 1431 | 
+ 1452 |         label.setNeedsLayout(); label.layoutIfNeeded()
+      |               `- warning: call to main actor-isolated instance method 'setNeedsLayout()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1453 |         XCTAssertEqual(label.attributedText?.string, name)
+ 1454 |     }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1452:39: warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1430 |     }
+ 1431 | 
+ 1452 |         label.setNeedsLayout(); label.layoutIfNeeded()
+      |                                       `- warning: call to main actor-isolated instance method 'layoutIfNeeded()' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 1453 |         XCTAssertEqual(label.attributedText?.string, name)
+ 1454 |     }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:1453:30: warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1451 |         label.frame.size.width = 500
+ 1452 |         label.setNeedsLayout(); label.layoutIfNeeded()
+ 1453 |         XCTAssertEqual(label.attributedText?.string, name)
+      |                              `- warning: main actor-isolated property 'attributedText' can not be referenced from a nonisolated autoclosure
+ 1454 |     }
+ 1455 | 
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:7019:18: warning: weak variable 'owner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 7017 |                 return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+ 7018 |             })
+ 7019 |         weak var owner = store
+      |                  `- warning: weak variable 'owner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 7020 |         let task = try XCTUnwrap(store).setDirectory(slow)
+ 7021 |         await fulfillment(of: [entered], timeout: 2)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8607:18: warning: weak variable 'weakProjection' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8605 |         var renders = 0
+ 8606 |         var projection: GPSEntryPresentation? = GPSEntryPresentation(model.gps)
+ 8607 |         weak var weakProjection = projection
+      |                  `- warning: weak variable 'weakProjection' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8608 |         var updates = 0
+ 8609 |         let token = projection!.objectWillChange.sink { updates += 1 }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8612:18: warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8610 |         var host: UIHostingController<GPSControlHarness>? = UIHostingController(rootView:
+ 8611 |             GPSControlHarness(coordinator: model.gps, input: input, rendered: { renders += 1 }))
+ 8612 |         weak var weakHost = host
+      |                  `- warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8613 |         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+ 8614 |         let previous = scene.windows.first(where: \.isKeyWindow)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8663:18: warning: weak variable 'weakObservation' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8661 |         model.gps.setEnabled(true)
+ 8662 |         var observation: GPSEnabledObservation? = GPSEnabledObservation(model.gps)
+ 8663 |         weak var weakObservation = observation
+      |                  `- warning: weak variable 'weakObservation' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8664 |         var changes = 0
+ 8665 |         let token = observation!.objectWillChange.sink { changes += 1 }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8719:18: warning: weak variable 'weakOwner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8717 |     func testRootAndPagerProjectOnlyTheirOwnInputsAndReleaseSubscriptions() async throws {
+ 8718 |         var owner: RootPresentationModel? = try fixture()
+ 8719 |         weak var weakOwner = owner
+      |                  `- warning: weak variable 'weakOwner' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8720 |         let connection = owner!.connection, gps = owner!.gps, effects = owner!.effects
+ 8721 |         gps.setEnabled(true)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:8723:18: warning: weak variable 'weakPager' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8721 |         gps.setEnabled(true)
+ 8722 |         var pager: HomeWorkspacePresentation? = HomeWorkspacePresentation(connection: connection, gps: gps)
+ 8723 |         weak var weakPager = pager
+      |                  `- warning: weak variable 'weakPager' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+ 8724 |         var rootChanges = 0, pagerChanges = 0, detailChanges = 0
+ 8725 |         let rootToken = owner!.objectWillChange.sink { rootChanges += 1 }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10048:22: warning: weak variable 'released' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10046 |         for gentle in [false, true] {
+10047 |             var popup: GeniePopupHostView? = GeniePopupHostView(frame: CGRect(x: 20, y: 80, width: 260, height: 160))
+10048 |             weak var released = popup
+      |                      `- warning: weak variable 'released' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10049 |             popup!.host.rootView = AnyView(Color.red.frame(width: 260, height: 160))
+10050 |             var frames: [CGFloat] = []
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10186:98: warning: main actor-isolated property 'scale' can not be referenced from a nonisolated context
+10184 |             var popup: GeniePopupHostView?
+10185 |             func snapshot(_ view: UIView) -> UIImage {
+10186 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                                  `- warning: main actor-isolated property 'scale' can not be referenced from a nonisolated context
+10187 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10188 |                     view.layer.render(in: context.cgContext)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10186:91: warning: main actor-isolated property 'screen' can not be referenced from a nonisolated context
+10184 |             var popup: GeniePopupHostView?
+10185 |             func snapshot(_ view: UIView) -> UIImage {
+10186 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                           `- warning: main actor-isolated property 'screen' can not be referenced from a nonisolated context
+10187 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10188 |                     view.layer.render(in: context.cgContext)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10186:83: warning: main actor-isolated property 'window' can not be referenced from a nonisolated context
+10184 |             var popup: GeniePopupHostView?
+10185 |             func snapshot(_ view: UIView) -> UIImage {
+10186 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                   `- warning: main actor-isolated property 'window' can not be referenced from a nonisolated context
+10187 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10188 |                     view.layer.render(in: context.cgContext)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10186:121: warning: main actor-isolated property 'scale' can not be referenced from a nonisolated autoclosure
+10184 |             var popup: GeniePopupHostView?
+10185 |             func snapshot(_ view: UIView) -> UIImage {
+10186 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                                                         `- warning: main actor-isolated property 'scale' can not be referenced from a nonisolated autoclosure
+10187 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10188 |                     view.layer.render(in: context.cgContext)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10186:116: warning: main actor-isolated class property 'main' can not be referenced from a nonisolated autoclosure
+10184 |             var popup: GeniePopupHostView?
+10185 |             func snapshot(_ view: UIView) -> UIImage {
+10186 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+      |                                                                                                                    `- warning: main actor-isolated class property 'main' can not be referenced from a nonisolated autoclosure
+10187 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10188 |                     view.layer.render(in: context.cgContext)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10187:59: warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated context
+10185 |             func snapshot(_ view: UIView) -> UIImage {
+10186 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+10187 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+      |                                                           `- warning: main actor-isolated property 'bounds' can not be referenced from a nonisolated context
+10188 |                     view.layer.render(in: context.cgContext)
+10189 |                 }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10188:26: warning: main actor-isolated property 'layer' can not be referenced from a nonisolated context
+10186 |                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+10187 |                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+10188 |                     view.layer.render(in: context.cgContext)
+      |                          `- warning: main actor-isolated property 'layer' can not be referenced from a nonisolated context
+10189 |                 }
+10190 |             }
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10775:18: warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10773 |         var host: UIHostingController<Harness>? = UIHostingController(rootView: Harness(
+10774 |             model: model, photo: file(1), feedback: feedback, frames: frames))
+10775 |         weak var weakHost = host
+      |                  `- warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10776 |         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+10777 |         let window = UIWindow(windowScene: scene)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/DomainModelTests.swift:10840:18: warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10838 |         window.frame = CGRect(x: 0, y: 0, width: 300, height: 600)
+10839 |         var host: UIHostingController<Harness>? = UIHostingController(rootView: Harness(editor: editor, frames: frames))
+10840 |         weak var weakHost = host
+      |                  `- warning: weak variable 'weakHost' was never mutated; consider changing to 'let' constant [#VariableNeverMutated::WeakMutability]
+10841 |         window.rootViewController = host; window.isHidden = false
+10842 |         defer { window.isHidden = true; window.rootViewController = nil }
+SwiftCompile normal arm64 Compiling\ PhotoGrainTests.swift,\ PhotoMetadataPreparationTests.swift /Users/orys/code/nk_send/ios/ZTransferTests/PhotoGrainTests.swift /Users/orys/code/nk_send/ios/ZTransferTests/PhotoMetadataPreparationTests.swift (in target 'ZTransferTests' from project 'ZTransfer')
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoGrainTests.swift:98:49: warning: call to main actor-isolated static method 'makeRenderKey(settings:source:metadata:sourceName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 85 |     }
+ 86 | 
+ 98 |         let first = PhotoEffectsSettingsPreview.makeRenderKey(settings: snapshot, source: nil, metadata: nil, sourceName: "A.JPG")
+    |                                                 `- warning: call to main actor-isolated static method 'makeRenderKey(settings:source:metadata:sourceName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 99 |         let second = PhotoEffectsSettingsPreview.makeRenderKey(settings: snapshot, source: nil, metadata: nil, sourceName: "B.JPG")
+100 |         XCTAssertNotEqual(first, second)
+
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoGrainTests.swift:99:50: warning: call to main actor-isolated static method 'makeRenderKey(settings:source:metadata:sourceName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+ 85 |     }
+ 86 | 
+ 99 |         let second = PhotoEffectsSettingsPreview.makeRenderKey(settings: snapshot, source: nil, metadata: nil, sourceName: "B.JPG")
+    |                                                  `- warning: call to main actor-isolated static method 'makeRenderKey(settings:source:metadata:sourceName:)' in a synchronous nonisolated context [#ActorIsolatedCall]
+100 |         XCTAssertNotEqual(first, second)
+101 |     }
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios16.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk/Developer/Library/Frameworks -filelist /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -bundle_loader /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer -Xlinker -object_path_lto -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/ztransfer-removal-derived-20261021/Build/Intermediates.noindex/ZTransfer.build/Debug-iphonesimulator/ZTransferTests.build/Objects-normal/arm64/ZTransferTests.swiftmodule -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/ZTransfer.debug.dylib -Xlinker -no_adhoc_codesign -o /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest/ZTransferTests
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferTests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/XCTest.framework/XCTest' which was built for newer version 17.0
+/Users/orys/code/nk_send/ios/ZTransfer.xcodeproj: ZTransferTests: ld: warning: building for iOS-simulator-16.0, but linking with dylib '@rpath/libXCTestSwiftSupport.dylib' which was built for newer version 17.0
+
+ExtractAppIntentsMetadata (in target 'ZTransferTests' from project 'ZTransfer')
+2026-10-30 16:26:23.561 appintentsmetadataprocessor[70493:36389835] Starting appintentsmetadataprocessor export
+2026-10-30 16:26:23.562 appintentsmetadataprocessor[70493:36389835] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+CopySwiftLibs /tmp/ztransfer-removal-derived-20261021/Build/Products/Debug-iphonesimulator/ZTransfer.app/PlugIns/ZTransferTests.xctest (in target 'ZTransferTests' from project 'ZTransfer')
+2026-10-30 16:26:46.931157+0800 ZTransfer[70680:36391980] [General] Failed to send CA Event for app launch measurements for ca_event_type: 1 event_name: com.apple.app_launch_measurement.ExtendedLaunchMetrics
+Test Suite 'Selected tests' started at 2026-10-30 16:26:47.147.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-30 16:26:47.147.
+Test Suite 'QueueCardPresentationTests' started at 2026-10-30 16:26:47.147.
+Test Case '-[ZTransferTests.QueueCardPresentationTests testOriginalSkipDoesNotHideRealDownloadOrConflateDerivedSkip]' started.
+Test Case '-[ZTransferTests.QueueCardPresentationTests testOriginalSkipDoesNotHideRealDownloadOrConflateDerivedSkip]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.QueueCardPresentationTests testRealQueueSurfaceSwipesBothDirectionsThenWithdrawsAndCollapses]' started.
+2026-10-30 16:26:47.820241+0800 ZTransfer[70680:36391999] [connection] nw_socket_handle_socket_event [C1:1] Socket SO_ERROR [61: Connection refused]
+2026-10-30 16:26:47.820675+0800 ZTransfer[70680:36391999] [connection] nw_endpoint_flow_failed_with_error [C1 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+2026-10-30 16:26:49.812956+0800 ZTransfer[70680:36391980] [connection] [C1 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.QueueCardPresentationTests testRealQueueSurfaceSwipesBothDirectionsThenWithdrawsAndCollapses]' passed (3.077 seconds).
+Test Suite 'QueueCardPresentationTests' passed at 2026-10-30 16:26:50.231.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 3.082 (3.084) seconds
+Test Suite 'QueueCardProgressVisibilityTests' started at 2026-10-30 16:26:50.231.
+Test Case '-[ZTransferTests.QueueCardProgressVisibilityTests testClockStopsOnCompletionResetAndOwnerRelease]' started.
+Test Case '-[ZTransferTests.QueueCardProgressVisibilityTests testClockStopsOnCompletionResetAndOwnerRelease]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.QueueCardProgressVisibilityTests testFailureAndRetryReverseFromDisplayedOpacityThenSettle]' started.
+Test Case '-[ZTransferTests.QueueCardProgressVisibilityTests testFailureAndRetryReverseFromDisplayedOpacityThenSettle]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.QueueCardProgressVisibilityTests testMountIsQuietAndCompletionRetainsProgressForExactDelayAndFade]' started.
+Test Case '-[ZTransferTests.QueueCardProgressVisibilityTests testMountIsQuietAndCompletionRetainsProgressForExactDelayAndFade]' passed (0.001 seconds).
+Test Suite 'QueueCardProgressVisibilityTests' passed at 2026-10-30 16:26:50.235.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'QueueConfirmationLayoutTests' started at 2026-10-30 16:26:50.235.
+Test Case '-[ZTransferTests.QueueConfirmationLayoutTests testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry]' started.
+2026-10-30 16:26:51.995147+0800 ZTransfer[70680:36392003] [connection] nw_socket_handle_socket_event [C3:1] Socket SO_ERROR [61: Connection refused]
+2026-10-30 16:26:51.995573+0800 ZTransfer[70680:36392003] [connection] nw_endpoint_flow_failed_with_error [C3 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.QueueConfirmationLayoutTests testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry]' passed (3.517 seconds).
+Test Suite 'QueueConfirmationLayoutTests' passed at 2026-10-30 16:26:53.752.
+	 Executed 1 test, with 0 failures (0 unexpected) in 3.517 (3.517) seconds
+Test Suite 'QueueRemovalCoordinatorTests' started at 2026-10-30 16:26:53.753.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork]' started.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearFallbackPreservesBothNewTerminalTasksAndNewWaitingWork]' passed (0.032 seconds).
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearLeavingFinishesOldTargetsAndAllowsNewClear]' started.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testClearLeavingFinishesOldTargetsAndAllowsNewClear]' passed (0.139 seconds).
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames]' started.
+2026-10-30 16:26:53.996366+0800 ZTransfer[70680:36392003] [connection] [C3 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testDisposedSingleSwipeKeepsPageOwnedCleanupAndOffscreenClearNeedsNoFrames]' passed (0.493 seconds).
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testPendingTasksDoNotRetainTheirScreenOwner]' started.
+Test Case '-[ZTransferTests.QueueRemovalCoordinatorTests testPendingTasksDoNotRetainTheirScreenOwner]' passed (0.411 seconds).
+Test Suite 'QueueRemovalCoordinatorTests' passed at 2026-10-30 16:26:54.830.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.076 (1.077) seconds
+Test Suite 'QueueRemovalLayoutTests' started at 2026-10-30 16:26:54.830.
+Test Case '-[ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows]' started.
+QUEUE_REMOVAL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/ACCD9E3D-0BAA-4C0C-9876-57170B413DE5/tmp/queue-removal-initial.png
+QUEUE_REMOVAL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/ACCD9E3D-0BAA-4C0C-9876-57170B413DE5/tmp/queue-removal-fade-before-collapse.png
+Test Case '-[ZTransferTests.QueueRemovalLayoutTests testRealViewportSelectionFadesBeforeHeightAndRemovesOnlyInitialVisibleRows]' passed (0.706 seconds).
+Test Suite 'QueueRemovalLayoutTests' passed at 2026-10-30 16:26:55.537.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.706 (0.707) seconds
+Test Suite 'QueueRemovalTests' started at 2026-10-30 16:26:55.537.
+Test Case '-[ZTransferTests.QueueRemovalTests testAlreadyDeletedRowNeverRestoresOnLateAnimationCompletion]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testAlreadyDeletedRowNeverRestoresOnLateAnimationCompletion]' passed (0.066 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testCleanupWaitsForActualFramesAndReleasesTheWaiterOnCancellation]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testCleanupWaitsForActualFramesAndReleasesTheWaiterOnCancellation]' passed (0.497 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testClearImmediatelyDropsOffscreenTargetsButPreservesNewWorkAndPausedVisibleRows]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testClearImmediatelyDropsOffscreenTargetsButPreservesNewWorkAndPausedVisibleRows]' passed (0.520 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testOpacityLeadsHeightAndBothStayMonotonic]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testOpacityLeadsHeightAndBothStayMonotonic]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testPageExitFinishesCapturedClearButCannotTouchTasksAddedAfterward]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testPageExitFinishesCapturedClearButCannotTouchTasksAddedAfterward]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testPlacementDoesNotChaseHeightCollapseAndResumesFromFinalPosition]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testPlacementDoesNotChaseHeightCollapseAndResumesFromFinalPosition]' passed (0.002 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testTimelineUsesFirstDeliveredFrameAndSupportsScaledStagger]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testTimelineUsesFirstDeliveredFrameAndSupportsScaledStagger]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.QueueRemovalTests testVisibleTargetsStaggerByPositionWithBoundedDelayAndNoDuplicate]' started.
+Test Case '-[ZTransferTests.QueueRemovalTests testVisibleTargetsStaggerByPositionWithBoundedDelayAndNoDuplicate]' passed (0.012 seconds).
+Test Suite 'QueueRemovalTests' passed at 2026-10-30 16:26:56.668.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 1.125 (1.130) seconds
+Test Suite 'TransferQueueScenarioTests' started at 2026-10-30 16:26:56.668.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto]' passed (0.022 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask]' passed (0.005 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade]' passed (0.075 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure]' passed (0.038 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication]' passed (0.033 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue]' passed (0.041 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline]' passed (0.014 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication]' passed (0.023 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope]' passed (0.009 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne]' passed (0.032 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication]' passed (0.033 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects]' passed (0.021 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused]' passed (0.096 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry]' passed (0.012 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues]' passed (0.019 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt]' passed (0.031 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave]' passed (0.024 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges]' passed (0.036 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe]' passed (0.020 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState]' passed (0.006 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt]' passed (0.038 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction]' passed (0.037 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped]' passed (0.000 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt]' passed (0.018 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart]' passed (0.029 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText]' passed (0.013 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks]' passed (0.030 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker]' passed (0.011 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration]' passed (0.017 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog]' passed (0.007 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit]' passed (0.025 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval]' passed (0.032 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart]' passed (0.053 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart]' passed (0.028 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate]' started.
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate]' passed (0.026 seconds).
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving]' started.
+2026-10-30 16:26:58.053260+0800 ZTransfer[70680:36392002] [connection] nw_socket_handle_socket_event [C5:1] Socket SO_ERROR [61: Connection refused]
+2026-10-30 16:26:58.053428+0800 ZTransfer[70680:36392002] [connection] nw_endpoint_flow_failed_with_error [C5 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+Test Case '-[ZTransferTests.TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving]' passed (0.023 seconds).
+Test Suite 'TransferQueueScenarioTests' passed at 2026-10-30 16:26:58.060.
+	 Executed 61 tests, with 0 failures (0 unexpected) in 1.372 (1.392) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-30 16:26:58.060.
+	 Executed 80 tests, with 0 failures (0 unexpected) in 10.881 (10.913) seconds
+Test Suite 'Selected tests' passed at 2026-10-30 16:26:58.061.
+	 Executed 80 tests, with 0 failures (0 unexpected) in 10.881 (10.914) seconds
+2026-10-30 16:26:58.114 xcodebuild[70397:36389036] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 16:26:58.119 xcodebuild[70397:36389036] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-30 16:26:58.435 xcodebuild[70397:36389036] [MT] IDETestOperationsObserverDebug: 34.184 elapsed -- Testing started completed.
+2026-10-30 16:26:58.436 xcodebuild[70397:36389036] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-30 16:26:58.436 xcodebuild[70397:36389036] [MT] IDETestOperationsObserverDebug: 34.184 sec, +34.184 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-queue-removal-final-20261030.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

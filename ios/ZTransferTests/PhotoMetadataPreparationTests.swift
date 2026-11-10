@@ -98,15 +98,18 @@ private actor MetadataTestLatch {
 private actor CapturedHeaderTestCamera: TransferDownloading {
     let header: Data
     let supplementalResult: Data?
+    let sourceBytes: Data?
     let readRelease = MetadataTestLatch()
     private(set) var reads = 0
-    init(header: Data, supplementalResult: Data? = nil) { self.header = header; self.supplementalResult = supplementalResult }
+    init(header: Data, supplementalResult: Data? = nil, sourceBytes: Data? = nil) {
+        self.header = header; self.supplementalResult = supplementalResult; self.sourceBytes = sourceBytes
+    }
     func photoMetadataIdentity() async -> PhotoMetadataCameraIdentity? {
         PhotoMetadataCameraIdentity(cacheIdentity: "Nikon\u{0}Z 30\u{0}pipeline-camera", session: "pipeline-session")
     }
     func download(file: CameraFile, to directory: URL, progress: (@Sendable (Double) -> Void)?) throws -> URL {
         let output = directory.appendingPathComponent(file.fileName)
-        try Data(repeating: 4, count: Int(file.size)).write(to: output)
+        try (sourceBytes ?? Data(repeating: 4, count: Int(file.size))).write(to: output)
         return output
     }
     func downloadResult(file: CameraFile, to directory: URL, captureHeader: Bool,
@@ -251,14 +254,15 @@ final class PhotoMetadataPipelineTests: XCTestCase {
         CameraFile(id: id, storageID: 1, format: 0x3801, size: 10,
             fileName: "DSC_\(id).JPG", captureDate: "20261016T000000", isProtected: false)
     }
-    private func jpeg() throws -> Data {
+    private func jpeg(gps: [CFString: Any]? = nil) throws -> Data {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { ctx in
             UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         }
         let data = NSMutableData()
         let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
-        CGImageDestinationAddImage(destination, try XCTUnwrap(image.cgImage),
-            [kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFModel: "Metadata test"]] as CFDictionary)
+        var properties: [CFString: Any] = [kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFModel: "Metadata test"]]
+        if let gps { properties[kCGImagePropertyGPSDictionary] = gps }
+        CGImageDestinationAddImage(destination, try XCTUnwrap(image.cgImage), properties as CFDictionary)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         return data as Data
     }
@@ -269,7 +273,7 @@ final class PhotoMetadataPipelineTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(5))
         }
     }
-    func testBlockedParserDoesNotBlockDownloadsAndBudgetFailureKeepsOriginal() async throws {
+    func testBlockedParserDoesNotBlockDownloadsAndBudgetFailureUsesEmptyMetadata() async throws {
         let root = try directory(), header = try jpeg()
         let store = PhotoMetadataHeaderStore(directory: root.appendingPathComponent("spool"),
             memoryLimit: header.count, diskLimit: header.count)
@@ -277,7 +281,9 @@ final class PhotoMetadataPipelineTests: XCTestCase {
         let camera = CapturedHeaderTestCamera(header: header)
         let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), metadataHeaderStore: store,
             parseMetadata: { try await parser.parse($0) }, renderFrame: { source, _, _, metadata in
-                XCTAssertEqual(metadata?.model, "Metadata test"); return source
+                if source.lastPathComponent == "DSC_3.JPG" { XCTAssertNil(metadata) }
+                else { XCTAssertEqual(metadata?.model, "Metadata test") }
+                return source
             })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueue([file(1), file(2), file(3)], effects: effects)
@@ -288,17 +294,17 @@ final class PhotoMetadataPipelineTests: XCTestCase {
         }
         try await wait { await parser.calls == 1 }
         // Original downloads finish before the independent metadata admission
-        // consumer reports the third item's exhausted header budget.
-        try await wait { await queue.snapshot().items.first(where: { $0.file.id == 3 })?.frameError != nil }
+        // consumer finishes the third item with empty metadata after exhausting its header budget.
+        try await wait { await queue.snapshot().items.first(where: { $0.file.id == 3 })?.frameURL != nil }
         XCTAssertEqual(store.usage, .init(memoryBytes: header.count, diskBytes: header.count))
         let blocked = await queue.snapshot()
         XCTAssertEqual(blocked.items.filter(\.isGeneratingFrame).count, 2)
-        XCTAssertNotNil(blocked.items.first(where: { $0.file.id == 3 })?.frameError)
+        XCTAssertNil(blocked.items.first(where: { $0.file.id == 3 })?.frameError)
         await parser.release.open()
         try await wait { await queue.snapshot().items.allSatisfy { !$0.isGeneratingFrame } }
         try await wait { store.usage == .init(memoryBytes: 0, diskBytes: 0) }
         let completed = await queue.snapshot()
-        XCTAssertEqual(completed.items.filter { $0.frameURL != nil }.count, 2)
+        XCTAssertEqual(completed.items.filter { $0.frameURL != nil }.count, 3)
         XCTAssertTrue(completed.items.allSatisfy { $0.outputURL != nil })
         await queue.closePhotoGeneration()
     }
@@ -357,8 +363,8 @@ final class PhotoMetadataPipelineTests: XCTestCase {
         let root = try directory(), header = try jpeg(), original = file(1)
         try Data(repeating: 4, count: 10).write(to: root.appendingPathComponent(original.fileName))
         let camera = CapturedHeaderTestCamera(header: header)
-        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, _ in
-            XCTFail("Missing metadata must not render"); return source
+        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, metadata in
+            XCTAssertNil(metadata); return source
         })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueue(original, effects: effects)
@@ -369,13 +375,13 @@ final class PhotoMetadataPipelineTests: XCTestCase {
         XCTAssertEqual(reads, 1)
         await camera.readRelease.open()
         try await wait { await queue.snapshot().items.allSatisfy { !$0.isGeneratingFrame } }
-        let failed = await queue.snapshot()
-        XCTAssertTrue(failed.items.allSatisfy { $0.frameError != nil })
+        let completed = await queue.snapshot()
+        XCTAssertTrue(completed.items.allSatisfy { $0.frameError == nil && $0.frameURL != nil })
         let finalReads = await camera.reads
         XCTAssertEqual(finalReads, 1)
-        let id = try XCTUnwrap(failed.items.first?.id)
-        _ = await queue.retry(id: id)
-        try await wait { await queue.snapshot().items.allSatisfy { !$0.isGeneratingFrame && $0.status != .waiting } }
+        _ = await queue.enqueue(original, effects: effects)
+        await queue.start(session: camera, directory: root)
+        try await wait { let snapshot = await queue.snapshot(); return snapshot.items.count == 3 && !snapshot.isTransferring && snapshot.items.allSatisfy { !$0.isGeneratingFrame && $0.status != .waiting } }
         let retriedReads = await camera.reads
         XCTAssertEqual(retriedReads, 2)
         await queue.closePhotoGeneration()
@@ -401,6 +407,39 @@ private actor TimedGenerationRenderer {
 }
 
 extension PhotoMetadataPipelineTests {
+    func testCropReceivesItsPreparedCameraLocationForBothRecipeRoutes() async throws {
+        for useSelection in [false, true] {
+            let root = try directory()
+            let header = try jpeg(gps: [kCGImagePropertyGPSLatitude: 48.8566, kCGImagePropertyGPSLatitudeRef: "N",
+                kCGImagePropertyGPSLongitude: 2.3522, kCGImagePropertyGPSLongitudeRef: "E",
+                kCGImagePropertyGPSAltitude: 7.25, kCGImagePropertyGPSAltitudeRef: 1])
+            let first = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(header.count),
+                fileName: "DSC_1.JPG", captureDate: "20261016T000000", isProtected: false)
+            let camera = CapturedHeaderTestCamera(header: header, sourceBytes: header)
+            let crop = HoldingCropRenderer()
+            let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime),
+                renderCrop: { _, source, directory, location in
+                    let location = try XCTUnwrap(location)
+                    XCTAssertEqual(location.latitude, 48.8566, accuracy: 1e-8)
+                    XCTAssertEqual(location.longitude, 2.3522, accuracy: 1e-8)
+                    XCTAssertEqual(try XCTUnwrap(location.altitude), -7.25, accuracy: 1e-8)
+                    return try await crop.render(source, directory: directory)
+                }, renderFrame: { source, _, _, _ in source })
+            var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
+            if useSelection {
+                await queue.enqueueCrop(first, selection: .init(bounds: .init(left: 0, top: 0, right: 1, bottom: 1), orientation: 1),
+                    storageMode: .unified, effects: effects)
+            } else { await queue.enqueueCrop(first, task: cropRecipe(first), effects: effects) }
+            await camera.readRelease.open(); await crop.release.open()
+            await queue.start(session: camera, directory: root)
+            try await wait { let s = await queue.snapshot(); return !s.isTransferring && s.items.first?.isGeneratingFrame == false }
+            let calls = await crop.calls, snapshot = await queue.snapshot()
+            XCTAssertEqual(calls, 1)
+            XCTAssertNil(snapshot.items.first?.frameError)
+            XCTAssertNotNil(snapshot.items.first?.cropURL)
+            await queue.closePhotoGeneration()
+        }
+    }
     func testFiveSecondsPreparationThenHalfSecondRenderRecordsOnlyHalfSecond() async throws {
         let root = try directory(), header = try jpeg()
         let clock = GenerationTestClock(), parser = HoldingMetadataParser(), renderer = TimedGenerationRenderer()
@@ -415,10 +454,15 @@ extension PhotoMetadataPipelineTests {
         let preparing = await queue.snapshot()
         XCTAssertNil(preparing.items.first?.frameGenerationStartedAtElapsedMs)
         XCTAssertNil(preparing.items.first?.displayedFrameGenerationElapsedMs(now: clock.now()))
+        XCTAssertEqual(preparing.items.first?.frameGenerationPendingCheck, true)
+        XCTAssertEqual(preparing.items.first?.isQueuedForFrameGeneration, false)
+        let clearTargets = await queue.beginClearQueue()
+        XCTAssertTrue(clearTargets.isEmpty)
         await parser.release.open()
         try await wait { await renderer.calls == 1 }
         clock.advance(250)
         let running = await queue.snapshot()
+        XCTAssertEqual(running.items.first?.frameGenerationPendingCheck, false)
         XCTAssertEqual(running.items.first?.displayedFrameGenerationElapsedMs(now: clock.now()), 250)
         clock.advance(250)
         await renderer.release(0)
@@ -523,7 +567,7 @@ extension PhotoMetadataPipelineTests {
             }
             let crop = HoldingCropRenderer(), clock = GenerationTestClock()
             let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), generationNow: clock.now,
-                renderCrop: { _, source, directory in try await crop.render(source, directory: directory) })
+                renderCrop: { _, source, directory, _ in try await crop.render(source, directory: directory) })
             let camera = CapturedHeaderTestCamera(header: header)
             await queue.enqueueCrop(first, task: cropRecipe(first))
             await queue.enqueue(file(2))
@@ -561,7 +605,7 @@ extension PhotoMetadataPipelineTests {
         let camera = CapturedHeaderTestCamera(header: header, supplementalResult: header)
         let crop = HoldingCropRenderer(), clock = GenerationTestClock()
         let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), generationNow: clock.now,
-            renderCrop: { _, source, directory in try await crop.render(source, directory: directory) },
+            renderCrop: { _, source, directory, _ in try await crop.render(source, directory: directory) },
             renderFrame: { source, _, _, metadata in
                 XCTAssertTrue(source.lastPathComponent.hasSuffix(".crop.JPG"))
                 XCTAssertEqual(metadata?.model, "Metadata test")
@@ -595,7 +639,7 @@ extension PhotoMetadataPipelineTests {
         let camera = CapturedHeaderTestCamera(header: header, supplementalResult: header)
         let crop = HoldingCropRenderer(), renderer = SharedMetadataRenderProbe()
         let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime),
-            renderCrop: { _, source, directory in try await crop.render(source, directory: directory) },
+            renderCrop: { _, source, directory, _ in try await crop.render(source, directory: directory) },
             renderFrame: { source, _, _, metadata in try await renderer.render(source, metadata: metadata) })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueueCrop(first, task: cropRecipe(first), effects: effects)
@@ -624,7 +668,7 @@ extension PhotoMetadataPipelineTests {
         let camera = CapturedHeaderTestCamera(header: header)
         let crop = HoldingCropRenderer(), renderer = TimedGenerationRenderer(), clock = GenerationTestClock()
         let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), generationNow: clock.now,
-            renderCrop: { _, source, directory in try await crop.render(source, directory: directory) },
+            renderCrop: { _, source, directory, _ in try await crop.render(source, directory: directory) },
             renderFrame: { source, _, _, _ in await renderer.render(source) })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueueCrop(first, task: cropRecipe(first))
@@ -650,7 +694,7 @@ extension PhotoMetadataPipelineTests {
         let root = try directory(), header = try jpeg()
         let camera = CapturedHeaderTestCamera(header: header), crop = HoldingCropRenderer()
         let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime),
-            renderCrop: { _, source, directory in try await crop.render(source, directory: directory) })
+            renderCrop: { _, source, directory, _ in try await crop.render(source, directory: directory) })
         for original in [file(1), file(2)] { await queue.enqueueCrop(original, task: cropRecipe(original)) }
         await queue.start(session: camera, directory: root)
         try await wait { await crop.calls == 1 }
@@ -712,15 +756,17 @@ extension PhotoMetadataPipelineTests {
 
     func testDisabledGateStillSavesCropAndMarksOnlyEffectsSkipped() async throws {
         let root = try directory(), header = try jpeg(), first = file(1), defaults = UserDefaults(suiteName: gateDefaultsName())!
-        defaults.set(false, forKey: "photo_effects_enabled")
+        defaults.set(true, forKey: "photo_effects_enabled")
         try Data(repeating: 4, count: 10).write(to: root.appendingPathComponent(first.fileName))
         let camera = CapturedHeaderTestCamera(header: header, supplementalResult: header)
         let crop = HoldingCropRenderer(), clock = GenerationTestClock()
         let queue = TransferQueue(defaults: defaults, premiumAccess: PremiumAccess(.lifetime), generationNow: clock.now,
-            renderCrop: { _, source, directory in try await crop.render(source, directory: directory) },
+            renderCrop: { _, source, directory, _ in try await crop.render(source, directory: directory) },
             renderFrame: { source, _, _, _ in XCTFail("Disabled effects must not render"); return source })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueueCrop(first, task: cropRecipe(first), effects: effects)
+        // Android snapshots enabled effects at admission; disable only after that boundary.
+        await queue.setPhotoEffectsEnabled(false)
         await queue.start(session: camera, directory: root)
         try await wait { await crop.calls == 1 }
         clock.advance(200)
@@ -739,12 +785,12 @@ extension PhotoMetadataPipelineTests {
     func testEnablingDuringCropPausesForMetadataAndResumesWithoutRecropping() async throws {
         for closeWhileWaiting in [false, true] {
             let root = try directory(), header = try jpeg(), first = file(1), defaults = UserDefaults(suiteName: gateDefaultsName())!
-            defaults.set(false, forKey: "photo_effects_enabled")
+            defaults.set(true, forKey: "photo_effects_enabled")
             try Data(repeating: 4, count: 10).write(to: root.appendingPathComponent(first.fileName))
             let camera = CapturedHeaderTestCamera(header: header, supplementalResult: header)
             let crop = HoldingCropRenderer(), clock = GenerationTestClock()
             let queue = TransferQueue(defaults: defaults, premiumAccess: PremiumAccess(.lifetime), generationNow: clock.now,
-                renderCrop: { _, source, directory in try await crop.render(source, directory: directory) },
+                renderCrop: { _, source, directory, _ in try await crop.render(source, directory: directory) },
                 renderFrame: { source, _, _, metadata in
                     XCTAssertFalse(closeWhileWaiting)
                     XCTAssertEqual(metadata?.model, "Metadata test")
@@ -752,6 +798,8 @@ extension PhotoMetadataPipelineTests {
                 })
             var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
             await queue.enqueueCrop(first, task: cropRecipe(first), effects: effects)
+            // Android snapshots enabled effects at admission; disable only after that boundary.
+            await queue.setPhotoEffectsEnabled(false)
             await queue.start(session: camera, directory: root)
             try await wait { await crop.calls == 1 }
             try await wait { await camera.reads == 1 }
@@ -798,7 +846,8 @@ extension PhotoMetadataPipelineTests {
         let count = await queue.pendingMetadataPreparationCount
         XCTAssertEqual(count, 2)
         let skipped = await queue.snapshot()
-        XCTAssertTrue(skipped.items.allSatisfy(\.frameGenerationSkipped))
+        XCTAssertTrue(skipped.items.prefix(2).allSatisfy(\.frameGenerationSkipped))
+        XCTAssertTrue(skipped.items.suffix(2).allSatisfy { $0.effects == nil && !$0.frameGenerationSkipped })
         await camera.readRelease.open()
         try await wait { await queue.pendingMetadataPreparationCount == 0 }
         await queue.closePhotoGeneration()

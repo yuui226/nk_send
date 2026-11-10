@@ -152,7 +152,7 @@ struct RemotePhotoReviewView: View {
                     .frame(width: 40, height: 36)
             }
             .foregroundStyle(closeTint)
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 22))
             .accessibilityLabel(AppLocalized.resource("cd_close"))
             .accessibilityIdentifier("remote-review-close")
             .padding(.top, 8).padding(.trailing, landscape ? 4 : 12)

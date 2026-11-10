@@ -1,0 +1,30 @@
+{
+  "before_visible_non_whitespace_characters": 2675,
+  "after_visible_non_whitespace_characters": 1071,
+  "count_scope": "HTML body text, all tabs; excludes source comments, metadata, screenshots and alt text",
+  "demo_drafts_removed": true,
+  "workflow_tabs": 2,
+  "complete_effect_showcases": 1,
+  "effect_control_groups": 5,
+  "remote_repeated_control_crops": 0,
+  "viewports_checked": [
+    [
+      1440,
+      1000
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      320,
+      740
+    ]
+  ],
+  "horizontal_overflow": false,
+  "console_errors_or_warnings": []
+}

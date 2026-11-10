@@ -1,0 +1,291 @@
+{
+  "monitor": [
+    {
+      "name": "基本操作",
+      "items": [
+        {
+          "name": "拍照与相机录像",
+          "description": "圆形快门按钮可以拍照、开始或停止录像；长按对焦，松手拍摄，移出按钮取消。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-camera\"/></svg>"
+        },
+        {
+          "name": "画面操作",
+          "description": "追焦功能下，点击画面选择追焦目标，再点一次取消追焦。双指缩放，放大后可拖动，双击还原。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-focus\"/></svg>"
+        },
+        {
+          "name": "拍摄参数",
+          "description": "按住拨轮上下拖动可快速调节曝光补偿、ISO、光圈和快门速度；ISO 上的 AUTO 按钮为自动 ISO 开关。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-sliders\"/></svg>"
+        },
+        {
+          "name": "回看",
+          "description": "照片模式下查看最新照片：左右翻页，双击或双指缩放，单击退出。同名 JPG+NEF 只显示一次。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#i-photo\"/></svg>"
+        },
+        {
+          "name": "连接与电量",
+          "description": "顶部显示连接状态；电池可查看剩余电量。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-signal\"/></svg>"
+        }
+      ]
+    },
+    {
+      "name": "相机控制",
+      "items": [
+        {
+          "name": "白平衡",
+          "description": "调整相机白平衡。",
+          "icon": "WB"
+        },
+        {
+          "name": "对焦模式",
+          "description": "选择单次、连续或手动对焦等方式。",
+          "icon": "AF"
+        },
+        {
+          "name": "对焦区域",
+          "description": "选择画面中参与对焦的范围，如单点或宽区域。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-focus\"/></svg>"
+        },
+        {
+          "name": "对焦框",
+          "description": "显示或隐藏对焦框。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-frame\"/></svg>"
+        },
+        {
+          "name": "优化校准",
+          "description": "支持已有预设切换，点槽位对应画笔更换或清除。可用内置或文件夹中的 .np3，暂不支持灵活色彩的 .np3。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-preset\"/></svg>"
+        },
+        {
+          "name": "完全控制",
+          "description": "部分机型开启后可调更多参数，机身操作可能受限。退出监看会解除。",
+          "icon": "PC"
+        }
+      ]
+    },
+    {
+      "name": "曝光与色彩",
+      "items": [
+        {
+          "name": "直方图",
+          "description": "看画面明暗分布：左暗右亮。点按切换 RGB（红绿蓝）、亮度或关闭。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-histogram\"/></svg>"
+        },
+        {
+          "name": "曝光辅助",
+          "description": "斑马纹标出亮部，伪色用颜色区分明暗。点按依次切换两种效果或关闭。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-zebra\"/></svg>"
+        },
+        {
+          "name": "曝光尺",
+          "description": "看相机的曝光指示，判断曝光偏亮还是偏暗。",
+          "icon": "±EV"
+        },
+        {
+          "name": "波形图",
+          "description": "横向对应画面位置，波形越高越亮。点按切换亮度、RGB 或关闭。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-wave\"/></svg>"
+        },
+        {
+          "name": "LUT",
+          "description": "选含 .cube 文件的文件夹，支持文件夹中一层子文件夹作分类。只改变监看颜色，不会影响相机产出的照片或视频，不能与伪色同用。",
+          "icon": "LUT"
+        }
+      ]
+    },
+    {
+      "name": "画面辅助",
+      "items": [
+        {
+          "name": "高清监看",
+          "description": "切换监看清晰度，不改变相机照片和录像的画质。",
+          "icon": "HD"
+        },
+        {
+          "name": "帧率显示",
+          "description": "显示监看每秒收到的画面数，不是相机录像帧率。",
+          "icon": "FPS"
+        },
+        {
+          "name": "音频电平",
+          "description": "显示相机左右声道的音量，仅录像模式可用。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-audio\"/></svg>"
+        },
+        {
+          "name": "监看录制",
+          "description": "将监看画面录成视频存到手机，支持暂停，需高级版。与相机录像独立，优先用手机麦克风；不录入监看缩放、LUT 和辅助标记。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-record\"/></svg>"
+        }
+      ]
+    },
+    {
+      "name": "布局与工具",
+      "items": [
+        {
+          "name": "参考线",
+          "description": "选择参考线帮助构图。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#i-grid\"/></svg>"
+        },
+        {
+          "name": "水平仪",
+          "description": "显示相机是否倾斜，帮助保持画面水平。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-level\"/></svg>"
+        },
+        {
+          "name": "反挤压",
+          "description": "使用变形宽银幕镜头时，按镜头倍率拉宽画面；普通镜头选 1×。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-expand\"/></svg>"
+        },
+        {
+          "name": "锁定布局",
+          "description": "固定当前横竖屏方向，解锁后才能旋转；不影响拍摄操作。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-lock\"/></svg>"
+        },
+        {
+          "name": "旋转布局",
+          "description": "切换竖屏或左右横屏；锁定时先解锁。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-rotate\"/></svg>"
+        },
+        {
+          "name": "管理工具",
+          "description": "管理小工具显隐与顺序，拖动排序，点按显示或隐藏。照片、录像分别记住布局；隐藏辅助工具会关闭其效果。锁定和旋转不能移动或隐藏。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-sliders\"/></svg>"
+        },
+        {
+          "name": "横屏 DISP",
+          "description": "切换显示在监看画面上的信息。",
+          "icon": "DISP"
+        }
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "name": "传输",
+      "items": [
+        {
+          "name": "传输目录",
+          "description": "选择照片、RAW 和视频的保存文件夹。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-folder\"/></svg>"
+        },
+        {
+          "name": "存放方式",
+          "description": "统一保存，或按拍摄日期、文件类型分文件夹；效果图单独保存。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-folders\"/></svg>"
+        },
+        {
+          "name": "实时传输",
+          "description": "按所选类型，将新拍摄的全部、JPG、RAW 或视频自动加入队列。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#i-download\"/></svg>"
+        },
+        {
+          "name": "选完再传",
+          "description": "挑选入队后不会立即传输，适合预览大图挑选照片时开启。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#i-check\"/></svg>"
+        }
+      ]
+    },
+    {
+      "name": "照片列表",
+      "items": [
+        {
+          "name": "每行数量",
+          "description": "调整照片列表每行显示的数量。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#i-grid\"/></svg>"
+        },
+        {
+          "name": "连拍成组",
+          "description": "将连拍合为一组，展开后逐张查看。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-stack\"/></svg>"
+        },
+        {
+          "name": "照片操作",
+          "description": "切换点击与长按的预览、传输操作。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-touch\"/></svg>"
+        },
+        {
+          "name": "照片加载范围",
+          "description": "按有照片的日期计数。选「5日」会加载最近 5 个有照片的日期，没拍照的日子不计入。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-calendar\"/></svg>"
+        }
+      ]
+    },
+    {
+      "name": "照片效果",
+      "items": [
+        {
+          "name": "照片效果开关",
+          "description": "在照片列表的设置中控制是否生成效果图；关闭后保留参数。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-toggle\"/></svg>"
+        },
+        {
+          "name": "编辑照片效果",
+          "description": "从照片列表打开设置，点卡片编辑；开启照片效果后，也可从 JPG 大图预览进入。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-sliders\"/></svg>"
+        }
+      ]
+    },
+    {
+      "name": "外观与操作",
+      "items": [
+        {
+          "name": "明暗",
+          "description": "跟随系统，或固定使用深色、浅色。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-theme\"/></svg>"
+        },
+        {
+          "name": "语言",
+          "description": "跟随系统，或选择应用语言。",
+          "icon": "A/文"
+        },
+        {
+          "name": "按钮风格",
+          "description": "更换按钮的外观材质。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-layers\"/></svg>"
+        },
+        {
+          "name": "触感反馈",
+          "description": "开启或关闭操作时的振动。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-touch\"/></svg>"
+        },
+        {
+          "name": "屏幕常亮",
+          "description": "使用 App 时保持屏幕亮起。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-screen\"/></svg>"
+        }
+      ]
+    },
+    {
+      "name": "版本与反馈",
+      "items": [
+        {
+          "name": "解锁高级版",
+          "description": "免费用户可查看高级版权益并激活。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-spark\"/></svg>"
+        },
+        {
+          "name": "续费",
+          "description": "有到期时间的高级版用户可续费，延长有效期。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-calendar\"/></svg>"
+        },
+        {
+          "name": "更新",
+          "description": "检查并下载新版本。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#i-download\"/></svg>"
+        },
+        {
+          "name": "换机",
+          "description": "高级版可复制激活码，在新设备激活后，本机恢复免费版。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-phone\"/></svg>"
+        },
+        {
+          "name": "反馈",
+          "description": "复制客服 QQ 号。",
+          "icon": "<svg class=\"icon\" aria-hidden=\"true\"><use href=\"#guide-i-message\"/></svg>"
+        }
+      ]
+    }
+  ]
+}

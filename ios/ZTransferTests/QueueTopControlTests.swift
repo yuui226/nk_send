@@ -146,6 +146,20 @@ final class QueueTopControlLifecycleTests: XCTestCase {
 
 @MainActor
 final class QueueTopControlRenderingTests: XCTestCase {
+    func testCapsuleGapShrinksWithItsWidthAndDisappearsAtZero() throws {
+        let solo = ImageRenderer(content: SharedQueueControlsLayout {
+            Color.blue.frame(width: 140, height: 36)
+        })
+        XCTAssertEqual(try XCTUnwrap(solo.uiImage).size.width, 140)
+        for (pillWidth, expectedWidth) in [(CGFloat(0), 32), (20, 56), (40, 80), (140, 180)] {
+            let renderer = ImageRenderer(content: SharedQueueControlsLayout {
+                Color.red.frame(width: 32, height: 36)
+                Color.blue.frame(width: pillWidth, height: 36)
+            })
+            XCTAssertEqual(try XCTUnwrap(renderer.uiImage).size.width, CGFloat(expectedWidth), accuracy: 0.1)
+        }
+    }
+
     private final class State: ObservableObject {
         @Published var snapshot = TransferQueueSnapshot(items: [], isTransferring: false, pauseAfterCurrent: false)
         @Published var held = 0
@@ -160,12 +174,23 @@ final class QueueTopControlRenderingTests: XCTestCase {
         var anchorUpdates = 0
         var anchor = CGRect.zero
         func set(_ statuses: [TransferStatus], running: Bool, generating: Bool = false) {
-            let items = statuses.enumerated().map { index, status in
-                var item = TransferQueueItem(id: UUID(), file: CameraFile(id: UInt32(index + 1), storageID: 1,
+            let resolvedStatuses = statuses.count == 1 && [.completed, .cancelled].contains(statuses[0])
+                ? Array(repeating: statuses[0], count: max(1, snapshot.items.count)) : statuses
+            var items = resolvedStatuses.enumerated().map { index, status in
+                let id = index < snapshot.items.count ? snapshot.items[index].id : UUID()
+                var item = TransferQueueItem(id: id, file: CameraFile(id: UInt32(index + 1), storageID: 1,
                     format: 0x3801, size: 10_000_000, fileName: "\(index).JPG", captureDate: nil, isProtected: false),
                     status: status, progress: 0.5, bytesPerSecond: 12_500_000)
                 item.isGeneratingFrame = generating
                 return item
+            }
+            // This scenario models successful handoff, not vanished unfinished
+            // work. Resolve omitted waiting rows explicitly as local skips.
+            if items.count < snapshot.items.count && statuses.first == .transferring {
+                for var old in snapshot.items.dropFirst(items.count) {
+                    old.status = .completed; old.isGeneratingFrame = false; old.skipped = true
+                    items.append(old)
+                }
             }
             snapshot = .init(items: items, isTransferring: running, pauseAfterCurrent: false)
         }
@@ -173,7 +198,7 @@ final class QueueTopControlRenderingTests: XCTestCase {
     private struct RectKey: PreferenceKey {
         static let defaultValue = CGRect.zero
         static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-            let next = nextValue(); if !next.isEmpty { value = next }
+            let next = nextValue(); if next.height > 0 { value = next }
         }
     }
     private struct Page: View {
@@ -181,20 +206,19 @@ final class QueueTopControlRenderingTests: XCTestCase {
         var body: some View {
             let _ = { state.bodyCount += 1 }()
             Color.gray.opacity(0.15).overlay(alignment: .topTrailing) {
-                HStack(spacing: 0) {
+                SharedQueueControlsLayout {
                     QueueTopPresence(visible: state.snapshot.executionControl != nil && !state.preview,
-                                     kind: .execution, trailingSpacing: 8) {
+                                     kind: .execution) {
                         QueueTopExecutionButton(control: state.snapshot.executionControl,
                             pauseRequested: state.snapshot.pauseAfterCurrent, startEnabled: true) { _ in }
                             .onAppear { state.executionMounted = true }
                             .onDisappear { state.executionMounted = false }
                     }
-                    QueueTopPresence(visible: !state.queuePage || !state.snapshot.items.isEmpty, kind: .pill) {
-                        QueuePill(snapshot: state.snapshot, activeProgress: nil, heldCount: state.held)
+                    QueuePill(snapshot: state.snapshot, activeProgress: nil, heldCount: state.held,
+                              visible: !state.queuePage)
                             .background(GeometryReader { g in
                                 Color.clear.preference(key: RectKey.self, value: g.frame(in: .global))
                             })
-                    }
                 }
                 .modifier(QueueControlsCatchEffect(trigger: state.catchNonce))
                 .padding(.trailing, 16).padding(.top, 20)
@@ -210,6 +234,32 @@ final class QueueTopControlRenderingTests: XCTestCase {
             }
         }
     }
+    func testDoneDeadlineSurvivesTerminalMetadataAndOldFailureHistory() async throws {
+        let state = State()
+        state.set([.failed], running: false)
+        let history = state.snapshot.items[0]
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 393, height: 120)
+        window.rootViewController = UIHostingController(rootView: Page(state: state).ignoresSafeArea().environment(\.scenePhase, .active))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
+        try await Task.sleep(for: .milliseconds(100))
+        var active = history; active.id = UUID(); active.status = .transferring; active.progress = 0.7
+        state.snapshot = .init(items: [history, active], isTransferring: true, pauseAfterCurrent: false)
+        try await Task.sleep(for: .milliseconds(120))
+        active.status = .completed; active.elapsedMs = 20
+        state.snapshot = .init(items: [history, active], isTransferring: false, pauseAfterCurrent: false)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(state.observation?.mode, .done)
+        XCTAssertEqual(state.observation?.completionFill, false, "Only the 160ms visible download hold draws liquid")
+        try await Task.sleep(for: .milliseconds(650))
+        active.downloadMBps = 19
+        state.snapshot = .init(items: [history, active], isTransferring: false, pauseAfterCurrent: false)
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(state.observation?.mode, .icon, "Unrelated history updates cannot restart Done's 1800ms timeout")
+    }
+
     func testRealClusterTransitionsInLiquidGlass() async throws { try await verify(.liquidGlass) }
     func testRealClusterTransitionsInPhysicalTheme() async throws { try await verify(.titanium) }
     func testRealClusterTransitionsInDarkPhysicalTheme() async throws { try await verify(.titanium, scheme: .dark) }
@@ -221,7 +271,7 @@ final class QueueTopControlRenderingTests: XCTestCase {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.windows.first(where: \.isKeyWindow)
         let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 393, height: 120)
-        let host = UIHostingController(rootView: Page(state: state).ignoresSafeArea().defaultAppStorage(defaults).environment(\.colorScheme, scheme))
+        let host = UIHostingController(rootView: Page(state: state).ignoresSafeArea().defaultAppStorage(defaults).environment(\.colorScheme, scheme).environment(\.scenePhase, .active))
         window.rootViewController = host; window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey(); defaults.removePersistentDomain(forName: suite) }
         var pictures: [UIImage] = []
@@ -286,6 +336,12 @@ final class QueueTopControlRenderingTests: XCTestCase {
         XCTAssertEqual(state.bodyCount, parentCount, "Catch/progress/width frames cannot rebuild the parent")
         XCTAssertEqual(state.anchor, initialAnchor)
         XCTAssertEqual(state.anchorUpdates, anchorUpdates, "Anchor cannot republish on width/catch frames")
+        state.queuePage = true
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertEqual(state.rect.width, 0, accuracy: 0.6, "A nonempty queue also hides the capsule")
+        XCTAssertTrue(state.executionMounted, "Start/pause remains on the queue page")
+        capture("nonempty queue hidden")
+        state.queuePage = false; try await settle(.counting)
         let lastStarted = CACurrentMediaTime()
         state.set([.transferring], running: true)
         try await Task.sleep(for: .milliseconds(50))

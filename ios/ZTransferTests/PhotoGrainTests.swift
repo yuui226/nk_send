@@ -296,7 +296,7 @@ final class PhotoGrainTests: XCTestCase {
         let lut = CubeLUT(size: 2, domainMin: .zero, domainMax: SIMD3(repeating: 1),
             rgb: [0,0,0, 0,0,1, 1,0,0, 1,0,1, 0,1,0, 0,1,1, 1,1,0, 1,1,1], digest: "grain-audit-cube")
         PhotoLUTRuntime.register(lut)
-        let selections = [PhotoFilterSelection(preset: PhotoEffectsSettings().orderedFilters[0], intensityPercent: 73),
+        let selections = [testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 73),
             PhotoFilterSelection(preset: .init(id: "cube:\(lut.digest)", name: "Audit"), intensityPercent: 67)]
         for selection in selections {
             for orientation in [UIImage.Orientation.up, .upMirrored, .down, .downMirrored, .left, .leftMirrored, .right, .rightMirrored] {
@@ -610,7 +610,7 @@ final class PhotoGrainLifecycleTests: XCTestCase {
     private func filteredGrainSettings() -> PhotoEffectsSettings {
         var settings = PhotoEffectsSettings()
         settings.photoFilterEnabled = true
-        settings.selectedFilter = .init(preset: settings.orderedFilters[0], intensityPercent: 77)
+        settings.selectedFilter = testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 77)
         settings.photoGrain = .init(intensityPercent: 53, enabled: true, style: .medium)
         return settings
     }

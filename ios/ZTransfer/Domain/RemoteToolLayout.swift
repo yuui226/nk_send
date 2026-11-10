@@ -7,13 +7,17 @@ enum RemoteTool: String, CaseIterable, Identifiable, Sendable {
     case hd, fps, audio, histogram, grid, exposure, desqueeze, level
     case whiteBalance = "white_balance"
     case focusArea = "focus_area"
-    case waveform, focusMode = "focus_mode", focusFrame = "focus_frame", lut, pictureControl = "picture_control", meter, lock
+    case waveform, focusMode = "focus_mode", focusFrame = "focus_frame", lut, pictureControl = "picture_control", meter
+    case selfTimer = "self_timer"
+    case lock
     case computerControl = "computer_control", rotate
 
     var id: String { rawValue }
     var fixed: Bool { self == .rotate || self == .lock }
     static let pinned: [RemoteTool] = [.lock, .rotate]
-    func available(movie: Bool) -> Bool { self != .audio || movie }
+    func available(movie: Bool) -> Bool {
+        switch self { case .audio: movie; case .selfTimer: !movie; default: true }
+    }
     static var regular: [RemoteTool] { allCases.filter { !$0.fixed } }
     var titleKey: String {
         switch self {

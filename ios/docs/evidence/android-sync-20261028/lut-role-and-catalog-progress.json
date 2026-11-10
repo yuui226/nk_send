@@ -1,0 +1,190 @@
+{
+  "status": "Implementation and test compilation complete; iOS runtime verification pending user system authorization. N15/N17/N19 remain in progress.",
+  "androidTarget": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "runtimeAttempt": {
+    "session": 75560,
+    "exitCode": 70,
+    "testMethodsRun": 0,
+    "log": "ios/docs/evidence/android-sync-20261028/lut-role-runtime-unavailable.log",
+    "sha256": "0fecf506265d68f15e958f86cdc3816ebd473dd07daf5a16ce7658beedd1080d",
+    "reason": "Installed CoreSimulator 1174.9.2 is older than Xcode requirement 1174.21.0; device unavailable."
+  },
+  "builds": [
+    {
+      "session": 90296,
+      "exitCode": 65,
+      "result": "TEST BUILD FAILED",
+      "testMethodsRun": 0,
+      "log": "ios/docs/evidence/android-sync-20261028/lut-role-build-r1.log",
+      "sha256": "756ffc8c21b4f83122f4f56ef7ab34ef3baab5e06ce294a9c5aae2d5c6abf8c9"
+    },
+    {
+      "session": 25561,
+      "exitCode": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "testMethodsRun": 0,
+      "log": "ios/docs/evidence/android-sync-20261028/lut-role-build-r2.log",
+      "sha256": "464527f043cb848019243f65fa38fb72ff84d7e02eb6140ad8c145a371d74c06"
+    },
+    {
+      "session": 79603,
+      "exitCode": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "testMethodsRun": 0,
+      "log": "ios/docs/evidence/android-sync-20261028/lut-role-build-r3.log",
+      "sha256": "7d7e3b13382aae61302dc554001bb1da74314b302b81976b6c49971828a74b96"
+    },
+    {
+      "session": 39570,
+      "exitCode": 65,
+      "result": "TEST BUILD FAILED",
+      "testMethodsRun": 0,
+      "log": "ios/docs/evidence/android-sync-20261028/lut-role-build-r4.log",
+      "sha256": "3158678c480c68596fc85d01b0414be201a739353a28543f296015f7e71fafc1"
+    },
+    {
+      "session": 67570,
+      "exitCode": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "testMethodsRun": 0,
+      "log": "ios/docs/evidence/android-sync-20261028/lut-role-build-r5.log",
+      "sha256": "66c88930c963130e33cecec92e74f6ece92ef2986d2849ed839624264a8b0553"
+    },
+    {
+      "session": 33389,
+      "exitCode": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "testMethodsRun": 0,
+      "log": "ios/docs/evidence/android-sync-20261028/lut-role-build-r6.log",
+      "sha256": "197613ff4b22154e03830da2763560a8bfa648879e2a067860ef5836115dcb08"
+    }
+  ],
+  "sourceSHA256": {
+    "ios/ZTransfer/Domain/PhotoLUTParameterMemory.swift": "43f978a5cd8cd30df672b1653ec674c17d8e17ba74b8e2aba63051ba6c58e560",
+    "ios/ZTransfer/Domain/PhotoLUTStore.swift": "1d96151af3e2b9c00780a249302b17e37a072bad53229fda0f10adf6559aa1f1",
+    "ios/ZTransfer/Domain/PhotoLUTEditorState.swift": "41c103dc4849287bef25682ffdcb8e94320ed0dcd1f549d0fc4caf1722e43ee4",
+    "ios/ZTransfer/Domain/PhotoEffects.swift": "4ae34cd7caa6caa6dd2811ad0aca7d574b852236aeafb1b4d06ea1a1e7ef8118",
+    "ios/ZTransfer/Domain/PhotoNp3EditorState.swift": "bf869b8f5623526b04dc1070fdf7b4d752f873b3690491e34cba0a7046c75d00",
+    "ios/ZTransfer/Domain/PhotoNp3Store.swift": "9581b87d78775439518c6288517fe4dbcf3e3c81bf336b774a4423f69b0e59b0",
+    "ios/ZTransfer/Domain/PhotoFilterCatalogIndex.swift": "b970b5025b062f166f095c80df53ed8d7975f5507534f27d702223d4ba93c338",
+    "ios/ZTransfer/Domain/RemoteLUTCatalog.swift": "fc1035c4e36419fe84725e86a26c26cb0789037e1bc34ec531fb61a13296dc0f",
+    "ios/ZTransfer/UI/PhotoLUTChooser.swift": "6ea7631ee4824329c3b426c2df8edc50bfbb4eecb415aa2f18e2e68a76b6f855",
+    "ios/ZTransfer/UI/SettingsView.swift": "cbc87f994c079183f166000c056bb64953940126f09eb1d1ab5cd770ba980335",
+    "ios/ZTransfer/UI/RemoteLUTPanel.swift": "af49e4b1977f17fe47171d19d66ed5cec820d738bd756f74b2ebfa6d334c60cc",
+    "ios/ZTransfer/UI/RemotePictureControlPanel.swift": "6f4326931da574cd302e4da0c55370fcbdd95cd7b31a5ecce7d3b75444d252a3",
+    "ios/ZTransferTests/PhotoLUTParameterMemoryTests.swift": "600fb8241fdedfa542b8cee6615f152ead9c8a921156007d56f01a0ae799600e",
+    "ios/ZTransferTests/PhotoLUTStoreTests.swift": "218c26018dfb79a3a11970e9528e9cf14dcefcac898815462102f7dc00dab4f2",
+    "ios/ZTransferTests/PhotoLUTEditorStateTests.swift": "b1ff6d241f9b012b61eb101ee4c7515f34eab0c0d2c506a8d181f9e3c92918b5",
+    "ios/ZTransferTests/PhotoFilterCatalogIndexTests.swift": "7980bd3f528b19231e69da859e9a33d593ac931760cf63d0da501bb6da2d7378",
+    "ios/ZTransferTests/PhotoNp3EditorStateTests.swift": "986dad625a083acad1e20f70f0de248a100e06d6021eee0dedb2ed545546ee23",
+    "ios/ZTransferTests/RemoteLUTMonitorStateTests.swift": "17b31d04454dcce1eef279e045838da9573ea3ec1ba106fd375e3a1406eacac5",
+    "ios/ZTransferTests/PictureControlFolderStateTests.swift": "a560b01f9be169e4961840cfe492f4417784d5765ae3a63eeb5eb42864fd2e98",
+    "ios/ZTransfer.xcodeproj/project.pbxproj": "aa65f215058c784ff7f926aa3394cf2b17d3a0fd931c466b64081ea93bad2d50"
+  },
+  "androidSourceSHA256": {
+    "app/src/main/java/com/ztransfer/lut/PhotoLutStore.kt": "cbc45f883ce7263f211e4d4c089cfd8ce77602046501e4b50dde87bafdcf3094",
+    "app/src/main/java/com/ztransfer/lut/PhotoLutEditorState.kt": "68dde23248b98c43a7d4f48f74ca2b481f9efd49a002a2915dfcbe92900c9efd",
+    "app/src/main/java/com/ztransfer/lut/PhotoLutParameterMemory.kt": "f1ffc1f19bbc5e2efee9a7efc3e7a0a7c7e25aa98ab34f14d45d925b6feebf84",
+    "app/src/test/java/com/ztransfer/lut/PhotoLutParameterMemoryTest.kt": "4d3a454044d07bbe6f3fd26f16c0fa95f2aecfc522e6f7c96faf3329446f7fe6",
+    "app/src/androidTest/java/com/ztransfer/lut/PhotoLutRoleInstrumentation.kt": "9f0f8e4f9aa78f82a0aaac5ba954558cac0f825410d63e49ac7efc3df1f7a977",
+    "app/src/main/java/com/ztransfer/presets/PresetFolderRepository.kt": "4a2ad338356130743e4b27c3b336ff95d41d4e73c01829ba568c59833791964c",
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoLutEditor.kt": "6f7b7d2af9364a0e4667fa9b6478960f587af9d48362a240d0ae46d1d2450e8c",
+    "app/src/main/java/com/ztransfer/ui/screen/LutCategoryList.kt": "8488583e679d700abb92163c2faf68e716f1b5daf6e7b0151fe900de5e49ec14"
+  },
+  "standaloneChecks": [
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/preset-order-android-comparator.java",
+      "sha256": "4808ba713dca656c787e9ff1c8e703b7092613667122a54aa04806a10f68e34b"
+    },
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/preset-order-names.txt",
+      "sha256": "9d250a1df7b7471fb27441e1770ecc8f525ce3541f38d4e622fb3162264fe3a9"
+    },
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/preset-order-check.swift",
+      "sha256": "c83e0646a3c5d961edcd9ab7498feae0093393d90d65519d6af9af8c6e5524b5"
+    },
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/preset-order-check.log",
+      "sha256": "ae27b191f95ffaa66b67f7b39967d38cfef250b40be5a75997439e8fc22b7aff"
+    },
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/preset-case17-check.swift",
+      "sha256": "80ebd0d530b66b0fe34583f44cbfc8cb8a80ff162ae7ff95c6e6e752524b944e"
+    },
+    {
+      "file": "ios/docs/evidence/android-sync-20261028/preset-case17-check.log",
+      "sha256": "cb3498b7a9cbe526695e1e0382cb78c3366c9cf3cb23436b944e784f04ff2601"
+    }
+  ],
+  "comparatorReference": {
+    "url": "https://android.googlesource.com/platform/libcore/+/refs/heads/main/ojluni/src/main/java/java/lang/String.java",
+    "sha256": "8b9fc5d6afa0037715d0a7bb390427c986accaa46eb9f12549ba81e6ce82af83",
+    "jdk": "/opt/homebrew/opt/openjdk@17/bin/java",
+    "expectedOrder": [
+      14,
+      1,
+      0,
+      2,
+      3,
+      5,
+      4,
+      13,
+      6,
+      8,
+      7,
+      11,
+      12,
+      10,
+      9
+    ],
+    "swiftResult": "PASS",
+    "swiftExitCode": 0,
+    "finalSession": 93566,
+    "note": "Uses copied Android charAt algorithm, not modern desktop Java codepoint comparison. Curated names cover Unicode supported by both runtimes."
+  },
+  "unicodeTableAudit": {
+    "unicode16URL": "https://www.unicode.org/Public/16.0.0/ucd/UnicodeData.txt",
+    "unicode16SHA256": "ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f",
+    "unicode16Result": "3 differences: native simple fold A7CE->A7CF, A7D2->A7D3, A7D4->A7D5, which were unmapped in Unicode 16. Initial diagnostic exited 133 (precondition), rerun exit1 with printed differences.",
+    "unicode17URL": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+    "unicode17SHA256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+    "unicode17Session": 18874,
+    "unicode17ExitCode": 0,
+    "unicode17Result": "All 63488 valid BMP scalars match simple lower(upper); surrogate behavior separately checked.",
+    "limitation": "Platform Unicode tables evolve; this does not establish every Unicode character matches all Android/iOS OS versions."
+  },
+  "findings": [
+    "Initial test attempt ran zero methods because the simulator is unavailable.",
+    "First generic build found missing MainActor annotation on the new test fixture and two missing try calls in existing tests; corrected.",
+    "Fourth generic build found self captured before category initialization; use a local source-index reference.",
+    "Standalone category test initially exposed Swift normalized String identity merging composed/decomposed categories; fixed maps, labels, reconciliation and chooser IDs to retain exact names.",
+    "Final generic build and standalone comparator check succeeded. Runtime behavior tests remain unrun."
+  ],
+  "pendingRuntimeTests": [
+    "PhotoLUTParameterMemoryTests",
+    "PhotoLUTRoleMemoryTests",
+    "PhotoLUTEditorStateTests",
+    "PhotoLUTStoreTests",
+    "PhotoFilterEditorSessionTests",
+    "PhotoFilterCatalogIndexTests",
+    "PhotoNp3FileProviderTests",
+    "RemoteLUTCatalogTests",
+    "RemoteLUTMonitorStateTests",
+    "PictureControlFolderStateTests"
+  ],
+  "pendingSystemSetup": {
+    "session": 24948,
+    "simctlPID": 95858,
+    "firstLaunchPID": 95870,
+    "reason": "sample confirms PackageKit AuthorizationCopyRights waiting for interactive macOS administrator authorization",
+    "userAsked": true
+  },
+  "noPhoneInstallCommitPush": true,
+  "final_verification": {
+    "status": "complete",
+    "date": "2026-10-31",
+    "evidence": "resumed-runtime/final-verification.json",
+    "note": "Supersedes historical runtime blockers and pending-runtime fields above; original per-run results remain unchanged."
+  }
+}

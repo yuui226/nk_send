@@ -75,7 +75,9 @@ final class RemoteLUTFolderAccess {
                         relativeTo: nil, bookmarkDataIsStale: &stale)
     }
 
-    static func prepareBookmark(_ data: Data?, fileExtension: String = "cube", checkCancelled: () throws -> Void) throws -> PreparedFolder {
+    static func prepareBookmark(_ data: Data?, fileExtension: String = "cube",
+                                operations: DirectoryAccessOperations = .system,
+                                checkCancelled: () throws -> Void) throws -> PreparedFolder {
         try checkCancelled()
         guard let data else { throw RemoteLUTFolderAccessError.missing }
         var stale = false
@@ -84,7 +86,7 @@ final class RemoteLUTFolderAccess {
             folder = try URL(resolvingBookmarkData: data, options: resolveSecurityScope,
                              relativeTo: nil, bookmarkDataIsStale: &stale)
         } catch { throw RemoteLUTFolderAccessError.missing }
-        return try prepareFolder(folder, fileExtension: fileExtension, checkCancelled: checkCancelled)
+        return try prepareFolder(folder, fileExtension: fileExtension, operations: operations, checkCancelled: checkCancelled)
     }
 
     func commit(_ prepared: PreparedFolder) {

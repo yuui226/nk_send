@@ -18,23 +18,23 @@ typealias RemoteLUTFile = PresetFile
 enum RemoteLUTCatalog {
     /// Android lutFileLabels: derive numbering before favorites reorder the list.
     static func labels(_ files: [RemoteLUTFile], uncategorized: String) -> [String: String] {
-        struct CategoryKey: Hashable { let group: String; let category: String? }
-        var counts: [String: Int] = [:]
+        struct CategoryKey: Hashable { let group: Data; let category: Data? }
+        var counts: [Data: Int] = [:]
         var categoryCounts: [CategoryKey: Int] = [:]
         for file in files {
-            let group = file.label.lowercased()
+            let group = Data(file.label.lowercased().utf8)
             counts[group, default: 0] += 1
-            categoryCounts[CategoryKey(group: group, category: file.category), default: 0] += 1
+            categoryCounts[CategoryKey(group: group, category: file.category.presetCategoryBytes), default: 0] += 1
         }
-        var positions: [String: Int] = [:]
+        var positions: [Data: Int] = [:]
         var result: [String: String] = [:]
         for file in files {
-            let group = file.label.lowercased()
+            let group = Data(file.label.lowercased().utf8)
             positions[group, default: 0] += 1
             let rawName = file.label.isEmpty ? file.name : file.label
             let name = String(decoding: rawName.utf16.prefix(256), as: UTF16.self)
             if counts[group, default: 0] > 1 {
-                let duplicate = categoryCounts[CategoryKey(group: group, category: file.category), default: 0] > 1
+                let duplicate = categoryCounts[CategoryKey(group: group, category: file.category.presetCategoryBytes), default: 0] > 1
                 result[file.identifier] = [name, file.category ?? uncategorized,
                     duplicate ? String(positions[group, default: 0]) : ""]
                     .filter { !$0.isEmpty }.joined(separator: " · ")
@@ -54,16 +54,67 @@ enum RemoteLUTCatalog {
     /// Android scans LUT files in the selected root and one category level.
     /// Deeper descendants and non-cube files are intentionally excluded.
     static func visibleFiles(_ files: [RemoteLUTFile], fileExtension: String = "cube") -> [RemoteLUTFile] {
-        files.filter {
+        sortedFiles(files.filter {
             $0.name.lowercased().hasSuffix("." + fileExtension.lowercased()) &&
             $0.relativePath.split(separator: "/").count <= 2
-        }.sorted {
-            let first = $0.name.lowercased()
-            let second = $1.name.lowercased()
-            if first != second { return first.utf16.lexicographicallyPrecedes(second.utf16) }
-            if $0.name != $1.name { return $0.name < $1.name }
-            return $0.identifier < $1.identifier
+        })
+    }
+
+    static func sortedFiles(_ files: [PresetFile]) -> [PresetFile] {
+        // Cache the simple case mapping once per name, outside O(N log N)
+        // comparisons. Java's final name/URI ties compare raw UTF-16 units.
+        var caseCache: [UInt16: UInt16] = [:]
+        return files.map { (file: $0, folded: PresetTextOrder.folded($0.name, cache: &caseCache)) }.sorted {
+            if $0.folded != $1.folded { return $0.folded.lexicographicallyPrecedes($1.folded) }
+            if !$0.file.name.utf16.elementsEqual($1.file.name.utf16) {
+                return $0.file.name.utf16.lexicographicallyPrecedes($1.file.name.utf16)
+            }
+            return $0.file.identifier.utf16.lexicographicallyPrecedes($1.file.identifier.utf16)
+        }.map(\.file)
+    }
+}
+
+/// Android libcore String.CaseInsensitiveComparator compares charAt(), not
+/// whole-string lowercase/case folding or Unicode scalar collation. Surrogates
+/// remain separate. UnicodeData simple mappings also differ from full mappings
+/// for Greek iota-subscript capitals and dotted I; never expand one char to two.
+enum PresetTextOrder {
+    static func folded(_ value: String) -> [UInt16] {
+        var cache: [UInt16: UInt16] = [:]
+        return folded(value, cache: &cache)
+    }
+    static func folded(_ value: String, cache: inout [UInt16: UInt16]) -> [UInt16] {
+        value.utf16.map { unit in
+            if unit < 128 { return (65...90).contains(unit) ? unit + 32 : unit }
+            if let mapped = cache[unit] { return mapped }
+            guard let scalar = UnicodeScalar(unit), scalar.properties.isCased else { return unit }
+            let fullUpper = String(scalar).uppercased().utf16
+            let upper: UInt16
+            if fullUpper.count == 1 { upper = fullUpper.first! }
+            else {
+                switch unit {
+                case 0x1F80...0x1F87, 0x1F90...0x1F97, 0x1FA0...0x1FA7: upper = unit + 8
+                case 0x1FB3: upper = 0x1FBC
+                case 0x1FC3: upper = 0x1FCC
+                case 0x1FF3: upper = 0x1FFC
+                default: upper = unit
+                }
+            }
+            if upper == 0x0130 { cache[unit] = 0x0069; return 0x0069 }
+            let lower = String(UnicodeScalar(upper)!).lowercased().utf16
+            let result = lower.count == 1 ? lower.first! : upper
+            cache[unit] = result
+            return result
         }
+    }
+}
+
+extension Optional where Wrapped == String {
+    // Swift String equality normalizes composed/decomposed spelling; Java
+    // category identity does not. Keep exact provider names in maps and UI IDs.
+    var presetCategoryBytes: Data? { map { Data($0.utf8) } }
+    var presetCategoryIdentifier: String {
+        map { "folder:" + ($0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0) } ?? "root"
     }
 }
 
@@ -74,15 +125,17 @@ struct PhotoLUTCategorySelection {
     private var positionedSelection: String?
 
     static func categories(in files: [RemoteLUTFile]) -> [String?] {
-        var seen = Set<String?>()
-        return files.map(\.category).filter { seen.insert($0).inserted }.sorted {
-            guard let first = $0 else { return $1 != nil }
-            guard let second = $1 else { return false }
-            if first.lowercased() != second.lowercased() {
-                return first.lowercased().utf16.lexicographicallyPrecedes(second.lowercased().utf16)
+        var seen = Set<Data?>()
+        var caseCache: [UInt16: UInt16] = [:]
+        return files.map(\.category).filter { seen.insert($0.presetCategoryBytes).inserted }
+            .map { (name: $0, folded: PresetTextOrder.folded($0 ?? "", cache: &caseCache)) }.sorted {
+            guard let first = $0.name else { return $1.name != nil }
+            guard let second = $1.name else { return false }
+            if $0.folded != $1.folded {
+                return $0.folded.lexicographicallyPrecedes($1.folded)
             }
             return first.utf16.lexicographicallyPrecedes(second.utf16)
-        }
+        }.map(\.name)
     }
 
     @MainActor
@@ -92,7 +145,7 @@ struct PhotoLUTCategorySelection {
             positionedSelection = selected
         }
         if selected == nil { positionedSelection = nil }
-        if !catalog.categories.contains(category) { category = catalog.categories.first ?? nil }
+        if !catalog.categories.contains(where: { $0.presetCategoryBytes == category.presetCategoryBytes }) { category = catalog.categories.first ?? nil }
     }
 
     mutating func reconcile(files: [RemoteLUTFile], selected: String?) {
@@ -102,7 +155,7 @@ struct PhotoLUTCategorySelection {
         }
         if selected == nil { positionedSelection = nil }
         let available = Self.categories(in: files)
-        if !available.contains(category) { category = available.first ?? nil }
+        if !available.contains(where: { $0.presetCategoryBytes == category.presetCategoryBytes }) { category = available.first ?? nil }
     }
 }
 
@@ -116,8 +169,10 @@ final class PresetCatalogIndex {
     let orderedFiles: [RemoteLUTFile]
     let categories: [String?]
     let filesByIdentifier: [String: RemoteLUTFile]
-    let filesByCategory: [String?: [RemoteLUTFile]]
-    private(set) lazy var labelsByCategory = filesByCategory.mapValues { $0.map(\.label) }
+    private let filesByCategory: [Data?: [RemoteLUTFile]]
+    private lazy var labelsByCategory = filesByCategory.mapValues { $0.map(\.label) }
+    func files(in category: String?) -> [RemoteLUTFile]? { filesByCategory[category.presetCategoryBytes] }
+    func labels(in category: String?) -> [String]? { labelsByCategory[category.presetCategoryBytes] }
     private let files: [RemoteLUTFile]
     private lazy var baseOptions: [String?] = [nil] + orderedFiles.map { Optional($0.identifier) }
     private var localizedLabels: (uncategorized: String, values: [String: String])?
@@ -128,7 +183,7 @@ final class PresetCatalogIndex {
         self.orderedFiles = orderedFiles ?? files
         categories = PhotoLUTCategorySelection.categories(in: files)
         filesByIdentifier = Dictionary(uniqueKeysWithValues: files.map { ($0.identifier, $0) })
-        filesByCategory = Dictionary(grouping: orderedFiles ?? files, by: \.category)
+        filesByCategory = Dictionary(grouping: orderedFiles ?? files) { $0.category.presetCategoryBytes }
     }
 
     func labels(uncategorized: String) -> [String: String] {

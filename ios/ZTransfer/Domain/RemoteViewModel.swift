@@ -44,6 +44,13 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     // Frame-only state continues to use frameUpdates below.
     let objectWillChange = ObservableObjectPublisher()
     let frameUpdates = RemoteFrameUpdates()
+    let selfTimer = RemoteSelfTimer()
+    private var selfTimerSeconds = 0
+    private var selfTimerToolVisible = true
+    private var selfTimerEditing = false
+    private var selfTimerForeground = true
+    private var selfTimerConnected = true
+    private var idleTimerBeforeSelfTimer: Bool?
     private(set) var state = RemoteState() {
         willSet {
             // All control/lifecycle changes still update the page. Only the
@@ -58,6 +65,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
         }
         didSet {
             if oldValue.liveViewStable != state.liveViewStable { restartExposureMeter() }
+            if oldValue.liveViewStable && !state.liveViewStable { selfTimer.cancel() }
         }
     }
     private(set) var frameImage: UIImage? {
@@ -98,6 +106,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
         willSet { objectWillChange.send() }
         didSet {
             if oldValue != movieMode {
+                selfTimer.cancel()
                 restartExposureMeter()
                 setDisplayDetailsMonitoring(displayDetailsMonitoringEnabled)
                 setMovieFormatMonitoring(movieFormatMonitoringEnabled)
@@ -164,18 +173,22 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     private var frameTask: Task<Void, Never>?
     let reviewFrames = RemoteReviewFrameGate()
     private var photoReviewActive = false
+    #if DEBUG
+    private var needsLevelDiagnostic = false
+    #endif
     func setPhotoReviewActive(_ active: Bool) {
         guard active != photoReviewActive else { return }
         photoReviewActive = active
+        if active { selfTimer.cancel() }
         updateEffectiveISOPolling()
         restartExposureMeter()
-        if active { updateLevel(roll: nil, pitch: nil) }
+        restartLevelPolling()
     }
     var reviewVisible: Bool {
         !movieMode
     }
     var reviewAllowed: Bool {
-        reviewVisible && state.liveViewStable && !stopRequested && !cameraBusy &&
+        reviewVisible && state.liveViewStable && !stopRequested && !cameraBusy && !selfTimer.active &&
             !cameraToolWriting && !computerControlBusy && !halfPressHeld &&
             halfPressTask == nil && tapFocusTask == nil
     }
@@ -266,6 +279,17 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
         self.onTransportLost = onTransportLost
         self.haptics = haptics
         usageMeter = RemoteUsageMeter(entitlements: entitlements, usage: freeUsage)
+        selfTimer.onActiveChanged = { [weak self] active in
+            guard let self else { return }
+            objectWillChange.send()
+            if active {
+                idleTimerBeforeSelfTimer = UIApplication.shared.isIdleTimerDisabled
+                UIApplication.shared.isIdleTimerDisabled = true
+            } else if let previous = idleTimerBeforeSelfTimer {
+                UIApplication.shared.isIdleTimerDisabled = previous
+                idleTimerBeforeSelfTimer = nil
+            }
+        }
         usageMeter.onExhausted = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -416,6 +440,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
                     state.liveViewStable = false
                     updateEffectiveISOPolling()
                     state.fps = 0
+                    await selfTimer.cancelAndWait()
                     await camera.endLiveView()
                     started = false
                     if !stopRequested && !restartLiveView { try? await waitForPolling(for: .seconds(2)) }
@@ -427,6 +452,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
                     if !stopRequested { try? await waitForPolling(for: .seconds(3)) }
                 }
             }
+            await selfTimer.cancelAndWait()
             await camera.endLiveView()
             started = false
         }
@@ -738,6 +764,13 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     private func refreshMovieMode() async {
         guard !stopRequested,
               let nextMovie = try? await camera.remoteMovieMode(), !stopRequested else { return }
+        await applyMovieMode(nextMovie)
+    }
+
+    /// Timer reads can observe the selector before the event refresh. Adopt
+    /// that same transition, including exposure/focus state, in either path.
+    private func applyMovieMode(_ nextMovie: Bool) async {
+        guard !stopRequested else { return }
         let changed = nextMovie != movieMode
         if changed {
             dismissCameraTool()
@@ -844,6 +877,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
 
     func setHDLiveView(_ enabled: Bool) {
         guard hdLiveView != enabled, !stopRequested else { return }
+        selfTimer.cancel()
         hdLiveView = enabled
         clearFrameOnNextSession = true
         // Cooperatively finish the command on the wire. EndLiveView precedes
@@ -1009,6 +1043,15 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
 
     func acceptDecodedFrame(_ decoded: RemoteDecodedFrame) {
         guard !stopRequested, decoded.generation == frameDecodeGeneration else { return }
+        #if DEBUG
+        if needsLevelDiagnostic, levelVisible, !photoReviewActive {
+            needsLevelDiagnostic = false
+            CameraRuntimeDiagnostics.record(.level,
+                "camera=\(frameDeviceModel ?? "unknown") operation=\(String(format: "%04X", decoded.operation)) header=\(decoded.jpegOffset) metadata=\(decoded.metadata != nil) attitude=\(String(describing: decoded.metadata?.attitude))\n" +
+                "headerPrefix=" + decoded.rawBytes.prefix(min(32, decoded.jpegOffset)).map { String(format: "%02X", $0) }.joined() +
+                "\ncompactAttitudeBytes=" + decoded.rawBytes.prefix(decoded.jpegOffset).dropFirst(404).prefix(12).map { String(format: "%02X", $0) }.joined())
+        }
+        #endif
         frameUpdates.performUpdate {
             frameData = decoded.jpeg
             frameImage = decoded.image
@@ -1112,16 +1155,27 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     func setLevelVisible(_ visible: Bool) {
         guard visible != levelVisible, !stopRequested else { return }
         levelVisible = visible
+        restartLevelPolling()
+    }
+
+    /// Android's level effect is recreated around photo review, including its
+    /// failed-property budget. A late property reply must not redraw over review.
+    private func restartLevelPolling() {
         levelGeneration &+= 1
         let generation = levelGeneration
         let previous = levelTask
         updateLevel(roll: nil, pitch: nil)
-        guard visible else { return }
+        guard levelVisible, !photoReviewActive, !stopRequested else { return }
+        #if DEBUG
+        needsLevelDiagnostic = true
+        #endif
         levelTask = Task { [weak self] in
             // Finish an in-flight PTP transaction before replacing its owner.
             await previous?.value
             guard let self else { return }
-            @MainActor func active() -> Bool { !stopRequested && levelVisible && levelGeneration == generation }
+            @MainActor func active() -> Bool {
+                !stopRequested && levelVisible && !photoReviewActive && levelGeneration == generation
+            }
             while active() && !initialLoaded {
                 try? await Task.sleep(for: .milliseconds(150))
             }
@@ -1131,10 +1185,6 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
             var fallbackUnavailable = false
             var wasHeader = false
             while active() {
-                if photoReviewActive {
-                    try? await Task.sleep(for: .milliseconds(150))
-                    continue
-                }
                 let age = ProcessInfo.processInfo.systemUptime - frameReceivedAtUptime
                 if let attitude = frameMetadata?.attitude, age >= 0, age <= 1.5 {
                     updateLevel(roll: Double(floor(attitude.roll * 10 + 0.5) / 10),
@@ -1195,7 +1245,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     }
 
     func setAutoISO(_ enabled: Bool) {
-        guard !stopRequested, !autoISOBusy, let descriptor = autoISODescriptor, descriptor.writable,
+        guard !stopRequested, !selfTimer.active, !autoISOBusy, let descriptor = autoISODescriptor, descriptor.writable,
               (descriptor.current != 0) != enabled else { return }
         let requestedMovie = movieMode
         autoISOBusy = true
@@ -1255,12 +1305,12 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     func pictureControlNotice(_ message: String) { showInteractionHint(message) }
 
     var cameraToolWritesAllowed: Bool {
-        !stopRequested && initialLoaded && state.capture != .capturing && !recordingBusy &&
+        !stopRequested && initialLoaded && state.capture != .capturing && !recordingBusy && !selfTimer.active &&
             !halfPressHeld && halfPressTask == nil && tapFocusTask == nil
     }
 
     func openCameraTool(_ tool: RemoteCameraTool) {
-        guard !stopRequested, !cameraToolWriting else {
+        guard !stopRequested, !cameraToolWriting, !selfTimer.active else {
             showInteractionHint(AppLocalized.resource("remote_camera_tool_unavailable"))
             return
         }
@@ -1325,7 +1375,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     /// Hiding the tool uses the same explicit setter as Android, independently
     /// of the button's capture/recording gate.
     func setComputerControl(_ enabled: Bool) {
-        guard !stopRequested, frameTask != nil, !computerControlBusy else { return }
+        guard !stopRequested, frameTask != nil, !computerControlBusy, !selfTimer.active else { return }
         preferredComputerControl = enabled
         onComputerControlPreferenceChanged?(enabled)
         computerControlBusy = true
@@ -1383,7 +1433,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     }
 
     func setExposure(_ field: RemoteExposureField, value: UInt64, feedback: Bool = true, immediate: Bool = true) {
-        guard !stopRequested, let descriptor = exposureDescriptors[field], descriptor.writable,
+        guard !stopRequested, !selfTimer.active, let descriptor = exposureDescriptors[field], descriptor.writable,
               descriptor.current != value else { return }
         let property = RemoteExposureParameters.canonical(descriptor.property)
         let requestedMovie = movieMode
@@ -1446,6 +1496,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     }
 
     func stop() {
+        selfTimer.cancel()
         focusExpiryTask?.cancel()
         focusExpiryTask = nil
         markMonitorHintHostInactive()
@@ -1565,6 +1616,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
 
     private func performStopAndWait() async {
         stop()
+        await selfTimer.cancelAndWait()
         let frame = frameTask
         let mode = modeTask
         let recording = recordingCommandTask
@@ -1621,6 +1673,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
     /// finger is still held when AF actually locks.
     func beginHalfPress() {
         guard frameTask != nil,
+              !selfTimer.active,
               !state.focus.manual, !halfPressHeld, halfPressTask == nil, tapFocusTask == nil,
               !stopRequested, !cameraToolWriting else { return }
         halfPressHeld = true
@@ -1662,40 +1715,132 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
         // transaction before sending their command and starting confirmation.
         let pendingFocus = halfPressTask ?? tapFocusTask
         if movieMode { toggleRecording(waitForFocus: pendingFocus) }
-        else { capture(waitForFocus: pendingFocus) }
+        else { requestPhoto(waitForFocus: pendingFocus) }
     }
+
+    func configureSelfTimer(seconds: Int? = nil, visible: Bool? = nil, editing: Bool? = nil,
+                            foreground: Bool? = nil, connected: Bool? = nil) {
+        let nextSeconds = seconds ?? selfTimerSeconds
+        let nextVisible = visible ?? selfTimerToolVisible
+        let nextEditing = editing ?? selfTimerEditing
+        let nextForeground = foreground ?? selfTimerForeground
+        let nextConnected = connected ?? selfTimerConnected
+        if nextSeconds != selfTimerSeconds || !nextVisible || nextEditing || !nextForeground || !nextConnected {
+            selfTimer.cancel()
+        }
+        selfTimerSeconds = nextSeconds; selfTimerToolVisible = nextVisible
+        selfTimerEditing = nextEditing; selfTimerForeground = nextForeground; selfTimerConnected = nextConnected
+    }
+
+    private func selfTimerValid(seconds: Int) -> Bool {
+        !stopRequested && !transportLossNotified && selfTimerConnected && selfTimerForeground &&
+        !movieMode && state.capture != .recording && state.capture != .stopping && !recordingBusy &&
+        initialLoaded && state.liveViewStable && !photoReviewActive && !selfTimerEditing &&
+        !cameraToolWriting && !computerControlBusy && selfTimerSeconds == seconds && selfTimerToolVisible
+    }
+
+    /// Returns true only when a countdown starts, so the host closes its menus
+    /// at that same edge. Regular quick/half-press shooting retains its path.
+    @discardableResult
+    func requestPhoto(waitForFocus pendingFocus: Task<Void, Never>? = nil) -> Bool {
+        if selfTimerSeconds == 0 { capture(waitForFocus: pendingFocus); return false }
+        guard !selfTimer.active, state.capture == .idle, !cameraToolWriting, !computerControlBusy,
+              !autoISOBusy, pendingSets.isEmpty, tapFocusTask == nil, halfPressTask == nil else { return false }
+        let seconds = selfTimerSeconds
+        guard selfTimerValid(seconds: seconds) else { return false }
+        dismissCameraTool()
+        focusHideTask?.cancel(); confirmedFocusMarker = nil
+        state.focus.phase = .idle; state.focus.point = nil
+        let started = selfTimer.start(seconds: seconds,
+            isValid: { [weak self] in self?.selfTimerValid(seconds: seconds) ?? false },
+            focus: { [weak self] in
+                guard let self else { return false }
+                let actualMovie = try await camera.remoteMovieMode()
+                guard selfTimerValid(seconds: seconds), selfTimer.focusing else { return false }
+                if actualMovie == true { await applyMovieMode(true); return false }
+                let descriptor = try await camera.remoteFocusMode()
+                guard selfTimerValid(seconds: seconds), selfTimer.focusing else { return false }
+                if let descriptor {
+                    focusModeDescriptor = descriptor
+                    state.focus.manual = RemoteFocusMode.manual(property: descriptor.property, value: descriptor.current)
+                }
+                if state.focus.manual { return true }
+                state.focus.tracking = false
+                let result = try await camera.halfPressFocus()
+                let focused = result.responseCode == PTPConstants.responseOK && !result.timedOut
+                if selfTimerValid(seconds: seconds), selfTimer.focusing {
+                    if focused { setConfirmedFocusMarker(at: focusAreaPoint, subjectTracking: false) }
+                    else { showInteractionHint(AppLocalized.resource("remote_self_timer_focus_failed")) }
+                }
+                return focused
+            }, capture: { [weak self] permission in
+                guard let self else { return }
+                let modeRead = Task { try await self.camera.remoteMovieMode() }
+                let currentMovie = try await modeRead.value
+                try Task.checkCancellation()
+                guard permission.isCurrent, selfTimerValid(seconds: seconds) else { return }
+                if currentMovie == true {
+                    // Adoption cancels this worker; drain its mode transition
+                    // with the same uncancelled ownership as the final read.
+                    let adoption = Task { await self.applyMovieMode(true) }
+                    await adoption.value
+                    return
+                }
+                state = state.applying(.captureRequested)
+                let accepted = await performCapture(permission: permission)
+                if !accepted, permission.isCurrent, selfTimerValid(seconds: seconds) {
+                    showInteractionHint(AppLocalized.resource("remote_self_timer_capture_failed"))
+                }
+            }, onFailure: { [weak self] error in
+                guard let self, selfTimerValid(seconds: seconds) else { return }
+                if Self.isTransportFailure(error) { notifyTransportLost() }
+                showInteractionHint(AppLocalized.resource("remote_self_timer_capture_failed"))
+            })
+        if started { haptics.play(.selection) }
+        return started
+    }
+
+    func cancelSelfTimer() { haptics.play(.selection); selfTimer.cancel() }
 
     func capture(waitForFocus pendingFocus: Task<Void, Never>? = nil) {
         guard frameTask != nil, state.capture == .idle, !movieMode, !stopRequested,
-              !cameraToolWriting else { return }
+              !cameraToolWriting, !selfTimer.active else { return }
         state = state.applying(.captureRequested)
         captureTask = Task { [weak self] in
             guard let self else { return }
-            defer {
-                if !stopRequested { state = state.applying(.captureConfirmed) }
-                captureTask = nil
+            defer { captureTask = nil }
+            _ = await performCapture(waitForFocus: pendingFocus)
+        }
+    }
+
+    private func performCapture(waitForFocus pendingFocus: Task<Void, Never>? = nil,
+                                permission: PTPCommandPermission? = nil) async -> Bool {
+        defer { if !stopRequested { state = state.applying(.captureConfirmed) } }
+        await pendingFocus?.value
+        guard !Task.isCancelled, !stopRequested, permission?.isCurrent != false else { return false }
+        // Register the ObjectAdded flag before sending the shutter. AF waiting
+        // is outside this twelve-second confirmation window, as on Android.
+        captureObjectAdded = false
+        let deadline = ContinuousClock.now + .seconds(12)
+        haptics.play(.shutter)
+        do {
+            if let permission {
+                guard try await camera.capturePhotoIfCurrent(permission) else { return false }
+            } else { try await camera.capturePhoto() }
+            while !stopRequested && !Task.isCancelled && permission?.isCurrent != false &&
+                    !captureObjectAdded && ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
             }
-            // Android starts the twelve-second confirmation window only after
-            // the pending AF transaction has reached its terminal response.
-            await pendingFocus?.value
-            guard !stopRequested else { return }
-            captureObjectAdded = false
-            let deadline = ContinuousClock.now + .seconds(12)
-            haptics.play(.shutter)
-            do {
-                try await camera.capturePhoto()
-                while !stopRequested && !captureObjectAdded && ContinuousClock.now < deadline {
-                    try? await Task.sleep(for: .milliseconds(20))
-                }
-            } catch {
-                if Self.isTransportFailure(error) { notifyTransportLost() }
-                // Android always releases the shutter after failure/timeout;
-                // a negative capture response must not fail the LV session.
-            }
+            // No event after an accepted shutter is not proof of capture failure.
+            return true
+        } catch {
+            if Self.isTransportFailure(error) { notifyTransportLost() }
+            return false
         }
     }
 
     func toggleRecording(waitForFocus pendingFocus: Task<Void, Never>? = nil) {
+        if selfTimer.active { selfTimer.cancel(); return }
         guard movieMode, frameTask != nil, !stopRequested, !cameraToolWriting else { return }
         let command: RemoteRecordingCommand
         if state.capture == .recording || state.capture == .stopping { command = .stop }
@@ -1898,6 +2043,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
 
     func focus(at point: RemoteFocusPoint, coordinateSize: CGSize = CGSize(width: 1000, height: 1000)) {
         guard state.session == .ready, state.capture != .capturing,
+              !selfTimer.active,
               !stopRequested, !cameraToolWriting, tapFocusTask == nil, halfPressTask == nil, !halfPressHeld else { return }
         if state.focus.manual {
             showInteractionHint(AppLocalized.resource("remote_tap_focus_manual"))
@@ -2087,6 +2233,7 @@ final class RemoteViewModel: @preconcurrency ObservableObject {
 
     private func notifyTransportLost() {
         guard !transportLossNotified else { return }
+        selfTimer.cancel()
         usageMeter.stop()
         transportLossNotified = true
         stopRequested = true

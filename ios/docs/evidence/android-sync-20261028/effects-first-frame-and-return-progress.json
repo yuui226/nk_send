@@ -1,0 +1,105 @@
+{
+  "tasks": [
+    "N17",
+    "N25"
+  ],
+  "status": "implementation_and_compilation_done_runtime_blocked",
+  "ledger_completed": 17,
+  "ledger_total": 26,
+  "android_revision": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "basis": [
+    "SettingsScreen 2910-2957, 3160-3455: source identity, initial 220ms FastOutSlowIn, comparison updates, 110/190ms canvas replacement, 220ms crossfade, visible-frame gestures; six Android transition tests read completely.",
+    "FileListScreen.preparePreviewDismissTarget: partial-visible return, expanded burst, header-inclusive runway, 88dp final offset."
+  ],
+  "changes": [
+    "Both effect entries wait for an accepted complete result; removed showSourceWhileRendering, share a 22pt blue loading indicator; raw source is failure-only and fitted.",
+    "Initial/normal frame fades share 220ms and an actual cancellable display-frame boundary; same-image comparison does not replay; the old image stays opaque during crossfade.",
+    "Initial canvas visibility starts at 1 as Android; stale first frames are rejected by the planner instead of adding a spurious later 190ms fade.",
+    "A single conflated collector finishes accepted transitions and keeps only latest pending results; 110/190ms canvas replacement and cover restoration preserved.",
+    "Opening an expanded effect image uses the accepted/presented frame recorded in a non-observable snapshot; loading has no open/rotate action and teardown clears the snapshot.",
+    "Preview return now targets 88pt below the visible top; reuses cached header-inclusive indices; membership scan off main; frame waits/scroll cancellation bounded by lifecycle.",
+    "No-source rendering failure shows the existing unavailable message instead of an indefinite spinner."
+  ],
+  "native_rounds": [
+    {
+      "round": 1,
+      "methods": 7,
+      "failures": 0,
+      "exit_code": 0,
+      "log": "effects-first-frame/native-r1.log"
+    },
+    {
+      "round": 2,
+      "methods": 9,
+      "failures": 0,
+      "exit_code": 0,
+      "log": "effects-first-frame/native-r2.log"
+    }
+  ],
+  "native_scope": "Actual production planner, collector and return anchor math, run on macOS SwiftPM. Nine distinct methods, not sixteen.",
+  "build_rounds": [
+    {
+      "round": 1,
+      "exit_code": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "log": "effects-first-frame/build-r1.log.gz"
+    },
+    {
+      "round": 2,
+      "exit_code": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "log": "effects-first-frame/build-r2.log.gz"
+    },
+    {
+      "round": 3,
+      "exit_code": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "log": "effects-first-frame/build-r3.log.gz"
+    },
+    {
+      "round": 4,
+      "exit_code": 0,
+      "result": "TEST BUILD SUCCEEDED",
+      "log": "effects-first-frame/build-r4.log.gz",
+      "note": "Final no-source rendering failure terminates loading with the existing failure message."
+    }
+  ],
+  "ios_methods_executed": 0,
+  "added_runtime_checks": [
+    "First complete image starts transparent and visibly fades; comparison arrival does not restart it.",
+    "Stale first canvas does not add a hidden 220ms plus another 190ms fade.",
+    "A real full-screen cover interrupting first fade restores accepted image; existing crossfade cover test retained.",
+    "Real ScrollViewReader/LazyVGrid placement in both directions with fixed top controls."
+  ],
+  "remaining": [
+    "Run iOS/real page lifecycle and pixel tests after simulator setup; verify indicator appearance and first-frame/return alignment, original source and FHD continuity.",
+    "N15/N17/N18/N19/N20/N22/N23/N24/N25 remain incomplete pending relevant runtime and actual UI evidence; counts not increased by compilation."
+  ],
+  "blocker": {
+    "session": 24948,
+    "pid": 95870,
+    "live_confirmed": true,
+    "latest_sample": "effects-first-frame/firstlaunch-authorization-sample.txt",
+    "reason": "PackageKit authorizeForRight:allowingInteraction -> AuthorizationCopyRights waiting for macOS administrator interaction; installed CoreSimulator1174.9.2 versus Xcode-required1174.21.0.",
+    "repeated_across": "N24, N25 and current consecutive goal turns (also earlier records).",
+    "user_already_asked": true
+  },
+  "not_run": [
+    "iOS runtime/component tests",
+    "Android instrumentation",
+    "phone/camera",
+    "FPS/energy or full visual acceptance"
+  ],
+  "not_done": [
+    "install phone",
+    "commit",
+    "push",
+    "Android/site changes"
+  ],
+  "final_verification": {
+    "status": "complete",
+    "date": "2026-10-31",
+    "evidence": "resumed-runtime/final-verification.json",
+    "note": "Supersedes historical runtime blockers and pending-runtime fields above; original per-run results remain unchanged."
+  }
+}

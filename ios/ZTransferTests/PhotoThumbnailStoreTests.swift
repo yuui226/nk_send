@@ -4,6 +4,61 @@ import XCTest
 #endif
 
 final class PhotoThumbnailStoreTests: XCTestCase {
+    func testDirectSTAReusedHandleAndSizeCannotHitAnotherCaptureDate() async throws {
+        for ext in ["JPG", "NEF"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let disk = PhotoThumbnailDiskCache(root: root)
+            func file(_ date: String) -> CameraFile {
+                CameraFile(id: 7, storageID: 1, format: ext == "JPG" ? 0x3801 : 0xB103,
+                    size: 10_000, fileName: "DSC_0007.\(ext)", captureDate: date, isProtected: false)
+            }
+            let oldStore = PhotoThumbnailStore(disk: disk)
+            let previous = try await oldStore.load(file: file("20261101T120000"), identity: "same-camera",
+                directSTA: true, allowRemote: true) { Data([1]) }
+            XCTAssertEqual(previous, Data([1]))
+            let newStore = PhotoThumbnailStore(disk: disk)
+            let calls = LockedCounter()
+            let current = try await newStore.load(file: file("20261108T120000"), identity: "same-camera",
+                directSTA: true, allowRemote: true) { calls.increment(); return Data([2]) }
+            XCTAssertEqual(current, Data([2]))
+            XCTAssertEqual(calls.value, 1)
+            let reopened = PhotoThumbnailStore(disk: disk)
+            let cached = try await reopened.load(file: file("20261108T120000"), identity: "same-camera",
+                directSTA: true, allowRemote: false) { XCTFail("Must use current file's disk entry"); return Data() }
+            XCTAssertEqual(cached, Data([2]))
+        }
+    }
+
+    func testSwitchingCamerasRejectsLateOldThumbnailAndKeepsSeparateDiskEntries() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = PhotoThumbnailDiskCache(root: root)
+        let store = PhotoThumbnailStore(disk: disk)
+        let file = CameraFile(id: 7, storageID: 1, format: 0x3801, size: 100,
+            fileName: "same.JPG", captureDate: "20261108T120000", isProtected: false)
+        let entered = GateTestLatch(), release = GateTestLatch()
+        let pending = Task { try await store.load(file: file, identity: "old-camera", allowRemote: true) {
+            await entered.signal()
+            await release.wait()
+            return Data([1])
+        } }
+        await entered.wait()
+        await store.beginSession(identity: "new-camera")
+        // The suspended old fetch deliberately ignores cancellation. Release
+        // it before waiting for the store's serialized remote permit again.
+        await release.signal()
+        do { _ = try await pending.value; XCTFail("Old camera's completion must be rejected") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        let current = try await store.load(file: file, identity: "new-camera", allowRemote: true) { Data([2]) }
+        XCTAssertEqual(current, Data([2]))
+        let key = PhotoThumbnailDiskCache.cacheFileName(fileName: file.fileName, size: file.size, captureDate: file.captureDate)
+        XCTAssertNil(disk.openCamera(identity: "old-camera").find(key))
+        let reopened = PhotoThumbnailStore(disk: disk)
+        let cached = try await reopened.load(file: file, identity: "new-camera", allowRemote: false) { Data() }
+        XCTAssertEqual(cached, Data([2]))
+    }
+
     func testNewPhotosBypassHistoricalRangeAcrossPauseRetryAndRescan() async throws {
         for sequential in [false, true] {
             let queue = PhotoThumbnailFillQueue(sequential: sequential)

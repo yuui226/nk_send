@@ -851,9 +851,9 @@ final class PhotoFilterPresentationPerformanceTests: XCTestCase {
                 .overlayPreferenceValue(AnchorKey.self) { anchor in
                     if let anchor {
                         var popup = PhotoFilterPopupOverlay(isPresented: $input.visible, anchor: anchor,
-                            initial: PhotoFilterState(ratingEnabled: true),
+                            initial: PhotoFilterState(ratingEnabled: input.enabled),
                             availableExtensions: [".jpg", ".nef", ".mp4"], availableStorageSlots: [1, 2],
-                            suggestedDate: "20261018", ratingProgress: input.progress, onChange: { _ in })
+                            ratingProgress: input.progress, onChange: { _ in }, onReset: {})
                         let _ = popup.didRender = { frames.popup += 1 }
                         popup
                     }
@@ -861,10 +861,10 @@ final class PhotoFilterPresentationPerformanceTests: XCTestCase {
                 .environment(\.scenePhase, input.phase)
         }
     }
-    private func window<Content: View>(_ content: Content) throws -> UIWindow {
+    private func window<Content: View>(_ content: Content, size: CGSize = CGSize(width: 390, height: 800)) throws -> UIWindow {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        window.frame = CGRect(origin: .zero, size: size)
         window.rootViewController = UIHostingController(rootView: content)
         window.isHidden = false
         window.rootViewController!.view.layoutIfNeeded()
@@ -946,7 +946,7 @@ final class PhotoFilterPresentationPerformanceTests: XCTestCase {
         weak var weakPanel = panel
         let native = try XCTUnwrap(descendants(window, NativeAttentionHostView.self).first)
         let size = panel!.bounds.size, rendered = frames.popup
-        XCTAssertEqual(size.width, 271, accuracy: 1)
+        XCTAssertEqual(size.width, 300, accuracy: 1)
         XCTAssertGreaterThan(size.height, 150)
         XCTAssertLessThan(size.height, 450)
         for i in 1...120 {
@@ -971,6 +971,40 @@ final class PhotoFilterPresentationPerformanceTests: XCTestCase {
         window.isHidden = true; window.rootViewController = nil; panel = nil
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertNil(weakPanel)
+    }
+
+    func testCompactFilterRowKeepsStarSlotAndRangeHelpWithinPanel() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("rating-panel-sync")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for width in [CGFloat(390), 280] {
+            let input = Input(), frames = Frames()
+            input.enabled = false
+            let window = try window(PopupHarness(input: input, frames: frames)
+                .environment(\.colorScheme, .light), size: CGSize(width: width, height: 560))
+            defer { window.isHidden = true; window.rootViewController = nil }
+            try await Task.sleep(for: .milliseconds(650))
+            let panel = try XCTUnwrap(descendants(window, GeniePopupHostView.self).first)
+            let expectedWidth = min(300, width - 24)
+            XCTAssertEqual(panel.bounds.width, expectedWidth, accuracy: 1)
+            for enabled in [false, true] {
+                input.enabled = enabled
+                try await Task.sleep(for: .milliseconds(250))
+                let chip = try XCTUnwrap(descendants(window, NativeAttentionHostView.self).first)
+                XCTAssertEqual(chip.bounds.width, expectedWidth - 28 - 154 - 8, accuracy: 1)
+                XCTAssertEqual(chip.bounds.height, 34, accuracy: 1)
+                XCTAssertEqual(panel.bounds.width, expectedWidth, accuracy: 1)
+                let host = try XCTUnwrap(window.rootViewController?.view)
+                host.layoutIfNeeded()
+                let image = UIGraphicsImageRenderer(bounds: host.bounds).image { _ in
+                    XCTAssertTrue(host.drawHierarchy(in: host.bounds, afterScreenUpdates: true))
+                }
+                let name = "filter-\(Int(width))-\(enabled ? "on" : "off")"
+                try XCTUnwrap(image.pngData()).write(to: directory.appendingPathComponent(name + ".png"))
+                let attachment = XCTAttachment(image: image)
+                attachment.name = name; attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
     }
 
     func testProgressProjectionIgnoresDictionaryOnlyChangesAndRetainsEveryStatus() {

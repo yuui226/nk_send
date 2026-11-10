@@ -137,6 +137,7 @@ final class ConflatedPreviewUpdatesTests: XCTestCase {
         @Published var canvas = "same"
         @Published var requestedCanvas = "same"
         @Published var failed = false
+        @Published var comparison: UIImage?
         var crossfadePrepared: (() async -> Void)?
         var visibilityStarted: ((Bool) -> Void)?
         init(_ image: UIImage) { self.image = image }
@@ -146,7 +147,7 @@ final class ConflatedPreviewUpdatesTests: XCTestCase {
         @ObservedObject var state: ImageState
         var body: some View {
             var preview = PhotoEffectsAnimatedImage(
-                frame: .init(image: state.image, comparison: nil, canvasKey: state.canvas),
+                frame: .init(image: state.image, comparison: state.comparison, canvasKey: state.canvas),
                 requestedCanvasKey: state.requestedCanvas, showComparison: false, failed: state.failed
             )
             preview.crossfadePrepared = { await state.crossfadePrepared?() }
@@ -173,8 +174,8 @@ final class ConflatedPreviewUpdatesTests: XCTestCase {
         return rgba
     }
 
-    func testInitialStaleCanvasIsHiddenUnlessReplacementFailed() throws {
-        for (requested, failed, expectedRed) in [("same", false, true), ("uniform", false, false), ("uniform", true, true)] {
+    func testInitialFrameCannotFlashBeforeMountAndFailureCanUseFallback() throws {
+        for (requested, failed, expectedRed) in [("same", false, false), ("uniform", false, false), ("uniform", true, true)] {
             let image = ImageRenderer(content: PhotoEffectsAnimatedImage(
                 frame: .init(image: solidImage(.red), comparison: nil, canvasKey: "same"),
                 requestedCanvasKey: requested, showComparison: false, failed: failed)
@@ -183,6 +184,61 @@ final class ConflatedPreviewUpdatesTests: XCTestCase {
             XCTAssertGreaterThan(pixel[0], 240)
             XCTAssertEqual(pixel[1] < 15, expectedRed)
         }
+    }
+
+    func testFirstCompleteFrameFadesInAndComparisonUpdateDoesNotRestartIt() async throws {
+        try await verifyFirstFade(staleFirst: false)
+    }
+
+    func testStaleFirstCanvasDoesNotAddAnotherVisibilityFadeToTheFirstAcceptedFrame() async throws {
+        try await verifyFirstFade(staleFirst: true)
+    }
+
+    private func verifyFirstFade(staleFirst: Bool) async throws {
+        let state = ImageState(solidImage(.red))
+        if staleFirst { state.requestedCanvas = "new" }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: ImageHost(state: state).background(Color.white))
+        let prepared = expectation(description: "first frame accepted while transparent")
+        var release: CheckedContinuation<Void, Never>?
+        var preparations = 0
+        state.crossfadePrepared = {
+            preparations += 1
+            if preparations == 1 {
+                await withCheckedContinuation { release = $0; prepared.fulfill() }
+            }
+        }
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer {
+            release?.resume(); state.crossfadePrepared = nil
+            window.isHidden = true; window.rootViewController = nil; previous?.makeKey()
+        }
+        func pixel() throws -> [UInt8] {
+            let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            return try centerPixel(image)
+        }
+        if staleFirst {
+            try await Task.sleep(for: .milliseconds(80))
+            XCTAssertGreaterThan(try pixel()[1], 240)
+            XCTAssertEqual(preparations, 0, "Do not accept the outdated first result")
+            state.canvas = "new"
+        }
+        await fulfillment(of: [prepared], timeout: 2)
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertGreaterThan(try pixel()[1], 240, "The accepted image must begin transparent")
+        state.comparison = solidImage(.blue)
+        release?.resume(); release = nil
+        try await Task.sleep(for: .milliseconds(80))
+        let middle = try pixel()
+        XCTAssertGreaterThan(middle[1], 0, "Must not jump directly to the completed red frame")
+        XCTAssertLessThan(middle[1], 250, "The first frame must be visibly fading in")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertLessThan(try pixel()[1], 15)
+        XCTAssertEqual(preparations, 1, "A comparison-only update cannot replay the first fade")
     }
 
     func testFailedCanvasReplacementRestoresOldImageAndRejectsLateOldResult() async throws {
@@ -263,26 +319,32 @@ final class ConflatedPreviewUpdatesTests: XCTestCase {
     }
 
     func testCoverInterruptingPreparedCrossfadeRestoresVisibleIncomingFrame() async throws {
+        try await verifyCoverInterruptedFrame(initial: false)
+    }
+
+    func testCoverInterruptingFirstFadeRestoresAcceptedImageWithoutReplaying() async throws {
+        try await verifyCoverInterruptedFrame(initial: true)
+    }
+
+    private func verifyCoverInterruptedFrame(initial: Bool) async throws {
         func bitmap(_ color: UIColor) -> UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 200, height: 200)).image { context in
                 color.setFill()
                 context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
             }
         }
-        let state = ImageState(bitmap(.red))
+        let state = ImageState(bitmap(initial ? .blue : .red))
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousKey = scene.windows.first(where: \.isKeyWindow)
         let window = UIWindow(windowScene: scene)
         let host = UIHostingController(rootView: ImageHost(state: state))
         window.rootViewController = host
-        window.makeKeyAndVisible()
         defer {
             state.crossfadePrepared = nil
             window.isHidden = true
             window.rootViewController = nil
             previousKey?.makeKey()
         }
-        try await Task.sleep(for: .milliseconds(500))
 
         func centerPixel(_ name: String) throws -> [UInt8] {
             let snapshot = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
@@ -303,9 +365,13 @@ final class ConflatedPreviewUpdatesTests: XCTestCase {
             context.draw(center, in: CGRect(x: 0, y: 0, width: 1, height: 1))
             return rgba
         }
-        let initial = try centerPixel("crossfade-before-cover")
-        XCTAssertGreaterThan(initial[0], 240)
-        XCTAssertLessThan(initial[2], 15)
+        if !initial {
+            window.makeKeyAndVisible()
+            try await Task.sleep(for: .milliseconds(500))
+            let before = try centerPixel("crossfade-before-cover")
+            XCTAssertGreaterThan(before[0], 240)
+            XCTAssertLessThan(before[2], 15)
+        }
         let cover = UIViewController()
         cover.view.backgroundColor = .green
         cover.modalPresentationStyle = .fullScreen
@@ -326,7 +392,8 @@ final class ConflatedPreviewUpdatesTests: XCTestCase {
                 XCTFail("Unexpected crossfade suspension error: \(error)")
             }
         }
-        state.image = bitmap(.blue)
+        if initial { window.makeKeyAndVisible() }
+        else { state.image = bitmap(.blue) }
         await fulfillment(of: [interrupted], timeout: 3)
         XCTAssertTrue(host.presentedViewController === cover)
         await withCheckedContinuation { continuation in

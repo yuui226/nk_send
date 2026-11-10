@@ -1,0 +1,10 @@
+{
+  "arguments": [
+    "--gps-direct-ble-probe"
+  ],
+  "activatedWhenStarted": true,
+  "processIdentifier": 8479,
+  "artifact": "ZTransfer-ios-debug-2.05-20261107-015756.app",
+  "testsPassed": 78,
+  "hardwareGPSVerified": false
+}

@@ -171,6 +171,9 @@ final class OutputFileNameReservations: @unchecked Sendable {
 enum TransferStatus: String, Codable, Sendable { case waiting, transferring, completed, failed, cancelled }
 
 struct TransferQueueItem: Identifiable, Equatable, Sendable {
+    /// Android's increasing Long task ID carries attempt order. UUID remains
+    /// the iOS identity; this separate ordinal also advances for in-place retries.
+    var attemptOrder: UInt64 = 0
     var id: UUID
     let file: CameraFile
     var status: TransferStatus = .waiting
@@ -196,6 +199,8 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable {
     var frameGenerationSkipped = false
     var cropEffectsSkipped = false
     var isGeneratingFrame = false
+    /// Busy/protected preflight; not yet confirmed work for generation UI.
+    var frameGenerationPendingCheck = false
     var frameGenerationStartedAtElapsedMs: Int64?
     var frameGenerationAccumulatedMs: Int64 = 0
     var frameGenerationElapsedMs: Int64?
@@ -210,6 +215,7 @@ struct TransferQueueItem: Identifiable, Equatable, Sendable {
     var cropSelection: JpegCropSelection?
     var hasCrop: Bool { cropTask != nil || cropSelection != nil }
     var cropURL: URL?
+    var isQueuedForFrameGeneration: Bool { isGeneratingFrame && !frameGenerationPendingCheck }
 
     /// Android TransferTask.canRetry; a stale error must not expose retry while
     /// a derived output is running. Cancelled tasks participate in retry-all.
@@ -350,6 +356,20 @@ protocol TransferDownloading: Sendable {
     func photoMetadataIdentity() async -> PhotoMetadataCameraIdentity?
     func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?) async throws -> Data?
     func frameMetadataHeader(file: CameraFile, expectedSource: PhotoMetadataCameraIdentity?, maxBytes: Int) async throws -> Data?
+}
+
+/// A single detached verification owns the removed directory index until it
+/// returns it to the worker. Keeping that ownership unique avoids copying the
+/// entire dictionary for every stale candidate in a large batch.
+private final class TransferDirectoryVerificationJob: @unchecked Sendable {
+    private var index: TransferDirectoryIndex
+    init(_ index: consuming TransferDirectoryIndex) { self.index = index }
+    func run(file: CameraFile,
+             verify: (IndexedTransferOriginal) throws -> IndexedTransferOriginal?,
+             invalidated: (IndexedTransferOriginal) -> Void) -> (TransferDirectoryIndex, Result<IndexedTransferOriginal?, Error>) {
+        let result = Result { try index.findVerified(for: file, verify: verify, onInvalidated: invalidated) }
+        return (index, result)
+    }
 }
 
 extension CameraSession: TransferDownloading {}
@@ -508,7 +528,7 @@ func transferDestinationDirectory(root: URL, folderName: String?) -> URL {
 /// handle; only the automatic-new-media path uses an identity de-duplication key.
 /// The active file is never user-cancelled and pause takes effect at its boundary.
 actor TransferQueue {
-    typealias CropRenderer = @Sendable (LosslessCropTask, URL, URL) async throws -> URL
+    typealias CropRenderer = @Sendable (LosslessCropTask, URL, URL, PhotoCaptureLocation?) async throws -> URL
     typealias MetadataParser = @Sendable (PhotoMetadataHeaderStore.Header) async throws -> PreparedPhotoMetadata
     typealias FrameRenderer = @Sendable (URL, PhotoEffectsSettings, URL, PhotoFrameMetadata?) async throws -> URL
     private struct FrameJob: Sendable {
@@ -535,8 +555,17 @@ actor TransferQueue {
     private var backgroundActivity: TransferBackgroundActivity<UIBackgroundTaskIdentifier>?
     private var backgroundTaskToken: UUID?
     private var pending = PendingTransferQueue()
+    private var nextAttemptOrder: UInt64 = 0
+
+    private func allocateAttemptOrder() -> UInt64 {
+        nextAttemptOrder += 1
+        return nextAttemptOrder
+    }
     private var frameWorkers: [UUID: Task<Void, Never>] = [:]
     private var frameJobs: [UUID: FrameJob] = [:]
+    /// Warm name-only proof for admission. Exact recipe/existence checks stay
+    /// in the worker; unknown destinations never trigger transfer-side IO.
+    private var knownFrameOutputNames: [URL: Set<String>] = [:]
     private var frameQueueState: PhotoGenerationQueueState
     private struct FrameAdmissionJob: Sendable {
         let frame: FrameJob
@@ -569,6 +598,8 @@ actor TransferQueue {
     private var frameMetadataJobs: [UUID: FrameMetadataJob] = [:]
     private var pendingFrameMetadata = PendingTransferQueue()
     private var frameMetadataWorker: Task<Void, Never>?
+    private var pendingFramePlaces = PendingTransferQueue()
+    private var framePlaceWorker: Task<Void, Never>?
     private var photoEffectsEnabled: Bool
     private let preparationCapacity: Int
     private var preparingFrameIDs: Set<UUID> = []
@@ -586,6 +617,10 @@ actor TransferQueue {
         let root: URL
     }
     private var savedGenerationSources: [UUID: SavedGenerationSource] = [:]
+    private var publishingPhotoSources: Set<URL> = []
+    private var publishedPhotoOutputs: Set<URL> = []
+    private let photoLibraryLedger: PhotoLibraryTransferLedger
+    private let importPhotoFile: @Sendable (URL) async throws -> Void
 
     private var directoryAccess: DirectoryAccessLease?
     private var directory: URL? { directoryAccess?.url }
@@ -605,6 +640,10 @@ actor TransferQueue {
     private var progressContinuations: [UUID: AsyncStream<TransferActiveProgress?>.Continuation] = [:]
     private var activeProgress: TransferActiveProgress?
     private var lastValidTransferSpeed: Int64 = 0
+    private var speedDisplaySampler = TransferSpeedDisplaySampler()
+    private let transferSpeedNow: @Sendable () -> Int64
+    nonisolated let originalStore: TransferOriginalStore
+    private let verifyOriginal: @Sendable (IndexedTransferOriginal) throws -> IndexedTransferOriginal?
     private let premiumAccess: PremiumAccess
     private let freeUsage: FreeUsageStore
     init(defaults: UserDefaults = .standard, premiumAccess: PremiumAccess = .shared,
@@ -613,17 +652,29 @@ actor TransferQueue {
          directoryPreparation: TransferDirectoryPreparation = .shared,
          generationCapacity: Int = 4096,
          generationNow: @escaping @Sendable () -> Int64 = PhotoGenerationClock.now,
+         transferSpeedNow: @escaping @Sendable () -> Int64 = PhotoGenerationClock.now,
+         originalStore: TransferOriginalStore = TransferOriginalStore(),
+         verifyOriginal: @escaping @Sendable (IndexedTransferOriginal) throws -> IndexedTransferOriginal? = readExistingTransferOriginal,
          metadataHeaderStore: PhotoMetadataHeaderStore = PhotoMetadataHeaderStore(),
          parseMetadata: MetadataParser? = nil,
          placeResolver: PhotoFramePlaceResolver = .shared,
          placeAllowed: @escaping @Sendable () async -> Bool = { await PhotoFramePlaceAvailability.shared.allowed },
-         renderCrop: @escaping CropRenderer = { task, source, directory in
-             try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory)
+         renderCrop: @escaping CropRenderer = { task, source, directory, location in
+             try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory, locationFallback: location)
          },
-         renderFrame: FrameRenderer? = nil) {
+         renderFrame: FrameRenderer? = nil,
+         photoLibraryLedger: PhotoLibraryTransferLedger = .shared,
+         importPhotoFile: @escaping @Sendable (URL) async throws -> Void = {
+             try await PhotoLibraryTransferImporter.importFile($0)
+         }) {
+        self.photoLibraryLedger = photoLibraryLedger
+        self.importPhotoFile = importPhotoFile
         self.photoEffectsEnabled = defaults.object(forKey: "photo_effects_enabled") as? Bool ?? true
         self.preparationCapacity = generationCapacity
         self.generationNow = generationNow
+        self.transferSpeedNow = transferSpeedNow
+        self.originalStore = originalStore
+        self.verifyOriginal = verifyOriginal
         self.metadataHeaderStore = metadataHeaderStore
         let metadataParser = PhotoMetadataParser()
         self.metadataParser = metadataParser
@@ -653,6 +704,7 @@ actor TransferQueue {
         frameAdmissionWorker?.cancel()
         frameMetadataWorker?.cancel()
         worker?.cancel()
+        framePlaceWorker?.cancel()
         frameWorkers.values.forEach { $0.cancel() }
     }
 
@@ -696,9 +748,10 @@ actor TransferQueue {
 
     @discardableResult
     func enqueue(_ file: CameraFile, storageMode: TransferStorageMode,
-                 effects: PhotoEffectsSettings? = nil) -> UUID? {
-        let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
+                 effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> UUID? {
+        let effects = queuedEffects(effects, enabled: photoEffectsEnabled)
         let item = TransferQueueItem(
+            attemptOrder: allocateAttemptOrder(),
             id: UUID(), file: file,
             destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
             effects: Self.effectsForFile(effects, file: file)
@@ -708,16 +761,16 @@ actor TransferQueue {
 
     @discardableResult
     func enqueue(_ file: CameraFile, organizeByDate: Bool = false,
-                 effects: PhotoEffectsSettings? = nil) -> UUID? {
-        enqueue(file, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+                 effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> UUID? {
+        enqueue(file, storageMode: organizeByDate ? .byDay : .unified, effects: effects, photoEffectsEnabled: photoEffectsEnabled)
     }
 
     @discardableResult
     func enqueueCrop(_ file: CameraFile, selection: JpegCropSelection,
-                     storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil) -> UUID? {
+                     storageMode: TransferStorageMode, effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> UUID? {
         guard !Task.isCancelled else { return nil }
-        let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
-        let item = TransferQueueItem(id: UUID(), file: file,
+        let effects = queuedEffects(effects, enabled: photoEffectsEnabled)
+        let item = TransferQueueItem(attemptOrder: allocateAttemptOrder(), id: UUID(), file: file,
             destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
             effects: Self.effectsForFile(effects, file: file), cropSelection: selection)
         items.append(item); pending.append(item.id); publish(); return item.id
@@ -726,9 +779,9 @@ actor TransferQueue {
     @discardableResult
     func enqueueCrop(_ file: CameraFile, task: LosslessCropTask,
                      storageMode: TransferStorageMode,
-                     effects: PhotoEffectsSettings? = nil) -> UUID? {
-        let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
-        let item = TransferQueueItem(id: UUID(), file: file,
+                     effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> UUID? {
+        let effects = queuedEffects(effects, enabled: photoEffectsEnabled)
+        let item = TransferQueueItem(attemptOrder: allocateAttemptOrder(), id: UUID(), file: file,
                                      destinationFolderName: transferStorageFolderName(file: file, mode: storageMode),
                                      effects: Self.effectsForFile(effects, file: file), cropTask: task)
         items.append(item); pending.append(item.id); publish(); return item.id
@@ -736,20 +789,20 @@ actor TransferQueue {
 
     @discardableResult
     func enqueueCrop(_ file: CameraFile, task: LosslessCropTask,
-                     organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil) -> UUID? {
-        enqueueCrop(file, task: task, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+                     organizeByDate: Bool = false, effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> UUID? {
+        enqueueCrop(file, task: task, storageMode: organizeByDate ? .byDay : .unified, effects: effects, photoEffectsEnabled: photoEffectsEnabled)
     }
 
     @discardableResult
     func enqueue(_ files: [CameraFile], storageMode: TransferStorageMode,
-                 effects: PhotoEffectsSettings? = nil) -> [UUID] {
+                 effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> [UUID] {
         // User-confirmed P05: all files in this enqueue share the effective
         // watermark captured now. Derived jobs and retries use this value.
-        let effects = effects.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
+        let effects = queuedEffects(effects, enabled: photoEffectsEnabled)
         var seen: Set<UInt32> = []
         let queuedAt = Date()
         let additions = files.filter { seen.insert($0.id).inserted }.map { file in
-            TransferQueueItem(id: UUID(), file: file,
+            TransferQueueItem(attemptOrder: allocateAttemptOrder(), id: UUID(), file: file,
                               destinationFolderName: transferStorageFolderName(
                                 file: file, mode: storageMode, fallback: queuedAt
                               ),
@@ -764,27 +817,27 @@ actor TransferQueue {
 
     @discardableResult
     func enqueue(_ files: [CameraFile], organizeByDate: Bool = false,
-                 effects: PhotoEffectsSettings? = nil) -> [UUID] {
-        enqueue(files, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+                 effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> [UUID] {
+        enqueue(files, storageMode: organizeByDate ? .byDay : .unified, effects: effects, photoEffectsEnabled: photoEffectsEnabled)
     }
 
     @discardableResult
     func enqueueAutomatic(_ file: CameraFile, mode: AutoTransferMode = .all,
                           storageMode: TransferStorageMode,
-                          effects: PhotoEffectsSettings? = nil) -> UUID? {
-        enqueueAutomatic([file], mode: mode, storageMode: storageMode, effects: effects).first
+                          effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> UUID? {
+        enqueueAutomatic([file], mode: mode, storageMode: storageMode, effects: effects, photoEffectsEnabled: photoEffectsEnabled).first
     }
 
     @discardableResult
     func enqueueAutomatic(_ file: CameraFile, mode: AutoTransferMode = .all, organizeByDate: Bool = false,
-                          effects: PhotoEffectsSettings? = nil) -> UUID? {
-        enqueueAutomatic(file, mode: mode, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+                          effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> UUID? {
+        enqueueAutomatic(file, mode: mode, storageMode: organizeByDate ? .byDay : .unified, effects: effects, photoEffectsEnabled: photoEffectsEnabled)
     }
 
     @discardableResult
     func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode = .all,
                           storageMode: TransferStorageMode,
-                          effects: PhotoEffectsSettings? = nil) -> [UUID] {
+                          effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> [UUID] {
         // Android addNewMediaToQueue excludes cropRecipe tasks: a derived
         // crop must not suppress a later automatic transfer of the original.
         var identities = Set(items.lazy.filter { !$0.hasCrop }
@@ -792,17 +845,29 @@ actor TransferQueue {
         let candidates = files.filter {
             mode.accepts($0.fileName) && identities.insert(automaticIdentity(for: $0)).inserted
         }
-        return enqueue(candidates, storageMode: storageMode, effects: effects)
+        return enqueue(candidates, storageMode: storageMode, effects: effects, photoEffectsEnabled: photoEffectsEnabled)
     }
 
     @discardableResult
     func enqueueAutomatic(_ files: [CameraFile], mode: AutoTransferMode = .all, organizeByDate: Bool = false,
-                          effects: PhotoEffectsSettings? = nil) -> [UUID] {
-        enqueueAutomatic(files, mode: mode, storageMode: organizeByDate ? .byDay : .unified, effects: effects)
+                          effects: PhotoEffectsSettings? = nil, photoEffectsEnabled: Bool? = nil) -> [UUID] {
+        enqueueAutomatic(files, mode: mode, storageMode: organizeByDate ? .byDay : .unified, effects: effects, photoEffectsEnabled: photoEffectsEnabled)
+    }
+
+    /// Android createQueueTasks: capture the master switch with the user's
+    /// enqueue command, independent of later worker gates or editor changes.
+    private func queuedEffects(_ settings: PhotoEffectsSettings?, enabled: Bool?) -> PhotoEffectsSettings? {
+        guard enabled ?? photoEffectsEnabled else { return nil }
+        return settings.map { effectivePhotoEffectsSettings($0, isPro: premiumAccess.isPro) }
     }
 
     private func setDirectory(_ url: URL?) {
+        originalStore.select(url)
+        if let url, PhotoLibraryTransferStaging.isStaging(url) {
+            PhotoLibraryTransferLedger.shared.apply(to: originalStore, root: url)
+        }
         guard directory != url else { return }
+        knownFrameOutputNames.removeAll()
         directoryAccess = url.map { DirectoryAccessLease(url: $0, operations: accessOperations) }
     }
 
@@ -917,11 +982,21 @@ actor TransferQueue {
     /// that cancels an active file transfer, so transferring tasks are left
     /// untouched here and finish normally.
     func withdraw(id: UUID) {
-        guard let index = items.firstIndex(where: { $0.id == id }), items[index].status == .waiting else { return }
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].status == .waiting,
+              !items[index].isGeneratingFrame else { return }
         pending.withdraw(id)
         items[index].status = .cancelled
         items[index].bytesPerSecond = 0
         publish()
+    }
+
+    /// Single-card equivalent of beginClearQueue, atomically protecting a
+    /// download/generation claimed between the gesture and its actor callback.
+    func beginRemoval(id: UUID) -> Set<UUID> {
+        guard let item = items.first(where: { $0.id == id }),
+              item.status != .transferring, !item.isGeneratingFrame else { return [] }
+        withdraw(id: id)
+        return [id]
     }
 
     /// Android's clear flow first withdraws every waiting item so the worker
@@ -929,13 +1004,37 @@ actor TransferQueue {
     /// is intentionally left untouched.
     func withdrawPending() {
         var changed = false
-        for index in items.indices where items[index].status == .waiting {
+        for index in items.indices where items[index].status == .waiting && !items[index].isGeneratingFrame {
             pending.withdraw(items[index].id)
             items[index].status = .cancelled
             items[index].bytesPerSecond = 0
             changed = true
         }
         if changed { publish() }
+    }
+
+    /// Android beginClearQueue: capture and withdraw atomically in the queue
+    /// actor. The returned IDs are the entire scope of this UI operation.
+    func beginClearQueue() -> Set<UUID> {
+        let targets = clearQueueTargetIDs(items)
+        for index in items.indices where targets.contains(items[index].id) && items[index].status == .waiting {
+            pending.withdraw(items[index].id)
+            items[index].status = .cancelled
+            items[index].bytesPerSecond = 0
+        }
+        if !targets.isEmpty { publish() }
+        return targets
+    }
+
+    func finishClearQueue(targetIDs: Set<UUID>) {
+        remove(ids: targetIDs)
+    }
+
+    /// Return only targets still protected by live work. An already removed
+    /// ID must not be mistaken for a rejected removal and visually restored.
+    func removeAndReturnRetained(ids: Set<UUID>) -> Set<UUID> {
+        remove(ids: ids)
+        return Set(items.lazy.filter { ids.contains($0.id) }.map(\.id))
     }
 
     /// Replace the visible card with a fresh attempt. Published originals retry
@@ -948,11 +1047,12 @@ actor TransferQueue {
         if old.frameError != nil, let saved = savedGenerationSources[id] {
             var replacement = old
             replacement.id = UUID()
+            replacement.attemptOrder = allocateAttemptOrder()
             replacement.status = .completed
             replacement.error = nil
             replacement.skipped = false
             replacement.cropEffectsSkipped = false
-            replacement.queueFrameGeneration()
+            replacement.queueFrameGeneration(pendingCheck: true)
             items[index] = replacement
             savedGenerationSources[id] = nil
             savedGenerationSources[replacement.id] = saved
@@ -964,6 +1064,7 @@ actor TransferQueue {
         }
         guard directory != nil else { return nil }
         let replacement = TransferQueueItem(
+            attemptOrder: allocateAttemptOrder(),
             id: UUID(), file: old.file,
             outputURL: old.outputURL,
             destinationFolderName: old.destinationFolderName,
@@ -1012,8 +1113,8 @@ actor TransferQueue {
         removeCleared()
     }
 
-    /// RemoveCleared in Android is deliberately limited to terminal items; a
-    /// waiting item can only disappear after withdrawPending has run.
+    /// Immediate history cleanup for callers without an animated clear flow.
+    /// UI cleanup must use finishClearQueue with its captured target IDs.
     func removeCleared() {
         let before = items.count
         items.removeAll { !$0.isGeneratingFrame &&
@@ -1031,8 +1132,10 @@ actor TransferQueue {
         for id in ids { await retry(id: id) }
     }
 
-    private func processCrop(itemID: UUID, task: LosslessCropTask, sourceURL: URL, directory: URL) async throws -> URL {
-        let output = try await renderCrop(task, sourceURL, directory)
+    private func processCrop(itemID: UUID, task: LosslessCropTask, sourceURL: URL, directory: URL,
+                             metadata: PhotoFrameMetadata?) async throws -> URL {
+        let location = PhotoCaptureLocation(latitude: metadata?.latitude, longitude: metadata?.longitude, altitude: metadata?.altitude)
+        let output = try await renderCrop(task, sourceURL, directory, location)
         // Match Android's NonCancellable publication + savedCropOutput update.
         // Record before observing cancellation so a foreground retry reuses it.
         if let index = items.firstIndex(where: { $0.id == itemID }) {
@@ -1071,9 +1174,6 @@ actor TransferQueue {
         // SAF indexing is off the UI/scheduler thread on Android. Each await
         // below is also a withdrawal point; identify tasks by ID after it.
         var directoryIndexes: [URL: TransferDirectoryIndex] = [:]
-        directoryIndexes[directory] = await Task.detached(priority: .utility) {
-            TransferDirectoryIndex.scan(directory: directory)
-        }.value
         while !Task.isCancelled {
             if pauseAfterCurrent { stoppedAfterCurrent = true; break }
             guard let itemID = pending.takeFirst() else { break }
@@ -1085,36 +1185,84 @@ actor TransferQueue {
                 fail(itemID, message: "Invalid transfer folder name: \(folder)")
                 continue
             }
-            let destinationDirectory = transferDestinationDirectory(root: directory, folderName: task.destinationFolderName)
+            let destinationDirectory = PhotoLibraryTransferStaging.isStaging(directory)
+                ? directory
+                : transferDestinationDirectory(root: directory, folderName: task.destinationFolderName)
             do {
                 if directoryIndexes[destinationDirectory] == nil {
-                    directoryIndexes[destinationDirectory] = try await Task.detached(priority: .utility) {
-                        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
-                        return TransferDirectoryIndex.scan(directory: destinationDirectory)
-                    }.value
+                    let scan = Task.detached(priority: .utility) {
+                        if destinationDirectory != directory {
+                            try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+                        }
+                        return try TransferDirectoryIndex.read(directory: destinationDirectory)
+                    }
+                    directoryIndexes[destinationDirectory] = try await withTaskCancellationHandler {
+                        try await scan.value
+                    } onCancel: { scan.cancel() }
                 }
-                guard isWaiting(itemID) else { continue }
-                try Task.checkCancellation()
-                if let destination = directoryIndexes[destinationDirectory]?.existingOriginal(for: task.file) {
+            guard isWaiting(itemID) else { continue }
+            try Task.checkCancellation()
+            if skipPhotoLibraryOriginal(itemID, file: task.file, directory: directory) { continue }
+            var original: IndexedTransferOriginal?
+                if directoryIndexes[destinationDirectory]?.candidate(for: task.file) != nil {
+                    let verify = verifyOriginal, store = originalStore
+                    let job = TransferDirectoryVerificationJob(directoryIndexes.removeValue(forKey: destinationDirectory)!)
+                    let lookup = Task.detached(priority: .utility) {
+                        job.run(file: task.file, verify: verify) { stale in
+                            _ = store.forget(stale, root: directory, folder: task.destinationFolderName)
+                        }
+                    }
+                    let result = await withTaskCancellationHandler {
+                        await lookup.value
+                    } onCancel: { lookup.cancel() }
+                    directoryIndexes[destinationDirectory] = result.0
+                    try Task.checkCancellation()
+                    guard isWaiting(itemID) else { continue }
+                    original = try result.1.get()
+                }
+                if let original {
+                    let destination = original.url
                     guard let index = items.firstIndex(where: { $0.id == itemID }) else { continue }
                     items[index].status = .completed
                     items[index].progress = 1
                     items[index].bytesPerSecond = 0
                     items[index].downloadMBps = 0
                     items[index].elapsedMs = nil
-                    items[index].downloadedBytes = UInt64(max(0, (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
+                    items[index].downloadedBytes = original.size
                     items[index].outputURL = destination
-                    items[index].skipped = !task.hasCrop && !hasEffects
+                    originalStore.record(original, root: directory, folder: task.destinationFolderName, fileID: task.file.id)
+                    items[index].skipped = !task.hasCrop && !(photoEffectsEnabled && hasEffects)
                     if task.hasCrop || hasEffects {
-                        await startFrameGenerationIfNeeded(for: itemID, source: destination, file: task.file,
+                        await startFrameGeneration(for: itemID, source: destination, file: task.file,
                             settings: task.effects ?? PhotoEffectsSettings(), in: destinationDirectory,
                             access: retainedAccess)
                     }
+                    await finishPhotoLibraryPublication(itemID: itemID, directory: directory)
                     publish()
                     continue
                 }
 
-                // Android's DL_RESUME_COMPLETE shortcut: a complete,
+                // LicenseManager / TransferViewModel: check only at the file
+                // boundary, after an existing original; never interrupt a download.
+                if !premiumAccess.isPro {
+                    if freeUsage.snapshot().transfersLeft == 0 {
+                        fail(itemID, message: AppLocalized.resource("transfer_limit_reached"))
+                        continue
+                    }
+                    if task.file.size > FreeUsageStore.maximumFileBytes {
+                        fail(itemID, message: AppLocalized.formattedResource("transfer_size_limit", ["%1$d": "400"]))
+                        continue
+                    }
+                }
+                // No TRANSFERING state for a local hit or disconnected task.
+                // Resolve the current session only after local-file preflight.
+                guard let session else {
+                    fail(itemID, message: AppLocalized.resource("camera_not_connected"))
+                    continue
+                }
+                // Android gates complete video recovery on quota, size and
+                // the current camera. Recovery itself consumes no quota.
+                // DL_RESUME_COMPLETE: a complete,
                 // identity-matching .nkpart_ means the previous download
                 // finished before its final rename. Finalize it while the
                 // card is still WAITING, then run the same local-original
@@ -1133,14 +1281,17 @@ actor TransferQueue {
                         items[index].bytesPerSecond = 0
                         items[index].downloadMBps = 0
                         items[index].elapsedMs = nil
-                        items[index].skipped = !task.hasCrop && !hasEffects
+                        items[index].skipped = !task.hasCrop && !(photoEffectsEnabled && hasEffects)
                         items[index].downloadedBytes = task.file.size
                         items[index].outputURL = output
+                        originalStore.record(IndexedTransferOriginal(url: output, size: task.file.size),
+                                             root: directory, folder: task.destinationFolderName, fileID: task.file.id)
                         if task.hasCrop || hasEffects {
-                            await startFrameGenerationIfNeeded(for: itemID, source: output, file: task.file,
+                            await startFrameGeneration(for: itemID, source: output, file: task.file,
                                 settings: task.effects ?? PhotoEffectsSettings(), in: destinationDirectory,
                                 access: retainedAccess)
                         }
+                        await finishPhotoLibraryPublication(itemID: itemID, directory: directory)
                         publish()
                         continue
                     } catch is CancellationError {
@@ -1153,29 +1304,12 @@ actor TransferQueue {
                         directoryIndexes[destinationDirectory]?.removePartial(partial)
                     }
                 }
-                // LicenseManager / TransferViewModel: check only at the file
-                // boundary, after local shortcuts; never interrupt a download.
-                if !premiumAccess.isPro {
-                    if freeUsage.snapshot().transfersLeft == 0 {
-                        fail(itemID, message: AppLocalized.resource("transfer_limit_reached"))
-                        continue
-                    }
-                    if task.file.size > FreeUsageStore.maximumFileBytes {
-                        fail(itemID, message: AppLocalized.formattedResource("transfer_size_limit", ["%1$d": "400"]))
-                        continue
-                    }
-                }
-                // No TRANSFERING state for a local hit or disconnected task.
-                // Resolve the current session only after local-file preflight.
-                guard let session else {
-                    fail(itemID, message: AppLocalized.resource("camera_not_connected"))
-                    continue
-                }
                 guard let index = items.firstIndex(where: { $0.id == itemID && $0.status == .waiting }) else { continue }
                 items[index].status = .transferring
                 items[index].downloadedBytes = 0
                 items[index].error = nil
                 items[index].elapsedMs = nil
+                speedDisplaySampler = .init()
                 activeProgress = TransferActiveProgress(taskID: itemID, fraction: 0, bytesPerSecond: 0,
                                                         retainedBytesPerSecond: lastValidTransferSpeed)
                 publishProgress()
@@ -1199,6 +1333,8 @@ actor TransferQueue {
                     items[index].elapsedMs = elapsed
                     items[index].downloadedBytes = result.bytes
                     items[index].outputURL = output
+                    originalStore.record(IndexedTransferOriginal(url: output, size: result.bytes),
+                                         root: directory, folder: task.destinationFolderName, fileID: task.file.id)
                     if task.hasCrop || hasEffects {
                         await startFrameGeneration(
                             for: itemID, source: output, file: task.file, settings: task.effects ?? PhotoEffectsSettings(), in: destinationDirectory, access: retainedAccess,
@@ -1207,6 +1343,7 @@ actor TransferQueue {
                             sourceCamera: session
                         )
                     }
+                    await finishPhotoLibraryPublication(itemID: itemID, directory: directory)
                     publish()
                 }
                 directoryIndexes[destinationDirectory]?.addOriginal(output, size: result.bytes)
@@ -1269,6 +1406,73 @@ actor TransferQueue {
         items.contains { $0.id == id && $0.status == .waiting }
     }
 
+    /// Album mode keeps one copy in Photos. A recorded original is not downloaded
+    /// again. A failed Photos import leaves the staged file so the next attempt
+    /// can publish it without asking the camera for the same bytes.
+    private func skipPhotoLibraryOriginal(_ itemID: UUID, file: CameraFile, directory: URL) -> Bool {
+        guard PhotoLibraryTransferStaging.isStaging(directory),
+              photoLibraryLedger.contains(file) else { return false }
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return true }
+        items[index].status = .completed
+        items[index].progress = 1
+        items[index].skipped = true
+        items[index].downloadedBytes = file.size
+        originalStore.record(
+            IndexedTransferOriginal(url: directory.appendingPathComponent(file.fileName), size: file.size, name: file.fileName),
+            root: directory, folder: nil, fileID: file.id
+        )
+        publish()
+        return true
+    }
+
+    private func finishPhotoLibraryPublication(itemID: UUID, directory: URL) async {
+        guard PhotoLibraryTransferStaging.isStaging(directory),
+              let item = items.first(where: { $0.id == itemID }),
+              item.status == .completed, let output = item.outputURL else { return }
+        // Android keeps originals for the asynchronous generation worker. In
+        // album mode the private original is its input too, until every reader
+        // has finished, including another queued attempt for the same file.
+        guard !items.contains(where: { $0.outputURL == output && $0.isGeneratingFrame }),
+              publishingPhotoSources.insert(output).inserted else { return }
+        defer { publishingPhotoSources.remove(output); publish() }
+        do {
+            if !photoLibraryLedger.contains(item.file) {
+                try await importPhotoFile(output)
+                photoLibraryLedger.record(item.file)
+                originalStore.record(
+                    IndexedTransferOriginal(url: output, size: item.file.size, name: item.file.fileName),
+                    root: directory, folder: nil, fileID: item.file.id
+                )
+            }
+            let completed = items.filter { $0.outputURL == output && !$0.isGeneratingFrame }
+            for task in completed {
+                for derivative in Set([task.cropURL, task.frameURL].compactMap { $0 }) where derivative != output {
+                    guard !publishedPhotoOutputs.contains(derivative) else { continue }
+                    do {
+                        try await importPhotoFile(derivative)
+                        publishedPhotoOutputs.insert(derivative)
+                    } catch {
+                        if let index = items.firstIndex(where: { $0.id == task.id }) {
+                            items[index].frameError = AppLocalized.resource("transfer_photo_import_failed")
+                        }
+                    }
+                }
+            }
+            // Failed generation/import retains its input for a local retry.
+            // Recheck after Photos suspends us: another reader may have started.
+            let readers = items.filter { $0.outputURL == output }
+            guard readers.allSatisfy({ !$0.isGeneratingFrame && $0.frameError == nil }) else { return }
+            try? FileManager.default.removeItem(at: output)
+            for derivative in publishedPhotoOutputs where
+                completed.contains(where: { $0.cropURL == derivative || $0.frameURL == derivative }) {
+                try? FileManager.default.removeItem(at: derivative)
+            }
+        } catch {
+            if let index = items.firstIndex(where: { $0.id == itemID }) { items[index].skipped = false }
+            fail(itemID, message: AppLocalized.resource("transfer_photo_import_failed"))
+        }
+    }
+
     private func fail(_ id: UUID, message: String) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].status = .failed
@@ -1279,6 +1483,7 @@ actor TransferQueue {
 
     private func invalidateDirectory() {
         invalidatedDirectory = directory
+        originalStore.select(nil)
         directoryAccess = nil
         pending.clear()
         let message = AppLocalized.resource("error_dir_invalid")
@@ -1311,15 +1516,24 @@ actor TransferQueue {
                                       sourceCamera: (any TransferDownloading)? = nil) async {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         guard items[index].hasCrop || Self.supportsRenderedOutput(file.fileExtension) else { return }
+        if !items[index].hasCrop && !photoEffectsEnabled {
+            items[index].skipFrameGeneration()
+            // Offline retry already published its protected preparation state.
+            // It has no download worker left to publish this synchronous skip.
+            publish()
+            return
+        }
         savedGenerationSources[id] = SavedGenerationSource(source: source, parent: directory, root: access.url)
         switch frameQueueState.submit(id, ready: false) {
         case .duplicate: return
         case .closed:
             items[index].isGeneratingFrame = false
+            items[index].frameGenerationPendingCheck = false
             publish()
             return
         case .full:
             items[index].isGeneratingFrame = false
+            items[index].frameGenerationPendingCheck = false
             items[index].frameError = "Photo generation queue capacity reached"
             items[index].frameGenerationElapsedMs = nil
             publish()
@@ -1329,7 +1543,16 @@ actor TransferQueue {
         var frame = FrameJob(id: id, source: source, settings: settings, directory: directory, access: access,
                              metadata: metadata,
                              cropTask: items[index].cropTask, cropSelection: items[index].cropSelection)
-        items[index].queueFrameGeneration()
+        let sameSourceInProgress = frameJobs.values.contains { other in
+            other.id != id && other.directory.standardizedFileURL == directory.standardizedFileURL &&
+                other.source.deletingPathExtension().lastPathComponent.caseInsensitiveCompare(
+                    source.deletingPathExtension().lastPathComponent) == .orderedSame
+        }
+        let confirmed = canConfirmPhotoGeneration(sourceName: source.lastPathComponent,
+            knownOutputNames: knownFrameOutputNames[directory.standardizedFileURL],
+            sameSourceInProgress: sameSourceInProgress,
+            cropRequested: items[index].hasCrop, hasSavedCrop: items[index].cropURL != nil)
+        items[index].queueFrameGeneration(pendingCheck: !confirmed)
         frameJobs[id] = frame
         if !Self.needsCameraMetadata(settings, file: file) {
             frame.metadataReady = true
@@ -1475,20 +1698,55 @@ actor TransferQueue {
 
     private func makeFrameReady(_ frame: FrameJob, key: MetadataKey) {
         var frame = frame
-        preparingFrameIDs.remove(frame.id)
-        frame.metadataReady = true
         frame.metadata = frame.metadata?.boundedForQueue()
         guard !frameQueueState.isClosed,
-              let index = items.firstIndex(where: { $0.id == frame.id && $0.isGeneratingFrame }) else { return }
+              let index = items.firstIndex(where: { $0.id == frame.id && $0.isGeneratingFrame }) else {
+            preparingFrameIDs.remove(frame.id)
+            return
+        }
         if let metadata = frame.metadata {
             items[index].sourceMetadataSnapshot = metadata
         }
         if let prepared = frame.preparedMetadata {
             frameMetadataCache.insert(PreparedPhotoMetadata(value: frame.metadata, state: prepared.state), for: key)
         }
+        if frame.settings.usesRenderedPlaceIdentity, frame.metadata != nil {
+            // Android prepares places before the compute consumer. Keep this
+            // bounded slot until lookup ends, even if effects get skipped.
+            frameJobs[frame.id] = frame
+            pendingFramePlaces.append(frame.id)
+            if framePlaceWorker == nil {
+                framePlaceWorker = Task(priority: .utility) { [weak self] in
+                    await self?.prepareWaitingFramePlaces()
+                }
+            }
+        } else { completeFramePreparation(frame) }
+    }
+
+    private func completeFramePreparation(_ frame: FrameJob) {
+        preparingFrameIDs.remove(frame.id)
+        guard !frameQueueState.isClosed,
+              items.contains(where: { $0.id == frame.id && $0.isGeneratingFrame }) else { return }
+        var frame = frame
+        frame.metadataReady = true
         frameJobs[frame.id] = frame
         frameQueueState.markReady(frame.id)
         startWaitingFrames()
+    }
+
+    private func prepareWaitingFramePlaces() async {
+        defer { framePlaceWorker = nil }
+        while !Task.isCancelled, !frameQueueState.isClosed, let id = pendingFramePlaces.takeFirst() {
+            guard var frame = frameJobs[id], let metadata = frame.metadata,
+                  items.contains(where: { $0.id == id && $0.isGeneratingFrame }) else {
+                preparingFrameIDs.remove(id)
+                continue
+            }
+            frame.metadata = await placeResolver.enriching(metadata, settings: frame.settings.metadata, allowed: placeAllowed)
+                .boundedForQueue()
+            guard !Task.isCancelled else { return }
+            completeFramePreparation(frame)
+        }
     }
 
     private func startFrameMetadataWorker() {
@@ -1534,6 +1792,7 @@ actor TransferQueue {
                     frameQueueState.finish(frame.id)
                     if let index = items.firstIndex(where: { $0.id == frame.id }) {
                         items[index].isGeneratingFrame = false
+                        items[index].frameGenerationPendingCheck = false
                         items[index].frameGenerationStartedAtElapsedMs = nil
                     }
                 }
@@ -1563,6 +1822,8 @@ actor TransferQueue {
         frameMetadataCache.removeAll()
         frameAdmissionWorker?.cancel()
         frameMetadataWorker?.cancel()
+        framePlaceWorker?.cancel()
+        pendingFramePlaces.clear()
         for id in abandoned {
             frameAdmissionJobs[id] = nil
             pendingFrameAdmissions.withdraw(id)
@@ -1577,50 +1838,13 @@ actor TransferQueue {
         publish()
     }
 
-    /// Android's launchPhotoFrameExport(skipIfExisting = true) checks the
-    /// deterministic frame path before publishing GENERATING. Keep that
-    /// preflight off the actor so a repeated export never flashes a fake
-    /// generation state or consumes a frame worker.
-    private func startFrameGenerationIfNeeded(
-        for id: UUID,
-        source: URL,
-        file: CameraFile,
-        settings: PhotoEffectsSettings,
-        in directory: URL,
-        access: DirectoryAccessLease,
-        metadata: PhotoFrameMetadata? = nil,
-        allowCameraMetadataRead: Bool = true,
-    ) async {
-        guard Self.supportsRenderedOutput(file.fileExtension) || items.first(where: { $0.id == id })?.hasCrop == true else { return }
-        // A crop changes the effect source name; its existence check belongs
-        // after crop publication inside the generation worker.
-        let hasCrop = items.first(where: { $0.id == id })?.hasCrop == true
-        let existing: URL?
-        // A place identity requires the prepared, policy-filtered text. Only
-        // recipes without location can take the cheap pre-metadata shortcut.
-        if hasCrop || settings.usesRenderedPlaceIdentity { existing = nil }
-        else {
-            existing = await Task.detached(priority: .utility) {
-                Self.existingFrameURL(source: source, settings: settings, in: directory)
-            }.value
-        }
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        if let existing {
-            items[index].skipFrameGeneration()
-            items[index].frameURL = existing
-            items[index].skipped = true
-            items[index].frameError = nil
-            return
-        }
-        await startFrameGeneration(for: id, source: source, file: file, settings: settings,
-                                   in: directory, access: access,
-                                   metadata: metadata, allowCameraMetadataRead: allowCameraMetadataRead)
-    }
-
     private func startWaitingFrames() {
         while let id = frameQueueState.takeReady(runWhilePreparing: { !photoEffectsEnabled && frameJobs[$0] != nil }) {
             guard let job = frameJobs[id] else { frameQueueState.finish(id); continue }
-            frameWorkers[id] = Task(priority: .utility) { [weak self] in await self?.generateFrame(job) }
+            frameWorkers[id] = Task(priority: .utility) { [weak self] in
+                await self?.generateFrame(job)
+                await self?.finishPhotoLibraryPublication(itemID: id, directory: job.access.url)
+            }
         }
     }
 
@@ -1652,10 +1876,6 @@ actor TransferQueue {
                 return
             }
             if !job.metadataReady && photoEffectsEnabled { deferForMetadata = true; return }
-            if let index = items.firstIndex(where: { $0.id == job.id }) {
-                items[index].startFrameGeneration(now: generationNow())
-                publish()
-            }
             var effectSource = job.source
             if job.hasCrop {
                 if let saved = items.first(where: { $0.id == job.id })?.cropURL,
@@ -1677,8 +1897,10 @@ actor TransferQueue {
                         }
                         crop = LosslessCropTask(fileID: fileID, recipe: try selection.resolve(source))
                     }
+                    startPhotoFrameWork(job.id)
                     effectSource = try await processCrop(itemID: job.id, task: crop,
-                        sourceURL: job.source, directory: job.directory)
+                        sourceURL: job.source, directory: job.directory,
+                        metadata: frameJobs[job.id]?.metadata ?? job.metadata)
                 }
                 savedOutput = true
                 if let legacyCrop = job.cropTask {
@@ -1691,8 +1913,7 @@ actor TransferQueue {
                 if frameJobs[job.id]?.metadataReady != true { deferForMetadata = true; return }
             }
             var metadata = frameJobs[job.id]?.metadata ?? job.metadata
-            if job.settings.usesRenderedPlaceIdentity, let sourceMetadata = metadata {
-                metadata = await placeResolver.enriching(sourceMetadata, settings: job.settings.metadata, allowed: placeAllowed)
+            if job.settings.usesRenderedPlaceIdentity {
                 metadata = metadata?.withAllowedFramePlace(await placeAllowed())
             }
             try Task.checkCancellation()
@@ -1700,11 +1921,12 @@ actor TransferQueue {
             // Recheck when a worker becomes available: an earlier identical
             // export may have completed while this job was waiting.
             let preparedSource = effectSource
-            let existing = await Task.detached(priority: .utility) {
-                Self.existingFrameURL(source: preparedSource, settings: job.settings, in: job.directory, renderedPlace: preparedMetadata?.renderedPlace)
+            let lookup = await Task.detached(priority: .utility) {
+                Self.lookupFrameOutput(source: preparedSource, settings: job.settings, in: job.directory, renderedPlace: preparedMetadata?.renderedPlace)
             }.value
             try Task.checkCancellation()
-            if let existing {
+            knownFrameOutputNames[job.directory.standardizedFileURL] = lookup.names
+            if let existing = lookup.existing {
                 if let index = items.firstIndex(where: { $0.id == job.id }) {
                     items[index].skipFrameGeneration()
                     items[index].frameURL = existing
@@ -1713,23 +1935,35 @@ actor TransferQueue {
                 }
                 return
             }
-            if Self.needsCameraMetadata(job.settings, name: job.source.lastPathComponent),
-               job.settings.metadata.hasVisibleMetadata, metadata == nil {
-                throw CameraRepositoryError.invalidDataset
-            }
+            // Android uses EMPTY_METADATA for absent EXIF or failed preparation.
+            // Missing fields do not invalidate the pixels or permit local EXIF reads.
+            startPhotoFrameWork(job.id)
             let output = try await renderFrame(effectSource, job.settings, job.directory, metadata)
             savedOutput = true
+            if knownFrameOutputNames[job.directory.standardizedFileURL] != nil {
+                knownFrameOutputNames[job.directory.standardizedFileURL]?.insert(output.lastPathComponent)
+            }
             try Task.checkCancellation()
             if let index = items.firstIndex(where: { $0.id == job.id }) { items[index].frameURL = output }
         } catch is CancellationError {
             // Completion cleanup above runs even when the renderer is cancelled.
         } catch {
+            knownFrameOutputNames[job.directory.standardizedFileURL] = nil
             if let index = items.firstIndex(where: { $0.id == job.id }) {
                 items[index].frameError = transferErrorMessage(error)
                 // Android preserves the published original and its download metrics.
                 // Only the derivative fails, regardless of how the original was found.
             }
         }
+    }
+
+    /// Exact preflight has finished. Crop and following effects share one
+    /// stopwatch; preparation and duplicate lookup never start it.
+    private func startPhotoFrameWork(_ id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              items[index].isGeneratingFrame, items[index].frameGenerationStartedAtElapsedMs == nil else { return }
+        items[index].startFrameGeneration(now: generationNow())
+        publish()
     }
 
     nonisolated static func renderFrameFile(source: URL, settings: PhotoEffectsSettings, directory: URL, metadata: PhotoFrameMetadata?,
@@ -1791,19 +2025,35 @@ actor TransferQueue {
     }
 
     private nonisolated static func needsCameraMetadata(_ settings: PhotoEffectsSettings?, name: String) -> Bool {
-        guard let settings, settings.photoFrameEnabled, settings.photoFrameBorderEnabled else { return false }
+        guard let settings, settings.photoFrameEnabled, settings.photoFrameBorderEnabled,
+              settings.metadata.requiresCameraMetadata else { return false }
         return ["jpg", "jpeg"].contains((name as NSString).pathExtension.lowercased())
     }
 
     nonisolated static func existingFrameURL(source: URL, settings: PhotoEffectsSettings, in directory: URL,
                                             renderedPlace: PhotoFramePlace? = nil) -> URL? {
+        lookupFrameOutput(source: source, settings: settings, in: directory, renderedPlace: renderedPlace).existing
+    }
+
+    private struct FrameOutputLookup: Sendable {
+        let existing: URL?
+        let names: Set<String>?
+    }
+
+    private nonisolated static func lookupFrameOutput(source: URL, settings: PhotoEffectsSettings, in directory: URL,
+                                                       renderedPlace: PhotoFramePlace?) -> FrameOutputLookup {
         let framesDirectory = directory.appendingPathComponent("ZTFrames", isDirectory: true)
         let preferred = frameURL(source: source, settings: settings, framesDirectory: framesDirectory)
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: framesDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return nil }
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(at: framesDirectory,
+                includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+        } catch {
+            let error = error as NSError
+            let missing = error.domain == NSCocoaErrorDomain &&
+                (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError)
+            return FrameOutputLookup(existing: nil, names: missing ? [] : nil)
+        }
         let legacyName = androidPhotoFrameOutputName(sourceName: source.lastPathComponent, settings: settings)
         let identity = photoEffectOutputIdentity(sourceName: source.lastPathComponent, settings: settings, renderedPlace: renderedPlace)
         func pattern(for name: String) -> NSRegularExpression? {
@@ -1817,12 +2067,13 @@ actor TransferQueue {
         func matches(_ name: String, _ regex: NSRegularExpression?) -> Bool {
             regex?.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
         }
-        return entries.first { candidate in
+        let existing = entries.first { candidate in
             guard (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return false }
             if matches(candidate.lastPathComponent, legacyPattern) { return true }
             return matches(candidate.lastPathComponent, shortPattern)
                 && PhotoEffectIdentityJPEG.read(from: candidate) == identity
         }
+        return FrameOutputLookup(existing: existing, names: Set(entries.map(\.lastPathComponent)))
     }
 
     private nonisolated static func frameURL(source: URL, settings: PhotoEffectsSettings, framesDirectory: URL) -> URL {
@@ -1832,12 +2083,16 @@ actor TransferQueue {
     }
 
     private func updateProgress(id: UUID, progress: TransferDownloadProgress) {
-        guard let index = items.firstIndex(where: { $0.id == id }), items[index].status == .transferring else { return }
-        items[index].bytesPerSecond = progress.bytesPerSecond
+        guard activeProgress?.taskID == id,
+              let index = items.firstIndex(where: { $0.id == id }),
+              items[index].status == .transferring, !items[index].isGeneratingFrame else { return }
+        let displayedSpeed = speedDisplaySampler.sample(progress.bytesPerSecond, nowMs: transferSpeedNow())
+        items[index].bytesPerSecond = displayedSpeed
         items[index].downloadedBytes = progress.downloaded
-        let retained = retainLastValidTransferSpeed(previous: lastValidTransferSpeed,
-                                                     sample: progress.bytesPerSecond)
-        lastValidTransferSpeed = retained
+        lastValidTransferSpeed = retainLastValidTransferSpeed(previous: lastValidTransferSpeed,
+                                                              sample: progress.bytesPerSecond)
+        let retained = retainLastValidTransferSpeed(previous: activeProgress?.retainedBytesPerSecond ?? 0,
+                                                     sample: displayedSpeed)
         items[index].progress = min(max(progress.fraction, 0), 1)
         activeProgress = TransferActiveProgress(taskID: id, fraction: items[index].progress,
                                                 bytesPerSecond: items[index].bytesPerSecond,

@@ -1,0 +1,53 @@
+{
+  "commit": "f91c98255b17b8c661f2e0cbe0e65c7cd78f8e04",
+  "files": [
+    {
+      "path": "index.html",
+      "status": 200,
+      "bytes": 17562,
+      "sha256": "5f1b63bc2721b877e7e0a3d0f71b69a8df799aaf4f2ab564452036d7de0de3a5",
+      "matches_source": true
+    },
+    {
+      "path": "screenshots.css",
+      "status": 200,
+      "bytes": 11897,
+      "sha256": "4c7ba8be70ac5fc5168b48499bbbf8f489b306070ad8ead9bd2cb05b9be30a93",
+      "matches_source": true
+    },
+    {
+      "path": "assets/screenshots/README.md",
+      "status": 200,
+      "bytes": 951,
+      "sha256": "e2179aff7a1a91eac0ec0c703dac8428dc5e28e6a5e4fe489e927b72119bce12",
+      "matches_source": true
+    }
+  ],
+  "preserved_existing_files_unchanged": true,
+  "preserved_file_count": 10,
+  "browser_viewports_checked": [
+    [
+      1440,
+      1000
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ],
+    [
+      320,
+      740
+    ]
+  ],
+  "source_pixel_validation": "All visual image assets remain unchanged; copy and layout were simplified. Asset provenance remains in project records.",
+  "app_backend_unchanged": true,
+  "api_server_login_performed_this_update": false,
+  "pages_status": "built",
+  "pages_built_at": "2026-10-22T02:17:05Z",
+  "live_browser_verified": true,
+  "normal_canonical_url_verified": true
+}

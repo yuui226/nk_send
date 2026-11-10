@@ -1,0 +1,192 @@
+{
+  "status": "development_complete",
+  "tasks": {
+    "completed": 5,
+    "total": 5
+  },
+  "android_baseline": "eafc461d36da712260ebb262f034d7da70450ae6",
+  "simulator": "FC8ECF06-0A56-4949-B64C-3EE06870025E / iOS 26.5",
+  "final_unique_methods": 13,
+  "unresolved_test_failures": 0,
+  "tests": {
+    "ZTransferTests.PhotoEffectModuleMotionTests/testRapidReverseRestoresWholeModuleAndSettlesWithoutResidualClock": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.PhotoEffectModuleMotionTests/testSectionAndSpacingShrinkTogetherWithoutPerFrameParentUpdates": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.SettingsPopupLayoutTests/testCompactColumnScrollsAsAWholeAndReopenDoesNotUseStaleHeight": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.SettingsPopupLayoutTests/testPreviewEffectsAvoidsStatusBarAndCoversBothQueueButtons": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.SettingsPopupLayoutTests/testPreviewEffectsMountsPresentedWithoutSheetAndClosesToSameHost": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.SettingsPopupLayoutTests/testRenderedSettingsMeshMatchesLivePanelAndDoesNotBounce": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.SettingsPopupLayoutTests/testWholeColumnUsesFinalHeightFromFirstVisibleFrameOnBothEntrypoints": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferInteractionUITests.PhotoEffectsMasterUITests/testModuleMenuUsesCompactChipsAndRemainsOpenWhenChangingModules": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferInteractionUITests.PhotoEffectsMasterUITests/testModuleVisibilityRestoresThroughRealPopupAndLocalWorkbench": {
+      "round": 10,
+      "result": "passed"
+    },
+    "ZTransferTests.PhotoEffectModuleMotionTests/testExpandedModuleMeasuresEveryRowAndItsTrailingGap": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferInteractionUITests.ButtonInteractionUITests/testNativeActionsAndDisabledStateAcrossAllMaterials": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.PhotoEffectModuleMotionTests/testHelpAndNavigationMaterialPaletteInLightAndDark": {
+      "round": 9,
+      "result": "passed"
+    },
+    "ZTransferTests.PhotoEffectModuleMotionTests/testImmediateEditorCancellationCannotShortenOutgoingHeight": {
+      "round": 9,
+      "result": "passed"
+    }
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "xcode_result": "failed",
+      "passed_methods": 0,
+      "failed_methods": 0,
+      "log": "logs/r1.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r1.xcresult"
+    },
+    {
+      "round": 2,
+      "xcode_result": "failed",
+      "passed_methods": 7,
+      "failed_methods": 2,
+      "log": "logs/r2.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r2.xcresult"
+    },
+    {
+      "round": 3,
+      "xcode_result": "failed",
+      "passed_methods": 9,
+      "failed_methods": 2,
+      "log": "logs/r3.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r3.xcresult"
+    },
+    {
+      "round": 4,
+      "xcode_result": "failed",
+      "passed_methods": 8,
+      "failed_methods": 1,
+      "log": "logs/r4.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r4.xcresult"
+    },
+    {
+      "round": 5,
+      "xcode_result": "succeeded",
+      "passed_methods": 9,
+      "failed_methods": 0,
+      "log": "logs/r5.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r5.xcresult"
+    },
+    {
+      "round": 6,
+      "xcode_result": "failed",
+      "passed_methods": 0,
+      "failed_methods": 0,
+      "log": "logs/r6.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r6.xcresult"
+    },
+    {
+      "round": 7,
+      "xcode_result": "failed",
+      "passed_methods": 11,
+      "failed_methods": 1,
+      "log": "logs/r7.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r7.xcresult"
+    },
+    {
+      "round": 8,
+      "xcode_result": "failed",
+      "passed_methods": 11,
+      "failed_methods": 1,
+      "log": "logs/r8.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r8.xcresult"
+    },
+    {
+      "round": 9,
+      "xcode_result": "failed",
+      "passed_methods": 12,
+      "failed_methods": 1,
+      "log": "logs/r9.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r9.xcresult"
+    },
+    {
+      "round": 10,
+      "xcode_result": "succeeded",
+      "passed_methods": 1,
+      "failed_methods": 0,
+      "log": "logs/r10.log.gz",
+      "xcresult": "/tmp/ztransfer-module-glass-20261106-r10.xcresult"
+    }
+  ],
+  "production_unchanged_between_r9_r10": true,
+  "r10_test_only_change": [
+    "ios/InteractionUITests/PhotoEffectsMasterUITests.swift"
+  ],
+  "reviewed_visuals": {
+    "screenshots/effect-module-height-frames.txt": "86ce8620253d8e50a79ec763c93a35144124496147c0cc3aeeefad64c87adee3",
+    "screenshots/icon-materials-dark.png": "97c4403bcca649536a2caffec3fbf54595a221a5d19c14c1baeca23ced137bb8",
+    "screenshots/icon-materials-light.png": "b0e81f3cee2cab6951a6feb37deb9286318cf8eacb7d6b9f24c752e8fc765286",
+    "screenshots/module-popup-restored.png": "8eb0734f4dade69015deb0ef8cfc8d45445b989cb1554b21dc29f6c107c76925",
+    "screenshots/module-workbench-restored.png": "ce56933d466412c78483a9955a6c9cbf4e1e127f4bbb54ae42685d9eaeb86362",
+    "screenshots/popup-expanded-frame.png": "f85d00787371d7eb660c86803b2019cf46dcb365f78d9e1b3bd3ff9768166584",
+    "screenshots/popup-final-frames.png": "f007f3de2cb066b4d2087678e09d26a745690c9cc492bf0987f6eba9308bfe5a",
+    "screenshots/popup-native-glass-header.png": "48a1db2d2edfcc154d8756a707d8b0c81780c7201586a2710b574a4e4f2bccaa",
+    "screenshots/settings-final-mesh.png": "37839fed462883ec77d037de0db6525086c8db9234ed8c961f92cc85f037ff2c",
+    "screenshots/settings-live-panel.png": "28871cf1215e1ad4b644c5d545325e106e5d757bbdc5f2d573e4a03715121d27",
+    "screenshots/workbench-expanded-frame.png": "8ad361f7e4c6368954b586abdd8d124a68e77f26dc4dd74f8b154490c17ec94d",
+    "screenshots/workbench-final-frames.png": "8429784245bab13b49ae942f120fbf3ad1044050c793341294aa2afc1ff0dab3",
+    "screenshots/workbench-native-glass-header.png": "cf00ddbef1b29d8b0cca44f6f10833afee15086ec46746a5ccaee085117f6b72"
+  },
+  "video": {
+    "path": "/tmp/ztransfer-module-glass-20261106-r10.mov",
+    "sha256": "608207a31caad8f32dcbc483acf0ecd90e2b24dabd1571b22c29deb13a0d30be",
+    "reviewed_samples": [
+      {
+        "time": "15-16s",
+        "fps": 24,
+        "scene": "camera effects popup"
+      },
+      {
+        "time": "34-35s",
+        "fps": 24,
+        "scene": "local workbench"
+      }
+    ]
+  },
+  "limitations": [
+    "No physical iPhone installation or camera test",
+    "No physical-device frame-rate, haptic feel or power measurement",
+    "Two-entry real interaction uses free-edition visibility coupling; pro independent masks retain their existing domain behavior"
+  ],
+  "git_actions": {
+    "committed": false,
+    "pushed": false
+  },
+  "ios_archive_or_upload": false
+}

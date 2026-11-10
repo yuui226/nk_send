@@ -1,0 +1,159 @@
+{
+  "base": "8a09e51b11c6fa4fa74133a4cf603c883ba7ea5a",
+  "head": "ca03503cc0934a53c4ccf2362b56f45b0831b729",
+  "workingTreeClean": true,
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "227a858ff9a57965d867982360793302940825e3d8df03d95989e9656937211e"
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "sha256": "9aeb297256ee5bd1e69808364996db1aeabd89b7e1f629330594061026e0e1ef"
+    },
+    {
+      "path": "app/src/androidTest/AndroidManifest.xml",
+      "sha256": "71e99c631da8c26ce6cb81d8f4a94bd4b489099fbfd9437ad70f332311dd1314"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/diagnostics/StaProbeQqDeliveryInstrumentation.kt",
+      "sha256": "44f7445ebbd44ce8ccdc4e36fae46eb2084b2125c787f1fadd398f9eb4abacb5"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/protocol/StaPairingHandshakeInstrumentation.kt",
+      "sha256": "c97805548c7336a616f3f38dd05531929f9f691404586321f7d163f33f9a54f5"
+    },
+    {
+      "path": "app/src/androidTest/java/com/ztransfer/ui/screen/RemoteToolsInstrumentation.kt",
+      "sha256": "cfd21c4a89b5c95c7bf7ece97e8d00c41a395fd897ff8b4a112936d3427cc111"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/diagnostics/StaPairingPropertyProbe.kt",
+      "sha256": "df9ec09737aa37d7c93704ea62db7613a6fe4a2d467179a5e28c2e223905d18d"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/diagnostics/StaProbeQqSender.kt",
+      "sha256": "454d50bcceb8af746a52f52a5c0c1e2ec15f55943e4960b1395ffd76776b3670"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/protocol/StaProbeSession.kt",
+      "sha256": "7183b8bd6543e8d162059ed9adabf9f0c2af9f263232974e20aab81c5d3901d8"
+    },
+    {
+      "path": "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt",
+      "sha256": "200ff60aa4fc78a82a2d77039cf43ea6df7fdabfcefe52d274fbf4d04ae6b5a2"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt",
+      "sha256": "8cd1cff2d7699e558ddb2cfae425f63a3071407cc5e180247ed05ed4729fcb35"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/RemoteDelayedCapture.kt",
+      "sha256": "72202ee977ce961ddbc2b2073701e06ee9d902f47f90de5045cb84c27881d188"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/StaHandshakeDeadlineInput.kt",
+      "sha256": "c05bcc0e55d6996fa9793abafd5008b7337aaa5a522884c97665eff4b13e53c9"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/protocol/StaPairingLiveView.kt",
+      "sha256": "d6874c8ec40eef001c56a1e8f65083a1e7a7e003582ce74742fe898a8faa7ce7"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteMonitorHelp.kt",
+      "sha256": "fa6abe2281f1567d7d8e1de3bec18a0e348686307aa116694d4fbdc030df64f3"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteScreen.kt",
+      "sha256": "2cd68a531e5a94ef19c0d0d1ef9fcfa191cac7100b9ced580bc42cf43285c89d"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteSelfTimer.kt",
+      "sha256": "3fdbd01c2e55d1f493249b9546e559102319c7d552578348f5c2c39438be760d"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteSelfTimerUi.kt",
+      "sha256": "5ebd637c12e5c1ecd125c5cc52c5bde733e8ee23a85ae8d08fc6f58f6c065ff3"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/ui/screen/RemoteToolPreferences.kt",
+      "sha256": "dec6d35c9d29d86b70450fd8da5f05244aa76b48e8ae4ffc85b3cf7602803746"
+    },
+    {
+      "path": "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt",
+      "sha256": "282664bcc0afffe6248918494cd3379b85134c8e237394a51befedc8cb0ca656"
+    },
+    {
+      "path": "app/src/main/res/values-b+zh+Hant/strings.xml",
+      "sha256": "662f80cb54e9db8f67097851fe62c453431391070403e554ba65a0b48a321ad3"
+    },
+    {
+      "path": "app/src/main/res/values-zh/strings.xml",
+      "sha256": "ceb67015bacebf588f4aead154722522b2db733726697e1352ad400164a5fd69"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "sha256": "339cbff27d69d2fa9e8d713a8865bd5f81461b36ebd88b752519e9b18ffb467f"
+    },
+    {
+      "path": "app/src/release/java/com/ztransfer/protocol/StaProbeSession.kt",
+      "sha256": "df9bef5138346c4a03121960d1b98ef8812cffbfc825c834f6c290657e195ff3"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/RemoteDelayedCaptureTest.kt",
+      "sha256": "590c34b054cc7a679c2527fc2c5cf05dc359c87480e506d26bf287a3d0d60252"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/protocol/StaHandshakeDeadlineInputTest.kt",
+      "sha256": "5dc4afb6fbf0e68cbcaa9df8d0a2306c7140d38b490bc5b0453a07aa34e286cc"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/ui/screen/RemoteSelfTimerTest.kt",
+      "sha256": "01f4c2c71173f9d0e2b8f227962e762c5aa600bd6e304028f549ef5d2b7b5ba5"
+    },
+    {
+      "path": "app/src/test/java/com/ztransfer/viewmodel/StaConnectionIsolationTest.kt",
+      "sha256": "9fd39f4efa0013918e8a2b388d530cb24112692107059ede0a793e9482fe77a6"
+    },
+    {
+      "path": "dist/build.bat",
+      "sha256": "b887ab1a6a6891744bf9688bcd328f00eb596eef6b5f343e2607665a39ce90dc"
+    },
+    {
+      "path": "dist/build.command",
+      "sha256": "26f52ac77474cd41aa3e54fc4786234f80c7cbb7a9e8efc16b716a0041333fab"
+    },
+    {
+      "path": "docs/发布与运维/App更新系统.md",
+      "sha256": "415f9fbfbaa29a5cb859738e54d3701185fed2e2d5b368c34d3fcc9bb1bf744a"
+    },
+    {
+      "path": "docs/技术调研/计算机Wi-Fi客户端与智能设备STA模式.md",
+      "sha256": "0c86d4ae455113b4edfb3a1072c5d4cbb6d33ee5b695d0f230d413dd130f6e41"
+    },
+    {
+      "path": "gradle.properties",
+      "sha256": "d288245f4bc437c2530b140a1c7b1af982a49f05a37904d050b58a11b724bc20"
+    },
+    {
+      "path": "server/OSS发布设置.md",
+      "sha256": "c32a6c9f9004df3a6a9d2f167488b6845e179bfc40050f4bc6d690cf47e0dc78"
+    },
+    {
+      "path": "server/admin-gui.ps1",
+      "sha256": "937b25bcdad10891670eb446485f421f27c8ca7bffd9295d448ba4b038ec6965"
+    },
+    {
+      "path": "server/admin.ps1",
+      "sha256": "231e66b6a10c860e54ffe6b881e43537dff636923ba32eee83c753dc2542a715"
+    },
+    {
+      "path": "server/tests/admin-update-tool.test.js",
+      "sha256": "b33e4b6b07b53a4982733675b2a6cbe7b120ba28fced7ff7ba8e61564219abf4"
+    },
+    {
+      "path": "server/部署指南.md",
+      "sha256": "ca16ec5db3883ece4ae79d91c350dc818cb0e1a76550e1b41b62917b16e26976"
+    }
+  ]
+}

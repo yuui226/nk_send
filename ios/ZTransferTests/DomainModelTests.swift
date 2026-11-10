@@ -172,9 +172,9 @@ final class DomainModelTests: XCTestCase {
             for module in PhotoEffectModule.allCases {
                 let pro = togglePhotoEffectModule(mask, module: module, isPro: true)
                 XCTAssertEqual(pro, mask == module.rawValue ? mask : mask ^ module.rawValue)
-                XCTAssertTrue((1...15).contains(pro))
+                XCTAssertTrue((1...allPhotoEffectModules).contains(pro))
                 let free = togglePhotoEffectModule(mask, module: module, isPro: false)
-                XCTAssertTrue((1...15).contains(free))
+                XCTAssertTrue((1...allPhotoEffectModules).contains(free))
                 XCTAssertEqual(photoEffectModuleIsVisible(free, .frame), photoEffectModuleIsVisible(free, .watermark))
                 let current = effectivePhotoEffectModules(mask, isPro: false)
                 if current == 12 && (module == .frame || module == .watermark) {
@@ -185,7 +185,7 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(togglePhotoEffectModule(13, module: .watermark, isPro: false), 1)
         XCTAssertEqual(togglePhotoEffectModule(1, module: .frame, isPro: false), 13)
         XCTAssertEqual(togglePhotoEffectModule(1, module: .filter, isPro: false), 1)
-        XCTAssertEqual(togglePhotoEffectModule(0, module: .filter, isPro: true), 14)
+        XCTAssertEqual(togglePhotoEffectModule(0, module: .filter, isPro: true), 30)
     }
 
     func testQueueFlightHoldsOnlyDownloadsAndNeverDelayRealCompletion() {
@@ -479,6 +479,38 @@ final class DomainModelTests: XCTestCase {
         }
     }
 
+    func testDateDraftStartsAtPhoneLocalTodayAndKeepsItsEntryYearBounds() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let dates = PhotoFilterDates(systemCalendar: calendar)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-12-31T18:00:00Z"))
+        var draft = PhotoFilterDateDraft(current: nil, now: now, dates: dates)
+        XCTAssertEqual(dates.key(draft.upperDate), "20270101")
+        XCTAssertEqual(draft.upperDate, draft.lowerDate)
+        draft.upperDate = dates.clamped(year: 1982, month: 6, day: 1)
+        XCTAssertEqual(dates.key(draft.lowerDate), "20270101", "Changing the upper row cannot clamp the lower row")
+        XCTAssertEqual(draft.years, Array(1982...2028))
+        XCTAssertEqual(draft.range, PhotoDateRange(start: "19820601", end: "20270101"))
+        let reopened = PhotoFilterDateDraft(current: nil, now: now.addingTimeInterval(86400), dates: dates)
+        XCTAssertEqual(dates.key(reopened.upperDate), "20270102", "Reentry takes a new today snapshot")
+    }
+
+    func testDateDraftKeepsEndpointsIndependentAndNormalizesOnlyAppliedRange() throws {
+        let dates = PhotoFilterDates()
+        let current = PhotoDateRange(start: "20240131", end: "20240331")
+        var draft = PhotoFilterDateDraft(current: current, dates: dates)
+        XCTAssertEqual(dates.key(draft.upperDate), "20240331")
+        XCTAssertEqual(dates.key(draft.lowerDate), "20240131")
+        draft.lowerDate = dates.clamped(year: 2025, month: 2, day: 31)
+        XCTAssertEqual(dates.key(draft.lowerDate), "20250228")
+        XCTAssertEqual(dates.key(draft.upperDate), "20240331")
+        draft.upperDate = dates.clamped(year: 2024, month: 2, day: 31)
+        XCTAssertEqual(draft.range, PhotoDateRange(start: "20240229", end: "20250228"))
+        XCTAssertEqual(dates.key(draft.upperDate), "20240229", "Applying does not swap the visible rows")
+        let discarded = PhotoFilterDateDraft(current: current, dates: dates)
+        XCTAssertEqual(discarded.range, current, "Back/reentry must discard unapplied changes")
+    }
+
     func testWorkspaceDiscoveryRemainsPausedUntilReturnSettles() {
         var state = WorkspaceDiscoveryState()
         XCTAssertFalse(state.shouldPause)
@@ -731,7 +763,7 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(cropOnly.downloadRemaining, 0)
         XCTAssertEqual(cropOnly.generationRemaining, 1)
         XCTAssertNil(cropOnly.activeDownload)
-        XCTAssertEqual(cropOnly.progressOwner?.id, crop.id)
+        XCTAssertNil(cropOnly.progressOwner)
         XCTAssertTrue(cropOnly.hasActive)
         let mixed = QueuePillTaskSummary(items: [waiting, crop, download, cancelled])
         XCTAssertEqual(mixed.downloadRemaining, 2)
@@ -742,10 +774,10 @@ final class DomainModelTests: XCTestCase {
         var completedGeneration = crop
         completedGeneration.status = .completed
         let generating = QueuePillTaskSummary(items: [waiting, completedGeneration])
-        XCTAssertEqual(generating.progressOwner?.id, crop.id)
+        XCTAssertNil(generating.progressOwner)
         XCTAssertEqual(generating.downloadRemaining, 1)
         let waitingOnly = QueuePillTaskSummary(items: [waiting])
-        XCTAssertEqual(waitingOnly.progressOwner?.id, waiting.id)
+        XCTAssertNil(waitingOnly.progressOwner)
         XCTAssertFalse(waitingOnly.hasActive)
         let terminal = QueuePillTaskSummary(items: [cancelled])
         XCTAssertNil(terminal.progressOwner)
@@ -835,52 +867,6 @@ final class DomainModelTests: XCTestCase {
         let r = sqrt(1500.0)
         let expected = (value + (velocity + r * value) * 0.02) * exp(-r * 0.02)
         XCTAssertEqual(Double(fade.alpha.value), expected, accuracy: 0.00001)
-    }
-
-    func testQueuePillCountRetainsIntermediateNumbersAndReusesReversal() {
-        var motion = QueuePillCountMotion(count: 10, heightPixels: 60)
-        XCTAssertFalse(motion.isRunning)
-        motion.update(9)
-        motion.advance(0)
-        motion.advance(50_000_000)
-        motion.update(8)
-        XCTAssertEqual(motion.layers.map(\.count), [10, 9, 8])
-        motion.advance(70_000_000)
-        let before = motion.layers[1].motion.offset.value
-        motion.update(9)
-        XCTAssertEqual(motion.layers.map(\.count), [10, 9, 8])
-        XCTAssertEqual(motion.layers[1].motion.offset.value, floor(before + 0.5))
-        let oldTarget = motion.layers[0].motion.offset.target
-        motion.update(12)
-        XCTAssertEqual(motion.layers[0].motion.offset.target, oldTarget,
-                       "An older exiting number must retain its original exit direction")
-        motion.advance(3_000_000_000)
-        XCTAssertEqual(motion.layers.map(\.count), [12])
-        XCTAssertFalse(motion.isRunning)
-    }
-
-    func testQueuePillCountSlideUsesIntegerHalfHeightAndOutlivesFade() {
-        var entering = QueuePillCountLayerMotion(initiallyVisible: false, heightPixels: 61, direction: 1)
-        XCTAssertEqual(entering.displayedOffsetPixels, 30)
-        entering.setVisible(true, direction: 1)
-        entering.advance(0)
-        entering.advance(50_000_000)
-        let expected = 30.0 * (1 + 20 * 0.05) * exp(-20 * 0.05)
-        XCTAssertEqual(Double(entering.offset.value), expected, accuracy: 0.00001)
-        XCTAssertEqual(entering.displayedOffsetPixels, Float(floor(expected + 0.5)))
-        let increasing = QueuePillCountLayerMotion(initiallyVisible: false, heightPixels: 61, direction: -1)
-        XCTAssertEqual(increasing.displayedOffsetPixels, -30)
-
-        var exiting = QueuePillCountLayerMotion(initiallyVisible: true, heightPixels: 61, direction: 1)
-        exiting.setVisible(false, direction: 1)
-        exiting.advance(0)
-        exiting.advance(120_000_000)
-        XCTAssertEqual(exiting.fade.alpha.value, 0)
-        XCTAssertTrue(exiting.offset.isRunning)
-        XCTAssertFalse(exiting.exitFinished)
-        exiting.advance(2_000_000_000)
-        XCTAssertTrue(exiting.exitFinished)
-        XCTAssertEqual(exiting.displayedOffsetPixels, -30)
     }
 
     func testQueuePillFadeDelayExitAndReverseSpring() {
@@ -1481,6 +1467,46 @@ final class DomainModelTests: XCTestCase {
         }
     }
 
+    func testGPSWideLevelInletMatchesAndroidEndpointsAndNeverFolds() {
+        // Android GenieLevelInletTest: full/narrow/right-side button, both
+        // guide/location panel heights, every percent of the reverse animation.
+        for anchor in [CGRect(x: 12, y: 50, width: 155, height: 50),
+                       CGRect(x: 12, y: 50, width: 60, height: 50),
+                       CGRect(x: 107, y: 50, width: 155, height: 50)] {
+            for height: CGFloat in [120, 300] {
+                let panel = CGRect(x: 12, y: 106, width: 250, height: height)
+                for step in stride(from: 100, through: 0, by: -1) {
+                    let geometry = GeniePopupMotion.FrameGeometry(progress: CGFloat(step) / 100,
+                        anchor: anchor, panel: panel, mouthWidth: 80, tiltEnabled: false)
+                    let rows = (0...48).map { geometry.row(at: .init(fraction: CGFloat($0) / 48)) }
+                    for row in rows {
+                        XCTAssertTrue(row.left.isFinite && row.right.isFinite && row.y.isFinite)
+                        XCTAssertGreaterThan(row.right, row.left)
+                        XCTAssertEqual(row.leftY, row.rightY, accuracy: 0.001)
+                        if step == 0 {
+                            XCTAssertEqual((row.left + row.right) / 2, anchor.midX, accuracy: 0.001)
+                            XCTAssertEqual(row.right - row.left, min(80, anchor.width), accuracy: 0.001)
+                            XCTAssertEqual(row.y, anchor.maxY, accuracy: 0.001)
+                        } else if step == 100 {
+                            XCTAssertEqual(row.left, panel.minX, accuracy: 0.001)
+                            XCTAssertEqual(row.right, panel.maxX, accuracy: 0.001)
+                        }
+                    }
+                    if step > 0 {
+                        for (top, bottom) in zip(rows, rows.dropFirst()) { XCTAssertGreaterThan(bottom.y, top.y) }
+                    }
+                    if step == 100 {
+                        XCTAssertEqual(rows.first?.y, panel.minY)
+                        XCTAssertEqual(rows.last?.y, panel.maxY)
+                    }
+                }
+                let ordinary = GeniePopupMotion.row(progress: 0, fraction: 0,
+                    anchor: anchor, panel: panel, mouthWidth: 80)
+                XCTAssertNotEqual(ordinary.leftY, ordinary.rightY)
+            }
+        }
+    }
+
     func testGeniePopupUsesTriggerShortEdgeAndSharedEndpoints() {
         for button in [CGRect(x: 119, y: 62, width: 40, height: 40),
                        CGRect(x: 12, y: 68, width: 55, height: 36),
@@ -1614,7 +1640,7 @@ final class DomainModelTests: XCTestCase {
         defer { popup.stop(); window.isHidden = true; defaults.removePersistentDomain(forName: suite) }
         popup.host.rootView = AnyView(SettingsView(showPhotoEffectsEntry: true,
             effectsStore: PhotoEffectsStore(defaults: defaults), directory: DirectoryAccessStore(defaults: defaults),
-            effectsDraft: .constant(PhotoEffectsSettings()), filterChooser: .constant(PhotoFilterChooserState()),
+            effectsDraft: .constant(PhotoEffectsSettings()),
             effectsHint: .constant(nil), dismissalRequested: false, popupMotionPaused: true)
             .environment(\.colorScheme, .light))
         root.view.addSubview(popup)
@@ -2335,7 +2361,7 @@ final class DomainModelTests: XCTestCase {
 
     func testPhotoScanSnapshotResumeKeepsOnlyUnprocessedHandlesPerCard() {
         let snapshot = PhotoScanSnapshot(
-            storageIDs: [1, 2],
+            sessionID: UUID(), storageIDs: [1, 2],
             handleOrders: [(storageID: 1, handles: [11, 10]),
                            (storageID: 2, handles: [21, 20])],
             processedHandles: [11, 21],
@@ -2715,7 +2741,7 @@ final class DomainModelTests: XCTestCase {
         effects.photoFramePreset = .minimal
         effects.watermark.text = "Locked"
         effects.photoFilterEnabled = true
-        effects.selectedFilter = PhotoFilterSelection(
+        effects.selectedFilter = testPhotoFilterSelection(
             preset: PhotoFilterPreset(id: "NP3_FILM", name: "Film"), intensityPercent: 63
         )
         let item = TransferQueueItem(id: UUID(), file: file, effects: effects)
@@ -2779,7 +2805,7 @@ final class DomainModelTests: XCTestCase {
         settings.photoFrameBorderEnabled = false
         settings.watermark.enabled = false
         settings.photoFilterEnabled = true
-        settings.selectedFilter = PhotoFilterSelection(
+        settings.selectedFilter = testPhotoFilterSelection(
             preset: PhotoFilterPreset(id: "NP3_FILM", name: "Film"),
             intensityPercent: 63
         )
@@ -3243,26 +3269,22 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(normalizedThumbnailColumns(8), 4)
     }
 
-    func testPreviewReturnOnlyTreatsCompleteCellAsVisible() {
+    func testPreviewReturnPreservesFullTileAndClipsOnlyTheVisibleRegion() {
         let viewport = CGRect(x: 0, y: 100, width: 390, height: 700)
-
-        XCTAssertTrue(photoFrameIsFullyVisible(
-            CGRect(x: 12, y: 120, width: 118, height: 118),
-            in: viewport
-        ))
-        XCTAssertTrue(photoFrameIsFullyVisible(
-            CGRect(x: 12, y: 99.75, width: 118, height: 118),
-            in: viewport
-        ))
-        XCTAssertFalse(photoFrameIsFullyVisible(
-            CGRect(x: 12, y: 99, width: 118, height: 118),
-            in: viewport
-        ))
-        XCTAssertFalse(photoFrameIsFullyVisible(
-            CGRect(x: 12, y: 700, width: 118, height: 118),
-            in: viewport
-        ))
-        XCTAssertFalse(photoFrameIsFullyVisible(.zero, in: viewport))
+        let samples: [(CGRect, CGRect)] = [
+            (CGRect(x: 12, y: 120, width: 118, height: 118), CGRect(x: 12, y: 120, width: 118, height: 118)),
+            (CGRect(x: 12, y: 80, width: 118, height: 118), CGRect(x: 12, y: 100, width: 118, height: 98)),
+            (CGRect(x: 12, y: 700, width: 118, height: 118), CGRect(x: 12, y: 700, width: 118, height: 100)),
+            (CGRect(x: -10, y: 120, width: 118, height: 118), CGRect(x: 0, y: 120, width: 108, height: 118))
+        ]
+        for (full, visible) in samples {
+            let bounds = photoPreviewAnchorBounds(.photo(7), bounds: [.photo(7): full], viewport: viewport)
+            XCTAssertEqual(bounds?.image, full)
+            XCTAssertEqual(bounds?.visible, visible)
+        }
+        XCTAssertNil(photoPreviewAnchorBounds(.photo(7), bounds: [:], viewport: viewport))
+        XCTAssertNil(photoPreviewAnchorBounds(.photo(7), bounds: [.photo(7): .zero], viewport: viewport))
+        XCTAssertNil(photoPreviewAnchorBounds(.photo(7), bounds: [.photo(7): CGRect(x: 12, y: 900, width: 118, height: 118)], viewport: viewport))
     }
 
     func testPhotoPreviewHoldAndHistogramMatchPresentationContract() throws {
@@ -3727,8 +3749,8 @@ extension DomainModelTests {
         settings.photoFramePreset = .plaque
         settings.watermark.enabled = false
         settings.photoFilterEnabled = true
-        settings.selectedFilter = PhotoFilterSelection(
-            preset: PhotoFilterCatalog.presets[0], intensityPercent: 80
+        settings.selectedFilter = testPhotoFilterSelection(
+            preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80
         )
 
         let output = try PhotoEffectsRenderer.render(oriented, settings: settings)
@@ -3754,8 +3776,8 @@ extension DomainModelTests {
             UIColor.yellow.setFill()
             context.fill(CGRect(x: 32, y: 24, width: 32, height: 24))
         }
-        let filter = PhotoFilterSelection(
-            preset: PhotoFilterCatalog.presets[0], intensityPercent: 80
+        let filter = testPhotoFilterSelection(
+            preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80
         )
 
         func bytes(_ image: CGImage) throws -> [UInt8] {
@@ -3814,8 +3836,8 @@ extension DomainModelTests {
         unfiltered.watermark.enabled = false
         var filtered = unfiltered
         filtered.photoFilterEnabled = true
-        let preset = Np3FilterCatalog.presets[0]
-        filtered.selectedFilter = PhotoFilterSelection(
+        let preset = TestPhotoFilterCatalog.np3Presets[0]
+        filtered.selectedFilter = testPhotoFilterSelection(
             preset: .init(id: preset.id, name: preset.name), intensityPercent: 100
         )
 
@@ -3882,7 +3904,7 @@ extension DomainModelTests {
             context.fill(CGRect(x: 0, y: 0, width: 4_096, height: 3_072))
         }
         let cgImage = try XCTUnwrap(source.cgImage)
-        let preset = Np3FilterCatalog.presets[0]
+        let preset = TestPhotoFilterCatalog.np3Presets[0]
         let task = Task.detached(priority: .userInitiated) {
             try Np3BitmapFilter.apply(
                 cgImage, parameters: preset.parameters, intensityPercent: 80
@@ -3901,7 +3923,7 @@ extension DomainModelTests {
         )
     }
 
-    func testPhotoEffectsBorderPreviewUsesAndroid1920PixelLayout() throws {
+    func testPhotoEffectsBorderPreviewUses1920PixelCanvasWithRoundedMargins() throws {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
@@ -3925,7 +3947,9 @@ extension DomainModelTests {
             }
         }
 
-        XCTAssertEqual(try renderedSize(.mist), CGSize(width: 1_920, height: 1_440))
+        // Source-resolution borders round to whole pixels before preview fit;
+        // the resulting raster need not retain an exact 4:3 canvas ratio.
+        XCTAssertEqual(try renderedSize(.mist), CGSize(width: 1_920, height: 1_441))
         XCTAssertEqual(try renderedSize(.plaque), CGSize(width: 1_920, height: 1_670))
         XCTAssertEqual(try renderedSize(.classicSignature), CGSize(width: 1_920, height: 1_802))
         // Android caps immersive previews but never upscales them.
@@ -3938,15 +3962,15 @@ extension DomainModelTests {
         current.photoFrameBorderEnabled = true
         current.photoFramePreset = .mist
         current.photoFilterEnabled = true
-        current.selectedFilter = PhotoFilterSelection(
-            preset: PhotoFilterCatalog.presets[0], intensityPercent: 80
+        current.selectedFilter = testPhotoFilterSelection(
+            preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80
         )
         var preferences = current
         preferences.favoriteFilterIDs = [
-            PhotoEffectsSettings.filterKey(PhotoFilterCatalog.presets[1].id)
+            PhotoEffectsSettings.filterKey(TestPhotoFilterCatalog.presets[1].id)
         ]
         preferences.filterIntensities[
-            PhotoEffectsSettings.filterKey(PhotoFilterCatalog.presets[2].id)
+            PhotoEffectsSettings.filterKey(TestPhotoFilterCatalog.presets[2].id)
         ] = 42
         preferences.favoriteFramePresets = [.cinema]
         preferences.metadataByPreset[PhotoFramePreset.cinema.rawValue] = .defaults(for: .cinema)
@@ -4022,17 +4046,17 @@ extension DomainModelTests {
     }
 
     func testFilterSelectionUsesOwnRememberedIntensityAndOffKeepsSelection() {
-        let first = PhotoFilterCatalog.presets[0]
-        let next = PhotoFilterCatalog.presets[1]
+        let first = TestPhotoFilterCatalog.presets[0]
+        let next = TestPhotoFilterCatalog.presets[1]
         var settings = PhotoEffectsSettings()
-        settings.selectFilter(first.id)
+        settings.selectTestFilter(first.id)
         settings.filterIntensities[PhotoEffectsSettings.filterKey(first.id)] = 22
-        settings.selectedFilter = .init(preset: first, intensityPercent: 22)
-        settings.selectFilter(next.id)
+        settings.selectedFilter = testPhotoFilterSelection(preset: first, intensityPercent: 22)
+        settings.selectTestFilter(next.id)
         XCTAssertEqual(settings.selectedFilter?.intensityPercent, 80)
-        settings.selectFilter(first.id)
+        settings.selectTestFilter(first.id)
         XCTAssertEqual(settings.selectedFilter?.intensityPercent, 22)
-        settings.selectFilter(nil)
+        settings.selectTestFilter(nil)
         XCTAssertFalse(settings.photoFilterEnabled)
         XCTAssertEqual(settings.selectedFilter?.preset.id, first.id)
     }
@@ -4042,22 +4066,24 @@ extension DomainModelTests {
         let suite = "effects-order-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let a = PhotoFilterCatalog.presets[0], c = PhotoFilterCatalog.presets[2]
+        let a = TestPhotoFilterCatalog.presets[0], c = TestPhotoFilterCatalog.presets[2]
         var settings = PhotoEffectsSettings()
-        settings.selectFilter(a.id)
+        settings.selectTestFilter(a.id)
         settings.toggleFilterFavorite(c.id)
         settings.toggleFilterFavorite(a.id)
         settings.favoriteFrameEffects = [.init(preset: .cinema, watermark: .init()), .init(preset: .mist, watermark: .init())]
         let store = PhotoEffectsStore(defaults: defaults)
-        store.update(settings)
+        store.toggleFilterFavorite(testPhotoFilterSelection(preset: c, intensityPercent: 80))
+        store.toggleFilterFavorite(testPhotoFilterSelection(preset: a, intensityPercent: 80))
+        XCTAssertTrue(store.commitFromEditor(settings, np3Source: nil))
         var restored = PhotoEffectsStore(defaults: defaults).settings
-        XCTAssertEqual(Array(restored.orderedFilters.prefix(2)).map(\.id), [c.id, a.id])
+        XCTAssertEqual(restored.favoriteFilterIDs, [PhotoEffectsSettings.filterKey(c.id), PhotoEffectsSettings.filterKey(a.id)])
         XCTAssertEqual(restored.favoriteFrameEffects.map(\.preset), [.cinema, .mist])
         XCTAssertEqual(Array(restored.orderedFramePresets.prefix(3)), [.cinema, .mist, .minimal])
         XCTAssertEqual(restored.selectedFilter, settings.selectedFilter)
         restored.toggleFilterFavorite(c.id)
         restored.toggleFilterFavorite(c.id)
-        XCTAssertEqual(Array(restored.orderedFilters.prefix(2)).map(\.id), [a.id, c.id])
+        XCTAssertEqual(restored.favoriteFilterIDs, [PhotoEffectsSettings.filterKey(a.id), PhotoEffectsSettings.filterKey(c.id)])
     }
 
     @MainActor
@@ -4129,7 +4155,7 @@ extension DomainModelTests {
     }
 
     @MainActor
-    func testLocalEffectsFirstRunMigratesOnlyLegacyFavoritesOnce() {
+    func testLocalEffectsFirstRunSharesFilterFavoritesButMigratesFrameFavoritesOnlyOnce() {
         let legacySuite = "effects-legacy-\(UUID())"
         let localSuite = "effects-local-migration-\(UUID())"
         let legacy = UserDefaults(suiteName: legacySuite)!
@@ -4138,15 +4164,17 @@ extension DomainModelTests {
             legacy.removePersistentDomain(forName: legacySuite)
             local.removePersistentDomain(forName: localSuite)
         }
-        let a = PhotoFilterCatalog.presets[0]
+        let a = TestPhotoFilterCatalog.presets[0]
         var old = PhotoEffectsSettings()
-        old.selectFilter(a.id)
+        old.selectTestFilter(a.id)
         old.toggleFilterFavorite(a.id)
         old.favoriteFrameEffects = [.init(preset: .cinema, watermark: .init())]
         old.favoriteFramePresets = [.cinema]
         old.photoFrameEnabled = true
         old.photoFramePreset = .filmEdge
-        PhotoEffectsStore(defaults: legacy).update(old)
+        let camera = PhotoEffectsStore(defaults: legacy)
+        camera.update(old)
+        camera.toggleFilterFavorite(testPhotoFilterSelection(preset: a, intensityPercent: 80))
 
         let migrated = PhotoEffectsStore(defaults: local, scope: .localPhotos,
                                          legacyDefaults: legacy).settings
@@ -4155,16 +4183,16 @@ extension DomainModelTests {
         XCTAssertFalse(migrated.photoFrameEnabled)
         XCTAssertEqual(migrated.photoFramePreset, .mist)
 
-        legacy.set("", forKey: "favorite_photo_filters_v1")
+        camera.toggleFilterFavorite(testPhotoFilterSelection(preset: a, intensityPercent: 80))
         legacy.set("", forKey: "favorite_frame_effects_v1")
         let reopened = PhotoEffectsStore(defaults: local, scope: .localPhotos,
                                          legacyDefaults: legacy).settings
-        XCTAssertEqual(reopened.favoriteFilterIDs, migrated.favoriteFilterIDs)
+        XCTAssertTrue(reopened.favoriteFilterIDs.isEmpty)
         XCTAssertEqual(reopened.favoriteFrameEffects.map(\.preset), [.cinema])
     }
 
     @MainActor
-    func testLocalEffectsFirstRunPersistsIndependentScopeWithoutEdits() {
+    func testLocalEffectsFirstRunPersistsIndependentScopeButObservesLaterSharedFavorites() {
         let legacySuite = "effects-empty-legacy-\(UUID())"
         let localSuite = "effects-empty-local-\(UUID())"
         let legacy = UserDefaults(suiteName: legacySuite)!
@@ -4179,14 +4207,16 @@ extension DomainModelTests {
         XCTAssertEqual(local.integer(forKey: "settings_version"), 3)
         XCTAssertTrue(first.favoriteFilterIDs.isEmpty)
 
-        let preset = PhotoFilterCatalog.presets[0]
+        let preset = TestPhotoFilterCatalog.presets[0]
         var camera = PhotoEffectsSettings()
         camera.toggleFilterFavorite(preset.id)
-        PhotoEffectsStore(defaults: legacy).update(camera)
+        let transfer = PhotoEffectsStore(defaults: legacy)
+        transfer.update(camera)
+        transfer.toggleFilterFavorite(testPhotoFilterSelection(preset: preset, intensityPercent: 80))
 
         let reopened = PhotoEffectsStore(defaults: local, scope: .localPhotos,
                                          legacyDefaults: legacy).settings
-        XCTAssertTrue(reopened.favoriteFilterIDs.isEmpty)
+        XCTAssertEqual(reopened.favoriteFilterIDs, [PhotoEffectsSettings.filterKey(preset.id)])
     }
 
     @MainActor
@@ -4194,7 +4224,7 @@ extension DomainModelTests {
         let suite = "effects-codec-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let a = Np3FilterCatalog.presets[0], b = Np3FilterCatalog.presets[1]
+        let a = TestPhotoFilterCatalog.np3Presets[0], b = TestPhotoFilterCatalog.np3Presets[1]
         defaults.set(a.id, forKey: "photo_filter_selected_id")
         defaults.set("\(a.catalogKey),79;missing,60;\(a.catalogKey),22;\(b.catalogKey),101;broken", forKey: "photo_filter_intensities_v1")
         defaults.set("\(b.catalogKey),71;missing;\(a.catalogKey);\(b.catalogKey),92", forKey: "favorite_photo_filters_v1")
@@ -4208,7 +4238,7 @@ extension DomainModelTests {
         let suite = "effects-partial-editor-persistence-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let first = Np3FilterCatalog.presets[0]
+        let first = TestPhotoFilterCatalog.np3Presets[0]
         defaults.set("\(first.catalogKey),63", forKey: "photo_filter_intensities_v1")
         defaults.set(
             "CINEMA,true,TEXT,CALLIGRAPHY,80,AUTO,ADAPTIVE,72,AUTO",
@@ -4217,8 +4247,7 @@ extension DomainModelTests {
 
         let restored = PhotoEffectsStore(defaults: defaults).settings
 
-        XCTAssertEqual(restored.selectedFilter?.preset.id, first.id)
-        XCTAssertEqual(restored.selectedFilter?.intensityPercent, 64)
+        XCTAssertNil(restored.selectedFilter)
         XCTAssertEqual(restored.filterIntensities[first.catalogKey], 64)
         XCTAssertFalse(restored.photoFilterEnabled)
         XCTAssertEqual(restored.favoriteFrameEffects.map(\.preset), [.cinema])
@@ -4229,7 +4258,7 @@ extension DomainModelTests {
         let suite = "local-effects-removed-filter-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let first = Np3FilterCatalog.presets[0]
+        let first = TestPhotoFilterCatalog.np3Presets[0]
 
         defaults.set(3, forKey: "settings_version")
         defaults.set("removed-filter", forKey: "filter_id")
@@ -4248,7 +4277,7 @@ extension DomainModelTests {
         let suite = "effects-json-intensity-normalization-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let first = PhotoFilterCatalog.presets[0]
+        let first = TestPhotoFilterCatalog.presets[0]
         let validKey = PhotoEffectsSettings.filterKey(first.id)
         var legacy = PhotoEffectsSettings()
         legacy.filterIntensities = [validKey: 63, "removed-key": 42]
@@ -4268,8 +4297,11 @@ extension DomainModelTests {
             transferDefaults.removePersistentDomain(forName: transferSuite)
             localDefaults.removePersistentDomain(forName: localSuite)
         }
-        let preset = Np3FilterCatalog.presets[0]
+        let preset = TestPhotoFilterCatalog.np3Presets[0]
 
+        let recipe = TestPhotoFilterCatalog.recipe(id: preset.id)!
+        try! PhotoNp3Store(defaults: transferDefaults).save(.transfer, recipe: recipe, source: nil)
+        try! PhotoNp3Store(defaults: localDefaults).save(.local, recipe: recipe, source: nil)
         transferDefaults.set(preset.id, forKey: "photo_filter_selected_id")
         transferDefaults.set(37, forKey: "photo_filter_intensity")
         let transfer = PhotoEffectsStore(defaults: transferDefaults).settings
@@ -4318,11 +4350,11 @@ extension DomainModelTests {
     }
 
     func testTransferDraftPreferencesPersistWithoutApplyingActiveEffects() {
-        let first = PhotoFilterCatalog.presets[0], next = PhotoFilterCatalog.presets[1]
+        let first = TestPhotoFilterCatalog.presets[0], next = TestPhotoFilterCatalog.presets[1]
         var saved = PhotoEffectsSettings()
-        saved.selectFilter(first.id)
+        saved.selectTestFilter(first.id)
         var draft = saved
-        draft.selectFilter(next.id)
+        draft.selectTestFilter(next.id)
         draft.photoFramePreset = .minimal
         draft.metadataByPreset[PhotoFramePreset.minimal.rawValue] = .init(showCoordinates: true)
         draft.toggleFilterFavorite(next.id)
@@ -4426,6 +4458,192 @@ extension DomainModelTests {
 /// controlled camera/render operations so task-boundary races are repeatable.
 @MainActor
 final class TransferQueueScenarioTests: XCTestCase {
+    func testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade() async throws {
+        let (queue, directory) = try fixture(), camera = ControlledTransferCamera()
+        let ids = await queue.enqueue([file(1), file(2)])
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items.first?.status == .transferring }
+        let model = TransferQueueViewModel(queue: queue)
+        let removal = QueueRemovalCoordinator(automaticFrames: false, visibleRows: { [(ids[1], 0)] })
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while model.snapshot.items.count != 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(model.snapshot.items.count, 2)
+        removal.clear(model: model)
+        while !removal.removingIDs.contains(ids[1]), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(removal.removingIDs, [ids[1]])
+        while !removal.isWaitingForFrames, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        removal.advance(0)
+        let added = await queue.enqueue(file(3))
+        await camera.finish(1); await camera.finish(3)
+        let completed = try await wait(queue) { !$0.isTransferring && $0.items.last?.status == .completed }
+        XCTAssertTrue(removal.isClearing, "Completion must occur inside the removal animation")
+        XCTAssertTrue(completed.items.contains { $0.id == ids[0] && $0.status == .completed })
+        removal.advance(280_000_000)
+        while removal.isClearing, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertFalse(removal.isClearing)
+        let final = await queue.snapshot()
+        XCTAssertEqual(final.items.map(\.id), [ids[0], try XCTUnwrap(added)])
+    }
+
+    func testDisabledEffectRetryPublishesItsImmediateSkipToObservers() async throws {
+        let renderer = FailOnceFrameRenderer()
+        let (queue, directory) = try fixture(renderer: { source, settings, target, _ in
+            try await renderer.render(source: source, settings: settings, directory: target)
+        })
+        try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(file(1).fileName))
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = false
+        let original = await queue.enqueue(file(1), effects: effects)
+        await queue.start(session: nil, directory: directory)
+        _ = try await wait(queue) { $0.items.first?.frameError != nil && !$0.isTransferring }
+        await queue.setPhotoEffectsEnabled(false)
+        let model = TransferQueueViewModel(queue: queue)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while model.snapshot.items.first?.frameError == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let retry = await queue.retry(id: try XCTUnwrap(original))
+        let retryID = try XCTUnwrap(retry)
+        while (model.snapshot.items.first?.id != retryID || model.snapshot.items.first?.frameGenerationSkipped != true),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(model.snapshot.items.first?.id, retryID)
+        XCTAssertEqual(model.snapshot.items.first?.attemptOrder, 2, "Generation retry has a new ordinal and keeps its UUID identity separate")
+        XCTAssertEqual(model.snapshot.items.first?.frameGenerationSkipped, true)
+        XCTAssertEqual(model.snapshot.items.first?.isGeneratingFrame, false)
+        XCTAssertEqual(model.snapshot.items.first?.frameGenerationPendingCheck, false)
+        let selections = await renderer.selections
+        XCTAssertEqual(selections.count, 1)
+    }
+
+    func testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry() async throws {
+        let (queue, directory) = try fixture(), camera = ControlledTransferCamera()
+        let ids = await queue.enqueue([file(1), file(2), file(3)])
+        await queue.start(session: camera, directory: directory)
+        _ = try await wait(queue) { $0.items.first?.status == .transferring }
+        let targets = await queue.beginClearQueue()
+        XCTAssertEqual(targets, Set(ids.dropFirst()))
+        let withdrawn = await queue.snapshot()
+        XCTAssertEqual(withdrawn.items.map(\.status), [.transferring, .cancelled, .cancelled])
+        let retry = await queue.retry(id: ids[1])
+        let retryID = try XCTUnwrap(retry)
+        let appended = await queue.enqueue(file(4))
+        let appendedID = try XCTUnwrap(appended)
+        await camera.finish(1)
+        _ = try await wait(queue) { $0.items.contains { $0.id == retryID && $0.status == .transferring } }
+        await camera.finish(2)
+        _ = try await wait(queue) { $0.items.last?.status == .transferring }
+        await camera.finish(4)
+        _ = try await wait(queue) { !$0.isTransferring }
+        await queue.finishClearQueue(targetIDs: targets)
+        await queue.finishClearQueue(targetIDs: targets)
+        let after = await queue.snapshot()
+        XCTAssertEqual(after.items.map(\.id), [ids[0], retryID, appendedID])
+        XCTAssertEqual(after.items.map(\.attemptOrder), [1, 4, 5])
+        XCTAssertTrue(after.items.allSatisfy { $0.status == .completed })
+    }
+
+    func testClearCannotRemoveGenerationThatFinishesDuringAnimation() async throws {
+        let renderer = ControlledFrameRenderer()
+        let (queue, directory) = try fixture(renderer: { source, _, target, _ in
+            try await renderer.render(source: source, directory: target)
+        })
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = false
+        for f in [file(1), file(2)] { try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(f.fileName)) }
+        let generationIDs = await queue.enqueue([file(1), file(2)], effects: effects)
+        await queue.start(session: nil, directory: directory)
+        _ = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy(\.isGeneratingFrame) }
+        let waitingID = await queue.enqueue(file(3))
+        let targets = await queue.beginClearQueue()
+        XCTAssertEqual(targets, Set([try XCTUnwrap(waitingID)]))
+        await renderer.releaseAll()
+        _ = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame } }
+        await queue.finishClearQueue(targetIDs: targets)
+        let after = await queue.snapshot()
+        XCTAssertEqual(after.items.map(\.id), generationIDs)
+        XCTAssertTrue(after.items.allSatisfy { $0.frameURL != nil })
+    }
+
+    func testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate() async throws {
+        let renderer = ControlledFrameRenderer()
+        let (queue, directory) = try fixture(renderer: { source, _, target, _ in
+            try await renderer.render(source: source, directory: target)
+        })
+        var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true; effects.photoFrameBorderEnabled = false
+        for f in [file(1), file(2)] { try Data(repeating: 1, count: 10).write(to: directory.appendingPathComponent(f.fileName)) }
+        await queue.enqueue(file(1), effects: effects)
+        await queue.start(session: nil, directory: directory)
+        _ = try await wait(queue) { !$0.isTransferring && $0.items.first?.frameGenerationStartedAtElapsedMs != nil }
+        let frames = directory.appendingPathComponent("ZTFrames")
+        try FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+        let effective = effectivePhotoEffectsSettings(effects, isPro: true)
+        let duplicate = frames.appendingPathComponent(androidPhotoFrameOutputName(sourceName: file(1).fileName, settings: effective))
+        try Data([1]).write(to: duplicate)
+        await queue.enqueue(file(2), effects: effects)
+        await queue.enqueue(file(1), effects: effects)
+        await queue.start(session: nil, directory: directory)
+        let pending = try await wait(queue) { !$0.isTransferring && $0.items.count == 3 && $0.items.allSatisfy(\.isGeneratingFrame) }
+        XCTAssertTrue(pending.items[1].isQueuedForFrameGeneration, "Warm empty-name index proves this other source is missing")
+        XCTAssertNil(pending.items[1].frameGenerationStartedAtElapsedMs)
+        XCTAssertTrue(pending.items[2].frameGenerationPendingCheck, "Same source in flight cannot use a stale missing-name proof")
+        XCTAssertFalse(pending.items[2].isQueuedForFrameGeneration)
+        XCTAssertFalse(TransferQueueCardText(item: pending.items[2]).generationWaiting)
+        XCTAssertEqual(QueuePillTaskSummary(items: pending.items).generationRemaining, 2)
+        let clearTargets = await queue.beginClearQueue()
+        XCTAssertTrue(clearTargets.isEmpty, "Hidden preflight remains protected")
+        await renderer.releaseAll()
+        let done = try await wait(queue) { $0.items.allSatisfy { !$0.isGeneratingFrame } }
+        XCTAssertEqual(done.items[2].frameURL, duplicate)
+        XCTAssertTrue(done.items[2].frameGenerationSkipped)
+        XCTAssertNil(done.items[2].frameGenerationElapsedMs)
+        XCTAssertTrue(done.items.allSatisfy { !$0.frameGenerationPendingCheck })
+        await queue.finishClearQueue(targetIDs: clearTargets)
+        let retained = await queue.snapshot()
+        XCTAssertEqual(retained.items.count, 3)
+    }
+
+    func testGenerationAdmissionProofAndPendingLifecycleMatchAndroid() {
+        func confirmed(_ names: Set<String>?, busy: Bool = false, crop: Bool = false, saved: Bool = false) -> Bool {
+            canConfirmPhotoGeneration(sourceName: "DSC_1.JPG", knownOutputNames: names,
+                sameSourceInProgress: busy, cropRequested: crop, hasSavedCrop: saved)
+        }
+        XCTAssertFalse(confirmed(nil)); XCTAssertTrue(confirmed([]))
+        XCTAssertTrue(confirmed(["DSC_10_f.jpg", "DSC_2_frame_mist_abc.jpg"]))
+        XCTAssertFalse(confirmed([], busy: true))
+        for name in ["DSC_1_f.jpg", "dsc_1_e (2).JPG", "DSC_1_frame_mist_abc.jpg", "DSC_1_c_f.jpg"] {
+            XCTAssertFalse(confirmed([name]))
+        }
+        XCTAssertTrue(confirmed(nil, busy: true, crop: true))
+        XCTAssertFalse(confirmed([], crop: true, saved: true))
+        for status in [TransferStatus.waiting, .transferring, .completed, .failed, .cancelled] {
+            var item = TransferQueueItem(id: UUID(), file: file(1), status: status)
+            item.queueFrameGeneration(pendingCheck: true)
+            XCTAssertTrue(item.isGeneratingFrame)
+            XCTAssertFalse(item.isQueuedForFrameGeneration)
+            XCTAssertFalse(item.canRetry)
+            XCTAssertTrue(clearQueueTargetIDs([item]).isEmpty)
+            XCTAssertEqual(QueuePillTaskSummary(items: [item]).downloadRemaining, 0)
+            XCTAssertEqual(QueuePillTaskSummary(items: [item]).generationRemaining, 0)
+            var skipped = item; skipped.skipFrameGeneration()
+            XCTAssertFalse(skipped.frameGenerationPendingCheck)
+            XCTAssertNil(skipped.frameGenerationElapsedMs)
+            item.startFrameGeneration(now: 100)
+            XCTAssertTrue(item.isQueuedForFrameGeneration)
+            XCTAssertFalse(item.frameGenerationPendingCheck)
+            item.finishFrameGeneration(now: 250, savedOutput: true)
+            XCTAssertEqual(item.frameGenerationElapsedMs, 150)
+            XCTAssertFalse(item.frameGenerationPendingCheck)
+        }
+    }
+
     func testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder() async throws {
         let (queue, directory) = try fixture()
         let camera = ControlledTransferCamera()
@@ -4788,7 +5006,7 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertEqual(finished?.items[1].error, AppLocalized.resource("camera_not_connected"))
     }
 
-    func testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal() async throws {
+    func testCompleteVideoPartialIsRenamedAfterCameraGateAndRecheckedAsLocalOriginal() async throws {
         let (queue, directory) = try fixture()
         let source = CameraFile(id: 7, storageID: 1, format: 0x300D, size: 10,
                                 fileName: "DSC_7.MP4", captureDate: "20260914T120000", isProtected: false)
@@ -4800,7 +5018,7 @@ final class TransferQueueScenarioTests: XCTestCase {
         await queue.enqueue(source)
 
         let stream = await queue.snapshots()
-        await queue.start(session: nil, directory: directory)
+        await queue.start(session: ControlledTransferCamera(), directory: directory)
         var finished: TransferQueueSnapshot?
         for await value in stream {
             if !value.isTransferring && value.items.first?.status == .completed {
@@ -5067,7 +5285,7 @@ final class TransferQueueScenarioTests: XCTestCase {
         var settings = PhotoEffectsSettings()
         settings.photoFrameEnabled = false
         settings.photoFilterEnabled = true
-        settings.selectedFilter = PhotoFilterSelection(preset: settings.orderedFilters[0], intensityPercent: 40)
+        settings.selectedFilter = testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 40)
         let locked = effectivePhotoEffectsSettings(settings, isPro: true)
         let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: UInt64(original.count),
                               fileName: source.lastPathComponent, captureDate: nil, isProtected: false)
@@ -5349,10 +5567,16 @@ final class TransferQueueScenarioTests: XCTestCase {
         XCTAssertNil(final.items[0].error)
         XCTAssertNotNil(final.items[0].frameError)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(file(1).fileName).path))
+        let original = final.items[0].outputURL
+        XCTAssertEqual(queue.originalStore.original(for: file(1), folder: nil, root: directory), original)
+        await queue.removeCleared()
+        let cleared = await queue.snapshot()
+        XCTAssertTrue(cleared.items.isEmpty)
+        XCTAssertEqual(queue.originalStore.original(for: file(1), folder: nil, root: directory), original)
     }
 
     func testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop() async throws {
-        let (queue, directory) = try fixture(cropRenderer: { task, source, directory in
+        let (queue, directory) = try fixture(cropRenderer: { task, source, directory, _ in
             let published = try await LosslessCropProcessor.processAsync(task: task, sourceURL: source, directory: directory)
             // Deterministic boundary: publication is complete, but the queue
             // has not yet resumed to record the URL.
@@ -5642,34 +5866,20 @@ extension DomainModelTests {
         XCTAssertEqual(index.original(for: unknown, folderName: "ZT2026-08-17"), copy)
     }
 
-    func testExportedOriginalSurvivesFrameFailureAndQueueClearing() {
-        let root = URL(fileURLWithPath: "/exports", isDirectory: true)
-        let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
-                              fileName: "DSC_0001.JPG", captureDate: nil, isProtected: false)
-        let output = root.appendingPathComponent(file.fileName)
-        let failedFrame = TransferQueueItem(id: UUID(), file: file, status: .failed, outputURL: output)
-        var index = ExportedOriginalIndex()
-        XCTAssertTrue(index.record([failedFrame], root: root))
-        XCTAssertFalse(index.record([], root: root))
-        XCTAssertEqual(index.original(for: file, folderName: nil), output)
-        XCTAssertFalse(index.record([failedFrame], root: root))
-    }
-
     func testLateOldDirectoryOutputDoesNotPolluteNewExportIndex() {
         let oldRoot = URL(fileURLWithPath: "/old", isDirectory: true)
         let newRoot = URL(fileURLWithPath: "/new", isDirectory: true)
         let file = CameraFile(id: 1, storageID: 1, format: 0x3801, size: 100,
                               fileName: "DSC_0001.JPG", captureDate: nil, isProtected: false)
-        let oldTask = TransferQueueItem(id: UUID(), file: file, status: .completed,
-                                        outputURL: oldRoot.appendingPathComponent(file.fileName))
-        var index = ExportedOriginalIndex()
-        XCTAssertFalse(index.record([oldTask], root: newRoot))
-        XCTAssertNil(index.original(for: file, folderName: nil))
+        let store = TransferOriginalStore()
+        store.select(newRoot)
+        XCTAssertFalse(store.record(.init(url: oldRoot.appendingPathComponent(file.fileName), size: 100), root: oldRoot, folder: nil))
+        XCTAssertNil(store.original(for: file, folder: nil, root: newRoot))
         let changedHandle = CameraFile(id: 9, storageID: 1, format: 0x3801, size: 100,
                                        fileName: file.fileName, captureDate: nil, isProtected: false)
         let output = newRoot.appendingPathComponent(file.fileName)
-        index.add(output, size: 100, folderName: nil)
-        XCTAssertEqual(index.original(for: changedHandle, folderName: nil), output)
+        store.record(.init(url: output, size: 100), root: newRoot, folder: nil)
+        XCTAssertEqual(store.original(for: changedHandle, folder: nil, root: newRoot), output)
     }
 }
 
@@ -6062,18 +6272,29 @@ final class LosslessCropMetadataTests: XCTestCase {
                         Tag(id: id, type: signed ? 10 : 5, count: UInt32(values.count / 2),
                             bytes: values.flatMap { number($0, 4, little: little) })
                     }
-                    let rootTags = [text(0x010f, "Nikon"), text(0x0110, "Crop fixture"), text(0x0131, "Camera software"), text(0x0132, "2026:10:15 12:34:56")]
+                    let rootTags = [text(0x010f, "Nikon"), text(0x0110, "Crop fixture"), text(0x0131, "Camera software"),
+                        text(0x0132, "2026:10:15 12:34:56"), text(0x013b, "Photographer"),
+                        text(0x8298, "Copyright fixture"), text(0x010e, "Capture description")]
                     let exifTags: [Tag] = [
                         text(0x9003, "2026:10:15 12:34:56"), text(0x9004, "2026:10:15 12:34:56"), text(0x9291, "123"), text(0x9011, "+08:00"),
-                        rational(0x829a, [1, 125]), rational(0x829d, [28, 10]), scalar(0x8827, 100), rational(0x920a, [50, 1]), scalar(0xa405, 75),
+                        rational(0x829a, [137, 1000000]), rational(0x829d, [28, 10]), scalar(0x8827, 100), rational(0x920a, [50, 1]), scalar(0xa405, 75),
                         text(0xa433, "Nikon"), text(0xa434, "24-70mm"), scalar(0x8822, 3), rational(0x9204, [UInt32.max, 3], signed: true),
-                        scalar(0x9207, 5), scalar(0x9209, 0), scalar(0xa403, 1), scalar(0xa001, 1)
+                        scalar(0x9207, 5), scalar(0x9209, 0), scalar(0xa403, 1), scalar(0xa001, 1),
+                        text(0x9290, "234"), text(0x9292, "567"), text(0x9010, "+08:00"), text(0x9012, "+08:00"),
+                        rational(0x9201, [12833345, 1000000], signed: true), rational(0x9202, [2970854, 1000000]),
+                        rational(0x9205, [1695993, 1000000]), rational(0x9203, [UInt32.max, 3], signed: true),
+                        scalar(0x8830, 3), scalar(0x8831, 640, short: false), scalar(0x8832, 640, short: false),
+                        scalar(0x8833, 640, short: false), rational(0xa404, [1, 1]),
+                        rational(0xa432, [24, 1, 70, 1, 28, 10, 28, 10]), text(0xa435, "Lens serial"),
+                        text(0xa431, "Body serial"), text(0xa430, "Camera owner"), scalar(0xa402, 1),
+                        scalar(0x9208, 1), scalar(0xa406, 2), rational(0x9206, [12, 10]), scalar(0xa40c, 2)
                     ]
                     let gpsTags: [Tag] = [
                         Tag(id: 0, type: 1, count: 4, bytes: [2, 3, 0, 0]), text(1, "N"), rational(2, [31, 1, 0, 1, 0, 1]),
                         text(3, "E"), rational(4, [121, 1, 0, 1, 0, 1]), Tag(id: 5, type: 1, count: 1, bytes: [0]), rational(6, [100, 1]),
                         rational(7, [12, 1, 34, 1, 56, 1]), text(29, "2026:10:15"), text(27, "ASCII\0\0\0GPS", type: 7),
-                        text(12, "K"), rational(13, [10, 1]), text(14, "T"), rational(15, [180, 1])
+                        text(12, "K"), rational(13, [10, 1]), text(14, "T"), rational(15, [180, 1]),
+                        text(16, "T"), rational(17, [95, 1]), text(18, "WGS-84"), rational(31, [25, 10])
                     ]
                     var root = rootTags + [scalar(0x0100, 128, short: dimensionsShort), scalar(0x0101, 96, short: dimensionsShort), scalar(0x0112, UInt32(orientation))]
                     let exif = exifTags + [scalar(0xa002, 128, short: dimensionsShort), scalar(0xa003, 96, short: dimensionsShort), text(0x927c, "UNCROPPED_MAKERNOTE", type: 7)]
@@ -6109,7 +6330,8 @@ final class LosslessCropMetadataTests: XCTestCase {
                     try fixture.write(to: input)
                     let source = try XCTUnwrap(parseJpegCropHeader(fixture))
                     let task = LosslessCropTask(fileID: 1, recipe: JpegCropRecipe(source: source, rect: CropRect(left: 16, top: 16, right: 80, bottom: 64)))
-                    let output = try LosslessCropProcessor.process(task: task, sourceURL: input, directory: directory)
+                    let output = try LosslessCropProcessor.process(task: task, sourceURL: input, directory: directory,
+                        locationFallback: PhotoCaptureLocation(latitude: 48.8566, longitude: 2.3522, altitude: -7.25))
                     defer { try? FileManager.default.removeItem(at: output) }
                     let encoded = try Data(contentsOf: output)
                     XCTAssertEqual(try Data(contentsOf: input), fixture)
@@ -7417,54 +7639,42 @@ private actor PreviewHistogramTestGate {
 }
 
 final class PhotoFilterCategoryParityTests: XCTestCase {
+    @MainActor
     func testChooserFavoritesPositionAndOffPreserveRecipe() throws {
-        let first = try XCTUnwrap(Np3FilterCatalog.preset(id: "forest_verdure"))
-        let second = try XCTUnwrap(Np3FilterCatalog.preset(id: "blue_hour"))
+        let first = TestPhotoFilterCatalog.np3Presets[0], second = TestPhotoFilterCatalog.np3Presets[1]
+        let files = [first, second].enumerated().map { index, _ in
+            PresetFile(identifier: "file:///imports/\(index).np3", name: "\(index).np3", relativePath: "\(index).np3", size: 256)
+        }
         var settings = PhotoEffectsSettings()
         settings.favoriteFilterIDs = [second.catalogKey, first.catalogKey]
         settings.filterIntensities[first.catalogKey] = 42
-        var chooser = PhotoFilterChooserState(isPresented: true, category: .landscape)
-        XCTAssertEqual(Array(chooser.items(in: settings).prefix(2).map(\.id)), [second.id, first.id])
-        chooser.select(first.id, in: &settings)
-        XCTAssertFalse(chooser.isPresented)
+        func catalog() -> PhotoFilterCatalogIndex {
+            let selected = settings.builtinFilterSelection?.preset
+            let source = selected.map { $0.id == first.id ? files[0].identifier : files[1].identifier }
+            return .init(files: files, failure: nil, hints: [files[0].identifier: first.id, files[1].identifier: second.id],
+                sourceRecipe: settings.builtinFilterSelection?.photoRecipe, source: source, sourceLabel: nil,
+                selected: selected, favorites: settings.favoriteFilterIDs)
+        }
+        XCTAssertEqual(catalog().categories.first { $0.builtIn == .favorites }?.choices.compactMap(\.presetID), [second.id, first.id])
+        settings.selectTestFilter(first.id)
         XCTAssertEqual(settings.selectedFilter?.intensityPercent, 42)
-        XCTAssertEqual(chooser.initialItemID(in: settings), first.id)
+        XCTAssertEqual(catalog().currentKey(enabled: settings.photoFilterEnabled), "document:" + files[0].identifier)
         let recipe = settings.selectedFilter
-        chooser.isPresented = true
-        chooser.select(nil, in: &settings)
+        settings.selectTestFilter(nil)
         XCTAssertFalse(settings.photoFilterEnabled)
-        XCTAssertFalse(chooser.isPresented)
         XCTAssertEqual(settings.selectedFilter, recipe)
-        XCTAssertEqual(chooser.initialItemID(in: settings), second.id)
-        chooser.category = .favorites
-        XCTAssertEqual(chooser.items(in: settings).map(\.id), [second.id, first.id])
+        XCTAssertNil(catalog().currentKey(enabled: settings.photoFilterEnabled))
         settings.favoriteFilterIDs = []
-        XCTAssertNil(chooser.initialItemID(in: settings))
+        XCTAssertEqual(catalog().categories.first { $0.builtIn == .favorites }?.choices.count, 0)
     }
 
-    func testAllFiftyCategoriesMatchAndroidFallbackMetadata() {
-        // Expected membership transcribed from Android CuratedNp3Filters and
-        // PhotoFilterCategory, not derived from iOS localized display names.
-        let expected: [PhotoEffectFilterCategory: [String]] = [
-            .landscape: ["forest_verdure", "blue_hour", "fern_shade", "urban_green", "moss_mood", "sunset_film", "sunset_glow"],
-            .cinematic: ["dusk_ember", "cinema_blue", "cinematic_dusk", "golden_dusk", "teal_and_orange"],
-            .color: ["bleached_silver", "blue_memory", "calm_breeze", "cozy_autumn", "dawn_hues", "soft_harmony", "matte_blue", "green_shadows", "natural_link", "cyan_negative", "red_cyan", "teal_negative", "lemon_negative", "amber_negative", "lime_negative", "pastel_pink", "setouchi_blue", "sky_mist", "soft_glow", "cool_sun_kiss", "warm_sun_kiss", "gentle_clarity", "turquoise_blue", "warm_street", "warm_lowlight", "honey_warm"],
-            .monochrome: ["british_mono"],
-            .portrait: ["love_glow", "clear_portrait", "soft_portrait", "warm_portrait"],
-            .film: ["darkroom_film", "classic_film", "rose_vintage", "soft_film", "vintage_color", "vintage_vibe", "vital_film"],
-        ]
-        XCTAssertEqual(expected.values.flatMap { $0 }.count, 50)
-        XCTAssertEqual(Np3FilterCatalog.presets.count, 50)
-        for preset in Np3FilterCatalog.presets {
-            let category = expected.first { $0.value.contains(preset.legacyID) }?.key
-            XCTAssertNotNil(category, preset.legacyID)
-            for id in [preset.id, preset.catalogKey, preset.legacyID] {
-                // Display language must never change catalog classification.
-                for displayName in [preset.name, preset.fallbackName, "任意显示名称"] {
-                    XCTAssertEqual(PhotoFilterPreset(id: id, name: displayName).category, category, preset.legacyID)
-                }
-            }
-        }
+    @MainActor
+    func testRemovedCatalogHasNoEmptyCuratedCategoriesOrRetiredOfflineSelection() {
+        let index = PhotoFilterCatalogIndex(files: [], failure: nil, hints: [:], sourceRecipe: nil,
+            source: nil, sourceLabel: nil, selected: .init(id: "forest_verdure", name: "Retired"), favorites: [])
+        XCTAssertTrue(index.choices.isEmpty)
+        XCTAssertNil(index.currentKey)
+        XCTAssertEqual(index.categories.compactMap(\.builtIn), [.all, .favorites])
     }
 }
 
@@ -7634,7 +7844,7 @@ final class PhotoPreviewCacheSetTests: XCTestCase {
             context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         }
         var settings = PhotoEffectsSettings()
-        settings.selectFilter(try XCTUnwrap(Np3FilterCatalog.presets.first).id)
+        settings.selectTestFilter(try XCTUnwrap(TestPhotoFilterCatalog.np3Presets.first).id)
         let cache = LocalPhotoPreviewCache()
         await cache.configure(image: image, settings: settings, metadata: nil)
         let opening = try await cache.render(image: image, settings: settings, metadata: nil)
@@ -7660,18 +7870,20 @@ final class PhotoPreviewCacheSetTests: XCTestCase {
             UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         }
         var settings = PhotoEffectsSettings()
-        settings.selectFilter(try XCTUnwrap(Np3FilterCatalog.presets.first).id)
+        settings.selectTestFilter(try XCTUnwrap(TestPhotoFilterCatalog.np3Presets.first).id)
         let cache = LocalPhotoPreviewCache()
         await cache.configure(image: image, settings: settings, metadata: nil)
         let first = try await cache.render(image: image, settings: settings, metadata: nil)
         let reused = try await cache.render(image: image, settings: settings, metadata: nil)
         XCTAssertTrue(first.filtered === reused.filtered, "A completed frame must return the same image")
         var neighbor = settings
-        neighbor.selectedFilter = try XCTUnwrap(nextPhotoFilterSelections(for: settings).first)
-        let warmed = try await cache.render(image: image, settings: neighbor, metadata: nil)
+        neighbor.selectedFilter = testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[1], intensityPercent: 80)
+        // Imported recipes have no bundled neighbor to preheat. Request the
+        // next selection first, then verify the real filtered frame is reused.
         await cache.configure(image: image, settings: neighbor, metadata: nil)
-        let promoted = try await cache.render(image: image, settings: neighbor, metadata: nil)
-        XCTAssertTrue(warmed.filtered === promoted.filtered, "Promoting a preheated frame must skip filtering and composition")
+        let changedFilter = try await cache.render(image: image, settings: neighbor, metadata: nil)
+        let reusedFilter = try await cache.render(image: image, settings: neighbor, metadata: nil)
+        XCTAssertTrue(changedFilter.filtered === reusedFilter.filtered)
         await cache.configure(image: image, settings: settings, metadata: nil)
         var changed = settings
         changed.selectedFilter?.intensityPercent = 42
@@ -7706,8 +7918,8 @@ final class PhotoPreviewCacheSetTests: XCTestCase {
 
 final class PhotoOriginalTiledCompositionTests: XCTestCase {
     func testFlatWatermarkAndImmersiveMatchPrefilteredCompositionAcrossTileBoundary() throws {
-        try assertTileBoundaryComposition(selection: PhotoFilterSelection(
-            preset: PhotoEffectsSettings().orderedFilters[0], intensityPercent: 80))
+        try assertTileBoundaryComposition(selection: testPhotoFilterSelection(
+            preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80))
     }
 
     func testCubeMatchesPrefilteredCompositionAcrossTileBoundary() throws {
@@ -7721,7 +7933,7 @@ final class PhotoOriginalTiledCompositionTests: XCTestCase {
         let lut = CubeLUT(size: 2, domainMin: .zero, domainMax: SIMD3(repeating: 1),
                           rgb: rgb, digest: "f110-cube-seam")
         PhotoLUTRuntime.register(lut)
-        try assertTileBoundaryComposition(selection: PhotoFilterSelection(
+        try assertTileBoundaryComposition(selection: testPhotoFilterSelection(
             preset: PhotoFilterPreset(id: "cube:\(lut.digest)", name: "Seam"), intensityPercent: 60))
     }
 
@@ -7771,8 +7983,8 @@ final class PhotoOriginalTiledCompositionTests: XCTestCase {
                           rgb: [Float](repeating: 0.25, count: 24), digest: "f110-transparency")
         PhotoLUTRuntime.register(lut)
         let selections = [
-            PhotoFilterSelection(preset: PhotoEffectsSettings().orderedFilters[0], intensityPercent: 80),
-            PhotoFilterSelection(preset: PhotoFilterPreset(id: "cube:\(lut.digest)", name: "Test"), intensityPercent: 60)
+            testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80),
+            testPhotoFilterSelection(preset: PhotoFilterPreset(id: "cube:\(lut.digest)", name: "Test"), intensityPercent: 60)
         ]
         let orientations: [UIImage.Orientation] = [.up, .upMirrored, .down, .downMirrored,
                                                   .left, .leftMirrored, .right, .rightMirrored]
@@ -7829,7 +8041,7 @@ final class PhotoOriginalTiledCompositionTests: XCTestCase {
         var settings = PhotoEffectsSettings()
         settings.photoFrameEnabled = false
         settings.photoFilterEnabled = true
-        settings.selectedFilter = PhotoFilterSelection(preset: settings.orderedFilters[0], intensityPercent: 80)
+        settings.selectedFilter = testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80)
         let original = try bytes(source)
         var queries = 0
         XCTAssertThrowsError(try PhotoEffectsRenderer.render(source, settings: settings, availableMemory: {
@@ -8330,7 +8542,8 @@ final class RootPresentationPerformanceTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let gps = GPSCoordinator(defaults: defaults, bluetooth: RootGPSStub(),
-                                 locationManager: RootLocationStub())
+                                 locationManager: RootLocationStub(),
+                                 bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
         return RootPresentationModel(connection: ConnectionViewModel(discoverySource: RootUSBStub()),
             effects: PhotoEffectsStore(defaults: defaults), gps: gps,
             directory: directory ?? DirectoryAccessStore(defaults: defaults))
@@ -8654,6 +8867,7 @@ final class RootPresentationPerformanceTests: XCTestCase {
     var state: NikonGPSBluetoothState { .disconnected }
     var statePublisher: AnyPublisher<NikonGPSBluetoothState, Never> { Empty().eraseToAnyPublisher() }
     var hasSavedPairing: Bool { false }
+    var isRunning: Bool { false }
     func start() {}
     func stop() {}
     func clearPairing() {}
@@ -8661,13 +8875,14 @@ final class RootPresentationPerformanceTests: XCTestCase {
 }
 
 private final class RootLocationStub: CLLocationManager {
-    // No real simulator authorization callbacks may race a scripted state.
+    // Simulate authorized GPS without real system prompts or radio work. A
+    // denied fixture must not inject connection details past permission guards.
     private weak var scriptedDelegate: CLLocationManagerDelegate?
     override var delegate: CLLocationManagerDelegate? {
         get { scriptedDelegate }
         set { scriptedDelegate = newValue }
     }
-    override var authorizationStatus: CLAuthorizationStatus { .denied }
+    override var authorizationStatus: CLAuthorizationStatus { .authorizedWhenInUse }
     override func requestAlwaysAuthorization() {}
     override func requestWhenInUseAuthorization() {}
     override func startUpdatingLocation() {}
@@ -9595,6 +9810,16 @@ final class RemoteExposureMeterReadingTests: XCTestCase {
     private final class Evaluations {
         var page = 0
         var rows = Array(repeating: 0, count: 40)
+        var identities = Array(repeating: Set<UUID>(), count: 40)
+    }
+    private struct IdentityProbe: View {
+        let index: Int
+        let evaluations: Evaluations
+        @State private var identity = UUID()
+        var body: some View {
+            Color.clear.frame(height: 2)
+                .onAppear { evaluations.identities[index].insert(identity) }
+        }
     }
     private struct Host: View {
         @ObservedObject var selection: Selection
@@ -9606,7 +9831,7 @@ final class RemoteExposureMeterReadingTests: XCTestCase {
                 ForEach(0..<40, id: \.self) { index in
                     QueueProgressScope(model: progress, active: selection.activeIndex == index) { _ in
                         let _ = evaluations.rows[index] += 1
-                        Color.clear.frame(height: 2)
+                        IdentityProbe(index: index, evaluations: evaluations)
                     }
                 }
             }
@@ -9640,6 +9865,7 @@ final class RemoteExposureMeterReadingTests: XCTestCase {
             }
             XCTAssertEqual(evaluations.page, pageBefore)
             for row in 0..<40 {
+                XCTAssertEqual(evaluations.identities[row].count, 1, "Subscription changes must preserve card animation state")
                 if row == active { XCTAssertGreaterThan(evaluations.rows[row], before[row]) }
                 else { XCTAssertEqual(evaluations.rows[row], before[row], "Inactive row \(row) reevaluated") }
             }
@@ -9846,6 +10072,160 @@ final class PopupLifetimePerformanceTests: XCTestCase {
 }
 
 @MainActor
+final class PhotoEffectModuleMotionTests: XCTestCase {
+    private final class State: ObservableObject {
+        @Published var visible = true
+        let child = ChildState()
+        var heights: [CGFloat] = []
+        var bodies = 0
+    }
+    private final class ChildState: ObservableObject { @Published var height: CGFloat = 80 }
+    private struct ObservedContent: View {
+        @ObservedObject var state: ChildState
+        var body: some View { Color.blue.frame(height: state.height) }
+    }
+    private struct HeightKey: PreferenceKey {
+        static let defaultValue: [CGFloat] = []
+        static func reduce(value: inout [CGFloat], nextValue: () -> [CGFloat]) { value += nextValue() }
+    }
+    private struct Harness: View {
+        @ObservedObject var state: State
+        var body: some View {
+            let _ = { state.bodies += 1 }()
+            VStack(spacing: 0) {
+                PhotoEffectModuleSection(visible: state.visible) {
+                    ObservedContent(state: state.child)
+                }
+                .background(GeometryReader { proxy in Color.clear.preference(key: HeightKey.self, value: [proxy.size.height]) })
+                Color.orange.frame(height: 30)
+            }
+            .frame(width: 240).frame(maxHeight: .infinity, alignment: .top)
+            .onPreferenceChange(HeightKey.self) { if let height = $0.last { state.heights.append(height) } }
+        }
+    }
+
+    func testSectionAndSpacingShrinkTogetherWithoutPerFrameParentUpdates() async throws {
+        try await withHarness { state, view in
+            XCTAssertEqual(try XCTUnwrap(state.heights.last), 90, accuracy: 0.5)
+            state.heights.removeAll(); let initialBodies = state.bodies
+            state.visible = false
+            await sample(view, milliseconds: 360)
+            let exit = state.heights
+            XCTAssertEqual(try XCTUnwrap(exit.last), 0, accuracy: 0.5)
+            XCTAssertGreaterThan(exit.filter { $0 > 1 && $0 < 89 }.count, 3, "Height must interpolate, not snap")
+            for (a, b) in zip(exit, exit.dropFirst()) { XCTAssertLessThanOrEqual(b, a + 0.5) }
+            XCTAssertLessThan(state.bodies - initialBodies, 6, "Only the section layout should run each frame")
+            state.heights.removeAll(); state.visible = true
+            await sample(view, milliseconds: 360)
+            let entry = state.heights
+            XCTAssertEqual(try XCTUnwrap(entry.last), 90, accuracy: 0.5)
+            XCTAssertGreaterThan(entry.filter { $0 > 1 && $0 < 89 }.count, 3)
+            for (a, b) in zip(entry, entry.dropFirst()) { XCTAssertGreaterThanOrEqual(b, a - 0.5) }
+            let evidence = XCTAttachment(string: "exit=\(exit)\nentry=\(entry)\nbodies=\(state.bodies - initialBodies)")
+            evidence.name = "effect-module-height-frames"; evidence.lifetime = .keepAlways; add(evidence)
+        }
+    }
+
+    func testRapidReverseRestoresWholeModuleAndSettlesWithoutResidualClock() async throws {
+        try await withHarness { state, view in
+            for _ in 0..<3 {
+                state.visible = false; await sample(view, milliseconds: 80)
+                state.visible = true; await sample(view, milliseconds: 80)
+            }
+            await sample(view, milliseconds: 360)
+            XCTAssertEqual(try XCTUnwrap(state.heights.last), 90, accuracy: 0.5)
+            let count = state.heights.count, bodies = state.bodies
+            await sample(view, milliseconds: 300)
+            XCTAssertEqual(state.heights.count, count)
+            XCTAssertEqual(state.bodies, bodies)
+        }
+    }
+
+    func testImmediateEditorCancellationCannotShortenOutgoingHeight() async throws {
+        try await withHarness { state, view in
+            XCTAssertEqual(try XCTUnwrap(state.heights.last), 90, accuracy: 0.5)
+            state.heights.removeAll()
+            state.visible = false
+            state.child.height = 20
+            await sample(view, milliseconds: 360)
+            XCTAssertGreaterThan(state.heights.max() ?? 0, 80,
+                "An observed editor closing its own controls must retain the original exit height")
+            XCTAssertEqual(try XCTUnwrap(state.heights.last), 0, accuracy: 0.5)
+        }
+    }
+
+    func testExpandedModuleMeasuresEveryRowAndItsTrailingGap() throws {
+        let renderer = ImageRenderer(content: PhotoEffectModuleSection(visible: true) {
+            Color.blue.frame(height: 50)
+            Color.green.frame(height: 120)
+        }.frame(width: 240))
+        renderer.scale = 1
+        let image = try XCTUnwrap(renderer.uiImage)
+        XCTAssertEqual(image.size.height, 180, accuracy: 0.5,
+            "An expanded frame module must include all parameter rows and the final 10pt gap")
+    }
+
+    func testHelpAndNavigationMaterialPaletteInLightAndDark() async throws {
+        let skins: [ZTransferButtonSkin] = [.liquidGlass, .frostedGlass, .titanium, .wood, .cameraControls]
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let suites = skins.map { _ in "IconPalette.\(UUID())" }
+        let defaults = try suites.map { try XCTUnwrap(UserDefaults(suiteName: $0)) }
+        for (skin, storage) in zip(skins, defaults) { storage.set(skin.rawValue, forKey: "skin_preset") }
+        defer { for (suite, storage) in zip(suites, defaults) { storage.removePersistentDomain(forName: suite) } }
+        for dark in [false, true] {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 360, height: 650)
+            window.overrideUserInterfaceStyle = dark ? .dark : .light
+            let host = UIHostingController(rootView: VStack(spacing: 24) {
+                ForEach(skins.indices, id: \.self) { index in
+                    VStack(spacing: 8) {
+                        Text(skins[index].rawValue).font(.system(size: 12))
+                        HStack(spacing: 22) {
+                            TipLightbulbButton(attention: true, size: 32, accessibilityLabel: "Help") {}
+                            TipLightbulbButton(attention: true, size: 32, accessibilityLabel: "Help") {}
+                            Button {} label: { Image(systemName: "chevron.left").frame(width: 32, height: 32) }
+                                .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
+                            Button {} label: { Image(systemName: "xmark").frame(width: 32, height: 32) }
+                                .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
+                        }
+                    }.defaultAppStorage(defaults[index])
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .foregroundStyle(ZTransferColors.primaryText).background(ZTransferColors.background)
+                .environment(\.colorScheme, dark ? .dark : .light))
+            window.rootViewController = host; window.makeKeyAndVisible()
+            await sample(host.view, milliseconds: 350)
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let shot = XCTAttachment(image: image); shot.name = "icon-materials-\(dark ? "dark" : "light")"
+            shot.lifetime = .keepAlways; add(shot)
+            window.isHidden = true; window.rootViewController = nil; previous?.makeKey()
+        }
+    }
+
+    private func sample(_ view: UIView, milliseconds: Int) async {
+        for _ in 0..<(milliseconds / 10) {
+            view.layoutIfNeeded()
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+    private func withHarness(_ action: @MainActor (State, UIView) async throws -> Void) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 300, height: 500)
+        let state = State()
+        let host = UIHostingController(rootView: Harness(state: state))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
+        await sample(host.view, milliseconds: 100)
+        try await action(state, host.view)
+    }
+}
+
+@MainActor
 final class SettingsPopupLayoutTests: XCTestCase {
     private final class State: ObservableObject {
         @Published var presented = false
@@ -9946,7 +10326,7 @@ final class SettingsPopupLayoutTests: XCTestCase {
             func snapshot(_ view: UIView) -> UIImage {
                 let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale
                 return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
-                    view.layer.render(in: context.cgContext)
+                    XCTAssertTrue(view.drawHierarchy(in: view.bounds, afterScreenUpdates: true))
                 }
             }
             for _ in 0..<50 {
@@ -10095,34 +10475,6 @@ final class SettingsPopupLayoutTests: XCTestCase {
 
 @MainActor
 final class QueuePillRenderingTests: XCTestCase {
-    func testCountStartsRollingWithoutWaitingForGeometryPreference() throws {
-        let clock = QueuePillCountClock(count: 10)
-        defer { clock.unmount() }
-        clock.update(9)
-        let motion = try XCTUnwrap(clock.motion)
-        XCTAssertTrue(motion.isRunning)
-        XCTAssertEqual(motion.layers.map(\.count), [10, 9])
-        XCTAssertGreaterThan(try XCTUnwrap(motion.layers.last).motion.displayedOffsetPixels, 0)
-        clock.update(12)
-        XCTAssertEqual(clock.motion?.current, 12)
-        XCTAssertLessThan(try XCTUnwrap(clock.motion?.layers.last).motion.displayedOffsetPixels, 0)
-    }
-
-    func testCountMountScaleAndRemountUseFixedLineBox() throws {
-        let clock = QueuePillCountClock(count: 100)
-        defer { clock.unmount() }
-        clock.measure(height: ZTransferTypography.labelLarge.lineHeight, scale: 3)
-        clock.update(99)
-        XCTAssertEqual(try XCTUnwrap(clock.motion?.layers.last).motion.displayedOffsetPixels, 30)
-        clock.unmount()
-        clock.update(8)
-        clock.measure(height: ZTransferTypography.labelLarge.lineHeight, scale: 2)
-        XCTAssertEqual(clock.motion?.layers.map(\.count), [8])
-        XCTAssertFalse(try XCTUnwrap(clock.motion).isRunning)
-        clock.update(7)
-        XCTAssertEqual(try XCTUnwrap(clock.motion?.layers.last).motion.displayedOffsetPixels, 20)
-    }
-
     func testAnimatedWidthsRemainPinnedToTrailingViewportIncludingOverflow() throws {
         for width: CGFloat in [40, 95, 180, 340] {
             let clock = QueuePillWidthClock()
@@ -10878,7 +11230,7 @@ final class QueuePillCompletionRenderingTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defaults.set(skin.rawValue, forKey: "skin_preset")
         let state = State()
-        let host = UIHostingController(rootView: Page(state: state).ignoresSafeArea().defaultAppStorage(defaults).environment(\.colorScheme, .light))
+        let host = UIHostingController(rootView: Page(state: state).ignoresSafeArea().defaultAppStorage(defaults).environment(\.colorScheme, .light).environment(\.scenePhase, .active))
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.windows.first(where: \.isKeyWindow)
         let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 393, height: 200)
@@ -10891,8 +11243,12 @@ final class QueuePillCompletionRenderingTests: XCTestCase {
         var images: [UIImage] = []
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         func capture(at time: Double) -> UIImage {
-            let image = UIGraphicsImageRenderer(size: CGSize(width: 393, height: 100), format: format).image { _ in
-                XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 393, height: 100), format: format).image { context in
+                // drawHierarchy synchronously flushes Metal and can block this
+                // geometry sampler for hundreds of milliseconds on a cold
+                // simulator shader. Layer capture keeps sampling independent;
+                // the separate blue-surface test validates the rendered clip.
+                window.layer.render(in: context.cgContext)
                 (String(format: "%.3f s", time) as NSString).draw(at: CGPoint(x: 12, y: 28),
                     withAttributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular),
                                      .foregroundColor: UIColor.black])
@@ -10918,7 +11274,7 @@ final class QueuePillCompletionRenderingTests: XCTestCase {
         state.complete()
         var captureTimes = [0.05, 0.15, 0.25, 0.45, 1.7, 1.8, 1.84, 1.88, 1.92, 1.96, 2.04, 2.2, 2.45].makeIterator()
         var nextCapture = captureTimes.next()
-        while CACurrentMediaTime() - start < 2.5 {
+        while CACurrentMediaTime() - start < 3.4 {
             try await Task.sleep(for: .milliseconds(16))
             host.view.layoutIfNeeded()
             let time = CACurrentMediaTime() - start
@@ -10947,60 +11303,23 @@ final class QueuePillCompletionRenderingTests: XCTestCase {
 
 @MainActor
 final class QueuePillReadoutTests: XCTestCase {
-    func testSpeedReadoutCoalescesLatestSampleAndPreservesPreparationGap() {
-        var cadence = QueuePillSpeedCadence()
-        cadence.update(1_000_000, at: 0)
-        XCTAssertEqual(cadence.value, 1_000_000)
-        cadence.update(2_000_000, at: 0.1)
-        cadence.update(9_000_000, at: 0.49)
-        XCTAssertEqual(cadence.value, 1_000_000)
-        XCTAssertEqual(cadence.deadline, 0.5)
-        cadence.advance(0.5)
-        XCTAssertEqual(cadence.value, 9_000_000)
-        XCTAssertNil(cadence.deadline)
-        cadence.update(0, at: 0.6)
-        XCTAssertEqual(cadence.value, 9_000_000)
-        XCTAssertNil(cadence.deadline)
-        cadence.update(12_000_000, at: 0.7)
-        cadence.advance(0.99)
-        XCTAssertEqual(cadence.value, 9_000_000)
-        cadence.advance(1)
-        XCTAssertEqual(cadence.value, 12_000_000)
-        cadence.update(nil, at: 1.01)
-        XCTAssertNil(cadence.value)
-        XCTAssertNil(cadence.deadline)
-        cadence.update(3_000_000, at: 1.02)
-        XCTAssertEqual(cadence.value, 3_000_000, "The next batch must show its first speed immediately")
+    func testSpeedSamplerFirstValidAndPerDownloadReset() {
+        var sampler = TransferSpeedDisplaySampler()
+        XCTAssertEqual(sampler.sample(0, nowMs: 10_000), 0)
+        XCTAssertEqual(sampler.sample(0, nowMs: 10_100), 0)
+        XCTAssertEqual(sampler.sample(5_000, nowMs: 10_200), 5_000)
+        var next = TransferSpeedDisplaySampler()
+        XCTAssertEqual(next.sample(0, nowMs: 10_250), 0)
+        XCTAssertEqual(next.sample(7_000, nowMs: 10_300), 7_000)
     }
-    func testReadoutCancelsUnchangedPendingValueAndResumesAfterIdle() {
-        var cadence = QueuePillSpeedCadence()
-        cadence.update(100, at: 0)
-        cadence.update(200, at: 0.1)
-        cadence.update(100, at: 0.2)
-        XCTAssertNil(cadence.deadline)
-        cadence.advance(0.5)
-        XCTAssertEqual(cadence.value, 100)
-        cadence.update(300, at: 4)
-        XCTAssertEqual(cadence.value, 300)
-    }
-    func testRealReadoutClockPublishesTrailingSampleAndResetsPendingWork() async throws {
-        var clock: QueuePillSpeedClock? = QueuePillSpeedClock()
-        weak var weakClock = clock
-        clock?.update(100)
-        clock?.update(200)
-        XCTAssertEqual(clock?.value, 100)
-        try await Task.sleep(for: .milliseconds(200))
-        clock?.update(300)
-        XCTAssertEqual(clock?.value, 100)
-        try await Task.sleep(for: .milliseconds(350))
-        XCTAssertEqual(clock?.value, 300)
-        clock?.update(400)
-        clock?.reset()
-        try await Task.sleep(for: .milliseconds(550))
-        XCTAssertNil(clock?.value)
-        clock?.update(500); clock?.update(600)
-        clock = nil
-        XCTAssertNil(weakClock, "Delayed display work must not retain a closed pill")
+    func testSpeedSamplerExactBoundaryAndInvalidValuesDoNotDelay() {
+        var sampler = TransferSpeedDisplaySampler()
+        XCTAssertEqual(sampler.sample(5_000, nowMs: 10_000), 5_000)
+        for ms in 1...599 { XCTAssertEqual(sampler.sample(Int64(5_000 + ms), nowMs: Int64(10_000 + ms)), 5_000) }
+        XCTAssertEqual(sampler.sample(5_600, nowMs: 10_600), 5_600)
+        XCTAssertEqual(sampler.sample(0, nowMs: 11_200), 5_600)
+        XCTAssertEqual(sampler.sample(-1, nowMs: 11_201), 5_600)
+        XCTAssertEqual(sampler.sample(7_000, nowMs: 11_202), 7_000)
     }
     func testDoneFillFadesWithContentAndReversesWithoutAVisualJump() {
         var motion = QueuePillContentMotion(.init(mode: .counting, count: 1, speed: 20_000_000))
@@ -11075,5 +11394,332 @@ final class GestureBoundaryAuditTests: XCTestCase {
         XCTAssertTrue(PopupDragBoundaryView.contains(point, in: host.view))
         window.rootViewController = nil
         XCTAssertFalse(PopupDragBoundaryView.contains(point, in: host.view))
+    }
+}
+
+extension TransferQueueScenarioTests {
+    func testPrivateNP3RecipeSurvivesSourceReplacementAndFailureRetry() async throws {
+        let (queue, directory) = try fixture()
+        let suite = "queue-np3-\(UUID())", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PhotoNp3Store(defaults: defaults)
+        let source = directory.appendingPathComponent("source.NP3")
+        store.replaceFolder(directory, bookmark: Data([1]))
+        let original = try photoNp3SnapshotFixture("G:1")
+        try store.save(.transfer, recipe: original, source: source.absoluteString)
+        var settings = PhotoEffectsSettings(); settings.photoFilterEnabled = true
+        settings.selectedFilter = try .init(np3Recipe: XCTUnwrap(store.restore(.transfer)), intensityPercent: 80,
+            lutAdjustments: .init(contrast: 17))
+        let captured = settings
+        let id = await queue.enqueue(file(1), effects: settings)
+        settings.selectedFilter = try .init(np3Recipe: photoNp3SnapshotFixture("C:2061:1"), intensityPercent: 40)
+        store.replaceFolder(directory.appendingPathComponent("replacement"), bookmark: Data([2]))
+        XCTAssertNil(store.restore(.transfer))
+        let queued = await queue.snapshot()
+        // Queue capture separately disables watermark when decoration is off.
+        // The filter recipe and its finishing controls must remain unchanged.
+        XCTAssertEqual(queued.items.first?.effects?.selectedFilter, captured.selectedFilter)
+        XCTAssertEqual(queued.items.first?.effects?.selectedFilter?.np3Recipe, original)
+        await queue.start(session: nil, directory: directory)
+        _ = try await wait(queue) { !$0.isTransferring && $0.items.first?.status == .failed }
+        _ = await queue.retry(id: try XCTUnwrap(id))
+        let retried = try await wait(queue) { !$0.isTransferring && $0.items.first?.status == .failed }
+        XCTAssertNotEqual(retried.items.first?.id, id)
+        XCTAssertEqual(retried.items.first?.effects?.selectedFilter?.np3Recipe, original)
+        XCTAssertEqual(retried.items.first?.effects?.selectedFilter?.lutAdjustments.contrast, 17)
+        XCTAssertEqual(retried.items.first?.effects?.selectedFilter?.intensityPercent, 80)
+    }
+
+    func testDisabledEffectsAreNotCapturedByAnyNewQueueEntryAndEditorStaysSaved() async throws {
+        let (queue, _) = try fixture()
+        let suite = "queue-effects-master-\(UUID())", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PhotoEffectsStore(defaults: defaults)
+        var settings = PhotoEffectsSettings()
+        settings.photoFrameEnabled = true; settings.watermark.enabled = true
+        settings.selectTestFilter(TestPhotoFilterCatalog.presets[0].id)
+        settings.photoGrain = .init(intensityPercent: 45, enabled: true, style: .coarse)
+        XCTAssertTrue(store.commitFromEditor(settings, np3Source: nil)); store.setEnabled(false)
+        let saved = store.settings
+        let crop = JpegCropSelection(bounds: .init(left: 0, top: 0, right: 0.8, bottom: 0.8), orientation: 1)
+        let source = JpegCropSource(width: 16, height: 16, mcuWidth: 16, mcuHeight: 16, orientation: 1)
+        let task = LosslessCropTask(fileID: 5, recipe: .init(source: source, rect: .init(left: 0, top: 0, right: 16, bottom: 16)))
+        // UI passes its immutable command even if the actor's runtime gate is
+        // still on; the inverse stale-gate case is checked below as well.
+        _ = await queue.enqueue(file(1), effects: saved, photoEffectsEnabled: false)
+        _ = await queue.enqueue([file(2), file(2), file(3)], organizeByDate: true, effects: saved, photoEffectsEnabled: false)
+        _ = await queue.enqueueCrop(file(4), selection: crop, storageMode: .byDay, effects: saved, photoEffectsEnabled: false)
+        _ = await queue.enqueueCrop(file(5), task: task, organizeByDate: true, effects: saved, photoEffectsEnabled: false)
+        _ = await queue.enqueueAutomatic([file(6), file(6)], effects: saved, photoEffectsEnabled: false)
+        await queue.setPhotoEffectsEnabled(false)
+        _ = await queue.enqueue(file(7), effects: saved)
+        let disabled = await queue.snapshot()
+        XCTAssertEqual(disabled.items.count, 7)
+        XCTAssertTrue(disabled.items.allSatisfy { $0.effects == nil })
+        XCTAssertEqual(disabled.items[3].cropSelection, crop)
+        XCTAssertEqual(disabled.items[4].cropTask, task)
+        XCTAssertEqual(disabled.items[3].destinationFolderName, "ZT2026-09-14")
+        XCTAssertEqual(disabled.items[4].destinationFolderName, "ZT2026-09-14")
+        XCTAssertEqual(store.settings, saved)
+        XCTAssertEqual(PhotoEffectsStore(defaults: defaults).settings, saved)
+        store.setEnabled(true)
+        _ = await queue.enqueue(file(8), effects: store.settings, photoEffectsEnabled: true)
+        let enabled = await queue.snapshot()
+        XCTAssertTrue(enabled.items.dropLast().allSatisfy { $0.effects == nil })
+        XCTAssertEqual(enabled.items.last?.effects, effectivePhotoEffectsSettings(saved, isPro: true))
+    }
+
+    func testDisabledRecipeRemainsOriginalOnlyThroughFailureRetryAndCropRemainsRequired() async throws {
+        let (queue, directory) = try fixture()
+        var settings = PhotoEffectsSettings(); settings.photoFrameEnabled = true
+        settings.photoGrain = .init(enabled: true)
+        let crop = JpegCropSelection(bounds: .init(left: 0, top: 0, right: 0.8, bottom: 0.8), orientation: 1)
+        _ = await queue.enqueue(file(1), storageMode: .byDay, effects: settings, photoEffectsEnabled: false)
+        _ = await queue.enqueueCrop(file(2), selection: crop, storageMode: .byDay, effects: settings, photoEffectsEnabled: false)
+        await queue.start(session: nil, directory: directory)
+        let failed = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy { $0.status == .failed } }
+        await queue.setPhotoEffectsEnabled(true)
+        for item in failed.items { _ = await queue.retry(id: item.id) }
+        let retried = try await wait(queue) { !$0.isTransferring && $0.items.allSatisfy { $0.status == .failed } }
+        XCTAssertTrue(retried.items.allSatisfy { $0.effects == nil && !$0.frameGenerationSkipped })
+        XCTAssertEqual(retried.items.map(\.destinationFolderName), failed.items.map(\.destinationFolderName))
+        XCTAssertTrue(retried.items[1].hasCrop)
+        XCTAssertEqual(retried.items[1].cropSelection, crop)
+        XCTAssertNotEqual(retried.items.map(\.id), failed.items.map(\.id))
+    }
+}
+
+/// Compare the pixels used during the real mesh transition with the settled
+/// native material, rather than checking only the outer panel's rim.
+@MainActor
+final class PopupBulbCaptureTests: XCTestCase {
+    func testPreparingOpeningMeshNeverExposesUnwarpedContent() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        let root = UIViewController()
+        window.rootViewController = root; window.makeKeyAndVisible()
+        let popup = GeniePopupHostView(frame: CGRect(x: 20, y: 80, width: 340, height: 460))
+        popup.host.rootView = AnyView(Color.red.frame(maxWidth: .infinity, maxHeight: .infinity))
+        root.view.addSubview(popup)
+        defer { popup.stop(); window.isHidden = true; previous?.makeKey() }
+        let canvas = try XCTUnwrap(popup.subviews.last)
+        var capturesObserved = 0
+        var exposedSource = 0
+        var settled: CGFloat?
+        var opening = false
+        popup.onSettled = { settled = $0 }
+        // A display-link/screenshot sample can miss the synchronous capture
+        // interval. Observe the source becoming visible inside that interval,
+        // before any mesh exists, and check its full on-screen ancestor chain.
+        let inspect: @MainActor @Sendable () -> Void = {
+            let layer = popup.host.view.layer
+            guard opening, layer.opacity == 1,
+                  !popup.host.view.isUserInteractionEnabled,
+                  canvas.layer.sublayers?.allSatisfy({ $0.sublayers?.first?.contents == nil }) == true else { return }
+            capturesObserved += 1
+            var opacity: Float = 1
+            var current: CALayer? = layer
+            while let ancestor = current {
+                opacity *= ancestor.isHidden ? 0 : ancestor.opacity
+                current = ancestor.superlayer
+            }
+            if opacity > 0 { exposedSource += 1 }
+        }
+        let observation = popup.host.view.layer.observe(\.opacity, options: [.new]) { _, _ in
+            MainActor.assumeIsolated { inspect() }
+        }
+        defer { observation.invalidate() }
+        for _ in 0..<3 {
+            for target: CGFloat in [1, 0] {
+                opening = target == 1
+                settled = nil
+                popup.configure(target: target, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+                popup.layoutIfNeeded()
+                for _ in 0..<150 {
+                    if settled == target { break }
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                XCTAssertEqual(settled, target)
+                XCTAssertEqual(popup.host.view.isUserInteractionEnabled, target == 1)
+            }
+        }
+        print("POPUP_SOURCE_VISIBILITY observed=\(capturesObserved) exposed=\(exposedSource)")
+        XCTAssertGreaterThan(capturesObserved, 0, "The synchronous capture interval must have been observed")
+        XCTAssertEqual(exposedSource, 0, "A render-server flush must never expose the full source before its mesh")
+    }
+
+    func testClosingCaptureKeepsSettledPanelVisibleThenGatesLiveSourceUntilHidden() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        let root = UIViewController()
+        window.rootViewController = root; window.makeKeyAndVisible()
+        let popup = GeniePopupHostView(frame: CGRect(x: 20, y: 80, width: 340, height: 460))
+        popup.host.rootView = AnyView(Color.red.frame(maxWidth: .infinity, maxHeight: .infinity))
+        root.view.addSubview(popup)
+        defer { popup.stop(); window.isHidden = true; previous?.makeKey() }
+        let canvas = try XCTUnwrap(popup.subviews.last)
+        let sourceContainer = try XCTUnwrap(popup.host.view.superview)
+        var settled: CGFloat?
+        popup.onSettled = { settled = $0 }
+        popup.configure(target: 1, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+        popup.layoutIfNeeded()
+        for _ in 0..<150 {
+            if settled == 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(settled, 1)
+        var blankCaptureStarts = 0
+        // Observe the ancestor being hidden, not the child's opacity being
+        // assigned 1 again: KVO omits an unchanged child value on close.
+        let inspect: @MainActor @Sendable () -> Void = {
+            if sourceContainer.layer.opacity == 0, popup.host.view.layer.opacity == 1,
+               !popup.host.view.isUserInteractionEnabled,
+               canvas.layer.sublayers?.allSatisfy({ $0.sublayers?.first?.contents == nil }) == true {
+                blankCaptureStarts += 1
+            }
+        }
+        let observation = sourceContainer.layer.observe(\.opacity, options: [.new]) { _, _ in
+            MainActor.assumeIsolated { inspect() }
+        }
+        defer { observation.invalidate() }
+        popup.configure(target: 0, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+        popup.layoutIfNeeded()
+        for _ in 0..<100 {
+            if canvas.layer.sublayers?.first?.sublayers?.first?.contents != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(canvas.layer.sublayers?.first?.sublayers?.first?.contents)
+        XCTAssertEqual(blankCaptureStarts, 0,
+            "Preparing the first closing capture must not flush a blank panel to screen")
+        XCTAssertEqual(sourceContainer.layer.opacity, 0)
+        // A hosting-content update must not be able to expose its full frame
+        // beside the collapsing mesh, even if UIKit restores the child opacity.
+        popup.host.rootView = AnyView(Color.blue.frame(maxWidth: .infinity, maxHeight: .infinity))
+        popup.host.view.layer.opacity = 1
+        popup.layoutIfNeeded()
+        XCTAssertEqual(sourceContainer.layer.opacity, 0)
+        for _ in 0..<150 {
+            if settled == 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(settled, 0)
+        XCTAssertEqual(sourceContainer.layer.opacity, 0)
+        XCTAssertEqual(popup.host.view.layer.opacity, 0)
+    }
+
+    func testReopenBeforeQueuedSettlementCannotDeliverStaleDismissal() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene), root = UIViewController()
+        window.rootViewController = root; window.makeKeyAndVisible()
+        let popup = GeniePopupHostView(frame: CGRect(x: 20, y: 80, width: 300, height: 200))
+        popup.host.rootView = AnyView(Color.red)
+        root.view.addSubview(popup)
+        defer { popup.stop(); window.isHidden = true; previous?.makeKey() }
+        var settlements: [CGFloat] = []
+        popup.onSettled = { settlements.append($0) }
+        popup.configure(target: 1, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+        popup.configure(target: 0, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+        popup.layoutIfNeeded() // Queues the closed endpoint while still at p=0.
+        popup.configure(target: 1, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+        popup.layoutIfNeeded()
+        for _ in 0..<150 {
+            if settlements.contains(1) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(settlements, [1], "The old closed endpoint cannot unmount a reopened popup")
+    }
+
+    func testPopupBulbCaptureMatchesLiveMaterial() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let suite = "PopupBulbCapture.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); previous?.makeKey() }
+        let skins: [ZTransferButtonSkin] = [.liquidGlass, .frostedGlass, .titanium, .wood, .cameraControls]
+        for (skin, dark) in skins.flatMap({ skin in [false, true].map { (skin, $0) } }) {
+            defaults.set(skin.rawValue, forKey: "skin_preset")
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+            window.overrideUserInterfaceStyle = dark ? .dark : .light
+            let root = UIViewController(); root.view.backgroundColor = dark ? .black : .white
+            window.rootViewController = root; window.makeKeyAndVisible()
+            let popup = GeniePopupHostView(frame: CGRect(x: 35, y: 100, width: 320, height: 120))
+            popup.host.rootView = AnyView(HStack(spacing: 24) {
+                TipLightbulbButton(attention: true, size: 32, accessibilityLabel: "Help") {}
+                Button {} label: { Image(systemName: "chevron.left").frame(width: 32, height: 32) }
+                    .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
+                Button {} label: { Image(systemName: "xmark").frame(width: 32, height: 32) }
+                    .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
+            }.frame(width: 320, height: 120)
+                .foregroundStyle(ZTransferColors.primaryText)
+                .background(ZTransferGlassSurface(cornerRadius: 22, kind: .panel))
+                .defaultAppStorage(defaults).environment(\.colorScheme, dark ? .dark : .light))
+            root.view.addSubview(popup)
+            defer { popup.stop(); window.isHidden = true; window.rootViewController = nil }
+            let began = CACurrentMediaTime()
+            popup.configure(target: 1, anchorX: 0.2, anchorWidth: 0.1, anchorGap: 8)
+            popup.layoutIfNeeded()
+            var images: [CGImage] = []
+            for _ in 0..<40 {
+                let layers = popup.subviews.last?.layer.sublayers ?? []
+                images = stride(from: 0, to: layers.count, by: 2).compactMap {
+                    layers[$0].sublayers?.first?.contents
+                }.map { $0 as! CGImage }
+                if !images.isEmpty { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            print("POPUP_CAPTURE skin=\(skin) dark=\(dark) firstImageMs=\((CACurrentMediaTime() - began) * 1000)")
+            XCTAssertEqual(images.count, GeniePopupMotion.renderBandCount)
+            let format = UIGraphicsImageRendererFormat(); format.scale = window.screen.scale
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 344, height: 144), format: format)
+            let capture = renderer.image { _ in
+                var y: CGFloat = 0
+                for image in images {
+                    let height = CGFloat(image.height) / format.scale
+                    UIImage(cgImage: image, scale: format.scale, orientation: .up)
+                        .draw(in: CGRect(x: 0, y: y, width: 344, height: height))
+                    y += height
+                }
+            }
+            try await Task.sleep(for: .milliseconds(450))
+            let live = renderer.image { context in
+                context.cgContext.translateBy(x: 12, y: 12)
+                XCTAssertTrue(popup.host.view.drawHierarchy(in: popup.host.view.bounds, afterScreenUpdates: true))
+            }
+            for (name, image) in [("capture", capture), ("live", live)] {
+                let shot = XCTAttachment(image: image); shot.name = "bulb-\(skin.rawValue)-\(dark ? "dark" : "light")-\(name)"
+                shot.lifetime = .keepAlways; add(shot)
+            }
+            let a = try pixels(capture), b = try pixels(live)
+            let width = try XCTUnwrap(capture.cgImage).width
+            for (name, x) in [("bulb", 88), ("back", 144), ("close", 200)] {
+                var total = 0, samples = 0
+                for y in Int(56 * format.scale)..<Int(88 * format.scale) {
+                    for x in Int(CGFloat(x + 12) * format.scale)..<Int(CGFloat(x + 44) * format.scale) {
+                        for channel in 0..<3 {
+                            let i = (y * width + x) * 4 + channel
+                            total += abs(Int(a[i]) - Int(b[i])); samples += 1
+                        }
+                    }
+                }
+                let difference = Double(total) / Double(samples)
+                print("POPUP_MATERIAL skin=\(skin) dark=\(dark) control=\(name) meanDifference=\(difference)")
+                XCTAssertLessThan(difference, 3, "\(name) must not change material when the live popup takes over")
+            }
+        }
+    }
+
+    private func pixels(_ image: UIImage) throws -> [UInt8] {
+        let cg = try XCTUnwrap(image.cgImage)
+        var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        return bytes
     }
 }

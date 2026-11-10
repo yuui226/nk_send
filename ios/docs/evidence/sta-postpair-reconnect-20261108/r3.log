@@ -1,0 +1,22 @@
+Building for debugging...
+[1 / 5]
+[2 / 5] ProtocolTests-product
+[4 / 7] ProtocolTests-product
+[10 / 12] ProtocolTests-product
+Build complete! (2.30秒)
+Test Suite 'Selected tests' started at 2026-11-08 12:27:42.668.
+Test Suite 'ProtocolTests.xctest' started at 2026-11-08 12:27:42.669.
+Test Suite 'STABrowsingSessionTests' started at 2026-11-08 12:27:42.669.
+Test Case '-[ProtocolTests.STABrowsingSessionTests testLegacyVerificationRejectsMissingEmptyAndPairingOnlyDeviceInfo]' started.
+Test Case '-[ProtocolTests.STABrowsingSessionTests testLegacyVerificationRejectsMissingEmptyAndPairingOnlyDeviceInfo]' passed (0.012 seconds).
+Test Suite 'STABrowsingSessionTests' passed at 2026-11-08 12:27:42.681.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+Test Suite 'STAConnectionCoordinatorTests' started at 2026-11-08 12:27:42.681.
+Test Case '-[ProtocolTests.STAConnectionCoordinatorTests testSlowRejoinStillAllowsExactlyOneRealFrameFailureRecovery]' started.
+Test Case '-[ProtocolTests.STAConnectionCoordinatorTests testSlowRejoinStillAllowsExactlyOneRealFrameFailureRecovery]' passed (0.018 seconds).
+Test Suite 'STAConnectionCoordinatorTests' passed at 2026-11-08 12:27:42.700.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.018 (0.018) seconds
+Test Suite 'ProtocolTests.xctest' passed at 2026-11-08 12:27:42.700.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.031 (0.031) seconds
+Test Suite 'Selected tests' passed at 2026-11-08 12:27:42.700.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.031 (0.032) seconds

@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-30",
+  "previousTarget": "18145b3aa14be55b97b44c277a420816505f46f7",
+  "target": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "remote": "18145b3aa14be55b97b44c277a420816505f46f7",
+  "status": "",
+  "pull": "Already up to date.",
+  "commits": [
+    "dfd66a20c739342fafbd927659e815e2d499e5ea 建立 2.02（75）开发基准并整理列表与预览优化",
+    "16d38f33a9bf85a5753adec2a03e43d20c922aa1 修复关闭照片效果时入队仍携带效果参数"
+  ],
+  "files": {
+    "app/build.gradle.kts": "c1b692a757cafdee03004d18bee89b5126670d9b42372fa4a62055d72ff250fb",
+    "app/src/main/java/com/ztransfer/ui/screen/BurstStackImage.kt": "22d9f4d08903a3cfc78c3fb93298276645f3ec6ffc89e7f5854d7b1ca81fa403",
+    "app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt": "62f3153944d8e9ebe237fa1b1969f66fcaac4a55ece871801b5a5f398fa550f9",
+    "app/src/main/java/com/ztransfer/ui/screen/GenerationQueueRows.kt": "c05535cef6f5bc7b19d4a590ad85ca85a60e68add6afbca3ca8c008db22664cd",
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoPreview.kt": "9dc03b3559aa84ef187b9efac9dc67af63972d98bba93358b4ec1524e607e9e5",
+    "app/src/main/java/com/ztransfer/ui/screen/TransferQueueStatusCards.kt": "5999892c0962c3409f03230f6259371ea855c4f676538daed24208cfdb51dd50",
+    "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt": "66e20d3c9aab0c28e8e9605cc0c5f3f4f45385f40cf961d053fc2b8267a0a92c",
+    "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt": "1d984bc12933efae7d252f1c54c3418db3d5936a5766b315511287b3809c387e",
+    "app/src/main/res/values-b+zh+Hant/strings.xml": "0cb31036060f1cf6d2fe106de74f566f488e29dbbb16fbae3b54f3efb91d467a",
+    "app/src/main/res/values-zh/strings.xml": "b19ec55c12233542823911a45ca36bd21b95a134c57a8f869c1790d1b9649e7c",
+    "app/src/main/res/values/strings.xml": "ebef3f7de9cf309624b6bda166d54d6759cb742ddaeb30b5d6a8e8c126c29b10",
+    "app/src/test/java/com/ztransfer/ui/screen/GenerationQueueRowsTest.kt": "5945b2c84a292fdac2637b1bb3b8e11d8b800be9d58a3f45680a6928dea11fed",
+    "app/src/test/java/com/ztransfer/viewmodel/TransferStateTest.kt": "fd9dc57db713d8eb2c5b86a76fd5492c5305ab2bdab47e9112721e1a9ab6c2f6"
+  },
+  "note": "Includes the two local Android commits under standing authorization; no Android source changes or commits by this task."
+}

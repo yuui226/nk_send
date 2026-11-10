@@ -56,6 +56,20 @@ enum NEFExifThumbnail {
         return try? parser.read()
     }
 
+    /// ExifInterface 1.4.2's JPEG path reads only the APP1 TIFF payload and
+    /// calls setThumbnailData directly. It does NOT validate/promote/swap RAW
+    /// image dimensions or decode the advertised thumbnail JPEG.
+    static func readJPEG(_ data: Data) -> Data? {
+        guard let segment = STAMediaMetadata.jpegSegment(data, marker: 0xE1,
+                prefix: Data([69, 120, 105, 102, 0, 0])) else { return nil }
+        let tiff = data.subdata(in: (segment.lowerBound + 6)..<segment.upperBound)
+        guard tiff.count >= 8 else { return nil }
+        let little = tiff.starts(with: [73, 73])
+        guard little || tiff.starts(with: [77, 77]) else { return nil }
+        var parser = Parser(data: tiff, little: little)
+        return try? parser.read(jpeg: true)
+    }
+
     private struct Parser {
         let data: Data
         let little: Bool
@@ -122,11 +136,16 @@ enum NEFExifThumbnail {
             }
         }
 
-        mutating func read() throws -> Data? {
+        mutating func read(jpeg: Bool = false) throws -> Data? {
             guard try integer(2, 2) == 42 else { return nil }
             let first = try integer(4, 4)
             guard first >= 8 else { return nil }
             try directory(first, .primary)
+            if !jpeg { try validateImages() }
+            return try thumbnailBytes(allowDNG: !jpeg)
+        }
+
+        private mutating func validateImages() throws {
             var dimensions: [Group: (Int, Int)] = [:]
             for group in [Group.primary, .preview, .thumbnail] {
                 let attrs = groups[group.rawValue]
@@ -153,6 +172,9 @@ enum NEFExifThumbnail {
                let size = dimensions[.preview], size.0 <= 512, size.1 <= 512 {
                 groups[Group.thumbnail.rawValue] = groups[Group.preview.rawValue]
             }
+        }
+
+        private func thumbnailBytes(allowDNG: Bool) throws -> Data? {
             let thumbnail = groups[Group.thumbnail.rawValue]
             let compression = try scalar(thumbnail[259]) ?? 6
             if compression == 6 {
@@ -162,7 +184,7 @@ enum NEFExifThumbnail {
             }
             guard compression == 1 || compression == 7 else { return nil }
             let bits = try numbers(thumbnail[258])
-            let greyscale = try isDNG && bits == [8] && scalar(thumbnail[262]) == 1
+            let greyscale = try allowDNG && isDNG && bits == [8] && scalar(thumbnail[262]) == 1
             guard bits == [8, 8, 8] || greyscale else { return nil }
             let offsets = try numbers(thumbnail[273]), lengths = try numbers(thumbnail[279])
             guard !offsets.isEmpty, offsets.count == lengths.count else { return nil }

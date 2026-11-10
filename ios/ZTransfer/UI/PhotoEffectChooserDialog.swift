@@ -6,6 +6,9 @@ import UIKit
 struct PhotoEffectChooserDialog<Header: View, Content: View>: View {
     let categoryLabels: [String]
     let optionLabels: [String]
+    var maximumHeight: CGFloat = 440
+    var guidance: String? = nil
+    var hint: String? = nil
     let onDismiss: () -> Void
     @ViewBuilder let header: Header
     @ViewBuilder let content: (CGFloat) -> Content
@@ -14,15 +17,39 @@ struct PhotoEffectChooserDialog<Header: View, Content: View>: View {
     var body: some View {
         GeometryReader { proxy in
             let width = min(320, max(1, proxy.size.width - 48))
-            let innerWidth = width - 20
+            let innerWidth = max(1, width - 20)
+            let guidanceHeight = guidance.map {
+                ceil(PhotoEffectChooserMetrics.measureText($0, width: max(1, innerWidth - 8), font: .systemFont(ofSize: 12))) + 10
+            } ?? 0
             let listHeight = PhotoEffectChooserMetrics.listHeight(
                 categoryLabels: categoryLabels, optionLabels: optionLabels,
-                width: innerWidth, viewportHeight: proxy.size.height)
+                width: innerWidth, viewportHeight: proxy.size.height,
+                maximumHeight: maximumHeight, additionalHeaderHeight: guidanceHeight)
             ZStack {
                 DialogBackdrop(onDismiss: onDismiss)
-                VStack(spacing: 6) {
-                    header.frame(height: 32)
-                    if listHeight > 0 { content(innerWidth).frame(height: listHeight) }
+                VStack(spacing: 0) {
+                    if let hint {
+                        let naturalHeight = ceil(PhotoEffectChooserMetrics.measureText(hint,
+                            width: max(1, innerWidth - 12), font: .systemFont(ofSize: 14))) + 52
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                Text(hint).font(.system(size: 14)).foregroundStyle(ZTransferColors.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 6).padding(.vertical, 10)
+                                header.frame(height: 32)
+                            }
+                        }.frame(height: min(naturalHeight, max(120, min(maximumHeight, proxy.size.height - 120)) - 20))
+                    } else {
+                        header.frame(height: 32).padding(.bottom, listHeight > 0 || guidance != nil ? 6 : 0)
+                        if let guidance {
+                            Text(guidance).font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4).padding(.vertical, 5)
+                        }
+                        if listHeight > 0 { content(innerWidth).frame(height: listHeight) }
+                    }
                 }
                 .padding(10).frame(width: width)
                 .background(ZTransferColors.surface.opacity(0.92), in: RoundedRectangle(cornerRadius: 18))
@@ -42,8 +69,9 @@ enum PhotoEffectChooserMetrics {
     /// that first stretches the dialog and then shrinks it after a frame.
     static func listHeight(categoryLabels: [String], optionLabels: [String], width: CGFloat,
                            viewportHeight: CGFloat,
+                           maximumHeight: CGFloat = 440, additionalHeaderHeight: CGFloat = 0,
                            measure: (String, CGFloat, UIFont) -> CGFloat = measureText) -> CGFloat {
-        let available = max(0, min(max(viewportHeight - 120, 120), 440) - 58)
+        let available = max(0, min(max(viewportHeight - 120, 120), maximumHeight) - 58 - additionalHeaderHeight)
         let font = UIFont.systemFont(ofSize: 14, weight: .medium)
         func minimumHeight(_ count: Int, padding: CGFloat) -> CGFloat {
             CGFloat(count) * (ceil(font.lineHeight) + padding) + CGFloat(max(0, count - 1)) * 2

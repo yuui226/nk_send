@@ -19,9 +19,6 @@ final class PhotoListViewModel: ObservableObject {
         let key = ObjectIdentifier(session)
         if let existing = sessionModels[key] { return existing }
         let model = PhotoListViewModel(session: session, onTransportLost: onTransportLost)
-        if let source = session.recoveredFromSessionID, let previous = sessionModels[source] {
-            model.inheritCatalog(from: previous)
-        }
         sessionModels[key] = model
         return model
     }
@@ -41,18 +38,18 @@ final class PhotoListViewModel: ObservableObject {
     /// The complete session catalog is retained for transfer and event
     /// bookkeeping; this is the range-scoped catalog presented in the grid.
     @Published private(set) var displayedFiles: [CameraFile] = []
-    @Published private(set) var availableDayKeys: Set<String> = []
     @Published private(set) var burstGroups: [BurstPhotoGroup] = []
     @Published private(set) var burstIDByFile: [UInt32: String] = [:]
     @Published private(set) var exitingTransferredFileIDs: Set<UInt32> = []
     @Published private(set) var filter = PhotoFilterState()
     @Published private(set) var photoLoadingRange = PhotoFilterPersistence.loadPhotoLoadingRange()
+    private var appliedPhotoLoadingDays = PhotoFilterPersistence.loadPhotoLoadingRange().days
+    private var loadingRangeRevision = 0
     @Published private(set) var availableStorageSlots: [UInt32] = []
     /// Android derives these with `remember(presentedCameraFiles)`. Keep the
     /// same catalog-scoped cache here so opening Filter is a constant-time
     /// state change instead of a fresh walk over every camera file.
     private(set) var availableFilterExtensions: [String] = []
-    private(set) var latestKnownCaptureDay: String?
     /// Mirrors Android's `isLoadingFiles`/`hasCompletedFileScan` pair.  The
     /// view may receive several published batches before the scan completes.
     @Published private(set) var isLoadingFiles = false
@@ -68,9 +65,12 @@ final class PhotoListViewModel: ObservableObject {
     #endif
     let ratingProgress = PhotoRatingProgress()
     /// Newest actual shooting days whose ordered thumbnail batches crossed
-    /// the STA rating boundary.
-    @Published private(set) var recentThumbnailReadyDays = 0
-    private var allFiles: [CameraFile] = []
+    /// the shared rating boundary (USB/AP/STA).
+    // Scanner input, not list presentation. The rating controller publishes
+    // its own progress; completed batches must not redraw an inactive filter.
+    private(set) var recentThumbnailReadyDays = 0
+    private var catalog = PhotoFileCatalog()
+    private var allFiles: [CameraFile] { catalog.files }
     private var transferredIDs: Set<UInt32> = []
     private var storageIDsBySlot: [UInt32: Set<UInt32>] = [:]
     var availableFiles: [CameraFile] { allFiles }
@@ -81,6 +81,9 @@ final class PhotoListViewModel: ObservableObject {
     private let canFill: @Sendable () async -> Bool
     private let reconcileCache: @Sendable ([CameraFile], Bool) async -> Void
     private let invalidateThumbnailState: @Sendable ([CameraFile]) async -> Void
+    private let registerNewThumbnailObjects: @Sendable ([CameraFile]) async -> Void
+    private let blockedThumbnailRetryHandles: @Sendable () async -> Set<UInt32>
+    private let stopThumbnailRetries: @Sendable () async -> Void
     private(set) var thumbnailFillDiskBlocked = false
     private let setRemoteGate: @Sendable (Bool) async -> Void
     private let onTransportLost: (() -> Void)?
@@ -92,6 +95,7 @@ final class PhotoListViewModel: ObservableObject {
     private let ratingScanController: PhotoRatingScanController
     private var ratingScanObservation: AnyCancellable?
     private var catalogUpdatesTask: Task<Void, Never>?
+    private var thumbnailRetryTask: Task<Void, Never>?
     private var loadTask: Task<Void, Never>?
     private var fillTask: Task<Void, Never>?
     private var fillResumeTask: Task<Void, Never>?
@@ -108,34 +112,14 @@ final class PhotoListViewModel: ObservableObject {
     /// Queue retries may refer to files absent from the current photo list;
     /// index changes must publish even when transferredIDs stays unchanged.
     @Published private(set) var transferOriginalIndexRevision: UInt64 = 0
-    private var transferIndexGeneration = 0
     private var transferIndexDirectory: URL?
     private var transferIndexStorageMode: TransferStorageMode = .unified
-    private var diskOriginals = ExportedOriginalIndex()
-    private var queueOriginals = ExportedOriginalIndex()
+    private var originalStore = TransferOriginalStore()
+    private var originalObservation: Task<Void, Never>?
+    private var observedOriginalRevision: UInt64 = 0
     /// A cancelled/old scan must never publish over a newer camera session.
     private var loadGeneration = 0
     private var loadingRangeScanStopped = false
-    private var preserveInitialCatalog = false
-
-    /// Presentation data crosses recovery; tasks, transport closures and
-    /// rating controllers remain owned by the newly constructed model.
-    func inheritCatalog(from previous: PhotoListViewModel) {
-        guard sequentialLoading, previous.sequentialLoading, loadState == .idle else { return }
-        preserveInitialCatalog = true
-        allFiles = previous.allFiles
-        filter = previous.filter
-        photoLoadingRange = previous.photoLoadingRange
-        storageIDsBySlot = previous.storageIDsBySlot
-        availableStorageSlots = previous.availableStorageSlots
-        transferredIDs = previous.transferredIDs
-        diskOriginals = previous.diskOriginals
-        queueOriginals = previous.queueOriginals
-        publishSections()
-        isLoadingFiles = true
-        hasCompletedFileScan = false
-    }
-
     /// Matches Android's latestEffectPreviewFile: videos are never used as an
     /// effect demo, and ties are resolved by the camera handle.
     static func latestEffectPreviewFile(in files: [CameraFile]) -> CameraFile? {
@@ -154,7 +138,6 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     init(session: CameraSession, onTransportLost: (() -> Void)? = nil) {
-        preserveInitialCatalog = session.recoveredFromSessionID != nil
         sequentialLoading = session.wirelessMode == .sta
         thumbnailFillQueue = PhotoThumbnailFillQueue(sequential: session.wirelessMode == .sta)
         ratingScanController = PhotoRatingScanController(io: PhotoRatingScanIO(session: session))
@@ -208,6 +191,15 @@ final class PhotoListViewModel: ObservableObject {
         self.invalidateThumbnailState = { files in
             await session.invalidateThumbnailState(files: files)
         }
+        self.registerNewThumbnailObjects = { await session.registerNewThumbnailObjects($0) }
+        self.blockedThumbnailRetryHandles = { await session.blockedThumbnailRetryHandles() }
+        self.stopThumbnailRetries = { await session.stopThumbnailRetries() }
+        thumbnailRetryTask = Task { [weak self] in
+            for await _ in await session.thumbnailRetryWakes() {
+                guard !Task.isCancelled else { return }
+                await self?.thumbnailRetryBecameReady()
+            }
+        }
         catalogUpdatesTask = Task { [weak self] in
             let repository = session.repository
             for await files in await repository.catalogUpdates() {
@@ -239,6 +231,9 @@ final class PhotoListViewModel: ObservableObject {
         canFill: @escaping @Sendable () async -> Bool = { false },
         reconcileCache: @escaping @Sendable ([CameraFile], Bool) async -> Void = { _, _ in },
         invalidateThumbnailState: @escaping @Sendable ([CameraFile]) async -> Void = { _ in },
+        registerNewThumbnailObjects: @escaping @Sendable ([CameraFile]) async -> Void = { _ in },
+        blockedThumbnailRetryHandles: @escaping @Sendable () async -> Set<UInt32> = { [] },
+        stopThumbnailRetries: @escaping @Sendable () async -> Void = {},
         setRemoteGate: @escaping @Sendable (Bool) async -> Void,
         sequentialLoading: Bool = false,
         ratingIO: PhotoRatingScanIO = .noop,
@@ -253,6 +248,9 @@ final class PhotoListViewModel: ObservableObject {
         self.canFill = canFill
         self.reconcileCache = reconcileCache
         self.invalidateThumbnailState = invalidateThumbnailState
+        self.registerNewThumbnailObjects = registerNewThumbnailObjects
+        self.blockedThumbnailRetryHandles = blockedThumbnailRetryHandles
+        self.stopThumbnailRetries = stopThumbnailRetries
         self.setRemoteGate = setRemoteGate
         self.onTransportLost = onTransportLost
         ratingScanObservation = ratingScanController.$state.sink { [weak self] value in
@@ -265,8 +263,6 @@ final class PhotoListViewModel: ObservableObject {
         let oldByID = Dictionary(uniqueKeysWithValues: allFiles.map { ($0.id, $0) })
         let oldLogicalIDs = Set(allFiles.map(PublishedPhotoIdentity.init))
         let currentByID = Dictionary(uniqueKeysWithValues: files.map { ($0.id, $0) })
-        allFiles = files
-        publishSections()
         // A dual-card backup alias can replace a deleted primary handle
         // without representing new media. Android compares the published
         // logical identity here, so that replacement must not auto-transfer.
@@ -278,13 +274,22 @@ final class PhotoListViewModel: ObservableObject {
             return PublishedPhotoIdentity(old) != PublishedPhotoIdentity(current)
         }
         if !additions.isEmpty || !removals.isEmpty {
-            newMediaHandler?(additions.filter(Self.isAutoTransferMedia))
             await thumbnailFillQueue.remove(Set(removals.map(\.id)))
             await invalidateThumbnailState(removals)
             guard !Task.isCancelled, generation == loadGeneration else { return }
+            // Register before exposing rows or dispatching automatic transfer:
+            // either consumer may immediately request the first thumbnail.
+            await registerNewThumbnailObjects(additions)
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            catalog.replaceAll(files)
+            publishSections()
+            newMediaHandler?(additions.filter(Self.isAutoTransferMedia))
             await thumbnailFillQueue.enqueueNew(additions)
             guard !Task.isCancelled, generation == loadGeneration else { return }
             startThumbnailFillWorker()
+        } else {
+            catalog.replaceAll(files)
+            publishSections()
         }
     }
 
@@ -303,10 +308,12 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     deinit {
+        originalObservation?.cancel()
         loadTask?.cancel()
         fillTask?.cancel()
         fillResumeTask?.cancel()
         catalogUpdatesTask?.cancel()
+        thumbnailRetryTask?.cancel()
     }
 
     /// A retained offline catalog is presentation/cache only. The replacement
@@ -320,6 +327,9 @@ final class PhotoListViewModel: ObservableObject {
         fillTask?.cancel(); fillTask = nil
         fillResumeTask?.cancel(); fillResumeTask = nil
         catalogUpdatesTask?.cancel(); catalogUpdatesTask = nil
+        thumbnailRetryTask?.cancel(); thumbnailRetryTask = nil
+        let stopRetries = stopThumbnailRetries
+        Task { await stopRetries() }
         ratingScanController.cancel()
         newMediaHandler = nil
         isLoadingFiles = false
@@ -330,7 +340,7 @@ final class PhotoListViewModel: ObservableObject {
         // Share the same shutdown gate so retained view callbacks cannot wake
         // a removed session model while its replacement is already active.
         transportDidDisconnect()
-        transferIndexGeneration &+= 1
+        originalObservation?.cancel(); originalObservation = nil
         fillWorkerGeneration &+= 1
         fillWorkerActive = false
         displayedFiles.removeAll()
@@ -350,19 +360,17 @@ final class PhotoListViewModel: ObservableObject {
         fillWorkerActive = false
         loadGeneration &+= 1
         let generation = loadGeneration
-        let preserve = preserveInitialCatalog
-        preserveInitialCatalog = false
-        if !preserve {
-            allFiles.removeAll(keepingCapacity: true)
-            displayedFiles.removeAll(keepingCapacity: true)
-            sections.removeAll()
-        }
+        // A new connection always enumerates its own newest-first catalog.
+        // Only thumbnails may be reused after a current camera file is known.
+        catalog.clear()
+        displayedFiles.removeAll(keepingCapacity: true)
+        sections.removeAll()
         recentThumbnailReadyDays = 0
         hasCompletedFileScan = false
         isLoadingFiles = true
         loadState = .loading
         loadTask = Task { [weak self] in
-            await self?.reload(generation: generation, resumeSnapshot: nil, preserve: preserve)
+            await self?.reload(generation: generation, resumeSnapshot: nil, preserve: false)
         }
     }
 
@@ -411,7 +419,7 @@ final class PhotoListViewModel: ObservableObject {
             // not by whether a metadata row happened to reach the UI yet.
             let preserveExisting = preserve ?? (!allFiles.isEmpty || resumeSnapshot != nil)
             if !preserveExisting {
-                allFiles.removeAll(keepingCapacity: true)
+                catalog.clear()
                 sections.removeAll()
                 previewFiles.removeAll()
             }
@@ -428,7 +436,7 @@ final class PhotoListViewModel: ObservableObject {
             guard !Task.isCancelled, generation == loadGeneration else { return }
             // Repository returns the merged logical rows in stable display
             // order, including dual-card membership replacements.
-            allFiles = result.files
+            catalog.replaceAll(result.files)
             if sequentialLoading {
                 // A completed or range-bounded catalog is the authoritative
                 // shorter-range boundary, just like CameraViewModel's final
@@ -452,7 +460,7 @@ final class PhotoListViewModel: ObservableObject {
             await thumbnailFillQueue.seed(
                 allFiles,
                 priorityRange: filter.dateRange,
-                loadingRange: newestCaptureDaysRange(allFiles, days: photoLoadingRange.days)
+                loadingRange: catalog.loadingRange(days: photoLoadingRange.days)
             )
             guard !Task.isCancelled, generation == loadGeneration else { return }
             // Monitor return identifies new objects by the authoritative handle
@@ -473,8 +481,17 @@ final class PhotoListViewModel: ObservableObject {
             // also applies after this iOS-specific suspension boundary.
             guard !Task.isCancelled, generation == loadGeneration else { return }
             loadState = .loaded
-            isLoadingFiles = false
-            hasCompletedFileScan = true
+            // The scanner may have returned the old finite boundary while
+            // settings widened it. Do not advertise that as the new complete
+            // catalog before its saved cursor resumes (Android rating plan).
+            let needsRangeResume = result.loadingRangeAtStop.map {
+                $0.days > 0 && (photoLoadingRange.days == 0 || photoLoadingRange.days > $0.days)
+            } ?? false
+            hasCompletedFileScan = !needsRangeResume
+            isLoadingFiles = needsRangeResume
+            if needsRangeResume, let stoppedRange = result.loadingRangeAtStop {
+                recentThumbnailReadyDays = min(recentThumbnailReadyDays, stoppedRange.days)
+            }
             publishSections()
             updateRatingScanFromCurrentState()
             if !result.addedHandles.isEmpty {
@@ -487,9 +504,7 @@ final class PhotoListViewModel: ObservableObject {
             }
             // A setting change can occur inside the final batch callback,
             // before hasCompletedFileScan allows the settings path to resume.
-            if let stoppedRange = result.loadingRangeAtStop,
-               stoppedRange.days > 0,
-               photoLoadingRange.days == 0 || photoLoadingRange.days > stoppedRange.days {
+            if needsRangeResume {
                 let snapshot = await resumeSnapshotProvider()
                 guard !Task.isCancelled, generation == loadGeneration else { return }
                 loadGeneration &+= 1
@@ -528,10 +543,11 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
-    private func publishSections() {
+    private func publishSections(originalsSynchronized: Bool = false) {
+        if !originalsSynchronized { _ = synchronizeOriginals() }
         // A refreshed catalog may reuse a handle for another file. Resolve
         // current file identity against the indexes, never a stale handle set.
-        let loadingRange = newestCaptureDaysRange(allFiles, days: photoLoadingRange.days)
+        let loadingRange = catalog.loadingRange(days: photoLoadingRange.days)
         let scopedFiles = loadingRange == nil
             ? allFiles
             : allFiles.filter { file in
@@ -540,20 +556,10 @@ final class PhotoListViewModel: ObservableObject {
         if scopedFiles != displayedFiles {
             displayedFiles = scopedFiles
             var extensions = Set<String>()
-            var latestDay: String?
             for file in scopedFiles {
                 extensions.insert(file.fileExtension.lowercased())
-                if let day = validPhotoCaptureDay(file.captureDate), latestDay == nil || day > latestDay! {
-                    latestDay = day
-                }
             }
             availableFilterExtensions = extensions.sorted()
-            latestKnownCaptureDay = latestDay
-            let dayKeys = Set(scopedFiles.map { file in
-                guard let value = file.captureDate, value.count >= 8 else { return PhotoCatalogGrouping.unknownDay }
-                return String(value.prefix(8))
-            })
-            if availableDayKeys != dayKeys { availableDayKeys = dayKeys }
             let groups = PhotoCatalogGrouping.bursts(in: scopedFiles)
             if burstGroups != groups { burstGroups = groups }
             let ids = groups.reduce(into: [UInt32: String]()) { result, group in
@@ -570,7 +576,6 @@ final class PhotoListViewModel: ObservableObject {
             #endif
         }
         normalizeFilterExtensions()
-        transferredIDs = indexedTransferredIDs
         publishFilteredSections()
         updateRatingScanFromCurrentState()
     }
@@ -629,15 +634,29 @@ final class PhotoListViewModel: ObservableObject {
             storageIDsBySlot = photoStorageIDsBySlot(snapshot.filterStorageIDs)
             availableStorageSlots = storageIDsBySlot.keys.sorted()
         }
+        let newObjects = batch.filter {
+            snapshot?.addedHandles.contains($0.id) == true &&
+                !accumulator.publishedIDs.contains($0.id) &&
+                !accumulator.initialLogicalIDs.contains(PublishedPhotoIdentity($0))
+        }
+        if !newObjects.isEmpty {
+            await registerNewThumbnailObjects(newObjects)
+            try Task.checkCancellation()
+            guard generation == loadGeneration else { throw CancellationError() }
+            accumulator.newObjectIDs.formUnion(newObjects.map(\.id))
+            await thumbnailFillQueue.enqueueNew(newObjects)
+            try Task.checkCancellation()
+            guard generation == loadGeneration else { throw CancellationError() }
+        }
         var additions: [CameraFile] = []
         for file in batch {
             if accumulator.publishedIDs.insert(file.id).inserted {
-                allFiles.append(file)
+                catalog.upsert(file)
                 additions.append(file)
-            } else if let index = allFiles.firstIndex(where: { $0.id == file.id }) {
+            } else if catalog.file(for: file.id) != nil {
                 // Membership replacements refresh filters without requeueing
                 // a logical photo or fetching its thumbnail a second time.
-                allFiles[index] = file
+                catalog.upsert(file)
             }
         }
         publishSections()
@@ -655,13 +674,15 @@ final class PhotoListViewModel: ObservableObject {
                 let allowed = await canFill()
                 guard !transferBusy, !previewActive, !remoteActive, allowed else {
                     allCached = false
+                    batchSettled = false
                     break
                 }
             }
             // Range changes while waiting for the foreground channel must
             // also affect thumbnail admission, not just visible sections.
-            let thumbnailRange = newestCaptureDaysRange(allFiles, days: photoLoadingRange.days)
-            if let date = file.captureDate, let thumbnailRange, !thumbnailRange.contains(date) { continue }
+            let thumbnailRange = catalog.loadingRange(days: photoLoadingRange.days)
+            if !accumulator.newObjectIDs.contains(file.id),
+               let date = file.captureDate, let thumbnailRange, !thumbnailRange.contains(date) { continue }
             let result = await prefetchBatch([file])
             if result.diskWritesBlocked {
                 thumbnailFillDiskBlocked = true
@@ -685,7 +706,7 @@ final class PhotoListViewModel: ObservableObject {
     }
 
     private func updateRecentThumbnailReadyDays(completedBatch: [CameraFile], batchSettled: Bool) {
-        guard sequentialLoading, batchSettled, !completedBatch.isEmpty else { return }
+        guard batchSettled, !completedBatch.isEmpty else { return }
         let dates = PhotoRatingScanPolicy.dates(allFiles)
         guard !dates.isEmpty else { return }
         var ready = recentThumbnailReadyDays
@@ -697,7 +718,10 @@ final class PhotoListViewModel: ObservableObject {
                 ready = max(ready, index + 1)
             }
         }
-        recentThumbnailReadyDays = ready
+        if recentThumbnailReadyDays != ready {
+            recentThumbnailReadyDays = ready
+            updateRatingScanFromCurrentState()
+        }
     }
 
     private func nextScanBatchSize(generation: Int, accumulator: ScanAccumulator) async -> Int {
@@ -713,6 +737,7 @@ final class PhotoListViewModel: ObservableObject {
         var batchPolicy = CachedThumbnailBatchPolicy()
         var publishedIDs = Set<UInt32>()
         var initialLogicalIDs = Set<PublishedPhotoIdentity>()
+        var newObjectIDs = Set<UInt32>()
     }
 
     func cancelLoading() {
@@ -763,6 +788,14 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
+    /// Android criteriaForPersistence reads live state, not the popup's old
+    /// capture. A later STA edit must never revive protection after reset.
+    func filterForPersistence(_ requested: PhotoFilterState) -> PhotoFilterState {
+        var next = requested
+        if !protectionFilteringEnabled { next.protectedOnly = filter.protectedOnly }
+        return next
+    }
+
     func setFilter(_ requested: PhotoFilterState) {
         var filter = requested
         filter.ratingDays = PhotoFilterPersistence.normalizedRatingDays(filter.ratingDays)
@@ -776,7 +809,7 @@ final class PhotoListViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             await thumbnailFillQueue.updatePriorityRange(allFiles, range: filter.dateRange)
-            await thumbnailFillQueue.retryFailed()
+            await thumbnailFillQueue.retryFailed(excluding: blockedThumbnailRetryHandles())
             startThumbnailFillWorker()
         }
     }
@@ -790,27 +823,37 @@ final class PhotoListViewModel: ObservableObject {
         guard previous != range else { return }
         PhotoFilterPersistence.savePhotoLoadingRange(range)
         photoLoadingRange = range
-        publishSections()
-        updateRatingScanFromCurrentState()
-        let allowed = newestCaptureDaysRange(allFiles, days: range.days)
-        Task { [weak self] in
-            guard let self else { return }
-            await thumbnailFillQueue.updateLoadingRange(allFiles, range: allowed)
-            await thumbnailFillQueue.wake()
-            let widened = previous.days > 0 && (range.days == 0 || range.days > previous.days)
-            guard transportAvailable, widened, loadingRangeScanStopped, hasCompletedFileScan,
-                  self.scanCatalog != nil else { return }
+        loadingRangeRevision &+= 1
+        let rangeRevision = loadingRangeRevision
+        let widened = previous.days > 0 && (range.days == 0 || range.days > previous.days)
+        if transportAvailable, widened, loadingRangeScanStopped, hasCompletedFileScan, scanCatalog != nil {
+            // Close readiness synchronously, before rating evaluation can run.
+            // Snapshot acquisition may suspend; the old completed catalog must
+            // not become a fixed scan for the newly expanded scope.
             loadTask?.cancel()
             loadGeneration &+= 1
             let generation = loadGeneration
-            let snapshot = await resumeSnapshotProvider()
-            guard !Task.isCancelled, generation == loadGeneration else { return }
             loadState = .loading
             isLoadingFiles = true
             hasCompletedFileScan = false
+            recentThumbnailReadyDays = 0
             loadTask = Task { [weak self] in
-                await self?.reload(generation: generation, resumeSnapshot: snapshot, preserve: true)
+                guard let self else { return }
+                let snapshot = await resumeSnapshotProvider()
+                guard !Task.isCancelled, generation == loadGeneration, transportAvailable else { return }
+                await reload(generation: generation, resumeSnapshot: snapshot, preserve: true)
             }
+        }
+        publishSections()
+        updateRatingScanFromCurrentState()
+        let allowed = catalog.loadingRange(days: range.days)
+        Task { [weak self] in
+            guard let self, self.loadingRangeRevision == rangeRevision, transportAvailable else { return }
+            await thumbnailFillQueue.updateLoadingRange(allFiles, range: allowed)
+            await thumbnailFillQueue.wake()
+            guard self.loadingRangeRevision == rangeRevision, transportAvailable else { return }
+            appliedPhotoLoadingDays = range.days
+            updateRatingScanFromCurrentState()
         }
     }
 
@@ -829,7 +872,9 @@ final class PhotoListViewModel: ObservableObject {
             listLoading: isLoadingFiles,
             recentThumbnailReadyDays: recentThumbnailReadyDays,
             ratingDays: ratingDays,
-            photoLoadingDays: photoLoadingRange.days
+            photoLoadingDays: photoLoadingRange.days,
+            appliedPhotoLoadingDays: appliedPhotoLoadingDays,
+            hasCompletedFileScan: hasCompletedFileScan
         )
         ratingScanController.update(input, enabled: enabled && transportAvailable)
     }
@@ -932,47 +977,47 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
-    private func updateTransferredIDs(_ ids: Set<UInt32>) {
-        guard ids != transferredIDs else { return }
-        transferredIDs = ids
-        guard loadState == .loaded else { return }
-        publishSections()
-    }
-
-    /// recordExistingExport is an index insertion, never a replacement with
-    /// the queue's currently completed IDs. Keep originals after clear, retry
-    /// and derived-image failure, and reject late results from an old folder.
-    func recordTransferredOriginals(_ items: [TransferQueueItem]) {
-        guard let root = transferIndexDirectory else { return }
-        let previous = indexedTransferredIDs
-        if queueOriginals.record(items, root: root) {
-            transferOriginalIndexRevision &+= 1
-            let current = indexedTransferredIDs
-            exitingTransferredFileIDs.formUnion(newlyExitingTransferredFileIDs(
-                previous: previous,
-                current: current,
-                queueItems: items,
-                untransferredOnly: filter.untransferredOnly
-            ))
-            publishTransferredOriginals()
-        }
-    }
-
     func finishTransferredExit(_ fileID: UInt32) {
         guard exitingTransferredFileIDs.remove(fileID) != nil else { return }
         publishSections()
     }
 
-    private func publishTransferredOriginals() {
-        updateTransferredIDs(indexedTransferredIDs)
+    func useOriginalStore(_ store: TransferOriginalStore) {
+        if originalStore !== store {
+            originalObservation?.cancel(); originalObservation = nil
+            originalStore = store; observedOriginalRevision = 0
+        }
+        guard originalObservation == nil else { return }
+        originalObservation = Task { [weak self, store] in
+            for await _ in store.updates() {
+                guard !Task.isCancelled, let self, self.originalStore === store else { return }
+                self.originalStoreDidChange()
+            }
+        }
+    }
+
+    private func originalStoreDidChange() {
+        if synchronizeOriginals(), loadState == .loaded { publishSections(originalsSynchronized: true) }
+    }
+
+    @discardableResult private func synchronizeOriginals() -> Bool {
+        let snapshot = originalStore.membership(allFiles, root: transferIndexDirectory,
+            mode: transferIndexStorageMode, since: observedOriginalRevision)
+        let changed = snapshot.revision != observedOriginalRevision || snapshot.ids != transferredIDs
+        if filter.untransferredOnly {
+            exitingTransferredFileIDs.formUnion(snapshot.ids.subtracting(transferredIDs).intersection(snapshot.publishedIDs))
+        }
+        observedOriginalRevision = snapshot.revision
+        if snapshot.ids != transferredIDs { transferredIDs = snapshot.ids }
+        if changed { transferOriginalIndexRevision &+= 1 }
+        return changed
     }
 
     /// Queue retries use the task's captured destination folder, not today's
     /// storage preference. Reuse the current index without synchronous I/O.
     func hasTransferredOriginal(_ file: CameraFile, folderName: String?, directory: URL?) -> Bool {
         guard let directory, transferIndexDirectory == directory else { return false }
-        return diskOriginals.original(for: file, folderName: folderName) != nil ||
-            queueOriginals.original(for: file, folderName: folderName) != nil
+        return originalStore.original(for: file, folder: folderName, root: directory) != nil
     }
 
     /// FileListScreen admits a disconnected batch only when every source is
@@ -988,50 +1033,15 @@ final class PhotoListViewModel: ObservableObject {
         }
     }
 
-    private var indexedTransferredIDs: Set<UInt32> {
-        Set(allFiles.compactMap { file -> UInt32? in
-            let folder = transferStorageFolderName(file: file, mode: transferIndexStorageMode)
-            return diskOriginals.original(for: file, folderName: folder) != nil ||
-                queueOriginals.original(for: file, folderName: folder) != nil ? file.id : nil
-        })
-    }
-
     /// Android refreshes the exported-original index independently of the
     /// queue. This keeps the list's "untransferred" filter correct even when
     /// the app is reopened with an empty in-memory queue.
-    func refreshTransferredIDs(directory: URL?, storageMode: TransferStorageMode) {
-        transferIndexGeneration &+= 1
-        let generation = transferIndexGeneration
-        if transferIndexDirectory != directory {
-            diskOriginals = ExportedOriginalIndex()
-            queueOriginals = ExportedOriginalIndex()
-        }
+    func refreshTransferredIDs(directory: URL?, storageMode: TransferStorageMode, resetDirectoryIndex: Bool = false) {
         transferIndexDirectory = directory
         transferIndexStorageMode = storageMode
-        transferOriginalIndexRevision &+= 1
-        publishTransferredOriginals()
-        guard let directory else {
-            return
-        }
-        let indexTask = Task.detached(priority: .utility) {
-            var result = ExportedOriginalIndex()
-            guard FileManager.default.fileExists(atPath: directory.path) else { return result }
-            result.merge(TransferDirectoryIndex.scan(directory: directory), folderName: nil)
-            if let children = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) {
-                for child in children where transferStorageChildDirectory(child.lastPathComponent, mode: storageMode) {
-                    guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-                    result.merge(TransferDirectoryIndex.scan(directory: child), folderName: child.lastPathComponent)
-                }
-            }
-            return result
-        }
-        Task { [weak self] in
-            let index = await indexTask.value
-            guard let self, generation == self.transferIndexGeneration else { return }
-            self.diskOriginals = index
-            self.transferOriginalIndexRevision &+= 1
-            self.publishTransferredOriginals()
-        }
+        useOriginalStore(originalStore)
+        originalStore.refresh(directory: directory, mode: storageMode, reset: resetDirectoryIndex)
+        originalStoreDidChange()
     }
 
     /// Compatibility entry point for older callers/tests that only know the
@@ -1049,6 +1059,17 @@ final class PhotoListViewModel: ObservableObject {
             if !transferBusy && !previewActive && !remoteActive, await canFill() { return }
             try await Task.sleep(for: .milliseconds(50))
         }
+    }
+
+    private func thumbnailRetryBecameReady() async {
+        guard transportAvailable else { return }
+        // The current scan already owns ordered first reads. Leave one wake
+        // pending so its post-scan worker can promote anything due meanwhile.
+        await thumbnailFillQueue.wake()
+        guard !isLoadingFiles, loadState == .loaded else { return }
+        await thumbnailFillQueue.retryFailed(excluding: blockedThumbnailRetryHandles())
+        guard transportAvailable, !isLoadingFiles else { return }
+        startThumbnailFillWorker()
     }
 
     private func startThumbnailFillWorker() {
@@ -1072,14 +1093,14 @@ final class PhotoListViewModel: ObservableObject {
                     // Android promotes transient failures only after an external
                     // wake-up (network/session/foreground state), never in a
                     // hot loop. Keep the same retry boundary here.
-                    await thumbnailFillQueue.retryFailed()
+                    await thumbnailFillQueue.retryFailed(excluding: blockedThumbnailRetryHandles())
                     continue
                 }
                 let id = polled.id
                 // Android's queue resolves the current file when a task is
                 // consumed. Do not capture a one-time catalog snapshot here:
                 // ObjectAdded can enqueue a file after the worker starts.
-                guard let file = self.allFiles.first(where: { $0.id == id }) else {
+                guard let file = self.catalog.file(for: id) else {
                     continue
                 }
                 if sequentialLoading {

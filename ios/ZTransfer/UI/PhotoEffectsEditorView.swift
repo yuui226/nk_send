@@ -145,16 +145,11 @@ struct PhotoEffectsControls: View {
     @State private var watermarkExpanded = false
     let photoLUTEditor: PhotoLUTEditorState
     private var photoLUTStore: PhotoLUTStore { photoLUTEditor.store }
-    @Binding var filterChooser: PhotoFilterChooserState
+    let photoFilterSession: PhotoFilterEditorSession
+    let onFilterFavorite: (PhotoFilterSelection) -> Void
     var onWatermarkTextCommitted: (String) -> Void = { _ in }
     var onFavoriteImageMissing: () -> Void = {}
 
-    private var filterOptions: [String?] { [nil] + draft.orderedFilters.map(\.id) }
-    private func filterKey(_ id: String) -> String {
-        PhotoEffectsSettings.filterKey(id)
-    }
-    private func isFavoriteID(_ id: String) -> Bool { draft.favoriteFilterIDs.contains(filterKey(id)) }
-    private var selectedFilterID: String? { draft.photoFilterEnabled ? draft.selectedFilter?.preset.id : nil }
     private var visibleModules: Int { effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro) }
     private var showFrame: Bool { photoEffectModuleIsVisible(visibleModules, .frame) }
     private var showWatermark: Bool { photoEffectModuleIsVisible(visibleModules, .watermark) }
@@ -202,22 +197,18 @@ struct PhotoEffectsControls: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            if colorEditorVisibility.filter {
-                filterCard
-                    .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
+        VStack(spacing: 0) {
+            PhotoEffectModuleSection(visible: colorEditorVisibility.filter) {
+                PhotoNP3Chooser(session: photoFilterSession, draft: $draft, onFavorite: onFilterFavorite)
             }
-            if colorEditorVisibility.lut {
+            PhotoEffectModuleSection(visible: colorEditorVisibility.lut) {
                 PhotoLUTChooser(editor: photoLUTEditor, draft: $draft)
-                    .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
             }
-            if photoEffectModuleIsVisible(visibleModules, .grain) {
-                grainCard.transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
+            PhotoEffectModuleSection(visible: photoEffectModuleIsVisible(visibleModules, .grain)) {
+                grainCard
             }
             frameCard
         }
-        .animation(ZTransferMotion.inlineExpansion, value: colorEditorVisibility)
-        .animation(ZTransferMotion.inlineExpansion, value: visibleModules)
         .onChange(of: colorEditorVisibility) { visibility in
             // Cancel immediately when a module leaves, before its 240ms exit
             // transition disposes the retained content.
@@ -248,49 +239,6 @@ struct PhotoEffectsControls: View {
         .onChange(of: watermarkEnabled) { value in
             if !value { watermarkExpanded = false }
         }
-    }
-
-    private var filterCard: some View {
-            PhotoEffectsCard(accent: ZTransferColors.accentBlue) {
-                PhotoEffectControlRow(primaryWeight: 3, secondaryWeight: 2) {
-                    DetentWheel(label: AppLocalized.resource("photo_filter"), options: filterOptions, selected: selectedFilterID,
-                                optionLabel: { id in
-                                    guard let id, let preset = Np3FilterCatalog.preset(id: id) else { return AppLocalized.resource("photo_filter_off_option") }
-                                    return AppLocalized.resource("photo_filter_builtin_\(preset.legacyID)")
-                                },
-                                onCommit: { id in
-                                    if id != nil { photoLUTEditor.cancelPending() }
-                                    var value = draft
-                                    value.selectFilter(id)
-                                    draft = value
-                                }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height,
-                                onLongClick: { filterChooser.isPresented = true },
-                                favoriteOption: { id in id.map(isFavoriteID) ?? false },
-                                favoriteIconColor: ZTransferColors.accentOrange)
-                    .frame(maxWidth: .infinity)
-                    DetentWheel(label: AppLocalized.resource("photo_filter_intensity"), options: Array(stride(from: 100, through: 2, by: -2)),
-                                selected: draft.selectedFilter?.intensityPercent ?? 80,
-                                optionLabel: { "\($0)%" }, onCommit: { value in
-                                    guard let selected = draft.selectedFilter else { return }
-                                    var updated = draft
-                                    updated.filterIntensities[filterKey(selected.preset.id)] = value
-                                    updated.selectedFilter = .init(preset: selected.preset, intensityPercent: value)
-                                    draft = updated
-                                }, rowHeight: 18, wheelHeight: PhotoEffectControlMetrics.height, enabled: selectedFilterID != nil)
-                    .frame(maxWidth: .infinity)
-                    PhotoEffectFavoriteButton(
-                        favorite: selectedFilterID.map(isFavoriteID) == true,
-                        enabled: selectedFilterID != nil
-                    ) {
-                        guard let id = selectedFilterID else { return }
-                        var value = draft
-                        value.toggleFilterFavorite(id)
-                        draft = value
-                    }
-                }
-            }
-            .opacity(photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter) ? 1 : 0.45)
-            .disabled(!photoEffectModuleIsVisible(effectivePhotoEffectModules(draft.photoEffectModules, isPro: isPro), .filter))
     }
 
     private var grainCard: some View {
@@ -330,11 +278,22 @@ struct PhotoEffectsControls: View {
         }
     }
 
-    @ViewBuilder private var frameCard: some View {
-        if showFrame || showWatermark {
+    private var frameCard: some View {
+        PhotoEffectModuleSection(visible: showFrame || showWatermark, spacing: 0) {
             PhotoEffectsCard(accent: ZTransferColors.accentOrange) {
-                if showFrame { frameControls }
-                if showWatermark { watermarkControls }
+                VStack(spacing: 0) {
+                    PhotoEffectModuleSection(visible: showFrame, spacing: 0) {
+                        VStack(spacing: 8) { frameControls }
+                    }
+                    PhotoEffectModuleSection(visible: showWatermark, spacing: 0) {
+                        VStack(spacing: 0) {
+                            PhotoEffectModuleSection(visible: showFrame, spacing: 0) {
+                                Color.clear.frame(height: 8)
+                            }
+                            watermarkControls
+                        }
+                    }
+                }
             }
         }
     }
@@ -380,6 +339,7 @@ struct PhotoEffectsControls: View {
                             withAnimation(ZTransferMotion.inlineExpansion) { metadataExpanded.toggle() }
                         })
             .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("photo-frame-settings")
             PhotoEffectFavoriteButton(
                 favorite: frameEnabled && draft.favoriteFrameEffects.contains { $0.preset == draft.photoFramePreset },
                 enabled: frameEnabled,
@@ -482,6 +442,7 @@ struct PhotoEffectsControls: View {
                                 ZTransferHaptics.shared.play(.navigation)
                                 withAnimation(ZTransferMotion.inlineExpansion) { watermarkExpanded.toggle() }
                             })
+                .accessibilityIdentifier("photo-watermark-settings")
             }
             if watermarkExpanded && watermarkEnabled {
                 VStack(spacing: 8) {
@@ -624,9 +585,28 @@ struct PhotoEffectsPreviewFrame {
     let canvasKey: String
 }
 
-private struct PhotoEffectsPreviewFrameKey: Hashable {
-    let image: ObjectIdentifier
-    let canvas: String
+/// Shared waiting surface for camera effects and local workbench previews.
+struct PhotoEffectsLoadingIndicator: View {
+    var body: some View {
+        RemoteCameraToolLoading(diameter: 22, strokeWidth: 2,
+                                color: ZTransferColors.accentBlue.opacity(0.76))
+    }
+}
+
+/// SettingsScreen.PhotoEffectsPreviewLoadingPlaceholder: the source has not
+/// arrived yet. Rendering an existing source uses only the indicator above.
+private struct PhotoEffectsPreviewLoadingPlaceholder: View {
+    @StateObject private var clock = RemoteCameraToolLoop()
+    var body: some View {
+        let cycle = max(0, clock.milliseconds).truncatingRemainder(dividingBy: 1800)
+        let fraction = Float(cycle <= 900 ? cycle / 900 : (1800 - cycle) / 900)
+        let alpha = 0.28 + 0.34 * Double(ZTransferAndroidMotion.fastOutSlowIn(fraction))
+        ZStack {
+            RoundedRectangle(cornerRadius: 12).fill(ZTransferColors.surface.opacity(alpha))
+            PhotoEffectsLoadingIndicator()
+        }
+        .onAppear { clock.start() }.onDisappear { clock.stop() }
+    }
 }
 
 /// Matches Android's completed-frame transition: ordinary effect changes keep
@@ -638,6 +618,9 @@ struct PhotoEffectsAnimatedImage: View {
     let frame: PhotoEffectsPreviewFrame
     let requestedCanvasKey: String
     let showComparison: Bool
+    var source: UIImage? = nil
+    var sourceRotationQuarterTurns = 0
+    var onPresentedFrame: ((PhotoEffectsPreviewFrame?) -> Void)? = nil
     var cornerRadius: CGFloat = 0
     var restoreRevision = 0
     var failed = false
@@ -648,9 +631,9 @@ struct PhotoEffectsAnimatedImage: View {
     var visibilityStarted: ((Bool) -> Void)?
     #endif
 
-    @State private var visible: PhotoEffectsPreviewFrame
+    @State private var visible: PhotoEffectsPreviewFrame?
     @State private var outgoing: PhotoEffectsPreviewFrame?
-    @State private var incomingOpacity: CGFloat = 1
+    @State private var incomingOpacity: CGFloat = 0
     @State private var replacementOpacity: CGFloat = 1
     @State private var updates = ConflatedPreviewUpdates<Update>()
     private struct Update: Equatable {
@@ -678,7 +661,9 @@ struct PhotoEffectsAnimatedImage: View {
         showComparison: Bool,
         cornerRadius: CGFloat = 0,
         restoreRevision: Int = 0,
-        failed: Bool = false
+        failed: Bool = false,
+        source: UIImage? = nil, sourceRotationQuarterTurns: Int = 0,
+        onPresentedFrame: ((PhotoEffectsPreviewFrame?) -> Void)? = nil
     ) {
         self.frame = frame
         self.requestedCanvasKey = requestedCanvasKey
@@ -686,14 +671,11 @@ struct PhotoEffectsAnimatedImage: View {
         self.cornerRadius = cornerRadius
         self.restoreRevision = restoreRevision
         self.failed = failed
-        _visible = State(initialValue: frame)
-        // An old in-flight canvas cannot flash as the first frame after a
-        // remount; a failed replacement may deliberately reveal that last image.
-        _replacementOpacity = State(initialValue: frame.canvasKey == requestedCanvasKey || failed ? 1 : 0)
-    }
-
-    private var frameKey: PhotoEffectsPreviewFrameKey {
-        .init(image: ObjectIdentifier(frame.image), canvas: frame.canvasKey)
+        self.source = source; self.sourceRotationQuarterTurns = sourceRotationQuarterTurns
+        self.onPresentedFrame = onPresentedFrame
+        // Keep visibility at Android's initial 1. A stale first result is
+        // rejected by the planner, not by hiding the next accepted canvas and
+        // accidentally adding another 190ms fade after its initial 220ms fade.
     }
 
     private func currentValue(for stored: PhotoEffectsPreviewFrame) -> PhotoEffectsPreviewFrame {
@@ -714,10 +696,13 @@ struct PhotoEffectsAnimatedImage: View {
             if let outgoing {
                 layer(outgoing, opacity: replacementOpacity)
             }
-            layer(
-                visible,
-                opacity: replacementOpacity * (outgoing == nil ? 1 : incomingOpacity)
-            )
+            if let visible {
+                layer(visible, opacity: replacementOpacity * incomingOpacity)
+            } else if failed {
+                PhotoEffectsSourceImage(source: source ?? frame.image, quarterTurns: sourceRotationQuarterTurns)
+            } else {
+                PhotoEffectsLoadingIndicator()
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .onAppear {
@@ -728,8 +713,9 @@ struct PhotoEffectsAnimatedImage: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) {
                 outgoing = nil
-                incomingOpacity = 1
+                incomingOpacity = visible == nil ? 0 : 1
             }
+            onPresentedFrame?(visible.map(currentValue))
             enqueue(update)
         }
         .onChange(of: update) { value in
@@ -738,45 +724,61 @@ struct PhotoEffectsAnimatedImage: View {
             // rebuilding them from that captured self after a key-only change.
             enqueue(value)
         }
-        .onDisappear { updates.close() }
+        .onDisappear { updates.close(); onPresentedFrame?(nil) }
+    }
+
+    private func install(_ next: PhotoEffectsPreviewFrame) {
+        visible = next
+        onPresentedFrame?(next)
+    }
+
+    private func fadeInAcceptedFrame() async -> Bool {
+        #if DEBUG
+        await crossfadePrepared?()
+        #endif
+        do { try await ZTransferNextDisplayFrame.wait() } catch { return false }
+        guard !Task.isCancelled else { return false }
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) { incomingOpacity = 1 }
+        do { try await Task.sleep(for: .milliseconds(220)) } catch { return false }
+        return true
     }
 
     private func enqueue(_ value: Update) {
         updates.submit(value) { target, latest in
-            let next = target.frame
-            // Never install an old rotation/border result after a newer request.
-            if next.canvasKey == target.canvas {
-                if ObjectIdentifier(next.image) == ObjectIdentifier(visible.image) {
-                    visible = next
-                } else if next.canvasKey != visible.canvasKey {
+            let transition = planPhotoEffectsPreviewTransition(current: visible, next: target.frame,
+                requestedCanvas: latest().canvas, canvasOf: { $0.canvasKey },
+                sameImage: { $0.image === $1.image })
+            if let next = transition.frame {
+                switch transition.change {
+                case .initial:
+                    install(next); outgoing = nil; incomingOpacity = 0
+                    guard await fadeInAcceptedFrame() else { return }
+                case .update:
+                    install(next)
+                case .replaceCanvas:
                     withAnimation(.linear(duration: 0.11)) { replacementOpacity = 0 }
                     do { try await Task.sleep(for: .milliseconds(110)) } catch { return }
-                    if next.canvasKey == latest().canvas {
-                        outgoing = nil; visible = next; incomingOpacity = 1
-                    }
-                } else {
-                    outgoing = visible; visible = next; incomingOpacity = 0
-                    #if DEBUG
-                    await crossfadePrepared?()
-                    #endif
-                    await Task.yield()
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) { incomingOpacity = 1 }
-                    do { try await Task.sleep(for: .milliseconds(220)) } catch { return }
+                    outgoing = nil; install(next); incomingOpacity = 1
+                case .crossfade:
+                    outgoing = visible; install(next); incomingOpacity = 0
+                    guard await fadeInAcceptedFrame() else { return }
                     outgoing = nil
+                case .keep: break
                 }
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, let visible else { return }
             let current = latest()
-            let show = visible.canvasKey == current.canvas || current.failed
+            let show = photoEffectsPreviewCanvasVisible(displayedCanvas: visible.canvasKey,
+                requestedCanvas: current.canvas, failed: current.failed)
             guard replacementOpacity != (show ? 1 : 0) else { return }
-            if show { await Task.yield() }
+            if show {
+                do { try await ZTransferNextDisplayFrame.wait() } catch { return }
+            }
             guard !Task.isCancelled else { return }
             #if DEBUG
             visibilityStarted?(show)
             #endif
-            // Android's collector awaits both legs. A newer effect may replace
-            // the pending frame, but cannot interrupt this accepted canvas fade.
+            // Finish both accepted legs before consuming the newest pending frame.
             withAnimation(show ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.19) : .linear(duration: 0.11)) {
                 replacementOpacity = show ? 1 : 0
             }
@@ -861,13 +863,11 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var expandedSnapshot: PhotoEffectsExpandedPreviewSnapshot?
 
     let sourceName: String
-    let showSourceWhileRendering: Bool
     init(source: UIImage?, metadata: PhotoFrameMetadata?, settings: PhotoEffectsSettings,
          onRequest: @escaping () -> Void, initialRotationQuarterTurns: Int = 0,
-         showSourceWhileRendering: Bool = false, sourceName: String = "") {
+         sourceName: String = "") {
         self.source = source; self.metadata = metadata; self.settings = settings; self.onRequest = onRequest
         self.sourceName = sourceName
-        self.showSourceWhileRendering = showSourceWhileRendering
         _rotationQuarterTurns = State(initialValue: ((initialRotationQuarterTurns % 4) + 4) % 4)
     }
 
@@ -1026,7 +1026,6 @@ struct PhotoEffectsSettingsPreview: View {
         } catch {}
     }
 
-    private var expandedImage: UIImage? { rendered ?? source }
 
     var body: some View {
         Group {
@@ -1040,7 +1039,9 @@ struct PhotoEffectsSettingsPreview: View {
                     requestedCanvasKey: requestedCanvasKey,
                     showComparison: showUnfiltered,
                     cornerRadius: 12,
-                    restoreRevision: previewRestoreRevision, failed: previewFailed
+                    restoreRevision: previewRestoreRevision, failed: previewFailed,
+                    source: source, sourceRotationQuarterTurns: rotationQuarterTurns,
+                    onPresentedFrame: { geometry.presentedFrame = $0 }
                 )
                 .overlay(alignment: .bottom) {
                     if previewFailed { previewUnavailableBadge }
@@ -1049,21 +1050,16 @@ struct PhotoEffectsSettingsPreview: View {
                 PhotoEffectsSourceImage(source: source, quarterTurns: rotationQuarterTurns)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(alignment: .bottom) { previewUnavailableBadge }
-            } else if showSourceWhileRendering, let source {
-                PhotoEffectsSourceImage(source: source, quarterTurns: rotationQuarterTurns)
-            } else if source != nil {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(ZTransferColors.primaryText.opacity(0.045))
-                    .overlay { ProgressView().tint(ZTransferColors.secondaryText) }
+            } else if previewFailed {
+                previewUnavailableBadge.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Keep a real 4:3 preview surface while the connected list is
                 // still resolving its latest file. An EmptyView collapses the
                 // aspect-ratio proposal to zero, which prevents the fallback
                 // render task from ever producing a visible preview in the
                 // settings page.
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(ZTransferColors.primaryText.opacity(0.045))
-                    .overlay { ProgressView().tint(ZTransferColors.secondaryText) }
+                PhotoEffectsPreviewLoadingPlaceholder()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1097,14 +1093,14 @@ struct PhotoEffectsSettingsPreview: View {
         #endif
         .overlay { PhotoEffectsImageInput(comparing: $showUnfiltered, comparisonEnabled: unfiltered != nil,
             onTap: { _ in
-                guard let expandedImage else { return }
-                expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: expandedImage,
-                    initialComparison: unfiltered, anchor: geometry.previewAnchor)
+                guard let displayed = geometry.presentedFrame else { return }
+                expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: displayed.image,
+                    initialComparison: displayed.comparison, anchor: geometry.previewAnchor)
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { expanded = true }
             }, onDoubleTap: { _ in
-                guard !expanded else { return }
+                guard !expanded, geometry.presentedFrame != nil else { return }
                 rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
             }) }
         .fullScreenCover(isPresented: $expanded, onDismiss: { expandedSnapshot = nil }) {
@@ -1389,6 +1385,104 @@ private enum PhotoEffectsFallbackSource {
     }
 }
 
+/// Android PhotoLutEditor.PhotoColorEffectGroup: retain outgoing content,
+/// expand/shrink towards the top in 240ms, fade in/out in 200ms. Spacing
+/// belongs to the section so removing the last frame never drops a gap.
+struct PhotoEffectModuleSection<Content: View>: View {
+    let visible: Bool
+    let spacing: CGFloat
+    let content: Content
+    @State private var retained = RetainedPhotoEffectModule<Content>()
+    @State private var mounted: Bool
+    @State private var progress: CGFloat
+    @State private var opacity: Double
+
+    init(visible: Bool, spacing: CGFloat = 10, @ViewBuilder content: () -> Content) {
+        self.visible = visible
+        self.spacing = spacing
+        self.content = content()
+        _mounted = State(initialValue: visible)
+        _progress = State(initialValue: visible ? 1 : 0)
+        _opacity = State(initialValue: visible ? 1 : 0)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if mounted || visible, let displayed = retained.resolve(content, visible: visible) {
+                VStack(spacing: 0) { displayed }.padding(.bottom, spacing)
+                    .modifier(PhotoEffectModuleReveal(progress: progress, retainingHeight: !visible))
+                    .opacity(opacity)
+            }
+        }
+        .allowsHitTesting(visible)
+        .accessibilityHidden(!visible)
+        .onChange(of: visible) { value in
+            if value { mounted = true }
+            withAnimation(ZTransferMotion.inlineExpansion) { progress = value ? 1 : 0 }
+            withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)) { opacity = value ? 1 : 0 }
+        }
+        .task(id: visible) {
+            guard !visible, mounted else { return }
+            do { try await Task.sleep(for: .milliseconds(240)) } catch { return }
+            guard !Task.isCancelled else { return }
+            mounted = false
+            retained.clear()
+        }
+    }
+}
+
+/// A rendering snapshot, not an observable/business state. Like Android's
+/// retained composable, it records the last visible View value without
+/// publishing a second editor update. Clearing after exit releases its binds.
+private final class RetainedPhotoEffectModule<Content: View> {
+    private var content: Content?
+    func resolve(_ current: Content, visible: Bool) -> Content? {
+        if visible { content = current }
+        return content
+    }
+    func clear() { content = nil }
+}
+
+private struct PhotoEffectModuleReveal: AnimatableModifier {
+    var progress: CGFloat
+    let retainingHeight: Bool
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        PhotoEffectModuleRevealLayout(progress: progress, retainingHeight: retainingHeight) { content }
+            .clipped()
+            .transaction { $0.animation = nil }
+    }
+}
+
+/// Only the layout interpolates each frame. No geometry state is written
+/// back into the editor and no wheel is compressed into a shorter proposal.
+struct PhotoEffectModuleRevealLayout: Layout {
+    var progress: CGFloat
+    var retainingHeight = false
+    struct Cache { var fullSize: CGSize? }
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+    func updateCache(_ cache: inout Cache, subviews: Subviews) { }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let measured = subviews.first?.sizeThatFits(.init(width: proposal.width, height: nil)) ?? .zero
+        // An observed LUT editor cancels immediately when hidden. Its own
+        // expanded controls may disappear; that must not shorten this exit.
+        if !retainingHeight || cache.fullSize == nil || cache.fullSize?.width != measured.width {
+            cache.fullSize = measured
+        }
+        let fullSize = cache.fullSize ?? measured
+        return CGSize(width: fullSize.width, height: fullSize.height * min(1, max(0, progress)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading,
+                             proposal: .init(width: bounds.width, height: nil))
+    }
+}
+
 struct PhotoEffectsCard<Content: View>: View {
     let accent: Color
     @ViewBuilder let content: Content
@@ -1397,44 +1491,8 @@ struct PhotoEffectsCard<Content: View>: View {
             .padding(12)
             .background(ZTransferColors.primaryText.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
             .background(accent.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.24), lineWidth: 1))
-    }
-}
-
-/// Hosted above the page/popup, outside its ScrollView and clipping bounds.
-struct PhotoFilterChooserOverlay: View {
-    @Binding var draft: PhotoEffectsSettings
-    @Binding var state: PhotoFilterChooserState
-    var onFilterSelected: () -> Void = {}
-
-    private func label(_ preset: PhotoFilterPreset) -> String {
-        AppLocalized.resource("photo_filter_builtin_\(Np3FilterCatalog.preset(id: preset.id)?.legacyID ?? preset.id)")
-    }
-
-    var body: some View {
-        let items = state.items(in: draft)
-        let initialID = items.first { draft.photoFilterEnabled && draft.selectedFilter?.preset.id == $0.id }?.id ?? items.first?.id
-        PhotoEffectChooserDialog(categoryLabels: PhotoEffectFilterCategory.allCases.map(\.title),
-            optionLabels: items.map(label), onDismiss: { state.isPresented = false }) {
-            PhotoEffectChooserAction(label: AppLocalized.resource("photo_filter_turn_off"), selected: !draft.photoFilterEnabled) {
-                ZTransferHaptics.shared.play(.selection); state.select(nil, in: &draft)
-            }
-        } content: { width in
-            HStack(spacing: 6) {
-                PhotoEffectChooserList(items: PhotoEffectFilterCategory.allCases, id: \.id) { category in
-                    PhotoEffectChooserRow(label: category.title, selected: state.category == category, category: true) {
-                        state.category = category
-                    }
-                }.frame(width: max(0, width - 6) * 0.36)
-                PhotoEffectChooserList(items: items, id: \.id, initialID: initialID) { preset in
-                    PhotoEffectChooserRow(label: label(preset),
-                        selected: draft.photoFilterEnabled && draft.selectedFilter?.preset.id == preset.id,
-                        favorite: draft.favoriteFilterIDs.contains(PhotoEffectsSettings.filterKey(preset.id))) {
-                        ZTransferHaptics.shared.play(.selection); onFilterSelected(); state.select(preset.id, in: &draft)
-                    }
-                }.id(state.category)
-            }
-        }
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.24), lineWidth: 1)
+                .allowsHitTesting(false))
     }
 }
 

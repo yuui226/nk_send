@@ -1,0 +1,17 @@
+{
+  "commit": "a30422d0dcf1aa20e3c6bedc6aa9455c2832e1f0",
+  "pages_status": "built",
+  "pages_commit": "a30422d0dcf1aa20e3c6bedc6aa9455c2832e1f0",
+  "pages_updated_at": "2026-11-02T06:40:18Z",
+  "homepage_status": 200,
+  "matches_local": true,
+  "sha256": "58e35b7d591a9146efdfb54238317161691fabb6b1cc92108978a6f85896a1a4",
+  "headline": "原片到手，分享顺手。",
+  "changed_fields": [
+    "hero headline",
+    "page title",
+    "Open Graph title"
+  ],
+  "old_copy_removed": true,
+  "verification": "Targeted source diff and public HTTP byte comparison; no repeated layout test for equal-length copy replacement."
+}

@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "6YY8Y34949"
 fileGroups:
   - StoreKit
 schemes:
@@ -163,6 +163,8 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleDisplayName: Z传
+        # OS-provided authentication/digests only; see docs/隐私清单与数据流核查.md.
+        ITSAppUsesNonExemptEncryption: false
         ZTransferPrivacyPolicyURL: "https://www.ztransfer.top/ios/privacy/"
         ZTransferTermsOfUseURL: "https://www.ztransfer.top/ios/terms/"
         CADisableMinimumFrameDurationOnPhone: true
@@ -171,6 +173,7 @@ targets:
         NSLocationAlwaysAndWhenInUseUsageDescription: 用于在后台持续向相机写入拍摄位置
         UIBackgroundModes:
           - location
+          - bluetooth-central
         NSBluetoothAlwaysUsageDescription: 用于连接 Nikon GPS 设备
         NSCameraUsageDescription: 用于通过 USB 连接相机、浏览和传输照片并控制拍摄
         NSPhotoLibraryUsageDescription: 用于读取工作台照片
@@ -185,6 +188,8 @@ targets:
           - cormorant_garamond_medium_italic.ttf
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # User-approved portrait compatibility mode; see AppStore上架步骤与分工.md.
+        UIRequiresFullScreen: true
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
@@ -200,8 +205,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ztransfer.ios
-        MARKETING_VERSION: "1.98"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "2.05"
+        CURRENT_PROJECT_VERSION: "81"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Z传
@@ -281,6 +286,7 @@ targets:
     platform: iOS
     sources:
       - path: InteractionUITests
+      - path: PopupUITests/PremiumPurchaseUITests.swift
     dependencies:
       - target: ZTransfer
     settings:

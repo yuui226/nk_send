@@ -8,13 +8,11 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
     static let maxIdleInterval: TimeInterval = 90 * 24 * 60 * 60
 
     final class CameraStore: @unchecked Sendable {
-        fileprivate let root: URL
         fileprivate let directory: URL
         fileprivate let lock: NSLock
         fileprivate var index: Set<String>
 
-        fileprivate init(root: URL, directory: URL) {
-            self.root = root
+        fileprivate init(directory: URL) {
             self.directory = directory
             self.lock = NSLock()
             self.index = []
@@ -51,7 +49,7 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
 
         func target(_ name: String) -> URL { directory.appendingPathComponent(name, isDirectory: false) }
 
-        func find(_ name: String, legacyName: String? = nil, alternateName: String? = nil) -> URL? {
+        func find(_ name: String, alternateName: String? = nil) -> URL? {
             lock.lock(); defer { lock.unlock() }
             let fm = FileManager.default
             ensureDirectoryLocked()
@@ -61,11 +59,14 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             }
             index.remove(name)
             try? fm.removeItem(at: targetURL)
-            for candidate in [alternateName, legacyName].compactMap({ $0 }).filter({ $0 != name }) {
-                let source = candidate == alternateName ? target(candidate) : root.appendingPathComponent(candidate)
-                guard ((try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 else { continue }
+            // Only a previous key within this same body's directory has
+            // known ownership. Flat legacy entries must never be adopted.
+            if let candidate = alternateName, candidate != name {
+                let source = target(candidate)
+                guard ((try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 else { return nil }
                 do {
                     try fm.moveItem(at: source, to: targetURL)
+                    index.remove(candidate)
                     index.insert(name)
                     return targetURL
                 } catch {
@@ -191,7 +192,7 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
             if !directoryAlreadyExisted { existing.resetIndexAfterDirectoryRecreated() }
             return existing
         }
-        let store = CameraStore(root: root, directory: directory)
+        let store = CameraStore(directory: directory)
         stores[directory.lastPathComponent] = store
         return store
     }
@@ -226,8 +227,8 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
         for file in dirs where file.pathExtension.lowercased() == "tmp" {
             if (try? fm.removeItem(at: file)) != nil { removed += 1 }
         }
-        // Keep recent legacy flat files so a later camera lookup can migrate
-        // them lazily, matching Android's 90-day cleanup window.
+        // Unowned legacy files are never read into a camera cache. Retain the
+        // existing 90-day sweep for their eventual deletion.
         for file in dirs where file.pathExtension.lowercased() == "jpg" {
             let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
             if mtime < cutoff, (try? fm.removeItem(at: file)) != nil { removed += 1 }
@@ -239,13 +240,15 @@ final class PhotoThumbnailDiskCache: @unchecked Sendable {
         sha256("\(fileName)\u{0}\(size)\u{0}\(captureDate ?? "")") + ".jpg"
     }
 
-    static func staCacheFileName(handle: UInt32, size: UInt64) -> String {
-        sha256("sta\u{0}\(UInt64(handle))\u{0}\(size)") + ".jpg"
+    // Direct-STA display names can be refined, but the captured date is stable.
+    // A reused handle with the same byte size must not reuse an older photo.
+    static func staCacheFileName(handle: UInt32, size: UInt64, captureDate: String? = nil) -> String {
+        sha256("sta-v2\u{0}\(UInt64(handle))\u{0}\(size)\u{0}\(captureDate ?? "")") + ".jpg"
     }
 
     /// Android's quality-versioned key must never migrate EXIF-only JPG entries.
-    static func staJpegCacheFileName(handle: UInt32, size: UInt64) -> String {
-        sha256("sta-jpeg-640-v1\u{0}\(UInt64(handle))\u{0}\(size)") + ".jpg"
+    static func staJpegCacheFileName(handle: UInt32, size: UInt64, captureDate: String? = nil) -> String {
+        sha256("sta-jpeg-640-v2\u{0}\(UInt64(handle))\u{0}\(size)\u{0}\(captureDate ?? "")") + ".jpg"
     }
 
     static func legacyCacheFileName(fileName: String, size: UInt64, captureDate: String?) -> String {

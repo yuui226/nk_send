@@ -56,6 +56,10 @@ extension PhotoFrameMetadataSettings {
         showDate || showTime || showFocalLength || showExposure || showBrand || showModel ||
             showLensModel || showCoordinates || showAltitude
     }
+
+    /// Android PhotoFrameMetadataSettings.requiresCameraMetadata. Address is
+    /// disabled on both platforms; city/region still require the source GPS.
+    var requiresCameraMetadata: Bool { hasVisibleMetadata || showCity || showRegion }
 }
 
 enum CameraDownloadError: Error, Equatable, LocalizedError, Sendable {

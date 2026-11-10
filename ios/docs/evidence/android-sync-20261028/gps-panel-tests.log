@@ -1,0 +1,40 @@
+Test Suite 'Selected tests' started at 2026-10-28 19:10:01.016.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-28 19:10:01.017.
+Test Suite 'GPSPresentationPerformanceTests' started at 2026-10-28 19:10:01.017.
+Test Case '-[ZTransferTests.GPSPresentationPerformanceTests testActualCountdownTicksOnlyItsLeafAndSleepsWhenHiddenBackgroundedOrExpired]' started.
+2026-10-28 19:10:01.759079+0800 ZTransfer[59248:34343478] [connection] nw_socket_handle_socket_event [C1:1] Socket SO_ERROR [61: Connection refused]
+2026-10-28 19:10:01.759306+0800 ZTransfer[59248:34343478] [connection] nw_endpoint_flow_failed_with_error [C1 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+2026-10-28 19:10:03.752321+0800 ZTransfer[59248:34343489] [connection] [C1 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+2026-10-28 19:10:05.891030+0800 ZTransfer[59248:34343482] [connection] nw_socket_handle_socket_event [C3:1] Socket SO_ERROR [61: Connection refused]
+2026-10-28 19:10:05.891334+0800 ZTransfer[59248:34343482] [connection] nw_endpoint_flow_failed_with_error [C3 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+2026-10-28 19:10:07.899897+0800 ZTransfer[59248:34343482] [connection] [C3 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+Test Case '-[ZTransferTests.GPSPresentationPerformanceTests testActualCountdownTicksOnlyItsLeafAndSleepsWhenHiddenBackgroundedOrExpired]' passed (7.769 seconds).
+Test Case '-[ZTransferTests.GPSPresentationPerformanceTests testCountdownScheduleKeepsSecondCadenceAndFinalZeroFrame]' started.
+Test Case '-[ZTransferTests.GPSPresentationPerformanceTests testCountdownScheduleKeepsSecondCadenceAndFinalZeroFrame]' passed (0.001 seconds).
+Test Case '-[ZTransferTests.GPSPresentationPerformanceTests testEntryProjectionCoversEveryStatusAndLastSentTextReusesFormatting]' started.
+Test Case '-[ZTransferTests.GPSPresentationPerformanceTests testEntryProjectionCoversEveryStatusAndLastSentTextReusesFormatting]' passed (0.002 seconds).
+Test Suite 'GPSPresentationPerformanceTests' passed at 2026-10-28 19:10:08.792.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 7.773 (7.775) seconds
+Test Suite 'GPSProtocolTests' started at 2026-10-28 19:10:08.792.
+Test Case '-[ZTransferTests.GPSProtocolTests testGPSPanelActualHostRendersOffAndLiveSyncStates]' started.
+GPS_PANEL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/B3145DBA-14D2-405E-B097-7B3C5AC85227/tmp/gps-panel-sync/off.png
+GPS_PANEL_IMAGE /Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/B3145DBA-14D2-405E-B097-7B3C5AC85227/tmp/gps-panel-sync/ready.png
+Test Case '-[ZTransferTests.GPSProtocolTests testGPSPanelActualHostRendersOffAndLiveSyncStates]' passed (1.589 seconds).
+Test Suite 'GPSProtocolTests' passed at 2026-10-28 19:10:10.381.
+	 Executed 1 test, with 0 failures (0 unexpected) in 1.589 (1.589) seconds
+Test Suite 'ZTransferTests.xctest' passed at 2026-10-28 19:10:10.382.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 9.362 (9.365) seconds
+Test Suite 'Selected tests' passed at 2026-10-28 19:10:10.382.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 9.362 (9.366) seconds
+2026-10-28 19:10:10.425 xcodebuild[59029:34340966] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 19:10:10.429 xcodebuild[59029:34340966] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 19:10:10.749 xcodebuild[59029:34340966] [MT] IDETestOperationsObserverDebug: 31.785 elapsed -- Testing started completed.
+2026-10-28 19:10:10.749 xcodebuild[59029:34340966] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-28 19:10:10.749 xcodebuild[59029:34340966] [MT] IDETestOperationsObserverDebug: 31.785 sec, +31.785 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-sync-gps-panel-20261028.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

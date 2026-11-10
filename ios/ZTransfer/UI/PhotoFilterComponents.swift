@@ -40,7 +40,8 @@ struct PhotoRatingProgressChip: View {
                 .accessibilityLabel(AppLocalized.resource("filter_rating_enabled"))
                 .accessibilityIdentifier("photo-rating-toggle")
         }
-        .frame(width: 81, height: 34)
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
         .onChange(of: breathing) { if $0 { origin = Date() } }
     }
 }
@@ -95,8 +96,34 @@ struct FilterChip: View {
     }
 }
 
+/// Action-only filter controls use the shared press owner, including its 90ms
+/// visual hold for quick taps. Size belongs to the label so the material and
+/// hit region fill the whole button, not just the text's intrinsic bounds.
+struct PhotoFilterActionButton: View {
+    let title: String
+    var systemImage: String? = nil
+    var selected = false
+    var height: CGFloat = 34
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let systemImage { Image(systemName: systemImage).font(.system(size: 13, weight: .semibold)) }
+                Text(title).font(.system(size: 12, weight: selected ? .semibold : .medium))
+            }
+            .lineLimit(1)
+            .foregroundStyle(selected ? ZTransferColors.accentBlue : ZTransferColors.secondaryText)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+        }
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: height > 34 ? 11 : 10,
+            followsSkin: false, panel: true, active: selected, activeColor: ZTransferColors.accentBlue))
+    }
+}
+
 struct DateEndpointEditor: View {
-    let label: String
     @Binding var date: Date
     let years: [Int]
     private let dates = PhotoFilterDates()
@@ -106,27 +133,20 @@ struct DateEndpointEditor: View {
         let month = calendar.component(.month, from: date)
         let day = calendar.component(.day, from: date)
         let days = Array(1...calendar.range(of: .day, in: .month, for: date)!.count)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(label).zTransferText(size: ZTransferMetrics.caption, weight: .semibold)
-                Spacer(minLength: 0)
-                Text(dates.shortDate(date))
-                    .zTransferText(size: ZTransferMetrics.caption)
-                    .foregroundStyle(ZTransferColors.secondaryText)
+        // User refinement (2026-11-06): the wheels already show the full
+        // endpoint. Omit the duplicate date summary and its vertical spacing.
+        GeometryReader { geometry in
+            let available = max(0, geometry.size.width - 16)
+            let unit = available / 3.3
+            HStack(spacing: 8) {
+                DetentWheel(label: AppLocalized.resource("date_year"), options: years, selected: year, optionLabel: String.init, onCommit: { date = dates.clamped(year: $0, month: month, day: day) }, rowHeight: 18, wheelHeight: 50)
+                    .frame(width: unit * 1.3)
+                DetentWheel(label: AppLocalized.resource("date_month"), options: Array(1...12), selected: month, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = dates.clamped(year: year, month: $0, day: day) }, rowHeight: 18, wheelHeight: 50)
+                    .frame(width: unit)
+                DetentWheel(label: AppLocalized.resource("date_day"), options: days, selected: day, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = dates.clamped(year: year, month: month, day: $0) }, rowHeight: 18, wheelHeight: 50)
+                    .frame(width: unit)
             }
-            GeometryReader { geometry in
-                let available = max(0, geometry.size.width - 16)
-                let unit = available / 3.3
-                HStack(spacing: 8) {
-                    DetentWheel(label: AppLocalized.resource("date_year"), options: years, selected: year, optionLabel: String.init, onCommit: { date = dates.clamped(year: $0, month: month, day: day) }, rowHeight: 18, wheelHeight: 50)
-                        .frame(width: unit * 1.3)
-                    DetentWheel(label: AppLocalized.resource("date_month"), options: Array(1...12), selected: month, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = dates.clamped(year: year, month: $0, day: day) }, rowHeight: 18, wheelHeight: 50)
-                        .frame(width: unit)
-                    DetentWheel(label: AppLocalized.resource("date_day"), options: days, selected: day, optionLabel: { String(format: "%02d", $0) }, onCommit: { date = dates.clamped(year: year, month: month, day: $0) }, rowHeight: 18, wheelHeight: 50)
-                        .frame(width: unit)
-                }
-            }
-            .frame(height: 50)
         }
+        .frame(height: 50)
     }
 }

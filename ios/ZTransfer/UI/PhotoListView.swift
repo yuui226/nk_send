@@ -5,22 +5,6 @@ func normalizedThumbnailColumns(_ value: Int) -> Int {
     min(max(value, 2), 4)
 }
 
-/// A return target only counts as visible when every edge is inside the
-/// scrollable photo viewport. `intersects` is intentionally insufficient: a
-/// clipped first/last row still needs a small corrective scroll before the
-/// preview collapses into it.
-func photoFrameIsFullyVisible(_ frame: CGRect, in viewport: CGRect,
-                              tolerance: CGFloat = 0.5) -> Bool {
-    guard frame.width > 0, frame.height > 0,
-          viewport.width > 0, viewport.height > 0,
-          !frame.isNull, !frame.isInfinite,
-          !viewport.isNull, !viewport.isInfinite else { return false }
-    return frame.minX >= viewport.minX - tolerance &&
-        frame.maxX <= viewport.maxX + tolerance &&
-        frame.minY >= viewport.minY - tolerance &&
-        frame.maxY <= viewport.maxY + tolerance
-}
-
 @preconcurrency
 private struct PhotoListTopControlsTransition: AnimatableModifier {
     var progress: CGFloat
@@ -149,31 +133,61 @@ private struct PhotoTransferExit: ViewModifier {
     }
 }
 
-private struct PhotoCellReveal: ViewModifier {
+struct PhotoCellReveal: ViewModifier {
     let active: Bool
     let trigger: Int
     let delay: UInt64
     @State private var progress: CGFloat = 1
+    @State private var startedTrigger: Int?
 
     func body(content: Content) -> some View {
+        // Android initializes revealProgress at zero before composing the cell.
+        // A task runs after SwiftUI's first body: resetting from one inside it
+        // showed a fully visible frame before the entrance could begin.
+        let visibleProgress = active ? (startedTrigger == trigger ? progress : 0) : 1
         content
-            .opacity(active ? progress : 1)
-            .scaleEffect(active ? 0.94 + 0.06 * progress : 1)
+            .opacity(visibleProgress)
+            .scaleEffect(0.94 + 0.06 * visibleProgress)
             .task(id: "\(trigger)|\(active)") {
-                guard active else { progress = 1; return }
+                guard active else { startedTrigger = nil; progress = 1; return }
                 let transaction = Transaction(animation: nil)
-                withTransaction(transaction) { progress = 0 }
-                try? await Task.sleep(nanoseconds: delay)
-                guard !Task.isCancelled else { return }
+                withTransaction(transaction) { startedTrigger = trigger; progress = 0 }
+                do {
+                    // Especially for the first cell (zero stagger), a Task yield
+                    // can merge both endpoints into one transaction and flash in.
+                    if delay > 0 { try await Task.sleep(nanoseconds: delay) }
+                    else { try await ZTransferNextDisplayFrame.wait() }
+                    try Task.checkCancellation()
+                } catch { return }
                 withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.22)) { progress = 1 }
             }
     }
 }
 
-private struct PhotoDateGridHeightPreferenceKey: PreferenceKey {
-    static let defaultValue: [String: CGFloat] = [:]
-    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+/// Android collapseHeight belongs to each cell, including its bottom gap.
+/// Rows move together as their actual heights shrink; clipping a whole grid
+/// only hides stationary rows and leaves a discontinuity at disposal.
+struct PhotoDateCellCollapseLayout: Layout {
+    var progress: CGFloat
+    var animatableData: CGFloat { get { progress } set { progress = newValue } }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let size = subviews.first?.sizeThatFits(.init(width: proposal.width, height: nil)) ?? .zero
+        return CGSize(width: size.width, height: size.height * min(1, max(0, progress)))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading,
+                             proposal: .init(width: bounds.width, height: nil))
+    }
+}
+
+struct PhotoDateCellCollapse: ViewModifier {
+    var progress: CGFloat
+    func body(content: Content) -> some View {
+        PhotoDateCellCollapseLayout(progress: progress) {
+            content.padding(.bottom, 6)
+        }
+        .opacity(min(1, max(0, progress)))
+        .clipped()
     }
 }
 
@@ -297,7 +311,7 @@ private struct PhotoListSessionTaskID: Equatable {
     private var transferSession: CameraSession? { isSessionConnected ? session : nil }
     @AppStorage("tap_to_preview") private var tapToPreview = false
     @State private var selectedFile: CameraFile?
-    @State private var previewAnchor: CGRect?
+    @State private var previewAnchor: PhotoPreviewAnchorBounds?
     @State private var previewExpandedBurstIDs: Set<String> = []
     @Environment(\.displayScale) private var displayScale
     @State private var remoteEntryAtTop = true
@@ -307,6 +321,15 @@ private struct PhotoListSessionTaskID: Equatable {
             legacyByDate: UserDefaults.standard.bool(forKey: TransferStorageMode.legacyByDateKey)
         )
     }
+    @AppStorage(TransferSaveDestination.persistenceKey) private var saveDestinationRaw = TransferSaveDestination.photoLibrary.rawValue
+    private var saveDestination: TransferSaveDestination {
+        TransferSaveDestination(rawValue: saveDestinationRaw) ?? .photoLibrary
+    }
+    /// Album mode ignores the folder wheels. Photos groups by capture date itself.
+    private var effectiveStorageMode: TransferStorageMode {
+        saveDestination == .photoLibrary ? .unified : storageMode
+    }
+    private var indexedTransferDirectory: URL? { saveDestination.transferRoot(userDirectory: directoryStore.directoryURL) }
     @State private var photoListScrollProxy: ScrollViewProxy?
     @State private var previewReturnFileID: UInt32?
     @State private var previewReturnNonce = 0
@@ -328,6 +351,7 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var collapsedDays: Set<String> = []
     @State private var presentedSections: [PhotoDaySection] = []
     @State private var gridCache = PhotoListGridCache()
+    @State private var thumbnailEntrance = PhotoThumbnailBatchEntrance()
     @State private var previewProjection = PhotoPreviewProjectionCache()
     @State private var presentedCameraFiles: [CameraFile] = []
     @State private var cameraRemovalAffectedDays: Set<String> = []
@@ -335,7 +359,6 @@ private struct PhotoListSessionTaskID: Equatable {
     @State private var collapsingDay: String?
     @State private var collapsingDayKeepCount = 0
     @State private var dateCollapseProgress: CGFloat = 1
-    @State private var dateGridHeights: [String: CGFloat] = [:]
     @State private var dateAnimationTask: Task<Void, Never>?
     @State private var recentlyExpandedDay: String?
     @State private var revealTick = 0
@@ -432,7 +455,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                   controlActionNonce: queueControlActionNonce,
                                   hasIndexedOriginal: { item in
                                       model.hasTransferredOriginal(item.file, folderName: item.destinationFolderName,
-                                                                   directory: directoryStore.directoryURL)
+                                                                   directory: indexedTransferDirectory)
                                   },
                                   onNavigateBack: dismissQueuePage)
                 .modifier(WorkspacePageEffect(frame: queueWorkspace.destination))
@@ -475,7 +498,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                 let displayedEntries = collapsingThis
                                     ? Array(allEntries.prefix(collapsingDayKeepCount))
                                     : allEntries
-                                VStack(alignment: .leading, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 0) {
                                 HStack(spacing: 8) {
                                 Button {
                                     toggleDateSection(section, entries: allEntries)
@@ -492,6 +515,8 @@ private struct PhotoListSessionTaskID: Equatable {
                                             .rotationEffect(.degrees(
                                                 collapsedDays.contains(section.day) || collapsingThis ? 0 : 180
                                             ))
+                                            .animation(.interpolatingSpring(mass: 1, stiffness: 1500, damping: 77.459667),
+                                                       value: collapsedDays.contains(section.day) || collapsingThis)
                                         Text("\(section.files.count)")
                                             .zTransferText(size: ZTransferMetrics.caption)
                                             .foregroundStyle(ZTransferColors.secondaryText)
@@ -504,6 +529,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                     .frame(height: 28)
                                 }
                                 .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
+                                .accessibilityIdentifier("photo-date-\(section.day)")
                                 Spacer(minLength: 0)
                                 Button {
                                     enqueueSection(section.files, source: scrollGeometry.sectionEnqueueBounds[section.day])
@@ -529,8 +555,12 @@ private struct PhotoListSessionTaskID: Equatable {
                                             value: ["header_\(section.day)": proxy.frame(in: .global)])
                                     }
                                 }
+                                // Android keeps this in the header even when
+                                // closed; removing it at collapse completion
+                                // made the following group jump by 10pt.
+                                .padding(.bottom, 10)
                                 if !collapsedDays.contains(section.day) || collapsingThis {
-                                    LazyVGrid(columns: columns, spacing: 6) {
+                                    LazyVGrid(columns: columns, spacing: 0) {
                                         ForEach(Array(displayedEntries.enumerated()), id: \.element.id) { cellIndex, entry in
                                         let file = entry.firstFile
                                         let transferExiting = entry.isPhoto &&
@@ -541,6 +571,8 @@ private struct PhotoListSessionTaskID: Equatable {
                                             if case let .burst(group) = entry {
                                                 BurstThumbnailView(session: session, group: group,
                                                                    allowRemoteThumbnails: isSessionConnected && selectedFile == nil,
+                                                                   loadEnabled: !collapsingThis,
+                                                                   transfersBusy: queueModel.snapshot.isTransferring,
                                                                    transferred: group.files.allSatisfy { model.transferredFileIDs.contains($0.id) },
                                                                    expanded: expandedBurstIDs.contains(group.id),
                                                                    onExpand: { toggleBurst(group.id) },
@@ -555,6 +587,8 @@ private struct PhotoListSessionTaskID: Equatable {
                                             } else {
                                             CameraThumbnailView(session: session, file: file,
                                                                     allowRemoteThumbnail: isSessionConnected && selectedFile == nil,
+                                                                    loadEnabled: !collapsingThis,
+                                                                    transfersBusy: queueModel.snapshot.isTransferring,
                                                                     transferred: model.transferredFileIDs.contains(file.id),
                                                                     inBurst: model.burstIDByFile[file.id] != nil,
                                                                     queueTask: queueModel.task(for: file.id),
@@ -562,6 +596,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                                 .accessibilityIdentifier("photo-cell-\(file.id)")
                                             }
                                         }
+                                        .modifier(PhotoThumbnailBatchOpacity(entrance: thumbnailEntrance))
                                         // The grid proposes a width but may let a
                                         // child determine the row height. Lock the
                                         // cell itself to a square before gestures
@@ -590,7 +625,9 @@ private struct PhotoListSessionTaskID: Equatable {
                                         .modifier(PhotoCellReveal(
                                             active: recentlyExpandedDay == section.day || filterRevealWindow,
                                             trigger: revealTick,
-                                            delay: UInt64(min(cellIndex, 18)) * 15_000_000
+                                            delay: recentlyExpandedDay == section.day
+                                                ? UInt64(min(cellIndex / columns.count, 4)) * 18_000_000
+                                                : UInt64(min(cellIndex, 18)) * 15_000_000
                                         ))
                                         .transition(photoGridCellTransition(
                                             burstMember: activeBurstMember,
@@ -607,25 +644,9 @@ private struct PhotoListSessionTaskID: Equatable {
                                                 handleLongPress(entry, file: file)
                                             }
                                         ))
-
+                                        .modifier(PhotoDateCellCollapse(progress: collapsingThis ? dateCollapseProgress : 1))
                                     }
                                 }
-                                .background {
-                                    GeometryReader { proxy in
-                                        Color.clear.preference(
-                                            key: PhotoDateGridHeightPreferenceKey.self,
-                                            value: [section.day: proxy.size.height]
-                                        )
-                                    }
-                                }
-                                .frame(
-                                    height: collapsingThis
-                                        ? max(0, (dateGridHeights[section.day] ?? 0) * dateCollapseProgress)
-                                        : nil,
-                                    alignment: .top
-                                )
-                                .opacity(collapsingThis ? dateCollapseProgress : 1)
-                                .clipped()
                                 }
                                 }
                                 .transaction { transaction in
@@ -654,7 +675,10 @@ private struct PhotoListSessionTaskID: Equatable {
                             case .loaded:
                                 PhotoListRatingEmptyState(progress: model.ratingProgress, filter: model.filter,
                                                           protectionAvailable: model.protectionFilteringEnabled,
-                                                          onClearFilter: model.clearFilter)
+                                                          onClearFilter: {
+                                                              showingFilter = false
+                                                              model.clearFilter()
+                                                          })
                                     .frame(maxWidth: .infinity)
                                     .padding(.top, 150)
                             }
@@ -701,9 +725,6 @@ private struct PhotoListSessionTaskID: Equatable {
                 }
                 .onPreferenceChange(PhotoListSectionEnqueueBoundsPreferenceKey.self) { bounds in
                     scrollGeometry.sectionEnqueueBounds = bounds
-                }
-                .onPreferenceChange(PhotoDateGridHeightPreferenceKey.self) { heights in
-                    for (day, height) in heights where height > 0 && dateGridHeights[day] != height { dateGridHeights[day] = height }
                 }
                 .onPreferenceChange(PhotoListScrollOffsetKey.self) { value in
                     scrollGeometry.photoListScrollOffset = value
@@ -804,26 +825,42 @@ private struct PhotoListSessionTaskID: Equatable {
             if effectPreviewRequested { requestEffectPreview() }
         }
         .task(id: PhotoListSessionTaskID(session: session.map(ObjectIdentifier.init), value: isSessionConnected)) {
+            model.useOriginalStore(queueModel.originalStore)
+            refreshTransferIndex()
             if showingRemote { showingQueue = false }
             if presentedSections.isEmpty {
                 presentedSections = model.sections
                 presentedCameraFiles = model.displayedFiles
             }
-            queueModel.attach(session: transferSession, directory: directoryStore.directoryURL)
+            queueModel.attach(session: transferSession, directory: indexedTransferDirectory)
             guard isSessionConnected else {
                 model.transportDidDisconnect()
                 return
             }
             await session?.setPreferHighThroughputTransfers(!showingRemote)
             model.setNewMediaHandler { files in
-                guard let directory = directoryStore.directoryURL else { return }
                 // Read at the new-file event, not when the page first appeared.
                 // Changing the wheel does not rescan or replay rejected files.
                 let mode = AutoTransferMode.load()
                 let deferStart = UserDefaults.standard.bool(forKey: "defer_transfer_start")
-                queueModel.enqueueAutomatic(files, mode: mode, session: transferSession, directory: directory,
-                                            autoStart: !deferStart, storageMode: storageMode,
-                                            effects: effectsStore.settings)
+                let destination = TransferSaveDestination.load()
+                let storage = destination == .photoLibrary ? TransferStorageMode.unified : TransferStorageMode.load()
+                Task { @MainActor in
+                    let directory: URL?
+                    if destination == .photoLibrary, !deferStart {
+                        guard await PhotoLibraryTransferAccess.requestFullAccess() == .full else {
+                            self.showPhotoAccessHint()
+                            return
+                        }
+                        directory = PhotoLibraryTransferStaging.url
+                    } else {
+                        directory = destination.transferRoot(userDirectory: self.directoryStore.directoryURL)
+                    }
+                    guard let directory else { return }
+                    self.queueModel.enqueueAutomatic(files, mode: mode, session: self.transferSession, directory: directory,
+                                                     autoStart: !deferStart, storageMode: storage,
+                                                     effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+                }
             }
             model.load()
         }
@@ -856,11 +893,22 @@ private struct PhotoListSessionTaskID: Equatable {
         }
         .onDisappear {
             cancelListQueueFlights()
+            thumbnailEntrance.update(hasItems: false)
             signalAttention.stop()
             admissionHint.stop()
             cameraRemovalTask?.cancel()
             dateAnimationTask?.cancel()
+            // A hidden workspace can retain its state. Cancellation must not
+            // leave it stuck in a half-collapsed grid when the user returns.
+            if let day = collapsingDay {
+                collapsedDays.insert(day)
+                collapsingDay = nil
+                collapsingDayKeepCount = 0
+                dateCollapseProgress = 1
+            }
             revealWindowTask?.cancel()
+            recentlyExpandedDay = nil
+            filterRevealWindow = false
             burstAnimationTask?.cancel()
             Task { await session?.setPreferHighThroughputTransfers(false) }
         }
@@ -876,13 +924,19 @@ private struct PhotoListSessionTaskID: Equatable {
             if !enabled { expandedBurstIDs.removeAll() }
         }
         .onChange(of: model.sections) { updatePresentedSections($0) }
+        .onAppear { thumbnailEntrance.update(hasItems: !presentedSections.isEmpty) }
+        .onChange(of: presentedSections.isEmpty) { thumbnailEntrance.update(hasItems: !$0) }
         .onChange(of: model.displayedFiles) { files in
             presentedCameraFiles = files
-        }
-        .onChange(of: model.availableDayKeys) { valid in
             // Filters can temporarily hide complete date groups. Only an
             // authoritative catalog change may retire a remembered choice.
-            collapsedDays = collapsedDays.intersection(valid)
+            guard !collapsedDays.isEmpty else { return }
+            let valid = Set(files.map { file in
+                guard let value = file.captureDate, value.count >= 8 else { return PhotoCatalogGrouping.unknownDay }
+                return String(value.prefix(8))
+            })
+            let retained = collapsedDays.intersection(valid)
+            if retained != collapsedDays { collapsedDays = retained }
         }
         .onChange(of: model.burstGroups) { current in
             expandedBurstIDs = reconciledExpandedBurstIDs(previousGroups: previousBurstGroups,
@@ -907,17 +961,19 @@ private struct PhotoListSessionTaskID: Equatable {
             // Android retains this demand when Settings opens before the
             // first metadata batch and retries when a candidate appears.
             if effectPreviewRequested { requestEffectPreview() }
-            model.refreshTransferredIDs(directory: directoryStore.directoryURL, storageMode: storageMode)
+            refreshTransferIndex()
         }
-        .onChange(of: directoryStore.directoryURL) { directory in
+        .onReceive(directoryStore.selectionChanges) { directory in
+            guard saveDestination == .folder else { return }
             queueModel.attach(session: transferSession, directory: directory)
-            model.refreshTransferredIDs(directory: directory, storageMode: storageMode)
+            refreshTransferIndex(reset: true)
         }
         .onChange(of: storageModeRaw) { _ in
-            model.refreshTransferredIDs(directory: directoryStore.directoryURL, storageMode: storageMode)
+            refreshTransferIndex()
         }
-        .onChange(of: queueModel.snapshot.items) { items in
-            model.recordTransferredOriginals(items)
+        .onChange(of: saveDestinationRaw) { _ in
+            queueModel.attach(session: transferSession, directory: indexedTransferDirectory)
+            refreshTransferIndex(reset: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: FreeUsageStore.changed)) { notification in
             guard let left = notification.userInfo?["threshold"] as? Int else { return }
@@ -1000,10 +1056,10 @@ private struct PhotoListSessionTaskID: Equatable {
                         : model.availableFilterExtensions,
                     availableStorageSlots: model.availableStorageSlots.count > 1
                         ? model.availableStorageSlots : [],
-                    suggestedDate: model.latestKnownCaptureDay,
                     ratingProgress: model.ratingProgress,
                     showProtectionFilter: model.protectionFilteringEnabled,
-                    onChange: applyFilter
+                    onChange: applyFilter,
+                    onReset: model.clearFilter
                 )
             }
         }
@@ -1018,32 +1074,32 @@ private struct PhotoListSessionTaskID: Equatable {
                          isSessionConnected: isSessionConnected,
                          burstIDByFile: model.burstIDByFile,
                          transferredFileIDs: model.transferredFileIDs, selectedFile: $selectedFile,
-                         directory: directoryStore.directoryURL,
-                         storageMode: storageMode,
+                         directory: indexedTransferDirectory,
+                         storageMode: effectiveStorageMode,
                          queueTarget: queueTargetBounds == .zero ? nil : queueTargetBounds,
-                         initialAnchor: previewAnchor,
+                         initialAnchor: previewAnchor?.image,
+                         initialVisibleAnchor: previewAnchor?.visible,
                          initialExpandedBurstIDs: previewExpandedBurstIDs,
                          collapseBursts: collapseBurstPhotos,
                          onBurstChanged: { id, expanded in
                              if expanded { expandedBurstIDs.insert(id) }
                              else { expandedBurstIDs.remove(id) }
                          }) { file in
-            guard admitManualTransfer([file], fromPreview: true) else { return false }
-            if !deferTransferStart {
-                queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL, storageMode: storageMode, effects: effectsStore.settings)
-            } else {
-                queueModel.enqueue(file, storageMode: storageMode, effects: effectsStore.settings)
+            beginTransfer([file], fromPreview: true, startsNow: !deferTransferStart) { directory, mode in
+                if self.deferTransferStart {
+                    self.queueModel.enqueue(file, storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+                } else {
+                    self.queueModel.enqueue(file, autoStart: self.transferSession, directory: directory, storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+                }
             }
-            return true
         } onEnqueueBurst: { burstFiles in
-            guard admitManualTransfer(burstFiles, fromPreview: true) else { return false }
-            if !deferTransferStart, let directory = directoryStore.directoryURL {
-                queueModel.enqueue(burstFiles, autoStart: transferSession, directory: directory,
-                                   storageMode: storageMode, effects: effectsStore.settings)
-            } else {
-                queueModel.enqueue(burstFiles, storageMode: storageMode, effects: effectsStore.settings)
+            return beginTransfer(burstFiles, fromPreview: true, startsNow: !deferTransferStart) { directory, mode in
+                if self.deferTransferStart {
+                    self.queueModel.enqueue(burstFiles, storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+                } else {
+                    self.queueModel.enqueue(burstFiles, autoStart: self.transferSession, directory: directory, storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+                }
             }
-            return true
         } onQueueFlightStarted: { count in
             beginQueueFlightHold(count)
         } onQueueFlightFinished: { count in
@@ -1064,8 +1120,8 @@ private struct PhotoListSessionTaskID: Equatable {
                 if previewReturnNonce == nonce { previewReturnFileID = nil }
             }
         } onCropConfirmed: { file, selection in
-            let directory = directoryStore.directoryURL
-            switch CropPreviewAdmission(hasDirectory: directory != nil, connected: isSessionConnected) {
+            let hasDirectory = saveDestination == .photoLibrary || directoryStore.directoryURL != nil
+            switch CropPreviewAdmission(hasDirectory: hasDirectory, connected: isSessionConnected) {
             case .directoryRequired:
                 selectedFile = nil
                 requestTransferDirectory()
@@ -1076,9 +1132,26 @@ private struct PhotoListSessionTaskID: Equatable {
                 return false
             case .accepted: break
             }
-            let accepted = await queueModel.acceptCrop(file, selection: selection, storageMode: storageMode,
+            let directory: URL?
+            let mode: TransferStorageMode
+            if saveDestination == .photoLibrary {
+                mode = .unified
+                if deferTransferStart {
+                    directory = nil
+                } else {
+                    guard await PhotoLibraryTransferAccess.requestFullAccess() == .full else {
+                        showPhotoAccessHint()
+                        return false
+                    }
+                    directory = PhotoLibraryTransferStaging.url
+                }
+            } else {
+                mode = storageMode
+                directory = deferTransferStart ? nil : directoryStore.directoryURL
+            }
+            let accepted = await queueModel.acceptCrop(file, selection: selection, storageMode: mode,
                 session: deferTransferStart ? nil : transferSession,
-                directory: deferTransferStart ? nil : directory, effects: effectsStore.settings)
+                directory: directory, effects: effectsStore.settings, photoEffectsEnabled: effectsStore.isEnabled)
             if accepted { admissionHint.show(AppLocalized.resource("crop_added")) }
             return accepted
         }
@@ -1113,7 +1186,8 @@ private struct PhotoListSessionTaskID: Equatable {
             CameraSignalControl(isUSB: presentationMode == .usb,
                                 wirelessMode: presentationMode == .sta ? .sta : .ap,
                                 connected: isSessionConnected,
-                                height: photoListTopControlsHeight)
+                                height: photoListTopControlsHeight,
+                                onRetrySTA: onRetrySTA)
                 .modifier(PhotoListSignalAttention(clock: signalAttention))
 
             let filterPalette = zTransferButtonAccentPalette(
@@ -1223,13 +1297,14 @@ private struct PhotoListSessionTaskID: Equatable {
                            height: photoListTopControlsHeight)
                     .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22))
+            .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 22))
             .accessibilityIdentifier("workspace-queue-back")
 
             CameraSignalControl(isUSB: presentationMode == .usb,
                                 wirelessMode: presentationMode == .sta ? .sta : .ap,
                                 connected: isSessionConnected,
-                                height: photoListTopControlsHeight)
+                                height: photoListTopControlsHeight,
+                                onRetrySTA: onRetrySTA)
                 .modifier(PhotoListSignalAttention(clock: signalAttention))
         }
         .transition(.opacity)
@@ -1250,14 +1325,14 @@ private struct PhotoListSessionTaskID: Equatable {
     /// one source of truth for start/pause availability and pill animation.
     private var queueTopRightControls: some View {
         let executionMode = queueModel.snapshot.executionControl
-        let canStart = directoryStore.directoryURL != nil && (isSessionConnected ||
+        let canStart = indexedTransferDirectory != nil && (isSessionConnected ||
             !queueModel.snapshot.items.contains { item in
                 item.status == .waiting && !model.hasTransferredOriginal(item.file,
-                    folderName: item.destinationFolderName, directory: directoryStore.directoryURL)
+                    folderName: item.destinationFolderName, directory: indexedTransferDirectory)
             })
-        return HStack(spacing: 0) {
+        return SharedQueueControlsLayout {
             QueueTopPresence(visible: executionMode != nil && (showingQueue || selectedFile == nil),
-                             kind: .execution, trailingSpacing: 8) {
+                             kind: .execution) {
                 QueueTopExecutionButton(control: executionMode,
                     pauseRequested: queueModel.snapshot.pauseAfterCurrent, startEnabled: canStart) { control in
                     switch control {
@@ -1269,20 +1344,26 @@ private struct PhotoListSessionTaskID: Equatable {
                         queueModel.pause()
                         queuePauseHint.show(AppLocalized.resource("pause_after_current_hint"), duration: .milliseconds(2200))
                     case .start:
-                        guard canStart, let directory = directoryStore.directoryURL else { return }
+                        guard canStart else { return }
                         queueControlActionNonce &+= 1
                         ZTransferHaptics.shared.play(.action)
-                        queueModel.start(session: transferSession, directory: directory)
+                        Task { @MainActor in
+                            guard let directory = await self.directoryForTransferStart() else { return }
+                            self.queueModel.start(session: self.transferSession, directory: directory)
+                        }
                     }
                 }
             }
-            QueueTopPresence(visible: !showingQueue || !queueModel.snapshot.items.isEmpty, kind: .pill) {
-                LiveQueuePill(snapshot: queueModel.snapshot,
+            LiveQueuePill(snapshot: queueModel.snapshot,
                     progressModel: queueModel.progressModel, heldCount: heldFlightCount,
-                    onClick: presentQueuePage)
+                    visible: !showingQueue, onClick: presentQueuePage)
                     .accessibilityLabel(AppLocalized.resource("cd_transfer"))
                     .accessibilityIdentifier("workspace-queue-open")
-            }
+                    .allowsHitTesting(!showingQueue)
+                    // The named outer wrapper must leave accessibility too;
+                    // hiding its Button alone leaves a discoverable zero-width
+                    // transfer control on the queue page.
+                    .accessibilityHidden(showingQueue)
         }
         .modifier(QueueControlsCatchEffect(trigger: queueImpact))
     }
@@ -1492,7 +1573,8 @@ private struct PhotoListSessionTaskID: Equatable {
         }
     }
 
-    private func applyFilter(_ filter: PhotoFilterState) {
+    private func applyFilter(_ requested: PhotoFilterState) {
+        let filter = model.filterForPersistence(requested)
         // Android keeps the rating loader and its date range out of the
         // visible-grid filter. Only a concrete star (or another filter field)
         // starts the 600 ms cascade/reflow animation.
@@ -1519,6 +1601,9 @@ private struct PhotoListSessionTaskID: Equatable {
     private func toggleDateSection(_ section: PhotoDaySection, entries: [PhotoGridEntry]) {
         guard collapsingDay == nil, !burstAnimationBusy,
               cameraRemovalAffectedDays.isEmpty else { return }
+        #if DEBUG
+        ButtonInteractionTrace.recordNow(collapsedDays.contains(section.day) ? "date-group-expand" : "date-group-collapse")
+        #endif
         if collapsedDays.contains(section.day) {
             filterRevealWindow = false
             collapsedDays.remove(section.day)
@@ -1551,8 +1636,10 @@ private struct PhotoListSessionTaskID: Equatable {
         collapsingDayKeepCount = min(entries.count, lastVisible + 1 + columns.count)
         dateCollapseProgress = 1
         dateAnimationTask = Task { @MainActor in
-            await Task.yield()
-            guard !Task.isCancelled else { return }
+            // Commit the retained visible grid before animating its height.
+            // Yield alone may resume within the insertion transaction.
+            do { try await ZTransferNextDisplayFrame.wait() }
+            catch { return }
             withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)) {
                 dateCollapseProgress = 0
             }
@@ -1567,16 +1654,18 @@ private struct PhotoListSessionTaskID: Equatable {
     }
 
     private func enqueueSection(_ files: [CameraFile], source: CGRect?) {
-        guard admitManualTransfer(files) else { return }
         guard let first = files.first else { return }
+        let started = beginTransfer(files, startsNow: !deferTransferStart) { directory, mode in
+            if self.deferTransferStart {
+                self.queueModel.enqueue(files, storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+            } else {
+                self.queueModel.enqueue(files, autoStart: self.transferSession, directory: directory,
+                                       storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+            }
+        }
+        guard started else { return }
         ZTransferHaptics.shared.play(.enqueue)
         startListQueueFlight(for: first, count: files.count, from: source, packFiles: files)
-        if deferTransferStart {
-            queueModel.enqueue(files, storageMode: storageMode, effects: effectsStore.settings)
-        } else {
-            queueModel.enqueue(files, autoStart: transferSession, directory: directoryStore.directoryURL,
-                               storageMode: storageMode, effects: effectsStore.settings)
-        }
     }
 
     private func handleTap(_ entry: PhotoGridEntry, file: CameraFile) {
@@ -1608,35 +1697,110 @@ private struct PhotoListSessionTaskID: Equatable {
     }
 
     private func enqueueFileFromList(_ file: CameraFile) {
-        guard admitManualTransfer([file]) else { return }
-        if !deferTransferStart {
-            ZTransferHaptics.shared.play(.enqueue)
-            startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
-                .photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
-            queueModel.enqueue(file, autoStart: transferSession, directory: directoryStore.directoryURL,
-                               storageMode: storageMode, effects: effectsStore.settings)
-        } else {
-            ZTransferHaptics.shared.play(.enqueue)
-            startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
-                .photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
-            queueModel.enqueue(file, storageMode: storageMode, effects: effectsStore.settings)
+        let started = beginTransfer([file], startsNow: !deferTransferStart) { directory, mode in
+            if self.deferTransferStart {
+                self.queueModel.enqueue(file, storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+            } else {
+                self.queueModel.enqueue(file, autoStart: self.transferSession, directory: directory,
+                                       storageMode: mode, effects: self.effectsStore.settings, photoEffectsEnabled: self.effectsStore.isEnabled)
+            }
+        }
+        guard started else { return }
+        ZTransferHaptics.shared.play(.enqueue)
+        startListQueueFlight(for: file, from: visiblePhotoListCellBounds(
+            .photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport))
+    }
+
+    /// Returns true when the transfer is admitted immediately. The first album
+    /// authorization prompt returns false and enqueues only after the user allows
+    /// full photo access, so a rejected prompt never starts a flight.
+    @discardableResult
+    private func beginTransfer(_ files: [CameraFile], fromPreview: Bool = false, startsNow: Bool,
+                               enqueue: @escaping (URL, TransferStorageMode) -> Void) -> Bool {
+        guard !files.isEmpty else { return false }
+        switch saveDestination {
+        case .folder:
+            guard let directory = directoryStore.directoryURL else {
+                if fromPreview { selectedFile = nil }
+                requestTransferDirectory()
+                return false
+            }
+            guard model.canEnqueueManually(files, connected: isSessionConnected,
+                                          directory: directory, storageMode: storageMode) else {
+                signalAttention.trigger()
+                admissionHint.show(AppLocalized.resource("camera_not_connected"))
+                return false
+            }
+            enqueue(directory, storageMode)
+            return true
+        case .photoLibrary:
+            let directory = PhotoLibraryTransferStaging.url
+            guard model.canEnqueueManually(files, connected: isSessionConnected,
+                                          directory: directory, storageMode: .unified) else {
+                signalAttention.trigger()
+                admissionHint.show(AppLocalized.resource("camera_not_connected"))
+                return false
+            }
+            guard startsNow else {
+                enqueue(directory, .unified)
+                return true
+            }
+            let status = PhotoLibraryTransferAccess.currentStatus()
+            if PhotoLibraryAccess.decide(status) == .full {
+                enqueue(directory, .unified)
+                return true
+            }
+            guard status == .notDetermined else {
+                showPhotoAccessHint()
+                return false
+            }
+            Task { @MainActor in
+                guard await PhotoLibraryTransferAccess.requestFullAccess() == .full else {
+                    self.showPhotoAccessHint()
+                    return
+                }
+                enqueue(directory, .unified)
+            }
+            return false
         }
     }
 
-    private func admitManualTransfer(_ files: [CameraFile], fromPreview: Bool = false) -> Bool {
-        guard !files.isEmpty else { return false }
-        guard let directory = directoryStore.directoryURL else {
-            if fromPreview { selectedFile = nil }
-            requestTransferDirectory()
-            return false
+    private func directoryForTransferStart() async -> URL? {
+        switch saveDestination {
+        case .folder:
+            guard let directory = directoryStore.directoryURL else {
+                requestTransferDirectory()
+                return nil
+            }
+            return directory
+        case .photoLibrary:
+            guard await PhotoLibraryTransferAccess.requestFullAccess() == .full else {
+                showPhotoAccessHint()
+                return nil
+            }
+            return PhotoLibraryTransferStaging.url
         }
-        guard model.canEnqueueManually(files, connected: isSessionConnected,
-                                      directory: directory, storageMode: storageMode) else {
-            signalAttention.trigger()
-            admissionHint.show(AppLocalized.resource("camera_not_connected"))
-            return false
+    }
+
+    private func refreshTransferIndex(reset: Bool = false) {
+        let directory = indexedTransferDirectory
+        model.refreshTransferredIDs(directory: directory, storageMode: effectiveStorageMode, resetDirectoryIndex: reset)
+        if saveDestination == .photoLibrary, let directory {
+            PhotoLibraryTransferLedger.shared.apply(to: queueModel.originalStore, root: directory)
         }
-        return true
+    }
+
+    private func showPhotoAccessHint() {
+        let hintID = UUID()
+        remoteEntryHintID = hintID
+        withAnimation(ZTransferMotion.standard) {
+            remoteEntryHint = AppLocalized.resource("transfer_photo_access_blocked")
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, remoteEntryHintID == hintID else { return }
+            withAnimation(ZTransferMotion.standard) { remoteEntryHint = nil }
+        }
     }
 
     private func requestTransferDirectory() {
@@ -1662,7 +1826,7 @@ private struct PhotoListSessionTaskID: Equatable {
         // The underlying grid is reconciled when returning to a member.
         previewExpandedBurstIDs = expandedBurstIDs
         if let expandingBurst { previewExpandedBurstIDs.insert(expandingBurst) }
-        previewAnchor = visiblePhotoListCellBounds(anchor, bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport)
+        previewAnchor = photoPreviewAnchorBounds(anchor, bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport)
         selectedFile = file
     }
 
@@ -1689,69 +1853,55 @@ private struct PhotoListSessionTaskID: Equatable {
     }
 
     @MainActor
-    private func preparePreviewDismissTarget(_ file: CameraFile) async -> CGRect? {
-        guard let targetSection = model.sections.first(where: { section in
-            section.files.contains(where: { $0.id == file.id })
-        }) else { return nil }
-        guard !collapsedDays.contains(targetSection.day) else { return nil }
+    private func preparePreviewDismissTarget(_ file: CameraFile) async -> PhotoPreviewAnchorBounds? {
+        let sections = model.sections
+        let targetDay = await Task.detached(priority: .userInitiated) {
+            sections.first { $0.files.contains { $0.id == file.id } }?.day
+        }.value
+        guard !Task.isCancelled, let targetDay, !collapsedDays.contains(targetDay) else { return nil }
 
         if collapseBurstPhotos,
            let burstID = model.burstIDByFile[file.id],
            !expandedBurstIDs.contains(burstID) {
             expandedBurstIDs.insert(burstID)
-            await Task.yield()
+            do { try await ZTransferNextDisplayFrame.wait() } catch { return nil }
         }
 
         let viewport = photoListVisibleViewport
-        let initialFrame = scrollGeometry.cellBounds[.photo(file.id)]
-        if let initialFrame,
-           photoFrameIsFullyVisible(initialFrame, in: viewport) {
-            return initialFrame
+        if let visible = photoPreviewAnchorBounds(.photo(file.id), bounds: scrollGeometry.cellBounds, viewport: viewport) {
+            return visible
         }
         guard let reader = photoListScrollProxy else { return nil }
 
-        let visibleEntries = model.sections.flatMap { section -> [(scrollID: String, cellID: PhotoListCellID)] in
-            guard !collapsedDays.contains(section.day) else { return [] }
-            return photoGridEntries(section.files, burstIDByFile: model.burstIDByFile,
-                                    collapse: collapseBurstPhotos,
-                                    expandedIDs: expandedBurstIDs).map { entry in
-                (entry.id, entry.cellID)
-            }
-        }
-        guard let targetIndex = visibleEntries.firstIndex(where: { entry in
-            entry.scrollID == "photo_\(file.id)"
-        }) else { return nil }
-        let visibleIndex = visibleEntries.firstIndex { entry in
-            scrollGeometry.cellBounds[entry.cellID]?.intersects(viewport) == true
-        } ?? targetIndex
+        // Reuse the grid's already-built projection (including date headers),
+        // rather than rebuilding every burst and allocating a second flat album.
+        let indices = gridCache.snapshot(for: scrollLayout).indices
+        guard let targetIndex = indices["photo_\(file.id)"] else { return nil }
+        let visibleIndex = scrollGeometry.scrollItemFrames.lazy
+            .filter { $0.value.intersects(viewport) }.compactMap { indices[$0.key] }.min() ?? targetIndex
         let runway = min(max(thumbnailColumns, 1), 4) * 3
         if abs(targetIndex - visibleIndex) > runway * 2 {
             let nearbyIndex = targetIndex > visibleIndex
                 ? max(0, targetIndex - runway)
-                : min(visibleEntries.count - 1, targetIndex + runway)
-            reader.scrollTo(visibleEntries[nearbyIndex].scrollID, anchor: .center)
-            await Task.yield()
+                : min(indices.count - 1, targetIndex + runway)
+            if let nearby = indices.first(where: { $0.value == nearbyIndex })?.key {
+                reader.scrollTo(nearby, anchor: .top)
+                do { try await ZTransferNextDisplayFrame.wait() } catch { return nil }
+            }
         }
-        let targetAnchor: UnitPoint
-        if let initialFrame, initialFrame.minY < viewport.minY {
-            targetAnchor = .top
-        } else if let initialFrame, initialFrame.maxY > viewport.maxY {
-            targetAnchor = .bottom
-        } else if targetIndex < visibleIndex {
-            targetAnchor = .top
-        } else if targetIndex > visibleIndex {
-            targetAnchor = .bottom
-        } else {
-            targetAnchor = .center
-        }
+        let columns = CGFloat(normalizedThumbnailColumns(thumbnailColumns))
+        let itemHeight = scrollGeometry.cellBounds[.photo(file.id)]?.height
+            ?? max(1, (viewport.width - 24 - (columns - 1) * 6) / columns)
+        let targetAnchor = UnitPoint(x: 0.5,
+            y: photoPreviewReturnAnchor(viewportHeight: viewport.height, itemHeight: itemHeight))
         withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)) {
             reader.scrollTo("photo_\(file.id)", anchor: targetAnchor)
         }
-        try? await Task.sleep(nanoseconds: 280_000_000)
-        await Task.yield()
-        guard let frame = scrollGeometry.cellBounds[.photo(file.id)],
-              photoFrameIsFullyVisible(frame, in: photoListVisibleViewport) else { return nil }
-        return frame
+        do {
+            try await Task.sleep(nanoseconds: 280_000_000)
+            try await ZTransferNextDisplayFrame.wait()
+        } catch { return nil }
+        return photoPreviewAnchorBounds(.photo(file.id), bounds: scrollGeometry.cellBounds, viewport: photoListVisibleViewport)
     }
 
     @ViewBuilder
@@ -1974,6 +2124,12 @@ func visiblePhotoListCellBounds(_ id: PhotoListCellID, bounds: [PhotoListCellID:
     return frame
 }
 
+func photoPreviewAnchorBounds(_ id: PhotoListCellID, bounds: [PhotoListCellID: CGRect],
+                              viewport: CGRect) -> PhotoPreviewAnchorBounds? {
+    guard let image = bounds[id] else { return nil }
+    return PhotoPreviewAnchorBounds.clipped(image: image, to: viewport)
+}
+
 /// Flight admission is independent of transfer admission: repeated exports
 /// still enqueue, but missing/offscreen or already-flying sources hold no count.
 func admittedPhotoListFlightSource(_ source: CGRect?, viewport: CGRect, activeSources: [CGRect]) -> CGRect? {
@@ -2027,32 +2183,35 @@ struct PhotoListQueueTargetPreferenceKey: PreferenceKey {
     }
 }
 
-/// 2026-10-20 user override: every transport indicates status only, including
-/// offline AP; wireless settings jumps were removed for App Store preparation.
-/// Keep the selected skin without pressed feedback, haptics or a button action.
+/// Only disconnected STA can request reconnection. USB, connected STA and AP
+/// remain status-only; no system wireless-settings jump is offered.
 struct CameraSignalControl: View {
     let isUSB: Bool
     let wirelessMode: WirelessMode?
     let connected: Bool
     var height: CGFloat = 36
+    var onRetrySTA: () -> Void = {}
+
+    private var canRetrySTA: Bool { !isUSB && wirelessMode == .sta && !connected }
 
     private var labelKey: String {
+        if canRetrySTA { return "sta_signal_disconnected_reconnect" }
         if !connected { return "camera_not_connected" }
         return isUSB ? "connection_usb" : "camera_session_notification_title"
     }
 
     var body: some View {
-        Button {} label: {
+        Button { if canRetrySTA { onRetrySTA() } } label: {
             PhotoListSignalIcon(isUSB: isUSB, wirelessMode: wirelessMode, connected: connected)
                 .frame(width: photoListCompactButtonWidth, height: height)
         }
         .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 22, disabledAlpha: 1))
-        .disabled(true)
-        .allowsHitTesting(false)
+        .disabled(!canRetrySTA)
+        .allowsHitTesting(canRetrySTA)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AppLocalized.resource(labelKey))
         .accessibilityIdentifier("photo-list-signal")
-        .accessibilityRemoveTraits(.isButton)
+        .accessibilityRemoveTraits(canRetrySTA ? [] : .isButton)
         .modifier(DisconnectedSignalBreath(connected: connected))
         // Android scales inside the signal pill's layout slot. Constrain the
         // outer animation host too: its UIView otherwise accepts the HStack's
@@ -2191,10 +2350,19 @@ private struct PhotoListEmptyState: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: filterActive ? "line.3.horizontal.decrease.circle" : "folder")
-                .font(.system(size: 48, weight: .regular))
-                .foregroundStyle(ZTransferColors.secondaryText)
-                .modifier(PhotoListEmptyPulse())
+            Group {
+                if filterActive {
+                    // Android emptyFilter uses the same outlined FilterMark
+                    // as the toolbar, at 44dp; never substitute a system icon.
+                    PhotoListFilterIcon(active: false, color: ZTransferColors.secondaryText)
+                        .frame(width: 44, height: 44)
+                } else {
+                    Image(systemName: "folder")
+                        .font(.system(size: 48, weight: .regular))
+                }
+            }
+            .foregroundStyle(ZTransferColors.secondaryText)
+            .modifier(PhotoListEmptyPulse())
             if !filterActive || showNoMatchMessage {
                 Text(AppLocalized.resource(filterActive ? "no_photos_match_filter" : "no_photos_on_camera"))
                     .zTransferText(size: ZTransferMetrics.body)
@@ -2205,9 +2373,16 @@ private struct PhotoListEmptyState: View {
             if filterActive {
                 Button(action: onClearFilter) {
                     Text(AppLocalized.resource("clear_filters"))
+                        .zTransferTypography(.labelLarge, weight: .medium)
                         .foregroundStyle(ZTransferColors.primaryText)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        // GlassButton defaults: size the label before its
+                        // material so every locale fits inside the same face.
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
                 }
-                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 18))
+                .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 20))
             }
         }
     }
@@ -2239,10 +2414,9 @@ enum PhotoGridEntry: Identifiable, Equatable {
 func photoGridEntries(_ files: [CameraFile], burstIDByFile: [UInt32: String], collapse: Bool = true,
                               expandedIDs: Set<String> = []) -> [PhotoGridEntry] {
     guard collapse else { return files.map(PhotoGridEntry.photo) }
-    let visibleGroups = Dictionary(grouping: files.compactMap { file -> (String, CameraFile)? in
-        burstIDByFile[file.id].map { ($0, file) }
-    }, by: \.0).mapValues { $0.map(\.1) }
+    let visibleGroups = visiblePhotoBurstMembers(files: files, burstIDs: burstIDByFile)
     var entries: [PhotoGridEntry] = []
+    entries.reserveCapacity(files.count)
     var collected = Set<String>()
     for file in files {
         guard let id = burstIDByFile[file.id], let members = visibleGroups[id], members.count >= 2 else {
@@ -2334,11 +2508,9 @@ struct QueuePillContentTransition<Surface: View, Content: View>: View {
 private struct QueuePillSurface: View {
     let motion: QueuePillContentMotion
     let skin: ZTransferButtonSkin
-    let progressAnimator: SmoothTransferProgressAnimator
-    let progressKey: String
-    let allDone: Bool
-    let completionFillVisible: Bool
-    let hasActiveItem: Bool
+    let progress: AndroidAnimatedOpacity
+    let taskID: UUID?
+    let animate: Bool
 
     var body: some View {
         let appearance = motion.surface
@@ -2352,13 +2524,9 @@ private struct QueuePillSurface: View {
                 ZTransferGlassSurface(cornerRadius: 22, kind: .button)
                     .opacity(1 - appearance.iconAlpha)
             }
-            if appearance.hasContent && (!allDone || completionFillVisible || appearance.finishingExit) {
-                TransferProgressContent(animator: progressAnimator) { value in
-                    LiquidTransferProgressSurface(progress: appearance.finishingExit ? 1 : value,
-                        seed: progressKey, isCapsule: true,
-                        waveEligible: hasActiveItem || completionFillVisible)
-                }
-                .opacity(appearance.fillAlpha)
+            if appearance.hasContent, let taskID, animate {
+                QueuePillDownloadFill(progress: progress, taskID: taskID)
+                    .opacity(appearance.fillAlpha)
             }
             if skin != .liquidGlass {
                 Capsule().strokeBorder(.white.opacity(0.14 * (1 - appearance.iconAlpha)), lineWidth: 0.6)
@@ -2369,6 +2537,19 @@ private struct QueuePillSurface: View {
     }
 }
 
+
+private struct QueuePillDownloadFill: View {
+    @ObservedObject var progress: AndroidAnimatedOpacity
+    let taskID: UUID
+    var body: some View {
+        LiquidTransferProgressSurface(progress: Double(progress.value),
+            seed: taskID.uuidString, isCapsule: true, waveEligible: true)
+#if DEBUG
+            .preference(key: SmoothTransferProgressObservationKey.self,
+                value: .init(key: taskID.uuidString, value: progress.value))
+#endif
+    }
+}
 
 @MainActor
 final class QueuePillWidthClock: ObservableObject {
@@ -2406,50 +2587,54 @@ final class QueuePillWidthClock: ObservableObject {
 /// retained content transitions and hidden measurement stay outside its body.
 struct QueuePillAnimatedSize<Content: View>: View {
     @ObservedObject var clock: QueuePillWidthClock
+    var visible: Bool? = nil
+    var naturalWidth: CGFloat = 0
+    var onRetained: (Bool) -> Void = { _ in }
+    @State private var visibilityTransition = false
     @ViewBuilder var content: Content
     var body: some View {
+        let width = clock.motion.width ?? (visible == false ? 0 : naturalWidth)
+        let retained = visible != false || width > 0
+        let feather = queuePillVisibilityFeather(width: width, naturalWidth: naturalWidth,
+                                                transitioning: visibilityTransition)
         QueuePillSizingLayout(displayedWidth: clock.motion.width, height: photoListTopControlsHeight) { content }
+            .opacity(visible == nil ? 1 : min(1, max(0, width / 8)))
+            .modifier(QueuePillEdgeMask(amount: feather, width: width))
+            .onAppear { onRetained(retained) }
+            .onChange(of: retained) { onRetained($0) }
+            .onChange(of: visible) { _ in visibilityTransition = true }
+            .onChange(of: clock.motion.isRunning) { if !$0 { visibilityTransition = false } }
     }
 }
 
-/// One delayed publication at most; no timer runs while the label is settled.
-@MainActor
-final class QueuePillSpeedClock: ObservableObject {
-    @Published private(set) var value: Int64?
-    private var cadence = QueuePillSpeedCadence()
-    private var task: Task<Void, Never>?
-    private var scheduledDeadline: TimeInterval?
-
-    func update(_ sample: Int64?) {
-        cadence.update(sample, at: CACurrentMediaTime())
-        synchronize()
-    }
-    private func synchronize() {
-        if value != cadence.value { value = cadence.value }
-        guard scheduledDeadline != cadence.deadline else { return }
-        task?.cancel(); task = nil
-        scheduledDeadline = cadence.deadline
-        guard let deadline = cadence.deadline else { return }
-        let delay = max(0, deadline - CACurrentMediaTime())
-        task = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
-            guard let self else { return }
-            self.cadence.advance(CACurrentMediaTime())
-            self.synchronize()
+private struct QueuePillEdgeMask: ViewModifier {
+    let amount: Double
+    let width: CGFloat
+    func body(content: Content) -> some View {
+        // Mask the rightmost 24pt including 16pt of shadow spill. No painted
+        // overlay, no scale/fade transition independent from the width spring.
+        content.mask {
+            HStack(spacing: 0) {
+                Color.white
+                LinearGradient(colors: [.white, .white.opacity(1 - amount)], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: min(24, max(0, width)))
+                Color.white.opacity(1 - amount).frame(width: 16)
+            }.padding(-16)
         }
     }
-    func reset() { task?.cancel(); task = nil; scheduledDeadline = nil; cadence = .init(); value = nil }
 }
 
 private struct LiveQueuePill: View {
     let snapshot: TransferQueueSnapshot
     @ObservedObject var progressModel: TransferQueueProgressViewModel
+    let visible: Bool
     let heldCount: Int
     let onClick: () -> Void
     private let taskSummary: QueuePillTaskSummary
 
     init(snapshot: TransferQueueSnapshot, progressModel: TransferQueueProgressViewModel,
-         heldCount: Int, onClick: @escaping () -> Void) {
+         heldCount: Int, visible: Bool, onClick: @escaping () -> Void) {
+        self.visible = visible
         self.snapshot = snapshot; self.progressModel = progressModel
         self.heldCount = heldCount; self.onClick = onClick
         // Structural snapshots change the summary; 200ms speed samples don't.
@@ -2461,6 +2646,7 @@ private struct LiveQueuePill: View {
             snapshot: snapshot,
             activeProgress: progressModel.activeProgress,
             heldCount: heldCount,
+            visible: visible,
             taskSummary: taskSummary,
             onClick: onClick
         )
@@ -2471,32 +2657,33 @@ struct QueuePill: View {
     let snapshot: TransferQueueSnapshot
     let activeProgress: TransferActiveProgress?
     let heldCount: Int
+    let visible: Bool
     let onClick: () -> Void
 
     private let taskSummary: QueuePillTaskSummary
 
     init(snapshot: TransferQueueSnapshot, activeProgress: TransferActiveProgress?,
-         heldCount: Int, taskSummary: QueuePillTaskSummary? = nil, onClick: @escaping () -> Void = {}) {
+         heldCount: Int, visible: Bool = true, taskSummary: QueuePillTaskSummary? = nil, onClick: @escaping () -> Void = {}) {
         self.onClick = onClick
         self.snapshot = snapshot
         self.activeProgress = activeProgress
         self.heldCount = heldCount
-        self.taskSummary = taskSummary ?? .init(items: snapshot.items)
+        self.visible = visible
+        let summary = taskSummary ?? QueuePillTaskSummary(items: snapshot.items)
+        self.taskSummary = summary
+        _downloadDisplay = StateObject(wrappedValue: .init(initialTask: summary.activeDownload))
     }
 
     @State private var showDoneLabel = false
-    @State private var sawActiveBatch = false
-    @State private var previousAllDone: Bool?
+    @State private var completionTracker = QueueCompletionTracker()
+    @State private var consumedCompletion: UInt64 = 0
     @State private var countingVisible = false
-    @State private var finishProgressVisible = false
-    @State private var retainedProgressSeed = "queue"
+    @State private var widthRetained = true
+    @StateObject private var downloadDisplay: QueueDownloadDisplayModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var doneTask: Task<Void, Never>?
     @State private var widthMeasurement = QueuePillWidthMeasurement()
     @State private var widthClock = QueuePillWidthClock()
-    @StateObject private var speedClock = QueuePillSpeedClock()
-    // Retain ownership without subscribing the whole capsule to display frames.
-    // Only TransferProgressContent observes this animator.
-    @State private var progressAnimator = SmoothTransferProgressAnimator()
     @Environment(\.displayScale) private var displayScale
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
     @Environment(\.colorScheme) private var colorScheme
@@ -2504,32 +2691,35 @@ struct QueuePill: View {
     private var downloadRemaining: Int { taskSummary.downloadRemaining }
     private var generationCount: Int { taskSummary.generationRemaining }
     private var activeItem: TransferQueueItem? { taskSummary.activeDownload }
-    private var progressOwner: TransferQueueItem? { taskSummary.progressOwner }
-
     private var activeSpeed: Int64 {
         guard snapshot.isTransferring else { return 0 }
         return activeProgress?.retainedBytesPerSecond ?? activeItem?.bytesPerSecond ?? 0
     }
-
-    private var displayedSpeed: Int64? { speedClock.value ?? (activeSpeed > 0 ? activeSpeed : nil) }
+    private var displayedSpeed: Int64? { activeSpeed > 0 ? activeSpeed : nil }
     private var activeSpeedText: String? { displayedSpeed.map(transferSpeedText) }
-    private var speedInput: Int64? { visualMode == .counting ? activeSpeed : nil }
-
+    private var completionObservation: QueueCompletionTracker.Observation { completionTracker.observe(snapshot.items) }
+    private var completionPending: Bool {
+        let observation = completionObservation
+        return consumedCompletion != observation.revision && observation.update.feedback?.showDone == true
+    }
+    private var animateContents: Bool { (visible || widthRetained) && scenePhase == .active }
+    private var finishingDownload: Bool {
+        downloadDisplay.completing || queueDownloadCompletedTask(downloadDisplay.task?.id,
+            active: activeItem, tasks: snapshot.items) != nil
+    }
+    private struct DownloadInput: Equatable {
+        let active: TransferQueueItem?
+        let progress: TransferActiveProgress?
+        let tasks: [TransferQueueItem]
+        let animate: Bool
+    }
+    private var downloadInput: DownloadInput {
+        .init(active: activeItem, progress: activeProgress, tasks: snapshot.items, animate: animateContents)
+    }
     private var displayRemainingCount: Int { taskSummary.displayRemaining(heldCount: heldCount) }
     private var allDone: Bool { taskSummary.allDone }
     private var paused: Bool { !snapshot.isTransferring && downloadRemaining > 0 }
-    private var hasCancelled: Bool { taskSummary.hasCancelled }
     private var hasWorkingTask: Bool { taskSummary.hasActive }
-    private var completionPending: Bool {
-        allDone && previousAllDone == false && !hasCancelled
-    }
-    private struct CompletionInput: Equatable {
-        let allDone: Bool
-        let hasCancelled: Bool
-    }
-    private var completionInput: CompletionInput {
-        .init(allDone: allDone, hasCancelled: hasCancelled)
-    }
     private struct CountVisibilityInput: Equatable {
         let hasRemaining: Bool
         let hasWorkingTask: Bool
@@ -2540,50 +2730,32 @@ struct QueuePill: View {
               hasWorkingTask: hasWorkingTask, paused: paused)
     }
     private var doneVisible: Bool { showDoneLabel || completionPending }
-    private var completionFillVisible: Bool {
-        finishProgressVisible || (completionPending && sawActiveBatch)
-    }
     private var allRemainingTasksAreInFlight: Bool {
         taskSummary.allDownloadsAreInFlight(heldCount: heldCount)
     }
     private var collapsedToIcon: Bool {
         allRemainingTasksAreInFlight ||
-            (!paused && ((allDone && !doneVisible) || (!allDone && !countingVisible)))
+            (!finishingDownload && !paused && ((allDone && !doneVisible) || (!allDone && !countingVisible && !hasWorkingTask)))
     }
     private var visualMode: QueuePillVisualMode {
         if collapsedToIcon { return .icon }
-        if doneVisible { return .done }
+        if allDone { return .done }
         if paused { return .paused }
         if downloadRemaining == 0, generationCount > 0 { return .generating }
         return .counting
     }
-    private var progressFraction: Double {
-        if completionFillVisible { return 1 }
-        if let activeItem {
-            return activeProgress?.taskID == activeItem.id
-                ? activeProgress!.fraction
-                : activeItem.progress
-        }
-        return generationCount > 0 ? 1 : 0
-    }
     private var presentation: QueuePillPresentation {
         .init(mode: visualMode,
               count: visualMode == .generating ? generationCount : displayRemainingCount,
-              speed: visualMode == .counting ? displayedSpeed : nil)
-    }
-    private struct ProgressInput: Equatable {
-        let fraction: Double
-        let key: String
-    }
-    private var progressInput: ProgressInput {
-        .init(fraction: progressFraction,
-              key: progressOwner?.id.uuidString ?? retainedProgressSeed)
+              speed: visualMode == .counting ? displayedSpeed : nil, showDone: doneVisible)
     }
     private var widthKey: QueuePillWidthKey {
         .init(mode: visualMode, speedText: activeSpeedText,
               count: visualMode == .generating ? generationCount : displayRemainingCount)
     }
-    private var targetWidth: CGFloat {
+    private var targetWidth: CGFloat { visible ? naturalWidth : 0 }
+    private var naturalWidth: CGFloat {
+        if visualMode == .done && !doneVisible { return 0 }
         guard visualMode != .icon else { return 40 }
         // Hold the previous measured width for the one layout pass needed to
         // measure new content. This prevents text appearing outside a width
@@ -2592,16 +2764,16 @@ struct QueuePill: View {
     }
 
     var body: some View {
-        QueuePillAnimatedSize(clock: widthClock) {
+        QueuePillAnimatedSize(clock: widthClock, visible: visible, naturalWidth: naturalWidth,
+                              onRetained: { widthRetained = $0 }) {
             // Keep one button and one transition owner across icon/count/
             // paused/generating/Done. Branching the whole button discarded
             // outgoing layers and restarted child clocks on mode changes.
             Button(action: onClick) {
                 QueuePillContentTransition(presentation: presentation) { motion in
                     QueuePillSurface(motion: motion, skin: .init(storedValue: skinPreset),
-                        progressAnimator: progressAnimator, progressKey: progressInput.key,
-                        allDone: allDone, completionFillVisible: completionFillVisible,
-                        hasActiveItem: activeItem != nil)
+                        progress: downloadDisplay.progress, taskID: downloadDisplay.task?.id,
+                        animate: animateContents)
                 } content: { displayed in
                     pillContent(for: displayed)
                 }
@@ -2610,6 +2782,8 @@ struct QueuePill: View {
                 .clipShape(Capsule())
                 .contentShape(Capsule())
             }
+            .disabled(!visible)
+            .accessibilityHidden(!visible)
             .buttonStyle(QueuePillButtonStyle())
             .frame(height: photoListTopControlsHeight)
 
@@ -2656,71 +2830,46 @@ struct QueuePill: View {
                 countingVisible = false
             }
         }
-        .onChange(of: speedInput) { speedClock.update($0) }
-        .onChange(of: progressOwner?.id) { id in
-            if let id { retainedProgressSeed = id.uuidString }
-        }
-        .onChange(of: progressInput) { input in
-            progressAnimator.update(target: input.fraction, key: input.key)
-        }
-        .onChange(of: hasWorkingTask) { active in
-            guard active else { return }
-            sawActiveBatch = true
-            doneTask?.cancel()
-            finishProgressVisible = false
-            showDoneLabel = false
-        }
-        .onChange(of: completionInput) { input in
-            // Read cancellation from the same new snapshot as the completion edge.
-            // An allDone-only callback can retain the preceding View capture.
-            let done = input.allDone
-            guard let previousAllDone else {
-                self.previousAllDone = done
-                return
-            }
-            if !done {
-                doneTask?.cancel()
-                showDoneLabel = false
-                finishProgressVisible = false
-            } else if !previousAllDone {
-                let celebrate = !input.hasCancelled && sawActiveBatch
-                if !input.hasCancelled {
-                    finishProgressVisible = celebrate
-                    showDoneLabel = true
-                    if celebrate { ZTransferHaptics.shared.play(.transferComplete) }
-                    doneTask?.cancel()
-                    doneTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 1_800_000_000)
-                        guard !Task.isCancelled else { return }
-                        showDoneLabel = false
-                        finishProgressVisible = false
-                    }
-                }
-                sawActiveBatch = false
-            }
-            self.previousAllDone = done
-        }
+        .onChange(of: downloadInput) { updateDownload($0) }
+        .onChange(of: completionObservation) { consumeCompletion($0) }
         .onAppear {
-            speedClock.update(speedInput)
-            previousAllDone = allDone
-            sawActiveBatch = hasWorkingTask
+            consumeCompletion(completionObservation)
             widthClock.update(width: targetWidth, scale: displayScale)
-            if let id = progressOwner?.id { retainedProgressSeed = id.uuidString }
-            progressAnimator.update(target: progressInput.fraction, key: progressInput.key)
+            updateDownload(downloadInput)
         }
         .onDisappear {
             doneTask?.cancel()
-            speedClock.reset()
             widthClock.reset()
-            progressAnimator.stop()
+            downloadDisplay.stop()
         }
         .background {
 #if DEBUG
             Color.clear.preference(key: QueuePillObservationKey.self,
                 value: QueuePillObservation(countingVisible: countingVisible,
                                            count: displayRemainingCount, mode: visualMode,
-                                           completionFill: completionFillVisible))
+                                           completionFill: finishingDownload))
 #endif
+        }
+    }
+
+    private func updateDownload(_ input: DownloadInput) {
+        downloadDisplay.update(active: input.active, progress: input.progress,
+                               tasks: input.tasks, animate: input.animate)
+    }
+    private func consumeCompletion(_ observation: QueueCompletionTracker.Observation) {
+        guard consumedCompletion != observation.revision else { return }
+        consumedCompletion = observation.revision
+        if !observation.update.state.unresolvedTaskIDs.isEmpty {
+            doneTask?.cancel(); showDoneLabel = false
+        }
+        guard let feedback = observation.update.feedback else { return }
+        doneTask?.cancel(); showDoneLabel = feedback.showDone
+        if feedback.celebrate { ZTransferHaptics.shared.play(.transferComplete) }
+        if feedback.showDone {
+            doneTask = Task { @MainActor in
+                do { try await Task.sleep(for: .milliseconds(1800)) } catch { return }
+                showDoneLabel = false
+            }
         }
     }
 
@@ -2736,28 +2885,25 @@ struct QueuePill: View {
                 .frame(width: 22, height: 22)
                 .frame(width: 40, height: photoListTopControlsHeight)
         case .done:
-            Text("Done")
+            if displayed.showDone { Text("Done")
                 .monospacedDigit()
                 .zTransferTypography(.labelLarge, weight: .bold)
                 .foregroundStyle(ZTransferColors.statusConnected)
-                .lineLimit(1)
+                .lineLimit(1) }
         case .paused:
-            QueuePillRollingCount(count: displayed.count)
+            QueuePillRollingCount(count: displayed.count, animate: visible && scenePhase == .active)
         case .generating:
             HStack(alignment: .center, spacing: 6) {
                 generationIcon
-                QueuePillRollingCount(count: displayed.count)
+                QueuePillRollingCount(count: displayed.count, animate: visible && scenePhase == .active)
             }
         case .counting:
             HStack(alignment: .center, spacing: 8) {
                 if let speed = displayed.speed {
-                    TransferNumericText(text: transferSpeedText(speed), value: Double(speed))
-                        .zTransferTypography(.labelMedium, weight: .bold)
-                        .foregroundStyle(ZTransferColors.accentBlue)
-                        .monospacedDigit()
-                        .lineLimit(1)
+                    QueueAnimatedValue(text: transferSpeedText(speed), value: speed, style: .labelMedium,
+                        color: ZTransferColors.accentBlue, animate: visible && scenePhase == .active)
                 }
-                QueuePillRollingCount(count: displayed.count)
+                QueuePillRollingCount(count: displayed.count, animate: visible && scenePhase == .active)
             }
         }
     }
@@ -2839,114 +2985,6 @@ private struct QueuePillMeasuredWidthPreferenceKey: PreferenceKey {
         nextValue: () -> [QueuePillWidthKey: CGFloat]
     ) {
         value.merge(nextValue()) { _, latest in latest }
-    }
-}
-
-@MainActor
-final class QueuePillCountClock: ObservableObject {
-    @Published private(set) var motion: QueuePillCountMotion?
-    private var count: Int
-    private var heightPixels: Int?
-    private var density: CGFloat = 1
-    private var link: CADisplayLink?
-    init(count: Int) {
-        self.count = count
-        // labelLarge has a fixed 20pt line box. Start with a valid motion
-        // immediately; a missing Button-label preference must not turn every
-        // count update into the static fallback. Mount applies display scale.
-        measure(height: ZTransferTypography.labelLarge.lineHeight, scale: 1)
-    }
-
-    @MainActor
-    private final class FrameTarget: NSObject {
-        weak var owner: QueuePillCountClock?
-        init(_ owner: QueuePillCountClock) { self.owner = owner }
-        @objc func frame(_ link: CADisplayLink) {
-            guard let owner else { link.invalidate(); return }
-            owner.frame(link)
-        }
-    }
-
-    func measure(height: CGFloat, scale: CGFloat) {
-        guard height.isFinite, height > 0, scale.isFinite, scale > 0 else { return }
-        let pixels = Int(floor(height * scale + 0.5))
-        if motion == nil || heightPixels != pixels || density != scale {
-            stop()
-            heightPixels = pixels
-            density = scale
-            motion = .init(count: count, heightPixels: pixels)
-        }
-    }
-
-    func update(_ count: Int) {
-        self.count = count
-        motion?.update(count)
-        guard motion?.isRunning == true, link == nil else { return }
-        let link = CADisplayLink(target: FrameTarget(self), selector: #selector(FrameTarget.frame(_:)))
-        self.link = link
-        link.add(to: .main, forMode: .common)
-    }
-
-    private func frame(_ link: CADisplayLink) {
-        motion?.advance(Int64(link.timestamp * 1_000_000_000))
-        if motion?.isRunning != true { stop() }
-    }
-    private func stop() { link?.invalidate(); link = nil }
-    func unmount() { stop(); motion = nil; heightPixels = nil }
-}
-
-private struct QueuePillRollingCount: View {
-    let count: Int
-    @StateObject private var clock: QueuePillCountClock
-    @Environment(\.displayScale) private var displayScale
-
-    init(count: Int) {
-        self.count = count
-        _clock = StateObject(wrappedValue: QueuePillCountClock(count: count))
-    }
-
-    var body: some View {
-        // SizeTransform(snap, clip=true): only the target number determines
-        // occupancy; outgoing layers are centered within that target viewport.
-        countText(count)
-            .hidden()
-            .accessibilityHidden(true)
-            .frame(height: ZTransferTypography.labelLarge.lineHeight)
-            .overlay {
-                ZStack {
-                    if let motion = clock.motion {
-                        ForEach(motion.layers) { layer in
-                            countText(layer.count)
-                                .offset(y: CGFloat(layer.motion.displayedOffsetPixels) / displayScale)
-                                .opacity(Double(layer.motion.fade.alpha.value))
-                                .accessibilityHidden(layer.count != count)
-                        }
-                    } else {
-                        countText(count)
-                    }
-                }
-            }
-            .clipped()
-            .fixedSize(horizontal: true, vertical: false)
-            .transaction { $0.animation = nil }
-            .onChange(of: count) { clock.update($0) }
-            .onChange(of: displayScale) {
-                clock.measure(height: ZTransferTypography.labelLarge.lineHeight, scale: $0)
-            }
-            .onAppear {
-                clock.update(count)
-                clock.measure(height: ZTransferTypography.labelLarge.lineHeight, scale: displayScale)
-            }
-            .onDisappear { clock.unmount() }
-    }
-
-    private func countText(_ value: Int) -> some View {
-        Text("\(value)")
-            .zTransferTypography(.labelLarge, weight: .bold)
-            .foregroundStyle(ZTransferColors.primaryText)
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -3036,54 +3074,52 @@ private struct CameraThumbnailView: View {
     let session: CameraSession?
     var file: CameraFile?
     var allowRemoteThumbnail = true
+    var loadEnabled = true
+    var transfersBusy = false
     var transferred: Bool = false
     var inBurst: Bool = false
     var showsCornerBadges: Bool = true
     var queueTask: TransferQueueItem? = nil
     var progressModel: TransferQueueProgressViewModel? = nil
-    @State private var image: UIImage?
+    var cornerRadius: CGFloat = 8
+    var showsPlaceholderIcon = true
 
     init(
         session: CameraSession?,
         file: CameraFile? = nil,
         allowRemoteThumbnail: Bool = true,
+        loadEnabled: Bool = true,
+        transfersBusy: Bool = false,
         transferred: Bool = false,
         inBurst: Bool = false,
         showsCornerBadges: Bool = true,
         queueTask: TransferQueueItem? = nil,
-        progressModel: TransferQueueProgressViewModel? = nil
+        progressModel: TransferQueueProgressViewModel? = nil,
+        cornerRadius: CGFloat = 8,
+        showsPlaceholderIcon: Bool = true
     ) {
         self.session = session
         self.file = file
         self.allowRemoteThumbnail = allowRemoteThumbnail
+        self.loadEnabled = loadEnabled
+        self.transfersBusy = transfersBusy
         self.transferred = transferred
         self.inBurst = inBurst
         self.showsCornerBadges = showsCornerBadges
         self.queueTask = queueTask
         self.progressModel = progressModel
-        _image = State(initialValue: file.flatMap { session?.memoryThumbnailImage(file: $0) })
+        self.cornerRadius = cornerRadius
+        self.showsPlaceholderIcon = showsPlaceholderIcon
     }
 
     var body: some View {
         GeometryReader { geometry in
         ZStack(alignment: .topLeading) {
-            Group {
-                if let image { Image(uiImage: image).resizable().scaledToFill().frame(width: geometry.size.width, height: geometry.size.height).clipped() }
-                else {
-                    // Android uses a stable media-type placeholder both while
-                    // loading and after a missing thumbnail. A failed bounded
-                    // RAW probe must never look like an operation still running.
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.black.opacity(0.08))
-                        .overlay {
-                            Image(systemName: file.map {
-                                [".mov", ".mp4"].contains($0.fileExtension) ? "film" : "photo"
-                            } ?? "photo")
-                            .font(.system(size: 28, weight: .regular))
-                            .foregroundStyle(Color.secondary.opacity(0.4))
-                        }
-                }
-            }
+            PhotoThumbnailImage(session: session, file: file, loadEnabled: loadEnabled,
+                allowRemote: allowRemoteThumbnail, transfersBusy: transfersBusy,
+                cornerRadius: cornerRadius, showsPlaceholderIcon: showsPlaceholderIcon,
+                stacked: !showsCornerBadges, expandedBurst: inBurst)
+                .frame(width: geometry.size.width, height: geometry.size.height)
             if let file, showsCornerBadges {
                 if !file.fileExtension.isEmpty {
                     Text(file.fileExtension.dropFirst().uppercased())
@@ -3131,25 +3167,7 @@ private struct CameraThumbnailView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity, minHeight: 0)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .task(id: PhotoListSessionTaskID(session: session.map(ObjectIdentifier.init), value: allowRemoteThumbnail)) {
-            guard let session, let file else { return }
-            if session.wirelessMode == .sta {
-                // View lifetime owns only observation. The session's ordered
-                // pipeline keeps loading even when this cell leaves the grid.
-                for await _ in await session.thumbnailUpdates(handle: file.id) {
-                    guard !Task.isCancelled else { return }
-                    if let cached = try? await session.thumbnailImage(file: file, allowRemote: false) {
-                        image = cached
-                        return
-                    }
-                }
-            } else if image == nil,
-                      let image = try? await session.thumbnailImage(file: file, allowRemote: allowRemoteThumbnail) {
-                self.image = image
-            }
-        }
+        .modifier(PhotoThumbnailOverlayClip(enabled: showsCornerBadges, radius: cornerRadius))
     }
 
     private func extensionColor(_ ext: String) -> Color {
@@ -3162,10 +3180,21 @@ private struct CameraThumbnailView: View {
     }
 }
 
+private struct PhotoThumbnailOverlayClip: ViewModifier {
+    let enabled: Bool
+    let radius: CGFloat
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.clipShape(RoundedRectangle(cornerRadius: radius)) }
+        else { content }
+    }
+}
+
 private struct BurstThumbnailView: View {
     let session: CameraSession?
     let group: BurstPhotoGroup
     var allowRemoteThumbnails = true
+    var loadEnabled = true
+    var transfersBusy = false
     var transferred: Bool = false
     var expanded = false
     var onExpand: () -> Void = {}
@@ -3176,17 +3205,29 @@ private struct BurstThumbnailView: View {
             let side = min(proxy.size.width, proxy.size.height)
             let cardSide = side * 0.86
             ZStack {
-                ForEach(Array(group.files.prefix(3).enumerated().reversed()), id: \.element.id) { item in
-                    CameraThumbnailView(session: session, file: item.element,
-                                        allowRemoteThumbnail: allowRemoteThumbnails,
-                                        showsCornerBadges: false)
-                        .accessibilityIdentifier("burst-image-\(item.element.id)")
-                        .frame(width: cardSide, height: cardSide)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .rotationEffect(.degrees(item.offset == 0 ? 0 : item.offset == 1 ? -5 : 5))
-                        .offset(x: item.offset == 0 ? 0 : item.offset == 1 ? -side * 0.025 : side * 0.025,
-                                y: item.offset == 0 ? 0 : side * 0.02)
+                PhotoThumbnailStackTransition(files: group.files) { renderedFiles in
+                    ZStack {
+                        ForEach(Array(renderedFiles.enumerated().reversed()), id: \.element.id) { item in
+                            let placement = PhotoThumbnailStackCard(frontIndex: item.offset, visibleCount: renderedFiles.count)
+                            CameraThumbnailView(session: session, file: item.element,
+                                                allowRemoteThumbnail: allowRemoteThumbnails,
+                                                loadEnabled: loadEnabled, transfersBusy: transfersBusy,
+                                                showsCornerBadges: false, cornerRadius: 10,
+                                                showsPlaceholderIcon: item.offset == 0)
+                                .accessibilityIdentifier("burst-image-\(item.element.id)")
+                                .frame(width: cardSide, height: cardSide)
+                                .rotationEffect(.degrees(placement.rotation))
+                                .offset(x: placement.x, y: placement.y)
+                        }
+                        LinearGradient(stops: [.init(color: .clear, location: 0),
+                                               .init(color: .clear, location: 0.55),
+                                               .init(color: .black.opacity(0.42), location: 1)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .frame(width: cardSide, height: cardSide)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .offset(y: 1)
+                            .allowsHitTesting(false)
+                    }
                 }
                 // Match BurstCollectionCell: image-only long press below the
                 // action buttons. Holding either button must not open preview.
@@ -3320,6 +3361,11 @@ private struct DebugPhotoProtectionPanel: View {
     let isSTA: Bool
     let files: [CameraFile]
     let session: CameraSession?
+    @State private var shareTask: Task<Void, Never>?
+    @State private var shareURL: URL?
+    @State private var sharing = false
+    @State private var sharePresented = false
+    @State private var notice = "诊断日志已复制"
     @State private var open = false
     @State private var busy = false
     @State private var diagnosticLines: [String] = []
@@ -3337,35 +3383,32 @@ private struct DebugPhotoProtectionPanel: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("评级与保护诊断").font(.headline)
-                                    Text("可连续探测两次后复制完整结果")
+                                    Text("诊断日志").font(.headline)
+                                    Text("遇到问题后分享日志")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
+                                Button { shareReport() } label: { Image(systemName: "square.and.arrow.up") }
+                                    .disabled(sharing)
+                                    .accessibilityLabel("分享 Debug 日志文件")
                                 Button {
-                                    UIPasteboard.general.string = PhotoRatingDiagnostics.snapshot()
-                                    let noticeID = UUID()
-                                    copyNoticeID = noticeID
-                                    copyNotice = true
-                                    Task { @MainActor in
-                                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                                        guard copyNoticeID == noticeID else { return }
-                                        copyNotice = false
-                                    }
+                                    UIPasteboard.general.string = diagnosticReport()
+                                    showNotice("诊断日志已复制")
                                 } label: {
                                     Image(systemName: "doc.on.doc")
                                 }
                                 .accessibilityLabel("复制 Debug 日志")
                                 Button {
-                                    PhotoRatingDiagnostics.clear(); refreshDiagnosticLines()
+                                    PhotoRatingDiagnostics.clear(); STAConnectionDiagnostics.clear(); refreshDiagnosticLines()
                                 } label: {
                                     Image(systemName: "trash")
                                 }
                                 .accessibilityLabel("清空 Debug 日志")
                                 Button { open = false } label: {
-                                    Image(systemName: "xmark")
+                                    Image(systemName: "xmark").frame(width: 32, height: 32)
                                 }
+                                .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 12))
                                 .accessibilityLabel("关闭")
                             }
                             HStack(spacing: 8) {
@@ -3403,7 +3446,7 @@ private struct DebugPhotoProtectionPanel: View {
                         .padding(.bottom, 8)
                         .overlay(alignment: .bottom) {
                             if copyNotice {
-                                Text("诊断日志已复制")
+                                Text(notice)
                                     .font(.caption)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 7)
@@ -3426,12 +3469,50 @@ private struct DebugPhotoProtectionPanel: View {
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
             }
+            .sheet(isPresented: $sharePresented) { if let shareURL { FileShareSheet(url: shareURL) } }
+            .onChange(of: open) { visible in if !visible { shareTask?.cancel() } }
+            .onDisappear { shareTask?.cancel() }
+    }
+
+    private func showNotice(_ text: String) {
+        notice = text
+        let id = UUID(); copyNoticeID = id; copyNotice = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if copyNoticeID == id { copyNotice = false }
+        }
+    }
+    private func diagnosticReport() -> String {
+        STAConnectionDiagnostics.snapshot() + "\n\n" + PhotoRatingDiagnostics.snapshot()
+    }
+    private func shareReport() {
+        guard !sharing else { return }
+        sharing = true
+        let report = diagnosticReport()
+        shareTask = Task { @MainActor in
+            defer { sharing = false }
+            do {
+                shareURL = try await Task.detached {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("picture_control_reports", isDirectory: true)
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let file = directory.appendingPathComponent("Shared-PhotoDiagnostics-\(UUID().uuidString).txt")
+                    try report.write(to: file, atomically: true, encoding: .utf8)
+                    return file
+                }.value
+                try Task.checkCancellation()
+                sharePresented = true
+            } catch is CancellationError {
+                return
+            } catch {
+                showNotice("分享失败，请重试")
+            }
+        }
     }
 
     private func refreshDiagnosticLines() {
         // Android remembers these rows per open/logVersion. Busy/progress or
         // copy-notice changes must not rescan the report or reset its scroll.
-        let next = PhotoRatingDiagnostics.snapshot().split(separator: "\n").map(String.init)
+        let next = diagnosticReport().split(separator: "\n").map(String.init)
         if diagnosticLines != next { diagnosticLines = next }
     }
 

@@ -26,7 +26,7 @@ final class CameraDownloadTests: XCTestCase {
         try original.write(to: first); try original.write(to: second)
         var settings = PhotoEffectsSettings()
         settings.photoFilterEnabled = true
-        settings.selectedFilter = .init(preset: settings.orderedFilters[0], intensityPercent: 80)
+        settings.selectedFilter = testPhotoFilterSelection(preset: TestPhotoFilterCatalog.presets[0], intensityPercent: 80)
         settings.photoFrameEnabled = true; settings.photoFramePreset = .minimal
         settings.watermark.enabled = false
         let recipe = settings
@@ -724,8 +724,12 @@ final class CameraDownloadTests: XCTestCase {
             .init(PTPConstants.getPartialObjectEx, [7, 0, 0, size, 0], payload: Data([255, 216]))
         })
         let session = CameraSession(repository: CameraRepository(session: PTPSession(transport: wire)))
-        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, _ in
-            XCTFail("Unusable partial metadata must not reach rendering"); return source
+        let renderCount = DownloadValueBox(0)
+        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, metadata in
+            XCTAssertNil(metadata)
+            renderCount.value += 1
+            if renderCount.value == 1 { throw CocoaError(.fileWriteUnknown) }
+            return source
         })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueue(cameraFile, effects: effects)
@@ -736,7 +740,8 @@ final class CameraDownloadTests: XCTestCase {
         let replacement = await queue.retry(id: id)
         XCTAssertNotNil(replacement)
         let second = try await finish(queue)
-        XCTAssertNotNil(second.items.first?.frameError)
+        XCTAssertNil(second.items.first?.frameError)
+        XCTAssertNotNil(second.items.first?.frameURL)
         let remaining = await wire.remaining
         let commands = await wire.commands
         XCTAssertEqual(remaining, 0)
@@ -752,8 +757,12 @@ final class CameraDownloadTests: XCTestCase {
             .init(PTPConstants.getPartialObjectEx, [7, 0, 0, UInt32(cameraExifHeaderCaptureBytes), 0], payload: Data([255,216,255,218]))
         ])
         let session = CameraSession(repository: CameraRepository(session: PTPSession(transport: wire)))
-        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, _ in
-            XCTFail("No camera metadata should fail before rendering"); return source
+        let renderCount = DownloadValueBox(0)
+        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, metadata in
+            XCTAssertNil(metadata)
+            renderCount.value += 1
+            if renderCount.value == 1 { throw CocoaError(.fileWriteUnknown) }
+            return source
         })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueue(cameraFile, effects: effects)
@@ -764,25 +773,27 @@ final class CameraDownloadTests: XCTestCase {
         let replacement = await queue.retry(id: id)
         XCTAssertNotNil(replacement)
         let retried = try await finish(queue)
-        XCTAssertNotNil(retried.items.first?.frameError)
+        XCTAssertNil(retried.items.first?.frameError)
+        XCTAssertNotNil(retried.items.first?.frameURL)
         let commands = await wire.commands
         XCTAssertEqual(commands.map(\.code), [PTPConstants.getPartialObjectEx])
     }
 
-    func testExistingJPEGWithoutCameraMetadataFailsOnlyDerivative() async throws {
+    func testExistingJPEGWithoutCameraMetadataRendersWithEmptyFields() async throws {
         let target = try directory(), jpeg = Self.jpegWithCameraMetadata()
         let cameraFile = file(size: UInt64(jpeg.count))
         try jpeg.write(to: target.appendingPathComponent(cameraFile.fileName))
         let rendered = DownloadValueBox(false)
-        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, _ in rendered.value = true; return source })
+        let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, metadata in XCTAssertNil(metadata); rendered.value = true; return source })
         var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
         await queue.enqueue(cameraFile, effects: effects)
         await queue.start(session: nil, directory: target)
         let snapshot = try await finish(queue)
         XCTAssertEqual(snapshot.items.first?.status, .completed)
-        XCTAssertEqual(snapshot.items.first?.frameError, AppLocalized.resource("error_camera_metadata_unavailable"))
+        XCTAssertNil(snapshot.items.first?.frameError)
+        XCTAssertNotNil(snapshot.items.first?.frameURL)
         XCTAssertNil(snapshot.items.first?.error)
-        XCTAssertFalse(rendered.value)
+        XCTAssertTrue(rendered.value)
         XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent(cameraFile.fileName).path))
     }
 
@@ -840,9 +851,11 @@ final class CameraDownloadTests: XCTestCase {
                 .init(PTPConstants.getPartialObjectEx, [7, 0, 0, UInt32(cameraExifHeaderCaptureBytes), 0], response: 0x2005)
             ])
             let firstSession = CameraSession(repository: CameraRepository(session: PTPSession(transport: firstWire), deviceInfo: info))
-            let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { source, _, _, _ in
-                XCTFail("Missing source metadata must fail before rendering")
-                return source
+            let queue = TransferQueue(premiumAccess: PremiumAccess(.lifetime), renderFrame: { _, _, _, metadata in
+                XCTAssertNil(metadata)
+                // A renderer failure is retryable; retry must retain the original
+                // source binding even when that source has no metadata.
+                throw CocoaError(.fileWriteUnknown)
             })
             var effects = PhotoEffectsSettings(); effects.photoFrameEnabled = true
             await queue.enqueue(original, effects: effects)

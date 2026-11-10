@@ -15,6 +15,7 @@ struct DetentWheelSizing {
 /// tap; long lists preview while dragging and commit only after release.
 struct DetentWheel<Option: Hashable>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var parentEnabled
     let label: String
     let options: [Option]
     let selected: Option
@@ -31,6 +32,7 @@ struct DetentWheel<Option: Hashable>: View {
     var optionFontWeight: Font.Weight? = nil
     var optionTextColor: Color? = nil
     var accentColor: Color? = nil
+    var labelColor: Color? = nil
     var emphasized = false
     var showEmphasisBorder = true
     var showDragHint = true
@@ -53,7 +55,6 @@ struct DetentWheel<Option: Hashable>: View {
     @State private var dragSession: DetentWheelDragSession<Option>
     @GestureState private var gestureActive = false
     @GestureState private var pressing = false
-    @State private var longPressFeedback = ZTransferLongPressFeedback()
     private let longPressDurationMilliseconds = 450
     // These inputs are immutable for a view value. A new parent configuration
     // recomputes them; local drag frames keep the same accepted selection/key.
@@ -69,7 +70,7 @@ struct DetentWheel<Option: Hashable>: View {
          cornerRadius: CGFloat = 13, optionMaxLines: Int = 1,
          optionFontSize: CGFloat = 14, optionFontSizeFor: ((Option) -> CGFloat)? = nil, optionFontWeight: Font.Weight? = nil,
          optionTextColor: Color? = nil,
-         accentColor: Color? = nil, emphasized: Bool = false,
+         accentColor: Color? = nil, labelColor: Color? = nil, emphasized: Bool = false,
          showEmphasisBorder: Bool = true, showDragHint: Bool = true,
          onDetent: (() -> Void)? = nil, onActivated: (() -> Void)? = nil,
          onLongClick: (() -> Void)? = nil,
@@ -80,6 +81,7 @@ struct DetentWheel<Option: Hashable>: View {
          ambientEffectPulse: NativeAmbientPulse? = nil,
          followsButtonSkin: Bool = false,
          prominentPressFeedback: Bool = false,
+         gestureIdentity: AnyHashable? = nil,
          contentAnchorSpace: AnyHashable? = nil,
          onContentAnchorChange: ((CGRect) -> Void)? = nil) {
         precondition(!options.isEmpty, "DetentWheel requires at least one option")
@@ -91,6 +93,7 @@ struct DetentWheel<Option: Hashable>: View {
         self.optionMaxLines = optionMaxLines; self.optionFontSize = sizing?.fontSize ?? optionFontSize
         self.optionFontSizeFor = optionFontSizeFor
         self.optionFontWeight = sizing?.fontWeight ?? optionFontWeight; self.optionTextColor = optionTextColor; self.accentColor = accentColor
+        self.labelColor = labelColor
         self.emphasized = emphasized; self.showEmphasisBorder = showEmphasisBorder
         self.showDragHint = showDragHint; self.onDetent = onDetent
         self.onActivated = onActivated; self.onLongClick = onLongClick
@@ -104,14 +107,15 @@ struct DetentWheel<Option: Hashable>: View {
         self.onContentAnchorChange = onContentAnchorChange
         let initial = options.firstIndex(of: selected) ?? 0
         selectedIndex = initial
-        let configuration = DetentWheelConfiguration(options: options, rowHeight: resolvedRowHeight, enabled: enabled, readOnly: readOnly)
+        let configuration = DetentWheelConfiguration(options: options, rowHeight: resolvedRowHeight, enabled: enabled, readOnly: readOnly, identity: gestureIdentity)
         gestureConfiguration = configuration
         _position = State(initialValue: CGFloat(initial))
         _dragSession = State(initialValue: DetentWheelDragSession(configuration: configuration))
     }
 
-    private var canDrag: Bool { gestureConfiguration.canDrag }
+    private var canDrag: Bool { parentEnabled && gestureConfiguration.canDrag }
     private var accent: Color { accentColor ?? ZTransferColors.accentBlue }
+    private var badgeColor: Color { labelColor ?? accent }
     private var dark: Bool { colorScheme == .dark }
     private var usesNativeLiquidGlass: Bool {
         followsButtonSkin && ZTransferButtonSkin(storedValue: skinPreset) == .liquidGlass
@@ -156,11 +160,11 @@ struct DetentWheel<Option: Hashable>: View {
                     Text(label)
                         .font(.system(size: wheelHeight <= 34 ? 8 : 9, weight: .medium))
                         .lineLimit(1)
-                        .foregroundStyle(accent)
+                        .foregroundStyle(badgeColor)
                         .padding(.horizontal, wheelHeight <= 34 ? 4 : 6)
                         .padding(.vertical, 1)
                         .frame(minHeight: wheelHeight <= 34 ? 11 : 15)
-                        .background(accent.opacity(0.10), in: UnevenRoundedRectangle(bottomTrailingRadius: wheelHeight <= 34 ? 4 : 5))
+                        .background(badgeColor.opacity(0.10), in: UnevenRoundedRectangle(bottomTrailingRadius: wheelHeight <= 34 ? 4 : 5))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .opacity(dragging ? 0 : 1)
                 }
@@ -192,7 +196,7 @@ struct DetentWheel<Option: Hashable>: View {
             .highPriorityGesture(clickGesture.simultaneously(with: dragGesture),
                                  including: canDrag ? .all : .subviews)
             .simultaneousGesture(pressGesture,
-                including: prominentPressFeedback || onLongClick != nil ? .all : .subviews)
+                including: prominentPressFeedback ? .all : .subviews)
             .scaleEffect(prominentPressFeedback && pressing ? 0.96 : 1)
             .brightness(prominentPressFeedback && pressing ? -0.035 : 0)
             .animation(.easeOut(duration: pressing ? 0.07 : 0.16), value: pressing)
@@ -219,21 +223,23 @@ struct DetentWheel<Option: Hashable>: View {
         .accessibilityHint(Text(readOnly ? AppLocalized.text("只读") : AppLocalized.resource("photo_effects_wheel_hint")))
         .accessibilityAddTraits(.isButton)
         .onChange(of: selected) { value in sync(value: value) }
-        .onChange(of: gestureConfiguration) { _ in
+        .onChange(of: gestureConfiguration) { configuration in
             // Android restarts pointerInput for these keys. Invalidate queued
             // callbacks as well as replacing the recognizer, including ABA changes.
-            longPressFeedback.end()
-            dragSession.update(configuration: gestureConfiguration)
+            // onChange can retain the previous view value while delivering
+            // the new configuration. Use its argument: reading the captured
+            // property left the drag session read-only after loading finished,
+            // even though the newly rendered wheel already showed drag arrows.
+            dragSession.update(configuration: configuration)
             dragging = false
             position = CGFloat(selectedIndex)
         }
-        .onChange(of: pressing) { active in
-            if !active { longPressFeedback.end() }
+        .onChange(of: parentEnabled) { active in
+            guard !active else { return }
+            dragSession.invalidate()
+            dragging = false
+            position = CGFloat(selectedIndex)
         }
-        .onChange(of: dragging) { active in
-            if active { longPressFeedback.cancel() }
-        }
-        .onDisappear { longPressFeedback.end() }
         .onPreferenceChange(DetentWheelContentAnchorPreferenceKey.self) { frame in
             guard frame != .zero else { return }
             onContentAnchorChange?(frame)
@@ -307,6 +313,7 @@ struct DetentWheel<Option: Hashable>: View {
                 guard revision == dragSession.revision, enabled, !readOnly, canDrag else { return }
                 if !dragging {
                     guard dragSession.begin(revision: revision, selectedIndex: selectedIndex) else { return }
+                    position = CGFloat(selectedIndex)
                     dragging = true
                 }
                 guard let next = dragSession.preview(revision: revision, translation: value.translation.height) else { return }
@@ -329,7 +336,7 @@ struct DetentWheel<Option: Hashable>: View {
     }
 
     private func activate() {
-        guard enabled, !readOnly else { return }
+        guard parentEnabled, enabled, !readOnly else { return }
         if let onActivated { onActivated(); return }
         let target = (selectedIndex + 1) % options.count
         guard target != selectedIndex else { return }
@@ -355,12 +362,15 @@ struct DetentWheel<Option: Hashable>: View {
             LongPressGesture(minimumDuration: Double(longPressDurationMilliseconds) / 1_000)
                 .exclusively(before: TapGesture())
                 .onEnded { result in
-                    guard enabled, !readOnly, !dragging, revision == dragSession.revision else { return }
+                    guard parentEnabled, enabled, !readOnly, !dragging, revision == dragSession.revision else { return }
                     switch result {
                     case .first(let completed):
                         if completed {
                             dragSession.invalidate()
-                            longPressFeedback.trigger { onLongClick?() }
+                            // A wheel press may become a drag or remain on one
+                            // empty/boundary detent. Never start motor feedback
+                            // at touch-down; confirm only a recognized menu action.
+                            ZTransferHaptics.shared.confirmLongPress { onLongClick?() }
                         }
                     case .second:
                         activate()
@@ -373,13 +383,8 @@ struct DetentWheel<Option: Hashable>: View {
     private var pressGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .updating($pressing) { _, active, _ in
-                if (prominentPressFeedback || onLongClick != nil) && enabled && !readOnly { active = true }
+                if prominentPressFeedback && parentEnabled && enabled && !readOnly { active = true }
             }
-            .onChanged { _ in
-                guard onLongClick != nil, enabled, !readOnly, !dragging else { return }
-                longPressFeedback.begin(durationMilliseconds: longPressDurationMilliseconds)
-            }
-            .onEnded { _ in longPressFeedback.end() }
     }
 
     private func sync(value: Option) {
@@ -428,11 +433,13 @@ struct DetentWheelConfiguration<Option: Hashable>: Hashable {
     let rowHeight: CGFloat
     let enabled: Bool
     let readOnly: Bool
+    let identity: AnyHashable?
     private let optionsHash: Int
 
-    init(options: [Option], rowHeight: CGFloat, enabled: Bool, readOnly: Bool) {
+    init(options: [Option], rowHeight: CGFloat, enabled: Bool, readOnly: Bool, identity: AnyHashable? = nil) {
         self.options = options; self.rowHeight = rowHeight
         self.enabled = enabled; self.readOnly = readOnly
+        self.identity = identity
         optionsHash = options.hashValue
     }
 
@@ -441,11 +448,11 @@ struct DetentWheelConfiguration<Option: Hashable>: Hashable {
     // frame. Full equality still protects against hash collisions and reorder.
     nonisolated func hash(into hasher: inout Hasher) {
         hasher.combine(optionsHash); hasher.combine(rowHeight)
-        hasher.combine(enabled); hasher.combine(readOnly)
+        hasher.combine(enabled); hasher.combine(readOnly); hasher.combine(identity)
     }
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.optionsHash == rhs.optionsHash && lhs.rowHeight == rhs.rowHeight
-            && lhs.enabled == rhs.enabled && lhs.readOnly == rhs.readOnly && lhs.options == rhs.options
+            && lhs.enabled == rhs.enabled && lhs.readOnly == rhs.readOnly && lhs.identity == rhs.identity && lhs.options == rhs.options
     }
 
     var canDrag: Bool { enabled && !readOnly && options.count > 3 }

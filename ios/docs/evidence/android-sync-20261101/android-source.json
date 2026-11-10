@@ -1,0 +1,34 @@
+{
+  "base": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "target": "8a09e51b11c6fa4fa74133a4cf603c883ba7ea5a",
+  "pull": "Already up to date",
+  "commits": [
+    "8a09e51b11c6fa4fa74133a4cf603c883ba7ea5a 升级至 2.03（76）并完善 STA 连接提示",
+    "4b240c1f4079ef1689100adf08196a43f249b65f 优化 STA 配对等待与连接失败提示",
+    "f50c08335254b7c67c652a46e5708b93f2666690 精简 STA 配对冗余请求并补充分段耗时诊断",
+    "f0f39a85ef9eba4b5c0ddf5eb8e110b875757252 修复 STA 首次配对确认与失败恢复"
+  ],
+  "files": {
+    "app/build.gradle.kts": "6c073ff13a4f6e05f3da10fe2096db93ee685d807c03b76143594eaf4175a04e",
+    "app/src/androidTest/AndroidManifest.xml": "874ee3fa65166d8705a3b94b5d87eb8de05b6984d02f8507dc434a15e195a10f",
+    "app/src/androidTest/java/com/ztransfer/protocol/StaPairingHandshakeInstrumentation.kt": "c09b95016416895113fd98608a2b11a9049d1d2b88de2d4da59dd8a95b6c580d",
+    "app/src/debug/java/com/ztransfer/diagnostics/StaConnectionDiagnostics.kt": "ef37c58e06c842d7525d3cbcada1e704f3e6a500bb62557136ad4570b0a33db5",
+    "app/src/debug/java/com/ztransfer/ui/screen/DebugPhotoGenerationProbePanel.kt": "1a2a74dc1783b72e425123430c636bbbfa61e193be01719a8f3b46f923dce43d",
+    "app/src/main/java/com/ztransfer/protocol/NikonCamera.kt": "1c2f2c001f47f376315725adae1c5f6110fe91f73fe97aa8d0d4ca228663b5a9",
+    "app/src/main/java/com/ztransfer/protocol/PtpIpDiscovery.kt": "68baf2e16245f69544d4e873476c4f5fef44a433c79b7d6d486fee4d8cf2f3cd",
+    "app/src/main/java/com/ztransfer/protocol/StaConnectionTrace.kt": "5fb2ea0556e8f75af29d6109ea0f643cea1cc408f6868dd4c14d79332dc606ed",
+    "app/src/main/java/com/ztransfer/protocol/StaPairingLiveView.kt": "2634ca90fc2c82031d9847699a02dc5328a80cf22841a1fa165656933a192c67",
+    "app/src/main/java/com/ztransfer/ui/screen/HomeScreen.kt": "5dc0a043682c3dbc9f4d09d50c145953988048e89cbfa8067158fb487b3715c6",
+    "app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt": "cdbd9581712fc92018f883d2cf00c45862f3b70cdc133aab32eef5f7920c6820",
+    "app/src/main/java/com/ztransfer/viewmodel/StaCameraProfileStore.kt": "672118f21dc1409cb483121aae4f1b2cc7def69196af49e9e3c833ec04c29b9c",
+    "app/src/main/res/values-b+zh+Hant/strings.xml": "dd8c176a6e04759005ef5c49c7f1d7cb6d3c89b3bcd4d882173f5f0510e761f0",
+    "app/src/main/res/values-zh/strings.xml": "6df200cee831f487309686646541957e98bd5b0cc39de39209ffc4ab964324e6",
+    "app/src/main/res/values/strings.xml": "eb5d1cb088823c9658dde0083693c39ebbf1268c67c00fa82fcdb3f1f74887fc",
+    "app/src/release/java/com/ztransfer/diagnostics/StaConnectionDiagnostics.kt": "ba29c84581420d018d9d241467ad6744f912a045d05a532cb760ce5eb18e948e",
+    "app/src/test/java/com/ztransfer/protocol/StaConnectionTraceTest.kt": "9c94b2270f03cb2ed1fb5c667e4839d1d3cb83faae9ca9a8bdd5c6ef2a1bcad7",
+    "app/src/test/java/com/ztransfer/viewmodel/StaConnectionIsolationTest.kt": "8400577046e93a6ce05fbc3bd0ef79627635726a4dc8c614c8ed41cb6b9432b6",
+    "app/src/test/java/com/ztransfer/viewmodel/StaFailureMessageTest.kt": "f5f33bc5e9eb834194dad5ab3e079600d4ab0ae5a161aa8c966bc63f8a07718b",
+    "app/src/testDebug/java/com/ztransfer/diagnostics/StaConnectionDiagnosticsTest.kt": "04f20340d8519a9e879416a3793b53723d65320524cead326bd38089181e4d04",
+    "docs/技术调研/计算机Wi-Fi客户端与智能设备STA模式.md": "2ff256b09298b64a645a4dd27d5546f4a3079fea6c84f5bfbb8686629b745f9a"
+  }
+}

@@ -108,9 +108,9 @@ struct RemoteParameterInput: UIViewRepresentable {
             autoElement.accessibilityIdentifier = next.identifier + "-auto"
             autoElement.accessibilityLabel = AppLocalized.resource("auto_iso")
             autoElement.accessibilityValue = next.configuration.autoEnabled == true ? "1" : "0"
-            autoElement.accessibilityTraits = next.autoBusy ? [.button, .notEnabled] : .button
+            autoElement.accessibilityTraits = next.autoBusy || !next.configuration.enabled ? [.button, .notEnabled] : .button
             autoElement.action = { [weak self] in
-                guard let c = self?.configuration, !c.autoBusy else { return false }
+                guard let c = self?.configuration, !c.autoBusy, c.configuration.enabled else { return false }
                 c.onAutoToggle?(); return true
             }
             accessibilityElements = next.configuration.hasAutoControl ? [valueElement, autoElement] : [valueElement]
@@ -131,7 +131,7 @@ struct RemoteParameterInput: UIViewRepresentable {
             }
         }
         func deliver(_ events: [RemoteParameterTouch.Event]) {
-            guard let c = configuration else { return }
+            guard let c = configuration, c.configuration.enabled else { return }
             for event in events {
                 switch event {
                 case .begin: c.onBegin()

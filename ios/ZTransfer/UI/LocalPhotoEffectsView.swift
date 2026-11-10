@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class PhotoEffectsGeometrySnapshot {
     var previewAnchor: CGRect = .zero
+    var presentedFrame: PhotoEffectsPreviewFrame?
 }
 
 /// Android LocalPhotoEffectsPage: fixed 4:3 pager, batch action, inline editors.
@@ -12,6 +13,10 @@ final class PhotoEffectsGeometrySnapshot {
 struct LocalPhotoEffectsView: View {
     @ObservedObject private var entitlements = PremiumEntitlementStore.shared
     let onNavigateUp: () -> Void
+    var pageActive = true
+    @StateObject private var photoFilterLifetime = PhotoFilterEditorLifetime(role: .local)
+    private var photoFilterSession: PhotoFilterEditorSession { photoFilterLifetime.session }
+    private var np3Active: Bool { pageActive && PhotoColorEffectEditorVisibility(settings: effectsStore.settings, isPro: entitlements.access.isPro).filter }
     @StateObject private var effectsStore = PhotoEffectsStore(scope: .localPhotos)
     @StateObject private var batch = LocalPhotoBatchViewModel()
     @StateObject private var photoLUTLifetime = PhotoLUTEditorLifetime(role: .local)
@@ -25,9 +30,17 @@ struct LocalPhotoEffectsView: View {
     @State private var showingModuleMenu = false
     @AppStorage("local_photo_effects_help_viewed") private var localPhotoEffectsHelpViewed = false
     @State private var showingWatermarkPicker = false
-    @State private var filterChooser = PhotoFilterChooserState()
     @State private var effectsHint: PhotoEffectsHint?
     @FocusState private var watermarkTextFocused: Bool
+
+    init(onNavigateUp: @escaping () -> Void, pageActive: Bool = true,
+         effectsStore: PhotoEffectsStore? = nil, photoFilterSession: PhotoFilterEditorSession? = nil,
+         photoLUTEditor: PhotoLUTEditorState? = nil) {
+        self.onNavigateUp = onNavigateUp; self.pageActive = pageActive
+        if let effectsStore { _effectsStore = StateObject(wrappedValue: effectsStore) }
+        if let photoFilterSession { _photoFilterLifetime = StateObject(wrappedValue: PhotoFilterEditorLifetime(photoFilterSession)) }
+        if let photoLUTEditor { _photoLUTLifetime = StateObject(wrappedValue: PhotoLUTEditorLifetime(photoLUTEditor)) }
+    }
 
     var body: some View {
         ScrollView {
@@ -42,7 +55,8 @@ struct LocalPhotoEffectsView: View {
                                        showLocationFields: false,
                                        imageImporting: effectsStore.watermarkImageImporting,
                                        photoLUTEditor: photoLUTEditor,
-                                       filterChooser: $filterChooser,
+                                       photoFilterSession: photoFilterSession,
+                                       onFilterFavorite: effectsStore.toggleFilterFavorite,
                                        onFavoriteImageMissing: { effectsHint = .init(resource: "photo_effect_favorite_image_missing") })
                 .padding(.top, 10).padding(.bottom, 18)
             }
@@ -62,10 +76,7 @@ struct LocalPhotoEffectsView: View {
         .overlayPreferenceValue(TipPopupAnchorPreferenceKey.self) { anchors in
             ZStack(alignment: .topLeading) {
                 PhotoLUTChooserPresentation(editor: photoLUTEditor, draft: effectsBinding)
-                AndroidDialogPresentation(isPresented: filterChooser.isPresented) {
-                    PhotoFilterChooserOverlay(draft: effectsBinding, state: $filterChooser,
-                        onFilterSelected: { photoLUTEditor.cancelPending() })
-                }
+                PhotoNP3ChooserPresentation(session: photoFilterSession, draft: effectsBinding)
                 TipPopupLayer(isPresented: showingHelp) {
                     if let anchor = anchors[.localEffects] {
                         Color.clear
@@ -81,6 +92,17 @@ struct LocalPhotoEffectsView: View {
                 .zIndex(1)
             }
         }
+        .onAppear {
+            photoFilterSession.begin(draft: effectsBinding, active: np3Active) { [photoLUTEditor] in
+                photoLUTEditor.cancelPending(); photoLUTEditor.store.select(nil)
+            }
+        }
+        .onChange(of: np3Active) { photoFilterSession.setActive($0) }
+        .onChange(of: effectsStore.settings.photoFilterEnabled && effectsStore.settings.colorEffectModule == .filter) { _ in
+            photoFilterSession.draftChanged(effectsStore.settings)
+        }
+        .onDisappear { photoFilterSession.end() }
+        .onReceive(photoFilterSession.$notice.compactMap { $0 }) { effectsHint = .init(resource: $0.resource) }
         .photoEffectsHint($effectsHint, duration: 2)
         .photosPicker(isPresented: $showingPicker, selection: $pickerItems,
                       matching: .images, preferredItemEncoding: .current)
@@ -135,7 +157,7 @@ struct LocalPhotoEffectsView: View {
     }
 
     private var effectsBinding: Binding<PhotoEffectsSettings> {
-        Binding(get: { effectsStore.settings }, set: { effectsStore.updateFromEditor($0) })
+        Binding(get: { [effectsStore] in effectsStore.settings }, set: { [effectsStore] in effectsStore.updateFromEditor($0) })
     }
 
     private var previewSettings: PhotoEffectsSettings {
@@ -151,7 +173,7 @@ struct LocalPhotoEffectsView: View {
                     .frame(width: 38, height: 38)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 19))
+            .buttonStyle(ZTransferGlassButtonStyle.iconControl(cornerRadius: 19))
             // UIPageViewController's rotated vertical pager can retain the
             // Button's internal tap recognizer after an interactive page
             // transition. Own the physical tap at the toolbar level and send
@@ -395,7 +417,8 @@ private struct LocalEffectPreview: View {
                     ),
                     requestedCanvasKey: photoEffectsPreviewCanvasKey(settings),
                     showComparison: comparing,
-                    restoreRevision: previewRestoreRevision, failed: failed
+                    restoreRevision: previewRestoreRevision, failed: failed,
+                    source: source, onPresentedFrame: { geometry.presentedFrame = $0 }
                 )
                 .overlay(alignment: .bottom) {
                     if failed { previewUnavailableBadge }
@@ -403,13 +426,13 @@ private struct LocalEffectPreview: View {
             } else if failed, let source {
                 Image(uiImage: source)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .clipped()
                     .overlay(alignment: .bottom) { previewUnavailableBadge }
             } else if failed {
                 Text(AppLocalized.resource("local_photo_preview_failed"))
                     .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-            } else { ProgressView().tint(ZTransferColors.accentBlue) }
+            } else { PhotoEffectsLoadingIndicator() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .background(GeometryReader { proxy in
@@ -418,10 +441,10 @@ private struct LocalEffectPreview: View {
                 .onChange(of: proxy.frame(in: .global)) { geometry.previewAnchor = $0 }
         })
         .overlay { PhotoEffectsImageInput(comparing: $comparing, comparisonEnabled: images?.unfiltered != nil, onTap: { _ in
-            guard let images, !comparing else { return }
+            guard let displayed = geometry.presentedFrame, !comparing else { return }
             onWillOpen()
-            expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: images.filtered,
-                initialComparison: images.unfiltered, anchor: geometry.previewAnchor)
+            expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: displayed.image,
+                initialComparison: displayed.comparison, anchor: geometry.previewAnchor)
             expanded = true
         }) }
         .fullScreenCover(isPresented: $expanded, onDismiss: {

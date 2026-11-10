@@ -10,7 +10,7 @@ final class Np3BitmapFilterTests: XCTestCase {
     func testSRGBAdapterPreservesPixelOrderAndMatchesOpaqueAndroidPixels() throws {
         let pixels: [UInt32] = [0xffff_0000, 0xff00_ff00, 0xff00_00ff, 0xffa2_8e43]
         let source = try image(pixels, width: 2)
-        let preset = Np3FilterCatalog.presets[0]
+        let preset = TestPhotoFilterCatalog.np3Presets[0]
         let filtered = try Np3BitmapFilter.apply(source, parameters: preset.parameters, intensityPercent: 80)
         let engine = Np3FilterEngine(parameters: preset.parameters, intensityPercent: 80)
         XCTAssertEqual(try rgbaBytes(filtered), pixels.flatMap { rgba(engine.filterPixel($0)) })
@@ -22,7 +22,7 @@ final class Np3BitmapFilterTests: XCTestCase {
     func testTranslucentInputIsUnpremultipliedForFilteringAndPremultipliedForDrawing() throws {
         let pixels: [UInt32] = [0x80ff_8000, 0x0000_0000]
         let source = try image(pixels, width: 2)
-        let preset = Np3FilterCatalog.presets[1]
+        let preset = TestPhotoFilterCatalog.np3Presets[1]
         let filtered = try Np3BitmapFilter.apply(source, parameters: preset.parameters, intensityPercent: 100)
         let engine = Np3FilterEngine(parameters: preset.parameters, intensityPercent: 100)
         let straight = rgba(engine.filterPixel(pixels[0]))
@@ -34,7 +34,7 @@ final class Np3BitmapFilterTests: XCTestCase {
         let source = try image([0xffff_0000], width: 1)
         let render = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try Np3BitmapFilter.apply(source, parameters: Np3FilterCatalog.presets[0].parameters,
+            return try Np3BitmapFilter.apply(source, parameters: TestPhotoFilterCatalog.np3Presets[0].parameters,
                                             intensityPercent: 80)
         }
         do { _ = try await render.value; XCTFail("Expected cancellation") }
@@ -54,7 +54,7 @@ final class Np3BitmapFilterTests: XCTestCase {
         let palette: [UInt32] = [0xffff0000, 0xff00ff00, 0xff0000ff, 0x80804020, 0x00000000]
         let pixels = (0..<(512 * 513)).map { palette[$0 % palette.count] }
         let source = try image(pixels, width: 512)
-        let parameters = Np3FilterCatalog.presets[1].parameters
+        let parameters = TestPhotoFilterCatalog.np3Presets[1].parameters
         let original = try Np3BitmapFilter.apply(source, parameters: parameters, intensityPercent: 80, execution: .original)
         let preview = try Np3BitmapFilter.apply(source, parameters: parameters, intensityPercent: 80, execution: .preview)
         XCTAssertEqual(try rgbaBytes(original), try rgbaBytes(preview))

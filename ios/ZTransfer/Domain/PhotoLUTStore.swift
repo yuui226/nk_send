@@ -13,11 +13,17 @@ final class PhotoLUTStore: ObservableObject {
         fileprivate var intensityKey: String {
             self == .camera ? "photo_lut_intensity" : "photo_lut_local_intensity"
         }
+        fileprivate var memoryRole: String { self == .camera ? "transfer" : "local" }
     }
 
     // All mutations are MainActor-isolated. The signal carries no preferences:
     // each live store rereads its own defaults, including isolated test suites.
     private static let sharedPreferencesChanged = PassthroughSubject<Void, Never>()
+    private static let folderKey = "photo_lut_folder_identity"
+    private static let folderRevisionKey = "photo_lut_folder_revision"
+    let folderChanges = PassthroughSubject<Void, Never>()
+    private var observedFolderRevision = 0
+    var folderRevision: Int { defaults.integer(forKey: Self.folderRevisionKey) }
     private var sharedObservation: AnyCancellable?
     private var recipeKey: String { role.selectionKey + "_recipe" }
     private let role: Role
@@ -50,6 +56,7 @@ final class PhotoLUTStore: ObservableObject {
          legacyDirectory: URL? = nil, savesOnCommit: Bool = false) {
         self.role = role
         self.defaults = defaults
+        observedFolderRevision = defaults.integer(forKey: Self.folderRevisionKey)
         self.savesOnCommit = savesOnCommit
         draftRecipe = defaults.dictionary(forKey: role.selectionKey + "_recipe")
         folderBookmark = defaults.data(forKey: "photo_lut_folder_bookmark")
@@ -79,6 +86,16 @@ final class PhotoLUTStore: ObservableObject {
         if folderBookmark != bookmark { folderBookmark = bookmark }
         if favorites != savedFavorites { favorites = savedFavorites }
         if favoriteOrder != savedOrder { favoriteOrder = savedOrder }
+        let revision = folderRevision
+        if observedFolderRevision != revision {
+            observedFolderRevision = revision
+            draftRecipe = nil; recipeOwner = nil
+            if selectedIdentifier != nil { selectedIdentifier = nil }
+            if hasSelection { hasSelection = false }
+            if intensityPercent != 80 { intensityPercent = 80 }
+            if adjustments != .init() { adjustments = .init() }
+            folderChanges.send()
+        }
     }
 
     /// An editor can be reopened after another presenter changed the same role.
@@ -105,8 +122,49 @@ final class PhotoLUTStore: ObservableObject {
         defaults.set(data, forKey: "photo_lut_folder_bookmark")
         Self.sharedPreferencesChanged.send()
     }
+
+    /// A completed replacement invalidates both roles before publishing the new
+    /// folder. Merely renewing its bookmark must not clear parameters or drafts.
+    func acceptFolder(_ prepared: RemoteLUTFolderAccess.PreparedFolder, replacing: Bool, previous: URL?) {
+        let next = prepared.root?.standardizedFileURL.path
+        let old = defaults.string(forKey: Self.folderKey) ?? previous?.standardizedFileURL.path
+        if replacing, let next, old != next {
+            for key in defaults.dictionaryRepresentation().keys where
+                key.hasPrefix("lut_adjustments_v1:") || key.hasPrefix("lut_adjustments_v2:") ||
+                key.hasPrefix("strength:") || ["photo_lut_selected", "photo_lut_local_selected",
+                    "photo_lut_selected_recipe", "photo_lut_local_selected_recipe",
+                    "photo_lut_intensity", "photo_lut_local_intensity",
+                    "photo_lut_favorites", "photo_lut_favorite_order"].contains(key) {
+                defaults.removeObject(forKey: key)
+            }
+            defaults.set(folderRevision &+ 1, forKey: Self.folderRevisionKey)
+        }
+        if let next { defaults.set(next, forKey: Self.folderKey) }
+        defaults.set(prepared.bookmark, forKey: "photo_lut_folder_bookmark")
+        Self.sharedPreferencesChanged.send()
+    }
+
+    func isSourceCurrent(_ source: String?) -> Bool {
+        guard let root = defaults.string(forKey: Self.folderKey), let source else { return true }
+        let file: URL
+        if source.hasPrefix("/") { file = URL(fileURLWithPath: source) }
+        else if let url = URL(string: source), url.isFileURL { file = url }
+        else { return true } // Unknown legacy identifiers cannot prove another folder.
+        let a = URL(fileURLWithPath: root).standardizedFileURL.pathComponents
+        let b = file.standardizedFileURL.pathComponents
+        return b.count > a.count && b.starts(with: a)
+    }
+
+    func canCommitSelection(_ selection: PhotoFilterSelection?) -> Bool {
+        guard let selection, selection.preset.id.hasPrefix("cube:") else { return true }
+        let digest = String(selection.preset.id.dropFirst(5))
+        guard PhotoNp3RecipeKind.isDigest(digest), isSourceCurrent(selectedIdentifier) else { return false }
+        return selectedIdentifier != nil || defaults.string(forKey: Self.folderKey) == nil ||
+            defaults.dictionary(forKey: recipeKey)?["digest"] as? String == digest
+    }
     func select(_ identifier: String?) {
         if identifier == nil || identifier != selectedIdentifier {
+            retainSavedParameters()
             recipe = nil
             recipeOwner = nil
             if hasSelection { hasSelection = false }
@@ -117,10 +175,14 @@ final class PhotoLUTStore: ObservableObject {
 
     /// SettingsScreen commits the transfer recipe on back/close. The workbench
     /// saves immediately; folder, favorites and per-LUT parameter memory do too.
-    func commitDraft() {
+    @discardableResult
+    func commitDraft() -> Bool {
+        guard isSourceCurrent(recipe?["source"] as? String) else { return false }
+        retainSavedParameters()
         persistRole()
         recipeOwner = nil
         Task { await pruneSnapshots() }
+        return true
     }
 
     private func persistRole() {
@@ -130,17 +192,16 @@ final class PhotoLUTStore: ObservableObject {
     }
 
     func setIntensity(_ value: Int) {
+        guard isSourceCurrent(recipe?["source"] as? String) else { return }
         let intensity = Np3FilterEngine.normalizeIntensity(value)
         if intensityPercent != intensity { intensityPercent = intensity }
         if var recipe {
+            if let digest = recipe["digest"] as? String, PhotoNp3RecipeKind.isDigest(digest) {
+                _ = remembered(digest: digest, source: recipe["source"] as? String)
+                defaults.set(intensity, forKey: memoryKey(digest) + ":intensity")
+            }
             recipe["intensity"] = intensityPercent
             self.recipe = recipe
-            if let digest = recipe["digest"] as? String {
-                defaults.set(intensityPercent, forKey: "lut_adjustments_v1:\(digest):intensity")
-            }
-            if let source = recipe["source"] as? String {
-                defaults.set(intensityPercent, forKey: "strength:\(source)")
-            }
         }
         if !savesOnCommit { persistRole() }
     }
@@ -150,7 +211,7 @@ final class PhotoLUTStore: ObservableObject {
     @discardableResult
     func selectLUT(_ lut: CubeLUT, name: String, sourceIdentifier: String) throws -> PhotoFilterSelection {
         let prepared = try Self.prepareSelection(lut, directory: snapshotDirectory)
-        return acceptSelection(prepared, name: name, sourceIdentifier: sourceIdentifier)
+        return try acceptSelection(prepared, name: name, sourceIdentifier: sourceIdentifier)
     }
 
     struct PreparedSelection: Sendable {
@@ -167,16 +228,14 @@ final class PhotoLUTStore: ObservableObject {
         return PreparedSelection(lut: lut, owner: owner)
     }
 
-    func acceptSelection(_ prepared: PreparedSelection, name: String, sourceIdentifier: String) -> PhotoFilterSelection {
+    func acceptSelection(_ prepared: PreparedSelection, name: String, sourceIdentifier: String) throws -> PhotoFilterSelection {
+        guard isSourceCurrent(sourceIdentifier) else { throw CancellationError() }
         let lut = prepared.lut
+        retainSavedParameters()
         PhotoLUTRuntime.register(lut, snapshot: snapshotDirectory.appendingPathComponent("\(lut.digest).bin"))
-        let intensityKey = "lut_adjustments_v1:\(lut.digest):intensity"
-        let remembered = defaults.object(forKey: intensityKey) as? Int
-            ?? defaults.object(forKey: "strength:\(sourceIdentifier)") as? Int ?? 80
-        intensityPercent = Np3FilterEngine.normalizeIntensity(remembered)
-        defaults.set(intensityPercent, forKey: intensityKey)
-        defaults.set(intensityPercent, forKey: "strength:\(sourceIdentifier)")
-        adjustments = Self.decodeAdjustments(defaults.dictionary(forKey: "lut_adjustments_v1:\(lut.digest)") as? [String: Int])
+        let memory = remembered(digest: lut.digest, source: sourceIdentifier)
+        intensityPercent = memory.intensity
+        adjustments = memory.adjustments
         let selection = PhotoFilterSelection(preset: .init(id: "cube:\(lut.digest)", name: name),
                                              intensityPercent: intensityPercent, lutAdjustments: adjustments)
         recipe = ["digest": lut.digest, "name": name, "source": sourceIdentifier,
@@ -194,6 +253,7 @@ final class PhotoLUTStore: ObservableObject {
 
     func restoreSelection() -> PhotoFilterSelection? {
         guard let recipe,
+              isSourceCurrent(recipe["source"] as? String),
               let digest = recipe["digest"] as? String,
               let name = recipe["name"] as? String,
               digest.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { return nil }
@@ -218,30 +278,30 @@ final class PhotoLUTStore: ObservableObject {
     // Android PhotoLutStore.restore: role values win; old recipes fall back
     // to digest memory. Use the same resolution for controls and rendering.
     private func restoredAdjustments(_ recipe: [String: Any]) -> LUTAdjustments {
-        if let fields = recipe["adjustments"] as? [String: Int], fields["contrast"] != nil {
-            return Self.decodeAdjustments(fields)
-        }
-        guard let digest = recipe["digest"] as? String else { return .init() }
-        return Self.decodeAdjustments(defaults.dictionary(forKey: "lut_adjustments_v1:\(digest)") as? [String: Int])
+        guard let digest = recipe["digest"] as? String, PhotoNp3RecipeKind.isDigest(digest) else { return .init() }
+        let memory = remembered(digest: digest, source: recipe["source"] as? String)
+        let fields = recipe["adjustments"] as? [String: Any] ?? [:]
+        return PhotoLUTParameterMemory.hasAdjustments(fields) ? PhotoLUTParameterMemory.adjustments(fields) : memory.adjustments
     }
 
     private func restoredIntensity(_ recipe: [String: Any]) -> Int {
-        let digestValue = (recipe["digest"] as? String).flatMap {
-            defaults.object(forKey: "lut_adjustments_v1:\($0):intensity") as? Int
-        }
-        return Np3FilterEngine.normalizeIntensity(recipe["intensity"] as? Int ?? digestValue ?? 80)
+        guard let digest = recipe["digest"] as? String, PhotoNp3RecipeKind.isDigest(digest) else { return 80 }
+        let memory = remembered(digest: digest, source: recipe["source"] as? String)
+        return Np3FilterEngine.normalizeIntensity(PhotoLUTParameterMemory.integer(recipe["intensity"]) ?? memory.intensity)
     }
 
     func setAdjustments(_ value: LUTAdjustments) {
+        guard isSourceCurrent(recipe?["source"] as? String) else { return }
         let normalized = value.normalized
         if adjustments != normalized { adjustments = normalized }
         guard var recipe,
-              let digest = recipe["digest"] as? String else { return }
+              let digest = recipe["digest"] as? String, PhotoNp3RecipeKind.isDigest(digest) else { return }
+        _ = remembered(digest: digest, source: nil, includeIntensity: false)
         let fields = Self.encodeAdjustments(adjustments)
         recipe["adjustments"] = fields
         self.recipe = recipe
         if !savesOnCommit { persistRole() }
-        defaults.set(fields, forKey: "lut_adjustments_v1:\(digest)")
+        defaults.set(fields, forKey: memoryKey(digest))
     }
 
     private static func encodeAdjustments(_ value: LUTAdjustments) -> [String: Int] {
@@ -249,12 +309,40 @@ final class PhotoLUTStore: ObservableObject {
          "highlights": value.highlights, "shadows": value.shadows]
     }
 
-    private static func decodeAdjustments(_ fields: [String: Int]?) -> LUTAdjustments {
-        LUTAdjustments(contrast: fields?["contrast"] ?? 0, saturation: fields?["saturation"] ?? 0,
-                       highlights: fields?["highlights"] ?? 0, shadows: fields?["shadows"] ?? 0).normalized
+    private func memoryKey(_ digest: String) -> String {
+        PhotoLUTParameterMemory.key(role: role.memoryRole, digest: digest)
+    }
+
+    private func remembered(digest: String, source: String?, includeIntensity: Bool = true) -> PhotoLUTParameterMemory {
+        guard isSourceCurrent(source) else { return .init(intensity: 80, adjustments: .init()) }
+        let key = memoryKey(digest), legacy = "lut_adjustments_v1:\(digest)"
+        let applied = defaults.dictionary(forKey: recipeKey)
+        let uri = source ?? (applied?["digest"] as? String == digest ? applied?["source"] as? String : nil)
+        // Read only this file's keys, not the entire application defaults on every detent.
+        var values: [String: Any] = [:]
+        for name in [key, key + ":intensity", legacy, legacy + ":intensity"] + (uri.map { ["strength:" + $0] } ?? []) {
+            values[name] = defaults.object(forKey: name)
+        }
+        let result = PhotoLUTParameterMemory.resolve(values: values, role: role.memoryRole,
+            digest: digest, source: source, applied: applied)
+        if includeIntensity && values[key + ":intensity"] == nil {
+            defaults.set(result.intensity, forKey: key + ":intensity")
+        }
+        if !PhotoLUTParameterMemory.hasAdjustments(values[key] as? [String: Any] ?? [:]) {
+            defaults.set(Self.encodeAdjustments(result.adjustments), forKey: key)
+        }
+        return result
+    }
+
+    private func retainSavedParameters() {
+        guard let saved = defaults.dictionary(forKey: recipeKey),
+              isSourceCurrent(saved["source"] as? String),
+              let digest = saved["digest"] as? String, PhotoNp3RecipeKind.isDigest(digest) else { return }
+        _ = remembered(digest: digest, source: saved["source"] as? String)
     }
 
     func toggleFavorite(_ identifier: String) {
+        guard isSourceCurrent(identifier) else { return }
         reloadSharedPreferences()
         if !favorites.insert(identifier).inserted { favorites.remove(identifier); favoriteOrder.removeAll { $0 == identifier } }
         else { favoriteOrder.append(identifier) }

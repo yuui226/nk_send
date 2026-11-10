@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import SwiftUI
 import UIKit
 
@@ -124,6 +125,9 @@ private final class DirectoryPreparationWaiter: @unchecked Sendable {
 @MainActor
 final class DirectoryAccessStore: ObservableObject {
     @Published private(set) var directoryURL: URL?
+    /// Android invalidates indexes on same-URI reselection. This targeted
+    /// event avoids invalidating every directory-dependent view a second time.
+    let selectionChanges = PassthroughSubject<URL?, Never>()
     @Published private(set) var isRestoring = false
     private let defaults: UserDefaults
     private let accessOperations: DirectoryAccessOperations
@@ -238,6 +242,7 @@ final class DirectoryAccessStore: ObservableObject {
                     self.preparation.beginCleanup(access: result.access, resolvedKey: key)
                 }
                 if self.directoryURL != result.access.url { self.directoryURL = result.access.url }
+                self.selectionChanges.send(result.access.url)
             } else {
                 self.removeSelection()
             }
@@ -263,8 +268,10 @@ final class DirectoryAccessStore: ObservableObject {
     }
 
     private func removeSelection() {
+        let hadSelection = directoryURL != nil
         directoryAccess = nil
         if directoryURL != nil { directoryURL = nil }
+        if hadSelection { selectionChanges.send(nil) }
         defaults.removeObject(forKey: bookmarkKey)
     }
 

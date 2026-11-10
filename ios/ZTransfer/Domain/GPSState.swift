@@ -6,11 +6,36 @@ import CoreLocation
 enum GPSDiagnostics {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var entries: [String] = []
+    #if DEBUG && !SWIFT_PACKAGE
+    private static let diagnosticQueue = DispatchQueue(label: "com.ztransfer.gps.diagnostics", qos: .utility)
+    nonisolated(unsafe) private static var writeScheduled = false
+    #endif
 
     static func record(_ message: String) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         if entries.count >= 80 { entries.removeFirst() }
         entries.append("\(ISO8601DateFormatter().string(from: Date())) \(message)")
+        #if DEBUG && !SWIFT_PACKAGE
+        let scheduleWrite = !writeScheduled
+        writeScheduled = true
+        #endif
+        lock.unlock()
+        #if DEBUG && !SWIFT_PACKAGE
+        if scheduleWrite {
+            // Event-triggered and coalesced, never a polling loop. Keep the same
+            // bounded diagnostic snapshot available to device tooling without
+            // requiring another user clipboard gesture after each failed run.
+            diagnosticQueue.asyncAfter(deadline: .now() + 0.1) {
+                lock.lock()
+                let text = entries.joined(separator: "\n")
+                writeScheduled = false
+                lock.unlock()
+                guard let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try? Data(text.utf8).write(to: directory.appendingPathComponent("gps-diagnostic.log"), options: .atomic)
+            }
+        }
+        #endif
     }
 
     static func snapshot() -> String {
@@ -24,7 +49,11 @@ enum GPSDiagnostics {
 /// persistence scope instead of sharing the app-wide defaults accidentally.
 enum GPSPreferences {
     static let suiteName = "nikon_gps"
-    static let enabled = "enabled"
+    // Removed startup flag: read only to clear values left by older iOS builds.
+    static let legacyEnabled = "enabled"
+    static let pairingConfirmed = "pairing_confirmed"
+    static let pairingVerificationPending = "pairing_verification_pending"
+    static let cameraName = "camera_name"
     static let deviceID = "device_id"
     static let nonce = "nonce"
     static let bleAddress = "ble_address"
@@ -77,6 +106,43 @@ struct GPSState: Equatable, Sendable {
     var accuracyMeters: Double?
     var lastSentAt: Date?
     var message: String?
+    var permissionIssue: GPSPermissionIssue?
+
+    /// Accepted iOS system-pairing difference: explain the OS-owned step and
+    /// expose the actionable failure instead of only saying "Camera pairing".
+    var pairingGuidance: String? {
+        guard enabled, permissionIssue == nil else { return nil }
+        if status == .cameraConfirm { return AppLocalized.resource("gps_ios_system_pairing") }
+        guard status == .needsCamera else { return nil }
+        switch message {
+        case "请在系统蓝牙中删除相机配对后重试": return AppLocalized.resource("gps_ios_forget_pairing")
+        case "请确认蓝牙配对": return AppLocalized.resource("gps_ios_confirm_pairing")
+        default: return nil
+        }
+    }
+
+    /// Android GpsState.canSyncNow is presentation eligibility, not proof of a
+    /// live session. Zero coordinates are valid for camera GEO writes.
+    var canSyncNow: Bool {
+        guard enabled, latitude != nil, longitude != nil else { return false }
+        switch status {
+        case .pairingSuccess, .connected, .waitingFix, .ready: return true
+        default: return false
+        }
+    }
+}
+
+/// iOS distinguishes unrequested access, per-app denial and system-wide
+/// restrictions. Android's enableGps requests missing access before starting;
+/// an unrequested iOS permission must likewise never send the user to Settings.
+enum GPSPermissionIssue: String, Equatable, Sendable {
+    case locationDenied, locationRestricted, locationServicesDisabled
+    case bluetoothDenied, bluetoothRestricted
+
+    var message: String { AppLocalized.resource("gps_ios_" + rawValue) }
+    var canOpenAppSettings: Bool {
+        self == .locationDenied || self == .bluetoothDenied
+    }
 }
 
 /// Core Location can report `locationUnknown` while it is still acquiring a fix.

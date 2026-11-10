@@ -1,0 +1,122 @@
+Test Suite 'Selected tests' started at 2026-10-28 16:46:53.931.
+Test Suite 'ZTransferTests.xctest' started at 2026-10-28 16:46:53.932.
+Test Suite 'PhotoCaptureLocationTests' started at 2026-10-28 16:46:53.933.
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal]' started.
+GPS precision mismatch orientation=1 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-1.jpg
+2026-10-28 16:46:54.562833+0800 ZTransfer[50211:34231893] [connection] nw_socket_handle_socket_event [C1:1] Socket SO_ERROR [61: Connection refused]
+2026-10-28 16:46:55.470395+0800 ZTransfer[50211:34231893] [connection] nw_endpoint_flow_failed_with_error [C1 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+2026-10-28 16:46:56.010911+0800 ZTransfer[50211:34231900] [connection] [C1 192.168.1.1:15740 tcp, attribution: developer] is already cancelled, ignoring cancel
+GPS precision mismatch orientation=2 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-2.jpg
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:46: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08") - orientation=1 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:47: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08") - orientation=1 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+GPS precision mismatch orientation=3 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-3.jpg
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:46: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08") - orientation=3 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:47: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08") - orientation=3 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+GPS precision mismatch orientation=4 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-4.jpg
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:46: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08") - orientation=4 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:47: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08") - orientation=4 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+GPS precision mismatch orientation=5 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-5.jpg
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:46: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08") - orientation=5 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:47: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08") - orientation=5 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+GPS precision mismatch orientation=6 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-6.jpg
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:46: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08") - orientation=6 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:47: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08") - orientation=6 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+GPS precision mismatch orientation=7 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-7.jpg
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:46: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08") - orientation=7 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:47: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08") - orientation=7 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+2026-10-28 16:46:59.526895+0800 ZTransfer[50211:34231898] [connection] nw_socket_handle_socket_event [C3:1] Socket SO_ERROR [61: Connection refused]
+2026-10-28 16:46:59.570782+0800 ZTransfer[50211:34231898] [connection] nw_endpoint_flow_failed_with_error [C3 192.168.1.1:15740 in_progress socket-flow (satisfied (Path is satisfied), interface: en0[802.11], uses wifi, LQM: unknown)] already failing, returning
+GPS precision mismatch orientation=8 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0)) properties={
+    Altitude = 0;
+    AltitudeRef = 0;
+    Latitude = "33.86881166666667";
+    LatitudeRef = S;
+    Longitude = "151.2093116666667";
+    LongitudeRef = E;
+} saved=/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/1AF3D212-9E55-4A61-822B-3FA8645FE1C5/tmp/crop-gps-precision-8.jpg
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:46: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("33.868811666666666") is not equal to ("33.868812345") +/- ("1e-08") - orientation=8 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+/Users/orys/code/nk_send/ios/ZTransferTests/PhotoCaptureLocationTests.swift:47: error: -[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal] : XCTAssertEqualWithAccuracy failed: ("151.20931166666668") is not equal to ("151.209312345") +/- ("1e-08") - orientation=8 location=PhotoCaptureLocation(latitude: -33.868812345, longitude: 151.209312345, altitude: Optional(0.0))
+Test Case '-[ZTransferTests.PhotoCaptureLocationTests testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal]' failed (6.153 seconds).
+Test Suite 'PhotoCaptureLocationTests' failed at 2026-10-28 16:47:00.089.
+	 Executed 1 test, with 14 failures (0 unexpected) in 6.153 (6.156) seconds
+Test Suite 'ZTransferTests.xctest' failed at 2026-10-28 16:47:00.090.
+	 Executed 1 test, with 14 failures (0 unexpected) in 6.153 (6.158) seconds
+Test Suite 'Selected tests' failed at 2026-10-28 16:47:00.091.
+	 Executed 1 test, with 14 failures (0 unexpected) in 6.153 (6.160) seconds
+2026-10-28 16:47:00.546 xcodebuild[48994:34217736] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:47:00.566 xcodebuild[48994:34217736] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:47:01.116 xcodebuild[48994:34217736] [MT] IDETestOperationsObserverDebug: 311.534 elapsed -- Testing started completed.
+2026-10-28 16:47:01.116 xcodebuild[48994:34217736] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-28 16:47:01.116 xcodebuild[48994:34217736] [MT] IDETestOperationsObserverDebug: 311.534 sec, +311.534 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/ztransfer-sync-crop-precision-20261028.xcresult
+
+Failing tests:
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+	PhotoCaptureLocationTests.testMissingGPSUsesSamePhotoSnapshotWithoutInventingTimeOrChangingOriginal()
+
+** TEST FAILED **
+
+Testing started

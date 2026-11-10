@@ -1,4 +1,853 @@
+## 2026-11-10 当前修复已上传TestFlight 2.05(81)，任务3/3完成
+
+用户明确要求当前版本TestFlight。仅版本80→81，同步project.yml/pbxproj，保留巨大既有dirty树。归档ARCHIVE SUCCEEDED/exit0，1168项输入SHA256前后一致，codesign严格验证、发布包--submission检查errors空，Apple Validated ZTransfer/EXPORT SUCCEEDED，11:07 Upload succeeded/EXPORT SUCCEEDED。归档及全部日志ios/.build/appstore-20261110/build81。包含生成完整原图生命周期和冷启动后台清理修复，先前16项定向过，真实Photos/硬件仍待用户验证。
+
+Chrome实际确认81处理完成，构建ID83edf90d-1712-4d48-a957-5d079c03fd72，中文/英文测试内容均保存并回读。加入既有本人内部测试组3c3a156f-3575-49cd-b811-92d496326be0，列表2.05(81)正在测试，1测试员4构建，旧80/79/78保留。用户正在原正式页面操作，另开Chrome标签完成TF，未改正式构建（核对仍80）、未AppStore送审/发布/手机安装/Git提交推送。用户已上传35d41643d17bd17e85ce850e581a0ddc_raw.mp4正式审核附件，但未检查视频内容。上传文档ios/docs/TestFlight当前版本上传-20261110.md，勿再引用11/9上传进行中为当前状态。
+
+## 2026-11-10 冷启动后台清理相册私有工作目录
+
+用户明确进程重启即新生命周期，断点续传/失败重试只在同一进程内；要求App启动后台清理、无阻塞无提示，不能等传输前。ZTransferApp.init启动进程静态utility detached任务一次；相册目录用ZTransferPhotoStaging/<进程UUID>，后台删除其他旧进程目录及历史平铺文件，保留本进程目录，立即开始传输可与清理并行。前台恢复不重复清理。用户已授权丢弃上次未入相册的私有原图/效果/分片。用户文件夹、Photos资产、导入账本不在此清理目录。新增3测试，最终定向16/16 TEST SUCCEEDED/exit0；文档任务4/5，真机杀进程/Photos仍待验。源码已改，未安装手机。详见ios/docs/相册保存与生成原图生命周期修复-20261110.md。
+
+## 2026-11-10 相册保存与生成完整原图生命周期修复
+
+用户报告生成“目录失效”和“格式不正确”，强调生成必须读取传输完成的完整原图。核实CameraRepository校验/close/finalize后result.url传给生成，问题是相册导入提前删除这份已完成原图，异步生成随后读空路径。未改成读取nkpart。TransferQueue现等同一原图生成读者结束后导入原图和派生图，成功后清理，失败保留完整输入供离线重试，发布串行和账本避免重复。文件夹保持既有原图保存，动画/UI不变。对照提前删除行为1测试4断言失败，实际复现“格式不正确”；目录错误由缺文件code4映射路径定位。最终定向13/13 TEST SUCCEEDED/exit0，含5新增，模拟Photos注入验证，无真实performChanges或手机安装。任务3/4，真机仍待验。详见ios/docs/相册保存与生成原图生命周期修复-20261110.md。勿将此次开发验证当作送审80或已安装手机含修复。
+
+## 2026-11-09 iOS 传输保存位置：默认「Z传」相簿，文件夹仍可选
+
+已确认的平台差异，安卓不改。无既有 iOS 用户，缺省直接是相册，不做旧偏好迁移。一次传输只写一个目的地。相册模式把完成的 JPEG/PNG/视频（以及系统接受的 NEF/NRW）导入系统照片，并放入以设备显示名命名的相簿（缺省「Z传」）；相簿被改名后用已存 localIdentifier 继续写入，被删除则再建同名相簿。按天/按类型在相册模式不建子目录。文件先落在应用私有暂存目录，导入成功后删除暂存原件；导入失败保留暂存并标记该条失败，不静默改写到用户文件夹。已传输记录是本地文件名+大小，重装可能重复导入。工作台本地效果仍走原有照片保存，不进这个相簿。
+
+完全访问（read-write 的 authorized）才算通过；limited、denied、restricted 都不开始。申请只发生在即将开始传输时：手动加入并立即开始、新照片自动开始、立即开始的裁切、队列开始。启动、仅连接相机、只加入延后队列都不弹窗。拒绝后提示到「设置 → 隐私与安全性 → 照片」给 Z传 完全访问。文件夹模式不申请这个权限，仍用用户选的目录。
+
+实现：`PhotoLibraryTransfer.swift`、`TransferQueue` 暂存与导入、`PhotoListView` 开始前申请、`SettingsView` 保存位置、`RootView` 重连目录、Info.plist 用途说明。保存位置拨轮下不放说明文字；说明在设置灯泡「传输」第一节。该拨轮选项字号与同卡存放方式、实时传输、选完再传同为 14。这张卡片里四个拨轮的左上角标签固定为 accentBlue，不跟随未开启时的灰色强调色；选项文字和边框仍按开启状态变化。安卓未改。generic 模拟器 `build-for-testing` exit 0；`PhotoLibraryTransferTests` 4/4 通过（缺省目的地、授权判定、账本、可导入类型）。未调用真实 `performChanges`，未真机验收导入和系统弹窗。未提交、未推送、未送审。
+
+## 2026-11-09 当前版本TestFlight上传进行中：2.05(80)归档已过
+
+本人明确“先把当前版本搞到TestFlight上”，本轮归档/校验/上传/现有内部组分配已获授权，勿再索要构建许可；不安装真机、不App Store送审/公开发布/Git提交推送。solo保留巨大既有dirty树，仅project.yml CURRENT_PROJECT_VERSION79→80及pbxproj两处同步，marketing2.05不变，原文件快照在ios/.build/appstore-20261109/build80。当前已归档ARCHIVE SUCCEEDED、exec85195 exit0，使用/tmp/ztransfer-prepay-release-20261102缓存，1172编译输入前后摘要一致，codesign严格过、verify-release-bundle.py --submission错误空。实际Info2.05/80、iPhone/iPad、iOS16、UIRequiresFullScreen/竖屏、豁免加密false、location/bluetooth-central均已看，不把archive开发profile当最终分发签名。
+
+Apple validation exec88674正在，log同目录validation.log（最后12:28创建xcdistributionlogs，无最终结果），使用旧既有validation-options methodvalidation/destinationupload，自动签名，manageAppVersionAndBuildNumber=false。不并行跑上传，validation通过再xcodebuild -exportArchive同archive、upload-options methodapp-store-connect。当前没有80上传成功证据。进度文档TestFlight当前版本上传-20261109.md T01完/T02中/T03待1/3；有what-to-test zh/en文本，后续需从真实UI保存回读。
+
+Chrome用户另开购物窗口，未碰其任何表单/购买；Window菜单选已存在App Store Connect窗口回到TF，原列表只有79/78。当前浏览器在本人内部测试组buildstab，2原构建；首次Testers加载显示0需最终复核，不要擅自宣称成员删除或新增别人。组ID3c3a156f-3575-49cd-b811-92d496326be0，完成上传处理后添加80，必要时查本人既有账号。原AppStore最终审核仍本人点。本轮没有跑新模型/UI/硬件测试，包中含此前未硬件验收修复，不夸整体正常。
+
+## 2026-11-09 版权与隐私2/2完成，送审资料剩4组
+
+本人明确回复async“确认，帮我完成这两项”，动作当时法律确认已获得，不再重复询问。助手先刷新隐私最终窗，点最终发布，后台显示“几秒钟前由钰诗胡发布”及未收集数据；随后App信息→设置内容版权→是（包含第三方内容并拥有必要版权）→完成→页面保存，显示已保存。刷新App信息回读“是，此App拥有对其第三方内容的必要权利”；再打开隐私页回读“2分钟前由钰诗胡发布”和未收集数据。两项实际持久完成，不只是准备或勾选，无需本人再点。
+
+上架手册A05核销，材料缺项改为4组A01新Release候选/A02商店图/A03两商品审核图及同批/A04硬件视频+审核说明；隐私和素材依据顶部更新、材料清单同步。旧未发布/待版权记录仅历史。最终新候选仍检查资源/数据流，未来公开样片仍须自有许可，不以字段完成保证任意素材权利。没有提交App审核/发布App/改地区/构建安装提交推送；git diff --check通过。当前Chrome留在隐私已发布页面，后续本轮授权只覆盖这两项，不扩成App正式提交。
+
+## 2026-11-09 版权与隐私：具体声明准备阶段（已由上方完成记录覆盖）
+
+本人问“版权与隐私确认是不是你可以做”，solo实际准备，未止于建议。复读现有素材/隐私依据、79包检查json、当前Resources三字体OFL/IJG及其他许可、Release排除debug样片、无内置NP3/CUBE；当前源码检索未发现开发者业务API/上传/跟踪，仍StoreKit/Apple geocoder、本地处理，新增诊断仅Debug本地。官方Apple privacy FAQ确认Apple自行收集无需开发者代报，本地不算收集。不是新全量动态审计或候选包通过。
+
+Chrome打开内容版权窗口看到完整两选项（均未选）：拟“是，包含/显示/访问第三方内容，并拥有必要版权”，依据合法许可字体等，而非虚称无任何第三方。合法许可不是版权登记/转让；不声称开发者获用户任意照片/预设分发权；公开样片仍需自有/许可。取消版权窗无变更，再打开App隐私，草稿未收集数据→点页面发布，当前停最终“是否发布你的App隐私答复”窗口。原文发布即同意答复准确、遵守审核指南和法律、变化及时更新。最终发布尚未点，版权也尚未写/保存。
+
+依据电脑操作Confirmation Required at Action time，需本人在此具体声明准备好后一次明确确认，之后助手可代点击（并非一律必须本人亲点隐私）；原App审核提交/实际App发布仍本人。准备向本人async问是否允许保存上述版权声明并发布未收集数据隐私答复，不提交审核/发布App，不索要其他材料。素材/隐私依据与上架手册已写准备状态，未核销A05；git diff检查后保持无构建安装提交推送。收到授权须先刷新ChromeAX再完成隐私dialog、版权radio/完成及页面保存，回读两项才标完成；如本人自行点击也先回读，不重复提交。
+
+## 2026-11-09 首次送审材料复核5/5，按本人要求本地工具先审、备案并行
+
+本人希望先正式审核获取反馈，通过后不发布、继续测试再换包；solo实际Chrome只读核查。官方说明确认当前手动发布通过后Pending Developer Release，不会自动上架；换代码/包需移除再选新递增build、重新审核，不必先公开旧包，也不能套用批准。Apple2.1/2.2要求完整且核心实机稳定，不把正式审核当beta QA；最终长测可继续，非强制先全勾V01–V16。
+
+实时后台：2.05准备提交、未选构建、手动发布已选；简中iPhone中等/iPad13截图均0/10；年度、永久准备提交且审核截屏均未选、组准备提交；版权仍设置入口、隐私未收集草稿Publish仍可用；审核附件空无硬件视频、线上备注旧Manage subscription双层路径。TF只有79/78，79元数据上传11/5 15:37；最新工作树仍2.05(79)但包含后续未上传修复，应新build如80再送审。商务免费/付费有效、银行可用、两税表使用中、合规2有效，价格29.90/79.90已本轮先前保存无需重做。3中文法律/support正常TLS HEAD均200；网页工具不可抓不等于站点故障。无新构建测试安装上传/改线上字段/审核提交/发布。
+
+调查中本人明确“备案没下也先按单机app送审，除了苹果没有别的联网业务”：遵从此推进策略，备案不再自行列作本次硬性前置、继续并行；不自动关大陆、不新接后台、不虚号、不问客服。说明必须如实USB/LAN/BLE/本地处理、StoreKit/Apple地理编码与外部浏览器/用户文件提供者，可尝试审核但不宣称绝不联网或已获ICP豁免。官方协会FAQ只列单机不联网，Apple部分App需要，未查到系统服务组合一概豁免。腾讯刷新短暂旧管局中后跳登录，不能称今日已认证进度；无需为此次清单再要扫码，已知本人说未发号。若后台/审核实际要求则再补件。
+
+上架手册顶部新增11/9权威复核（覆盖11/7待办）、五组A01候选+核心冒烟/A02商店截图/A03IAP审核图同批/A04实体手机相机同框视频和说明/A05版权隐私确认，按最少可提交材料与后续测试区分；材料清单价格/签名进度修正、验收和审核草稿/联网核查顶部更新。本人主要需自有可公开照片、硬件视频及代表设备/固件/系统连接事实，其余助手准备，最终添加审核/隐私确认/提交发布仍本人。复核任务5/5不等于材料完成5/5；git diff --check通过，5份文档73个本地链接全部存在；未提交推送。
+
+## 2026-11-09 苹果后台定价已改年度29.90／永久79.90
+
+本人明确“年度改29.90，永久79.90，Chrome已打开苹果后台”。solo通过cua原生Chrome操作，浏览器扩展控制在Work设置禁用但native AX可用，无额外插件。永久6830950193全球价格调整→CNY79.90→立即生效2026-11-09→确认，完成后当前价格明细售价79.90复读；年度6830954364最初价格→编辑→CNY重新计算29.90→两步确认，完成后重新打开最初价格明细售价29.90复读。不是收入列/临时优惠，未提交审核或发布。价格换算175地区，供应保持148地区，未重新开放欧盟。所有最终审核按钮仍本人操作。
+
+记录上架步骤与分工新增11/9、商业化进度顶部与操作目标更新；旧39.90/99.90历史记录保留。正式页面已有StoreKit product.displayPrice/monthly calculation，无需改App或重打包。独立本地StoreKit文件仍旧测试价，本次未改测试夹具/生产源码，沙盒传播未实测，勿说手机已显示新价。无构建安装提交推送。
+
+## 2026-11-08 横屏监看 Dock 旋转入口去重：源码调整完成，待运行验证
+
+用户明确横屏展开Dock不应再有旋转按钮，旋转仅外侧常驻。solo读取Android LandscapeMonitorControls/RemoteToolPreferences及RemoteToolLayoutTest（原drawerPinsBothControls测试要求锁定+旋转都在Dock），按用户本轮明确规则覆盖该旧行为，不再另问平台差异。iOS RemoteLandscapeControls将Dock固定项改为仅.lock；外侧rotate移出dock=false淡出层，保持同一36pt槽位，展开/收起均可见；Dock底部预留36pt按钮+8pt间隔，侧栏及反挤压下方布局共用，避免滚动内容遮挡。锁定禁用旋转的业务逻辑、竖屏工具栏、照片/视频配置和原Dock动画时序不变。仅该组件3处布局修改，无新增状态/计时器/逐帧计算。git diff --check通过，未新增镜像测试，未构建/运行测试/截图验收/安装/提交/推送；不能引用前一轮85项为本轮布局验证。
+
+## 2026-11-08 STA 气泡、水平仪与监看回看：开发侧5/5，现场问题待验
+
+solo继续，Android独立工作区已pull到14bc46619cea5f5affe22016f0a31d9e1f1740f0，确认N日范围修复定稿；用户明确缓存/目录其他差异先不看，待Android来对齐，不撤销iOS此前严格新会话隔离。用户新报STA前台亮屏偶发断线、断开信号应提示正在尝试重连、水平仪无俯仰线、换机沿用卡回看只见旧照片；追加确认照片列表排序正常、新照片在前。
+
+STA保活10s/连续2失败/额外1s、下载让路、事件无超时均与Android一致，未改时序或吞掉事务失同步。手机13:03缓存仅连接成功，系统日志USB/usbmux不可用，没有实际断线原因，不能宣称修好。补Debug各一份8192字符本地快照：Camera-transportFailure-latest.txt真实失效命令/错误，Camera-review-latest.txt时间覆盖与当前目录head，Camera-level-latest.txt开启工具后第一帧必要头字段。无额外探测/定时器/逐帧写盘，Release报告autoclosure不求值。手机尚无本轮诊断代码。
+
+断开STA信号入口原一律disabled，现列表/队列/监看共用回调，ConnectionVM每个合格点击发提示事件，即便发现已执行也提示但不重复任务；Root挂PhotoListHint，沿用1800ms/28dp/spring400。USB、已连接STA/AP仍不可点。水平仪双轴解析/绘制原已有且与Android相同（仅512 compact-v1有已证实pitch），未盲加线/手机姿态；修正回看出入重置轮询失败预算与代际、拒绝迟到属性。当前相机无pitch仍需真实帧头。
+
+回看旧逻辑每卡handles反序+跨卡head合并，列表却按已读真实日期重排，因此相同文件可出现不同排序；Android原实现也有同一假设。现新枚举handles限定成员，同会话已读时间排序，支持0x9434时每次回看刷新日期索引；已知时间/未知时间拆惰性流，比较未知head真实时间，避免旧未加载文件挡住已知最新照片。只分页读metadata，不全卡原图；完全未知且无时间索引部分仍原序，不能宣称所有无时间机型已全球有序。
+
+r1 43过；追加partial-cache反例1失败/1断言exit65复现列表2/回看91；修正拆流后r2 51过；r3姿态解析5过；Release诊断7过，去重85方法（7新方法），含实际SwiftUI pitch-only像素变化、迟到属性不复活、回看新拍刷新/双卡/RAWJPEG/取消/一帧lookahead。不重复计数，不当物理相机验收。证据ios/docs/evidence/sta-review-level-20261108含日志、85名单、源码hash、当前任务diff；文档STA保活与监看回看水平仪核查-20261108.md任务5/6，S06现场仍未完成。全部构建已结束，未手机打包/安装/提交/推送；手机仍122616。13:34只读截图全黑，不能判断页面或验收。后续需本人操作相机验证回看第一张及新拍后重开、pitch和偶发断线；勿把开发侧通过写成实机问题已解决。
+
+## 2026-11-08 新连接目录与缩略图缓存：开发侧4/4，真机待验
+
+用户明确新连接不能先闪旧目录，必须本次相机从新到旧枚举最近N个实际拍摄日，再逐文件命中同机身缩略图。solo删除STACatalogRecovery/ConnectionViewModel快照传递/PhotoListViewModel.inheritCatalog，Root以session身份同步重置网格投影；同连接切页/预览/监看恢复及离线页面保留。N日停止从累计旧日期数改为当前批次实际读到更早日期，避免最新日只读首张。PhotoScanSnapshot加连接UUID＋原revision双检；未知机身无序列号/GUID时按连接隔离；不再迁移无归属平铺缓存；STA稳定编号＋大小键加拍摄时间/版本，旧弱键首次需重填。保留90日清理、全量成功才剪缓存、新拍摄范围豁免、队列重绑及既有动画。
+
+Android已提交eafc461d也有旧范围bug；审查中独立Android工作区出现未提交CameraViewModel/PhotoDateRange/PhotoLoadingRangeTest修复，已读取参考，不是本轮修改或测试Android。不要再沿用10月16日跨连接目录继承为当前正确规则，旧台账已注明被覆盖。
+
+r1基线3失败/8断言、r2 71过；r3追加2失败/4断言证实断点与STA弱键；r4新迟到响应测试自己占着串行permit却等后续请求，主动中止exit143，修测试释放顺序未改生产。r5最终95/95、无跳过、TEST SUCCEEDED/exit0，含四档N日、换机迟到、同编号换日期、双卡、加载扩大/收缩、新拍摄和监看恢复。证据ios/docs/evidence/catalog-cache-20261108含每轮log/源码hash/本轮diff/95名单/Android只读参考。文档照片目录新连接与缩略图缓存修复-20261108.md L01–L04完成4/5，L05物理相机待本人验。未打安装包、未安装/提交/推送；手机仍之前122616，不把模型通过当真机通过。全部构建已结束。
+
+## 2026-11-08 12:35 STA 临时诊断清理核查完成3/3，未重新安装
+
+用户要求核查大波STA试探代码是否清除及开销。solo确认STATCPAudit/启动参数/六种TCP对照/route导出/BSD probe均不存在生产源码，host无遗留抓包/LLDB/dns进程。保留原mDNS/端口发现、真正配对LV帧验证/一次补救/60s回网等待、业务保活/目录同步；Debug手动保护探测入口仍在但默认不运行，详细传输采样需显式环境变量且正常启动未注入。发现Release facade虽空，STAConnectionTrace仍读时钟/加锁/记录且参数提前格式化；已#ifDEBUG移除存储/时钟，文本/报告入口改非逃逸autoclosure，等待诊断计时/WiFi结果跟踪仅Debug。协议/界面不变。
+
+Debug诊断7/7、Release本机协议目标50/50均exit0，去重51方法2新增；Release断言时钟及消息/报告求值0，慢回网+真实LV失败补救都通过。WiFi服务仅两配置语法解析通过，未完整App构建/安装/提交推送/上传，手机仍122616且早无TCP实验；本轮Release关闭日志下次打包生效。文档STA临时诊断清理与开销核查-20261108.md C01–C03完成3/3，证据sta-diagnostics-cleanup-20261108。未测真机CPU功耗，不称零开销/硬件STA验收通过。用户随后新报告N日加载仍旧照片、新机不能复用旧缓存，正在转核Android实际范围/缓存生命周期，保留以上结论。
+
+## 2026-11-08 12:28 STA 配对后慢速回网：等待已放宽并安装，补救回归通过
+
+用户说明前一IPv4冲突已解决，现为相机确认配对后尚未回网就失败；追加要求确保监看帧补救不被阻断。solo核对Android eafc461d仍6.6s+一次1.2s，iOS本来一致；本轮按用户明确要求调整已ACK后等待（不改Android）。同一收据/GUID/身份下，ACK起算60s窗口只对暂时网络故障按1.2s间隔重连，socket/清理计时且失败不续期；取消/错误机身/明确配对拒绝/已开始Query或Result的不确定失败保持原终止，未改UI/文案/动画。ACK仅记路线，不写成功标记；实际相册+真实LV帧通过才可信。帧验证失败/仅配对能力仍共享原一次补救，保留身份不清其他机身；有帧证据后只恢复收尾。新增真实协议回归验证慢回网→帧失败→补救→成功或再次失败，Query/Result各恰2次，无提前trust。旧标记只有明确pairing-only才作废，普通网络断线不清。
+
+r1 55/55、r2 23/23、r3 2/2均exit0，去重58方法、8新增，证据ios/docs/evidence/sta-postpair-reconnect-20261108。按既有“STA修好一起构建安装”授权，脚本122616包BUILD SUCCEEDED/exit0，31s覆盖15Plus并启动，1成功0失败，数据保留。随后只补测试文档，生产与安装一致，无需再装。文档STA配对后网络重连等待修复-20261108.md R01–R03完成3/4，R04待用户实际相机验收；不把替身当物理通过。12:16:44最后设备记录是后续Query201F，不能称捕获了之前ACK后超时。IP变更重新发现仍未新增/未验，原固定候选策略保留。无提交推送、无运行构建。用户要捋清保存/补救，下一回复应讲路线/待验证与成功标记区别，并说明完整补救回归已通过及安装。
+
+## 2026-11-08 11:53 STA 真正根因已确认：局域网 IP 冲突；普通版已恢复安装
+
+本人已USB接线解锁。pymobiledevice3通过uv临时工具环境使用官方开发pcapd，无管理员授权；两轮30s仅筛相机IP ARP和TCP15740头字段，不写原始payload/其他流量。11:49:48两条ARP reply相隔83.6ms：相机MAC3c:be:e1:58:e9:73与另一MAC2c:19:5c:2d:fa:16都声明192.168.1.6。TCP相机SYNACK、手机后续ACK/SYN被导至另一MAC并收到其RST。**已确认IPv4冲突，不是未知errno，也不能再将探测socket退场差异当根因。**本人确认相机自动获取IP；是谁错误占用/分配仍待路由器核对。IEEE官方OUI另一设备前缀归小米，不能推断具体型号。用户问“相机选了被用IP？”已解释自动通常路由器分配，建议给相机DHCP保留空闲IP再获取。
+
+临时STATCPAudit/启动参数/debugRoutes全部删除。另撤销试验BSD发现探测，恢复本轮开始Network.framework适配器，删三个probe回归及fixture计数；保留NSError真实码、Debug一次完成缓存、生产选择路径抽取与取消检查、弹窗两个修复。不为网络冲突加重试/改配对/清身份。最终43协议测试通过（/tmp/ztransfer-sta-final-protocol-20261108.log），既有去重92减删除3=保留89方法有通过证据，6新增；popup12不变。STA文档S01–S03完成3/4，S04地址冲突解决后的真实配对仍待验。ARP/TCP脱敏证据已在ios/docs/evidence/sta-second-camera-20261108，真实完整仅/tmp。
+
+普通版115233脚本session3098已exit0，BUILD SUCCEEDED/1成功0失败，35秒覆盖15Plus并正常启动，保留数据，无audit代码/参数；日志/tmp/ztransfer-sta-normal-device-20261108.log。RVI已停止、两pcapd采集/所有listener和dns进程均已结束。临时工具未进工程依赖。只读http://192.168.1.1标题SG631Z，不读取/修改路由器配置。未提交推送。必须等相机获得不冲突地址后再声称配对解决，不能只根据协议回归通过核销。
+
+## 2026-11-08 STA 第二台相机及弹窗关闭闪烁：已装联合修复版，等实际相机验收
+
+用户明确当前是 STA 无法配对新相机，要求直接对照 Android，不再问现象/复制日志；另有设置等窗关闭闪一次。solo fetch/核对 Android HEAD/origin 均 eafc461d。真实生产选择流程本来已有旧机找不到→其他 GUID 延后→扫描完成再不限旧 GUID 配对；未虚称缺分支。独立 Swift 语言诊断确认原 ChannelError.system(errno) 桥接 NSError 一律枚举编号0，已 CustomNSError 保留 POSIX 真因，重试分类不变。选择 actor 与最终收尾移入协议协调器复用同一路径，增加取消检查及真实回归。三次 LLDB 未取得 errno（锁/符号/调试器自身崩溃），全部退出且 app 已 resume，不再用调试器。
+
+确认另一实质实现差异：Android 探测 Socket.use 返回前关闭，iOS NWConnection.cancel 异步退场，可能与正式 BSD 握手重叠；已改同一 BSD 轻量探测，450ms/绑定原路由/24并发/48批次不变，无 PTP 数据/无命令优化，返回前同步 shutdown/关闭。仅说明修正生命周期差异，**尚未证明这是实际新相机失败根因或已配对成功**。Debug 连接结束只异步原子保存一份有界 Library/Caches/STAConnection-latest.txt，可 devicectl 直接读，不再要用户复制，不添网络请求/逐帧工作/Release记录。r1 85、r2 1、r3 41、r4 6 去重92协议方法通过（9新增）；证据 ios/docs/evidence/sta-second-camera-20261108。STA任务S01/S03完成2/4，S02真机errno仍缺、S04物理验收待回报。
+
+弹窗：按Android保持已展开真实窗至关闭捕获完成，再由网格接手；打开/中途重捕仍隐藏源，动画中整个父容器隐藏，避免材质重置子层露完整窗。queued onSettled核对最新target/progress/settledTarget并调用当前回调，防旧关闭卸载已重开窗；不改动画参数/灯泡材质、不逐帧截图。模拟器r1 12项10过2失败（新KVO观察重复子层1未回调；旧安全区固定300ms时尚差opacity .00318）；r2新观察actor声明错误构建失败；r3纠正父层观察+主actor后两项通过，安全区测试/生产时长未改。去重12均有通过结果；原失败和日志完整保留，不能称r1全绿。证据popup-close-20261108；液态玻璃浅色capture/live已人工查看，其余像素对照过但未逐图看。文档开发侧P01–P03为3/3，真机肉眼未验。
+
+用户“STA问题一起修好了再构建安装”作为集中验证安装授权，先完成实质源码差异及协议验证再跑组件/脚本。Debug2.05(79)20261108-113420 已覆盖 iPhone15Plus 00008120-000A08110CF1A01E并启动，脚本exit0/BUILD SUCCEEDED，1成功0失败，总32s，不卸载不清数据。旧103821交付包按脚本授权清理。原日志/tmp/ztransfer-sta-popup-device-20261108.log；没有运行的构建/调试器。已异步询问用户以刚才新相机正常STA连接；等待物理结果，失败直接读缓存。手机启动截图已查看，停在STA连接页，未报错。保持手机当前状态，不反复重装或调试。无提交推送。所有原工作树改动保留，before快照在/tmp/ztransfer-sta-second-camera-before-20261108与/tmp/ztransfer-popup-close-before-20261108。
+
+最新11:37用户回报联合版仍失败。缓存已直接拿到：session2/11:36:52 两次正式CommandSocket成功前system(61)=ECONNREFUSED，原1200msretry后仍拒绝；6.393s结束。不能再写未知errno或修好。Mac同LAN Bonjour找到Z50_2/15740，11:38无数据TCP能连通，不能外推手机。临时STATCPAudit加在Trace.swift（DEBUG）、App启动参数 --sta-tcp-audit=<本轮实际IPv4>、Discovery.debugRoutes，6次有限对照绑定/自动、BSD探测/命令参数、NW，不发PTP。脚本session30199日志/tmp/ztransfer-sta-tcp-audit-device-20261108.log构建中；成功后需devicectl terminate-existing启动参数、读Library/Caches/STA-TCP-audit.txt，然后删除这些临时块恢复正常包。临时前快照/tmp/ztransfer-sta-tcp-audit-before-20261108（仅App/Discovery/Trace，不要覆盖其他新修复）；协议目标不包含DiscoveryService，临时Audit未移除前不要运行协议测试。无运行dns-sd，已CtrlC退出两进程。
+
+11:45临时114117包已装并显式launch有限audit：手机192.168.1.15/24→相机.6，BSD四种绑定/自动×参数均61，NW两项3s超时；手机同API→Mac.5:15740六项全部OPEN，临时listener实际收到六次连接后自动退出。Mac→相机再三次全OPEN。设备STA偏好仅迁移键（所筛model/IP空），不臆断当前有旧相机记录。证据device-tcp-camera-redacted与device-tcp-mac-control-redacted。RVI无法列设备，idevice_id -l -n为空，当前只有CoreDeviceWiFi。已async请求USB接电脑解锁用于手机TCP包，只看15740握手，不要求用户再点连接；得到接线后rvictl+tcpdump，重启audit明确target相机.6即可自动触发。有限audit已结束，phone当前停普通连接页无业务活动，不要说还运行。没有遗留listener/dns进程。临时probe代码需最终移除再装普通版。
+
+## 2026-11-07 APP备案已过腾讯初审并提交管局，保留Z传名称
+
+本人回报初审电话建议三字名称、提示驳回风险，但决定不改名直接提交。solo查官方：腾讯11740三字要求针对网站，97691 APP说明要求安装后实际显示名称、未列三字门槛；阿里辽宁个人规则也链接网站命名。未找到辽宁公开明确针对该APP情形的最低三字条文，不保证通过，也不臆断美团/企业有豁免。尊重本人保留Z传，不改代码/商店/备案、不联系客户服务。刷新Chrome同订单30179380556798516：提交审核时间2026-11-07 14:52:24，腾讯云审核已通过、待提交管局已提交、工信部短信无需核验、管局审核中。订单锁定不可撤改，页面预计约8工作日最长20，以实际为准；尚无APP号。已纠正先前笼统“随后必须短信”提醒，本单当前无需短信。详细记录ios/docs/iOS-APP备案申请-20261107.md；若名称被正式退回，先读理由/依据，再讨论真实显示名称统一调整。无构建安装提交推送。
+
+## 2026-11-07 APP备案最初提交记录（后续已进入管局，见上）
+
+本人回复“已提交”后实查console.cloud.tencent.com/beian/manage：同一订单30179380556798516“新增服务-审核中”，“提交初审 已提交”“腾讯云审核 审核中”。本次提交目标已完成；没有获得APP备案号，也未进入管局审核。页面预计1–2工作日电话核实（两次未接可能驳回），之后工信部短信需24小时内核验，管局标注1–20工作日；不是审批时间保证。记录已更新，原网站/主体号不能写成APP号，尚未写入Apple。无客服消息/自动监控，无构建安装提交代码推送。下段保留准备阶段经过，最终协议提交已由本人完成，不再重复要求。
+
+solo操作腾讯云已有APP草稿，用户完成登录。已录入Z传/软件开发/苹果平台/简繁英、真实无iOS业务后端说明、AppIcon，以及com.ztransfer.ios正式发行公钥和证书SHA1（3F9D389BFA9381D9260DB699C87CAB56426A229B）。苹果平台字段虽名MD5实用SHA1。证书从上传79的发行profile提取，与实际上传重签名产物codesign公开证书及签名日志交叉一致；原xcarchive是开发签名，不能误用。没导出私钥或保存完整profile/证件资料。
+
+初次空域名保存被拒，随后用户明确“就写这台腾讯云服务器、备案后iOS可请求，不问客服”。已遵从，不再等待客服授权。公开DNS api.ztransfer.top→122.51.32.193，腾讯官方19630“网站/APP没有做好”允许计划上线提前备案；填写该域名，备注如实注明拟用于后续iOS后台、当前尚未接入，保留Apple系统服务/外部网页事实。没有擅自改iOS网络代码、迁移GitHub官网或DNS，也不声称备案等于无限制业务许可。本人已完成微信真实性核验及浏览器短信填写，保存服务成功，列表Z传/APP/api.ztransfer.top/正常。补充材料仅选填，已进入/review并核对所有公开技术字段和真实拟接入说明。最终复选框包含隐私声明/相关条款/互联网信息服务备案承诺书，尚未勾选或提交；已请求本人核对主体地址联系方式、阅读勾选并点提交审核，再读取回执。记录ios/docs/iOS-APP备案申请-20261107.md。无APP备案号、无初审回执；未构建安装提交推送，也未改Apple后台。客服咨询从未发送，用户明确不要联系；敏感证件、手机号、验证码、照片不存仓库。
+
+## 2026-11-07 正式送审与单机备案条件复核
+
+本人问能否直接送审及是否完全单机免APP备案。solo静态复核网络调用并查询工信部105号通知、互联网协会2026-01-07单机FAQ及Apple App信息文档；无自有公网业务后端，USB/BLE/LAN核心本地，StoreKit和两处CLGeocoder仍会使用联网系统能力，法律页openURL交外部浏览器。不能声称完全不联网，也不能仅据系统联网断言必备案；当前组合没有查到明确通用豁免，仍需确认大陆适用口径，未对外发咨询或更改功能/地区。隐私/条款正常TLS HEAD均200。
+
+Chrome首次刷新登录过期，本人重新登录后只读核对版本截图、App信息、隐私、两商品/订阅组、TestFlight与商务：2.05准备提交、构建未选；简中iPhone/iPad截图均0/10；两商品审核截图空、订阅组准备提交；硬件视频/附件未补；内容版权未设置、隐私未收集数据草稿待本人发布；ICP未填。App与年度备注仍写旧Manage subscription双层路径，需跟现行续费/GPS流程更新。TF仅79/78，新Debug同79不等于上传包更新；79有1安装35使用不能当功能验收。免费/付费协议有效、银行可用、两税表使用中、810/DSA有效；年度宽限期16天仅付费转付费/仅沙盒，正式环境按既定策略待收尾。未逐地区重查价表。
+
+更新AppStore上架步骤与分工最新7类待办、网络核查11/7复核、验收清单当前GPS证据与V12规则（有效年度无永久升级、到期后可重新选）。未核销最终V01–V16，GPS长期后台/锁屏及照片EXIF仍待本人验。仅文档修改，diff检查通过；未构建安装提交推送/上传/后台保存/送审发布，最终按钮仍本人点。
+
+## 2026-11-07 蓝牙/GPS再次全流程复查：5/5检查完成，86项通过
+
+本人要求再查蓝牙/GPS流程及功能，solo按Android eafc461d核对Service/BLE/ViewModel/协议/恢复/频率/海拔测试和Home/CameraViewModel GPS互斥。未发现新的生产业务流程缺陷；生产仅改GPSCoordinator一条“AP阻塞期间保存在preferences”的过时注释为本次App会话，没改运行逻辑。新增1个运行中四档频率交叉用例（12种切换，覆盖在途ACK、旧倒计时迟到、重复选择、关闭后ACK）。
+
+完整r1运行82项：76GPS+3展示全部过，3Root中1过2失败；旧RootLocationStub固定denied却期望连接详情更新，正确权限守卫拒绝。已改该专用夹具为授权/前台、蓝牙/位置替身，无真实无线工作，原断言阈值保留；r2该夹具全部7Root用例过、TEST SUCCEEDED、exec50008 exit0；与r1去重86项通过。r1失败保留（exit65），无须重跑已通过的79项。修复的是测试前提，不是生产权限逻辑。证据ios/docs/evidence/gps-full-flow-recheck-20261107含r1/r2日志、86方法、source哈希。
+
+只读手机缓存补齐真实旧10:07–10:09记录（不要称本轮重新操作）：10:07:32/10:08:33两次GEO成功，10:09:24实际断连→10:09:36重新ID/GEO成功；10:09:43关GPS→10:09:50开→10:09:53 ID/GEO成功，无系统首次配对窗，10:09:58关闭。脱敏device-reconnect-and-periodic-write-redacted.txt已存；普通断连和关开GPS现已实证，不再写完全未验。未知道具体断连原因，不能说证明相机关机再开机；长期锁屏/后台及新照片EXIF仍待本人相机验证。S05只缺照片EXIF，完整历史GPS目标仍不可全部核销；旧goal状态不新建重复目标。
+
+文档ios/docs/蓝牙与GPS全流程复查-20261107.md R01–R05为5/5检查完成，GPS系统配对后连接恢复表同步。未重新安装手机（仍101735，运行逻辑相同），未提交推送/归档上传，没有遗留构建或设备采集。不要为本轮只改测试和注释再打包或要求重新配对。
+
+## 2026-11-07 首次系统配对/GEO实机成功，GPS连接卡片整体禁用外观4/4完成并安装
+
+本人已确认“两边成功，坐标和发送时间都有”。读取095818正常包真实缓存：10:01:30选择器仍notFound，pending身份保留→原身份重连→10:01:34第二次ID ACK/ready→实际GEO ACK→confirmed。偏好pairing_confirmed=true、pending=false及device_id/nonce/ble_address均存在；脱敏日志system-flow-device-success-1001.txt与仅布尔identity-confirmed证据已保存。首次配对和GPS写入已实机通过，不再写仍未成功；相机断开再连及新照片EXIF仍待用户操作，S05部分完成。10:09只读截图显示正常发送时间持续更新；含真实坐标仅留/tmp，不进仓库。
+
+用户追加GPS开时两张连接卡片图标/按钮没全变灰。solo对照Android HomeScreen eafc461d：圆角背景wash位于共同父层最上方0.28/320ms，STA禁用alpha仅已连接例外1，否则.45。iOS此前wash仅cardSurface漏独立飞行badge，allowsHitTesting未传播disabled，CTA又无条件disabledAlpha1。已移动wash至共同NativeAttentionHost内最上方，正文disabled(dimmed)且保留触摸拦截，CTA条件alpha；公共灯泡未改、不加drawingGroup/截图/灰度滤镜或时钟。gps-card-disabled-r1卡片5方法通过；截图复核发现CTA例外后追加修正。r2新增像素对照夹具误用3x对2x导致12尺寸断言失败，已统一比例；r3最终1专项（12组模式/材质/明暗开关与恢复）通过、TEST SUCCEEDED、exec14970 exit0；去重5方法，36张最终图片及3张CTA修正后代表图已看。既有ButtonStateLabel flatten警告未清除，实际截图正常，不扩大验证结论。
+
+文档ios/docs/GPS连接卡片整体禁用外观-20261107.md C01–C04为4/4完成。沿用授权脚本101735包36秒覆盖15Plus安装启动成功，1成功0失败、exec70223 exit0。安装后偏好device_id/nonce保持、confirmed=true/pending=false；近期BLE UUID与10:01不同（发现回调会更新），仅布尔记录installed.json，不能写所有偏好逐字相同。启动截图已看，GPS默认OFF、身份保留；真机开启后的置灰及后续相机重连/新照片EXIF仍由用户确认。无遗留构建或采集，不提交推送；不用重新要求首次配对或清bond。goal旧blocked状态不等于首次GPS仍失败，不新建重复目标。
+
+## 2026-11-07 10:00 正常系统配对版已装，待一轮正常硬件验证
+
+095818包由脚本35秒覆盖15Plus成功（localNetwork，1成功0失败），exec37702 exit0。普通启动的新进程PID8603已查，system-flow-installed.json和连接页截图已保存/查看，GPS未自启，源码无probe代码/参数。75GPS+3展示=78不同方法通过，S01–S04完成，S05仍缺物理配对/GEO/后续重连/照片坐标（4/5）。已异步请求本人仅忽略iPhone蓝牙中Z50_2旧bond（针对此前确证INVALID_LINK_KEY）→相机重新配对→Z传开启GPS→系统选择/两端确认，再反馈相机成功与坐标发送时间。用户已明确接受选设备，不再测试免列表；不能自动删系统bond/假ready。手机待操作时不要重装重启，可直接读Library/Caches/gps-diagnostic.log，注意旧09:48缓存会留到新事件覆盖。goal API仍blocked但当前用户授权修复持续；不要创建重复goal。未提交推送，无遗留构建/采集。
+
+## 2026-11-07 用户确认恢复选设备，完整流程核查已通过，正常版安装中
+
+用户明确“省不了选设备就先加回来，正常走通也行”，继而要求整个流程对齐Android、只增加选设备。solo完整核对eafc461d NikonGpsBleClient/Service/GpsState及协议、恢复、频率、坐标/海拔、地点与展示测试。生产probe枚举/启动参数/所有试验分支和4测试已删除；保留GATT诊断。恢复首次ID ACK→EA系统选择/确认→pending→800ms原身份重连→新ID ACK才ready→真实GEO ACK才confirmed/650+700ms成功提示。新增actual client→coordinator回归防止手机坐标提前发布；restore专项6/6、full75GPS+3展示=78/78均TEST SUCCEEDED/exit0，不相加，当前1新增。证据system-flow-source-sha256、system-flow-test-methods、remove-probe-delta及logs/system-flow-audit-r1。
+
+Debug正常版安装进程exec37702，日志system-flow-device.log，结果待查；**普通启动，绝不再带已删除试验参数**。任务doc新增S01–S05完整对照表，目前S01–S03完成，S04安装中、S05物理验收未做。必须如实说明：iOS旧bond不能像安卓removeBond自动清理，前面00:37INVALID_LINK_KEY需要本人系统蓝牙忽略相机，不是可以保证只选一次就自动修旧密钥；用户已接受系统流程，准备具体安装后再给一次完整清理/配对指令。当前新回报工作解除旧等待，goal API仍blocked不可自行resume，未创建新goal；完整GPS尚未完成。未提交推送。
+
+## 2026-11-07 用户指出假连接，两个免选择器实验失败，正在撤除
+
+用户“没配对/没连接就到坐标界面”。真实094710日志09:48:21：ID ACK后试验发ready→手机定位/坐标→GEO返回CBATTErrorDomain/128→失败丢candidate；相机没收到有效GPS。09:48:30重试扫描后not found。根因是试验错误借用ready触发写入，违反coordinator/视图已连接契约，造成sessionEstablished锁存手机坐标。已承认错误，不能称之前6测试证明UI正确。ATT128应用错误无厂商细节，别杜撰为系统权限错误。证据held-link-device-failure-0948.txt+hash保存。
+
+已撤除NikonGPSPairingRoute/所有probe状态/启动参数/4实验测试（恢复/tmp/ztransfer-gps-direct-probe-before原业务，保留GATT domain/code日志）。原EA待验证恢复、取消、身份策略不变；用户此前接受的系统配对路线回归。新增actual client→coordinator首次ID/三种picker结果都不能启动位置或接受手机坐标的集成回归，补之前只测单层的缺口。6项专项运行exec57793/logs/remove-probe-r1.log，结果待查；手机仍094710实验包，接下来沿用授权构建覆盖恢复版，**普通启动，不带实验参数**。不再让用户反复测试已失败免列表方案，不再添无根据新路线。完整GPS仍未解决；此次只是纠正回归，正常系统配对的硬件验收继续开放。未提交推送。
+
+## 2026-11-07 09:49 保留BLE的第二免选择器实验已安装
+
+held-link-r1 6项专项通过、TEST SUCCEEDED、exec85493 exit0，是既有78项中的修订/子集，不相加。脚本exec61885已exit0；094710包覆盖15Plus成功/保留数据，20秒构建+2秒打包+11秒设备，共33秒。随后exec80343带 --gps-direct-ble-probe明确启动，PID8594，参数已核实。证据held-link-launch.json、held-link-source-sha256.json、held-link-test-methods.txt、held-link-delta.patch及logs/held-link-*。新路径保留首次BLE/ID后连接→真实GEO，未验证前不存identity；原EA生产路线不改。已向用户异步请求相机重新开始配对→当前App开启GPS，若系统配对码确认则本人确认；不选设备、不复制日志。等待实际GEO/相机坐标/后续重连，3/4准备完成、E04仍未验收，不称已解决。当前手机新版本等待操作，不再安装重启干扰。goal工具仍blocked（API不能resume），用户消息已允许继续工作，未创建重复目标；无构建/采集遗留，无提交推送。
+
+## 2026-11-07 09:38用户回报免选择器失败，已恢复实际修复
+
+用户明确相机没反应、按钮配对→连接，已复制日志。手机缓存与剪贴板一致：09:38:50首次PAIR/stage3 ACK，09:38:51 ID ACK后旧实验主动断BLE，09:38:52已知UUID重连、09:38:57扫描，09:39:13超时丢候选停止；没有第二次握手/GEO。实证旧“跳过Classic后断连重连”失败，不泛化所有iOS免列表不可能。脱敏direct-probe-device-failure-0938.txt已保存。常规/network idevicesyslog均找不到设备，CoreDevice可访问，未取得新系统归档，不继续卡管理员工具。goal工具仍返回blocked，不能用update_goal擅自改active；用户已恢复工作，旧等待条件解除，计数重新起算，不创建重复目标。
+
+solo将现有Debug --gps-direct-ble-probe改为首次ID ACK后保留现有BLE→真实GEO写入，不调用选择器/不主动断连；candidate仍内存、GEO ACK才持久化、45秒期限/失败停止保留。Apple受保护属性自动触发LE配对只是机制依据，尚未知Nikon GEO是否如此；独立协议作者仍要求Classic，不能声称已成功。6项专项运行exec85493，日志evidence/gps-pairing-recovery-20261107/logs/held-link-r1.log。本轮代码仅NikonGPSBluetoothClient与4个已有probe测试适配，正常EA路线保持；尚未安装新版本。下一步查真实测试结果后沿用授权Debug覆盖安装、带参数启动，再验证实际GEO响应；不要重复问旧方案/用户是否真的选相机。完整目标未完成。
+
+## 2026-11-07 02:09 免选择器实验等待硬件动作，目标已blocked
+
+第三个连续目标轮核验同一外部条件：手机实际进程仍为PID8479/015756试验包；GPS缓存仍不存在（CoreDevice7000），用户尚未反馈新路径的相机开始配对/开启GPS结果。上轮属于no progress，不是运行中的相机测试；未发现独立可推进的有效动作，不能用替身继续宣称GPS可用。本轮`update_goal(status: blocked)`已成功，完整目标“搞定蓝牙功能以及gps功能”未完成；不再自动循环查询、重装或重发同一问题。保留用户待答的新路径测试请求与试验进程；用户恢复后先核验当前进程/参数、读取GPS缓存/必要系统日志，根据真实失败继续修复，blocked计数重新起算。不要回退为清bond重测原窗口，也不要标记完成。无构建/采集遗留，无提交推送。
+
+## 2026-11-07 免选择器实验第一次自动续查
+
+上一目标轮为progress（新增免选择器实际路径、78项验证、015756包安装及带参数启动）。本轮只读手机：devicectl实际进程列表确认PID8479仍是同一个试验进程，未重启；GPS诊断缓存仍返回文件节点不存在7000。没有新GEO/配对事件证据，原异步问题未获回复。未重新安装或更改代码，不把进程活着当作正在做相机验证。相机开始配对/当前App启用GPS的同一外部动作等待已跨2个连续目标轮（含上轮末首次）；未达3，不标blocked/complete。后续再核验实际日志；若第三轮仍无变化、无独立有效工作，按goal规则标blocked，保留完整GPS/蓝牙目标与当前试验进程。旧清bond请求已被替代，不再要求。
+
+## 2026-11-07 02:01 免设备选择实验已安装，待新路径硬件验证
+
+78 GPS专项通过/exit0。Debug脚本exec41064已exit0，015756包29秒覆盖安装15Plus（1成功0失败），保留数据。随后exec10166 devicectl明确带 `--gps-direct-ble-probe` 启动成功，PID8479，launchOptions.arguments实证；证据direct-probe-launch.json。截图direct-probe-installed.png已看，连接页/GPS未启用；诊断缓存此时不存在（copy7000），不能说已有硬件GPS事件。新增异步问题call请求用户相机开始配对→当前App开启GPS，**不需要清bond、不选设备**；不要重复此前清密钥验证，也不要用户操作时再安装重启。新路使用现有真实定位，暂存identity只留内存，45秒期限，只有GEO ACK持久化；普通Release/无启动参数仍正常系统路线。App进程被杀重启会丢本次启动参数，若用户重启需由devicectl再带参数启动；不要私自持久化GPS开关。任务E01–E03完成、E04物理GPS未验（3/4）；完整蓝牙/GPS目标active未完成。新增4项包含取消/迟到/旧已确认身份不被删，78方法清单/hash/增量diff保存。无遗留构建/采集进程，未提交推送。
+
+## 2026-11-07 GPS用户改为实际免选择器实验（覆盖此前等待清bond的安排）
+
+用户明确“尝试无需手机选设备这一步骤是否可行，而不是让我重新测一下”。目标继续active，有实质实现工作，不沿用前两轮外部动作blocked计数。solo实现Debug显式启动参数 `--gps-direct-ble-probe`：首次BLE/ID ACK后同一身份只留内存→800ms重连→实际GEO验证，不调用EA，不伪造paired；45秒实验期限、失败停止、关闭/adapter/旧回调守卫，只有GEO ACK才持久化。既有确认身份保留，普通Release/无参数仍原路线。新增4个专项，全部GPSProtocolTests **78/78通过、TEST SUCCEEDED、exec25827 exit0**，日志`ios/docs/evidence/gps-pairing-recovery-20261107/logs/direct-probe-r1.log`；相机为替身，不能当硬件通过。手机正按已有授权脚本覆盖安装，exec41064，日志direct-probe-device.log；之后必须带参数启动，不能默认启动后声称免选择器已启用。完成情况追加同名GPS系统配对后连接恢复文档E01–E04。未提交/推送，物理GPS仍未验收。
+
+## 2026-11-07 01:43 GPS目标第二次外部动作核验
+
+前一目标轮是progress：取得系统旧link key失效/Non CTKD证据、修正文案、r4验证。本轮重新读取手机nikon_gps.plist仍为空；另用idevicesyslog archive取01:30之后当前系统记录，按GPS/相机配对相关事件过滤为空（/tmp/ztransfer-gps-followup-events-20261107.txt仅表头）。归档进程58537 exit0，ps确认无遗留xcodebuild/采集。未收到用户“忽略Z50_2系统旧bond并重新配对”的操作结果，无新GEO或配对成功证据。当前同一外部动作阻塞已出现2个连续目标轮（含上轮首次），未达3轮，不标blocked/complete。没有改生产代码/安装/重复测试或重新发送同一问题；原async请求仍待答。后续只读核验外部变化；第三轮若仍无操作且确无其他有意义工作，按goal规则标blocked，保留完整蓝牙/GPS目标。
+
+## 2026-11-07 01:39 GPS本轮收尾状态
+
+r4五项已有专项5/5通过，TEST SUCCEEDED及exec93567 exit0；不是新增5项，不代表硬件。新失败引导/Debug缓存尚未覆盖手机，当前003656可用于已经提出的清洁配对验证。实时日志01:33–01:39没有目标配对事件，采集exec73375已CtrlC正常exit0，无遗留采集/构建；后续用idevicesyslog archive读历史即可。用户尚未回答忽略Z50_2系统旧bond并重新配对的请求，必须保留待答；这是首次等待该明确外部动作，不能标记goal blocked/complete。继续目标需该设备密钥冲突先清除，不能以现有替身单测当作解决。
+
+## 2026-11-07 01:30 GPS系统根因已查明：旧link key失效，等待清洁配对验证
+
+目标“搞定蓝牙功能以及gps功能”active，solo。上一轮取得公开API适用边界属于实质证据进展；本轮进一步读取手机实际系统归档，不靠再改猜测版本。工具已安装 `/opt/homebrew/bin/idevicesyslog`！`idevicesyslog -u 00008120-000A08110CF1A01E archive /tmp/ztransfer-gps-system-20261107.tar --start-time 1793981040 --size-limit 60000000`成功（实际251MiB），解到/tmp/ztransfer-gps-phone-20261107.logarchive用log show时间/进程过滤。无对外上传。log collect需root、devicectl sysdiagnose密码已CtrlC取消，别再走管理员阻塞路。
+
+00:05原轮：00:06:02.252 New link key，00:06:02.261 pairingComplete result:0；00:06:02.452 WirelessiAP BT_SUCCESS，00:06:03.096配件认证Passed，之后iAP断开，App00:06:12notFound。用户说配对成功完全正确，旧000352包丢identity是App bug；已安装003656处理notFound→pending→BLE验证。不要称MFi认证失败。
+
+00:37新轮：系统用旧paired:1/link key连接→00:38:00.327 BT_ERROR_INVALID_LINK_KEY→picker00:38:00.329 BluetoothDeviceConnectFailedNotification→00:38:00.775关闭返回code2。证实是旧bond密钥失效，不是用户主动取消，不能通过忽略cancel/假配对解决。已async请求本人仅忘记iPhone设置蓝牙中Z50_2，随后相机开始配对、App关开GPS并双方确认；等待结果。现手机截图黑屏，当前仍003656包，不能正在操作时覆盖安装打断。实时过滤日志进程exec session73375写/tmp/ztransfer-gps-live-20261107.log（需要每次恢复查进程是否仍活），之后也可归档读历史，没必要长期空转。
+
+系统还明确 `Non CTKD Device`/ClassicSMPSupported:0，此设备的CTKD跨传输自动配对路线不适用，继续已证实能bond的EA入口；不泛化到所有型号。当前只改三语既有失败帮助为条件式“若点选相机后窗口自动关闭，设置→蓝牙忽略该相机后重配”，并更正canVerifyCamera注释，不改业务取消策略。r4 exec93567正在5项配对子集验证，日志evidence/gps-pairing-recovery-20261107/logs/r4.log；完成需查真实结果。r3实际缓存检查存在80行3983字节，后加Debug缓存运行时落盘已证，但未安装到手机。脱敏系统证据3txt+hash已保存，同名任务doc更新。没有提交推送；权限沿用，不再问构建安装许可。整体GPS及重连/相机照片坐标尚未验收。
+
+## 2026-11-07 GPS最新现场与免列表路线调查：后续系统证据已补在上方
+
+已取得用户重新复制的00:37轮诊断：00:37:55 ID ACK→EA picker，00:38:00 EABluetoothAccessoryPickerErrorDomain/2→App failed/stop；不是30秒超时。用户明确“点了相机，窗口自己关闭”，不能把resultCancelled等同用户点取消。脱敏证据ios/docs/evidence/gps-pairing-recovery-20261107/device-diagnostic-0037-cancelled.txt；真实系统关闭原因未知。003656手机包仍未通过，现行cancelled分支仍会丢候选identity且停止；不能说GPS已正常。
+
+用户问是否一定要手动选择。已纠正之前绝对说法：CoreBluetooth可自动发现连接BLE，受保护GATT访问触发系统配对；支持CTKD的设备可从BLE派生经典蓝牙密钥，bridging是联动profile不是无条件createBond。Apple WWDC2019/901与WWDC2022/10008公开依据。尚未证明Z50 II支持所需GATT/CTKD，不盲加选项。当前Nikon SnapBridge帮助把Z系列与Other Cameras分节；旧iOS“Select an accessory”位于Other Cameras，不能据此证明所有Z系列都必需。Android自行Classic发现/createBond，静默确认可能受系统权限限制；列表与确认不能混为一谈。photools所谓免配对先用SnapBridge再提取已有凭证，不解决首次配对；仅参考说明未复制代码/提取凭证。
+
+本次继续独立调查，未改生产配对路线/未新装手机。后加Debug日志缓存已随r3编译，5个已有配对/窗口归属方法通过，非新增5项也非物理相机通过；尚未专测缓存落盘，手机仍没有该缓存。r3 exec1592已正常结束，无遗留构建。完整现状和下一步证据需求已补到ios/docs/GPS系统配对后连接恢复-20261107.md。此前模拟器/Debug覆盖安装授权持续，不重复询问；不提交推送。
+
+## 2026-11-07 GPS实机notFound纠正及新失败：此前记录，最新诊断见上
+
+用户报相机实际已配对却App提示重新配对，允许读取iPhone剪贴板。已用xcrun devicectl device pasteboard paste读取实际00:05轮次：Z50_2（非早期Z30），ID ACK后EA窗口打开，25秒后notFound，App直接failed/stop，根本没重连；手机无已保存identity。不是已证实的BLE重连/身份拒绝。证据gps-pairing-recovery-20261107/device-diagnostic.txt已脱敏。Apple alreadyConnected也不代表失败。实际系统iAP为何notFound没系统服务证据，不猜根因。
+
+已改：paired/alreadyConnected/notFound/failed后保留显式pending身份（不是确认配对）再以BLE/GEO验证；cancelled和app30秒timedOut仍停止。pending跨重启保留，但GPS开关仍默认OFF；hasPairingIdentity供恢复/清除，hasSavedPairing仅GEO成功ACK后true。新verifyingPairing事件保留650/700ms首次GEO成功展示。取回同机系统已连接设备→已知UUID→4.5s fallback扫描，按同机名/唯一前缀约束；pending扫描/握手超时允许5s重连而不丢身份，真实stage2拒绝仍清除。清除同时删pending/name/UUID。台账ios/docs/GPS系统配对后连接恢复-20261107.md，前一轮旧方案被明确覆盖。
+
+baseline仅alreadyConnected反证失败，不冒称notFound单测反证；r1广告Any字典跨隔离编译错误，提前取String修正；r2 74GPS+3展示=77通过，含四种系统结果后的GEO才确认、pending重启/超时/失败写入、同机选择。随后仅简化不可达错误文案、添等待旧连接释放的日志/注释。脚本003656包33秒覆盖15Plus、保留数据，1安装启动成功/0失败。用户00:39又报“相机没配对成功、退步了”，没有通过，不能终结GPS目标。
+
+已截当前手机画面仍配对未完成，偏好无pending/identity；读剪贴板仍00:05旧日志。已异步请求“再长按上方蓝色GPS一次，已复制后回复；无需重新配对”，正在等当前诊断。工具可直接读取手机剪贴板，截图用devicectl device capture screenshot；不必找pymobiledevice或分享。新提示对应cancelled/timedOut，但当前轮次未取得不能断言。先保留现场，不删除系统配对/不反复重试。
+
+当前源码额外补了DEBUG && !SWIFT_PACKAGE的GPSDiagnostics 80条缓存，100ms事件合并后台写Library/Caches/gps-diagnostic.log，后续不必每次让用户复制；在003656包之后，尚未构建安装，暂无新验证。没有提交推送。当前debug打包/覆盖安装授权持续，不重复询问。原始当前快照/偏好在/tmp/ztransfer-gps-regression-*；当次剪贴板/tmp/ztransfer-gps-current-20261107.txt仍旧日志。最近所有构建已结束；待新日志后继续实际修复，不将77测试当真机成功。
+
+## 2026-11-07 GPS系统配对补齐：4/5，修复包已覆盖安装，待相机验收
+
+本人反馈相机未配对成功，已明确接受iOS公开系统选择配件窗口，并要求以GPS可用为目标。solo再次对照Android eafc461d的ID ACK→Classic createBond→保存identity→800ms BLE重连→首次GEO ACK；原iOS在stage1即保存、ID ACK直接ready，实际漏整个Classic阶段。之前所谓完整链路回放注入ready，没有验证这一段，不能沿用为硬件通过证据。
+
+现通过ExternalAccessory公开picker、前台延期/单窗口/30秒期限（Android同值）、系统确认后才存新pairing_confirmed与identity；旧无确认标记凭证清理，不动频率/帮助/其他数据。系统完成后扫描新BLE地址，systemPaired事件设置pending跨越重连，首次GEO ACK才显示650ms成功/700ms已连接。取消/超时/清除/适配器/关闭/AP及重复旧回调不复活、不假ready；已确认重连不再弹系统首次配对。不能用公开API静默删除bond/代按确认/取消OS窗口，已取消仍可见窗口须用户关闭；状态失效且不叠加新窗口。现GPS面板有三语系统步骤/失败/忽略旧配对指引，用户批准的平台交互差异。按实际isScanning才stopScan。
+
+baseline旧实现4断言失败；r1错误变量重名编译失败后修正；r2 71通过，r3最终76不同方法通过（71GPS+3展示+2真实定位/手势UI），含系统驱动前台/窗口归属、身份迁移/延迟提交、错误取消/超时、四档GEO与确认过渡、冷启动两次OFF及按住关闭。蓝牙系统选择器返回是替身，没证明物理相机；已看第二次已授权冷启动OFF截图。台账GPS权限申请与设置引导修复第五轮，证据gps-system-pairing-20261106含baseline/r1/r2/r3、76清单/hash/本轮diff与截图。
+
+用户已授权“现在覆盖安装”：Debug脚本产物ZTransfer-ios-debug-2.05-20261107-000352.app/.ipa，20秒构建/2秒打包/15秒安装，总37秒，1台iPhone15Plus通过localNetwork安装启动成功、0失败，保留数据。已请求本人在相机开始配对→Z传开启GPS→系统选相机/两端确认，再反馈相机成功与坐标/发送时间。P01–P04开发侧完成，P05等待物理相机/GEO验收，不能称已正常可用。没有提交推送。后续此轮安装已获授权，不重复索取；若用户追加反馈继续当前GPS目标。
+
+## 2026-11-06 GPS冷启动与授权后闪退纠正：4/4开发侧完成，真机新包未验
+
+本人指出一启动GPS就开启且重试，明确开关不持久化；又报允许定位后闪退。solo读Android eafc461d：NikonGpsRuntime初始OFF、ViewModel不自动开，setApModeBlocked明确不允许首次非AP报告复活服务。Android实际会写KEY_ENABLED供既有START_STICKY服务恢复，之前把它等同普通App冷启动恢复是错误。Android ERROR确实有gps_retry/toggleGps.retry，保留手动开启后错误重试。iOS已完全移除enabled持久化/冷启动续接，旧键只清理；配对/频率/帮助保留，AP发现不再受旧磁盘标志暂停。普通前后台切换保留本次已开启会话，进程重启默认OFF。
+
+只读手机两份23:16:17/19真实SIGABRT栈，均为CBCentralManager.init断言→ensureCentral→start→GPS授权续接。原ips没有reason正文，不杜撰异常原文。源码真机专用restore identifier却缺bluetooth-central，模拟器原分支无此参数；前三轮模拟器/替身过关不能证明真机初始化。移除跨进程恢复注册/回调，与用户本次会话规则一致；同一普通initializer用于真机/模拟器；Info.plist/project.yml补bluetooth-central支持手动开启后后台工作。停止先发布OFF再Bluetooth.stop，避免同步disconnected复活重连。补状态按钮无障碍label，无可见样式动画改动。
+
+baseline2方法15断言反证；r1删除磁盘guard后7模型断言失败暴露同步停止顺序，已修；r2 64模型展示全过，冷启动UI被空可访问label阻断，截图真实显示Enable GPS；r3补label后7展示/UI全过。最终去重68方法（61GPS模型+3展示+4UI），两次真实定位授权/终止重启验证OFF，再手动开启SEARCHING，最终OFF/授权4截图已看。旧恢复已开启测试错误期待已替换。台账GPS权限申请与设置引导修复第四轮，证据gps-cold-launch-crash-20261106含原日志、脱敏设备栈、hash、增量diff与截图。只读日志未安装手机，真机新包蓝牙授权/配对/GEO未验；未提交推送，无遗留构建。不要再引用前三轮“全链路”措辞覆盖冷启动和真机初始化缺口。
+
+## 2026-11-06 GPS运行链路第三轮：追加3/3开发侧完成
+
+本人再次要求检查GPS正常使用，solo按Android eafc461d NikonGpsService核对配对/ACK/周期/失败/重连，并覆盖iOS BLE协议及归属测试。发现上轮原生拒绝UI日志的locationServicesEnabled主线程警告，改仅denied后台查询、主线程续接，重复点击合并、代次隔离、弱引用；关闭/AP/重新授权/替代会话忽略旧结果，后台不跳设置。CLError.denied按当前真实授权处理，不再用迟到错误强判App拒绝；已授权保留普通定位失败重试。没有增加轮询、改变频率/协议/动画时长。
+
+r1一次64不同测试全过：58 GPS协议模型+3展示+3真实CoreLocation/手势UI，4新增覆盖异步生命周期及四档完整配对→首次fix→ACK→650/700ms成功→静止周期→失败重试→重连立即写入→清除及晚到ACK/定时。系统查询主线程警告本轮不再出现；仍有工程及weak测试变量编译警告。原生定位弹框真实、BLE为替身；实际设置改权、物理BLE/相机GEO、真实后台定位未验，不能声称全部真机通过。台账ios/docs/GPS权限申请与设置引导修复-20261106.md第三轮，证据gps-runtime-audit-20261106含日志/64清单/hash/增量diff/附件，拒绝返回截图已看。未安装手机/提交推送，无遗留构建。
+
+## 2026-11-06 GPS启用再次复查：追加4/4开发侧完成
+
+本人要求再查确保GPS可正常启用。solo新增三项回归先反证（baseline 9断言失败）：Ask Next Time回到notDetermined被旧回调忽略、旧定位/写入继续；蓝牙获准后scanning未清旧permissionIssue；配对失败后用户明确重试进入授权，旧awaitingPairingAction挡住恢复。修复共用暂停定位工作/写入归属、所有GEO与BLE ready准入检查真实定位权限、获准清提示、显式retry提前释放旧配对等待。AP禁用与已关闭的迟到BLE事件入口拦截。完整中英繁公开设置路径补入指引，无私有URL、无新轮询。
+
+最终60不同方法通过：final-r2 57模型/展示＋1原按住关闭真实UI，ui-r6 2真实CoreLocation UI（首次系统定位弹框允许→SEARCHING；拒绝→打开设置→仍拒绝返回保持指引）。新增GPSPermissionAuditHarness仅DEBUG，CoreLocation/TCC真实、Nikon BLE替身，不得说物理蓝牙已验证。首次弹框与拒绝返回截图已看。grant→resume依然由模型覆盖：Simulator Settings导航多轮未稳定进入定位详情，旧跨系统改权UI用例没有通过，最终明确缩为上述拒绝返回路径；r2/r3/r4/r5失败原始日志保留，不可将60通过描述为真实设置内改权成功。final-r1三个旧夹具用AP禁用避免硬件又注入BLE期望继续，已换可控授权/transport保持原断言；旧GPS手势夹具denied强行ready改authorized。首轮UI中英文错配及失败清理遗漏也已修成多语按钮＋XCTest teardown。
+
+沿用模拟器授权；文档ios/docs/GPS权限申请与设置引导修复-20261106.md追加段，证据evidence/gps-enable-recheck-20261106含7轮日志、60清单、hash、增量diff、4张最终截图。未真机安装/系统蓝牙首次授权/相机配对及实际GEO写入/提交推送。无遗留构建。
+
+## 2026-11-06 GPS权限申请与设置引导：4/4开发侧完成
+
+本人反馈GPS提示定位/蓝牙权限后跳设置却没有开关。solo核对Android eafc461d enableGps/toggleGps与NikonGpsService；iOS声明齐全、旧notDetermined已经requestWhenInUse，不得宣称原来完全没申请。确认旧UI按错误文字跳App设置，把定位总开关关闭/受限/拒绝混用；BLE在定位之后启动，未申请时不应要求用户找蓝牙开关。新typed permissionIssue与统一续接按真实状态处理：未申请先请求，仅App明确拒绝跳公开App设置；全局关闭/系统限制在GPS面板显示中英繁具体路径。用户本轮要求下的iOS系统引导，无私有Settings URL。首次定位/首次BLE请求等前台；Always等BLE ready后前台单次申请，保留后台能力。Root返回只恢复授权，不自动重试相机错误；撤权取消GEO定时/晚到ACK、定位、BLE扫描/断连/ready不能覆盖权限状态或复活写入，关闭/AP守卫保持，无新增轮询。
+
+r1 53项运行中既有相机恢复用例4断言失败（新续接过早清错误文案），已修；r2 54/54、r3最终GPS 51/51全过，去重54项（9新增），含用途声明成品、授权/拒绝/限制/总开关/恢复/取消及展示性能。首次notDetermined按Apple合同不额外查locationServicesEnabled，避免无谓同步查询。台账ios/docs/GPS权限申请与设置引导修复-20261106.md，证据evidence/gps-permissions-20261106含三轮日志、方法清单、hash、本任务增量diff。系统授权返回为替身；没有验证实际手机首次弹框、设置开关或物理Nikon GPS，用户这次具体触发分支未真机归因。未安装手机、归档上传、提交推送；无遗留构建。
+
+## 2026-11-06 AP静默提示＋监看预设全量核查：10/10开发侧完成
+
+本人要求AP检测不遮步骤，预设所有逻辑完整对照安卓；最初补充“给槽位写入”“点NP3后提示失败”，随后明确只按安卓代码核查、不再追问现象、“照着抄作业”。solo按Android eafc461d36da干净工作树核查入口/9槽、目录/分类/授权/解析、classic/V2、PASM/U档、写入/激活/清除、回读/回滚/取消、备份/bank隔离、导航/动画/文案/诊断；核心协议未发现新漏项。内置相机NP3移除仍是本人批准差异，不能补回。旧probePictureControl无生产UI入口，未移植实验入口。
+
+AP仅展示始终保留两步，删除350ms提示任务，后台探测/失败重试/USB优先/STA保持。当前安卓源码仍含候选热点PROBING反馈，须如实记为本人本轮指定的展示差异。预设修复两层SwiftUI容器及错误容器identifier覆盖子按钮的问题：无障碍/自动化点目录可能命中返回；保留UIKit宿主标识，目录/清除独立标识。不改变业务或动画参数，不能说这是本人普通触摸写入失败根因。
+
+最终去重85测试方法通过：r1 81协议/模型/组件，r7 19模型/文件夹/AP后台重试（含新增真实文件有效/损坏/不支持/拒读），r8两项真实点击首次目录确认取消返回及NP3→C9写入→激活→目录取消→清除。r2编译、r3未open、r4主线程隔离是新测试夹具错误，r5-r7标识问题均保留，不说一次全过。新增fileAccess注入默认仍system，测试用本地目录授权替身，真实扫描/NP3流解析运行；相机仅回放或替身，不能代替真机写入验收。中英繁各37资源逐字一致。最终C9及AP长探测/失败截图已看。台账ios/docs/AP静默检测与监看预设全量核查-20261106.md，证据evidence/ap-preset-audit-20261106含8轮日志/清单/hash。
+
+早期只读手机报告：2.05(79)、Z50_2 V1.03、PTP/IP照片、9槽全空读取成功、D200可写但省略未注册槽，无operation；标准preferences未存目录不证明本人未曾选文件，后续不继续追问。原失败未复现/归因，按照本人最后的源码核查范围完成，真机写入/授权/性能未测。没有手机构建安装、真实相机改写、归档上传、提交推送；无遗留构建或设备读取进程。
+
+## 2026-11-06 弹窗完整窗闪现：回归修复3/3开发侧完成，真机待验
+
+本人随后反馈打开设置先闪完整窗，再展开。上轮“同一显示回调内隐藏即可防闪”的推断错误：drawHierarchy(afterScreenUpdates:true)可能提交渲染，不能短暂把屏幕上的完整源窗放出来。原10项测试及30fps录像没覆盖同步取图瞬间；保留历史结果但不得继续当作无闪现证据。本轮在同一宿主与内容之间增加屏幕可见性容器，取图时祖先持续不可见，子内容仍可完整取原生玻璃；取完在同一禁用隐式动画事务里隐藏源视图再恢复父容器，不改320/350ms、主题／红点／命中或网格。依旧solo。
+
+新同步可见性检查反证：临时去掉父容器隐藏，旧顺序3次观察／3次露出，断言失败，finally恢复源码；最终3次观察／0次露出。r5十项组件＋r6两项UI共12项通过，含30组主题像素比较、快速反向、视口改变重开／预览安全区、空闲释放、连续3次真实开关及两入口模块／帮助／返回。液态玻璃差0.065–0.534，整窗0.467，4张按钮图及3次展开／末次收起30fps抽帧已看。r2测试隔离编译错误、r3错误期待同值KVO次数、r4基线450ms等待假设均如实保留并修正。没有新测取图中途尺寸变化；模拟器与录像不能替代真机。证据evidence/popup-source-flash-20261106；旧verification标记superseded。无遗留构建录像、手机安装、归档上传、提交推送。
+
+## 2026-11-06 弹窗灯泡材质交接：追加3/3开发侧完成
+
+本人反馈灯泡在弹窗动画期间显示错误，结束才闪现恢复。solo确认Genie的CALayer.render遗漏完整原生glassEffect底板／边缘；此前静态材质与整窗CALayer对比未覆盖此问题。captureContent先提交可见布局事务，再drawHierarchy(afterScreenUpdates:true)，同一显示回调内用新事务隐藏宿主；事务不提交直接换API会得到透明图，不能恢复该失败写法。保留完整iconControl、静态灯泡＋红点、原320/350ms运动及12条带网格，不增加逐帧取图或空闲时钟。
+
+最终r5九项组件／布局／反向／释放＋r6两入口真实交互一项，共10个不同方法通过。五主题浅深模式三个按钮30组像素比较通过，液态玻璃均差0.065–0.107，原约6.4–7.6；真实设置窗均差0.467。修正原整窗测试参考图为UIKit层级，避免共同漏材质。基线4张、最终液态玻璃4张及整窗2张已看，实际进出30fps抽帧无提前完整弹窗闪现；模拟器结果不代表真机帧率／功耗。r1测试编译、r2基线、r3透明图失败均保留；r4修复后通过。台账ios/docs/图标按钮主题与效果模块收合-20261106.md，证据evidence/bulb-popup-capture-20261106。无手机安装、归档上传、提交推送。
+
+## 2026-11-06 续费窗与已购显隐：追加5/5＋续费4/4，按钮文案1/1
+
+本人最终采用：有效年费期间不显示永久升级／重复年度购买；取消续订保留本期，到期免费后重新选择两档，不永久锁定历史年费用户。此约定覆盖下文早期“年度用户自动选永久”及中间“日期＋永久升级”方案。设置年度左侧标题“续费”，帮助同步；窗口同名，只显示下次续费日期（取消则本期到期日）、适用异常与同行管理入口。永久若有历史年度待处理仍称“管理订阅”；真实共存权益／退款聚合不变。去掉三个点，免费恢复在底部，已有效Pro无恢复。自动恢复到达时直接切换内容，无强制selected永久；购买确认也复查权益。
+
+本人确认管理订阅原来有内容只是加载慢；不要再声称持续空白或已修复苹果网络耗时。iOS17+用Apple返回的组ID管理，旧系统／缺元数据保留通用入口，返回刷新。solo沿用模拟器授权，最终3UI＋3StoreKit专项通过，覆盖小屏中文年度／取消／重启、英文取消再开启、免费三语12次切档／恢复、到期重新买年度再永久、历史共存退款、新实例自动恢复；准备清理均过。中间SE首次付款未送达的失败保留，测试改等系统按钮稳定后通过。13张最终截图已看，台账ios/docs/高级版弹窗精简与稳定布局-20261106.md，证据premium-renewal-20261106。
+
+测试后本人追加去掉购买CTA末尾“／年”“· 永久”，现为方案名＋Apple真实价格，三语IOSLocalization同步，永久键覆写Android生成资源。此纯文案仅静态核对，未重跑构建／UI，旧截图仍有后缀。已同步快速清单、StoreKit说明及审核中英文（英文3957 UTF-8字节，仍是待本人核对草稿）。没有安装手机、归档上传、提交推送；真实沙盒/手机体验未新测。
+
+## 2026-11-06 高级版弹窗精简：5/5开发侧完成
+
+本人要求自动恢复购买、删冗余项、修复年费／永久切档高度闪变，并质疑恢复按钮多余。solo对照Android eafc461d LicenseDialogs及测试、Apple订阅购买页要求。确认现有启动／前台／交易监听已自动读取currentEntitlements，无需用户点恢复；不改支付验证、退款／到期或服务端。Apple要求购买页有已有订阅的恢复／登录路径，因此底部整行恢复收进右上角菜单，显式sync仅用户主动点击；未给设置加额外一行。重复法律链接只留设置，删除常驻续订开关文字／账号段落，保留简短年度自动续订说明、有效期／异常和年费转永久的取消提醒及管理入口。
+
+切档不增删段落，购买按钮原48pt最小高度／两行14pt，选中与文字局部180ms淡变，无整窗动画或新增常驻时钟；弹窗内自动恢复到达时自动选永久档，避免已购年度档禁用。截图另修英文Supported截断，三列短值保留单行适当缩放，不改文案或共享列宽。
+
+7个不同测试方法具有通过结果：6个本地StoreKit专项（含年度／永久新实例无需手动sync自动恢复）＋跨三语UI方法在17Pro及SE3各通过，最终12张状态截图已看，切档位置／高度／按钮高度稳定；r3首次切档24fps中间帧已看，后续仅短文字适配。r1月均硬编码3.33而Apple实际3.32、r2未处理Xcode模拟身份验证的测试问题均修正保留记录。台账ios/docs/高级版弹窗精简与稳定布局-20261106.md与evidence/premium-compact-20261106。真机／真实沙盒交易生命周期未测，未安装手机、归档上传、提交推送。币种排查仍待本人登录后的真实价格核对，不用模拟器人民币结果代替。
+
+## 2026-11-06 高级版美元显示排查：2/3，Debug及美元金额已实机确认，待沙盒地区核对
+
+用户问高级版为何显示美元。solo核查PremiumPurchaseView与StoreKitPurchaseStore：主价／CTA直接Product.displayPrice，月均同商品priceFormatStyle，无硬编码USD／人民币回退；普通打包Scheme未挂本地StoreKit，只有专项Scheme读取CHN配置，不能混淆本地39.90／99.90与真实沙盒。本人已明确Debug；devicectl同机截图确认年费US$5.99、永久US$14.99，不再索要渠道／金额。只读运行时storefront尝试未成功，未取得国家代码；随后正常重新打开App，无重装。Apple论坛845478为TestFlight同机USD报告，不能套用当前Debug或保证正式版自动恢复。本人追加点击购买要求Apple登录：已核对官方开发签名首次购买需独立Sandbox Apple Account，入口设置→开发者→沙盒Apple账户，无需退出日常账号；普通Apple账号不等于沙盒测试账号，沙盒交易不扣款。新截图只见桌面，未读到登录弹窗全文，不得声称已验证登录状态。后续本人自行创建中国大陆沙盒账号，助手实际看到后台测试账户列表；16:47同机截图见Apple登录框，按要求仅复制邮箱到手机剪贴板，本人完成登录并反馈成功，原始凭证不存仓库。台账ios/docs/高级版价格币种排查-20261106.md仍P01/P02完成、P03待登录后商品币种／购买确认页核对，不能把登录反馈当交易验收；历史后台人民币39.90/99.90不是本轮在线复核。币种排查只改记录，无生产代码变更／改价／代创建或登录／购买／构建／安装／提交上传。
+
+## 2026-11-06 NP3目录入口文案：1/1完成
+
+本人明确要求“设置滤镜文件目录”改为“设置NP3文件目录”。已修改iOS专用本地化photo_filter_set_folder，简中按原话无空格，繁中“設定NP3檔案目錄”、英文“Set NP3 folder”；相机照片效果／本地工作台共用入口同时生效。保留原资源键与目录选择行为，未改Android。同步既有测试期望和手工清单／首发台账的现行文案；台账此前已通过结果仅代表旧文案版本，本轮未新运行这些测试。静态核对共用调用链、三语键和值及git diff --check，无构建、安装、提交或推送。
+
+## 2026-11-06 图标按钮主题＋效果模块收合：5/5开发侧完成
+
+用户要求统一所有灯泡及返回／关闭按钮的液态玻璃适配，追加管理模块隐藏时动画异常。solo对照Android eafc461d的TipLightbulbButton／GlassBackButton、PhotoColorEffectGroup、SettingsScreen与模块测试。iconControl共用完整公共材质，移除灯泡embeddedInPanel分支；浅深五种主题均核看，拨轮内部材质不改，灯泡继续静态图标＋未读点，不恢复呼吸。核查设置／效果／日期／工作台／队列／监看／回看／帮助／购买／诊断导航按钮，原已完整材质的预览等保留正确路径。
+
+模块改为局部240ms顶部真实高度收合＋200ms淡入出，尾间距一起插值；移除整列两处布局动画。SwiftUI结构移除会先丢父高度，故保留退出View至240ms单次可取消任务收尾，快速恢复取消清理；多行内容先组列，LUT等立即取消时缓存原退出高度，避免子编辑器缩短叠加。弹窗自然高度只由外框modifier订阅，首次测高／旧回调隔离与预览安全区规则保持。模块掩码、免费联动、最后一项保护、持久化和业务取消时机不改。
+
+最终13个不同测试均有通过：r9最终生产代码12通过／1UI查询Close歧义失败，r10仅修测试查询后两入口完整通过。覆盖中间高度、间距、反向、静止无残留更新、被观察编辑器立即取消、多行180pt、5弹窗布局、材质动作禁用、菜单与帮助／返回实点；父层只因显隐求值2次。最终两入口24fps抽帧及13视觉证据已核看。r1/r6测试编译失败、r2-r4结构高度问题、r7-r9 AX祖先覆写／原生双层元素误查均如实保留，非一次全通过。台账ios/docs/图标按钮主题与效果模块收合-20261106.md；evidence/effect-modules-glass-20261106含十轮日志、16输入hash与最终核销。无遗留构建／录像进程。真机手感、帧率、功耗未测，无手机安装、归档上传、提交推送。
+
+## 2026-11-06 STA首次配对核查＋队列胶囊／生成标签：4/4开发侧完成
+
+用户要求跟进安卓最近的首次STA配对优化，队列页隐藏速度胶囊，以及生成标签省略。solo fetch确认本地android/origin均eafc461d、工作树干净。完整对照0da7b8e4与ca03503c实际入口ConnectionViewModel→WiFiConnectionService→STAConnectionCoordinator→STABrowsingSession：当前源码已包含ACK立即断开、不清事件/不等4008/不CloseSession、ACK剩余6.6秒、同机相册＋实际帧证明、一次共用修复与清理恢复及配对状态保持。本轮未发现新增STA漏接、没有改协议生产代码；57项协议回放通过。手机安装包和真实首次配对未验证，不能声称同机问题已解决。
+
+修复真实遗漏：LiveQueuePill旧条件“非队列或任务非空”改为仅照片页显示；共享Layout按实际胶囊宽度同步缩到零间距，兼容执行控件移除后单子视图，不影响固定右缘，不把每帧宽度写回父列表。隐藏时明确禁止命中；仍保留计数／Done状态。生成耗时／短状态在标签内部完整自然测宽，140ms向右宽变，长效果说明低优先级可省略、文件大小旧有可压缩布局保持，避免窄卡溢出。
+
+去重78项最终通过：57协议＋21组件/交互，三种主题显隐、缓存原图实际开始完成、三次队列往返＋监看、滚动／右缘恢复、父层帧重建限制、22pt提案完整短标签、320/600pt汇总。r1新Layout单子视图失效已被实测捕获修正；r2-r4误用XCTest保留的禁用字形AX bounds判断可见，已结合0宽组件测量/截图/动作禁用/实际开始操作验证；r7新增往返使次数6→8，修正测试后r8通过。实际24fps出入帧已看。台账ios/docs/STA与传输页行为对齐-20261106.md；证据ios/docs/evidence/sta-queue-20261106。无手机安装、归档上传、提交推送。
+
+## 2026-11-06 日期分组展开／收起专项：4/4开发侧完成
+
+用户反馈日期分组动画生硬。solo完整读取Android GroupedPhotoGrid/collapseHeight/GroupHeader/ThumbnailCell：收起300ms逐格真实高度＋透明度，6pt行距一起收缩；展开220ms、每行18ms最多4行、600ms窗口，保持即时恢复懒布局，收合中忽略竞争日期/连拍操作。
+
+iOS改掉整块LazyVGrid裁切收缩，改为格子外层PhotoDateCellCollapseLayout（含底部6pt）逐行实际布局；标题下10pt永久保留，消除末帧跳动；箭头默认临界弹簧1500，离页结算半程收起并清空入场窗口。没有新增常驻计时，保留可见前缀＋缓冲一行、收合停止取图与普通滚动不入场规则。
+
+最终r3五项测试通过：两渲染检查、浅深主题实际列表滚动复用已解码图、双日期各9张反复切换／次组终点一致、点击滚动长按互斥；30fps实际录像中间帧已检查连续逐行移动／淡入出，无终点间距跳变。r1/r2因模拟器旧1日加载范围导致fixture缺第二组，已仅隔离测试输入并保存恢复，未修改正式加载业务。离页结算只静态审查，真实相机／手机热量未测。台账ios/docs/日期分组动画修复-20261106.md；证据ios/docs/evidence/date-groups-20261106。无手机安装、归档上传、提交推送。
+
+## 2026-11-06 筛选无结果空态修正：追加7/7
+
+用户指出无匹配照片的图标错误、清除筛选文字越出按钮。已对照Android emptyFilter和GlassButton：复用顶部PhotoListFilterIcon轮廓44pt，替换系统三横线圆圈；清除按钮14pt labelLarge／medium，单行自然宽度，label内部水平14／垂直8pt padding及20pt圆角，材质包住全部内容。原呼吸及评级显隐、关闭弹窗与clearFilter接线不改。两项静态核对及git diff --check通过，未新增测试、构建、安装或提交；此前19项不是本次新验证。台账原6/6，反馈A01–A07为7/7开发侧完成，真机视觉待用户体验。
+
+## 2026-11-06 日期页进一步紧凑化：追加5/5
+
+用户要求去掉两行拨轮右上侧重复日期值并释放高度。已移除DateEndpointEditor摘要Text及外层VStack／6pt间距，两端各只占50pt拨轮行，外层自然测高随之缩短，不用透明占位。用户最新要求覆盖下方摘要10pt的旧显示约定；不改安卓。静态检查共用组件与原日期回调、git diff --check通过；局部低影响布局删除未新跑测试、构建或安装。前一轮19项及截图仅为旧摘要版本证据，不冒充本轮验证。台账原6/6、用户追加5/5，无提交推送。
+
+## 2026-11-06 筛选操作反馈与日期页转场：追加4/4开发侧完成
+
+用户实际反馈日期／重置无按压、日期页闪现、清空／完成像文字且字号异常。此前同日静态“未发现问题”没有实点覆盖，已在原台账和followup-review.json纠正范围。solo修复；沿用模拟器专项授权，不安装手机、不归档上传、不提交推送。
+
+四个操作使用公共GlassButton按压（快点保留90ms视觉、不延迟动作）、12pt字体；清空／完成尺寸放在label内部，底板整行40pt。日期页复用双层淡入淡出，Android入150ms／出100ms；核对Compose1.5.4 SizeTransform为刚度400／阻尼40，不能写成1500。仅外部实际插值高度负责尺寸，内部根容器minHeight0允许收缩，避免旧页撑高后被UIKit居中导致中途上跳。关闭／后台停止淡入淡出时钟，重开直接主筛选页；不改评级、日期草稿或重置业务。没有保留公共Genie宿主的同步布局实验。
+
+本轮19个不同测试最终通过（r3公共兼容12项＋r7最终筛选组件／实点7项）；最初两项测试假设错误、一次Swift隔离编译错误已修正，过程日志保留。功能测试通过后仍从录像查出中途偏移，直到r7逐帧确认进入／返回顶部固定、内容淡出入及连续尺寸才核销。7张截图／帧序列与快速重复重置trace在ios/docs/evidence/filter-motion-20261106；任务docs/待做/iOS-20261106-安卓增量复刻.md原6/6、追加4/4。真实手机视觉手感仍待用户验收，TestFlight79不包含本轮。
+
+## 2026-11-06 Android 筛选与延时档位增量：开发侧6/6，基准89018097
+
+本人随后要求“检查一遍”，solo复查同轮完整差异及重置/持久化/评级取消、日期宿主状态、延时偏好与取消门禁三条调用链，未发现新增问题；13个iOS最终输入和7个Android输入hash与已测版本一致，三语881键及旧引用检查通过。补充followup-review.json与台账复查记录；本次仅静态审查，不改生产代码、不重跑构建/测试，不将原56项写成新一轮结果。
+
+用户“安卓端又有了一些改动老规矩”。solo fetch并核对本地/远端android一致、工作树干净，ca03503cc0934a53c4ccf2362b56f45b0831b729→89018097b1f98aaaa85e01e31c966a34e364a65b，1提交7文件；下轮从89018097比较。台账docs/待做/iOS-20261106-安卓增量复刻.md为6/6开发侧完成，真机待用户验收。iOS原有大量未提交修改保留，HEAD仍58d9b6ed。
+
+筛选底部新增整行重置，恢复全部默认/评级5日并清STA隐藏保护；普通STA编辑读取模型最新保护值，重置后旧回调不复活。关闭评级读取/重置后，之前已经发出的请求即使返回也必须丢弃，不恢复值或进度；不是关闭筛选窗就关闭评级开关。日期页默认手机当地今天，已有范围较新在上，两行独立、只确认时排序；删除起始/结束和存储卡标题及无用最新相机日期扫描，保持实际拍摄日加载范围不变。延时档位改关闭/2/3/5/10/30，旧20恢复关闭；原计时/取消/AF/MF状态不改。三语881键一致，已移除内置滤镜规则保持，手工清单C05/C07/H12更新；版本号未改。
+
+沿用已授权模拟器专项，分批56个不同测试最终通过；首轮49通过/1新测试错误地断言异步秒数同步更新失败，修正测试订阅后复测7项通过，未改计时实现。8张实际组件截图逐张检查（筛选280/390评级开关、延时横竖/浅深），评级进度局部更新及关闭动画释放回归通过。日期页未做自动触摸，真实相机/真机功耗未测；证据ios/docs/evidence/android-sync-20261106。无手机安装、Release归档、上传、提交或推送，已上传79不包含本轮。
+
+## 2026-11-05 上架资料缺项：重新登录后9类后台页面已只读复核
+
+本人回复已登录后，solo用Chrome逐项读版本／截图、App信息、隐私、永久商品、年度商品、价格供应、订阅总览、商务及审核共9类页面。当前2.05准备提交、未选构建、手动发布、审核列表空；简中iPhone中屏与iPad13截图各0/10；两商品审核截图均未选择文件；内容版权仍设置入口；ICP号未填；审核联系人／英文通用备注已有，无硬件视频链接或附件。隐私未收集草稿可发布，按钮留本人。已更新ios/docs/AppStore上架步骤与分工.md顶部7类缺项，不再写登录阻塞。
+
+在线确认付费／免费协议有效、银行可用、两税表使用中、810／DSA有效；App中国大陆下载价0元，148供应／27未供应；Mac与Vision Pro均未供应。两商品各148地区、家人共享关，年费1年预付、多名额不允许；宽限期16天仅付费转付费、仅沙盒，正式环境仍待既定业务收尾。未重查所有商品全价表和所有地区合规，不能宣称真实支付或所有区域通过。没有保存／改价／改版本／添加以供审核／发布隐私／提交审核／构建／上传。1.0仍未执行；可选营销素材、服务器通知URL、旧共享密钥等空白不列成缺项。下段登录过期为本轮较早过程。
+
+## 2026-11-05 上架资料缺项检查的初次记录
+
+用户要求检查iOS上架还缺什么资料。solo读取最新商业／79上传／素材记录和Apple官方硬件审核、首批内购提交说明，已在ios/docs/AppStore上架步骤与分工.md顶部整理7类待办：商店截图、两项商品审核截图、硬件视频与代表设备资料、公开素材内容权利、隐私标签发布、中国大陆发行备案资料、最终版本／构建及同批内购关联。明确会员／协议／银行／两税表／810／无欧盟DSA已有完成证据，不重复索取；50个内置滤镜已移除，不再列为等待许可。真实支付与硬件验收及正式宽限期另列为非资料收尾。
+
+本轮Chrome现有79详情页可读，但转分发页刷新后Apple登录过期（authResult=FAILED），已请求本人在浏览器登录、无需发送密码验证码。尚未取得本轮全后台逐字段复核，不能把上述记录来源当新在线验证。另见腾讯云APP备案草稿苹果包信息未完整添加，仅记录未完成状态，不改该草稿或读取／落盘证件详情。本轮只改文档，无后台修改／提交／发布／构建；1.0仍未改工程或后台。
+
+## 2026-11-05 手工全功能测试文档；iOS 独立版本编号仅讨论
+
+用户要求一份可按内容快速测试完整 App 的 MD，新增 ios/docs/iOS全功能快速测试清单.md，并从 ios/docs/上架前验收清单.md 链接。按真实操作顺序覆盖启动／设置、USB、列表／筛选、预览／裁切、队列／输出、照片效果、工作台、监看、AP／STA、GPS、购买、权限／性能，提供16项快速路线和失败编号模板；所有结果初始未勾选，不据文档核销硬件或支付验收。明确79不含之后的目录入口／拨轮震动修复、手机端监看录制豁免、无内置滤镜及Debug模拟权益不等于真实Apple购买；旧上架清单历史范围已加醒目标注。本轮仅文档和静态核对，无构建／安装／上传／提交／推送或新增真机结果。
+
+用户同时询问新 iOS App 是否应与安卓独立编号。建议首发公开版本1.0、构建号继续递增（例如80）、安卓2.05只作复刻基准；当前仍是建议，未获改号指令，未改工程、已上传包或App Store Connect。后续若实施，需同步实际包版本与待提交商店记录，不把旧2.05(79)改名当新包。
+
+## 2026-11-05 TestFlight首轮反馈（优先于下方历史记录）
+
+79上传后新增要求已完成：初始滤镜改为“设置滤镜文件目录”并像LUT一样短按选择目录；拨轮没有真实跨档不得因按住/滑动预震。两入口共用PhotoNP3Chooser和DetentWheel已修改，去掉拨轮按下即触发的渐强震动，保留真实跨档反馈与成功长按确认；其他控件不改。沿用本人之前的模拟器专项授权，37个不同测试最终通过，N01–N03为3/3；第一批36通过/1测试宿主漏挂展示层失败，Debug宿主修复后2项复测通过（覆盖两入口目录选择/取消和实际名称/强度拖动）。触觉事件已测，真机马达体感未测。证据在ios/docs/evidence/first-feedback-20261105/filter-folder-wheel-haptics.json。此轮源码**不在已上传79内**；未新Release归档/上传/安装/git提交。追加任务见ios/docs/TestFlight首轮反馈与首发收尾-20261105.md。
+
+最新结果：本人批准的2.05(79)正式归档、严格签名/包检查、Apple线上校验全部通过，2026-11-05 15:36:55上传成功。Apple处理完成后已加入“本人内部测试”，构建ID73e31cd6-24f3-459a-a7ce-9300d46139bb；组页实际1测试员/2构建，79正在测试、90天后过期。79简中/英文测试重点已保存并刷新回读逐字一致，78保留为旧包。任务T01–T04/T06完成5/6，T05保留真实商品价格、购买/恢复和真机验收；分批380个不同测试最终通过、5项合成检查及真正79归档资源检查通过。无手机安装、App/Beta送审、隐私发布、公开发布、git提交或推送。整体上架仍待真实验收及正式截图/硬件视频/内容版权与相关地区事项，不得把上传成功当全部功能已测。后文“正在执行/尚无新Release”为本次上传前记录，以上实际证据优先。
+
+本人已明确改为移除50个许可不明的内置手机滤镜，保留用户导入；取代此前“保留手机滤镜”的决定，不能继续把版权许可当等待项而保留这些参数。新反馈并行保留：所有显示上下箭头的拨轮必须支持上下拖动快速调整（不限滤镜或某个入口）；高级版窗只留正式购买流程需要的操作，缩短并去掉滚动条；日期分组展开/收起修复闪现。由主代理独立处理，记录见ios/docs/TestFlight首轮反馈与首发收尾-20261105.md。当前78不会自动包含新改动，不得沿用以前测试结果核销。用户已同意查看78商品价格，尚未收到实际价格结果；本人已批准模拟器专项验证；拨轮/日期分组/购买窗17项通过。拨轮根因是onChange捕获旧配置导致箭头与dragSession不一致，已使用回调新配置修复。50个内置滤镜源码移除及导入/旧配置/队列恢复验证已完成；分批380个不同测试最终通过（包含本地StoreKit39.90/99.90价格类型周期验证）、合成包检查5项通过，T01–T04为4/6完成，仍无新Release/真机/实际支付结果。本人现已明确批准归档、校验并上传2.05(79)，更新本人内部TestFlight；允许所需修复重试，不安装手机、不提交审核、不公开发布。正在执行，新状态必须以产物与后台结果核对；不得拿78当新版。商店简中/英文描述和审核备注已保存回读，补充滤镜/LUT由用户导入、无内置调色预设；后台仍准备提交，手动发布为1，无审核提交。未要求提交git、推送或手机安装，所有审核/发布继续留本人。
+
+## 2026-11-05 App与两项商品已建立；所有送审/发布由本人点击
+
+最终内部测试结果：Apple已处理完2.05(78)，构建ID85122ebb-d75e-494f-8418-12fa8210b3e5；已加入“本人内部测试”组。实际组页显示1测试员/1构建、构建“正在测试”且90天后过期，本人账户“已邀请”。简中/英语Beta资料及本构建测试重点均已保存并复读，自动分发关闭。无外部组、Beta审核、手机安装或真实购买/相机验收；步骤9仍开放。下方13:30“正在处理/0构建”为中途记录，已被本结果替代。本人问测试永久购买能否停用：仅解释Apple的90天期限及沙盒权益不继承为正式购买；手动Expire Build官方明确保证停止安装，不能宣称已安装/离线设备立即被远程封禁。测试结束后停止给该用户开放新包，避免其持续换新测试包。未实际停用78、移除测试员或改支付逻辑；静态核对Release无持久化Pro开关，Debug模拟购买读取隔离，跨环境实机尚未测。
+
+最新执行状态（2026-11-05 13:30）：Release2.05(78)已正式上传成功。最终归档ios/.build/appstore-20261105/ZTransfer-2.05-78-ipad-compat.xcarchive；ARCHIVE SUCCEEDED、codesign严格验证和发布包检查通过。实际Info.plist确认UIRequiresFullScreen=true、两平台Portrait、ITSAppUsesNonExemptEncryption=false、profileTeam6YY8Y34949。Apple线上validation记录Validated ZTransfer/EXPORT SUCCEEDED；upload.log于13:25:34记录Upload succeeded/Uploaded ZTransfer/EXPORT SUCCEEDED，进程exit0，无运行中的构建/上传任务。TestFlight实际上传表识别2.05(78)，13:30状态“正在处理”，待处理后给本人内部组分配，不重传同一构建。原失败归档/日志保留。付费App协议有效、银行可用、两税表使用中、810/DSA有效；步骤6和7核销。内部组1名账户持有人/0已分配构建，自动分发关闭，中英文Beta说明/反馈邮箱/隐私URL已保存；没有外部组或Beta审核。未安装真机、送审、发布、提交git或推送；真实购买/恢复与设备运行未验证。滤镜本人确认可能转发、许可不确定，保留功能但版权项/P10仍开放。
+
+本人询问同版本反复构建：已按Apple官方规则说明，未上架时商店版本可一直2.05，新上传包构建号需递增78→79→80，不覆盖已成功处理的同一构建；上架后代码更新需新商店版本并审核。本次未要求改版本/重传，不因此改工程。以下同日记录是历史过程；其中待签、等待银行/协议、正在归档/上传等描述已被以上实际终态替代。
+
+最新iPad决定：正式2.05(78)已归档和本地签名/发布包检查成功，但Apple线上validation明确因仅Portrait却未采用全屏兼容而拒绝。本人已回答“保持竖屏，采用兼容模式（建议）”，允许UIRequiresFullScreen=true，旧系统不使用分屏，iPadOS27仍有缩放结束后的离散resize；不新增横屏、不删iPad目标，更新此前多任务方案。已同步project.yml/Info.plist，需继续归档校验上传；前版archive和validation失败均保留ios/.build/appstore-20261105，不把它当已上传。所有构建/校验/上传授权持续有效，不再逐次确认修复重试。
+
+最新商务结果：本人在重新打开的W-8BEN完成核对与提交，助手实际读取商务表格：W-8BEN和Certificate均为2026-11-05提交、“使用中”；付费App协议从等待用户信息变为“正在处理”，银行仍“正在处理”。W-8BEN已完成，不得继续要求填写、签署或重试，也不要把先前通用报错当现状。法律实体、两份税表、810及无欧盟计划的DSA均已由本人处理；商业配置整体仍等付费协议/银行生效，尚未证明真实沙盒可用。
+
+下一验证节点本人已明确批准“允许归档、校验并上传”：授权Release2.05(78)使用付费团队归档、校验并上传ASC准备内部TestFlight，不安装手机、不送审、不公开发布。已启动xcodebuild archive，输出在ios/.build/appstore-20261105/，复用/tmp/ztransfer-prepay-release-20261102缓存；以实际进程和日志确认结果，不因本条视为成功。TestFlight已创建“本人内部测试”组，关闭自动分发，实际0测试员/0构建。本人说明50个保留手机滤镜是群友发的，已继续询问是否原创且允许随App分发；来源渠道不等于分发许可，版权项仍未设。后台其余不适用的医疗/游戏/服务器通知项不因有按钮就新增配置。
+
+同日后续出口配置：solo复查Nikon GPS配对和SHA256用途、Apple系统加密分类、BIS对authentication/data integrity的界定，按仅使用豁免加密在ios/project.yml与ios/ZTransfer/Info.plist写入布尔false的ITSAppUsesNonExemptEncryption。私有配对消息格式不自动等于自研数据保密加密；当前转换只认证时间戳/nonce，照片和GPS载荷不走它。ASC上传向导仅列专有和系统外标准算法，未乱选、已取消，未提交材料/批准编号。依据详见ios/docs/隐私清单与数据流核查.md；不宣称EAR99决定或后台已审核通过，首次真机Archive仍须核对依赖/最终键值和处理状态。本轮不构建/上传/安装/提交/推送，原W-8BEN仍需本人实际签署，不因税务口头回复核销。
+
+同日后续优先状态：本人拒绝发送Apple财务问询，要求先参考网上实际分享；未发送。已结合IRS当前说明及Apple论坛亲历转述，提出W-8BEN“仅证明外国身份、不提出特定协定优惠主张”的路径，Part II第9–10项和收入选项均空，不填0%/10%；6.a与生日已在原表内，未代签提交。最终还需本人核对个人资料/税务居住地址并签Part III。详情与来源已记录上架手册，不再把联系Apple财务当硬性前置。不能保证本人的全部收入免税。
+
+随后本人回复“已核对并提交”，但商务页仍显示W-8BEN缺少税务信息，最初原表两项声明未选。本人再实际勾选并点击后出现“当前无法处理你的请求。请稍后再试。”，按钮已启用，不能再说只是未勾声明。独立商务页复查仍缺税务信息，第一份Certificate使用中、付费协议等待用户信息、银行正在处理；Apple状态页当时全部正常，未能据此定位税务报错原因。助手保留原报错表，在最后一个ASC标签页从商务页新开W-8BEN，按原授权补回相同税号与生日并确认一致，Part II不变，新表Part III留本人核对签署；已请本人仅重试这一轮，当前待结果。不要改税率或协定来碰运气，不代签，不把系统通用错误说成明确资料错误，不重复索取已有敏感资料；原始值仅用于Apple表单，不写仓库。
+
+隐私草稿已保存：ASC实际预览“未收集数据”，发布按钮可用，未点发布。已纠正把外部QQ/邮件客服直接算App内采集的过宽判断：两反馈按钮仅复制公开QQ，固定法律链接无附加用户数据；本地照片/定位/权益没有开发者上传路径，Apple单独收集的分析/付款无需重复列入。320个联网清点输入比较，318一致、2工程配置变化；这不是抓包或新增文件完整扫描。依据及范围见ios/docs/App隐私问卷填写依据.md。以后新增App内客服上传/第三方SDK需重新申报。下方“隐私问卷未填”是此前状态，以本条为准。
+
+商务最新进展：本人已完成法律实体更新、自行接受付费App协议，并自行确认添加银行账户。实际银行状态“正在处理”，付费协议最近核对仍“等待用户信息”，不能说已有效。本人完成税收问卷后生成两份表，并亲自提交U.S. Certificate of Foreign Status of Beneficial Owner，后台已显示2026-11-05提交、“使用中”。W-8BEN仍未提交；助手已打开并阅读Apple内附提示及IRS说明，不能把“Optional”当全部可省略，或擅自填写0%/10%与协定条款。本人随后主动提供资料并明确要求助手代填，6.a与生日已在Apple表单写入并确认有值，原始值不入仓库；第9项、税率及最终声明均未操作。原W-8BEN标签页保留未提交。本人后续明确授权将其号码用于810号表；助手填写后由本人点击完成，后台实际已显示2026-11-05、“有效”。810号已完成，不重复索取或填写。本人随后明确“不在欧盟吧，麻烦”。已在DSA选择“不是交易商，或者没有欧盟分发计划”的合并选项，依据是无欧盟计划，并保存；后台显示DSA有效。逐项取消27个欧盟成员国，App供应确认148，年度1年预付确认148/175，永久商品显示已保存148/175。三处均完成，未误取消英国/瑞士/挪威等非欧盟地区；未公开联系方式或上传DSA证明。原先175地区目标由本次决定收窄为当前148个非欧盟地区。全部最终声明由本人核对签署。W-8BEN第10项不能套用Apple旧提示：IRS2021说明对主张无美国常设机构营业利润待遇有明确附加要求；当前收入分类/预扣仍待确认，财务支持问询草稿已写上架手册但未获发送授权、未发送。下一轮先读取真实UI，不重复要求银行添加、第一份税务证明、生日或6.a填写。
+
+用户明确“需要提交审核的都留给我点提交，告诉我需要点哪些，我需要核对后再发起”。此边界持续生效：助手可填写/保存/核对草稿，不点击添加以供审核、提交审核、Beta审核或发布，不用API绕过；隐私标签发布也留本人。价格本人确认调整为年度¥39.90、永久¥99.90，已经在Apple完整价表选取并保存，不再使用原¥39.99/¥99.99作为正式目标。
+
+已创建Z传，Apple ID6830945574、Bundle com.ztransfer.ios、SKU ztransfer-ios-001；Team6YY8Y34949已写project.yml并XcodeGen生成，plutil通过，未构建/安装/Archive/上传。版本草稿2.05、中文Z传/英文ZTransfer及新副标题、两语言版本文案/支持URL/隐私URL已保存。版权2026及审核联系电话本人已确认；不将电话全文留在仓库。App免费下载¥0.00及148个非欧盟地区供应草稿已保存，关闭Mac/Vision Pro/校园批量优惠，保留公开App Store及手动发布；未上架，地区条件仍未核销。无自有账号登录；隐私问卷未填/发布、内容权利/DSA/ICP尚待实际依据，不能视为整体送审就绪。付费前台账P17已核销，当前14/18；P10滤镜来源/P14截图/P15实机/P16视频仍缺，不再重复询问版权/电话等事实。
+
+永久Non-Consumable com.ztransfer.ios.pro.lifetime（6830950193）人民币基准¥99.90；年度自动续期com.ztransfer.ios.pro.annual（6830954364）1年预付¥39.90；订阅组ZTransfer Pro（22547521），组本地化高级版/Pro。两商品简中/英文名称描述及审核说明已保存，当前148个非欧盟地区供应已保存；无家庭共享、无多名额、年度只App Store渠道，未开12月合约按月付款。宽限期已保存16天、仅付费转付费、仅沙盒，正式上线前另核对正式环境；两商品审核截图仍缺，真实商品加载/沙盒未验证。详见ios/docs/AppStore上架步骤与分工.md，后续补齐实际配置结果；以下“无App/未建商品”为最初核查历史，不能当现状。
+
+法律实体表单历史：中文城市/省份被判无效，原地址过长；经本人要求，助手在保留信息的前提下拆为两行并恢复英文格式，随后本人完成保存并接受协议。不能再把“等待地址保存”作为现状；表单格式通过也不等于全部身份审核通过。该地址是本人提供的户籍地址，不能未经核对自动断言适用于所有银行或税务字段。首批App版本、年度、订阅组、永久须同一审核提交单；所有送审/发布均留本人。
+
+## 2026-11-05 Apple会员初次核查记录（后续App/商品配置见上文）
+
+用户收到批准邮件后要求核实能否继续。solo通过Chrome实际读取Apple Developer账户，Program个人会员、Team ID 6YY8Y34949、续订日期2027-11-06，Program许可接受日期2026-11-05。本人自行登录及完成App Store Connect首次服务条款；助手未代签。ASC实际App列表“无 App”，商务页免费App协议“有效”、付费App协议“新”，明确要求先更新法律实体；欧盟交易商状态待提供，银行税务详情未进入不作完成判断。会员审核阻塞已解除，上架手册步骤5已核销，付费前材料仍13/18。未建App/商品、修改账户资料、刷新Xcode签名、构建/安装/Archive/上传/提交/推送；不能视为正式沙盒已可测或通过。旧手机7天开发包不会因会员升级自动换签。后续按ios/docs/AppStore上架步骤与分工.md步骤6–9继续，法律/税务/地区事实由本人填写。此次不保存网页完整AX或个人地址/电话，只有必要状态记录。
+
+## 2026-11-05 iOS联网/备案静态核查7/7，无产品修改
+
+同日用户确认外链跳转浏览器并要求留档、以后需要再改。文档已明确：App仅openURL发起跳转，网页请求由默认浏览器完成，无自定义openURL拦截、内嵌WebView/SFSafariViewController或App自行下载法律页面；不要将其混写成App内部自有业务请求。已记录法律入口/配置、两条地名链路及未来抓包的分类位置，未授权或实施功能删改。
+
+用户询问除Apple服务外的联网行为及局域网是否需APP备案。solo静态扫描生产Swift、项目依赖/权限和C/C++桥接，记录ios/docs/iOS-联网行为与APP备案核查-20261105.md及evidence/network-audit-20261105/source-inventory.json。未发现安卓后端、独立HTTP业务API、广告统计/崩溃上传SDK；AP固定192.168.1.1、STA本地接口/local.Bonjour/TCP15740，USB/蓝牙本地。但设置/购买页隐私条款会openURL自有www.ztransfer.top；CLGeocoder地名、StoreKit可联网；用户选择PhotosPicker/iCloud、第三方File Provider或分享应用可能触发其网络。生成资源中APK URL无执行调用，反馈只复制QQ。未改生产代码/构建/安装/抓包/提交/推送。
+
+法律表述须区分：工信部对象是在境内提供互联网信息服务，互联网协会2026-01-07FAQ称单机不联网无需核准，Apple现行帮助称“部分App”要ICP备案。没有查到“只调用Apple服务即一律豁免”或本App组合的明确官方认定；局域网设备通讯不等同公网信息服务属于技术/规则范围分析。不能声称本App已获免备案，也不能因政策外链就断言必然需要；应如实向Apple/住所地管局确认。源码不是抓包，不能保证系统底层仅访问Apple自营域名。未为规避备案删除功能。
+
+## 2026-11-04 Android 2.05增量开发侧12/12，基准ca03503c
+
+用户“安卓又有了一些新功能，还是老规矩”。solo拉取并纳入本地android最新，8a09e51b→ca03503cc0934a53c4ccf2362b56f45b0831b729，共4提交/38文件，末次源码hash一致、工作树干净。台账docs/待做/iOS-20261104-安卓增量复刻.md开发侧12/12，真机待用户验收。iOS HEAD仍58d9b6ed，保留既有未提交代码/网站，本轮未提交、推送、安装手机。下轮从ca03503c比较。
+
+新增照片模式延时拍照0/2/5/10/20秒、持久化/隐藏归零、独立工具排序、锚点选择窗、秒数逐位动画、再次取消、MF保持/AF确认及实际模式复查。计数只订阅快门局部；后台/断连/回看/编辑/模式切换/退出取消，AF与已发送快门排空再关闭监看；会话队列与USB/IP发送口均检查共享许可，取消后不再发快门，不额外AF，有界200ms×5忙重试。参数拨轮/AUTO及相机写入互斥，临时常亮恢复。物理模式切换采用正常focus/exposure刷新；保留iOS端侧录制不提供等既有差异。
+
+本轮STA新规则取代11月1日旧4008规则：Query/Result ACK后直接关闭临时传输，不等4008、不发CloseSession；ACK计时剩余6.6秒后同机重连，仍需相册与实际JPEG帧后落可信。每身份一次内联/远控修复共享预算，临时读取失败保凭据；已有真实帧但End失败仅一次同机清理恢复，不重新配对。初始化及每个握手响应共享绝对期限，句柄总30秒且底层读空闲5秒，其他响应5秒，PING/分片不能续命；激活后的普通传输仍用原空闲期限。移除旧4008排空和未用peek辅助。
+
+最终去重283 iOS XCTest全部通过0最终失败/跳过；本机协议123/123与其重叠不累加。iOS r1 17通过、r2 247中1内部动画归零失败、修复后r3 171通过、选中矩形修正后r4 9通过。最终build-r6通过；r5曾Int/Bool编译失败，日志保留。4张最终横竖/浅深组件截图逐张检查，选中行矩形像素及反向关闭终点断言通过；非完整页面/实机证据。三语933键/2.05(78)一致。证据ios/docs/evidence/android-sync-20261104/verification.json及inputs/logs/screenshots-final。全部进程结束；未测真实相机、功耗、正式Archive或支付；研究QQ/Android发布后端工具不移植、不发送。无新增平台差异。
+
+## 2026-11-04 真机覆盖安装2.03(76)，用户确认可以打开
+
+用户报告手机旧版“不再可用”，明确要求安装。solo运行现有ios/dist-debug-ios/d-b-ios.command，指定00008120-000A08110CF1A01E（iPhone 15 Plus，设备报告iOS27.0.1），跳过模拟器；当前工作树Debug构建BUILD SUCCEEDED，未改生产代码/运行回归/提交/推送。产物ZTransfer-ios-debug-2.03-20261104-182510.app/.ipa，脚本按既定规则只保留最新Debug包；日志/tmp/ztransfer-install-20261104.SEeGp3。旧电脑包的免费开发描述文件已于2026-10-25过期，但未取得旧手机安装版本，不能写成已验证两者完全一致。
+
+新包已无线覆盖安装，未卸载或清数据；首次自动启动被系统Security拒绝，因此脚本整体exit1，不能写成全流程一次通过。新描述文件346e0c13-2320-409a-9f83-5307c408d270包含目标设备，签名/授权匹配，开发证书有效；仍为Personal Team 6YY8Y34949的7天LocalProvision，2026-11-11 18:26:50（Asia/Shanghai）到期。用户随后确认已USB连接并解锁、已信任/验证开发者App，并明确反馈“现在能打开了”；本次安装与启动恢复完成，未据此核销相机功能/支付/热状态。此前用户已付款但Developer会员注册仍待审核，不能据付款视为会员生效或正式Apple沙盒已通过。
+
+## 2026-11-02 付费前复核13/18，开发侧补齐，5项仍需本人材料/实机
+
+用户要求补齐购买Apple会员前工作。solo按ios/docs/付费前复核与补齐-20261102.md执行：前轮传输F01–F04及D01已修复，缺EXIF空字段回退、纯装饰不读相机、独立地点准备且不占计算槽/计时、本地原片关闸skip、完整视频part在次数/大小/相机门控之后发布。新增TransferBusinessParityTests6方法含取消/运行期关闸/裁切时钟；旧缺EXIF测试改为回退，并以真实渲染失败保留重试来源隔离。颗粒模块旧15掩码断言纠正；预览旧尺寸断言记录当前整数边距原生栅格，未改渲染器，不宣称所有像素完全一致。分页Coordinator补@MainActor，无时序改动，14专项通过。
+
+分批去重424 XCTest最终通过（406模型/组件/队列+18本地StoreKit），0最终失败/跳过，另4检查脚本测试通过；中途编译夹具错误/旧预期失败均保留，非一次全量通过。设备与模拟器无签名Release2.03(76)/SDK27.2构建及严格包检查均通过，未安装真机/正式签名Archive/上传/提交/推送。证据ios/docs/evidence/prepayment-20261102/。6中英文政策/条款/支持页GET200，未部署网站；地名缓存文档纠正24h/15s/5s，当前411编译输入含新增FastNoiseLite及MIT通知；商店文案补颗粒并核长度。
+
+5项开放：50个手机NP3派生滤镜来源/使用依据（50独立hash与Android31跟踪NP3匹配0，已问原始目录/链接，不删除）；可公开照片及商店成图；代表硬件环境及当前候选验证；手机与相机同框实拍视频；名称/语言/版权年份本人事实。旧1.98截图不作当前候选；续查已补当前2.03(76)首页/设置6张并逐张核看，1个UI方法在3个新模拟器分别通过（不计入424项），原图无alpha/摘要一致，设备全清理，未注入应用数据或安装真机。记录screenshots/capture-record-20261102.json；完整核心场景仍缺，维持13/18。审核说明按实际页面/源码纠正“照片效果 / Effects”入口及USB自动发现步骤，当前自有账号登录要求及GPS入口已由Release/源码核销；硬件与后台定位仍待实机。英文Notes3612字符/3934字节，记录按UTF-8字节校验4000上限。已有姓名邮箱/价格/客服/网站不用重问。会员后才做正式商品/真实Apple沙盒/分发签名/上传和后台声明；iPad竖屏多窗口及既有方向警告保留，不擅自全屏/横屏；监看端侧录制豁免保持。目标未全完成，不可据本地通过核销本人事实/许可/真实相机。
+
+## 2026-11-02 传输业务核对28/28；4问题与1差异待处理
+
+用户要求核对iOS传输业务是否遗漏Android，排除鸿蒙。主代理solo按Android8a09e51b、iOS58d9b6ed+既有未提交内容审查；台账 `docs/待做/iOS-20261102-传输业务逻辑核对.md` 为28/28代码核对完成。4项问题尚未修复、1项差异尚未决定：F01无EXIF有效JPEG在生成分支抛invalidDataset；F02纯装饰边框仍捕获/补读元数据；F03地点查询占住唯一计算槽，阻塞后续就绪项；F04本地原片命中且运行期效果关闭，skipped仍false；D01完整视频part先于免费限额/大小/相机门控发布。均有真实队列受控诊断复现，不能称当前传输完全无遗漏。水印入队冻结为用户明确差异，保持；监看端侧录制继续豁免。
+
+本轮只改两份既有测试的过期预期/前置条件：AutoTransferModeTests三语按当前Android；PhotoMetadataPreparationTests两裁切场景先启用入队再关闸，容量场景区分旧配方和关闸后新无效果任务。r1诊断夹具Swift6隔离编译失败；r2执行232方法有4旧测试失败（7条错误）；r3地点夹具构造器编译失败；r4修正后5/5通过。去重后228现有回归最终通过，另5诊断确认问题，共233不同方法最终0失败/跳过，失败历史保留。诊断临时追加已移除，DomainModelTests恢复本轮起点hash；夹具保存在evidence供修复重放。生产源码未改，未安装真机、提交或推送。证据在 `ios/docs/evidence/transfer-audit-20261102/`；真实相机、Provider、功耗和端到端UI未验。历史F065/F067等核销不证明无EXIF降级、地点准备全部正确，以本轮新增项为准。
+
+## 2026-11-01 新STA增量完成7/7，Android基准推进8a09e51b
+
+用户“又来了一点修改，老规矩”。solo完成dfd66a20→8a09e51b11c6fa4fa74133a4cf603c883ba7ea5a的4提交/21文件，Android工作树干净且pull已最新。台账docs/待做/iOS-20261101-STA增量复刻.md为7/7。iOS HEAD仍58d9b6ed，上一轮26项与本轮全部未提交；不改Android/网站，不安装手机，不推送。下轮增量从8a09e51b比较。
+
+首次STA配对Result后须30秒内完整新4008，先排空旧事件，ACK必须含GUID；凭据仅内存绑定同机，会话只关闭一次5秒读预算。仅新配对重连验证8秒内真实JPEG监看帧，EX9428回退9203，只结束自己开启的监看，流坏直接退役；取消不落盘，旧可信/旧marker迁移不新增LV。两身份使用相同有界恢复，恢复清凭据但保留GUID；未确认即终止发现/自动重试，不能绕相册身份。共享配对锁覆盖重置、迁移和最终取消检查。临时DeviceInfo失败保留旧信任，仅明确pairing-only能力才失效。
+
+相册首个ObjectInfo失败就停采样，无GetThumb，无有效正size不partial。Debug增加被动有界STA计时/完整块日志、复用文件分享且唯一文件/后台写/取消过期展示，无轮询；旧诊断入口复制/清除同步。STA失败标题/完整可滚动文案、201F/未完成提示、无流量说明、三语928键及2.03(76)一致。iOS Bonjour确有末轮100ms等待，已去掉，保留两服务间等待；不机械移植Android性能结构。
+
+最终build-r3成功；iOS模拟器181项全部通过0失败0跳过，包含真实BSD双socket/真实JPEG/取消重置/同机/不自动重试/卡片宿主；本机协议112项通过（重叠，不累加）。英文截图已核对。证据ios/docs/evidence/android-sync-20261101/verification.json、source-sha256.json、logs、screenshots；原始xcresult /tmp/ztransfer-sta-20261101/ios-r1.xcresult。最终构建/测试结束，无运行中会话。真机相机首次配对及耗时功耗、向第三方实际分享、Release打包未测；不声称真机已过。保留既有监看端侧录制不提供等所有已批准差异。
+
+## 2026-10-31 全轮复查完成，102项专项通过；性能按iOS实际开销判断
+
+用户明确安卓性能优化仅作参考，目标是减少iOS无谓运算/渲染，不机械复制安卓优化结构。已solo复查当前102份新增/修改生产Swift文件及相关调用链；台账仍26/26，不新加功能差异。Android仍dfd66a20且干净，iOS HEAD58d9b6ed，未提交/推送/安装手机，网站与安卓未修改。
+
+本次修3处：PhotoFileCatalog按days缓存日期范围，替换/增删/拍摄时间改变失效，元数据变化不失效，缓存nil且值复制独立；PhotoListViewModel四处改用缓存，每个await后仍检查准入与新照片范围豁免。PhotoThumbnailBitmapView仅圆角变化请求布局，UIKit尺寸布局保留。TransferFileTitleLabel颜色帧复用拟合文本与自然宽度，name/font/width/scale变化重算，保留后缀样式/无障碍标题。新增2个目录缓存测试+1个文字颜色帧测试。
+
+两次build-for-testing成功，专项80+22=102不同方法全部通过/0失败，日志与xcresult均确认。包括真实PhotoList浅深色滚动缓存身份、有限重试/评级/目录性能与队列布局。8000文件128次范围检查原0.966191166s、缓存0.0074965s；只是Debug模拟器该计算，不能推断真机FPS/功耗。资源926键3语一致。证据ios/docs/evidence/android-sync-20261028/review-20261031/verification.json、source-sha256.json为本次477份当前输入；旧resumed-runtime/337方法证据是上次历史，不是本次重跑。全部构建/测试会话已结束。真机/相机验收仍留给用户。
+
+## 2026-10-31 本轮完成26/26，Android冻结基准dfd66a20
+
+本轮开发侧复刻/验证已收尾，台账docs/待做/iOS-20261028-安卓增量复刻.md为26/26。Android工作树干净、HEAD dfd66a20c739342fafbd927659e815e2d499e5ea；iOS HEAD仍58d9b6ed，全部工作未提交。未装手机、未推送、未改Android/网站。用户要求主代理自己处理，本轮solo。用户后续如要求新一轮同步，增量从dfd66a20比较，勿重复做旧26项。
+
+系统授权已解决，旧24948安装exit0/Install Succeeded；模拟器iPhone17Pro/iOS26.5 UUID CA046456-B859-45F4-9CB3-2C6E2F8E03B0可用，SDK27.2，DerivedData /tmp/ztransfer-removal-derived-20261021。没有组件阻塞或遗留运行命令。旧段落中的blocked/0运行属于历史，不再适用。
+
+恢复后337个独立方法最终通过、未解决失败0（多组专项去重，非单轮337）。48/UI、216/state初轮8方法失败16断言、63/thumbnail、57/fixes全过、1实际PhotoListView浅深色顶底顶缓存复用；N25真实逐帧断言又发现末尾29点跳动，修后25项组合全过，移除几何探针的普通宿主1项也通过。最终UIKit条件编译隔离后r7再次build+25全过。所有原始失败和通过日志、截图、像素/布局JSON、477份输入哈希在ios/docs/evidence/android-sync-20261028/resumed-runtime/final-verification.json及同目录。旧各progress.json末尾final_verification指向最终结果，不要把历史pending当剩余任务。
+
+实际代码修复：SharedPhotoFilterFavorites在迁移时先移除无效标记再set(true)，防CFPreferences将数字1与Boolean true当相等而保留旧类型、下次重导入已删除收藏；测试覆盖取消后重开。效果加载器复用22pt/2pt的Material3圆弧，仅源未到占位保留900ms/.28-.62脉冲。PremiumBusinessTests期望补N12的101字节APP15查重标签，保留精确字节断言；LUT rescan夹具在初次目录替换后才设置另一个role。两个入口的收藏、参数和commit边界均通过真实宿主回归。
+
+N25最终仅在PhotoPreviewView分页Group固定frame后增加ignoresSafeArea(.container, edges: review == nil ? .all : [])，防PageTabView投影归一时再次施加安全区。错误是整层图像在末尾y320→349，不是FHD解码。固定Image尺寸、stack.position、内层ignore均无效，已撤回，不要再加补偿offset。修后横图一直y320，旋转图y168，340/260/300ms、裁切与手势不变。保留显式--preview-motion-fixture下的stack几何trace，普通运行无此探针。新增实际PhotoPreviewOpeningRenderingTests有真实缓存/FHD链路与接续位置断言，UIKit部分条件编译，纯几何测试仍可供原生包使用。
+
+最终资源--check确认926key/三语完全一致。真机相机实拍、FPS和功耗未测，仍由用户后续验收，不能拿模拟器推断。临时UIHostingController夹具的SceneStorage警告来自非App场景宿主，真实App路径没改。除用户已批准的平台差异外，没有新增差异。下一步只有用户要求才打包/装手机/提交/推送。
+
+## 2026-10-31 组件授权已解决，24/26；正在修实际预览终点跳动
+
+用户回复“好了”，旧session24948安装成功exit0，CoreSimulator可用。当前iPhone17Pro/iOS26.5模拟器CA046456-B859-45F4-9CB3-2C6E2F8E03B0，DerivedData /tmp/ztransfer-removal-derived-20261021，SDK27.2。不要再问授权/重装组件。solo，不装手机、不提交/推送、不碰Android或网站；冻结Android dfd66a20不变。台账24/26，仅N24汇总和N25收尾未完成。
+
+实际iOS运行：resumed-ui-r1 48通过；resumed-state-r1 216执行/8方法失败16断言；resumed-thumbnail-r1 63通过；resumed-fixes-r1 57全部通过且覆盖所有8失败方法；resumed-list-r1真实PhotoListView浅深色顶底顶6截图1方法通过。日志均/tmp/ztransfer-*-20261031-*.log/xcresult，已开始保存ios/docs/evidence/android-sync-20261028/resumed-runtime。不要把纯macOS验证冒充本次，也不要抹除初轮失败。修复SharedPhotoFilterFavorites：CFPreferences旧数字1写true可能保留数字，迁移前remove无效标记再set(true)，新测试取消后重开不复活。LUT旧夹具先设other再第一次换目录错误，改为换完目录再设other测试refresh；PremiumBusinessTests期望编码补N12的101字节APP15身份标签，保留字节相等；不是EXIF或像素问题。两真实入口截图已看过，默认菊花换复用RemoteCameraToolLoading22/2，源图未到占位恢复900ms/.28-.62背景脉冲。
+
+N25新增PhotoPreviewOpeningRenderingTests在真实PhotoPreviewView、真实session缓存/DebugCameraData预览链路采样像素。初版末尾稳定断言通过，但看截图发现横图y320→349，下移29点发生在展开终点、FHD到来前。加强“同宽高、尚未绿中心FHD”的中间断言后r1确实失败。xctestrun副本Build/Products/ZTransfer_preview_trace.xctestrun增加--preview-motion-fixture，测试开启ButtonInteractionTrace并附像素/布局JSON。/tmp/ztransfer-preview-layout-20261031-r1-attachments含trace：真实图像在同一时间从y320改y349，viewport一直390x752/infoBottom132。PageTabView安全区提案影响Image.scaledToFit自动居中，不是照片解码或340ms时长。
+
+已改PhotoPreviewView.PreviewImage两个Image：photoPreviewDisplaySize(rotation0)算Fit尺寸，明确frame及position在proxy中心，再走原旋转/缩放/偏移；不改手势、裁切、340/260/300ms。当前session33242正在顺序build+test，log /tmp/ztransfer-preview-layout-build-20261031-r2.log 和 /tmp/ztransfer-preview-layout-20261031-r2.log，结果bundle同名；先poll这个，不并行启动xcodebuild。选actualOpening、CropRendering、AnchorGeometry、ReturnScroll。尚不知道r2结果，不能标完成。r1旋转图宽已到但裁切高未完全展开也触发误判，现接续断言同时要求宽高都接近终点。
+
+N23新实际列表测试在PhotoThumbnailPresentationTests内，用真实session/model/PhotoListView、浅深色及UIScrollView滚动，确认每个已显示UIImage都是会话缓存的同一实例；6截图已看3张，连续描边、连拍层/缓存正常。该UIHosting夹具产生SceneStorage非AppLifecycle警告，仅测试宿主，真实App不走此宿主。不要因此改生产SceneStorage。本轮没有FPS/真机耗电数据。继续完成N25并最小回归，保存最终源码hash/日志/必要截图、核对资源与Androidfreeze、更新台账及记忆。goal工具上轮blocked，工具不能主动resume；用户答复已允许继续，不创建重复goal，真正完成再complete。
+
+## 2026-10-31 N17/N25首帧与返位已补；真正运行验收阻塞，仍17/26
+
+上一目标回合是实质progress；本轮继续改代码、补测试与证据，仍未完成整轮。冻结Android dfd66a20c739342fafbd927659e815e2d499e5ea、工作区干净；iOS HEAD58d9b6ed，所有修改未提交。solo，不装手机、不提交/推送，不改Android/网站。当前剩9项全需真实iOS运行/界面证据，不能用编译或更多纯数学测试冒充；本轮保存后将goal标记blocked，待用户完成系统授权再恢复。
+
+阻塞已跨至少N24、N25、本轮连续验证。旧session24948/PID95870仍运行；本轮再次write_stdin返回仍活跃，ps存活3h49m。重新sample而非沿用旧样本：/tmp/ztransfer-firstlaunch-sample-20261031-latest.txt（已保存到evidence/effects-first-frame/firstlaunch-authorization-sample.txt）仍为PackageKit authorizeForRight:allowingInteraction -> AuthorizationCopyRights。CoreSimulator1174.9.2 vs Xcode要求1174.21.0。系统安装器等Mac管理员授权，已问过用户，勿重复问/启动simctl或firstLaunch、勿擅自杀旧安装进程。恢复先检查这个确切session/PID终态；授权完成且组件就绪后再跑待验集。
+
+本轮新增Domain/PhotoEffectsPreviewTransition.swift，完全按SettingsScreen3410+规划INITIAL/UPDATE/CROSSFADE/REPLACE_CANVAS/KEEP，过时结果不接受；已读完整Android collector和6测试。PhotoEffectsAnimatedImage.visible改可选，所有入口首张接受的完整成片220ms渐入，旧图不透明垫底，比较图不重播，画布110/190ms；源showSourceWhileRendering彻底删除。DesignSystem/ZTransferNextDisplayFrame.swift为可取消的一次真实显示帧边界，弱display-link目标，无常驻任务；旧Task.yield可能合并事务的问题在这些过渡里已替换。首张画布visibility必须初值1，不然会额外等190ms，已修并加UI用例。取消/全屏cover返回恢复已接受图且不重新播放首帧。
+
+PhotoEffectsGeometrySnapshot新增不发布的presentedFrame，两个入口展开用已接受显示的图片/对比图，不再用最新待展示结果或原图；加载时不开放大图/旋转，消失清快照。共享22pt蓝色loader，去掉灰色额外底板，工作台失败原图Fit；source=nil且生成失败显示原有失败提示，避免无限spinner。实际loader描边/样式仍待运行截图，不宣称完全视觉通过。既有组件调用更新：SettingsView、PhotoEffectsSettingsPreview、LocalPhotoPreviewCard。
+
+返位：Domain/PhotoPreviewReturnGeometry.swift求ScrollViewReader单位锚点，使目标停在可见顶部下88pt；短视口/异常尺寸有界。PhotoList.preparePreviewDismissTarget用已有gridCache.indices（含日期标题），不再重新分组/铺平整库；成员搜索在detached纯快照上进行。展开连拍、远距离预定位与最终坐标等一次显示帧；取消后立即停止，半露格子直接返位。现有260ms滚动曲线与最终实际88pt位置仍需运行对照，不能只靠公式核销。
+
+新增PhotoEffectsPreviewTransitionTests7方法、PhotoPreviewReturnGeometryTests2方法；/tmp/ztransfer-effects-first-frame-20261031跑真实生产planner/collector/anchor，两轮7/9全部通过（最终9独立方法，0.003s）。新UIKit4方法已编译但0执行：首帧渐入+comparison不重播、过时首帧不追加190ms、cover中断首帧恢复、实际LazyVGrid上下返位；更新旧静态ImageRenderer首帧断言，并保留旧crossfade cover测试。generic build-for-testing四轮全部exit0/TEST BUILD SUCCEEDED；最终/tmp/ztransfer-effects-first-frame-build-20261031-r4.log，session98119已闭。本轮新sessions全部闭，仅旧24948保留。证据effects-first-frame-and-return-progress.json和effects-first-frame/，final-inputs已在最后一改后重算。
+
+恢复验证清单：N15/N19见lut-role-and-catalog-progress.json的pendingRuntimeTests；N20见shared-favorites-progress.json。N17/18运行PhotoEffectsPreviewTransitionTests、ConflatedPreviewUpdatesTests、PhotoEffectsVisibleFrameTests、PhotoEffectsFallbackLifecycleTests、PhotoFilterEditorSession/参数作用域相关集，检查两真实入口调参/复位/确认/取消。N22实际PhotoListViewModel owner与重试集；N23实际缓存/堆叠卡片/首批/滚动；N24三语和完整入口；N25新PhotoPreviewAnchorGeometry/ReturnGeometry/ReturnScroll、旧CropRendering/ProjectionPerformance以及真实打开/返回/方向/FHD接续截图与性能。只编译，不运行，不可核销上述9项。旧证据remaining是历史状态；preview-anchor-progress已链接本轮补齐证据，勿重复实现已修缺口。
+
+## 2026-10-31 N25接线/21项原生回归，仍17/26；接着效果首帧与返位缺口
+
+冻结Android仍dfd66a20c739342fafbd927659e815e2d499e5ea且干净；iOS HEAD58d9b6ed。solo，不派agent、不装手机、不提交/推送，不改网站。目标active，尚有独立工作不能blocked/complete。旧session24948/PID95870仍在firstlaunch管理员授权等待（最后ps存活3h22m），不要重复启动simctl/安装器，也不重复问授权。
+
+N25新增Domain/PhotoPreviewAnchorGeometry.swift、PhotoPreviewImageGeometry.swift（现有纯布局函数移入）、PhotoPreviewPresentationClock.swift、UI/Components/PhotoPreviewAnchorPresentation.swift。完整读Android PreviewAnchorGeometry及7测试、PhotoPreview eec diff和最新df主动归组差异、278行真实instrumentation。实际图像矩阵/旋转补偿/非对称可见裁切/连续圆角，合集视频保留整页fallback。PhotoList开场/返位传完整+可见bounds，半露格子不额外滚动；删除过时fullyVisible helper并更新两个原断言。起始索引也改@State，和来源图片、来源文件、锚点一起冻结。旧PhotoPreviewAnchorTransform仍被效果展开页引用，已原样迁到新组件文件，不能再删除。
+
+关键修正：PreviewImage底部padding会缩小真实viewport，不能用pager整页size算开场。现在onPlacementChange记录真实renderer placement并调用beginOpeningIfReady；safeInsetsReady且readyPhotoPreviewOpeningPlacement匹配当前页宽、高减previewBottomPadding、infoBottom和恢复方向才冻结并启动。始终同一clip/projection modifier层级，不在p=1换pager。@State持有clock但父页不观察Published；仅小modifier观察。340/260ms时钟遵循Android曲线；布局就绪后340ms再最多120ms等实际完成。关闭先冻结当前placement、异步定位、等真正p=0，消失会取消closeTask与等待者。普通翻页工具180ms，主动归组工具立即卸载。
+
+新PhotoPreviewAnchorGeometryTests13方法；/tmp/ztransfer-preview-anchor-20261031实际生产几何/clock/motion+真实列表adapter摘录+8个逐字既有回归，最终native-r4.log 21/21（0.146s，session53700 exit0），前三轮10/12/13。production native copied helpers已是最终版；inputs-r4及final-inputs保存hash。没有UIKit驱动或实际页面测试执行。xcodegen完成；generic build-for-testing r1/r2失败65（Swift if expression、旧共用modifier），r3/r4/r5成功0；最终/tmp/ztransfer-preview-anchor-build-20261031-r5.log，session32486已结束。其余本轮所有session都结束；仅旧24948保留。证据preview-anchor-progress.json + preview-anchor目录，ledger仍17/26，N25进行中。
+
+接下来两个明确代码缺口：① eec5d6db SettingsScreen修改所有入口首帧等完整效果图、22dp蓝色0.76/2dp加载、首帧220ms FastOutSlowIn渐入（以前只有直接FHD可先露原图）；后续保留上一成片，失败才原图。iOS SettingsView223仍传showSourceWhileRendering:effectsOnly；PhotoEffectsEditorView816/819/822/1004仍保留flag。PhotoEffectsAnimatedImage590+的incomingOpacity初值1、首帧visible直接显示且visible层outgoing=nil时强制alpha1，onAppear重置1；需要补初次220渐入，同时保留系统picker消失/返回不会卡透明、同bitmap comparison更新不重启动画、110/190画布替换和220常规换图。先完整读相关collector/ConflatedPreviewUpdates及现有UIKit组件测试，避免只改alpha弄坏恢复。这个缺口已记N17/N25未完成。② 既有preparePreviewDismissTarget离屏仍以top/bottom/center和260ms滚动，Android最终目标88dp顶栏下留白；新eec未修改这旧段，但完整对齐需核对，不能声称N25全完成。部分可见免滚动已改对。
+
+N25真实UI、真实来源/返回帧、FHD接续、interrupt/perf均未跑，CoreSimulator1174.9.2/1174.21.0仍阻塞。13新测试+8既有数学仅原生证明。Android rotation placement本身报告targetRotation而非animatedRotation（PhotoPreview2811..2875已读），不要臆改成逐帧写SwiftUI状态造成新开销。其他N15/17/18/19/20/22/23/24状态与下文相同，余9项。
+
+## 2026-10-31 N24文案/版本推进，仍17/26，接着N25
+
+承接下条N23，当前所有新sessions已结束，仅旧24948（firstlaunch管理员授权）还活着。N24改进行中：sync-android-localization.py新增 --android-root/--check，输入缺失先失败；以冻结dfd66a20的/Users/orys/code/nk_send-android生成byResource，926键与三语源码逐项一致（en926/zh925/hant921），488处完整静态调用无缺失；photo_filter_builtin_/photo_filter_category_三处是拼接前缀不是missing。未发现此次变更中文旧字面量残留。AppLocalized.resource原来Hant缺项返回资源ID，现补IOS/en、Android/en回退；4个Hant边框名称按Android默认英文显示。renewal_needed源文字无网络已更新，应用无对应业务引用，没改变StoreKit。项目MARKETING_VERSION2.02/CURRENT_PROJECT_VERSION75；Settings fallback2.02保留-D；旧IncrementalLocalizationTests版本断言同步。
+
+新增AndroidResourceFallbackTests两方法，真实AppLocalized枚举从RootView.swift逐字提取到/tmp/ztransfer-resource-parity-20261031，生产AndroidLocalization/IOSLocalization完整复制，swift test两方法通过（13060 exit0）。新xcodegen后generic build-for-testing42568 exit0 TEST BUILD SUCCEEDED，log /tmp/ztransfer-resource-parity-build-20261031.log；读真实Build/Products/Debug-iphonesimulator/ZTransfer.app/Info.plist确认2.02/75。iOS测试执行0。证据resource-parity-progress.json及resource-parity/（native日志、原生enum摘录、hash、gzip编译日志）；ledger标题当前dfd66a20，N24进行中，总17/26。完整入口/提示窗回归还缺，勿核销。
+
+已开始读N25，尚未修改预览代码：Android PreviewAnchorGeometry.kt 50行完整已读，PreviewAnchorGeometryTest.kt七测试完整已读（0/90/180/270/-90/-180/-270，非对称可见裁切、终点identity、连续clip扩展、超宽/超高/目标更小/scale<.05、clip矩阵中心、progress clamp）。Android eec5d6db的PhotoPreview.kt diff存 /tmp/ztransfer-preview-eec5d6db.diff；只读1..275且有374token截断，需补127..160，剩276..end还未读。实际完整最新版必须按dfd66a20（额外主动归组时移除已淡出工具栏）对照，instrumentation FileListPreviewMotionInstrumentation.kt 278行也还未读。
+
+N25关键已知：Android openingAnchorRect/clip固定，openingFile/缓存bitmap固定避免逐帧变几何/缓存淘汰；needsOpeningPlacement为非review、有效anchor、已缓存图、非视频，placement未就绪时不启动spring且图alpha0。onPlacementChanged首次记录openingPlacement；关闭预定位返回PreviewAnchorBounds(image,visible)，closingPlacement需冻结（diff截断处待读）。延迟加载从overlayBounds到位起算PREVIEW_DEFERRED_LOAD_DELAY_MS，再最多120ms等待progress>=1，不能无界依赖动画结束。对普通图以实际旋转后的图像frame做origin0矩阵+单一连续clip（先按saved方向旋转clip，圆角8*(1-p)/scale）；collection/video保留旧整页scale；queue/burst变换依旧合成。
+
+iOS现PhotoPreviewAnchorTransform在UI/PhotoPreviewView.swift259..291，仍用UIScreen整页scale，min .05/max1固定，只有UnitPoint anchor，没有图像placement/visible crop/rotation。modifier接于672..683左右整个TabView，之后burst scale/alpha/offset+queueMotion；initialAnchor CGRect? 417、collapseAnchor499、opening init517..561，关闭1136附近。PreviewImage2240+，actual geometry2282/2331/2474..2501，preview visible bounds2628+；这些未完整读。先完整读Android新代码/tests与iOS实际renderer，再实现，不凭公式猜接线。未改变N25代码/状态，仍待做。所有未完成同前：N15/17/18/19/20/22/23/24进行中，N25待做；active goal继续，有独立工作，不blocked/complete、不派agent、不装手机/提交/推送。
+
+### N25 阅读进度补充（代码尚未改）
+
+台账改进行中，仍17/26。已补读 /tmp/ztransfer-preview-eec5d6db.diff 126..733：ZoomablePreviewViewport把onSizeChanged状态换成BoxWithConstraints真实首帧尺寸，内部rotation/pinch/tap/240ms双击逻辑只是移入新Box。关闭startClose先冻结previewPlacement（非video），再closing=true；closing期间禁手势。延迟加载明确340ms加最多120ms等待progress>=1，始点overlayBounds到位。Android instrumentation FileListPreviewMotionInstrumentation.kt读到145，146..278未读；真实FileListScreen+VM缓存600x400的magenta离中心首格，等首批500ms后tap，900ms settled-a及100ms后b的边缘差≤4，旋转可注入；禁止真机/相机。最新dfd66的主动归组工具栏卸载逻辑还需读。
+
+iOS已读PreviewImage2240..2353：thumbnail State默认nil，body回读memoryThumbnailImage，loadEnabled=false期间没持有首图，有缓存淘汰风险。UIImage.scaledToFit→frame(proxy)→PreviewRotationTransform(rotation/imageSize/infoBottom/crop/zoom)→offset→croptransform/手势。已读2570..2637：rotationFit/displaySize/PhotoPreviewCropViewport，实际区域复用photoPreviewPlacement。尚需读PreviewRotationTransform/placement、PreviewImage后半onAppear/task/viewport回调、父body585..720/onAppear929/close1136，以及PhotoList源anchor/prepareDismissTarget。旧AnchorTransform259..291仅缩UIScreen且min .05/max1；新实现需要实际图像矩阵/连续crop，collection/video保留旧分支。固定SwiftUI层级避免p=1替换View使pager重建；保存方向是否onAppear才恢复尚待核查，不能当已确认bug。
+
+只有原24948授权等待，本轮其他sessions均结束。继续N25独立工作，不重跑无代码变更的N23/N24检查。不派agent，不装手机/提交/推送。最后一次Python更新记忆因stdin编码错误未执行，已改apply_patch补记；源码不受影响。
+
+## 2026-10-31 N23目录/缩略图呈现推进，仍17/26
+
+继续同一active goal，solo，无手机安装/提交/推送；Android冻结dfd66a20c739342fafbd927659e815e2d499e5ea，本轮始末确认干净。N23实现目录索引PhotoFileCatalog（bulk重建/单行upsert，first duplicate匹配，恢复副本COW），所有PhotoListViewModel allFiles写点迁移，worker O1查当前文件。visiblePhotoBurstMembers单次分组供列表/预览使用；删除无用availableDayKeys发布/全表构造，只有collapsedDays非空才从displayedFiles清理。recentThumbnailReadyDays取消Published但保留显式updateRatingScanFromCurrentState。CameraRepository待新增对象已用pending字典/knownHandles，无安卓的空pending全表问题；deadline选择lazy，new logical identity移到查重closure外。
+
+PhotoThumbnailPresentation.swift：泛型MainActor PhotoThumbnailLoader先订阅再读，后续本地读，generation+cancel阻止旧结果，缓存不启动任务；实际Store晚发布填入现有格子已本机验证。PhotoThumbnailFade基于既有AndroidScalar180ms，空批暂停、完成不重播。PhotoThumbnailImage.swift：独立首批clock（root @State reference，只有opacity modifier观察帧），每图UIImageView复用解码对象、原生圆角/抗锯齿、layer.opacity180ms，新图渐入、缓存即显；ready离场/复入不保留半透明；normal/stack theme outlines源码对照，液态玻璃沿用批准的glass体系。PhotoListView普通/连拍接同加载器，busy/load/remote gate；STA保持只读缓存的格子，USB/AP新增ready订阅解决旧失败后永久占位。移除连拍重复外层clip；角度1/2/3张0与[-5,+3]/[-6,+5,0]、固定偏移和底部渐变对照Android。
+
+新增PhotoThumbnailStackMotion及PhotoThumbnailStackTransition：前三张PublishedPhotoIdentity作key，尾部变化不重播；同key换handle更新payload；进入180/退出160，中断按既有Compose critical spring保留值/速度；clock只发布结构变化，局部AndroidOpacity观察每帧。Snapshot缓存id，opacity表只在层变化时裁剪，避免每帧集合。stack内容和渐变一起过渡，计数/按钮仍在外层。
+
+新增PhotoThumbnailPresentationTests共18方法：macOS可执行15，另3UIKit编译但0运行。native-r1 8通过，r2合并49（38既有+11新）通过，r3索引末次11通过；追加stack时r4/r5临时包缺RemoteReviewPhoto/selectNewestPhotoHeadIndex编译失败0执行，移除无关完整Catalog/Review拷贝，逐字提取真实PublishedPhotoIdentity定义后r6最终15通过。覆盖53唯一方法（38前轮+15末轮，不能说一次最终53）。真实Store晚发布、订阅释放/取消/generation、8000项索引/删除/复用/复制、fade180曲线/暂停、stack尾部/alias/180-160/中断。native临时包/tmp/ztransfer-new-object-retry-native；最终Sources有PublishedPhotoIdentity.swift真实摘录，没有PhotoCatalog.swift/RemoteReviewCatalog.swift。现有PhotoDateRange等仍是上一轮记录的真实摘录。
+
+iOS builds r1成功（当时新测试尚未入project）、r2因误写PrefKey失败、r3修为skin_preset成功（新测试仍未入project），xcodegen后r4成功并编译全部新测试；追加stack/xcodegen后r5最终成功，/tmp/ztransfer-thumbnail-presentation-build-20261031-r5.log。所有本轮sessions结束：46523/94887/76552/1408/77450/13980/15573 exit0，9971 exit65；57805/98676 native harness exit1。证据thumbnail-presentation-progress.json + thumbnail-presentation/原始native日志、gzip build日志、inputs和identity摘录，ledger已更新。git diff --check通过。
+
+目前只有旧24948仍活着，PID95870 xcodebuild -runFirstLaunch已2小时20分，CoreSimulator1174.9.2 vs1174.21.0等macOS管理员授权。用户没回旧async授权提示；不重复问、不代输、不kill、不另起simctl。实际SwiftUI复用/抗锯齿像素/帧率、3UIKit方法和2N22 owner仍未运行；N22/N23仍进行中。已做真实独立进展，不设goal blocked/complete。总17/26：N15/N17/N18/N19/N20/N22/N23进行中，N24/N25待做。下一步可继续N24三语2.02(75)/入口净差异、N25真实预览锚点/方向/手势；运行集成回归等系统组件许可。不要重复本轮已通过底层测试除非代码变更。
+
 # iOS 复刻项目记忆
+
+## 2026-10-30 N22有限重试与N23队列优化推进，仍17/26
+
+同一active无预算goal，继续独立工作；不派agent、不改网站、不装手机、不提交/推送。Android dfd66a20c739342fafbd927659e815e2d499e5ea 本turn末次确认工作树干净。N23由待做转进行中，完成仍17/26、余9。**只有旧session24948**仍活着（PID95858/95870，simctl bootstrap→xcodebuild -runFirstLaunch，末次已等1h20m），仍在macOS PackageKit管理员授权。用户没有答复之前唯一的异步提示。勿重复问、代输密码、kill安装器、启动第二个simctl/bootstrap。当前CoreSimulator1174.9.2，Xcode要1174.21.0。其他本turn所有build/test进程均已结束；generic build-for-testing可用，iOS runtime仍0。阻塞持续多turn但本turn持续完成独立实现/验证，不设goal blocked。
+
+N22新增Domain/NewObjectThumbnailRetries.swift，严格Android 300/900/1800ms、register put-if-absent、deadline前joined failure不加次数、takeDue只清deadline、success/delete/reset清budget。PhotoThumbnailStore统一注册、单弱Task定时器/AsyncStream<Void>唤醒、blocked handles、每Flight retryDeferred、generation/invalidated门禁；load/prefetch共同遵守deadline，empty JPG耗尽后正常negative，STA RAW/video仍unsettled。修正STA图片validator先挡住empty导致不收束：只校验nonempty，empty共走finishEmptyPrefetch，STA JPG也尊重negative。临时IO异常可延迟，取消不花额度，磁盘失败仍锁背景写入。stopRetries终止observer/timer但保留离线缓存；beginShutdown和PhotoList disconnect均接入。reconcile按有效handles收回，invalidate/旧flight不允许迟到发布。
+
+CameraSession注册/blocked/retryWakes桥接；实际shared fetch才查isRetry传CameraRepository.thumbnail(retryNewObject:)，原事务内调用STAObjectReader.prepareNewObjectThumbnailRetry，仅清目标prefix/order、noThumb/checked/thumbnail、MPF，保留文件元数据和RAW索引。PhotoScanSnapshot新增addedHandles默认[]，真实枚举设置，resume继续携带。PhotoList applyCatalogUpdate先移除/失效/注册，再publish和auto transfer；acceptBatch按snapshot真实addedHandles且非既有logical row登记，先enqueueNew范围豁免再发布和first prefetch；历史扩大范围不注册。两处retryFailed都排除blockedhandles，retryWakes到期唤醒，不在scan期间抢后台worker。新增ScanAccumulator.newObjectIDs使scan首批新图也豁免历史范围。
+
+N22 tests：NewObjectThumbnailRetryTests现11方法，其中9项纯store/queue在macOS运行，2项 #if os(iOS) 真实PhotoListViewModel发布/自动传输/首批预取顺序只编译未跑。临时包/tmp/ztransfer-new-object-retry-native编译实际全部PTP + Store/Disk/Queue/NewRetries，唯一隔离是从生产PhotoFilter.swift原样提取PhotoDateRange/validPhotoCaptureDay，保留extracted文件和hash，不是替代实现。最初依赖闭包误含RemoteReviewPhoto/TransferQueueItem/CameraSession编译失败；去掉无关文件后31项通过，追加queue gating后9项filtered通过；拓展STA JPG测试的Sendable三元closure触发compiler diagnostic失败，补明确@Sendable后**32方法通过**。sessions24600/81157/3821/67443/66240均结束，对应exit1/0/0/1/0。
+
+Protocol STAProfileAndMetadataTests新增testNewObjectRetryDropsOnlyItsEarlyHeaderAndKeepsOtherObjects（真实script transport、两个JPEG文件、只重读目标header）；首轮夹具没JPEG标识，被正确认作.bin，修夹具后**11方法通过**（8JPGfallback+新STA+2旧JPEG/RAW），sessions44564 exit1、26834 exit0结束。3次iOS generic build-for-testing90750/69585/46777全部exit0 TEST BUILD SUCCEEDED。证据new-object-retry-progress.json及原始logs保存；N22完整owner运行还缺，不能核销。旧jpg-thumbnail-fallback-progress里的1个NEF137 oracle skip仍是历史记录，本轮11方法无skip。
+
+N23已读完整Android ThumbnailFillQueue.kt和新增6场景测试。iOS PhotoThumbnailFillQueue改ArraySlice<UInt32> lanes（O1 popFirst）；markSettled只移pending/failed，poll跳过stale，updatePriorityRange/updateLoadingRange过滤pending/failed避免完成项复活；returnToFront按Android对已pending不重复搬动，插入用slice.startIndex；markFailed仅外部仍pending时清lane，普通polled failure免扫描。新增PhotoThumbnailQueueEfficiencyTests六方法，范围/STA双lane/删除复用/暂停/失败/全完成/非零slice起点及有功能断言的性能样例。
+
+N23先用临时包原N22 queue源码运行6方法baseline exit0（96304），2000/8000半数完成登记0.217694/3.492340秒；改后全**38方法通过**exit0（8543），同场景0.000749/0.002916秒；drain改前0.000763/0.003196秒，改后0.000948/0.003870秒。只是macOS Debug队列成本，不是iOS FPS。保留thumbnail-queue-before.swift原源码及所有inputs/log/hash，manifest thumbnail-queue-efficiency-progress.json。xcodegen后generic build-for-testing75308 exit0，/tmp/ztransfer-thumbnail-queue-build-20261030.log；2项iOS owner测试仍未执行。新queue supersedes N22 manifest里的旧queue hash，后者是历史运行版本，不改旧证据。
+
+下一步继续N23：PhotoListViewModel worker约1133仍allFiles.first(id)每张全表找；allFiles写点132(copy previous)、310/317(event)、392/450(clear)、467(scan final)、692append/697replace，可考虑维护handle→index并同步所有写点，避免用didSet每append重建。Android queue直接携file；不能粗暴用旧快照破坏新增/删除/复用。另需核对首批统一淡入、burst边缘抗锯齿/解码复用、评级关闭不因readyDays更新整页、空pending/collapsed短路。N15/N17/N18/N19/N20运行集成回归与N24三语2.02(75)/全入口、N25实际预览锚点/手势还在本轮范围。未新增goal、不完成/不blocked。git diff --check末次通过。
+
+## 2026-10-30 N20共享收藏与N22 JPG回退推进，仍17/26
+
+同一active goal，不派agent、不改网站、不装手机/提交/推送。安卓仍dfd66a20c739342fafbd927659e815e2d499e5ea，工作树干净。N20/N22从待做改进行中，已完成仍17/26，剩9项。当前**只有旧24948**（simctl自动触发firstlaunch，PID95858/95870）仍活着；最后确认等macOS PackageKit管理员授权，CoreSimulator1174.9.2低于Xcode1174.21.0。用户尚未答复既有异步授权提示，勿重复问/代输密码/kill安装器/再跑simctl。收到答复先收尾该会话，再恢复iOS专项。此turn是第3次遇到同一环境问题，但仍持续完成独立工作，不是无进展，不设goal blocked。
+
+N20新增Domain/SharedPhotoFilterFavorites.swift：PhotoFilterFavorites.merge保序+去重+严格合法key，迁移键photo_filter_favorites_shared_v1只认CFBoolean true。SharedPhotoFilterFavorites MainActor、CurrentValueSubject与静态弱invalidations；真实raw传输收藏+local独有一次合并，不写local旧key，取消/目录清除不复活。兼容原iOS JSON（PhotoFilterPreferences.catalogKey归一化render/legacy ID），不应用其他配置。全目录扫描/轮询未引入。PhotoEffectsStore新let filterFavorites/可注入实例，恢复配置先用local restoredSettings再赋存储属性；共享favorites marker不遮挡旧camera JSON。配置persist两条函数删除写favorite key；update始终采用共享值，persistEditorPreferences先替换共享值再比较避免旧草稿多余写盘。owner订阅只改favorite字段，不改selected/config，NP3真换目录清自定义收藏。Settings/Local controls传显式toggleFilterFavorite(selection)，NP3 Card直接回调；SettingsView onReceive把共享list反映到打开草稿。局部PhotoEffectsSettings纯值helper仍保留历史toggle/copy，但owner边界不能写回旧收藏。
+
+N20新增SharedPhotoFilterFavoritesTests.swift：4codec+8store/owner方法=12；覆盖真实UserDefaults不同实例、raw与JSON迁移、严格flag、独立参数/旧draft、换目录/捕获任务、weak释放。已有PhotoFilterEditorSessionTests真实SettingsView/Local宿主加跨实例同步断言；PremiumBusinessTests改显式收藏动作；DomainModelTests按新基准更正“local滤镜收藏永久独立”的两测试（frame仍独立），fixture建收藏改显式toggle。PhotoGrainControlTests补requiredcallback。三个generic build-for-testing session61199 exit65、37725/30174 exit0；首轮settings包装属性在新let初始化前使用，改local值修复。iOS测试实际0方法。所有编译进程已结束。
+
+N20另有真正运行的macOS native检查，session38133 exit0，/tmp/ztransfer-shared-favorites-native/check.log四组PASS。编译实际SharedPhotoFilterFavorites/PhotoFilterPreferences/NP3 catalog/codec/parser/engine/Foundation/Combine；PhotoFilterPreset和LUTAdjustments从生产PhotoEffects.swift原样抽两段以避UIKit。检查迁移顺序、真实50项catalog ID映射、合法离线NP3、跨实例通知、移除/清理不复活、非布尔flag及weak释放。不是iOS owner/UI回归；harness/抽取/inputs/log与依赖hash保存在evidence/shared-favorites-native-*，shared-favorites-progress.json追加native_check而非假称12测试已跑。历史N16真实页面截图未重跑，不能引用作当前全回归。
+
+N22新增Transport/PTP/JpegThumbnailFallback.swift并接CameraSession/CameraRepository。thumbnail(handle:file:priority:)新增可选file，原visible/background fetch传当前文件；repo可fallback已知catalog，保留原事务和directSTA分支。只OK空数据/NoThumbnail的JPG/JPEG一次0x9431(handle,0,0,min(size,128KiB),0)，不额外GetObject/FHD；无图partial响应保留miss，取消/transport异常抛出，UInt64 size上限安全。NEFExifThumbnail新增readJPEG，APP1 TIFF直接读取thumbnailBytes，不运行RAW validateImages/尺寸交换；原read()默认RAW行为保持。拆出validateImages/thumbnailBytes共同逻辑。Android固定ExifInterface已为1.4.2，下载并读对应官方sources的getJpegAttributes/APP1/readExifSegment/setThumbnailData/handleThumbnailFromJfif/Strips；URL/SHA记jpg-thumbnail-fallback-progress.json，临时源码/tmp/ztransfer-jpg-fallback/ExifInterface.java。原NEF137差异仍是旧单独问题，没有声称最新RAW全量对齐。
+
+N22新增ProtocolTests/JpegThumbnailFallbackTests.swift八方法，macOS ZTRANSFER_PROTOCOL_ONLY=1 swift test --package-path ios --scratch-path /tmp/ztransfer-jpg-fallback-build --filter 'JpegThumbnailFallbackTests|NEFExifParityTests'：session20401 exit1编译失败（PTPResponse夹具误写parameters），修正后74275 exit0，**9方法通过/1跳过**。跳过旧testAgainstActualAndroidX137因NEF_EXIF_JAVA/NEF_EXIF_ORACLE_CLASSPATH未配；8新+1既有NEF/TIFF多样例通过。之后xcodegen+generic build-for-testing session3601 exit0 TEST BUILD SUCCEEDED，repo/session接线只编译未iOS运行。日志/evidence均保留。下载session39784也已exit0，无遗留新进程。
+
+N22尚未实现有限重试，不要核销。本turn完整读Android NewObjectThumbnailRetries.kt/五测试、ThumbnailFillQueue.kt，CameraViewModel 619–680(单timer/markFailed/publishReady)、3120–3165(新对象baseline注册)、3950–4025/4080–4185(缓存/flight/后台/延迟失败)，NikonCamera2890–3025及4014partial。规则仅真正新增对象：300/900/1800ms，join失败不多扣额度/不延长；timer不持IOgate，单时钟唤醒；success/delete/newsession清；到期retry才清STA该handle旧prefix/noThumb/jpegChecked/MPF，不影响其他文件；3次耗尽回原negative规则。load可见和prefetch都要门禁，队列retryFailed应只允许到期项，不得形成热循环。
+
+接下来继续N22实际架构：iOS PhotoThumbnailStore actor load/prefetchOutcome各自有negative/共享Flight，cache命中和原始字节/解码结果分层；清理/取消/共享等待门禁不可损坏。CameraSession持thumbnailStore、decodedcache，prefetch成功publish，STA失败discardRejectedThumbnail。PhotoListViewModel applyCatalogUpdate约267先publish再计算additions/autoTransfer，然后remove/invalidate/enqueueNew；监看返回reload约468仅最终result.addedHandles入队，但前面metadata batch已可能prefetch，新retry注册必须早于首次新文件读，不要只在最后注册。两处retryFailed在setFilter约796、worker空队列wake约1069。PhotoThumbnailFillQueue已有liveHandles范围豁免，保留同session和retry，remove时清；不要倒退这个已有修复。待补读scan batch准入/新事件和disconnect生命周期以决定单timer/注册归属；目前无新增retry class或占位代码。
+
+其他N15/N17/N18/N19/N24/N25继续，所有iOS runtime集成回归待系统授权。最后git diff --check通过；此turn未fetch新scope或动Android，只确认冻结dfd66a20仍最新本地且干净。完成后仍需统一差异/文案2.02(75)/实际预览动画和性能核验，不能把此次两个小段编译/本机检查当整轮完成。
+
+## 2026-10-30 N19参数与N15排序接线，仍17/26，模拟器系统授权待用户
+
+同一active goal，无预算、未blocked；不派agent、不改网站、不安装手机/提交/推送。Android dfd66a20末次确认仍干净。N15/N17/N18/N19进行中，其余N20/N22–25待做，余9项。下面N16的37方法验证是历史阶段证据，后续共享代码变化还需运行回归。
+
+**唯一未结束的工具会话24948**：xcrun simctl list devices available --json，PID95858；它自动运行Xcode自带first-launch安装，子PID95870。当前CoreSimulator1174.9.2，新Xcode要1174.21.0。sample /tmp/ztransfer-firstlaunch-sample.txt 证明停在PackageKit AuthorizationCopyRights，需要用户在macOS系统窗口完成管理员授权。已用request_user_input_async问过一次，不重复问、不输入密码、不擅自kill该提示。xcodebuild -checkFirstLaunchStatus仍exit69。收到用户回复后先收尾24948、确认新模拟器清单；原目标B6B4E291-173A-4BFE-BB9C-2D1F62643C49可能仍可用。不要把环境未就绪写成测试成功，也不要因一次环境问题将整个goal blocked；还有其他独立工作。
+
+新增PhotoLUTParameterMemory.swift与测试文件：iOS旧dictionary存储适配安卓role+digest v2独立记忆；本角色已应用配方优先迁移，旧v1摘要其次，旧URI强度最后。严格Int32/排除Bool与浮点，损坏现有作用域字段不回退旧值。只读当前文件少量键，不每拨一档扫描整个defaults；迁移不写旧共享键，另一角色未迁移数据保持。PhotoLUTStore在Off/换文件/提交前保留旧参数，传输未应用记忆不污染已应用配方；restore控制值和渲染同源。acceptSelection现在throws，两个旧测试调用已加try。
+
+PhotoLUTStore新增acceptFolder(prepared,replacing,previous)，identity/revision及定向folderChanges；真正换目录清两个角色选择/参数/收藏，先清后发布新folder，书签刷新或同目录不清。source门禁支持原raw path/fileURL，未知旧identifier保持兼容；迟到source和URI-less旧draft不能提交，原snapshot文件不删。PhotoLUTEditorState订阅清请求/目录，scan和read还校验revision。PhotoEffectsStore持有roleStore并订阅关闭活动Cube；SettingsView同步清打开的draft，commit前canCommitSelection+commitDraft布尔门禁。新测试有5纯迁移+3实际store，实际editor增加跨入口目录变更时排队读取取消。所有这些**只编译，未运行**。
+
+PhotoLUTChooser改用PhotoColorAdjustmentControls共用五轮和复位；删旧.id(source)和升序四轮，参数身份再次防旧gesture，hasSelection改变重置展开，读取时readOnly而不灰化。N17完整动画/真实图片预览收敛未验。
+
+RemoteLUTCatalog新增PresetTextOrder，按安卓AOSP String.CaseInsensitiveComparator明确charAt实现（非桌面Java codepoint版）；simple upper/lower保留surrogate，Greek iota-subscript和dotted I处理，排序内缓存字符映射/无大小写字符短路，原名与URI用rawUTF16。NP3最终fileURI生成后重排。发现Swift规范等价String会合并两类名字，改分类与labels分组键为原始Data；PresetCatalogIndex公开files(in:)/labels(in:)替代旧字典，Optional<String>.presetCategoryBytes/Identifier用于三个实际chooser稳定身份。PhotoFilterCatalogIndex复用fileIndex分组，初始化closure用local sourceIndex避免捕获半初始化self。PictureControlFolderStateTests/RemoteLUTMonitorStateTests只更新查目录API。已有15名对照包含土耳其I/sigma/Greek/组合分解/补充平面，独立Swift与AOSP算法复制版JDK17一致。Unicode17有效BMP63488全部一致；16版3个新拉丁字母映射不同（A7CE/D2/D4），没有声称跨所有OS字库等价。
+
+证据lut-role-and-catalog-progress.json：test session75560 exit70，0方法（模拟器环境）；generic build-for-testing六轮90296 exit65、25561/79603 exit0、39570 exit65、67570/33389 exit0。最后TEST BUILD SUCCEEDED，所有编译/standalone进程已终结；仅24948等用户授权。两个编译失败是Fixture缺MainActor/旧调用缺try，和PhotoFilterCatalogIndex捕获self；日志/源hash全留。独立排序最终session93566 exit0，Unicode17session18874 exit0；前期16版precondition和规范等价分类失败事实也保留。/tmp/ztransfer-removal-derived-20261021仍为derivedData。恢复后先运行ledger所列LUT/NP3/source/catalog/monitor/PictureControl目录最小回归，不用先重复整套编译。
+
+N20刚完整读SharedPhotoFilterFavorites.kt与其4项测试、PhotoEffectFavorites.kt/测试，尚未实施：一次按传输顺序+本地独有项稳定合并，ztransfer.photo_filter_favorites_shared_v1置true，保留旧local key但以后不重导。当前iOS独立favorites仍需接真正共享store/两个draft，不能把其他配置合并。TransferViewModel实际toggle/persist调用、Settings/Local接线尚待补读。其他N22–25、N17/N18验证继续。长期授权是模拟器专项，未获新手机安装/提交/推送授权。
+
+## 2026-10-30 N16实际双入口完成，整轮17/26
+
+同一active goal继续，无预算/阻塞；本人处理，不派agent、不动网站、不安装手机/提交/推送。N16完成，N15/N17/N18进行中，余9项。下面“实际页面尚未接通/16项”已是历史。所有测试进程已终结。
+
+PhotoFilterEditorSession + Lifetime与PhotoNP3Chooser实际接入SettingsPopupOverlay/SettingsView/LocalPhotoEffectsView，RootView传pageActive。真实来源随transfer关窗提交，local即时保存；父只持有不转发的lifetime。每轮begin新建SourceState，native Files子view用lifetimeID并在callback和binding双重检查，旧picker不影响新会话。scene恢复门禁仅跳过真实picker恢复，取消不扫描；隐藏filter模块（包括初始frame-only）不扫描。draftChanged单独观察effective filter开关，inactive保留disclosure但Off→On重置。PhotoEffectChooserDialog支持560上限/提示，LUT默认440保持。旧PhotoFilterChooserOverlay/State及旧card移除，相关fixture转用生产组件。
+
+新PhotoColorAdjustmentControls用于NP3：五紧凑轮、镜像现有RemoteToolMark(.rotate)复位80/四0；-100…100按降序5步，保留合法非整档值。DetentWheel新可选gestureIdentity加入配置，preset+全部参数作为会话身份，旧拖动失效；handler再次检查当前身份。LUT仍旧控制UI，N17/N19继续。favorites normalized允许合法np3内容key，但N20共享/迁移尚未做。实际AppLocalized读AndroidLocalization.byResource，19键三语已同时补映射和Localizable，不要只改后者。onExplicitSelection只捕获photoLUTEditor，避免捕获完整View闭环。
+
+np3-ui-verification.json保留7轮：session70249 exit65编译失败0（旧fixture）、5864 exit0 21、31420 exit0 27、47511 exit0 30、30915 exit0 34、27652 exit0 14、30111 exit0 2。37个不同方法/128次通过；r3截图发现raw key虽测试绿，r4已修且加实际AppLocalized三语断言。13项新PhotoFilterEditorSessionTests包括真实双页和SettingsPopupOverlay，注入文件provider并调用生产session，不是synthetic触摸/系统Files测试。r3/r4/r6各6张附件通过xcresulttool export attachments保留，r4/r6全6图已逐张查看；np3-ui-verification.json含源/安卓/日志/截图SHA。无运行任务、未跑真机/功耗/全UI/Androidinstrumentation。
+
+继续N15最终排序：共享RemoteLUTCatalog.lowercased排序并非JavaCASE_INSENSITIVE_ORDER，raw UTF16 tie；NP3将rawpath转fileURI后需复核次序。N17/N19读AndroidPhotoLutEditor/Store及参数测试，LUT按入口文件独立记忆和迁移未做，新NP3参数面板还需动画/真实预览收敛验证；N18随之收尾。N20共享收藏保持配置独立；N22缩略图回退、N23列表性能、N24文案版本2.02(75)、N25预览锚点/手势仍待做。旧localization同步脚本默认当前ioscheckout的旧app，不要直接运行覆盖新映射。
+
+## 2026-10-30 N16来源索引推进，整轮仍16/26
+
+持续同一active goal，无阻塞、无预算。N15/N16/N18均进行中，剩10项；未使用agent，未动网站，未安装/提交/推送。当前没有运行测试。继续实际UI，不要误核销模型阶段。
+
+新增Domain/PhotoFilterCatalogIndex.swift：PhotoFilterChoice.preset(preset,source)/document(file,presetID)，key区分preset与document，catalogKey仍按内容；同一内置配方可拥有多个独立文件行。选中来源只有sourceRecipe与owner selected ID一致时才采用；missing/denied隐藏目录但保留离线行，read/tooMany保留目录；离线源优先savedLabel，否则使用调用方提供的photo_np3_selected_source文案，没有URI的自定义快照才使用嵌入名称。稳定收藏排序不改重名序号；内置全部/收藏/六类+目录root/folder分类；目录分组一次，不逐分类遍历全部文件。labels(locale,uncategorized,restoredSourceFallback,builtInLabel)缓存，仅50个内置需要本地化。PhotoFilterCategorySelection按真正变化的selected重新定位，否则保留用户分类。沿用公共目录排序，先前Unicode/最终URI问题仍待解决。
+
+PhotoNp3EditorState新增catalog(selected:PhotoFilterPreset?,favorites:[String])缓存，files/failure/selectedRecipe/selectedSource/sourceLabel/hints改变清缓存；请求进度/取消不影响索引，owner强度参数无需传入索引。实际页面仍旧选择器，N16未完成。新类只进Xcode自动source，Package的纯Effects目标不依赖SourceEditor，无需加入该target。
+
+新PhotoFilterCatalogIndexTests8项+既有PhotoNp3EditorStateTests12项=20/20，session52707终结exit0；/tmp/ztransfer-np3-catalog-20261030.{log,xcresult}，仓库np3-catalog-verification.json/summary/log保存。含10000份单文件类别和label次数/对象身份测试，非帧率/耗时指标；未跑Androidinstrumentation、全UI、Files/cloud或手机。前阶段owner r4的session50883轮询输出在压缩时丢失，恢复后handle未知，不能声称exit0：manifest已修正null，独立np3-owner-r4-summary.json证实98/98 Passed。下节50883 exit0为纠正前记录，以本节为准。
+
+本阶段补完整读Android PhotoFilterEditor.kt约430行、PhotoNp3EditorInstrumentation.kt约488行（全部测试与fixture）、PhotoColorAdjustmentControls.kt全部、LutCategoryList.kt的category/browser/header实现。安卓选择器：长按打开并刷新；首次选目录先提示，目录picker取消不扫描；resume跳过一次picker产生的刷新；inactive取消并关选择器/提示。文件行选择始终重读；内置选择先np3.off再reset，离线快照可直接选。loading期间轮/设置/收藏readOnly且外观不禁用，chooser内Preset仍可选而Document禁用。切换preset保持展开，Off重置展开。调节5个紧凑轮+38pt镜像旋转复位，100到-100每5档，合法非5倍数要插入保留（例如9点一下到5），手势键绑定preset+全部参数，复位80/四项0。上述UI规则尚未实现。
+
+两入口现状：SettingsPopupOverlay拥有effectsDraft、PhotoLUTLifetime，beginPresentation从store.beginDraft刷新并递增presentationID；Genie内SettingsView(.id(presentationID))，两个chooser在Genie外由popup根部承载，不能塞进滚动card/clipping。SettingsView.init已可接photoLUTEditor用于真实测试，commit用savedNP3Source fallback，需新source真实URI替换。LocalPhotoEffectsView根有effectsStore/batch StateObject、effectsBinding getter/setter直接owner更新，RootView约538在pager保留该页，尚无active参数，需要传当前page门禁。AndroidDialogPresentation是同层ZStack，不是window portal；不要放入裁剪card。PhotoEffectChooserDialog现有固定32pt header/max440，NP3还要提示页/状态行及Android max560，不能生搬旧布局。完整组件相关小段已读；LocalPhotoEffectsView/UI lifecycle和SettingsView init余段可按需补读。
+
+建议接线时复用持有editor但不转发其每帧/IO更新的Lifetime模式，由控件和chooser订阅实际state；每次presentation创建新NP3 state，close不可逆，避免重用已close对象。owner draft与source URI一起传递，目录选择回调门禁、目录替换清draft和关闭收尾必须完整验证。不要为了复用合并两个角色，也不要用source ID冒充正在读的preset ID。下一阶段应优先实际双入口，而非重复扩大底层测试。
+
+## 2026-10-30 N15/N18启动恢复与owner接线，整轮仍16/26
+
+同一active goal持续推进，无阻塞/预算，独立处理、不派agent、不动网站、不安装手机/提交/推送。N15/N18进行中，余10项；下面rawrestore只识别builtin、没有np3Store/observer已成为历史状态。N16完整选择UI仍未实现。
+
+新增PhotoFilterPreferences.swift：custom记忆键不含converter；Int32/边界/无效项/重复项/稳定编解码，保留detached custom。PhotoEffectsSettings新增filterAdjustments Codable/即时记忆复制/预览身份剔除，selectPhotoFilter(recipe,explicit:)被动刷新保留Off或活动Cube；Selection.photoRecipe给出完整值。目录清理保留内置/其他效果/活动Cube。旧强度拨轮改为修改Selection，保留NP3和后置调节。Package/Xcode同步。
+
+PhotoEffectsStore从原始defaults创建共享np3Store（不使用local resolved suite），先恢复两个角色私有recipe再验证raw ID。传输remembered和applied分别用photo_filter_adjustments_v1/photo_filter_applied_adjustments_v1；local用filter_adjustments_v1。未提交controls不覆盖applied；强度冷启动仍按Android取最新detent map。全局folder observer清实时配置和未挂载local套件的旧配置/JSON，不访问源文件。新增canCommitNP3/commitFromEditor/savedNP3Source；SettingsView提交先guard，再提交LUT和NP3。当前SettingsView来源仅查已保存角色，N16必须接入实际editor.source(for:)；新文件未存role时不能靠这个fallback提交。LocalPhotoEffectsView仍updateFromEditor，新NP3即时source保存尚未接通。frame-only提交不提交filter。
+
+np3-owner-verification.json保留四轮：/tmp/ztransfer-np3-owner-20261030{,-r2,-r3,-r4}.{log,xcresult}，29/29(session93216 exit0)、测试Fixture缺MainActor编译0(94009 exit65)、76/76(54246 exit0)、98/98(50883 exit0)。全部结束，无运行任务。新PhotoFilterPreferencesTests有6codec/model+8owner；实际SettingsView组件测试加NP3角色落盘断言，末轮还含batch11和全部62queue。跨轮156个不同方法成功，不是单轮156。源和日志哈希保留。未运行本阶段Kotlin、Android instrumentation、全UI、Files/cloud、真机/性能。
+
+已读Android PhotoFilterAdjustments及其6项测试、Identity、intensity codec、LocalPrefs相关normalize/restore/save/clear和测试、PhotoPresetDirectoryState、VM初始化/记忆/提交/observer，以及两个页面NP3 callback/commit。PhotoFilterAdjustmentsInstrumentation已读32–248相关场景，末尾fixture未读；PhotoNp3EditorInstrumentation完整UI测试仍待N16。
+
+下一步优先真实双入口选择UI，再参数面板和完整记忆核销。iOS路径是UI/PhotoEffectsEditorView.swift（controls/filterCard）、UI/LocalPhotoEffectsView.swift（effectsBinding）、UI/SettingsView.swift（controls/commit），不是Views目录。NP3.close后不能复用同一实例，初始化须用实际draft与活跃门禁。新选择的URI和recipe须一起到owner，不能猜来源。shared收藏、调节交互及上一节记录的最终URI/Unicode排序仍未收尾；任务数不增加。
+
+## 2026-10-30 N15目录/生命周期后端接通，整轮仍16/26
+
+同一active goal持续，上一turn为实际快照/存储进展，本turn为实际IO/状态实现与47项验证；无阻塞/预算，不派agent、不动网站、不安装手机/提交/推送。Android工作树仍dfd66a20干净ahead2；台账N15进行中、16/26，余10。下面“FileProvider IO/editor尚未实现”已被本阶段替代，但owner恢复/实际页面仍未接通。
+
+新增Domain/PhotoNp3EditorState.swift（246行）：PhotoNp3Source可注入操作，live直接复用RemoteLUTFolderAccess.prepareFolder/prepareBookmark(with np3 extension)/withScopedFile+FileHandle/PhotoNp3Parser；共享PresetIOQueue和每editor独立LUTRequestController，10秒默认。公共prepareBookmark只增加operations参数传到prepareFolder，默认不变。NP3的PresetFile.identifier使用file:// URI，其他既有LUT仍保留原absolute path，不能混用；读取只用bookmark+relativePath。扫描时给NP3元数据映射稳定逻辑root，刷新和重选同一bookmark实际目录仍保留原root身份，原生容器路径变化不破坏来源匹配。scope操作后台defer释放，不存在等待UI提交才释放的lease。
+
+State有folder/files/failure/selectedRecipe/selectedSource/selectedSourceLabel/sourcePresetIDs/notice，loading/pending委托request。原样实现explicit/passive刷新、相同id+source不触发owner回调、不因刷新启用Off、完整成功列表确认消失才off/onUnavailable、失败保留旧列表/recipe、文件改名先更新label即使新字节坏、换目录清双draft但保留builtin、selectionAllowed交付门禁、关闭不可再用/取消/弱释放。只管目录与来源草稿，不替owner保存角色/效果配置。UI未来要新建每次presentation生命周期，不能close后复用同一实例（对照AndroidonDispose）。实际页面还未创建这个State。
+
+证据np3-editor-verification.json：/tmp/ztransfer-np3-editor-20261030{,-r2,-r3}.{log,xcresult}三轮21/21(session14736)、30/30(80827)、47/47(17883)，均已terminalexit0，当前无运行任务。新PhotoNp3EditorStateTests.swift有12state+3FileProvider测试：生产串行队列、故意忽略取消的gate、显式/被动/不变、所有错误保留、完整删除不动ownerStore、两role换目录/内置保留/旧保存拒绝、80ms测试注入超时与物理移除待执行scan、旧scan不能先提交、weak释放。真实临时NP3与Foundationbookmark覆盖一级类别/过滤/metadataonly、fresh读取、64KiB上限、URI身份与实际路径分离、损坏bookmark/越界relativePath/拒绝scope/取消后释放。scope许可是注入计数，未测SystemFiles/cloud授权。最终另含Codec9、Store7、PhotoLUTEditorStateTests11、RemoteLUTLoadQueueTests5；未跑Androidinstrumentation（完整读413行）、全UI、真机/CPU/FPS/功耗。
+
+下一步实际owner接线仍需读完整相关段再改：PhotoEffectsStore init约1074，先Androidraw恢复再JSON；local scope会切UserDefaults suite，NP3共享Store必须从原始defaults创建（不是local resolvedDefaults）。Android TransferViewModel init1268+先把transfer/local私有recipe并入只读catalog，再解析selectedID；2039+setPhotoFilterConfiguration同时guard两种sourceCurrent再保存LUT/NP3和applied参数。SettingsScreen381+rememberPhotoNp3Draft的onSelected恢复独立记忆，explicit才关LUT/启用filter，496+commit才保存；LocalPhotoEffectsOverlay219+local显式/刷新语义相同，267+选择/来源变化即save并在dispose再save。1570附近ViewModel全局folderObserver清custom应用/记忆/收藏，local prefs也清；local页本身还订阅清draft。不能只实现draft的onUnavailable就遗漏页面没打开时的应用状态。PhotoEffectsStore现在没有np3Store/observer，rawrestore仍builtin-only；N18强度/参数和N20收藏也没接。
+
+已读PhotoFilterIdentity：custom renderID是np3:64hash:converter，偏好catalogKey必须是np3:64hash（不带converter）；当前PhotoEffectsSettings.filterKey约627仍只映射builtin，normalized约1409与decodeAndroidIntensities1690仍只允许builtin，需N18统一补齐。不要用全局可变配方registry，Selection持有完整typed参数继续保持。PhotoNp3EditorInstrumentation(488行)目前只定位未读；PhotoFilterEditor.kt已读初始化/lifecycle和选择模型，剩UI完整段待N16。所有失败/未验证范围继续保留，不能核销N15或整轮。
+
+
+收尾额外发现待核对的排序细节（未修改/未验证）：RemoteLUTCatalog.visibleFiles约56用lowercased再UTF16、名字/identifier fallback是Swift `<`；Android为CASE_INSENSITIVE_ORDER再原始UTF16名字/URI。NP3适配把扫描后的raw-path identifier转成file:// URL后没有按最终URI重排；相同文件名处于不同Unicode分类时，转义后的URI排序可能与原path不同。N15/N16选择器收尾时补实际用例并按安卓规则处理，避免重名序号受影响；现在的元数据测试只验证ASCII文件名，不据此声称全部Unicode排序一致。
+
+## 2026-10-30 N15快照/存储局部完成，整轮仍16/26
+
+同一active goal、无预算/阻塞，独立处理，不派agent、不动网站、不安装手机/提交/推送。Android再次确认dfd66a20干净ahead2，iOS基线58d9b6ed。台账N15改进行中但不核销，剩N15–N20/N22–N25共10项；下面N14阶段的“SnapshotCodec尚未实现”已被本阶段替代。
+
+新增PhotoNp3SnapshotCodec.swift（4096上限/v1灵活/v2传统/v3分级/SHA/modified UTF-8/严格身份与范围），PhotoNp3Store.swift（shared目录bookmark、transfer/local独立快照、来源hint/label、换目录防旧draft、仅folder变化通知）。Java字符串按UTF-16计长度，显式检查surrogate，保留开头FEFF/零宽字符；同文件夹有无尾斜杠不清角色。Selection持有np3Recipe，Codable有界完整snapshot，不保留sourceURI；PhotoEffectsRenderer消费typed参数，旧builtin规范化保留lutAdjustments。正常滤镜切Cube时记忆typed配方。Package加codec，Xcode项目同步，Store尚未被UI调用。
+
+np3-snapshot-verification.json保留四轮：r1 /tmp/ztransfer-np3-snapshot-20261030.log、22/22(session91940 exit0)；r2 -r2、测试漏try导致编译0(session25514 exit65)；r3 -r3、59/60(session71606 exit65)，新队列测试误比较入队时按原逻辑禁用的watermark；改为精确比较selectedFilter/完整recipe，未改queue实现；r4 -r4、121/121(session74426 exit0)，含全部62个TransferQueueScenarioTests。新PhotoNp3SnapshotTests.swift有codec9/store7方法，DomainModelTests同文件extension增真实队列换目录/失败/重试配方保留测试。全部进程已结束，无在跑测试。目录/关闭保留提示、角色独立、损坏拒绝、源文件不在也可真实preview/original渲染均有后端证据，不外推UI导入。
+
+Kotlin对照在/tmp/ztransfer-np3-snapshot-oracle-20261030，JDK17，复用上阶段已验证jars。未改实际PhotoFilterPreset/Classic参数/Grading/Identity/SnapshotCodec和原始SnapshotCodecTest；仅两个converter常量与不会调用的catalogKey stub。69组fixture与Swift编码逐字节一致，原始JUnit10/10(session42034 exit0)；runner/stub/log及依赖哈希保留，fixture只在test bundle。Fingerprint.kt是另一个提取片段，未作为本轮外部fingerprint验收；Selection测试只是实际输出名的往返稳定性。
+
+下一步N15仍要接通FileProvider IO/editor生命周期与owner提交/恢复。已读完整PhotoNp3EditorState/Store/Codec及Store/Codec测试、PresetFolderRepository/SourceFolder/IoQueue/SerialPresetQueue。可复用RemoteLUTFolderAccess.prepareFolder/prepareBookmark(fileExtension:"np3")和既有共享PresetIOQueue/LUTRequestController，不要复制IO队列。10秒超时/取消/换目录/新鲜重读/完整扫描后缺文件才失效/selectionAllowed/关闭拒绝迟到都要逐条对照。iOS bookmark准备IO自身defer释放scope；Android grant-release语义需对应到既有原生lease。
+
+特别注意：PhotoEffectsStore.init目前先恢复Android原始偏好，restoreAndroidTransferSettings/LocalSettings仍只解析固定catalog，不能仅凭新Selection JSON声称重启恢复完整；local入口有独立UserDefaults suite，NP3共享Store须用外层共享defaults，角色不要合并。store.save与两个editor确认/实时提交尚未接线。N18每滤镜记忆仍只允许固定catalog key，typed强度/参数独立记忆仍待做。未跑全UI、手机/相机、CPU/帧率/功耗，不新增安装/提交/推送权限。
+
+## 2026-10-30 N14渲染收尾，整轮16/26继续
+
+同一active goal、无预算/阻塞；独立处理，不派agent、不动网站、不安装手机/提交/推送。台账16/26，N01–N14/N21/N26完成；余N15–N20/N22–N25共10项。Android仍dfd66a20干净ahead2，iOS基线58d9b6ed；下面15/26和N14未实现均为历史阶段。
+
+Np3FilterEngine改为typed CompiledFlexibleNp3/CompiledClassicNp3共用像素外层；31base映射、quarter/Auto/黑白滤镜/调色浓度/创意强度/曲线全部对齐。CompiledNp3ColorGrading按安卓编译4×1025Float表，中性先guard不分配；HSL量化→grading→strength混合→finishing。LUTColorPipeline移出PhotoCubeLUTMapper到独立Swift文件，两个路径复用；PhotoEffectsRenderer旧内置路径补传lutAdjustments。Np3BitmapFilter新typed重载共用同一像素循环、取消、alpha转换和最多2个预览worker，未复制适配或增加UI。项目/Package sources已同步。
+
+np3-rendering-verification.json四轮：33/33、测试编译失败0、47中46、最终60/60（session57571 exit0）。失败原因分别为测试curve参数nil/UInt16类型，及全图测试直接比较UIKit画布与RGBA适配的原始字节序；最终统一premultiplied sRGB格式后严格字节一致，无容差放宽。新PhotoNp3RenderingTests11项，含实际应用render后置调节、传统与grading并行/串行/取消/透明度、creative0/Auto/曲线拥有、纯亮度/色域/连续灰阶。最终还包括parser20、旧50预设golden、旧配方迁移/两个偏好作用域和LUT回归。N13旧manifest是历史快照，N14保存当前相关源哈希，不倒改旧证据。
+
+Kotlin对照已补齐：/tmp/ztransfer-np3-oracle-20261030内下载固定2.2.21 compiler与依赖（Maven SHA1校验及本地SHA256记录），JDK17在/opt/homebrew/opt/openjdk@17/bin/java。未改安卓6份真实生产源码，Bitmap/Cube API仅抛错stub；Oracle.kt反射实际compileFilter/filterPixel，31base×3参数组＋10flex组，4强度×2alpha×2后置调节，1648组×518色=853664像素的SHA全部一致。旧50预设golden未改。安卓原始ClassicNp3RendererTest8＋Np3ColorGradingTest6＋LutColorPipelineTest4共18项也通过；runner/stub文本、日志、依赖哈希、test bundle夹具均保留。iOS没有引入Kotlin运行依赖。无全UI、真机/相机、CPU/帧率/功耗验收。
+
+下一步N15：已补读PhotoNp3Store缺失45–102段，restore先匹配BuiltIn、再验证customID/来源文件夹/4096byte有界snapshot及相同id；observeFolderChanges只对实际folder值改变发通知；isSelectionCurrent防旧draft跨目录提交。SnapshotCodec全篇已读但实现未开始。仍需完整读PhotoNp3EditorState、Store/Codec测试、来源文件夹IO和两个UI调用链；N15覆盖目录授权/取消/刷新/超时/快照和队列生命周期。PhotoNp3Recipe目前只承载纯不可变参数，PhotoFilterSelection仍仅preset/intensity/lutAdjustments+Cube owner；不得仅存ID或让队列读取可变全局NP3配置。用户NP3完整导入尚未接UI，N16–20也未完成。
+
+## 2026-10-30 N13解析完成，整轮15/26继续
+
+同一active goal、无预算/阻塞；独立处理，不动网站，不安装手机/提交/推送。台账15/26，N01–N13/N21/N26完成，剩N14–N20/N22–N25共11项。Android仍dfd66a20干净ahead2，iOS基线58d9b6ed。下面14/26及N13未实现是历史阶段，不沿用。
+
+新增Domain/PhotoNp3Recipe.swift、PhotoNp3Parser.swift、ClassicPhotoNp3Parser.swift，现有Np3FilterParameters加入可缺省的colorGrading及安全Codable验证。完整实现64KiB有界读/取消、TLV/字段/编码范围、Flexible 0310/Classic 0300+0310（31base、Auto=-128、quarter）、257点曲线拥有规则、三域grading、中性canonical、detail不重复锐化、SHA匹配curated保留旧ID转换、新文件内容SHA+converter版本身份。FileHandle适配只借用句柄，读上限65537，不保留源引用。PhotoNp3Recipe单独承载metadata与完整参数，未提前改持久化作用域。
+
+PhotoNp3ParserTests 20项；9份既有测试NP3与安卓字节相同。np3-parser-verification.json保存3轮：编译失败0、32/32、34/34。第二轮误用资源测试类名未运行，最后改UserPictureControlResourcesTests并实际通过；34包括20解析+7引擎+5位图+1历史50预设安卓像素oracle+1应用资源检查。最终日志TEST SUCCEEDED，xcresult独立确认Passed/34/0失败；第三轮会话句柄未在压缩后保留，纠正原先推断的session/exit记录，exitCode改null并附结果包summary，源哈希/历史日志不变。App不带相机NP3。未运行本轮Kotlin、全UI、手机/相机、CPU/帧率/功耗。Package显式sources及Xcode工程已更新。
+
+N14/N15尚未完成：已读PhotoFilterRenderer编译Classic系数和像素顺序、Np3ColorGrading实现/测试、ClassicNp3RendererTest以及PhotoNp3SnapshotCodec全篇；PhotoNp3Store中60–85行仍需补读，其他导入与双入口调用链/测试待逐项核对。N14需分级1025点编译表、31base明确映射、共用有界位图循环，滤镜强度混合后只应用一次LUTColorPipeline；当前iOS builtIn路径忽略lutAdjustments，用户NP3尚未接通。N15二进制快照v1 Flexible/v2 Classic/v3 grading+SHA尾校验，transfer/local状态独立，共享文件夹/收藏不能合并配置；完成解析不等于整个导入功能完成。可用JDK17在/opt/homebrew/opt/openjdk@17/bin/java，但PATH里的java仅系统stub；kotlinc/缓存尚未找到。
+
+## 2026-10-30 N12原片复核收尾，整轮14/26继续
+
+同一active goal继续，无预算、无阻塞；不派子agent、不动网站、不装手机/提交/推送。Android仍dfd66a20（干净ahead2，origin18145b3a），iOS HEAD58d9b6ed。台账当前14/26：N01–N12/N21/N26完成，余N13–N20/N22–N25共12。下面13/26等均为历史阶段，旧manifest不改写。
+
+N12已实现且通过最终145/145专项，证据 `ios/docs/evidence/android-sync-20261028/original-index-verification.json`。六轮：编译失败0、编译失败0、25中24、143中141、144/144、145/145；最后session14135终态exit0。前两轮是新增测试autoclosure/隔离修正；第三轮旧“refresh即重扫”测试修为安卓实际显式重选边界，整批准入断言保留；第四轮发现新增@Published选择revision增加全局重绘，改为selectionChanges定向事件，既有性能断言未放宽。无全UI/Kotlin/手机/相机/实测功耗帧率。新建测试TransferOriginalVerificationTests.swift共20方法；旧纯历史回放API及假保留测试移除，生成失败/清空保留原片验证加强到真实TransferQueueScenarioTests。
+
+TransferDirectoryIndex.findVerified只复核内存命中；fresh URL resourceValues + FileHandle打开/关闭，不消费内容、不用fd长度。仅明确missing才删除，权限/提供器/目录错误原样失败；继续找编号副本，编辑大小/重命名保留真实占名，未知大小非空匹配。内部replacement revision只用于compare-remove，reader新构造的同名同大小URL仍视为有效，避免无限循环。队列独占移出的索引用单消费者TransferDirectoryVerificationJob交给后台，避免失效循环COW全量复制；查重和目录扫描均传播取消，等待期间撤回可响应，取消/撤回后不迟到发布。
+
+TransferOriginalStore是队列持有、列表共享的锁内可变索引，通知为合并的Void信号，读取最新状态。扫描在后台持有DirectoryAccessLease；按root/mode缓存，旧root/scanID结果拒绝；在途按key记录版本保护防复活/覆盖新发布，完成后清理临时版本表；共享合并不在锁内重复正则。历史卡片不再回写，已完成原片按实际字节记账，效果失败和清空不丢失。DirectoryAccessStore.selectionChanges表达同URL重选成功及真正清除；PhotoListView.onReceive强制清索引重扫，普通catalog/mode刷新复用；无重复全页发布。已读Android完整ExistingFileNameIndexTest、ExistingOriginalDocument以及TransferViewModel 172–258、396、2270–2500相关实现。
+
+下一步N13：已全文读安卓 PhotoNp3Parser.kt(249行)、ClassicPhotoNp3Parser.kt(144)、ClassicNp3PhotoFilterParameters.kt(64)、PhotoFilterPreset.kt、Np3ColorGrading.kt；两套parser测试306+177行也已补全阅读。iOS当前Np3FilterEngine仅Flexible旧参数/渲染，Np3FilterCatalog是固定转换目录；PhotoEffects.PhotoFilterPreset仅id/name，无用户NP3解析器。尚未修改N13代码、未运行其测试。需要64KiB有界读、TLV结构/重复/结束校验、Flexible 0310与Classic 0300/0310按base分流（非仅version）、31种Classic base/quarter-step/Auto=-128、257点曲线/curve-owned sentinel、detail仅校验不二次锐化、完整grading与neutral canonical、错误INVALID/UNSUPPORTED/TOO_LARGE区分。精确source SHA匹配已有curated时保持旧id/转换；用户导入属于本轮，不能误跳过。测试夹具可来自安卓test/resources的3份Flexible和6份Z30导出，内置相机NP3仍不作为iOS正式资源。N13解析、N14渲染、N15快照/生命周期、N16–20双入口交互与独立记忆依次接通，不凭单独模型完成整轮。
+
+## 2026-10-30 N10入场/订阅身份收尾，整轮13/26继续
+
+本turn继续同一active goal，有实际代码与验证进展，无阻塞；get_goal确认objective仍为“安卓端又有一些新功能…老规矩…略过回滚/排查共性性能”。未设预算，不标complete/blocked，不派子agent，不动网站，未安装手机/提交/推送。台账 `docs/待做/iOS-20261028-安卓增量复刻.md` 当前13/26：N01–N11、N21、N26完成，余N12–N20/N22–N25共13项。下面12/26、11/26均为阶段历史；N09本turn也已补齐（55方法），随后N10再回归它，旧证据不改写。
+
+N10新增 `QueueItemAppearance.swift`（QueueAppearanceKeyMap/Tracker/Checkpoint/Clock/modifier），按TransferScreen.animateItem和Foundation1.7.6实现180ms FastOutSlowIn入场，无额外系统隐式动画/全卡片transaction覆盖。只比较上一布局key map；首次无旧map、空队列切换安静重置；索引0是汇总栏，近邻窗口30、前后100，普通近邻滚动不重播，远跳不在旧map时仍遵循安卓appearance。复用QueueRemovalCoordinator原生锚点，新增viewportRows/onLayoutChange及Marker.layout回调，只有布局检查点更新缓存，不发布父层帧状态；相同range且IDs不变不重建集合。数据prepare和leave提升revision，异步旧布局不能把尚未呈现的新插入吞成历史，旧页回调也不能污染新页。叶时钟有限、不重启在途、背景/离页停表、弱target不留owner。原位置spring/移除height/卡片手势不叠额外动画。
+
+复查还发现旧QueueProgressScope的active/inactive条件分支会销毁同一卡片子树，导致等待→下载→完成打断颜色、波形等状态。已抽到新Components/QueueProgressScope.swift，稳定内容身份，仅通过MainActor下的Combine订阅桥转发当前活动任务的objectWillChange，退出取消订阅；使用项目既有的@preconcurrency ObservableObject桥接旧协议。入场/位置modifier放到scope外层。原40行QueueProgressInvalidationTests已加强：父页不重算、仅当前活动行响应，切换任务后每行@State身份仍唯一。无需新增全列表进度观察。
+
+证据 `ios/docs/evidence/android-sync-20261028/queue-appearance-verification.json`：8轮依次编译失败0、19中18过（像素夹具采到下方移动旧卡片）、19/19、2中1过（只滚到懒布局的估计尺寸）、编译失败0（Combine协议隔离）、3/3、集中146/146、最后revision竞态10/10。147个不同方法成功，197次成功执行；最后session6394已terminalexit0，集中session15983 exit0。不是单批147全绿。修夹具是手动淡入停0等待独立位置spring退开再采像素，滚动跟随实际修正的contentSize直到目标真正可见且超时抛错；未放宽断言。初次测试Source补MainActor。10个最后方法含近邻map、插入/重排/替换、时钟/弱释放、背景、原生懒布局屏外新项/滚回、旧布局/旧页面回调及40行身份/订阅验证。
+
+13张最终图已查看：透明→90ms灰度→实心、真实卡片移除、数字局部/跨位。146轮模拟器沙盒已被后续安装更新，图片从xcresult附件导出，附件manifest保留；10轮图片直接复制，均sha留证。旧manifest不改写，新证据记录28个当前源码hash；模拟器/root /tmp路径完整记录，源foundation1.7.6新增LazyListScrollPosition/NearestRangeState全文及原LazyLayoutItemAnimator/Animation摘录。未运行Kotlin/全UI/真机相机/CPU/功耗/帧率验收，不声称这些已通过。N10可核销，继续后续功能，不能把剩余13项忽略。
+
+接下来N12已初读：Android `app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt` ExistingFileNameIndex 172–258的findVerified/compare-and-remove，以及findVerifiedOriginal约2470，只对内存命中候选进行IO校验，失败权限/提供器异常不证明删除；删除后继续找副本，编辑/重命名更新真实占名；失效仅移除精确旧发布并按目录作用域更新export revision。测试 `ExistingFileNameIndexTest.kt` 包含删除副本/全删与效果隔离/文件变长/重命名/权限错误/迟到结果/大小写预留/未知大小空bucket；文件曾长输出被截断，开始实现前补全读取全部测试和调用链。iOS `Domain/TransferDirectoryIndex.swift` 当前existingOriginal只按缓存返回URL，尚无候选真实复核/精确remove；ExportedOriginalIndex仅add/merge/record/original无remove。TransferQueue.swift约1164命中后直接标completed，resourceValues取不到大小还会记0；批次开始仅扫描一次。下一步核对UI索引store生命周期/重试引用，再实现真正复核及取消/旧回调保护；注意NSURL资源属性缓存不能作为新鲜存在性证据，外部IO失败不能误删索引。N12尚未改代码/未运行其新增测试。
+
+## 2026-10-30 N09逐位动画补齐，整轮12/26继续
+
+上一goal turn有实际代码及80测试进展，本turn继续无阻塞，仍同一active goal；不派子agent、不动网站、不安装/提交/推送。开始已重读本文件/台账和实际工作树。Android仍dfd66a20（本地干净ahead2，origin18145b3a），iOS HEAD仍58d9b6ed。当前台账12/26：N01–N09/N11/N21/N26完成，剩N10/N12–N20/N22–N25共14。下面11/26是发现遗漏时的历史记录，N09现在补上实际实现和新验证后才能核销，不改写旧manifest。
+
+新增UI/Components/QueueNumericValueMotion.swift与QueueAnimatedValue.swift，统一替换胶囊速度/计数、两张状态卡计数/下载速度、历史卡片速度。QueuePillRollingCount现只是共用组件薄封装；原QueuePillCountClock/CountMotion/CountLayerMotion及系统TransferNumericText删掉，DomainModelTests中4个旧整串测试迁入新的9模型+3时钟方法。TransferInfoPill.numericValue改Int64，完成速率用queueNumericValue按Kotlin.toLong饱和转换，正常字重对齐Android Normal。新解析按UTF16 Nd和三种小数点，按位权key稳定；相同text不重记原数值/不重启；单位或非数字整串转场；99→100→9保留离场位、占宽立即0、反转重用旧层。模型静止位不采样，集合仅实际缩减时整理；有限时钟只在文本叶节点，背景/隐藏/卸载停表，重新挂载取最新值不回放。胶囊原600ms采样/批次结果/Done1800/补满120+40/固定右缘宽度等不改变。
+
+重新下载Google Maven官方Compose1.7.6 animation/core/foundation sources（当前app明确foundation1.7.6）。普通位移tween180、入160/出120、整数半行物理像素；Transition中断tween是critical1500，PostExit反向采用EnterExit默认400。父Transition快照切段会resetAnimations递归，因此未变但仍在运行的数位也需以当前值/速度重建（不生成新字符层）；不能误用“字符一样就不管在途动画”。源码URL/完整SHA及摘录保存在numeric-value-verification.json和numeric-compose-*.kt.txt，原缓存/tmp/ztransfer-numeric-compose-1.7.6。原web搜索也核对官方Android源码，但实现依据固定版本jar。
+
+numeric-value-verification.json三轮：/tmp/ztransfer-queue-numeric-20261030 53/53、queue-numeric-layout2/2、queue-numeric-final55/55，全部TEST SUCCEEDED/exit0；55不同方法、110次成功执行。最后session24786已terminalexit0。新真实组件像素：42.1→42.3未变整数/单位区域字节一致、变化小数确实移动；9→99→100→9目标宽即时变化、右缘固定、收尾像素与原9完全一致无幽灵位。模型测试覆盖同文案原速变更、位权/缺位/小数符号、全标签单位/反转、恢复/隐藏/未挂载及weak owner；同时回归汇总卡、三主题胶囊、完成转场/批次/生产速度采样。10张numeric-final-*图已查看，2份CSV、三日志、相关当前源哈希保留；完成联系图为layer.render，不能代表实时玻璃/Metal像素。未运行Kotlin/全UI/物理相机/真机CPU/功耗/帧率。
+
+下一步N10：新增行180ms淡入与完整卡片动画审查仍待做。已读取Foundation1.7.6 LazyLayoutItemAnimator.kt 80–181与LazyLayoutItemAnimation.kt173–203：首次keyIndexMap==null不入场；以后previousIndex==-1且上一map非null才animateAppearance，已有入场不重启；初始layer.alpha=0，再180ms FastOutSlowIn到1。可见项位置变化另走原placement，滚动delta直接消化；上一key map是LazyList近邻范围，不能简单让每次onAppear（滚动或返回页面）都淡入。两文件摘录已留证，完整缓存同上。当前QueueItemPlacement只有位置弹簧，未新增淡入，台账N10仍进行中。不要用本次数字55方法核销队列新项入场。
+
+## 2026-10-30 队列移除局部完成验证，N09遗漏重开，整轮11/26继续
+
+继续同一active goal，主任务独立做，不派子agent；Android目标仍dfd66a20、远端18145b3a，iOS仍58d9b6ed，网站并行内容不碰。台账当前11/26：N01–N08/N11/N21/N26完成；N09重开、N10进行中、N12–N20/N22–N25待做，共15项未完成。上一节12/26是当时记录，已发现缺项不能继续沿用；不是撤销已通过的采样、批次、宽度或效果开关验证。无新阻塞，goal不能complete/blocked。
+
+N10新增QueueRemovalMotion.swift（可见项20ms错峰/80ms封顶、280ms线性时间线、透明度前64%/高度后18%起余82%、0.97–1缩放）、QueueRemovalCoordinator.swift（页面拥有捕获范围收尾）及原生QueueRemovalAnchor。只在操作开始读真实UIScrollView可见行几何；屏外目标立即删除，不让整队陆续补入再退出。所有行与收尾同一实际帧时间，最后40ms余量；墙钟流逝但无帧不能删除。离页/虚拟条目消失仍执行捕获范围finally，新任务/重试/忙碌任务不会被扩大范围清掉。独立叶子进度观察、收合期间禁位置弹簧，生成卡不订阅下载进度；空/非空切换重建滚动容器并清旧位置。TransferQueue/VM新增beginRemoval原子准入与removeAndReturnRetained：晚到删除回调不能把已不存在的旧卡当成busy恢复，防闪现。
+
+N11旧测试夹具QueueRemovalCoordinatorTests有4方法未纳入上轮80场景，仍期待离页遗留取消卡、清空连新增终态也删；本轮按安卓当前finally/捕获范围改正并实际跑过。QueueCardPresentationTests离页预期同步改正。清空动画期间下载完成测试改手动帧，避免墙钟猜测。保留旧日志/哈希，不伪造旧测试已跑。
+
+queue-removal-verification.json六轮证据：queue-removal编译失败0（非Sendable显示链不能在非隔离deinit读取，改为wait/cancel显式收尾+既有弱代理）；fixed编译失败0（旧abandon接口测试）；aligned78/78；layout1方法失败（在160ms错误期待alpha0）；layout-fixed1/1（按280*.64=179.2改200ms采样）；final80/80 TEST SUCCEEDED exit0。80个不同方法、159次成功执行。最后session27052已terminalexit0；两张latest-queue-removal PNG已查看。真实组件验证视口选择/先淡后缩、无父帧发布、晚回调不恢复、页面finally、固定确认窗及61场景。未运行Kotlin/全UI/真机相机/功耗/帧率，不安装不提交不推送。
+
+下一步先补N09共享逐位数字动画，再收N10新增卡片180ms入场/完整动画核对。Android AnimatedQueuePillCount.kt在a90da2eb已变：queueNumericLabel允许未分组整数/小数与`.`/`,`/阿拉伯小数点；整数位权从右对齐，小数从左，未变位不动，单位变化整标签过渡，连续99→100→9保留离场位且目标宽立即0。动画位移180ms FastOutSlowIn、入160/出120，半行高位移，方向比较原数值；remember(text)令同显示文案不因原值变化重启动画。iOS QueuePillRollingCount当前仍整串+旧位移弹簧，TransferNumericText是系统numericText/240ms：没有复刻这部分，不能把旧测试当证明。需要统一胶囊、状态卡数字、历史速度标签；此前QueueCompletionState/600ms真实actor采样/120+40补满/Done1800/宽度弹簧等已验证链路保留。N10卡片进度原有目标/失败不补满及完成100ms延迟+220ms退场已在QueueCardProgressVisibilityTests回归，但新增项180ms入场未实现，因此仍不核销N10。
+
+## 2026-10-30 新增安卓两提交并完成胶囊/效果开关，整轮12/26继续中
+
+用户又要求“有一些改动，老规矩”，继续原active goal、主任务独立执行，不建新goal/不派子agent。Android pull返回Already up to date；本地干净领先远端2，按既有授权纳入16d38f33、dfd66a20，当前目标dfd66a20c739342fafbd927659e815e2d499e5ea，origin/android仍18145b3a。13文件哈希见android-source-addendum-20261030.json；iOS仍58d9b6ed，无提交/推送/真机安装。网站并行修改不动。
+
+台账docs/待做/iOS-20261028-安卓增量复刻.md现12/26，N01–N09/N11/N21/N26完成。N08因新徽标规则重开后重新验证完成；N26新增关闭效果时配方捕获。剩N10、N12–N20、N22–N25，共14项，继续，不能结束整轮。新增其余范围：N23连拍图片抗锯齿/列表避免无谓集合和观察；N25主动归组不重新带出旧工具；N24版本2.02(75)和renewal_needed新三语文案核对；尚未实现这些追加。iOS版本目前仍1.98，苹果权益差异保持，不能把安卓续期后台搬来。
+
+N09新增QueueCompletionState/Tracker与TransferSpeedDisplaySampler；生产actor逐下载600ms采样、无效不记时、首正速立即、原始字节/进度不降频、旧ID回调拒绝。删除旧QueuePillSpeedCadence/Clock；胶囊已真正接QueueDownloadDisplayModel（120+40ms），仅实际下载进度。批次保留已移除失败、区别跳过与实际工作，终态元数据不重启Done1800ms；同一结构快照缓存事件。显隐直接传visible到QueuePill，移除生产旧QueueTopPresence(kind:.pill)，宽度可0/右缘固定/最后8pt淡出+24pt羽化，宽度和液面叶节点观察。QueuePillTaskSummary.progressOwner现仅actualDownload。注意新的onChange全消费新快照，不读取旧self。
+
+N08追加TransferQueueStatusCards：生成徽标数归0后120ms淡出但留旧正数宽度，直到行全部离场；零不读屏，空闲占全宽。新QueueGenerationRemainingBadge/Opacity叶节点时钟，不影响灯泡。N26队列所有enqueue/auto/crop接口追加可选photoEffectsEnabled，UI每次入队显式传effectsStore.isEnabled，actor默认内部调用走自身门禁，queuedEffects统一nil或有效配方。此参数只决定新任务，已有任务/重试不变；编辑器仍保存效果。
+
+pill-latest-verification.json保留5轮：pill-20261028和pill-fixed编译失败0；pill-sampler101方法97成功/4方法失败5断言；pill-latest-20261030 108方法107成功/1失败；pill-render-20261030最终4/4成功。109不同方法累计成功、208次成功执行。101轮失败因旧测试凭空移除未完成任务而期待成功；修夹具让省略的等待任务明确本地跳过。最后物理主题几何帧采样被同步drawHierarchy冷Metal刷新阻塞，改layer.render并延长观察窗口，未降低帧数断言；真实顺序/右缘/中间尺寸断言通过。新结构/进度纯测试、真实队列采样/61项场景、新生成保宽/真实队列页、三主题胶囊状态、Done元数据期限均通过。七张实际图已看，图层图不能证明玻璃/Metal像素，非真机相机/帧率/功耗验收。旧证据源哈希不要更新。
+
+所有build会话均已终态，最新29913 exit0。B6B4E291-173A-4BFE-BB9C-2D1F62643C49确认Shutdown，FC8ECF06-0A56-4949-B64C-3EE06870025E仍Booted不动。当前工具权限已变为全权限/never，后续exec_command不要再传sandbox_permissions。新一轮无新安装/提交授权，专项模拟器授权持续有效。
+
+## 2026-10-28 队列状态卡完成，整轮10/25继续中
+
+本轮有实际源码/测试/截图进展，active goal继续，非阻塞。主任务独立完成N08；台账10/25、剩15项。Android仍18145b3a、iOS58d9b6ed，未提交/推送/安装，网站文件不动。下一步N09速度胶囊与N10历史卡片、N12索引，再NP3等；不要把共享模型存在当成胶囊已经接线。
+
+新增Domain/TransferQueuePresentation.swift、UI/Components/QueueSummaryMotion.swift、TransferQueueStatusCards.swift，真实TransferQueueView首个滚动项恒定双卡、空队列仍保留。UUID身份不变，attemptOrder在全部入队/两类重试递增，用于等待生成顺序；运行生成优先。最多3驻留/2退出，显示2行、计数全部；成功110ms绿/220ms持留，退出140ms/位移180ms；下载120ms补满+40ms合并输入的显示模型已接状态卡，尚未接顶部胶囊。原生层背景2400ms、0…0.08呼吸（前笔0.045记忆不准确，以源码0.08为准），220ms存在性淡出/卸载停止，不影响灯泡差异。
+
+真实宿主抓到两个生产问题均修正：onChange调用读取旧self的helper会使用上一帧let输入，下载输入/生成任务与历史/动画阶段改成单个Equatable快照，回调直接消费新值；生成ZStack较少行时会在固定高度内居中，必须frame(height:...,alignment:.topLeading)。以后新回调勿重复这个模式。模拟器宿主须UIWindow(windowScene:)并显式.environment(\.scenePhase,.active)，否则黑图/背景停动画不是合格证据。真实队列夹具的UserDefaults跨actor需独立实例。
+
+summary-verification.json保留9轮：0编译失败、0夹具编译失败、75(3方法失败)、75(2方法失败)、2(1失败)、2(1失败)、2全过、0生产页夹具编译失败、最终98/98全过。共98不同方法成功；Scene那轮工具退出码0但日志TEST FAILED，明确按失败记。最终8张实际图已实看、源/日志/图片哈希记录；覆盖纯边界/精确时序、真实组件与队列页窄宽/布局、刷新隔离/停动画、原队列59/元数据19/确认窗/标题与计数回归。非Kotlin/全UI/物理相机/真机功耗/VoiceOver，图层捕获不证明Metal模糊阴影像素。既有固定字体度量未全局更改。构建会话均已终态，最后48626退出0。旧证据共享文件哈希保留各自运行时点，不更新它们。
+
+## 2026-10-28 队列清理和生成准入完成，整轮9/25继续中
+
+active goal继续、非阻塞；本轮主任务独立完成N11，台账9/25，余16项，N08/N09/N10尚未完成。Android仍18145b3a且干净、iOS仍58d9b6ed；未提交/推送/安装，不动网站。Android新状态卡已详细读过（TransferQueuePresentation、TransferQueueStatusCards、QueueDownloadDisplay、GenerationQueueRows及部分测试），接下来继续状态卡/速度胶囊/进度收尾，再NP3等。
+
+N11：beginClearQueue原子捕获非下载/非生成忙碌ID并撤回等待任务，finish只清此集合；真实UI协调器320ms后使用捕获集合，不再全局removeCleared。frameGenerationPendingCheck区分查重保护与已确认生成，isQueuedForFrameGeneration只在确认后用于计数/等待文字；未知名称或同来源正在生成保守等待，温内存名称可证明唯一来源缺失。完整目录/配方查重移动到串行生成工作线程，实际裁切/渲染才计时；命中成片直接skip；总开关关闭的离线重试快路径主动publish。原有removeCleared/clearFinished仅保留即时历史接口，不用于动画清理。
+
+queue-admission-verification.json：78/78和80/80，两轮exit0；80不同方法、158通过，含真实清空协调器/确认窗、同源重复/异源温缓存、五种底层状态准备保护、关闭效果重试通知，及19项元数据/裁切流水线。非Kotlin/全UI/真机/性能验收。共享源码哈希记录测试时点，不倒改前批证据。构建会话69758和5095均已终态0。
+
+N08等待生成顺序不能按UUID字符串排序：安卓Long是尝试/入队时序，iOS重试在旧历史位置替换，需要单调尝试序号或真实入队顺序，同时保留UUID业务身份。状态卡两张常驻首个滚动项，下载55%/生成45%，显示2行但全量计数；生成第三行预备、成功220ms/退出140ms/位移180ms，下载成功补满120ms+40ms停留，失败/取消不假补满。相关纯函数测试仍需完整读/移植并接入真实UI，不能只做模型标完成。/tmp/ztransfer-queue-screen-delta.patch为空（错误旧文件名），实际Android文件是TransferScreen.kt；不要依赖空patch。
+
+## 2026-10-28 筛选评级增量完成，整轮8/25继续中
+
+当前 active goal 持续推进，上一轮7/25和本轮均有实际源码/验证进展，非阻塞；N07已完成，总台账 docs/待做/iOS-20261028-安卓增量复刻.md 现8/25，剩余17项不可忽略或标整轮完成。再次pull Android返回Already up to date，仍18145b3a且干净；ios仍58d9b6ed，本批均未提交/推送/真机安装，网站并行文件不动。继续由主任务独立处理。
+
+N07全运输共用PhotoRatingPlan，完整目录实际日/范围相交/未应用范围空总数/显式目录完成或足够已确认天数，不再STA独有；未知非法日期有限排除而全部保留，非评级格式日仍占边界。公历校验同安卓纯ASCII整数，不逐行构造Calendar。PhotoListViewModel扩大已截断范围前同步关完成状态，异步游标和快速再切范围不能锁定旧清单，末批范围变更同门禁；USB/AP也直接通知就绪边界。异步缓存读取间输入变化重规划，开读后固定清单；Set来源检查去平方复杂度，进度按文件，取消重开/旧回调保持。300pt筛选窗、154pt五星、其余自适应、34pt清除、6pt灯泡间距，日期页独立滚动树；清除关闭浮层并恢复全默认。
+
+rating-verification.json保留4轮：首次私有夹具编译失败0方法；fixed 76/76；boundary 77方法其中1方法5断言失败，新测试遗漏canFill=true导致关闭通道；只修夹具后final 63/63。当前生产覆盖77不同方法；216执行215通过，不声称单批77全绿。四截图390/280宽×关闭/开启均已实看，父弹窗不随120进度更新重建、宿主连续性验证通过。实际宿主和受控目录/通道验证，非Kotlin执行/全UI/物理相机验收。PhotoRatingScanTests/ScanBatchPolicyTests最后一轮全过，其余14方法上轮通过且对应生产未变。历史报告共享源码哈希保留各自时点，不倒改旧报告。
+
+后续从N08–N12队列块继续，再NP3/缩略图/预览等；已读取但未编辑下一块，Android净差异在/tmp/ztransfer-transfer-delta.patch、/tmp/ztransfer-queue-screen-delta.patch和/tmp/ztransfer-filelist-delta.patch。注意手机验证仍由用户操作，不自动安装/提交。蓝牙唤醒研究回滚及所有既定iOS差异保持。模型测试新加PhotoRatingScanInput必须显式传hasCompletedFileScan/appliedPhotoLoadingDays；测试PhotoListViewModel的canFill默认false，验证可用通道时必须主动true，不能把等通道误当生产挂起。
+
+本批4个构建会话已终态（65/0/65/0）；B6确认Shutdown，FC8仍Booted未操作。当前源/7项Android依据/四图/四轮全日志及保留日志SHA全部复核，git diff --check通过。未重跑已经通过且未变化的其他专项。
+
+## 2026-10-28 GPS 增量同步完成，整轮7/25继续中
+
+本轮按 active goal 继续，前轮属于实际进展（源码、拉取及验证证据），非等待/空转。主任务独立完成N04/N05/N06；总台账 docs/待做/iOS-20261028-安卓增量复刻.md 当前7/25，其他18项尤其NP3完整链路/队列/筛选/缩略图/预览继续，不能结束整轮或缩小目标。Android仍18145b3a，检查时本地远端已一致且干净，未再次修改/提交Android。ios仍58d9b6ed，无新提交/推送/真机安装，网站并行修改保留。
+
+N04倒计时立即同步接coordinator；canSyncNow逐状态且0坐标有效，后端再验持久化开启/AP/实际isRunning/认证ready/无GEO在途，用最新fix同步开始，重复点击不留后续强制写；成功ACK才更新时间/重排周期，新认证清lastWrite。同步拒绝回调不再遗留空10s定时器。N05明确主动开启+完整旧配对才预热定位30s，首次/恢复/后台重试不预热；认证前不缓存应用坐标或发布，认证后读CLLocationManager自己的两分钟内缓存。统一stopLocationUpdates取消预热，正常交接和八类停止测试。保留4.5s直连退扫描、15s扫描、7s握手、3sID；补旧配对服务发现/通知订阅15s，先退役再失败，所有清理取消旧期限。start不重开当前扫描；发现回调要求仍在扫描。客户端已有退役/对象身份/串行写门禁保持，主线程状态事件取消多余RunLoop派发，初始idle不当断连。CoreLocation频率精度档、外设UUID等既定iOS差异保持，无Classic bond冒充。
+
+N06关闭时配对/频率/按钮权重0.60/1.08/1.18，启用0.82/0.86/1.18；频率允许拖动提示+档位selection，倒计时仍42pt可点，同步三语标签逐字资源且不再提示普通拨轮手势。GPS专用Genie80pt水平开口，公共新增参数默认仍27.2pt/tilt=true（以实际zMarkWidth常量为准）；开关320/350ms、反向/捕获保持，不改其他弹窗。两个实际控件浅色截图已看，字/按钮不遮挡；无灯泡呼吸恢复。
+
+首轮 gps 日志编译失败0执行：漏补Debug GPSGestureAuditHarness.Bluetooth的isRunning；补齐所有conformer。gps-fixed实际64/64、TEST SUCCEEDED/exit0。随后仅读屏hint清空与新增实际宿主截图方法，gps-panel4/4（含3倒计时重复），合计68次成功/65不同方法，非单次全套。含真实生产coordinator/期限/回调与UIKit宿主，定位/蓝牙受控夹具；宽入口3锚点×2高×101进度×49截面端点/水平/保序及旧几何回归；倒计时叶观察、隐藏/后台/归零休眠验证。不是物理GPS/BLE/订阅注册/权限提示/VoiceOver/热状态/全UI验收。入口ios/docs/evidence/android-sync-20261028/gps-verification.json，三日志+两PNG+最新源码哈希。此前N01–N03/N21历史证据保留；DomainModelTests因本次新增GPS测试/协议stub变化，旧报告哈希是各自验证时刻，不能要求历史哈希与当前完整文件相同。
+
+本批所有xcodebuild会话均已终态（首轮65，后两轮0），收尾无xcodebuild进程。B6确认Shutdown，关闭调用因已关闭返回405；FC8仍Booted未操作。git diff --check及GPS最终源码/两张已审截图SHA复核通过。下一步从N07筛选或N08–N12队列块继续；不重复已通过专项，除非新增相关修改。
+
+## 2026-10-28 安卓新一轮增量同步进行中（4/25，尚未整体完成）
+
+当前 active goal 是继续拉取并完整复刻 Android 新增功能、跳过已回滚内容并处理 iOS 对应性能问题，不能把此阶段通过当整轮结束。iOS 基线/HEAD 58d9b6ed，用户单独要求推送时 git push origin ios 返回 Everything up-to-date；本轮新改动均未提交/推送，无真机安装。主任务独立处理，不改网站并行文件或 Android 工作树。已重读长期规则。
+
+首轮独立 Android 树 /Users/orys/code/nk_send-android 从7690172b至431132ca，18提交/166净变化文件哈希在 android-sync-20261028/android-source.json。蓝牙唤醒热点研究被dcc1bdda回滚，忽略；GPS立即同步保留。用户后来再次要求拉取，pull已最新，按先前授权包含本地新增eec5d6db、18145b3a；检查开始的4个dirty文件由Android侧随后提交，最终干净ahead2，新增20变化文件冻结android-source-addendum.json。新预览真实图像锚点/裁切/方向动画独列N25，NP3文档名/离线选择归N15/16、速度600ms归N09、缩略图首次180ms共用入场和共乘防重复解码归N22/23。台账 docs/待做/iOS-20261028-安卓增量复刻.md，现4/25（N01/N02/N03/N21）；其他21项继续做，尤其NP3导入/渲染/双入口/持久化、GPS、队列及缩略图等，不能漏。已移除品牌图形、内置相机NP3、监看端侧录制、灯泡呼吸继续不恢复；用户导入NP3照片滤镜是新范围，不能跳过。
+
+N01两导出共用64项拍摄EXIF，保留原始数值精度。N21九槽实际读取、36/614字节空槽以基底0为准；可选/可写分离，只确认空槽可注册，已占用不可选不可覆盖；激活前复验枚举，回滚和双bank隔离。首轮40测试1失败（旧断言拒绝614空槽），另原编码器所属类选错未执行；改目标/断言并加组件准入后42/42成功。证据exif-slots-verification.json。
+
+N02已有同照片元数据通过独立参数传裁切，不改配方存储、不请求手机定位或额外等待；原GPS有效优先原始字节，缺失回填并清不可靠旧海拔，保存后校验/失败清理/重试。初次36方法中1失败2精度断言，诊断重跑1方法14断言失败，均保留。独立Python TIFF解析证明保存原值33.868812345/151.209312345正确，ImageIO字典回读会舍入；现复用原TIFF reader校验原始有理数，测试独立解析保持1e-8，ImageIO显示另验1e-6。失败成片和crop-gps-raw-diagnostic.json已保留，非放宽原始精度。
+
+N03纯地区映射按大陆/港澳/TW/国际语义，NFKC只做比较不改显示拼写；134安卓字面样例+63组合+1000仅输出输入名称不变量。缓存32LRU，成功24h/空15s/错误5s，不缓存取消/超时/不可用；实际请求跟随新版安卓3s，排队不消耗预算；原AP禁止/NWPath默认路径政策保持。CLGeocoder取消主动结束continuation，晚回调隔离。最终location-place批56/56、TEST SUCCEEDED/exit0，含实际JPEG/native裁切、队列两入口、取消清理、原字段、缓存/网络门禁实际导出；不是全UI、物理相机/文件provider/真实地理网络验收。最新production/test哈希与三次日志入口location-place-verification.json，收尾已逐项复核当前哈希及20项追加Android输入一致。Xcodegen已更新，所有专项进程结束；B6确认Shutdown（清理时已关闭），FC8仍Booted未操作。下一阶段须用当前树继续。当前无新增提交，App仍1.98。
 
 ## 2026-10-22 等宽边框、效果查重及提示框同步与整体复查
 

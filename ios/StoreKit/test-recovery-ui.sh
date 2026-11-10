@@ -12,7 +12,7 @@ test_methods=(
     testLifetimePurchaseSurvivesImmediateAppRelaunch
     testLifetimePurchaseClosesAfterSystemAcknowledgement
     testPurchasedBadgeCelebratesWithoutReopeningPurchaseInBothSettings
-    testAnnualToLifetimeKeepsRenewalManagementAfterRelaunch
+    testAnnualRenewalShowsDateWithoutPurchaseOptionsAfterRelaunch
     testAppleSubscriptionManagementCancelsRenewalAndKeepsPaidTerm
     testPurchasePageLayoutInAllLanguages
     testFreeWorkbenchLocksWatermarkButAllowsFiltersAndFrames

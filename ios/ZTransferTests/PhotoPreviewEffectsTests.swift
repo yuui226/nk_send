@@ -198,13 +198,13 @@ final class PhotoPreviewEffectsTests: XCTestCase {
         XCTAssertTrue(photoEffectsEditorDraft(stored).photoFrameBorderEnabled)
         XCTAssertTrue(photoEffectsEditorDraft(stored).watermark.enabled)
     }
-    func testMissingSelectionUsesFirstFilterWithoutEnablingItOrChangingStore() throws {
+    func testMissingSelectionDoesNotInventBundledFilterOrDiscardImportedMemory() throws {
         var stored = PhotoEffectsSettings()
-        let first = try XCTUnwrap(PhotoFilterCatalog.presets.first)
+        let first = try XCTUnwrap(TestPhotoFilterCatalog.presets.first)
         stored.filterIntensities[PhotoEffectsSettings.filterKey(first.id)] = 64
         let draft = photoEffectsEditorDraft(stored)
-        XCTAssertEqual(draft.selectedFilter?.preset.id, first.id)
-        XCTAssertEqual(draft.selectedFilter?.intensityPercent, 64)
+        XCTAssertNil(draft.selectedFilter)
+        XCTAssertEqual(draft.filterIntensities[PhotoEffectsSettings.filterKey(first.id)], 64)
         XCTAssertFalse(draft.photoFilterEnabled)
         XCTAssertNil(stored.selectedFilter)
     }

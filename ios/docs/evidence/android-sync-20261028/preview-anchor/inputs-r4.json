@@ -1,0 +1,11 @@
+{
+  "ios/ZTransfer/Domain/PhotoPreviewAnchorGeometry.swift": "8af2ebe9f571325697865cff47865aa46c1e0a79ea5af8eae08a0957352ddd3b",
+  "ios/ZTransfer/Domain/PhotoPreviewImageGeometry.swift": "2de4969e53080d84a22250b0010608754208c3dd127a6382d5535c3d9c65251f",
+  "ios/ZTransfer/Domain/PhotoPreviewPresentationClock.swift": "457d6ee39fe72b365a5cad52515486a878d895d3cc8b07fd8c82f9d04e1822fb",
+  "ios/ZTransfer/UI/Components/PhotoPreviewAnchorPresentation.swift": "cf13f1f2d39280541dad1b3491e9326ca54bb3c8b5afaeb50aee10e987f78fc3",
+  "ios/ZTransfer/UI/PhotoListView.swift": "9f801a6cdfd5f552ddf9d422d0f455f5247614df9b649acae1d4e45eabeb56cf",
+  "ios/ZTransfer/UI/PhotoPreviewView.swift": "738b8a714c221ed00f9d640fa514f568ba1ce1ae5341fc60afd8a0050b40d423",
+  "ios/ZTransferTests/PhotoPreviewAnchorGeometryTests.swift": "6fa4135fefe60bab13709786de09c5e9265cf5279ad9357956c673529b3c460e",
+  "ios/ZTransferTests/DomainModelTests.swift": "506bf612a3200e998429b7249251a284e0e86a78f9ef55413ac31808394f808e",
+  "ios/ZTransferTests/PhotoListScrollActivityTests.swift": "d75a71aea9f135c94cb5677b66d383f5cf989e5682b20c676bb7bb17a6a5a1f0"
+}

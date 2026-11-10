@@ -41,9 +41,23 @@ struct PictureControlSlotInfo: Identifiable, Equatable, Sendable {
     let availability: PictureControlSlotAvailability
     var name: String? = nil
     var hasOriginal = false
+    let selectable: Bool
+    init(slot: Int, availability: PictureControlSlotAvailability, name: String? = nil,
+         hasOriginal: Bool = false, selectable: Bool? = nil) {
+        self.slot = slot; self.availability = availability; self.name = name
+        self.hasOriginal = hasOriginal; self.selectable = selectable ?? (availability == .occupied)
+    }
     var id: Int { slot }
     var number: Int { slot - 200 }
     var readable: Bool { availability == .occupied || availability == .empty }
+    var editable: Bool { readable && (availability == .empty || selectable) }
+}
+private struct PictureControlCommandError: Error, LocalizedError {
+    let responseCode: UInt16
+    let operation: UInt16
+    var errorDescription: String? {
+        String(format: "Picture Control op=0x%04X failed: 0x%04X", operation, responseCode)
+    }
 }
 struct PictureControlOverview: Equatable, Sendable {
     let slots: [PictureControlSlotInfo]
@@ -96,7 +110,7 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
         let response = try await pictureControlExchange(exchange, sessionCheck: sessionCheck, log: log,
             code: code, parameters: parameters, data: data)
         guard response.code == 0x2001 else {
-            throw NikonPictureControlError.invalid(String(format: "Picture Control op=0x%04X failed: 0x%04X", code, response.code))
+            throw PictureControlCommandError(responseCode: response.code, operation: code)
         }
         return response.data
     }
@@ -104,11 +118,21 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
         try await NikonPictureControlSelection(command(0x1014, [property]), property: UInt16(property))
     }
     func prepareSelection() async throws {
+        try await prepareAccess(allowEmptyRegistration: false)
+    }
+    private func prepareAccess(allowEmptyRegistration: Bool) async throws {
         selectionPrepared = false; writePrepared = false; selection = nil
         try require(Set<UInt16>([0x1014, 0x1015, 0x1016, 0x90CC]).isSubset(of: operations),
                     "Camera does not advertise Picture Control activation")
         let descriptor = try await selectionDescriptor()
-        try require(descriptor.writable && descriptor.supportsSlot(slot), "Camera does not expose writable C\(slot - 200)")
+        try require(descriptor.writable, "Camera does not expose writable Picture Control selection")
+        // Android 431132ca: D200/D237 enumerate selectable entries, not slot
+        // capacity. Only a successful empty-slot read permits registration.
+        if !descriptor.supportsSlot(slot) {
+            try require(allowEmptyRegistration, "Camera does not expose selectable C\(slot - 200) or a verified empty slot")
+            let current = try await readData(item: slot, defaultFlag: 0)
+            try require(current.isEmpty, "Camera does not expose selectable C\(slot - 200) or a verified empty slot")
+        }
         let program = try await readU16(0x500E)
         let userMode: Int?
         if NikonPictureControlExposure.needsUserMode(program) {
@@ -122,9 +146,9 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
         selection = descriptor; selectionPrepared = true
     }
     func prepare(dataset: Data? = nil) async throws {
-        writePrepared = false
+        writePrepared = false; selectionPrepared = false; selection = nil
         try require(writeOperations.isSubset(of: operations), "Camera does not advertise Picture Control editing")
-        try await prepareSelection()
+        try await prepareAccess(allowEmptyRegistration: true)
         if let dataset {
             let parsed = try NikonPictureControlData(item: slot, responseCode: 0x2001, data: dataset, format: format)
             try require(selection?.choices.contains(parsed.baseItem) == true, "Camera does not support this base Picture Control")
@@ -145,22 +169,22 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
         var slots: [PictureControlSlotInfo] = []
         for item in NikonPictureControlData.customSlots {
             let hasOriginal = (try? backup.load(identity: cameraIdentity, slot: item)) != nil
-            guard descriptor.supportsSlot(item) else {
-                log?("C\(item - 200) UNSUPPORTED: absent from selection descriptor")
-                slots.append(.init(slot: item, availability: .unsupported)); continue
-            }
             do {
                 let current = try await readData(item: item, defaultFlag: 0)
-                log?("C\(item - 200) \(current.isEmpty ? "EMPTY" : "OCCUPIED name=\(current.name)")")
+                let selectable = !current.isEmpty && descriptor.supportsSlot(item)
+                log?("C\(item - 200) \(current.isEmpty ? "EMPTY" : "OCCUPIED name=\(current.name)") selectable=\(selectable)")
                 slots.append(.init(slot: item, availability: current.isEmpty ? .empty : .occupied,
-                                   name: current.isEmpty ? nil : current.name, hasOriginal: hasOriginal))
+                                   name: current.isEmpty ? nil : current.name, hasOriginal: hasOriginal, selectable: selectable))
             } catch is CancellationError { throw CancellationError() }
             catch let error as PTPSessionError { throw error }
             catch let error as CameraTransportError { throw error }
             catch let error as URLError { throw error }
             catch {
-                log?("C\(item - 200) READ_FAILED: \(type(of: error)): \(error.localizedDescription)")
-                slots.append(.init(slot: item, availability: .unreadable, hasOriginal: hasOriginal))
+                let unsupported = (error as? PictureControlCommandError).map {
+                    [UInt16(0x2005), 0x2006, 0x201D].contains($0.responseCode)
+                } ?? false
+                log?("C\(item - 200) \(unsupported ? "UNSUPPORTED" : "READ_FAILED"): \(type(of: error)): \(error.localizedDescription)")
+                slots.append(.init(slot: item, availability: unsupported ? .unsupported : .unreadable, hasOriginal: hasOriginal))
             }
         }
         return PictureControlOverview(slots: slots, selected: selected,
@@ -205,7 +229,10 @@ actor NikonPictureControlAccess: PictureControlSlotAccess {
     func readSelection() async throws -> Int { try await readU16(property) }
     func select(_ value: Int) async throws {
         try require(selectionPrepared, "Picture Control selection was not prepared")
-        try require(selection?.choices.contains(value) == true, "Invalid Picture Control selection")
+        // Registration, deletion and rollback may change the descriptor.
+        let descriptor = try await selectionDescriptor()
+        try require(descriptor.writable, "Picture Control selection is no longer writable")
+        try require(descriptor.choices.contains(value), "Invalid Picture Control selection")
         _ = try await command(0x1016, [property], Data([UInt8(truncatingIfNeeded: value), UInt8(truncatingIfNeeded: value >> 8)]))
     }
     private func require(_ condition: Bool, _ message: String) throws {

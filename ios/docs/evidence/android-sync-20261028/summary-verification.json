@@ -1,0 +1,1218 @@
+{
+  "tasks": [
+    "N08"
+  ],
+  "androidTarget": "18145b3aa14be55b97b44c277a420816505f46f7",
+  "iosBase": "58d9b6ed81c8f92e155b4402f8b05e88fda421ed",
+  "runs": [
+    {
+      "log": "/tmp/ztransfer-sync-summary-20261028.log",
+      "logSHA256": "6a6d92554a6d1c52a57540d39c4dea6ed05a14c932e57b6d9c610bf4047d664e",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-tests.log",
+      "retainedLogSHA256": "08d5d8ddd2952f5544f7078de87edbb532f722d83e08bdbc1d62d7c4e6510356",
+      "xcresult": "/tmp/ztransfer-sync-summary-20261028.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": []
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-fixed-20261028.log",
+      "logSHA256": "8ef211d4f9c9480a1f9e2f7a5fefe750cd3085661efbc83654141e7e00a06be5",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-fixed-tests.log",
+      "retainedLogSHA256": "2e74fa2ed497fac179815c900287117f532b08a06fc305d3285c7eb724f4764b",
+      "xcresult": "/tmp/ztransfer-sync-summary-fixed-20261028.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": []
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-host-20261028.log",
+      "logSHA256": "4c8945f28229b035480a11fb9e69d7498653790e8e339266877d3715c5b51544",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-host-tests.log",
+      "retainedLogSHA256": "586c2ccde588cd78b6596b7e0cd41fff3ca28ef70f30a8b7650f4e60d9d5c0c8",
+      "xcresult": "/tmp/ztransfer-sync-summary-host-20261028.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": [
+        {
+          "name": "QueueConfirmationLayoutTests testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens",
+          "result": "failed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation",
+          "result": "failed"
+        },
+        {
+          "name": "QueueSummaryTests testDownloadFillHoldConflatesFastOwnersAndUsesFinalStatistics",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testDownloadNeverBorrowsWrongProgressOrCompletesFailureAndHiddenDisplaySnaps",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testFastGenerationHistoryRemainsBoundedAndNeverReplaysInvisibleCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationFailureSkipMissingAndRetryNeverReplaySuccess",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationMotionExactTimingsAndLowerExitTravel",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationRowsHoldSuccessfulFirstThenMoveBoundedQueueUp",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testHiddenChecksAndPrefetchedSuccessHaveNoVisibleLifecycle",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testIndependentCountsAndPriorityNeverInventDownloadsOrFutureEffects",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testPausedAndTerminalStatesDoNotRetainWrongFileOrClock",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testPendingCheckAndLegacyCropProtectionDoNotDoubleCount",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testSecondRowSuccessNeverDisplacesRunningFirstRow",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testStableSummaryGeometryDoesNotUseCountsOrQueueActivity",
+          "result": "failed"
+        },
+        {
+          "name": "QueueSummaryTests testSummarySpeedIdentityRetentionAndIdleClearing",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-scene-20261028.log",
+      "logSHA256": "10a29117519286388322efa1a0832922968928efe5fc8f0ce19762e51bed09ac",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-scene-tests.log",
+      "retainedLogSHA256": "912866e84baaa91cf7fd6c3f31af87e76a85f9645a0bcdc0d683a658313d0f55",
+      "xcresult": "/tmp/ztransfer-sync-summary-scene-20261028.xcresult",
+      "exitCode": 0,
+      "result": "failed",
+      "tests": [
+        {
+          "name": "QueueConfirmationLayoutTests testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens",
+          "result": "failed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation",
+          "result": "failed"
+        },
+        {
+          "name": "QueueSummaryTests testDownloadFillHoldConflatesFastOwnersAndUsesFinalStatistics",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testDownloadNeverBorrowsWrongProgressOrCompletesFailureAndHiddenDisplaySnaps",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testFastGenerationHistoryRemainsBoundedAndNeverReplaysInvisibleCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationFailureSkipMissingAndRetryNeverReplaySuccess",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationMotionExactTimingsAndLowerExitTravel",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationRowsHoldSuccessfulFirstThenMoveBoundedQueueUp",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testHiddenChecksAndPrefetchedSuccessHaveNoVisibleLifecycle",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testIndependentCountsAndPriorityNeverInventDownloadsOrFutureEffects",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testPausedAndTerminalStatesDoNotRetainWrongFileOrClock",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testPendingCheckAndLegacyCropProtectionDoNotDoubleCount",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testSecondRowSuccessNeverDisplacesRunningFirstRow",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testStableSummaryGeometryDoesNotUseCountsOrQueueActivity",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testSummarySpeedIdentityRetentionAndIdleClearing",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-active-20261028.log",
+      "logSHA256": "2fd36c652762d7a6b38e355e513c9698d59718284db632468aab7a28e077cd10",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-active-tests.log",
+      "retainedLogSHA256": "47df9beb90a1cdb1107e9fc4b71b19b6643bff5673ec4fac5ea7b710b86f3ee3",
+      "xcresult": "/tmp/ztransfer-sync-summary-active-20261028.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": [
+        {
+          "name": "QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens",
+          "result": "failed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-render-20261028.log",
+      "logSHA256": "037467f0b321eb0b5ac2438ff62b4253f6313d2a13ccad97583c4e6ba2a6a8d5",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-render-tests.log",
+      "retainedLogSHA256": "07a54905883f54be31b37bbd1f456821dfa205234be2d3b8ab4f60f4457bf3e1",
+      "xcresult": "/tmp/ztransfer-sync-summary-render-20261028.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": [
+        {
+          "name": "QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens",
+          "result": "failed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-input-20261028.log",
+      "logSHA256": "0e70a4f25682f4b1012482e42db90a5d7896f015f80922c947b2368efe95d213",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-input-tests.log",
+      "retainedLogSHA256": "ed2c300b5b074a021da5ca9a203f0c3b2814dbeee2d564d0e675301ed0561d13",
+      "xcresult": "/tmp/ztransfer-sync-summary-input-20261028.xcresult",
+      "exitCode": 0,
+      "result": "passed",
+      "tests": [
+        {
+          "name": "QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-final-20261028.log",
+      "logSHA256": "a81492107e6f11d407acc129246e28e97baaa6071efd55bab4288f20f3fe0378",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-final-tests.log",
+      "retainedLogSHA256": "8266fcdd72113c2089c5d4da783f7b7a2898743abeb916731ac71b1b0a5708b7",
+      "xcresult": "/tmp/ztransfer-sync-summary-final-20261028.xcresult",
+      "exitCode": 65,
+      "result": "failed",
+      "tests": []
+    },
+    {
+      "log": "/tmp/ztransfer-sync-summary-verified-20261028.log",
+      "logSHA256": "9bcf72ff6c33ec7c37f4eabafca95196c768a8a33afee4146e4a49db4fee7a9a",
+      "retainedTestLog": "ios/docs/evidence/android-sync-20261028/summary-verified-tests.log",
+      "retainedLogSHA256": "c7274b72d884fccd7400af6f679a840993eba322f5a569b82ea2af9d5044a86d",
+      "xcresult": "/tmp/ztransfer-sync-summary-verified-20261028.xcresult",
+      "exitCode": 0,
+      "result": "passed",
+      "tests": [
+        {
+          "name": "DomainModelTests testQueuePillCountRetainsIntermediateNumbersAndReusesReversal",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testQueuePillCountSlideUsesIntegerHalfHeightAndOutlivesFade",
+          "result": "passed"
+        },
+        {
+          "name": "DomainModelTests testTransferTitleFitsStemAndPreservesExtensionAndStyles",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testAllOriginalPathsContinueSecondDownloadWhileCropIsBlocked",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testBlockedParserDoesNotBlockDownloadsAndBudgetFailureKeepsOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testCloseDropsPendingSpoolButRetainsActiveParserUntilItReturns",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testClosingGenerationPreservesActiveCropPublicationAndDropsWaitingCrop",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testCropAndPlainEffectShareOneComputeSlot",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testCropReceivesItsPreparedCameraLocationForBothRecipeRoutes",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testCropWaitsForMetadataThenAccumulatesCropAndEffectTime",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testDisabledGateStillSavesCropAndMarksOnlyEffectsSkipped",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testDuplicatePendingRequestsShareFailedReadWithoutCachingFailure",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testEffectFailureRetryReusesPublishedCropWithoutRepeatingCrop",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testEnablingDuringCropPausesForMetadataAndResumesWithoutRecropping",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testExifDateFallsBackToTIFFThroughBothConsumers",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testFailureAndWorkerTimeExistingOutputHaveNoCompletedGenerationDuration",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testFiveSecondsPreparationThenHalfSecondRenderRecordsOnlyHalfSecond",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testOneFailedRenderDoesNotLoseAnotherSharedPreparationWaiter",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testPhotoExifFormattingMatchesAndroidAndFrameMetadata",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testRuntimeSwitchSkipsOnlyWaitingWorkAndReenableRetainsRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testSecondRenderDoesNotCountFirstWorkersFiveSeconds",
+          "result": "passed"
+        },
+        {
+          "name": "PhotoMetadataPipelineTests testSkippedComputationsCannotGrowBlockedPreparationPastCapacity",
+          "result": "passed"
+        },
+        {
+          "name": "QueueConfirmationLayoutTests testFixedFABsAndLocalAnchorThroughOpenCancelConfirmAndReentry",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testActualCardsStayEqualHeightAcrossIdleBusyAndCompletedOnNarrowAndWideScreens",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testProductionQueueKeepsSummaryAboveHistoryOnPortraitAndCompactLayouts",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryLayoutTests testRunningLeafClocksDoNotRebuildSummaryGroupAndUnmountStopsAmbientAnimation",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testDownloadFillHoldConflatesFastOwnersAndUsesFinalStatistics",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testDownloadNeverBorrowsWrongProgressOrCompletesFailureAndHiddenDisplaySnaps",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testFastGenerationHistoryRemainsBoundedAndNeverReplaysInvisibleCompletion",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationFailureSkipMissingAndRetryNeverReplaySuccess",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationMotionExactTimingsAndLowerExitTravel",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testGenerationRowsHoldSuccessfulFirstThenMoveBoundedQueueUp",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testHiddenChecksAndPrefetchedSuccessHaveNoVisibleLifecycle",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testIndependentCountsAndPriorityNeverInventDownloadsOrFutureEffects",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testPausedAndTerminalStatesDoNotRetainWrongFileOrClock",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testPendingCheckAndLegacyCropProtectionDoNotDoubleCount",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testSecondRowSuccessNeverDisplacesRunningFirstRow",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testStableSummaryGeometryDoesNotUseCountsOrQueueActivity",
+          "result": "passed"
+        },
+        {
+          "name": "QueueSummaryTests testSummarySpeedIdentityRetentionAndIdleClearing",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testAlreadyUsedRootDoesNotStartDestructiveCleanupLater",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testBatchDeduplicatesHandlesButSeparateClicksCreateNewAttempts",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testBatchRemovalRetainsNewRetriedAndActiveTasksAndPublishesFinalOrder",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancellationAfterCropPublicationRetainsCompletedOriginalAndPublishedCrop",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledAndFailedGenerationReleaseSingleSlotForFollowingPhoto",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledCropAcknowledgementDoesNotCreateTask",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCancelledStartupWaiterExitsWithoutCancellingSharedCleanupOrBlockingAnotherRoot",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCleanupPreservesCurrentFrameFilesAndRemovesOldFilesInActualFrameFolders",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearCannotRemoveGenerationThatFinishesDuringAnimation",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearCoordinatorUsesCapturedSelectionWhenWorkCompletesDuringFade",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearingDirectoryRetainsActiveAndWaitingFrameScopesThroughSuccessAndFailure",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClearSelectionSurvivesDownloadCompletionNewTasksAndRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClosingGenerationCancelsActiveComputeAndPreparingPhotoWithoutLatePublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testClosingGenerationClearsPreparingAndPendingWorkAndIgnoresLateMetadata",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCompleteStillPartialCannotBePublishedByOfflineQueue",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCompleteVideoPartialIsRenamedBeforeCameraStateAndRecheckedAsLocalOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testCropFailureKeepsOriginalAndCanRetryDerivedWorkOffline",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredCropOrientationFailureRetainsSelectionAndRecoversOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredCropRetryReusesPublishedCropBeforeReadingOriginal",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeferredSelectionResolvesOriginalAfterOfflinePublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDeniedScopeIsNeverStoppedAndStoreDeinitBalancesSuccessfulScope",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDetachDoesNotReuseOldCameraAndReconnectRetryUsesNewOne",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDirectorySelectionChangeRetainsActiveDownloadScopeUntilPublication",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testDisabledEffectRetryPublishesItsImmediateSkipToObservers",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testExecutionControlRequiresWaitingWorkIncludingReservedHandoff",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testExistingOriginalFrameFailureCanRetryOfflineWithLockedEffects",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testFramesUseSingleWorkerAndClearProtectsActiveAndWaitingRenders",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationAdmissionProofAndPendingLifecycleMatchAndroid",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationCapacityRejectsOverflowAndRetrySucceedsAfterSlotsAreReleased",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testGenerationRetryKeepsOriginalDestinationAndMetricsWhileDownloadsPaused",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testIdentityPreparationAlsoCannotHoldOriginalDownloadPipeline",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testInvalidDestinationClearsQueueDirectoryAndDoesNotRestartOnRetry",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testInvalidTypeFoldersFailBeforeFilesystemOrCameraAccessAndValidTaskContinues",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLastFileHidesPauseWithoutInterruptingWorkerAndNewWaitingTaskRestoresIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLateCardRemovalCannotWithdrawActiveTransferButWaitingCardCanLeave",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLatestTaskIndexIgnoresStatusAndUUIDOrdering",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testLUTRetryKeepsEnqueuedAdjustmentsAfterEditorChanges",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testMemoryBudgetFailurePreservesOriginalAndRetriesLockedRecipe",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testNewDownloadRemainsCompletedWhenOnlyItsFrameFails",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testOfflineLocalHitAndMissingOriginalNeverPublishFalseDownloadState",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testPauseWaitsForCurrentFileAndRetryCannotReleaseIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testPreparingPhotoConsumesCapacityWithoutBlockingLaterOriginalDownload",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueActionEligibilityTracksActivityGenerationAndDepartingCards",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueCardErrorsOverrideEffectsAndWatermarkUsesItsOwnLabel",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueuedLUTSurvivesEditorReplacementPruneAndCacheEviction",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testQueueGenerationWaitingDistinguishesPreparingRunningPausedAndSkipped",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testReselectedDirectoryCanRetryWithoutHistoricalErrorInvalidatingIt",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testRestoredCleanupBlocksProductionQueueAndCannotRunAgainOverLivePart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testResumeUnavailableDeletesPartAndUsesAndroidFailureText",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testRetryKeepsCardPositionButExecutesAfterAlreadyPendingTasks",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSafeFolderLengthBoundaryIsAcceptedByActualWorker",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSlowMetadataPreparationDoesNotBlockLaterDownloadAndCapturedHeaderGeneration",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testSlowSnapshotSubscribersReceiveLatestStateWithoutBacklog",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testUnknownQueueSizeRetainsActualBytesAfterDownloadAndLocalHit",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelLatestTaskTracksQueuePublicationsWithdrawalAndRemoval",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelManualOfflineSingleBatchAndDeferredStart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testViewModelOfflineCropStartsImmediatelyOrAfterExplicitStart",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testWarmAdmissionShowsUniqueWaitingWorkButHidesSameSourceDuplicate",
+          "result": "passed"
+        },
+        {
+          "name": "TransferQueueScenarioTests testWithdrawAndRetryAllExcludeCardsAlreadyLeaving",
+          "result": "passed"
+        }
+      ]
+    }
+  ],
+  "images": [
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-320-idle.png",
+      "sha256": "27a0f40ce1fbfdcb1593ccc44e44a84b122def04a75eea16b2f1ea967e19a187",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-320-idle.png",
+      "inspected": true
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-320-busy.png",
+      "sha256": "0640ea0b7ba563315fd329c417ebec5909683880f6f40fb493c47b865aceba55",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-320-busy.png",
+      "inspected": true
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-600-idle.png",
+      "sha256": "426d87739ae8787996a827806acd3090cfba88c046b0d776efb8727c73023344",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-600-idle.png",
+      "inspected": true
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-600-busy.png",
+      "sha256": "18d1954092a54e068037baa7d61208fad7caedc198f612d0ba5455eb94a4cafa",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-600-busy.png",
+      "inspected": true
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-page-390-empty.png",
+      "sha256": "8678db4e2d836f3d6ba068d2caf0454769400c245cb7b10e515bd33da7c5d1d5",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-page-390-empty.png",
+      "inspected": true
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-page-390-waiting.png",
+      "sha256": "80dac4b0a95b8489b217f4e58c59caae43f6c589713dd600c4fd72273afcdf04",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-page-390-waiting.png",
+      "inspected": true
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-page-600-empty.png",
+      "sha256": "adbe8296a59922a35e019c293d70b435701ad9c1bdff3362f4f8cff076e1c4d8",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-page-600-empty.png",
+      "inspected": true
+    },
+    {
+      "path": "ios/docs/evidence/android-sync-20261028/queue-summary-page-600-waiting.png",
+      "sha256": "17685c9536073e5e1d9a16cd9319739c457eb6046b7bb3d7156945820cc5b042",
+      "source": "/Users/orys/Library/Developer/CoreSimulator/Devices/B6B4E291-173A-4BFE-BB9C-2D1F62643C49/data/Containers/Data/Application/8A206641-38A3-4743-81F5-820315006F19/tmp/queue-summary-page-600-waiting.png",
+      "inspected": true
+    }
+  ],
+  "sourceHashes": {
+    "ios/ZTransfer/Domain/TransferQueue.swift": "cada1db4018bf400f5d660f954dbdf3307b4ad262f08a4da2c699103099134e4",
+    "ios/ZTransfer/Domain/TransferQueuePresentation.swift": "01ac890704624b3f9e40338b5848b1e7d033eb8858dc7ca9048e0015c579ca5f",
+    "ios/ZTransfer/UI/Components/QueueSummaryMotion.swift": "bacbdffb5d68153f9019413be765d1e6d5d4e0aef4608ad5572a5b57283762ed",
+    "ios/ZTransfer/UI/Components/TransferQueueStatusCards.swift": "393bc65e39632b186f3693e5c1bc002e51e71f528f57f33680055128f36b467c",
+    "ios/ZTransfer/UI/Components/TransferFileTitle.swift": "0a9eef1c729432b22b6322d31768f94b4ea553c1a79c48d998a328cace36e0f4",
+    "ios/ZTransfer/UI/TransferQueueView.swift": "16ed10afb04e584fa84b03414a39c7c14f66671b855020d2ec0baf36a9c0e85e",
+    "ios/ZTransfer/UI/PhotoListView.swift": "22baffe714e75a5ddc0a8ebeacae4bbd4f0d1ab8ffcef4e39a72f1b5fac05a00",
+    "ios/ZTransfer/App/AndroidLocalization.swift": "7d52b3b7fdd01ee5332ac013720cec40ab0d30df96a56c163f97aa0dbee0cad9",
+    "ios/ZTransferTests/QueueSummaryTests.swift": "b48c469c4c074baf964864037e2e8d99f449dfae413f2b64e5a368bbc62568a6",
+    "ios/ZTransferTests/QueueSummaryLayoutTests.swift": "9e605604da40e03a9984770af9daf0e091239c3a433b77d1d2498369c91e755d",
+    "ios/ZTransferTests/DomainModelTests.swift": "943c6aee3a2cdec2b963aff8a3ff8e0dcb6cd477abe58f5e7d8310b5a9f8df29"
+  },
+  "androidSourceHashes": {
+    "app/src/main/java/com/ztransfer/ui/screen/TransferQueuePresentation.kt": "3df83bc102aad9bd4bb6a3ad26d1168fb59fa4e7511f57c502dbd76e95ab9c33",
+    "app/src/main/java/com/ztransfer/ui/screen/TransferQueueStatusCards.kt": "42dd482db7e1aec2d55a6ef1d1f9c901a511b43c0e9b3836309b03f54b5de185",
+    "app/src/main/java/com/ztransfer/ui/screen/QueueDownloadDisplay.kt": "dc6b62c785663ac4c4ffe6cb029ce189520aa48d191dc2faabbb9899498dc9c3",
+    "app/src/main/java/com/ztransfer/ui/screen/QueueSummarySpeed.kt": "d77ac94866b13753e0f486dbd07be6b4e1c1fad8f07146fb4e993c7395d93680",
+    "app/src/main/java/com/ztransfer/ui/screen/GenerationQueueRows.kt": "4cee5a87ea21b21ef0eced30029d631725a7672155428dbc27a1c2360238c8cb",
+    "app/src/main/java/com/ztransfer/ui/screen/AmbientBreathing.kt": "edbb993a7348d8fe5cd2ac8d64a6a9f359dbfa6f4da9d424911a6b9cdee04e09",
+    "app/src/main/java/com/ztransfer/ui/screen/TransferScreen.kt": "3a64ee6d1c3d3a736d81b5d1f736202691df98b63bec6de405fcb8e4b6f51f16",
+    "app/src/test/java/com/ztransfer/ui/screen/TransferQueuePresentationTest.kt": "1ef055a9f58dea2b3815969107890080c12b669c26882e1e2af85c2c75e96d07",
+    "app/src/test/java/com/ztransfer/ui/screen/GenerationQueueRowsTest.kt": "b7c6a0867245f1ecca5cc6a8f47fb31628867ea0c29b369b81e874ab124b8920",
+    "app/src/test/java/com/ztransfer/ui/screen/QueueDownloadDisplayTest.kt": "1ad59d334daea1c9fff32df262a747239c6e64333758c3b48f5f58898674ad8c",
+    "app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt": "0d86eca04ad867ec8481bfa27bc49fe47e6bff07520c4551b347986a52d9152f"
+  },
+  "distinctPassedMethods": 98,
+  "finalRunTests": 98,
+  "scope": [
+    "Two permanent status cards integrated as first scrolling item, independent counts/identities/order and captured exclusions",
+    "Bounded generation row hold/exit/upward motion, download 120ms fill plus 40ms conflated handoff, hidden/idle clock lifecycle",
+    "Monotonic attempt ordinal while preserving UUID, actual enqueue/retry and crop/metadata regression",
+    "Eight real component/page layer captures inspected; 200ms/wave/activity work does not rebuild group"
+  ],
+  "limitations": [
+    "Simulator controlled fixtures; no Kotlin execution, physical camera, on-device performance, full UI or VoiceOver acceptance",
+    "Layer captures do not verify live Metal shadow/blur pixels; geometry and production component hierarchy are exercised",
+    "Existing fixed font metrics retained; geometry function separately covers larger line metrics",
+    "N09 capsule and N10 history-card transitions remain unfinished; shared download motion is currently wired only to summary card"
+  ],
+  "diagnostics": [
+    "First compile lacked private icon access; then new UI fixture actor/renderer signature errors",
+    "Host without UIWindowScene made black captures; scene phase must be set active in fixture",
+    "Real host revealed old-self captures in onChange causing one-update lag and a centered generation viewport; inputs made atomic and top alignment fixed",
+    "Production-page fixture needed separate UserDefaults instance at actor boundary",
+    "Scene run tool exit was 0 but TEST FAILED; recorded as failed, never accepted"
+  ]
+}

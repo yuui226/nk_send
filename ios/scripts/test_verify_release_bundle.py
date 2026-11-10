@@ -87,6 +87,15 @@ class RemovedAssetPackagingTests(unittest.TestCase):
                 finally:
                     resource.rmdir()
 
+    def testCompiledRetiredPhoneFilterMarkerIsRejected(self):
+        for marker in ("photo_filter_builtin_forest_verdure",
+                       "0d277cf79b6f91dbb70849a34a61d8fbc3a471838731267c3874d2c50061602d"):
+            with self.subTest(marker=marker):
+                (self.app / "Synthetic").write_bytes(marker.encode())
+                code, report = self.check()
+                self.assertEqual(code, 1, report)
+                self.assertTrue(any("phone-filter marker" in error for error in report["errors"]), report)
+
 
 if __name__ == "__main__":
     unittest.main()

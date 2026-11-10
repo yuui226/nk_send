@@ -1,0 +1,929 @@
+{
+  "tasks": "N16 actual two-entry NP3 chooser; N17/N18 partial adjustment UI and source handoff",
+  "androidTarget": "dfd66a20c739342fafbd927659e815e2d499e5ea",
+  "runs": [
+    {
+      "session": 70249,
+      "exitCode": 65,
+      "count": 0,
+      "log": "/tmp/ztransfer-np3-ui-20261030.log",
+      "logSHA256": "fb24685c4c8705b3b991ccced09867808635ab0787084d75ed5aff6d072ba102",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-ui-r1-tests.log",
+      "retainedLogSHA256": "4c131c04396c9a4b42977b2227267c85b18b1fdade0e0d4fdace15bc22c19f11",
+      "xcresult": "/tmp/ztransfer-np3-ui-20261030.xcresult",
+      "tests": []
+    },
+    {
+      "session": 5864,
+      "exitCode": 0,
+      "count": 21,
+      "log": "/tmp/ztransfer-np3-ui-20261030-r2.log",
+      "logSHA256": "99aba4b2984cb97e9912adfc2b3ee9775fe42d387df39c4f06d8395a650b3766",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-ui-r2-tests.log",
+      "retainedLogSHA256": "c712831c04b822bdbb9ac7a2b9ffc56392886f024595f99e7942ce8537cb9118",
+      "xcresult": "/tmp/ztransfer-np3-ui-20261030-r2.xcresult",
+      "tests": [
+        [
+          "ZTransferTests.ModalPresentationTests testSettingsAndChooserDimWholePagerAndPhotoListViewport",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testBothRolesCarryNewSourceToTheirCorrectCommitBoundary",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testDirectoryReplacementClearsOpenDraftAndItsRememberedCustomControls",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFolderHintCancellationAndNativePickerResumeDoNotScan",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFreshPresentationRestoresOwnerInsteadOfReusingClosedState",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testParameterSnapshotInvalidatesOldWheelDragWithoutRecreatingTheWheel",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testRetainedInactivePageRejectsPickerAndLateReadThenRefreshesOnReturn",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testSameContentBuiltinSelectionDropsDocumentSourceAndKeepsAdjustmentMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoGrainControlTests testActualSharedGrainControlsThreeLanguagesAndThemes",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoGrainControlTests testTwoWheelRowHasBothChildrenAndKeepsThreeChildLayout",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "session": 31420,
+      "exitCode": 0,
+      "count": 27,
+      "log": "/tmp/ztransfer-np3-ui-20261030-r3.log",
+      "logSHA256": "53fc78701efe79d5c600f061b98406ffda9f0f39221b16b765ebc4325e3d963e",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-ui-r3-tests.log",
+      "retainedLogSHA256": "a4dc133d07f0d5abca88e66acf8e9e0981fb3a0ebc5947ae2326b79701ec8c11",
+      "xcresult": "/tmp/ztransfer-np3-ui-20261030-r3.xcresult",
+      "tests": [
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testActualTransferAndLocalPagesUseSourceAndKeepTheirCommitBoundaries",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testBothRolesCarryNewSourceToTheirCorrectCommitBoundary",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testDirectoryReplacementClearsOpenDraftAndItsRememberedCustomControls",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFolderHintCancellationAndNativePickerResumeDoNotScan",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFreshPresentationRestoresOwnerInsteadOfReusingClosedState",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testParameterSnapshotInvalidatesOldWheelDragWithoutRecreatingTheWheel",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testRetainedInactivePageRejectsPickerAndLateReadThenRefreshesOnReturn",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testSameContentBuiltinSelectionDropsDocumentSourceAndKeepsAdjustmentMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testBothEntriesRestoreTheirOwnRecipeAndControlMemoryWithoutSourceIO",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testBothPrivateRecipesAreAvailableBeforePreferenceIDValidation",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testCorruptOneRoleDoesNotDiscardOtherRoleFrameOrMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testGlobalReplacementClearsInactiveLocalPreferencesAndLiveTransferButNotCapturedTask",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testNewerValidSelectionCannotBeOverwrittenByOldDirectoryDraft",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testOffRetainsRecipeAndControlsAndSameDirectoryDoesNotClearThem",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testReplacementPreservesBuiltinControlsAndOtherEffectsWhileClearingDetachedCustomMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testTransferAppliedControlsStaySeparateFromRememberedDraftAcrossRestart",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "session": 47511,
+      "exitCode": 0,
+      "count": 30,
+      "log": "/tmp/ztransfer-np3-ui-20261030-r4.log",
+      "logSHA256": "eb0cb3088066807a48472209d6ebf015c7b8cca3425e20ec5acb9c0cadfeded6",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-ui-r4-tests.log",
+      "retainedLogSHA256": "fb269c92b339146ed42dad9147c7a381063c08ad8cb500d72af1055b1366c360",
+      "xcresult": "/tmp/ztransfer-np3-ui-20261030-r4.xcresult",
+      "tests": [
+        [
+          "ZTransferTests.ModalPresentationTests testSettingsAndChooserDimWholePagerAndPhotoListViewport",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testActualTransferAndLocalPagesUseSourceAndKeepTheirCommitBoundaries",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testBothRolesCarryNewSourceToTheirCorrectCommitBoundary",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testDirectoryReplacementClearsOpenDraftAndItsRememberedCustomControls",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFolderHintCancellationAndNativePickerResumeDoNotScan",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFreshPresentationRestoresOwnerInsteadOfReusingClosedState",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testNP3ResourcesResolveThroughTheActualAppLookupInAllThreeLanguages",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testOldNativePickerCannotMutateOrDismissNextPresentation",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testParameterSnapshotInvalidatesOldWheelDragWithoutRecreatingTheWheel",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testRetainedInactivePageRejectsPickerAndLateReadThenRefreshesOnReturn",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testSameContentBuiltinSelectionDropsDocumentSourceAndKeepsAdjustmentMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testBothEntriesRestoreTheirOwnRecipeAndControlMemoryWithoutSourceIO",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testBothPrivateRecipesAreAvailableBeforePreferenceIDValidation",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testCorruptOneRoleDoesNotDiscardOtherRoleFrameOrMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testGlobalReplacementClearsInactiveLocalPreferencesAndLiveTransferButNotCapturedTask",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testNewerValidSelectionCannotBeOverwrittenByOldDirectoryDraft",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testOffRetainsRecipeAndControlsAndSameDirectoryDoesNotClearThem",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testReplacementPreservesBuiltinControlsAndOtherEffectsWhileClearingDetachedCustomMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testTransferAppliedControlsStaySeparateFromRememberedDraftAcrossRestart",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "session": 30915,
+      "exitCode": 0,
+      "count": 34,
+      "log": "/tmp/ztransfer-np3-ui-20261030-r5.log",
+      "logSHA256": "4eae6eb5585307ecd97f3366b139d03b25945ba271384d1646e9d830a76dce41",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-ui-r5-tests.log",
+      "retainedLogSHA256": "6dc9c6a80f46392c59bc17f15be218f1fdc81d2f175e6aed44cf6998f1109733",
+      "xcresult": "/tmp/ztransfer-np3-ui-20261030-r5.xcresult",
+      "tests": [
+        [
+          "ZTransferTests.ModalPresentationTests testSettingsAndChooserDimWholePagerAndPhotoListViewport",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testActualTransferAndLocalPagesUseSourceAndKeepTheirCommitBoundaries",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testBothRolesCarryNewSourceToTheirCorrectCommitBoundary",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testDirectoryReplacementClearsOpenDraftAndItsRememberedCustomControls",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testDisclosureSurvivesInactivePagerButResetsOnDisabledFilter",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFolderHintCancellationAndNativePickerResumeDoNotScan",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFreshPresentationRestoresOwnerInsteadOfReusingClosedState",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testImportedFavoriteSurvivesOwnerNormalizationAndReload",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testNP3ResourcesResolveThroughTheActualAppLookupInAllThreeLanguages",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testOldNativePickerCannotMutateOrDismissNextPresentation",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testParameterSnapshotInvalidatesOldWheelDragWithoutRecreatingTheWheel",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testRetainedInactivePageRejectsPickerAndLateReadThenRefreshesOnReturn",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testSameContentBuiltinSelectionDropsDocumentSourceAndKeepsAdjustmentMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoGrainControlTests testActualSharedGrainControlsThreeLanguagesAndThemes",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoGrainControlTests testTwoWheelRowHasBothChildrenAndKeepsThreeChildLayout",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testBothEntrypointsRetainAcceptedLUTWhenCandidateOrReplacementFails",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCatalogIndexSurvivesRecipeLoadingAndSameScanButInvalidatesChangedFilesAndFavorites",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testChooserHeightIsBoundedAndEmptyCatalogDoesNotReserveAFullSheet",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testCloseAndOffInvalidateQueuedSelectionForBothEntrypoints",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFavoritesUseStableCatalogOrderAndAreSharedAcrossRoles",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testFolderPickerCancellationRefreshesButAccessFailurePreservesRecipeAndReportsDenied",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testMissingPrivateSnapshotDoesNotExposeInactiveLUTControlsAndCanBeReselected",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testProductionEffectsWindowCommitsLUTAndNP3MemoryTogetherOnDismissal",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testReopeningRefreshesSameRoleWithoutCopyingOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testSuccessfulRescanClearsMissingSelectionButKeepsOtherRole",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoLUTEditorStateTests testTransferLUTSelectionRemainsDraftWhileWorkbenchSavesImmediately",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testBothEntriesRestoreTheirOwnRecipeAndControlMemoryWithoutSourceIO",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testBothPrivateRecipesAreAvailableBeforePreferenceIDValidation",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testCorruptOneRoleDoesNotDiscardOtherRoleFrameOrMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testGlobalReplacementClearsInactiveLocalPreferencesAndLiveTransferButNotCapturedTask",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testNewerValidSelectionCannotBeOverwrittenByOldDirectoryDraft",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testOffRetainsRecipeAndControlsAndSameDirectoryDoesNotClearThem",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testReplacementPreservesBuiltinControlsAndOtherEffectsWhileClearingDetachedCustomMemory",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoNp3OwnerTests testTransferAppliedControlsStaySeparateFromRememberedDraftAcrossRestart",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "session": 27652,
+      "exitCode": 0,
+      "count": 14,
+      "log": "/tmp/ztransfer-np3-ui-20261030-r6.log",
+      "logSHA256": "d5bde31bcc514b78fe7f0299cc5663c68990cb9d4d4197fee38266ace10b0294",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-ui-r6-tests.log",
+      "retainedLogSHA256": "83187e7490a178c9d1eed8ea520aaf2cd0ec736442370d6a4b49b0198f0c55e9",
+      "xcresult": "/tmp/ztransfer-np3-ui-20261030-r6.xcresult",
+      "tests": [
+        [
+          "ZTransferTests.ModalPresentationTests testSettingsAndChooserDimWholePagerAndPhotoListViewport",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testActualPopupReopeningUsesFreshSessionAndHiddenModuleDoesNotScan",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testActualTransferAndLocalPagesUseSourceAndKeepTheirCommitBoundaries",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testBothRolesCarryNewSourceToTheirCorrectCommitBoundary",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testDirectoryReplacementClearsOpenDraftAndItsRememberedCustomControls",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testDisclosureSurvivesInactivePagerButResetsOnDisabledFilter",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFolderHintCancellationAndNativePickerResumeDoNotScan",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testFreshPresentationRestoresOwnerInsteadOfReusingClosedState",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testImportedFavoriteSurvivesOwnerNormalizationAndReload",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testNP3ResourcesResolveThroughTheActualAppLookupInAllThreeLanguages",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testOldNativePickerCannotMutateOrDismissNextPresentation",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testParameterSnapshotInvalidatesOldWheelDragWithoutRecreatingTheWheel",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testRetainedInactivePageRejectsPickerAndLateReadThenRefreshesOnReturn",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterEditorSessionTests testSameContentBuiltinSelectionDropsDocumentSourceAndKeepsAdjustmentMemory",
+          "passed"
+        ]
+      ]
+    },
+    {
+      "session": 30111,
+      "exitCode": 0,
+      "count": 2,
+      "log": "/tmp/ztransfer-np3-ui-20261030-r7.log",
+      "logSHA256": "35d7c8d7b141cc4c8b81e34d3a2527a6bc682b99df038cf56f26b47f2c577084",
+      "retainedLog": "ios/docs/evidence/android-sync-20261028/np3-ui-r7-tests.log",
+      "retainedLogSHA256": "b65b46928d8b3e67a674e335fe83297234685c69911e2bb8d916d27840ac10d2",
+      "xcresult": "/tmp/ztransfer-np3-ui-20261030-r7.xcresult",
+      "tests": [
+        [
+          "ZTransferTests.PhotoFilterCategoryParityTests testAllFiftyCategoriesMatchAndroidFallbackMetadata",
+          "passed"
+        ],
+        [
+          "ZTransferTests.PhotoFilterCategoryParityTests testChooserFavoritesPositionAndOffPreserveRecipe",
+          "passed"
+        ]
+      ]
+    }
+  ],
+  "uniquePassedMethods": 37,
+  "sourceSHA256": {
+    "ios/ZTransfer/UI/PhotoFilterEditorSession.swift": "76275a3012b5548317695d0ed3ea08b1a1f7a56eb1a7eeb7917b9658f9ff00d4",
+    "ios/ZTransfer/UI/PhotoNP3Chooser.swift": "0a4d36ed9c22345b094f4be3f6dfba2e465af04d2055175e5ebca02259a3b847",
+    "ios/ZTransfer/UI/PhotoEffectChooserDialog.swift": "ec49785a475a7e6df7b7ee60de453c0b068abd5f9ec2e4336a275ce16669dac7",
+    "ios/ZTransfer/UI/SettingsPopupOverlay.swift": "3bd8b36432c212ab03777a0a51eca623d93bdeea5be60e302b3bcb03a52846b9",
+    "ios/ZTransfer/UI/SettingsView.swift": "137cb316a0b3f111b9ef2bc1b669a1a11456360e763523104fc2c2ded0599bd8",
+    "ios/ZTransfer/UI/LocalPhotoEffectsView.swift": "2673094224811fa5820b7cc31ca84373da74db8ac4ccf1c8a04e860f74a6091a",
+    "ios/ZTransfer/UI/PhotoEffectsEditorView.swift": "594ef6af65c2fbffb881ca923ddbe3c53e2d7a5b543e2b22c14df14fbed68959",
+    "ios/ZTransfer/UI/Components/DetentWheel.swift": "e11858e642cedf3aa6d37979e35b1c19de6f3f386f69cf45ce83bdd335f91c86",
+    "ios/ZTransfer/UI/Components/PhotoEffectsSettingsHarness.swift": "829f68c6ed7c919a60d5b0b27e33eb17b30f9257a63bcc9bd87389494bc1e64c",
+    "ios/ZTransfer/Domain/PhotoEffects.swift": "c79b2638d1cd4a87d6b3422053908c346b46cc673fe5078f63aa03484daca71d",
+    "ios/ZTransfer/Domain/PhotoNp3EditorState.swift": "78746dd8f8ee115f0bfe3c4dffed0c6f65470ca36828c96fa83c8520d062a348",
+    "ios/ZTransfer/Domain/PhotoFilterCatalogIndex.swift": "bbf7ffce9b5498c63554d9e2f1102ab853622859f6f71509e3cee2f85f225d38",
+    "ios/ZTransfer/Domain/PhotoFilterPreferences.swift": "9b2d865ffb76b5aec4ec1e5bf7454657423ac25f86efe1545db216c4aa75751a",
+    "ios/ZTransfer/App/RootView.swift": "870b0c64340fc2d27380d78e330f275a1ad56f448f84f7181df4aba6c0e7ecef",
+    "ios/ZTransfer/App/AndroidLocalization.swift": "8d455442cedad76949b8a9bffd7a9d86c284c7317abf07188f39ca6d3f3aec64",
+    "ios/ZTransferTests/PhotoFilterEditorSessionTests.swift": "f88a09caff648d29ce145d605e99094eb463b12e7fbb14f99eecd4759ea54af5",
+    "ios/ZTransferTests/PhotoLUTEditorStateTests.swift": "c2fb91237a10ea02ef42d3a38c7631fcc57e979ce83063bfae0442df66572a33",
+    "ios/ZTransferTests/PhotoGrainControlTests.swift": "b83ad581d2e430f06b749c44b8f6018b9fd9b8afdc488270aa86e0737c69465f",
+    "ios/ZTransferTests/ModalPresentationTests.swift": "0f953b1104cd76a774783007c251250458f891f7545df9c5bb9f8aeef53b5efb",
+    "ios/ZTransferTests/DomainModelTests.swift": "0104b10fa228974449379b1f0f2c65a9d01161bffb168de8402053e27fc199f3",
+    "ios/ZTransfer/Resources/en.lproj/Localizable.strings": "d65eb8ba4f4d8be1f831e0d8b8f00c0a0f62306ef5d043d1db8c25d0e98d0112",
+    "ios/ZTransfer/Resources/zh-Hans.lproj/Localizable.strings": "5d1ae1506bb4cfbe5bbc9a380f224ae3fe59feee953f4079917d8f2fa9b8a6d0",
+    "ios/ZTransfer/Resources/zh-Hant.lproj/Localizable.strings": "2036cb638e3fd01ccd7f76f67a4e4f624d706f21b6584fa71a1c525f6d9b1087"
+  },
+  "androidSourceSHA256": {
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoFilterEditor.kt": "6fb5d6128524fa40e79ba9dc66f63b7f80002ecdf9704b0c6c7d9316a1d30abe",
+    "app/src/main/java/com/ztransfer/ui/screen/PhotoColorAdjustmentControls.kt": "1253cb19ad3e95a335a40df21a8617fcf9ce28bde17384ac8c369b15cf2f871f",
+    "app/src/main/java/com/ztransfer/ui/screen/LutCategoryList.kt": "8488583e679d700abb92163c2faf68e716f1b5daf6e7b0151fe900de5e49ec14",
+    "app/src/main/java/com/ztransfer/ui/screen/SettingsScreen.kt": "a892f5e95344d51f12ae8a69190321d60c13f24cca6bb32accdbd7e9fef19b9c",
+    "app/src/main/java/com/ztransfer/ui/screen/LocalPhotoEffectsOverlay.kt": "1146526c869d9abda6433fe6db3cdef44419707358b0a1d1317ad7b287ab1c87",
+    "app/src/androidTest/java/com/ztransfer/ui/screen/PhotoNp3EditorInstrumentation.kt": "a628f1b771465ad978f48b8f37ad6d910b7ac2e8ebecf93f8e3e6642fb5d4ac8",
+    "app/src/main/java/com/ztransfer/effects/PhotoEffectFavorites.kt": "27ac8a1e50467bf70997948f3ec02b7084ff08312064a96532fe05bd8960b916",
+    "app/src/main/res/drawable/ic_monitor_rotate.xml": "318a03290f2c2917e0b9487213cb3dc3ce8ef26f6b0caa494c1c69f40f56175f",
+    "app/src/main/res/values/photo_np3.xml": "e076a42680fee1090ad20b886a008fd1782e73da7df3bee2305ded99c1362246",
+    "app/src/main/res/values/strings.xml": "ebef3f7de9cf309624b6bda166d54d6759cb742ddaeb30b5d6a8e8c126c29b10",
+    "app/src/main/res/values-zh/photo_np3.xml": "745e0b344a139cfd4864ef3ae27a58f9aede341d69801a1c4c33e37dbc5d5806",
+    "app/src/main/res/values-zh/strings.xml": "b19ec55c12233542823911a45ca36bd21b95a134c57a8f869c1790d1b9649e7c",
+    "app/src/main/res/values-b+zh+Hant/photo_np3.xml": "424b729d3526d849842c17def57a90ca7de92bd8c485992f459e59493fbf7527",
+    "app/src/main/res/values-b+zh+Hant/strings.xml": "0cb31036060f1cf6d2fe106de74f566f488e29dbbb16fbae3b54f3efb91d467a"
+  },
+  "screenshots": [
+    {
+      "run": 3,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r3-np3-local-hint.png",
+      "sha256": "1944287fb741eacfe7eab6947ac257888e53a8e334dcd3c80f3d1ee140b11217",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "9C1674B4-8621-40D4-819C-6E63B092B837.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-hint_0_3E0BB27F-476B-4C6D-B370-FECD5E618BAB.png",
+        "timestamp": 1793367802.696
+      }
+    },
+    {
+      "run": 3,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r3-np3-local-chooser.png",
+      "sha256": "b8b21fb9a656010f2ea655599bf6ab6eb9254d30e92814ccae9d7b46c96f6b85",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "C5A254F1-3C01-4440-881B-2684B45E6AFC.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-chooser_0_DF6C04FE-8D40-4968-9EFE-9C808ECD5554.png",
+        "timestamp": 1793367802.562
+      }
+    },
+    {
+      "run": 3,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r3-np3-local-controls.png",
+      "sha256": "744ad809d44c55f23946715e8d3d007218c178452ebe36765d8c88fbeee94b5b",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "4D7687A3-C475-4F0A-9FAD-F17161647FE8.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-controls_0_2537F74B-9F5C-4654-BC54-6F18F1FD9AD5.png",
+        "timestamp": 1793367801.787
+      }
+    },
+    {
+      "run": 3,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r3-np3-transfer-hint.png",
+      "sha256": "084a00dcbf9fbf7d9db2a85922636ddaceb19daf0d997c3525e2f3d82c8d7d5a",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "C1CF03DA-3646-445A-8631-90E76C5D687D.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-hint_0_1B06963D-6573-44BB-A800-F38CBB025D87.png",
+        "timestamp": 1793367800.851
+      }
+    },
+    {
+      "run": 3,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r3-np3-transfer-chooser.png",
+      "sha256": "51acd39e60f17aed6e0dfc30b069bba5c739bef4f37d24d1ea79e39978553a54",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "46BD470E-FA1A-4910-B09D-2CB05C9C2DFF.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-chooser_0_6C8D9A27-1324-4445-895C-EFC51E615D1C.png",
+        "timestamp": 1793367800.639
+      }
+    },
+    {
+      "run": 3,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r3-np3-transfer-controls.png",
+      "sha256": "ad557a09f572d79225eac9c8ac00e99b85a758908c62465ec591b3b7d966afc5",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "A825CD17-33B3-42AE-AC0C-5A7DFB362CEF.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-controls_0_1E6D6E91-7969-4280-B7C4-9D6F09FF6246.png",
+        "timestamp": 1793367799.814
+      }
+    },
+    {
+      "run": 4,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r4-np3-local-hint.png",
+      "sha256": "2653ba562999cf1a54eb3e21bc1157930597c7db2344da1be78aca16ed9b822d",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "A3F37366-DDF9-441A-9394-3CD1091FA427.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-hint_0_5021037D-C129-4AD9-BCA9-8761C3E8D278.png",
+        "timestamp": 1793368140.923
+      }
+    },
+    {
+      "run": 4,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r4-np3-local-chooser.png",
+      "sha256": "da6ca9287d0c4c93d8b4c2bd7433637f4d5a62b5c7df010ddef6ad072ed64f57",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "8D2586A8-C608-4913-8E69-F38D1AAE2DD9.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-chooser_0_A2BEA31A-AA35-4DB6-AF86-356BA545AB4B.png",
+        "timestamp": 1793368140.78
+      }
+    },
+    {
+      "run": 4,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r4-np3-local-controls.png",
+      "sha256": "c22c989305df0c4704ebba4ffaf44f8d6c27750a4e932bb1d6be5d7afc1d136c",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "EF12F0BB-2A9F-40AB-8793-4333FCBF353B.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-controls_0_3C564A9B-7248-454C-A1F4-80FD8D111A43.png",
+        "timestamp": 1793368140.138
+      }
+    },
+    {
+      "run": 4,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r4-np3-transfer-hint.png",
+      "sha256": "7ff82e676b5145c69e465b65346fbe489c9f658ab5c0bd5ae65e7c65402a171e",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "239CA4FE-4B81-4521-83C5-B27E066DC76F.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-hint_0_5EFDBF67-484F-4547-B9CF-690DA364EC2D.png",
+        "timestamp": 1793368139.255
+      }
+    },
+    {
+      "run": 4,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r4-np3-transfer-chooser.png",
+      "sha256": "f08ba4ac52610e9e6f71ea5bee9da17fdbe6f65e228d188e9875b7e08cde96d9",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "EA735570-5CDD-4BD2-85B3-94CA07A525BA.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-chooser_0_72BBFE82-E0BA-4AF4-B277-62D709E9688E.png",
+        "timestamp": 1793368139.033
+      }
+    },
+    {
+      "run": 4,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r4-np3-transfer-controls.png",
+      "sha256": "7e8387212f7f4030fb7a9df03f362046bd1f457f182f6ecf486ad76e1e229540",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "7F9802B3-B53B-4925-BCD3-430FB5BD3067.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-controls_0_B977CD09-F671-4293-903E-CF9D1098179C.png",
+        "timestamp": 1793368138.323
+      }
+    },
+    {
+      "run": 6,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r6-np3-local-hint.png",
+      "sha256": "7d679df19bcf5dbbefed9de114298228c92b0e0d0d60691e543930bcbb81951a",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "B82F0DB2-887A-4745-A998-651C98E8B40C.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-hint_0_C9F272C1-ACDE-434C-A435-89875ECB0416.png",
+        "timestamp": 1793368627.208
+      }
+    },
+    {
+      "run": 6,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r6-np3-local-chooser.png",
+      "sha256": "8bd38ee7e0daac387c3aeb5594b58c48e0e5995d6ab77b572f554f421e57bdb2",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "004DF92A-EE58-4D76-91B8-7AE848A8FB9E.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-chooser_0_3BBE3A6E-EEC3-4E47-837A-E90ACAA0F7E4.png",
+        "timestamp": 1793368627.04
+      }
+    },
+    {
+      "run": 6,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r6-np3-local-controls.png",
+      "sha256": "ced87b490ba566044d6153b7e1b6269da3ee3e56c844ad4b39106da3f489f5b4",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "6B563A51-E184-44DD-B71C-BFD130AB13A6.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-local-controls_0_9FD4E1D1-5E66-41E3-9535-204B56D0E9CD.png",
+        "timestamp": 1793368626.453
+      }
+    },
+    {
+      "run": 6,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r6-np3-transfer-hint.png",
+      "sha256": "2efd372621a6dc64f766a3612577f17228e5f728902430a44a63dd2f1f9c0a90",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "C484E806-6717-48A2-AD1A-0404489270E9.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-hint_0_B4DE4CA8-5FE3-4759-B617-400015A2CC37.png",
+        "timestamp": 1793368625.677
+      }
+    },
+    {
+      "run": 6,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r6-np3-transfer-chooser.png",
+      "sha256": "5250d95d2dff834c42e024367417f12139a000ebacae7ac1c40ebd9a86eed496",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "246CAE14-11B3-49B8-8000-99C232AF95C4.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-chooser_0_136452F0-A02A-48B2-8DA5-36B437FDB4C9.png",
+        "timestamp": 1793368625.465
+      }
+    },
+    {
+      "run": 6,
+      "path": "ios/docs/evidence/android-sync-20261028/np3-ui-r6-np3-transfer-controls.png",
+      "sha256": "c13a4c57fce2536e98e1f766a9751598bfab99e60805c3ee9184cee77ac34465",
+      "xcresultAttachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "B6B4E291-173A-4BFE-BB9C-2D1F62643C49",
+        "deviceName": "ZTransfer-Prelaunch-StandardPhone",
+        "exportedFileName": "62511451-C0CF-4645-AF9E-6DBC4E318A69.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "np3-transfer-controls_0_C4FAA7FB-2891-4985-977B-AAEF87551CDE.png",
+        "timestamp": 1793368624.824
+      }
+    }
+  ],
+  "coverage": [
+    "Actual SettingsView and LocalPhotoEffectsView hosted in UIWindow; production callback/session selection saves transfer only on close, local immediately. Provider is injected; native Files selection was not exercised.",
+    "Actual SettingsPopupOverlay close/reopen refreshes fresh source states; hidden filter module issues zero scans.",
+    "Session cancellation, native picker resume/cancellation, stale picker generation, source/builtin identity, off/disclosure retention, directory clearing and imported favorite normalization/reload.",
+    "All three languages resolve 19 keys through AppLocalized.",
+    "Per-snapshot gesture identity rejects an old drag. Restored adjustment 9 is retained with next detent 5. No synthetic touch drag in this phase.",
+    "Existing LUT editor/owner/grain/whole-viewport modal tests pass; obsolete chooser/state removed, category parity test uses production catalog."
+  ],
+  "findings": [
+    "r1 compile failed because ModalPresentationTests referenced removed chooser; updated to new production presentation.",
+    "r3 tests passed but screenshot inspection exposed raw resource keys. Added AndroidLocalization.byResource and lookup assertions before r4.",
+    "r5 adds disclosure reset across inactive retained pages and custom favorite persistence.",
+    "r6 verifies real popup generation and hidden-module IO gate.",
+    "r7 verifies both category parity tests after deleting obsolete chooser state.",
+    "Simulator temporary screenshots expired after later test installations. Recovered original kept attachments from xcresult; names and hashes recorded."
+  ],
+  "remaining": [
+    "N15 final URI/Unicode ordering",
+    "N17 animation/preview and shared LUT parameter UI completion",
+    "N18 final parameter interaction review with N17",
+    "N19 per-file LUT preferences",
+    "N20 shared favorite migration/store",
+    "N22-N25 remaining tasks"
+  ],
+  "notRun": [
+    "Android instrumentation",
+    "Native system Files/cloud provider UI",
+    "Phone/camera",
+    "CPU/FPS/energy measurements",
+    "Full UI suite"
+  ],
+  "noInstallCommitPush": true
+}
