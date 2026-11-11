@@ -1,8 +1,0 @@
-{
-  "ios/ZTransfer/Domain/PhotoPreviewAnchorGeometry.swift": "8af2ebe9f571325697865cff47865aa46c1e0a79ea5af8eae08a0957352ddd3b",
-  "ios/ZTransfer/Domain/PhotoPreviewPresentationClock.swift": "457d6ee39fe72b365a5cad52515486a878d895d3cc8b07fd8c82f9d04e1822fb",
-  "ios/ZTransfer/DesignSystem/ZTransferAndroidMotion.swift": "4487d44e8132d41c8be9adf3f3fece0a9697aff6233a1cc1cc0c84d4fccf7d48",
-  "ios/ZTransfer/DesignSystem/ZTransferAndroidMath.swift": "c4f7843eea31f171b80548ba1709b5112b487343c7e380ec89588d6271ea9f65",
-  "ios/ZTransfer/DesignSystem/ZTransferScalarAnimation.swift": "e67472d6b26a8443086202579a37a1f53dc539fed5f07c0fe0e6fc58c7e87640",
-  "ios/ZTransferTests/PhotoPreviewAnchorGeometryTests.swift": "5070795b175e0448686fcd46cc96a171934bdd5411dc529281bfb49371f9d805"
-}

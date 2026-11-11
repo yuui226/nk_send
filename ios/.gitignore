@@ -3,3 +3,6 @@
 DerivedData/
 *.xcuserstate
 xcuserdata/
+
+# Historical verification logs, screenshots, and hashes. Not part of the app.
+docs/evidence/

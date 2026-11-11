@@ -1,4 +1,0 @@
-/Users/orys/code/nk_send/ios/ZTransferTests/QueueSummaryLayoutTests.swift:110:25: error: sending 'defaults' risks causing data races [#RegionIsolation::SendingRisksDataRace]
-    |                         |- error: sending 'defaults' risks causing data races [#RegionIsolation::SendingRisksDataRace]
-Test session results, code coverage, and logs:
-** TEST FAILED **

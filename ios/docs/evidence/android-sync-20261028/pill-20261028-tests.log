@@ -1,5 +1,0 @@
-/Users/orys/code/nk_send/ios/ZTransfer/UI/PhotoListView.swift:2376:61: error: cannot convert value of type 'Double' to expected argument type 'Float'
-     |                                                             `- error: cannot convert value of type 'Double' to expected argument type 'Float'
-Testing failed:
-	Testing cancelled because the build failed.
-** TEST FAILED **

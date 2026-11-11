@@ -1,5 +1,0 @@
-Debug 2.05(79) 20261108-115233
-BUILD SUCCEEDED; script exit0; 1 physical install succeeded, 0 failed.
-Build20s + package2s + install13s = 35s.
-Normal launch, temporary TCP audit removed; existing data retained.
-Physical STA acceptance pending unique camera IPv4 address.

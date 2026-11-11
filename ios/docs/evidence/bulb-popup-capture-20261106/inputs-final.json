@@ -1,9 +1,0 @@
-{
-  "ios/ZTransfer/UI/GeniePopupPanel.swift": "c9c33ab2b8335a60d8b3be9ac8030af3d87e94971a5e5aa5f6c7fb8d3fc0b709",
-  "ios/ZTransfer/UI/GeniePopupMotion.swift": "68d8466353a9139d6ea93386399eff5145b5c34fb3e49b85ab3deb96c75cd426",
-  "ios/ZTransfer/UI/Components/TipLightbulbButton.swift": "9aef14ed1033e21ae7e7ad97deb7c517c14ab71ff91cd653d58b98afc45618c5",
-  "ios/ZTransfer/DesignSystem/ZTransferColors.swift": "6590a0dfb069f1285e1ded74c7afe626331790e9a047655c0cf295d466ac252c",
-  "ios/ZTransfer/DesignSystem/ZTransferGlassSurface.swift": "f335b53f7f32587bdae7c5bbd9745041cb2d592bb2b7b9d1b8cac8a30c6edfa9",
-  "ios/ZTransferTests/DomainModelTests.swift": "1a85cc18d8766fdae9838fef21b4ea4573bc72cb86e232747f619c2ebff8c33f",
-  "ios/InteractionUITests/PhotoEffectsMasterUITests.swift": "8179066473f660cc4fc9e31bdced541a41e59a772bf544d24e06b6134fe9e785"
-}

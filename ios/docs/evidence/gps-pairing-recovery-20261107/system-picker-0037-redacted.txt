@@ -1,7 +1,0 @@
-2026-11-07 00:37:55.945 Df BTDevicePickerUI[8368:24ff92] [com.apple.bluetooth:BTDevicePickerUI] Searching for available paired devices
-2026-11-07 00:37:57.388 Df BTDevicePickerUI[8368:24ff92] [com.apple.bluetooth:BTDevicePickerUI] Insert device: <private> with address: <private> to device picker list
-2026-11-07 00:38:00.329 Df BTDevicePickerUI[8368:24ff92] [com.apple.bluetooth:BTDevicePickerUI] Received BluetoothDeviceConnectFailedNotification for device <private>
-2026-11-07 00:38:00.343 Df BTDevicePickerUI[8368:24ff92] [com.apple.bluetooth:BTDevicePickerUI] Present alert
-2026-11-07 00:38:00.775 Df BTDevicePickerUI[8368:24ff92] [com.apple.bluetooth:BTDevicePickerUI] BT device picker cancelled
-2026-11-07 00:38:00.775 Df ZTransfer[8362:24fe17] [com.apple.bluetooth:CoreBluetoothUI] Calling didDismissWithResult delegate
-2026-11-07 00:38:00.834 Df BTDevicePickerUI[8368:24ff92] [com.apple.bluetooth:BTDevicePickerUI] BT device picker cancelled

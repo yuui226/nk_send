@@ -1,8 +1,0 @@
-/Users/orys/code/nk_send/ios/ZTransferTests/PhotoNp3ParserTests.swift:109:47: error: call can throw but is not marked with 'try'
-    |                                               |- error: call can throw but is not marked with 'try'
-/Users/orys/code/nk_send/ios/ZTransferTests/PhotoNp3ParserTests.swift:109:56: error: call can throw but is not marked with 'try'
-    |                                                        |- error: call can throw but is not marked with 'try'
-/Users/orys/code/nk_send/ios/ZTransferTests/PhotoNp3ParserTests.swift:220:61: error: contextual type for closure argument list expects 1 argument, which cannot be implicitly ignored
-    |                                                             `- error: contextual type for closure argument list expects 1 argument, which cannot be implicitly ignored
-Testing failed:
-** TEST FAILED **

@@ -1,9 +1,0 @@
-STA TCP audit 2026-11-08T03:42:05Z host=<camera-ip>
-routes=[("<phone-ip>", 24)]
-BSD local=<phone-ip> command=false FAIL=system(61) elapsed=0.024521 seconds
-BSD local=<phone-ip> command=true FAIL=system(61) elapsed=0.124709708 seconds
-NW local=<phone-ip> FAIL=timeout elapsed=3.021871166 seconds
-BSD local=auto command=false FAIL=system(61) elapsed=0.073820084 seconds
-BSD local=auto command=true FAIL=system(61) elapsed=0.086127292 seconds
-NW local=auto FAIL=timeout elapsed=3.102070917 seconds
-finished; no PTP bytes sent

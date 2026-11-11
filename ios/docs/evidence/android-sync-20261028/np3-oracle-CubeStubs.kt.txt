@@ -1,8 +1,0 @@
-package com.ztransfer.filter
-internal class CubePhotoFilterParameters : PhotoFilterParameters { val mapper:PhotoCubeMapper get() = error("Cube excluded from NP3 oracle") }
-internal enum class PhotoLutExecution { KOTLIN }
-internal class PhotoCubeMapper {
- fun prepareBulk():PhotoLutExecution = error("Cube excluded from NP3 oracle")
- fun map(c:Int,s:Float,a:Boolean):Int = error("Cube excluded from NP3 oracle")
- fun mapRange(p:IntArray,f:Int,t:Int,s:Float,a:Boolean,e:PhotoLutExecution,c:()->Boolean):Unit = error("Cube excluded from NP3 oracle")
-}

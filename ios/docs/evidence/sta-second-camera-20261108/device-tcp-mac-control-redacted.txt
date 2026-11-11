@@ -1,9 +1,0 @@
-STA TCP audit 2026-11-08T03:44:18Z host=<mac-ip>
-routes=[("<phone-ip>", 24)]
-BSD local=<phone-ip> command=false OPEN elapsed=0.007947625 seconds
-BSD local=<phone-ip> command=true OPEN elapsed=0.006862125 seconds
-NW local=<phone-ip> OPEN elapsed=0.016514375 seconds
-BSD local=auto command=false OPEN elapsed=0.006891584 seconds
-BSD local=auto command=true OPEN elapsed=0.005716292 seconds
-NW local=auto OPEN elapsed=0.007493084 seconds
-finished; no PTP bytes sent

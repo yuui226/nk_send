@@ -1,8 +1,0 @@
-/Users/orys/code/nk_send/ios/ZTransferTests/TransferOriginalVerificationTests.swift:271:46: error: call to actor-isolated instance method 'snapshot()' in a synchronous nonisolated context [#ActorIsolatedCall]
-    |                                              `- error: call to actor-isolated instance method 'snapshot()' in a synchronous nonisolated context [#ActorIsolatedCall]
-/Users/orys/code/nk_send/ios/ZTransferTests/TransferOriginalVerificationTests.swift:271:34: error: 'await' in an autoclosure that does not support concurrency
-    |                                  `- error: 'await' in an autoclosure that does not support concurrency
-Test session results, code coverage, and logs:
-Testing failed:
-	Testing cancelled because the build failed.
-** TEST FAILED **

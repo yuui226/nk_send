@@ -1,7 +1,0 @@
-/Users/orys/code/nk_send/ios/ZTransferTests/PhotoFilterPreferencesTests.swift:80:19: error: call to main actor-isolated initializer 'init(defaults:)' in a synchronous nonisolated context [#ActorIsolatedCall]
-    |                   `- error: call to main actor-isolated initializer 'init(defaults:)' in a synchronous nonisolated context [#ActorIsolatedCall]
-/Users/orys/code/nk_send/ios/ZTransferTests/PhotoFilterPreferencesTests.swift:81:17: error: call to main actor-isolated instance method 'replaceFolder(_:bookmark:)' in a synchronous nonisolated context [#ActorIsolatedCall]
-    |                 `- error: call to main actor-isolated instance method 'replaceFolder(_:bookmark:)' in a synchronous nonisolated context [#ActorIsolatedCall]
-/Users/orys/code/nk_send/ios/ZTransferTests/PhotoFilterPreferencesTests.swift:85:13: error: call to main actor-isolated initializer 'init(defaults:scope:legacyDefaults:premiumAccess:lutStore:np3Store:)' in a synchronous nonisolated context [#ActorIsolatedCall]
-    |             `- error: call to main actor-isolated initializer 'init(defaults:scope:legacyDefaults:premiumAccess:lutStore:np3Store:)' in a synchronous nonisolated context [#ActorIsolatedCall]
-** TEST FAILED **

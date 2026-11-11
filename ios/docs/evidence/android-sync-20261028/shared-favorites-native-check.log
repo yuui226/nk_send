@@ -1,4 +1,0 @@
-PASS: migration order, detached NP3, malformed rejection, cross-instance publication, removal and folder-clear non-resurrection
-PASS: migration flag requires a real boolean true
-PASS: actual catalog normalizes original iOS JSON IDs without reimport
-PASS: global invalidations do not retain the store

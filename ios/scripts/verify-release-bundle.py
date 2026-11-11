@@ -85,7 +85,7 @@ if executable.is_file():
     # Retired phone filters were compiled parameters, not .np3 resources.
     # Check their stable catalog/name markers too. This complements the empty
     # catalog and migration tests; it does not establish third-party rights.
-    retired = ios / "docs/evidence/prepayment-20261102/retained-filter-sources.csv"
+    retired = ios / "scripts/retained-filter-sources.csv"
     with retired.open(newline="") as source:
         rows = list(csv.DictReader(source))
     require(len(rows) == 50, "Retired phone-filter manifest must contain 50 entries")

@@ -1,4 +1,0 @@
-/Users/orys/code/nk_send/ios/ZTransfer/UI/Components/TransferQueueStatusCards.swift:278:36: error: 'QueueWaitingClock' is inaccessible due to 'private' protection level
-    |                                    `- error: 'QueueWaitingClock' is inaccessible due to 'private' protection level
-Test session results, code coverage, and logs:
-** TEST FAILED **

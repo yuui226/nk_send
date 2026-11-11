@@ -1,5 +1,0 @@
-r1: 65, expected baseline failures (3 tests, 8 failures)
-r2: 0, 71 tests passed
-r3: 65, expected additional baseline failures (2 tests, 4 failures)
-r4: 143, interrupted test harness deadlock; not a pass
-r5: 0, 95 tests passed
