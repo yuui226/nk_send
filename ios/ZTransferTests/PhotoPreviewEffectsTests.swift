@@ -209,3 +209,125 @@ final class PhotoPreviewEffectsTests: XCTestCase {
         XCTAssertNil(stored.selectedFilter)
     }
 }
+
+/// The overlay must outlive a virtualized workbench page without presenting a
+/// blank UIKit controller.
+@MainActor
+final class PhotoEffectsExpandedPresentationTests: XCTestCase {
+    private func image(_ color: UIColor) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100)).image { context in
+            color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+        }
+    }
+
+    func testAcceptedImageSurvivesSourceReplacementAndRejectsUnrelatedComparison() {
+        let presentation = PhotoEffectsExpandedPresentation()
+        let accepted = image(.blue), next = image(.red), comparison = image(.green)
+        presentation.present(.init(image: accepted, initialComparison: nil, anchor: .zero), onDismiss: {})
+        presentation.updateComparison(image: next, unfiltered: comparison)
+        XCTAssertTrue(presentation.snapshot?.image === accepted)
+        XCTAssertNil(presentation.comparison)
+        presentation.updateComparison(image: accepted, unfiltered: comparison)
+        XCTAssertTrue(presentation.comparison === comparison)
+        presentation.updateComparison(image: accepted, unfiltered: nil)
+        XCTAssertNil(presentation.comparison)
+    }
+
+    func testDismissReleasesPixelsAndCallbackOnceThenAcceptsNewImage() {
+        let presentation = PhotoEffectsExpandedPresentation()
+        var callbacks = 0
+        weak var retainedImage: UIImage?
+        autoreleasepool {
+            let pixels = image(.blue)
+            retainedImage = pixels
+            presentation.present(.init(image: pixels, initialComparison: pixels, anchor: .zero)) { callbacks += 1 }
+        }
+        XCTAssertNotNil(retainedImage)
+        presentation.dismiss(); presentation.dismiss()
+        XCTAssertNil(presentation.snapshot); XCTAssertNil(presentation.comparison)
+        XCTAssertNil(retainedImage); XCTAssertEqual(callbacks, 1)
+        let next = image(.red)
+        presentation.present(.init(image: next, initialComparison: nil, anchor: .zero)) { callbacks += 1 }
+        XCTAssertTrue(presentation.snapshot?.image === next)
+        presentation.dismiss()
+        XCTAssertEqual(callbacks, 2)
+    }
+
+    private final class FixtureState: ObservableObject {
+        @Published var sourceVisible = true
+        var presentation: PhotoEffectsExpandedPresentation?
+        var sourceAppearances = 0
+        var sourceDisappearances = 0
+    }
+    private struct Source: View {
+        @Environment(\.photoEffectsExpandedPresentation) private var presentation
+        let state: FixtureState
+        var body: some View {
+            Color.clear.frame(width: 100, height: 100)
+                .onAppear { state.presentation = presentation; state.sourceAppearances += 1 }
+                .onDisappear { state.sourceDisappearances += 1 }
+        }
+    }
+    private struct Fixture: View {
+        @ObservedObject var state: FixtureState
+        var body: some View {
+            ZStack {
+                Color.red
+                if state.sourceVisible { Source(state: state) }
+            }
+            .photoEffectsExpandedPresentation()
+        }
+    }
+
+    private func centerPixel(_ window: UIWindow) throws -> [UInt8] {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let capture = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { context in
+            window.layer.render(in: context.cgContext)
+        }
+        let image = try XCTUnwrap(capture.cgImage)
+        let sample = try XCTUnwrap(image.cropping(to: CGRect(x: CGFloat(image.width / 2), y: CGFloat(image.height / 2), width: 1, height: 1)))
+        var bytes = [UInt8](repeating: 0, count: 4)
+        try bytes.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: 1, height: 1,
+                bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(sample, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        return bytes
+    }
+
+    func testLiveHostRetainsOverlayAfterSourceRemovalWithoutSystemModal() async throws {
+        let state = FixtureState()
+        let host = UIHostingController(rootView: Fixture(state: state))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
+        try await Task.sleep(for: .milliseconds(100))
+        let presentation = try XCTUnwrap(state.presentation)
+        let pixels = image(.blue)
+        presentation.present(.init(image: pixels, initialComparison: nil, anchor: .zero), onDismiss: {})
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertNil(host.presentedViewController)
+        XCTAssertEqual(state.sourceDisappearances, 0, "Opening must keep the source hierarchy alive")
+        state.sourceVisible = false
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(state.sourceDisappearances, 1)
+        XCTAssertTrue(presentation.snapshot?.image === pixels)
+        XCTAssertTrue(PopupDragBoundaryView.contains(window.center, in: window))
+        let expandedPixel = try centerPixel(window)
+        XCTAssertLessThan(expandedPixel[0], 20); XCTAssertGreaterThan(expandedPixel[2], 230)
+        presentation.dismiss()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(PopupDragBoundaryView.contains(window.center, in: window))
+        let returnedPixel = try centerPixel(window)
+        XCTAssertGreaterThan(returnedPixel[0], 230); XCTAssertLessThan(returnedPixel[2], 20)
+        XCTAssertNil(host.presentedViewController)
+        state.sourceVisible = true
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(state.sourceAppearances, 2)
+        XCTAssertTrue(state.presentation === presentation, "The host must survive pager cell replacement")
+    }
+}

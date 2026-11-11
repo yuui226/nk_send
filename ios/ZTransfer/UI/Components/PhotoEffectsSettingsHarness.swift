@@ -66,6 +66,7 @@ struct PhotoEffectsSettingsHarness: View {
                     photoFilterSession: usesImportedFixture ? filterLifetime.session : nil)
             }
         }
+            .photoEffectsExpandedPresentation()
             .overlay {
                 // The production SettingsPopupOverlay owns this outer host.
                 // Match it when injecting a session into the standalone harness.

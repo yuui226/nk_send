@@ -860,7 +860,7 @@ struct PhotoEffectsSettingsPreview: View {
     @State private var rotationQuarterTurns = 0
     @State private var expanded = false
     @State private var geometry = PhotoEffectsGeometrySnapshot()
-    @State private var expandedSnapshot: PhotoEffectsExpandedPreviewSnapshot?
+    @Environment(\.photoEffectsExpandedPresentation) private var expandedPresentation
 
     let sourceName: String
     init(source: UIImage?, metadata: PhotoFrameMetadata?, settings: PhotoEffectsSettings,
@@ -1094,30 +1094,24 @@ struct PhotoEffectsSettingsPreview: View {
         .overlay { PhotoEffectsImageInput(comparing: $showUnfiltered, comparisonEnabled: unfiltered != nil,
             onTap: { _ in
                 guard let displayed = geometry.presentedFrame else { return }
-                expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: displayed.image,
-                    initialComparison: displayed.comparison, anchor: geometry.previewAnchor)
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { expanded = true }
+                guard let expandedPresentation else { return }
+                expanded = true
+                expandedPresentation.present(.init(image: displayed.image,
+                    initialComparison: displayed.comparison, anchor: geometry.previewAnchor)) {
+                    expanded = false
+                }
             }, onDoubleTap: { _ in
                 guard !expanded, geometry.presentedFrame != nil else { return }
                 rotationQuarterTurns = (rotationQuarterTurns + 1) % 4
             }) }
-        .fullScreenCover(isPresented: $expanded, onDismiss: { expandedSnapshot = nil }) {
-            if let expandedSnapshot {
-                PhotoEffectsExpandedPreview(image: expandedSnapshot.image,
-                    comparison: expandedSnapshot.comparison(image: rendered, unfiltered: unfiltered),
-                    initialAnchor: expandedSnapshot.anchor) {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { expanded = false }
-                }
-            }
+        .onChange(of: unfiltered) { _ in
+            expandedPresentation?.updateComparison(image: rendered, unfiltered: unfiltered)
         }
         .onDisappear {
-            if !expanded {
-                completeCache.close(); intermediateCache.close(); comparisonCache.close(); rotatedSourceCache.close()
-            }
+            // The inline overlay keeps this source mounted while previewing.
+            // A real removal must stop its render work even if the retained
+            // expanded snapshot is still finishing its close animation.
+            completeCache.close(); intermediateCache.close(); comparisonCache.close(); rotatedSourceCache.close()
         }
 
         // Android keys the 2200 ms camera-source grace to the page/source,
@@ -1274,7 +1268,7 @@ struct PhotoEffectsExpandedPreview: View {
 
 
     var body: some View {
-        GeometryReader { proxy in
+        GeometryReader { _ in
             ZStack {
                 Color.black.opacity(0.74 * presentationProgress).ignoresSafeArea()
                 PhotoEffectsExpandedImageSurface(image: image, comparison: comparison,
@@ -1287,35 +1281,20 @@ struct PhotoEffectsExpandedPreview: View {
                     closing: closing
                 ))
 
-                Text(AppLocalized.resource("photo_effects"))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85 * presentationProgress))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 52)
-                    .padding(.top, proxy.safeAreaInsets.top + 12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-
-                Button {
+                PreviewCircleButton(icon: .rotateLeft, accessibilityKey: "cd_rotate_photo") {
                     interaction.rotate()
-                } label: {
-                    Image(systemName: "rotate.left")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 48, height: 48)
-                        .background(.black.opacity(0.45), in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 1))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(AppLocalized.resource("cd_rotate_photo"))
+                .disabled(closing)
                 .opacity(presentationProgress)
                 .padding(.trailing, 20)
-                .padding(.bottom, proxy.safeAreaInsets.bottom + 32)
+                .padding(.bottom, photoPreviewControlsBottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .allowsHitTesting(!closing)
+            // Consume touches during collapse as well; never pass a drag to
+            // the workbench pager or editor below the overlay.
+            .background { PopupDragBoundary() }
         }
         .statusBarHidden(true)
         .onDisappear { closeTask?.cancel(); closeTask = nil }

@@ -74,6 +74,9 @@ struct PreviewReviewTouchObserver: UIViewRepresentable {
 /// accepts only touches beginning in this page, leaving single-finger paging alone.
 struct PreviewPinchObserver: UIViewRepresentable {
     let enabled: Bool
+    // Single-photo effects have no paging gesture to yield to. Preserve the
+    // first contact when its zero-distance SwiftUI drag wins before finger 2.
+    var retainsTouchesForPinch = false
     let onActive: (Bool) -> Void
     let onChange: (CGFloat, CGPoint, CGSize) -> Void
 
@@ -81,6 +84,7 @@ struct PreviewPinchObserver: UIViewRepresentable {
     func updateUIView(_ view: Marker, context: Context) {
         view.onActive = onActive
         view.onChange = onChange
+        view.recognizer.retainsTouchesForPinch = retainsTouchesForPinch
         if !enabled { view.recognizer.clearTracking() }
         view.recognizer.isEnabled = enabled
     }
@@ -118,6 +122,15 @@ struct PreviewPinchObserver: UIViewRepresentable {
 
     final class TouchTransform: UIGestureRecognizer {
         weak var marker: Marker?
+        var retainsTouchesForPinch = false
+
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Android keeps observing the same pointer sequence when the
+            // second finger joins a drag. Do not let the competing SwiftUI
+            // drag/hold fail this recognizer before that finger arrives.
+            if retainsTouchesForPinch { return false }
+            return super.canBePrevented(by: preventingGestureRecognizer)
+        }
         private var points: [UITouch: CGPoint] = [:]
         private var active = false
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {

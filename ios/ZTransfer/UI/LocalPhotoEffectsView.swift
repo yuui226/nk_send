@@ -129,6 +129,7 @@ struct LocalPhotoEffectsView: View {
                 }
             }
         }
+        .photoEffectsExpandedPresentation()
     }
 
     private var batchHasFailure: Bool {
@@ -370,8 +371,7 @@ private struct LocalEffectPreview: View {
     let settings: PhotoEffectsSettings
     let allowsFilterPrefetch: Bool
     let onWillOpen: () -> Void
-    @State private var expandedSnapshot: PhotoEffectsExpandedPreviewSnapshot?
-    @State private var expanded = false
+    @Environment(\.photoEffectsExpandedPresentation) private var expandedPresentation
     @State private var geometry = PhotoEffectsGeometrySnapshot()
     @State private var sourceName = ""
     @State private var source: UIImage?
@@ -442,21 +442,13 @@ private struct LocalEffectPreview: View {
         })
         .overlay { PhotoEffectsImageInput(comparing: $comparing, comparisonEnabled: images?.unfiltered != nil, onTap: { _ in
             guard let displayed = geometry.presentedFrame, !comparing else { return }
+            guard let expandedPresentation else { return }
             onWillOpen()
-            expandedSnapshot = PhotoEffectsExpandedPreviewSnapshot(image: displayed.image,
-                initialComparison: displayed.comparison, anchor: geometry.previewAnchor)
-            expanded = true
+            expandedPresentation.present(.init(image: displayed.image,
+                initialComparison: displayed.comparison, anchor: geometry.previewAnchor), onDismiss: {})
         }) }
-        .fullScreenCover(isPresented: $expanded, onDismiss: {
-            expandedSnapshot = nil
-        }) {
-            if let expandedSnapshot {
-                PhotoEffectsExpandedPreview(
-                    image: expandedSnapshot.image,
-                    comparison: expandedSnapshot.comparison(current: images),
-                    initialAnchor: expandedSnapshot.anchor
-                ) { expanded = false }
-            }
+        .onChange(of: images?.unfiltered) { _ in
+            expandedPresentation?.updateComparison(image: images?.filtered, unfiltered: images?.unfiltered)
         }
         .task(id: PreviewRequest(
             item: item, settings: photoEffectsPreviewPixelSettings(settings)

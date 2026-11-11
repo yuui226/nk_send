@@ -1,3 +1,13 @@
+## 2026-11-11 效果大图双指手势竞争修正，待运行验证
+
+用户追加放大缩小不灵敏。对照Android ZoomablePreviewViewport与几何测试，源码发现效果图minimumDistance0拖动可先识别并取消窗口TouchTransform，导致第二指稍晚加入时缩放丢失。PreviewPinchObserver新增retainsTouchesForPinch仅效果大图开启，canBePrevented拒绝提前取消；普通列表默认不变。缩放倍率、边界、旋转与事件增量不改。新增实际TouchTransform+EffectsInteraction合成触摸回归，单指先移动/第二指加入/细微放大反向缩小/结束复位，未执行。三文件parse与diff检查过，无构建安装上传，不宣称已实机复现或完成灵敏度验收。详见ios/docs/照片效果大图预览修复-20261111.md后续章节。
+
+## 2026-11-11 照片效果大图预览源码修复，运行验收待做
+
+用户明确忽略上一个送审问题，改修工作台加工后点图白屏卡住、去标题、复用照片列表旋转及高度、开关不闪白。solo对照Android SinglePhotoPreviewOverlay/PreviewRotationButton和相关测试。移除两入口fullScreenCover，工作台/SettingsPopupOverlay稳定外层各自持有快照展示器并用overlay展示，比较图按image身份更新，源分页退出不清大图，关闭释放。复用PreviewCircleButton.rotateLeft和底部32pt共享常量，去额外safeArea累加，按用户指示去标题；340/260ms及旋转220ms保留，模态点击/辅助访问/主分页边界保留到收起结束。Genie原已传完整environment，新模型可穿过其UIHostingController。
+
+文档ios/docs/照片效果大图预览修复-20261111.md，开发3/3、整体3/4，真机/运行待验。新增3定向模型/真实宿主像素及源移除用例但未执行，8文件swift语法parse和diff检查过；未编译/类型检查/构建安装上传，不称已复现用户当次卡死或已肉眼验收无白闪。遵守无授权不自动构建规则。TestFlight81不含本轮改动。上一审核操作实际已将正式2.05构建80改81并保存、添加草稿，未最终提交；用户转向后不再继续审核操作。
+
 ## 2026-11-11 照片效果 LUT/NP3/边框/颗粒加速，像素测试已过，真机计时未做
 
 工作台和导出生成共用 PhotoEffectsRenderer。慢在完整原图的 CPU 像素：iOS LUT 插值仍在 Swift，NP3 无精确色表，边框窄阴影模糊整幅画布；颗粒核已与安卓 1f804ab8 一致。安卓 LUT 是 Native16K，NP3 导出有 2^20 ExactRgbMemo，浮影在四分之一代理。本次不改公式、强度、收尾、取消发布、JPEG 和原图单 worker，也不恢复安卓两层大阴影。

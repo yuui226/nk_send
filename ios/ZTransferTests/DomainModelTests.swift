@@ -2022,6 +2022,39 @@ final class DomainModelTests: XCTestCase {
     }
 
     @MainActor
+    func testEffectsPinchSurvivesAnEarlierDragAndAppliesSmallReversingMovements() {
+        let marker = PreviewPinchObserver.Marker(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
+        let input = marker.recognizer
+        input.retainsTouchesForPinch = true
+        let drag = UIPanGestureRecognizer()
+        let interaction = PhotoEffectsExpandedInteraction()
+        marker.onActive = interaction.setMagnifying
+        marker.onChange = { factor, centroid, pan in
+            interaction.pinch(factor: factor, centroid: centroid, pan: pan,
+                imageSize: CGSize(width: 1200, height: 900), viewport: marker.bounds.size)
+        }
+        let first = GestureAuditTouch(), second = GestureAuditTouch(), event = UIEvent()
+        first.point = CGPoint(x: 100, y: 200)
+        input.touchesBegan([first], with: event)
+        first.point.x = 120
+        input.touchesMoved([first], with: event)
+        XCTAssertFalse(input.canBePrevented(by: drag), "An earlier drag must not discard the first contact")
+        second.point = CGPoint(x: 220, y: 200)
+        input.touchesBegan([second], with: event)
+        XCTAssertTrue(interaction.magnifying)
+        second.point.x = 222
+        input.touchesMoved([second], with: event)
+        XCTAssertEqual(interaction.transform.scale, 1.02, accuracy: 0.0001)
+        second.point.x = 220.5
+        input.touchesMoved([second], with: event)
+        XCTAssertEqual(interaction.transform.scale, 1.005, accuracy: 0.0001)
+        input.touchesEnded([first, second], with: event)
+        input.reset()
+        XCTAssertFalse(interaction.magnifying)
+        XCTAssertEqual(interaction.transform.scale, 1, accuracy: 0.0001)
+    }
+
+    @MainActor
     func testPreviewPinchDoesNotReuseSingleFingerTravelOrPointerJoinMovement() {
         let marker = PreviewPinchObserver.Marker(frame: CGRect(x: 0, y: 0, width: 400, height: 600))
         let input = marker.recognizer

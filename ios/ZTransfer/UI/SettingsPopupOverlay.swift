@@ -65,6 +65,7 @@ struct SettingsPopupOverlay: View {
         GeometryReader { safeViewport in
             popup(in: safeViewport.frame(in: .global))
         }
+        .photoEffectsExpandedPresentation()
         .zIndex(100)
         .photoEffectsHint($effectsHint, duration: 1.8, multilineDuration: 3.6)
         .onDisappear { photoFilterSession.end() }

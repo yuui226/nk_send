@@ -828,7 +828,7 @@ struct PhotoPreviewView: View {
                 .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
                 .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
                 .padding(.trailing, landscapeReview ? 12 : review != nil ? 20 : 76)
-                .padding(.bottom, landscapeReview ? 8 : 32)
+                .padding(.bottom, landscapeReview ? 8 : photoPreviewControlsBottomPadding)
             PhotoPreviewHistogramLayer(model: histogram, mode: histogramMode,
                 currentPhoto: currentPhoto, cropPresented: cropPresented,
                 alpha: burstPagerAlpha, feedback: pageFeedback,
@@ -856,7 +856,7 @@ struct PhotoPreviewView: View {
                         }
                         if pageFailed { review.loadMore() }
                     }
-                    .padding(.leading, 12).padding(.bottom, landscapeReview ? 8 : 32)
+                    .padding(.leading, 12).padding(.bottom, landscapeReview ? 8 : photoPreviewControlsBottomPadding)
                 }
             }
         }
@@ -1897,6 +1897,9 @@ struct PreviewActionVisibility<Content: View>: View {
         }
     }
 }
+
+/// Shared safe-area-relative bottom spacing for portrait photo controls.
+let photoPreviewControlsBottomPadding: CGFloat = 32
 
 struct PhotoPreviewTools: View {
     let selection: PhotoPreviewToolSelection?

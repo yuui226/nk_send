@@ -1,6 +1,73 @@
 import SwiftUI
 import UIKit
 
+/// Android SinglePhotoPreviewOverlay is layered above its owner, not a system
+/// full-screen modal. Keep the accepted pixels at the stable workbench/popup
+/// boundary so a pager cell disappearing cannot leave an empty modal behind.
+@MainActor
+final class PhotoEffectsExpandedPresentation: ObservableObject {
+    @Published private(set) var snapshot: PhotoEffectsExpandedPreviewSnapshot?
+    @Published private(set) var comparison: UIImage?
+    private var onDismiss: (() -> Void)?
+
+    func present(_ snapshot: PhotoEffectsExpandedPreviewSnapshot, onDismiss: @escaping () -> Void) {
+        guard self.snapshot == nil else { return }
+        self.onDismiss = onDismiss
+        comparison = snapshot.initialComparison
+        self.snapshot = snapshot
+    }
+
+    func updateComparison(image: UIImage?, unfiltered: UIImage?) {
+        guard let snapshot, image === snapshot.image else { return }
+        comparison = snapshot.comparison(image: image, unfiltered: unfiltered)
+    }
+
+    func dismiss() {
+        let completion = onDismiss
+        onDismiss = nil
+        snapshot = nil
+        comparison = nil
+        completion?()
+    }
+}
+
+private struct PhotoEffectsExpandedPresentationKey: EnvironmentKey {
+    static let defaultValue: PhotoEffectsExpandedPresentation? = nil
+}
+
+extension EnvironmentValues {
+    var photoEffectsExpandedPresentation: PhotoEffectsExpandedPresentation? {
+        get { self[PhotoEffectsExpandedPresentationKey.self] }
+        set { self[PhotoEffectsExpandedPresentationKey.self] = newValue }
+    }
+}
+
+extension View {
+    func photoEffectsExpandedPresentation() -> some View {
+        modifier(PhotoEffectsExpandedPresentationHost())
+    }
+}
+
+private struct PhotoEffectsExpandedPresentationHost: ViewModifier {
+    @StateObject private var presentation = PhotoEffectsExpandedPresentation()
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.photoEffectsExpandedPresentation, presentation)
+            .allowsHitTesting(presentation.snapshot == nil)
+            .accessibilityHidden(presentation.snapshot != nil)
+            .overlay {
+                if let snapshot = presentation.snapshot {
+                    PhotoEffectsExpandedPreview(image: snapshot.image,
+                        comparison: presentation.comparison, initialAnchor: snapshot.anchor,
+                        onDismiss: presentation.dismiss)
+                }
+            }
+            .statusBarHidden(presentation.snapshot != nil)
+            .onDisappear { presentation.dismiss() }
+    }
+}
+
 struct PhotoEffectsExpandedTransform: Equatable {
     var scale: CGFloat = 1
     var offset: CGSize = .zero
@@ -320,7 +387,7 @@ struct PhotoEffectsExpandedImageSurface: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
-                PreviewPinchObserver(enabled: !closing, onActive: interaction.setMagnifying, onChange: { factor, centroid, pan in
+                PreviewPinchObserver(enabled: !closing, retainsTouchesForPinch: true, onActive: interaction.setMagnifying, onChange: { factor, centroid, pan in
                     interaction.pinch(factor: factor, centroid: centroid, pan: pan, imageSize: image.size, viewport: proxy.size)
                 })
             }

@@ -124,6 +124,7 @@ struct EffectsGestureAuditHarness: View {
                 Text("Trace").accessibilityValue(trace).accessibilityIdentifier("interaction-trace")
             }.buttonStyle(.plain).frame(height: 44)
         }
+        .photoEffectsExpandedPresentation()
         .background { ButtonInteractionTouchTrace() }
         .onAppear { ButtonInteractionTrace.enabled = true; ButtonInteractionTrace.reset() }
         .onDisappear { ButtonInteractionTrace.enabled = false }
