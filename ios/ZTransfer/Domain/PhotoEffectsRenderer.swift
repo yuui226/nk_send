@@ -724,10 +724,8 @@ enum PhotoEffectsRenderer {
         case .parameterPoster: min(rect.width, rect.height) * 0.018
         }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
-        if [.mist, .cinema, .minimal, .frosted, .brandInset, .brandGallery, .colorArchive].contains(preset) {
+        if [.mist, .cinema, .minimal, .frosted, .brandInset, .brandGallery, .colorArchive, .parameterPoster].contains(preset) {
             drawStandardPhotoElevation(cg, rect: rect, radius: radius, preset: preset, canvasSize: canvasSize)
-        } else if ![.plaque, .immersive, .filmEdge, .filmNegative, .classicSignature, .filmGallery, .galleryMat].contains(preset) {
-            drawPhotoElevation(cg, rect: rect, radius: radius, preset: preset, canvasSize: canvasSize)
         }
         cg.saveGState()
         cg.addPath(path)
@@ -841,9 +839,11 @@ enum PhotoEffectsRenderer {
         return try applyFilter(preview, selection: selection)
     }
 
-    /// 安卓标准四种照片边框都只有贴边的接触阴影。CoreGraphics 的大半径代理
-    /// 阴影在 iOS 预览缩放后会变成照片下方的灰色圆角块，因此这些预设直接在
-    /// 主画布绘制窄阴影；毛玻璃的信息面板仍由其独立路径绘制。
+    /// 安卓这些照片边框只有贴边接触阴影。四分之一代理经 CGContext.draw 画回
+    /// UIKit 画布时会上下翻转，大半径阴影在预览缩放后也会变成灰色圆角块。
+    /// 参数海报是最后一条仍走代理的路径：横图和方图上下边距不对称，照片的深色
+    /// 圆角填充因此落在信息区；竖图上下边距相同，翻转后则叠在照片背后。这里统一
+    /// 在主画布绘制窄阴影。毛玻璃的信息面板仍由其独立路径绘制。
     private static func drawStandardPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, preset: PhotoFramePreset, canvasSize: CGSize) {
         guard rect.width > 0, rect.height > 0 else { return }
         let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
@@ -857,38 +857,6 @@ enum PhotoEffectsRenderer {
         cg.addPath(path)
         cg.fillPath()
         cg.restoreGState()
-    }
-
-    /// Android renders elevation for the other standard presets on a quarter-size proxy.
-    private static func drawPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, preset: PhotoFramePreset, canvasSize: CGSize) {
-        let strength: CGFloat = switch preset {
-        case .cinema: 1.15
-        case .minimal, .brandInset, .brandGallery, .colorArchive: 0.78
-        case .mist, .frosted: 1.0
-        case .parameterPoster: 1.0
-        default: 0
-        }
-        guard strength > 0, canvasSize.width > 0, canvasSize.height > 0 else { return }
-        let proxyScale: CGFloat = 0.25
-        let shortEdge = min(canvasSize.width, canvasSize.height)
-        let proxySize = CGSize(width: max(1, (canvasSize.width * proxyScale).rounded()), height: max(1, (canvasSize.height * proxyScale).rounded()))
-        let proxyFormat = UIGraphicsImageRendererFormat()
-        proxyFormat.scale = 1
-        proxyFormat.opaque = false
-        let proxy = UIGraphicsImageRenderer(size: proxySize, format: proxyFormat).image { renderer in
-            let context = renderer.cgContext
-            let proxyRect = CGRect(x: rect.minX * proxyScale, y: rect.minY * proxyScale, width: rect.width * proxyScale, height: rect.height * proxyScale)
-            let proxyRadius = radius * proxyScale
-            let proxyPath = UIBezierPath(roundedRect: proxyRect, cornerRadius: proxyRadius).cgPath
-            context.setFillColor(UIColor(white: 0, alpha: 18.0 / 255.0).cgColor)
-            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.003 * proxyScale), blur: shortEdge * 0.020 * proxyScale, color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0, alpha: 48.0 / 255.0 * strength).cgColor)
-            context.addPath(proxyPath); context.fillPath(); context.setShadow(offset: .zero, blur: 0, color: nil)
-            context.setFillColor(UIColor(white: 0, alpha: 20.0 / 255.0).cgColor)
-            context.setShadow(offset: CGSize(width: 0, height: shortEdge * 0.009 * proxyScale), blur: shortEdge * 0.009 * proxyScale, color: UIColor(red: 5.0 / 255.0, green: 11.0 / 255.0, blue: 16.0 / 255.0, alpha: 64.0 / 255.0 * strength).cgColor)
-            context.addPath(proxyPath); context.fillPath()
-        }
-        guard let proxyCG = proxy.cgImage else { return }
-        cg.draw(proxyCG, in: CGRect(origin: .zero, size: canvasSize), byTiling: false)
     }
 
     static func blurredBackground(_ image: UIImage, size: CGSize, blurPercent: Int = 100) -> UIImage {
