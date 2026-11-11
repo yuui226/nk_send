@@ -839,23 +839,37 @@ enum PhotoEffectsRenderer {
         return try applyFilter(preview, selection: selection)
     }
 
-    /// 安卓这些照片边框只有贴边接触阴影。四分之一代理经 CGContext.draw 画回
-    /// UIKit 画布时会上下翻转，大半径阴影在预览缩放后也会变成灰色圆角块。
-    /// 参数海报是最后一条仍走代理的路径：横图和方图上下边距不对称，照片的深色
-    /// 圆角填充因此落在信息区；竖图上下边距相同，翻转后则叠在照片背后。这里统一
-    /// 在主画布绘制窄阴影。毛玻璃的信息面板仍由其独立路径绘制。
+    /// 安卓在四分之一代理上做照片浮影，避免原尺寸软件模糊。这里保留现有窄接触
+    /// 阴影的半径和颜色，代理用 UIImage 画回当前 UIKit 上下文，向下的偏移不会翻到
+    /// 信息区。毛玻璃面板仍走自己的阴影，但只模糊面板附近。
     private static func drawStandardPhotoElevation(_ cg: CGContext, rect: CGRect, radius: CGFloat, preset: PhotoFramePreset, canvasSize: CGSize) {
-        guard rect.width > 0, rect.height > 0 else { return }
-        let path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
+        guard rect.width > 0, rect.height > 0, canvasSize.width > 0, canvasSize.height > 0 else { return }
         let opacity: CGFloat = preset == .cinema ? 0.20 : 0.16
+        let shadowOffset = max(1, canvasSize.height * 0.0012)
+        let shadowBlur = max(1, min(canvasSize.width, canvasSize.height) * 0.0028)
+        // Android blurs photo elevation at 1/4 resolution because a full-size
+        // software shadow walks the export. Keep this narrow contact shadow.
+        // The proxy is drawn with UIImage into the current UIKit context, so the
+        // downward offset is not mirrored into the metadata band.
+        let proxyScale: CGFloat = 0.25
+        let proxySize = CGSize(width: max(1, (canvasSize.width * proxyScale).rounded()),
+                               height: max(1, (canvasSize.height * proxyScale).rounded()))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let proxy = UIGraphicsImageRenderer(size: proxySize, format: format).image { renderer in
+            let proxyContext = renderer.cgContext
+            proxyContext.scaleBy(x: proxySize.width / canvasSize.width, y: proxySize.height / canvasSize.height)
+            proxyContext.setFillColor(UIColor(white: 0, alpha: 0.01).cgColor)
+            proxyContext.setShadow(offset: CGSize(width: 0, height: shadowOffset), blur: shadowBlur,
+                                   color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0,
+                                                  alpha: opacity).cgColor)
+            proxyContext.addPath(UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath)
+            proxyContext.fillPath()
+        }
         cg.saveGState()
-        cg.setFillColor(UIColor(white: 0, alpha: 0.01).cgColor)
-        cg.setShadow(offset: CGSize(width: 0, height: max(1, canvasSize.height * 0.0012)),
-                     blur: max(1, min(canvasSize.width, canvasSize.height) * 0.0028),
-                     color: UIColor(red: 8.0 / 255.0, green: 15.0 / 255.0, blue: 21.0 / 255.0,
-                                    alpha: opacity).cgColor)
-        cg.addPath(path)
-        cg.fillPath()
+        cg.interpolationQuality = .medium
+        proxy.draw(in: CGRect(origin: .zero, size: canvasSize))
         cg.restoreGState()
     }
 
@@ -1216,8 +1230,13 @@ enum PhotoEffectsRenderer {
         let radius = min(metadataBandHeight * 0.26, panel.width * 0.5)
         let path = UIBezierPath(roundedRect: panel, cornerRadius: radius).cgPath
         cg.saveGState()
+        // The blur kernel stays inside this band. Clipping keeps a full-resolution
+        // frosted shadow from filtering the photograph above the panel.
+        let blur = canvas.width * 0.009
+        let pad = blur * 3 + abs(canvas.height * 0.004)
+        cg.clip(to: panel.insetBy(dx: -pad, dy: -pad))
         cg.setShadow(offset: CGSize(width: 0, height: canvas.height * 0.004),
-                     blur: canvas.width * 0.009,
+                     blur: blur,
                      color: UIColor(red: 0.08, green: 0.14, blue: 0.18, alpha: 0.20).cgColor)
         cg.setFillColor(UIColor(red: 0.98, green: 0.99, blue: 1.0, alpha: 0.59).cgColor)
         cg.addPath(path); cg.fillPath(); cg.restoreGState()

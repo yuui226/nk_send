@@ -25,6 +25,8 @@
 		04BBC16721ACF78D4FDB6421 /* jdarith.c in Sources */ = {isa = PBXBuildFile; fileRef = E999FE16B4B6B70CA9DA4F87 /* jdarith.c */; };
 		04E30F9F00DE029EC2AB6876 /* RemoteCameraTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EACB1BFF876F8F625A7004E /* RemoteCameraTool.swift */; };
 		04FDA089E2E70E83E18527AD /* Np3BitmapFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088B7DE128919633A28EF1C /* Np3BitmapFilter.swift */; };
+		D0F6124E37A58C9BE413F705 /* Np3ExactApply.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C9E5013D26F47B8AD302E6F4 /* Np3ExactApply.cpp */; settings = {COMPILER_FLAGS = "-std=c++17 -O2 -ffp-contract=off -fno-fast-math -fwrapv"; }; };
+		B8D4F02C15E36A79C2F1D5E3 /* PhotoLutBridge.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A7C3E91B04D25F68B1E0C4D2 /* PhotoLutBridge.cpp */; settings = {COMPILER_FLAGS = "-std=c++17 -O2 -ffp-contract=off -fno-fast-math -fwrapv"; }; };
 		05266BA778E3346924478E59 /* jdcolor-8.c in Sources */ = {isa = PBXBuildFile; fileRef = 391E7C1C994AFFFE1A2A1285 /* jdcolor-8.c */; };
 		05427A7B347ED28A25AD5375 /* PhotoFrameUniformBorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF1C3D196C8FC3D007C97549 /* PhotoFrameUniformBorder.swift */; };
 		05F220C304B1F3BE2D0430BD /* FreeUsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E5D3F75A8E65FDF84E1ED39 /* FreeUsageStore.swift */; };
@@ -1164,6 +1166,8 @@
 		AFB72B3D2D448CF46B0B15D3 /* android15-shadow-conics.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "android15-shadow-conics.json"; sourceTree = "<group>"; };
 		AFE97292ED423E1E36936CBD /* STAConnectionTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STAConnectionTrace.swift; sourceTree = "<group>"; };
 		B088B7DE128919633A28EF1C /* Np3BitmapFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Np3BitmapFilter.swift; sourceTree = "<group>"; };
+		C9E5013D26F47B8AD302E6F4 /* Np3ExactApply.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Np3ExactApply.cpp; sourceTree = "<group>"; };
+		A7C3E91B04D25F68B1E0C4D2 /* PhotoLutBridge.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = PhotoLutBridge.cpp; sourceTree = "<group>"; };
 		B0D26D7C4F1E5BCB5F08606F /* RemoteFrameParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteFrameParser.swift; sourceTree = "<group>"; };
 		B1BFF49AA970DADA3976BCB0 /* CubeLUTTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CubeLUTTests.swift; sourceTree = "<group>"; };
 		B1FC2E876EE810EA986CDE9E /* RemotePhotoReviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePhotoReviewModel.swift; sourceTree = "<group>"; };
@@ -1604,6 +1608,8 @@
 			children = (
 				F4D2E49405678EF28B196622 /* libjpeg-8bit */,
 				45F247B736301EBA09B9891C /* PhotoGrain */,
+				E4B17C2A90F64D5E8A1B3C70 /* PhotoLUT */,
+				F5C28D3B01A75E6F9B2C4D81 /* PhotoNP3 */,
 			);
 			path = ThirdParty;
 			sourceTree = "<group>";
@@ -1734,6 +1740,22 @@
 				03FDC804BB79D18762ECE9CE /* PhotoGrainBridge.cpp */,
 			);
 			path = PhotoGrain;
+			sourceTree = "<group>";
+		};
+		E4B17C2A90F64D5E8A1B3C70 /* PhotoLUT */ = {
+			isa = PBXGroup;
+			children = (
+				A7C3E91B04D25F68B1E0C4D2 /* PhotoLutBridge.cpp */,
+			);
+			path = PhotoLUT;
+			sourceTree = "<group>";
+		};
+		F5C28D3B01A75E6F9B2C4D81 /* PhotoNP3 */ = {
+			isa = PBXGroup;
+			children = (
+				C9E5013D26F47B8AD302E6F4 /* Np3ExactApply.cpp */,
+			);
+			path = PhotoNP3;
 			sourceTree = "<group>";
 		};
 		4FA1CAF4109968AFCC0043BC /* Components */ = {
@@ -2869,6 +2891,8 @@
 				C85E831899FE297C9D01D1B9 /* NikonPictureControlAccess.swift in Sources */,
 				BE82AC7AB79F3C99762297E5 /* NikonPictureControlSelection.swift in Sources */,
 				04FDA089E2E70E83E18527AD /* Np3BitmapFilter.swift in Sources */,
+				D0F6124E37A58C9BE413F705 /* Np3ExactApply.cpp in Sources */,
+				B8D4F02C15E36A79C2F1D5E3 /* PhotoLutBridge.cpp in Sources */,
 				CDA839B3BA3291E7FA00F976 /* Np3FilterCatalog.swift in Sources */,
 				5847B86DF637C69FB7A9E604 /* Np3FilterEngine.swift in Sources */,
 				6AE2F510FC97396C20F68EE1 /* PTPCodec.swift in Sources */,

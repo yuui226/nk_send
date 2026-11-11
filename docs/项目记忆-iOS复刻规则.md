@@ -1,3 +1,15 @@
+## 2026-11-11 照片效果 LUT/NP3/边框/颗粒加速，像素测试已过，真机计时未做
+
+工作台和导出生成共用 PhotoEffectsRenderer。慢在完整原图的 CPU 像素：iOS LUT 插值仍在 Swift，NP3 无精确色表，边框窄阴影模糊整幅画布；颗粒核已与安卓 1f804ab8 一致。安卓 LUT 是 Native16K，NP3 导出有 2^20 ExactRgbMemo，浮影在四分之一代理。本次不改公式、强度、收尾、取消发布、JPEG 和原图单 worker，也不恢复安卓两层大阴影。
+
+LUT 不透明批次进 PhotoLutBridge.cpp，轴表与 ByteSampler 相同，混合用 (byte/255)*255 和 floor(double+0.5)，半透明仍 Swift sample。NP3 的 Np3ExactApply.cpp 只扫描和查表，未命中回调现有 filterPixel；原图复用一张表，预览各自一张。颗粒 alpha 255 跳过结果不变的反预乘。窄阴影改 0.25 代理后用 UIImage.draw 画回，毛玻璃阴影裁到面板附近。
+
+模拟器 iPhone 17 上 ZTransfer-Interactions：64 项（CubeLUT、PhotoCubeLUTMapper、PhotoNp3Rendering 含 1648 组、PhotoGrain、Np3Bitmap、Np3FilterEngine）和 LUTFinishingPerformanceTests 3 项均 Passed、exit 0，含冻结 RGBA 对照。本机 17 格 LUT 公式对照一致。未重跑 photo_grain 原生脚本，未做真机计时和阴影截图，不宣称倍速。文档 ios/docs/工作台LUT生成性能检查-20261111.md，5/6。下方同日“仍是 Swift、测试未跑”已被本条覆盖。
+
+## 2026-11-11 工作台LUT生成性能检查与轴查表优化，待实测
+
+用户报告工作台LUT生成慢。确认完整原图后台detached处理，LUT有缓存；iOS仍单线程Swift每像素domain除法/floor及8点插值，Android已256项轴表+默认Native16K。增加CubeLUT.ByteSampler每图预备3×256坐标，不透明像素走查表，半透明保持原float采样，两路共用原插值顺序。不降画质、不增原图并发、不改取消/强度/后调/保存。新增多尺寸domain完全相等对照测试未运行。3文件parse与diff过，未构建安装/性能计时，不称已解决全部慢或获得具体加速。文档ios/docs/工作台LUT生成性能检查-20261111.md，2/3，运行性能/像素验证待做。
+
 ## 2026-11-10 当前修复已上传TestFlight 2.05(81)，任务3/3完成
 
 用户明确要求当前版本TestFlight。仅版本80→81，同步project.yml/pbxproj，保留巨大既有dirty树。归档ARCHIVE SUCCEEDED/exit0，1168项输入SHA256前后一致，codesign严格验证、发布包--submission检查errors空，Apple Validated ZTransfer/EXPORT SUCCEEDED，11:07 Upload succeeded/EXPORT SUCCEEDED。归档及全部日志ios/.build/appstore-20261110/build81。包含生成完整原图生命周期和冷启动后台清理修复，先前16项定向过，真实Photos/硬件仍待用户验证。

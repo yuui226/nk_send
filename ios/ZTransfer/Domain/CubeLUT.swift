@@ -46,6 +46,43 @@ struct CubeLUT: Equatable, Sendable {
         let lo = SIMD3(Int(floor(p.x)), Int(floor(p.y)), Int(floor(p.z)))
         let hi = SIMD3(min(lo.x + 1, size - 1), min(lo.y + 1, size - 1), min(lo.z + 1, size - 1))
         let f = SIMD3(p.x - Float(lo.x), p.y - Float(lo.y), p.z - Float(lo.z))
+        return interpolate(low: lo, high: hi, fraction: f)
+    }
+
+    /// Android PhotoCubeMapper.Axis: prepare the 256 possible byte inputs once
+    /// per bitmap, preserving the exact Float operations of the reference path.
+    /// Only opaque pixels use this; unpremultiplied partial alpha is not an
+    /// integer byte and must keep the general sampler.
+    struct ByteSampler {
+        private struct Axis {
+            let low: Int
+            let high: Int
+            let fraction: Float
+        }
+        private let table: CubeLUT
+        private let axes: [[Axis]]
+
+        init(_ table: CubeLUT) {
+            self.table = table
+            axes = (0..<3).map { channel in
+                (0..<256).map { byte in
+                    let p = ((Float(byte) / 255 - table.domainMin[channel]) /
+                        (table.domainMax[channel] - table.domainMin[channel]))
+                        .clamped(to: 0...1) * Float(table.size - 1)
+                    let low = Int(floor(p))
+                    return Axis(low: low, high: min(low + 1, table.size - 1), fraction: p - Float(low))
+                }
+            }
+        }
+
+        func sample(red: UInt8, green: UInt8, blue: UInt8) -> SIMD3<Float> {
+            let r = axes[0][Int(red)], g = axes[1][Int(green)], b = axes[2][Int(blue)]
+            return table.interpolate(low: SIMD3(r.low, g.low, b.low),
+                high: SIMD3(r.high, g.high, b.high), fraction: SIMD3(r.fraction, g.fraction, b.fraction))
+        }
+    }
+
+    private func interpolate(low lo: SIMD3<Int>, high hi: SIMD3<Int>, fraction f: SIMD3<Float>) -> SIMD3<Float> {
         func value(_ r: Int, _ g: Int, _ b: Int) -> SIMD3<Float> {
             let index = ((b * size + g) * size + r) * 3
             return SIMD3(rgb[index], rgb[index + 1], rgb[index + 2])

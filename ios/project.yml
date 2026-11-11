@@ -49,6 +49,10 @@ targets:
     platform: iOS
     sources:
       - path: ZTransfer
+      - path: ThirdParty/PhotoNP3/Np3ExactApply.cpp
+        compilerFlags: "-std=c++17 -O2 -ffp-contract=off -fno-fast-math -fwrapv"
+      - path: ThirdParty/PhotoLUT/PhotoLutBridge.cpp
+        compilerFlags: "-std=c++17 -O2 -ffp-contract=off -fno-fast-math -fwrapv"
       - path: ThirdParty/PhotoGrain/PhotoGrainBridge.cpp
         compilerFlags: "-std=c++17 -O2 -ffp-contract=off -fno-fast-math -fwrapv"
       - path: ThirdParty/libjpeg-8bit/LosslessJpegBridge.c
