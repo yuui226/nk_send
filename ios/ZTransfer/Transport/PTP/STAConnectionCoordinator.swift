@@ -272,9 +272,9 @@ actor STAConnectionCoordinator {
         }
         let socket: PTPIPSocketTransport
         do {
-            // Android STA uses one blocking command socket + reusable reader.
-            // Keep that same path in both build configurations. AP/USB are
-            // unchanged. See STA下载-Android与iOS实现差异审查.md for evidence.
+            // Android uses one blocking command socket and a reusable reader
+            // for both wireless modes. Camera hotspot opens the same backend
+            // from WiFiConnectionService.connectAP. USB stays on ImageCaptureCore.
             socket = try await PTPIPSocketTransport.open(host: candidate.ip, localAddress: candidate.localAddress,
                 staInitiatorID: profiles.initiatorID(identity), expectedGUID: pairingConfirmation?.responderGUID ?? expectedGUID, backend: .bsdSocket, trace: trace)
         } catch {

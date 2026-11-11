@@ -19,6 +19,10 @@ final class PTPIPDiscoveryTests: XCTestCase {
         XCTAssertTrue(PTPIPDiscoveryPolicy.isCameraHotspotAddress("192.168.1.254"))
         XCTAssertFalse(PTPIPDiscoveryPolicy.isCameraHotspotAddress("192.168.5.27"))
         XCTAssertFalse(PTPIPDiscoveryPolicy.isCameraHotspotAddress("bad"))
+        XCTAssertEqual(
+            PTPIPDiscoveryPolicy.cameraHotspotLocalAddress(in: ["10.0.0.8", "192.168.1.23", "192.168.5.2"]),
+            "192.168.1.23")
+        XCTAssertNil(PTPIPDiscoveryPolicy.cameraHotspotLocalAddress(in: ["10.0.0.8"]))
     }
 
     func testContainsRejectsMalformedAndLocalAddress() {

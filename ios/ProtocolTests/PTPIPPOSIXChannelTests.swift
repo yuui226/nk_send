@@ -10,6 +10,19 @@ import XCTest
 
 @MainActor
 final class PTPIPPOSIXChannelTests: XCTestCase {
+    func testACKExperimentRequiresExplicitDiagnosticLaunchAndPreservesDefault() {
+        XCTAssertEqual(PTPIPPOSIXChannel.commandACKPolicy(environment: [:]), 1)
+        XCTAssertEqual(PTPIPPOSIXChannel.commandACKPolicy(isSTA: true, environment: [:]), 0)
+        XCTAssertEqual(PTPIPPOSIXChannel.commandACKPolicy(isSTA: true, environment: ["ZTRANSFER_STA_ACK_POLICY": "frequent"]), 0)
+        XCTAssertEqual(PTPIPPOSIXChannel.commandACKPolicy(environment: ["ZTRANSFER_STA_ACK_POLICY": "system"]), 1)
+        XCTAssertEqual(PTPIPPOSIXChannel.commandACKPolicy(environment: ["ZTRANSFER_STA_DIAGNOSTICS": "1", "ZTRANSFER_STA_ACK_POLICY": "invalid"]), 1)
+        #if DEBUG
+        XCTAssertEqual(PTPIPPOSIXChannel.commandACKPolicy(environment: ["ZTRANSFER_STA_DIAGNOSTICS": "1", "ZTRANSFER_STA_ACK_POLICY": "system"]), 0)
+        #else
+        XCTAssertEqual(PTPIPPOSIXChannel.commandACKPolicy(environment: ["ZTRANSFER_STA_DIAGNOSTICS": "1", "ZTRANSFER_STA_ACK_POLICY": "system"]), 1)
+        #endif
+    }
+
     func testSocketErrorsPreserveActualPOSIXCauseForPresentation() {
         for code in [ECONNREFUSED, ECONNRESET, EHOSTUNREACH, ENOBUFS] {
             let error = PTPIPPOSIXChannel.ChannelError.system(code) as NSError
@@ -217,15 +230,19 @@ final class PTPIPPOSIXChannelTests: XCTestCase {
         XCTAssertEqual(received, Data([1, 2, 3]))
     }
 
-    func testSTACommandDarwinACKAdaptationPreservesData() async throws {
-        let peer = try await SocketEchoPeer.start()
-        defer { peer.close() }
-        let channel = try await PTPIPPOSIXChannel.connect(host: "127.0.0.1", port: peer.port)
-        defer { channel.close() }
-        XCTAssertEqual(channel.diagnosticSnapshot()?["tcp_send_more_acks"], 1)
-        try await channel.send(Data([1, 2, 3]))
-        let received = try await channel.receive()
-        XCTAssertEqual(received, Data([1, 2, 3]))
+    func testSTAUsesSystemACKsWhileAPRetainsAdaptationAndBothPreserveData() async throws {
+        for sta in [false, true] {
+            let peer = try await SocketEchoPeer.start()
+            defer { peer.close() }
+            let channel = try await PTPIPPOSIXChannel.connect(host: "127.0.0.1", port: peer.port, isSTA: sta)
+            defer { channel.close() }
+            XCTAssertEqual(channel.diagnosticSnapshot()?["tcp_send_more_acks"], sta ? 0 : 1)
+            XCTAssertEqual(channel.diagnosticSnapshot()?["tcp_no_delay"], 1)
+            XCTAssertGreaterThanOrEqual(channel.receiveBufferBytes, 4 * 1024 * 1024)
+            try await channel.send(Data([1, 2, 3]))
+            let received = try await channel.receive()
+            XCTAssertEqual(received, Data([1, 2, 3]))
+        }
     }
 
     func testCallerCancellationDoesNotCloseAcceptedSocket() async throws {

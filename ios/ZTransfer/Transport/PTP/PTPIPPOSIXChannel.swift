@@ -4,9 +4,9 @@ import Darwin
 typealias PTPIPBorrowedPacketConsumer = (PTPIPPacketType, UnsafeRawBufferPointer) throws -> Void
 typealias PTPIPBorrowedPacketRead = (PTPIPBorrowedPacketConsumer) throws -> Void
 
-/// STA byte channel matching NikonCamera.connectSta's Android socket setup.
-/// Shared by Debug/Release; AP keeps its existing Network.framework path.
-/// Blocking syscalls run on dedicated queues, never Swift executors.
+/// Camera-hotspot and STA byte channel matching NikonCamera's socket setup.
+/// Shared by Debug/Release. Blocking syscalls run on dedicated queues, never
+/// Swift executors. Network.framework remains only for probes and tests.
 final class PTPIPPOSIXChannel: @unchecked Sendable {
     enum ChannelError: Error, Equatable, CustomNSError {
         case system(Int32)
@@ -83,8 +83,21 @@ final class PTPIPPOSIXChannel: @unchecked Sendable {
         }
     }
 
+    /// Router STA A/B/A (2026-11-11): forcing every-other-packet ACKs
+    /// reduced throughput. Use Darwin's default for STA; leave AP unchanged.
+    /// Debug-only override remains available for controlled regression checks.
+    static func commandACKPolicy(isSTA: Bool = false, environment: [String: String]) -> Int32 {
+        #if DEBUG
+        if environment["ZTRANSFER_STA_DIAGNOSTICS"] == "1" {
+            if environment["ZTRANSFER_STA_ACK_POLICY"] == "system" { return 0 }
+            if environment["ZTRANSFER_STA_ACK_POLICY"] == "frequent" { return 1 }
+        }
+        #endif
+        return isSTA ? 0 : 1
+    }
+
     static func connect(host: String, port: UInt16, localAddress: String? = nil,
-                        isCommandChannel: Bool = true,
+                        isCommandChannel: Bool = true, isSTA: Bool = false,
                         timeout: Duration = .seconds(3)) async throws -> PTPIPPOSIXChannel {
         // STA discovery produces numeric IPv4 addresses; do not silently fall
         // back to DNS or a different route if the selected address is invalid.
@@ -100,14 +113,10 @@ final class PTPIPPOSIXChannel: @unchecked Sendable {
                 // Android configures only the command socket, before connect.
                 // Event traffic retains the kernel defaults, as in connectSta.
                 try setOption(fd, level: SOL_SOCKET, name: SO_RCVBUF, value: 4 * 1024 * 1024)
-                // Equal application defaults do not make Linux and Darwin's
-                // delayed ACK policies equal. Keep the public Darwin adapter
-                // on STA command sockets, in both build configurations.
-                // Default-policy device samples regressed to 1.28–1.35 MiB/s;
-                // earlier adapted samples were 1.5–1.8, still below Android.
-                // This is not a claim that ACKs explain the remaining gap.
-                // See STA下载-Android与iOS实现差异审查.md, device acceptance.
-                try setOption(fd, level: IPPROTO_TCP, name: TCP_SENDMOREACKS, value: 1)
+                // Explicitly set both branches so a diagnostic readback can
+                // verify the effective policy; event sockets retain defaults.
+                try setOption(fd, level: IPPROTO_TCP, name: TCP_SENDMOREACKS,
+                              value: commandACKPolicy(isSTA: isSTA, environment: ProcessInfo.processInfo.environment))
             }
             var actual: Int32 = 0
             var length = socklen_t(MemoryLayout.size(ofValue: actual))

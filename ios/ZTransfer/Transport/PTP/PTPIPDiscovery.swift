@@ -15,6 +15,12 @@ enum PTPIPDiscoveryPolicy {
         parse(address).map { ($0 & ipv4Mask(24)) == parse("192.168.1.0")! } ?? false
     }
 
+    /// Android binds the AP socket to the Wi-Fi network that owns 192.168.1.1.
+    /// The phone address on that network is the local endpoint for the same bind.
+    static func cameraHotspotLocalAddress(in addresses: [String]) -> String? {
+        addresses.first(where: isCameraHotspotAddress)
+    }
+
     static func effectiveScanPrefix(routePrefix: Int) -> Int {
         max(24, min(32, max(0, routePrefix)))
     }

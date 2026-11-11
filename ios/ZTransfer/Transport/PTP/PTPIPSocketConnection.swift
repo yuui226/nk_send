@@ -14,6 +14,7 @@ final class PTPIPSocketConnection: @unchecked Sendable {
     private let port: UInt16
     private let localAddress: String?
     private let isCommandChannel: Bool
+    private let isSTA: Bool
     private let lock = NSLock()
     private var posix: PTPIPPOSIXChannel?
     private var closed = false
@@ -24,18 +25,19 @@ final class PTPIPSocketConnection: @unchecked Sendable {
     }
 
     init(host: String, port: UInt16, localAddress: String?, parameters: NWParameters, backend: PTPIPSocketBackend,
-         isCommandChannel: Bool = true) {
+         isCommandChannel: Bool = true, isSTA: Bool = false) {
         self.host = host
         self.port = port
         self.localAddress = localAddress
         self.isCommandChannel = isCommandChannel
+        self.isSTA = isSTA
         network = backend == .networkFramework
             ? NWConnection(host: .init(host), port: .init(rawValue: port)!, using: parameters) : nil
     }
 
     func startPOSIX() async throws {
         let channel = try await PTPIPPOSIXChannel.connect(host: host, port: port, localAddress: localAddress,
-                                                        isCommandChannel: isCommandChannel)
+                                                        isCommandChannel: isCommandChannel, isSTA: isSTA)
         let accepted = lock.withLock {
             guard !closed, posix == nil else { return false }
             posix = channel

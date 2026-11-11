@@ -5,7 +5,11 @@ import Network
 /// batches. Port probes overlap, but complete Nikon handshakes stay sequential.
 final class PTPIPDiscoveryService: Sendable {
     func isOnCameraHotspot() -> Bool {
-        localInterfaces().contains { PTPIPDiscoveryPolicy.isCameraHotspotAddress($0.address) }
+        cameraHotspotLocalAddress() != nil
+    }
+
+    func cameraHotspotLocalAddress() -> String? {
+        PTPIPDiscoveryPolicy.cameraHotspotLocalAddress(in: localInterfaces().map(\.address))
     }
 
     func discover<Value: Sendable>(lastIP: String? = nil,

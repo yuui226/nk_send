@@ -25,7 +25,15 @@ actor WiFiConnectionService: WiFiConnectionServicing {
     func connectAP(host: String) async throws -> CameraRepository {
         generation &+= 1
         let request = generation
-        let socket = try await PTPIPSocketTransport.open(host: host)
+        // NikonCamera.connect puts the command socket on the camera Wi-Fi
+        // network, sets TCP_NODELAY and a 4 MiB receive buffer before connect,
+        // then reads and writes that socket on one blocking loop. Binding the
+        // 192.168.1.x address is the iOS equivalent of Android's Wi-Fi
+        // socketFactory: an unbound socket can leave 192.168.1.1 on another
+        // interface when the hotspot has no internet route.
+        let localAddress = PTPIPDiscoveryService().cameraHotspotLocalAddress()
+        let socket = try await PTPIPSocketTransport.open(
+            host: host, localAddress: localAddress, backend: .bsdSocket)
         let session = PTPSession(transport: socket, defaultTimeoutNanoseconds: 60_000_000_000)
         var opened = false
         do {

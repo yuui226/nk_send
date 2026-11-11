@@ -76,7 +76,8 @@ final class PTPIPSocketTransport: @unchecked Sendable, PTPCommandTransport {
                      backend: PTPIPSocketBackend = .networkFramework,
                      trace: STAConnectionTrace? = nil) async throws -> PTPIPSocketTransport {
         let parameters = connectionParameters ?? parameters(localAddress: localAddress, sta: staInitiatorID != nil)
-        let command = PTPIPSocketConnection(host: host, port: port, localAddress: localAddress, parameters: parameters, backend: backend)
+        let command = PTPIPSocketConnection(host: host, port: port, localAddress: localAddress, parameters: parameters,
+                                               backend: backend, isSTA: staInitiatorID != nil)
         let event = PTPIPSocketConnection(host: host, port: port, localAddress: localAddress, parameters: parameters,
                                          backend: backend, isCommandChannel: false)
         let transport = PTPIPSocketTransport(host: host, port: port, command: command, event: event)

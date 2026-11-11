@@ -1,3 +1,31 @@
+## 2026-11-11 STA ACK默认修正已交付，49测试过
+
+用户确认签名修复正常+A2传完，ACK1回测合计5.993MiB/s，对照A6.424/B系统ACK0 8.442，支持当前路由器场景去强制ACK。最终STA默认0通过staInitiatorID→isSTA接线，AP默认1/事件默认不变；Debug支持system/frequent回切，Release默认STA0。Socket+Recovery49/49过，真机build过、profile有效至2027-11-11，最终覆盖安装D9330EF8-5C3B-489A-9D01-593D69E8752D，无参数普通启动成功，诊断关闭。仍2.05(81)，无TF上传/Git提交推送。不能称达到安卓10+或普遍31%提速；B实测约7.7–9.0MiB/s，日常稳定性待用户验证。证据及细节ios/docs/STA吞吐复查-20261111.md，旧STA强制ACK结论被本轮覆盖。
+
+## 2026-11-11 STA B提速约31%，签名过期已覆盖修复，A2待结果
+
+B组4文件ACK0实际确认，合计8.442MiB/s vs A6.424，用户也说更快；不同文件且待A2，不能宣称最终因果/同速。用户同时报App不再可用，查诊断profile已于今日18:26北京时间过期。重新自动签名build成功，新profile有效至2027-11-11 14:40:06UTC，设备包含。覆盖安装3DE4E051-294B-4810-9138-166CEA2060BA，未卸载/清数据，已成功启动STA_DIAGNOSTICS=1无override，当前A2原ACK1。异步等用户正常打开/传完再取日志。详见STA吞吐复查-20261111.md；B证据ack-system-b.jsonl。生产默认仍ACK1，勿把B实验当前默认化或重开成B丢失A2。
+
+## 2026-11-11 STA ACK诊断包已安装，B组进行中
+
+用户授权构建安装。Socket主机19/19过、真机Debug BUILD SUCCEEDED exit0；已安装CB83274C-7C13-4D8D-BFAD-37A5CEAAB9C7，仍2.05(81)。A日志已取回，新增4条成功current ACK1约6.1–7.3MiB/s，recv占主导。当前已重启带STA_DIAGNOSTICS=1 + STA_ACK_POLICY=system，等待用户B组传完；必须以getsockopt日志ACK0确认实际切换，不能现在称更快。后续B取回与A比较，必要A2回切，最终用户结束后普通启动关闭诊断。证据/构建路径见ios/docs/STA吞吐复查-20261111.md。无TF上传/提交推送。LUT已解决勿再处理。
+
+## 2026-11-11 STA实机基线已取得，recv约97%，ACK对照待打包
+
+用户确认两端同路由器并授权重启测试；已用devicectl重启当前81，STA_DIAGNOSTICS=1。真实10,082,064字节总1794.694ms，recv1743.444ms、write9.454ms、gate0.052ms，单worker，实际4MiB缓冲/window、scale6、ACK1/NODELAY1。不是写盘或应用等待占主导；不能据recv认定具体无线/ACK原因。证据ios/docs/evidence/sta-throughput-20261111/baseline.jsonl。rvictl起rvi0后tcpdump BPF权限拒绝，未采包，已移除接口。准备仅Debug诊断双开关ACK_POLICY=system，生产默认仍1；测试已写未跑，parse/diff过，无构建安装。需按仓库规则获明确打包授权后同包A/B/A，不得给当前旧包传开关就宣称策略已切。LUT用户确认已解决不再处理。
+
+## 2026-11-11 STA 6–7对安卓10+吞吐复查，等待实际采样
+
+用户明确LUT已解决忽略，转STA速度。当前源码命令/缓冲/借用同步收写/测速口径已核对；最新工作区BSD改动主要AP，不能据此称STA修好。手机Caches可读但无Diagnostics；11/8 STA-TCP-audit仅TCP连接无PTP数据，不能归因本次速度。异步询问同路由器vs各自手机热点，并请求空闲后重启现有Debug App启用ZTRANSFER_STA_DIAGNOSTICS=1，尚未答复，不中断传输。无生产修改/构建安装/测试；详见ios/docs/STA吞吐复查-20261111.md。根因和吞吐修复未完成，不能仅凭流程相同承诺同速。
+
+## 2026-11-11 复查无线下载流程，应用层已与安卓相同
+
+相机热点和手机热点都是：命令口在 connect 前设 TCP_NODELAY 和 4MB 接收缓冲，事件口保持默认；64KB 读缓冲，大包直接读进可复用包体；一个数据相位在同一条阻塞循环里读完就写入 1MB 输出缓冲。照片一次请求整文件，视频分块阈值相同。相机热点绑定 192.168.1.x。命令口仍有 Darwin 的 TCP_SENDMOREACKS，安卓源码没有这项。Wi-Fi 低延迟锁没有对应接口。发现策略断言未跑，未真机测速。
+
+## 2026-11-11 相机热点下载改走与安卓相同的阻塞 Socket
+
+照片请求、视频分块、1MB 写缓冲和测速原本已相同。相机热点原先用 Network.framework，每个包一次异步回调，也没有连接前的 4MB 接收窗口。现与手机热点一样走 BSD：命令口 TCP_NODELAY、连接前 4MB SO_RCVBUF、同一条读-写循环，并绑定 192.168.1.x，对应安卓把 Socket 绑在相机 Wi-Fi 上。Darwin 的 TCP_SENDMOREACKS 仍留在命令口。安卓的 Wi-Fi 低延迟锁没有对应接口。发现策略测试已加断言，未跑，未真机测速。
+
 ## 2026-11-11 复查效果描边、展开和重置，未再改代码
 
 滤镜、LUT、颗粒、边框卡片以及边框、水印内层区域都是 1pt strokeBorder，颜色和圆角未改。模块展开用矩形裁切，内描边整段留在形状里，直边不再被削掉半条。卡片描边不接收点击，布局高度不变。展开仍由开关驱动 240ms，模块只在自身开合过程中清掉子动画。重置按钮仅空标题加图标时居中，尺寸 34；带文字的拨轮未走这条路径。未跑界面测试。
