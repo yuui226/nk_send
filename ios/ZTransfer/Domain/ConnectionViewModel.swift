@@ -246,9 +246,16 @@ final class ConnectionViewModel: ObservableObject {
         state.wirelessMode == .sta && [.discovering, .pairing, .connecting].contains(state.wifiPhase)
     }
 
+    /// Android's STA card treats a second tap as stop while the attempt is
+    /// still searching, pairing, or connecting. An idle tap starts discovery.
+    func handleSTAConnectTap() {
+        if staBusy { cancelWiFiConnection() }
+        else { Task { [weak self] in await self?.connectSelectedWiFi() } }
+    }
+
     func connectSelectedWiFi(reconnect: Bool = false) async {
-        // Android's connection action is disabled by an active STA discovery;
-        // a repeated tap is a no-op and never cancels the current scan.
+        // Starting stays here. The card button cancels a busy attempt itself,
+        // so this entry does not turn a second call into another scan.
         if staBusy { return }
         wifiRetryAttempt = 0
         wifiRetryTask?.cancel(); wifiRetryTask = nil

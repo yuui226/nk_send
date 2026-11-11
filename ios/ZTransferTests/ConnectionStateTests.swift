@@ -484,6 +484,40 @@ final class ConnectionStateTests: XCTestCase {
         let retried = await service.attempts; XCTAssertEqual(retried, 2)
     }
 
+    @MainActor
+    func testSecondSTAConnectTapStopsTheActiveAttempt() async throws {
+        let service = STAHangingConnectService()
+        let model = ConnectionViewModel(discoverySource: WorkspaceDiscoverySource(devices: []), wifiService: service)
+        model.select(wirelessMode: .sta)
+        let started = Task { await model.connectSelectedWiFi() }
+        var entered = 0
+        for _ in 0..<100 {
+            entered = await service.attempts
+            if entered >= 1, model.staBusy { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(entered, 1)
+        XCTAssertTrue(model.staBusy)
+        model.handleSTAConnectTap()
+        XCTAssertEqual(model.state.wifiPhase, .idle)
+        XCTAssertFalse(model.staBusy)
+        await started.value
+        XCTAssertEqual(model.state.wifiPhase, .idle)
+        XCTAssertNil(model.cameraSession)
+        let stopped = await service.attempts
+        XCTAssertEqual(stopped, 1)
+        model.handleSTAConnectTap()
+        var restarted = stopped
+        for _ in 0..<100 {
+            restarted = await service.attempts
+            if restarted >= 2 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(restarted, 2)
+        model.handleSTAConnectTap()
+        XCTAssertEqual(model.state.wifiPhase, .idle)
+    }
+
     func testAPFailureClassificationMatchesAndroid() async {
         let refusal = await MainActor.run {
             ConnectionViewModel.wifiFailureKind(for: STAConnectionError.cameraRefused)
@@ -661,6 +695,24 @@ final class PremiumConnectionArtworkTests: XCTestCase {
         let attachment = XCTAttachment(image: sheet); attachment.name = "Premium connection stages"
         attachment.lifetime = .keepAlways; add(attachment)
     }
+}
+
+private actor STAHangingConnectService: WiFiConnectionServicing {
+    nonisolated let profiles: STAProfileStore
+    private(set) var attempts = 0
+    init() {
+        let name = "STAHang-\(UUID().uuidString)"
+        profiles = STAProfileStore(preferences: UserDefaults(suiteName: name)!, pairing: UserDefaults(suiteName: name + ".pairing")!)
+    }
+    func connectAP(host: String) async throws -> CameraRepository { throw STAConnectionError.notFound }
+    func connectSTA(discovery: PTPIPDiscoveryService, onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> CameraRepository {
+        attempts += 1
+        await onStage(.discovering("10.0.0.8"))
+        try await Task.sleep(for: .seconds(30))
+        throw CancellationError()
+    }
+    func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) async {}
+    func disconnect() async {}
 }
 
 private actor STARejectedReplayService: WiFiConnectionServicing {

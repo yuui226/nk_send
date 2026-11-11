@@ -1,3 +1,15 @@
+## 2026-11-11 STA 连接按钮再次点击可停止
+
+对照 Android HomeScreen：搜索、配对、连接中再点「连接相机」调用 cancel，空闲才开始并震动。iOS 原先 staBusy 时直接 return。现由 handleSTAConnectTap 在忙碌时 cancelWiFiConnection。ConnectionStateTests.testSecondSTAConnectTapStopsTheActiveAttempt 在 iPhone 17 模拟器通过。
+
+## 2026-11-11 设置底部隐私、条款、反馈跟随按钮风格
+
+这三个按钮原先用 panel 扁平面，液态玻璃和实体材质都不会出现。现改为默认的 ZTransferGlassButtonStyle，不再传 panel。AppLegalLinks 里未使用的纯文字分支已删除。未跑界面测试。
+
+## 2026-11-11 按钮风格列表把液态玻璃放在第一项
+
+iOS 26 及以上的设置拨轮顺序改为液态玻璃、毛玻璃、木纹、相机按键、钛合金。默认仍是 ZTransferButtonSkin.defaultPreset，iOS 26 为液态玻璃，更低系统没有这一项并继续默认毛玻璃。未跑测试。
+
 ## 2026-11-11 高级版弹窗「恢复购买」改名为「恢复权益」
 
 按钮 `iap_restore` 改为恢复权益 / 恢復權益 / Restore access。同屏验证失败、恢复失败和账户说明里的同一说法一并改掉。行为仍是 AppStore.sync()。界面测试期望文案已改，未运行。

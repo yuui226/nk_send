@@ -140,9 +140,9 @@ struct SettingsView: View {
     }
 
     private var buttonSkinOptions: [String] {
-        var options = ["FROSTED_GLASS"]
+        var options: [String] = []
         if #available(iOS 26.0, *) { options.append("LIQUID_GLASS") }
-        options.append(contentsOf: ["WOOD", "CAMERA_CONTROLS", "TITANIUM"])
+        options.append(contentsOf: ["FROSTED_GLASS", "WOOD", "CAMERA_CONTROLS", "TITANIUM"])
         return options
     }
 
@@ -796,7 +796,7 @@ struct SettingsView: View {
             Spacer(minLength: 0)
             // User-approved iOS addition (2026-10-21): always one row to the
             // left of feedback. Narrow layouts reduce gaps/padding, not text.
-            AppLegalLinks(compactLabels: true, compactSpacing: compact)
+            AppLegalLinks(compactSpacing: compact)
                 .fixedSize(horizontal: true, vertical: false)
             SettingsFooterButton(AppLocalized.resource("feedback")) {
                 UIPasteboard.general.string = "953000922"; feedbackHint = true
@@ -1001,7 +1001,7 @@ private struct SettingsFooterButton: View {
                 .padding(.horizontal, 10)
                 .frame(height: 28)
         }
-        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
     }
 }
 

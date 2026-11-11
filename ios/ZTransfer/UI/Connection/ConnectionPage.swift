@@ -87,9 +87,8 @@ struct ConnectionPage: View {
                             previewPremiumCelebration: model.previewsPremiumConnectionAnimation,
                             onWirelessModeChanged: model.select(wirelessMode:),
                             onConnect: {
-                                guard !model.staBusy else { return }
-                                ZTransferHaptics.shared.play(.action)
-                                Task { await model.connectSelectedWiFi() }
+                                if !model.staBusy { ZTransferHaptics.shared.play(.action) }
+                                model.handleSTAConnectTap()
                             },
                             onResetSTAPairing: { Task { await model.refreshSTAProfiles(); showSTAReset = true } },
                             onSTAHelpRequested: {

@@ -111,7 +111,6 @@ extension EnvironmentValues {
 struct AppLegalLinks: View {
     @Environment(\.appLegalLinksConfiguration) private var configuration
     @Environment(\.openURL) private var openURL
-    var compactLabels = false
     var compactSpacing = false
 
     var body: some View {
@@ -124,23 +123,16 @@ struct AppLegalLinks: View {
         }
     }
 
-    @ViewBuilder
     private func link(_ document: AppLegalDocument) -> some View {
-        let button = Button {
+        Button {
             configuration.open(document, using: openURL)
         } label: {
-            Text(AppLocalized.resource(document.titleKey(compact: compactLabels)))
-                .font(.system(size: compactLabels ? ZTransferMetrics.caption : 11,
-                              weight: compactLabels ? .semibold : .regular))
-                .foregroundStyle(compactLabels ? ZTransferColors.primaryText : ZTransferColors.secondaryText)
-                .padding(.horizontal, compactLabels ? (compactSpacing ? 4 : 10) : 0)
-                .frame(minHeight: compactLabels ? 28 : nil)
+            Text(AppLocalized.resource(document.titleKey(compact: true)))
+                .font(.system(size: ZTransferMetrics.caption, weight: .semibold))
+                .padding(.horizontal, compactSpacing ? 4 : 10)
+                .frame(minHeight: 28)
         }
-        if compactLabels {
-            button.buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14, panel: true))
-        } else {
-            button.buttonStyle(.plain)
-        }
+        .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: 14))
     }
 }
 
