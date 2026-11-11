@@ -1227,12 +1227,12 @@ final class PremiumRecoveryUITests: XCTestCase {
 
     func testPurchasePageLayoutInAllLanguages() {
         let copies = [
-            (language: "zh-Hans", unlock: "解锁高级版", restore: "恢复购买",
-             terms: "年费版按年自动续订", restored: "未找到有效的高级版购买记录"),
-            (language: "zh-Hant", unlock: "解鎖高級版", restore: "恢復購買",
-             terms: "年費版按年自動續訂", restored: "未找到有效的高級版購買記錄"),
-            (language: "en", unlock: "Unlock Pro", restore: "Restore purchases",
-             terms: "Annual Pro renews yearly", restored: "No active Pro purchase found")
+            (language: "zh-Hans", unlock: "解锁高级版", restore: "恢复权益",
+             terms: "按年自动续订，可随时取消", restored: "未找到有效的高级版购买记录"),
+            (language: "zh-Hant", unlock: "解鎖高級版", restore: "恢復權益",
+             terms: "按年自動續訂，可隨時取消", restored: "未找到有效的高級版購買記錄"),
+            (language: "en", unlock: "Unlock Pro", restore: "Restore access",
+             terms: "Renews yearly, cancel anytime", restored: "No active Pro purchase found")
         ]
         let app = XCUIApplication()
         addTeardownBlock { app.terminate() }
@@ -1261,8 +1261,8 @@ final class PremiumRecoveryUITests: XCTestCase {
             XCTAssertFalse(app.buttons["premium-options"].exists)
             XCTAssertFalse(panel.buttons["legal-link-privacy"].exists)
             XCTAssertFalse(panel.buttons["legal-link-terms"].exists)
-            let disclosure = panel.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", copy.terms)).firstMatch
-            XCTAssertTrue(disclosure.exists)
+            XCTAssertTrue(annual.label.contains(copy.terms), annual.label)
+            XCTAssertFalse(lifetime.label.contains(copy.terms), lifetime.label)
             let buy = app.buttons["premium-purchase-action"]
             revealFully(buy, in: panel, app: app)
             let originalPanel = panel.frame
@@ -1274,7 +1274,7 @@ final class PremiumRecoveryUITests: XCTestCase {
                 XCTAssertEqual(panel.frame.minY, originalPanel.minY, accuracy: 0.5)
                 XCTAssertEqual(panel.frame.height, originalPanel.height, accuracy: 0.5)
                 XCTAssertEqual(buy.frame.height, originalCTA.height, accuracy: 0.5)
-                XCTAssertTrue(disclosure.exists, "Selecting lifetime must not remove the annual disclosure")
+                XCTAssertTrue(annual.label.contains(copy.terms), "Selecting lifetime must not remove the annual disclosure")
                 if index < 2 { attachScreenshot(app, name: "premium-compact-\(copy.language)-\(index)") }
             }
             let restore = panel.buttons["premium-restore"]

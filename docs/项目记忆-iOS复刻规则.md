@@ -1,3 +1,11 @@
+## 2026-11-11 高级版弹窗「恢复购买」改名为「恢复权益」
+
+按钮 `iap_restore` 改为恢复权益 / 恢復權益 / Restore access。同屏验证失败、恢复失败和账户说明里的同一说法一并改掉。行为仍是 AppStore.sync()。界面测试期望文案已改，未运行。
+
+## 2026-11-11 年费选项：月均价在总价下，续订说明改短，待运行验证
+
+用户要求不对照安卓。一年高级版按钮左侧标题下只留一句「按年自动续订，可随时取消」（繁体、英文同步缩短），12pt medium，单行。≈月均价移到右侧总价正下方，11pt medium、次要色、右对齐。选永久版不移走这句。PremiumRecoveryUITests 文案断言已改，未运行，未构建安装。
+
 ## 2026-11-11 效果大图双指手势竞争修正，待运行验证
 
 用户追加放大缩小不灵敏。对照Android ZoomablePreviewViewport与几何测试，源码发现效果图minimumDistance0拖动可先识别并取消窗口TouchTransform，导致第二指稍晚加入时缩放丢失。PreviewPinchObserver新增retainsTouchesForPinch仅效果大图开启，canBePrevented拒绝提前取消；普通列表默认不变。缩放倍率、边界、旋转与事件增量不改。新增实际TouchTransform+EffectsInteraction合成触摸回归，单指先移动/第二指加入/细微放大反向缩小/结束复位，未执行。三文件parse与diff检查过，无构建安装上传，不宣称已实机复现或完成灵敏度验收。详见ios/docs/照片效果大图预览修复-20261111.md后续章节。

@@ -252,11 +252,6 @@ struct PremiumPurchaseView: View {
                     plan(.annual)
                     plan(.lifetime)
                 }
-                // This describes the annual option regardless of selection.
-                // Switching plans changes neither the text nor its layout.
-                Text(AppLocalized.resource("iap_annual_disclosure"))
-                    .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 ProBadgeButton(label: purchaseLabel(for: selected), big: true,
                                enabled: canPurchase, motionPaused: busy || measuring,
                                animatesLabelChanges: true) {
@@ -410,19 +405,32 @@ struct PremiumPurchaseView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(AppLocalized.resource(kind == .annual ? "plan_annual" : "plan_lifetime"))
                         .font(.system(size: 14, weight: .bold)).foregroundStyle(ZTransferColors.primaryText)
-                    if let product, kind == .annual {
-                        Text(AppLocalized.formattedResource("pro_price_per_month", [
-                            "%1$s": (product.price / 12).formatted(product.priceFormatStyle)
-                        ])).font(.system(size: 11)).foregroundStyle(ZTransferColors.secondaryText)
-                    } else if product == nil {
+                    if product == nil {
                         Text(AppLocalized.resource(store.loadingProducts ? "iap_loading" : "plan_unavailable"))
                             .font(.system(size: 12)).foregroundStyle(ZTransferColors.secondaryText)
+                    } else if kind == .annual {
+                        // One short line under the plan name. The monthly figure
+                        // sits under the price so this row does not grow a third line.
+                        Text(AppLocalized.resource("iap_annual_disclosure"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(ZTransferColors.secondaryText)
+                            .lineLimit(1).minimumScaleFactor(0.8)
                     } else {
                         Text(AppLocalized.resource("duration_lifetime")).font(.system(size: 12))
                     }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                if let product {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(product.displayPrice).font(.system(size: 22, weight: .bold))
+                        if kind == .annual {
+                            Text(AppLocalized.formattedResource("pro_price_per_month", [
+                                "%1$s": (product.price / 12).formatted(product.priceFormatStyle)
+                            ]))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(ZTransferColors.secondaryText)
+                        }
+                    }
                 }
-                Spacer(minLength: 0)
-                if let product { Text(product.displayPrice).font(.system(size: 22, weight: .bold)) }
             }.foregroundStyle(ZTransferColors.accentYellow)
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .background((selected == kind && enabled ? ZTransferColors.accentYellow : ZTransferColors.primaryText)
