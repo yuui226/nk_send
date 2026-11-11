@@ -273,33 +273,40 @@ struct DetentWheel<Option: Hashable>: View {
             let baseColor = emphasized && active ? accent : (optionTextColor ?? ZTransferColors.primaryText)
             let color = baseColor
                 .opacity(active ? 1 : (dark ? 0.50 : 0.38))
-            HStack(spacing: 4) {
-                if favoriteOption(options[index]) { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle((favoriteIconColor ?? accent).opacity(active ? 1 : 0.38)) }
-                if let centerIcon { centerIcon(color) }
-                Text(AppLocalized.text(optionLabel(options[index])))
-                    .font(.system(size: active ? fontSize : max(optionFontSizeFor == nil ? 12 : 10, fontSize - 2), weight: optionFontWeight ?? (active ? .semibold : .regular)))
-                    .lineLimit(optionMaxLines)
-                    .fixedSize(horizontal: false, vertical: optionMaxLines > 1)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(color)
-                    .background {
-                        if active, let contentAnchorSpace {
-                            GeometryReader { geometry in
-                                Color.clear
-                                    .allowsHitTesting(false)
-                                    .preference(
-                                        key: DetentWheelContentAnchorPreferenceKey.self,
-                                        value: geometry.frame(in: .named(contentAnchorSpace))
-                                    )
+            let title = AppLocalized.text(optionLabel(options[index]))
+            if title.isEmpty, let centerIcon {
+                centerIcon(color)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                HStack(spacing: 4) {
+                    if favoriteOption(options[index]) { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle((favoriteIconColor ?? accent).opacity(active ? 1 : 0.38)) }
+                    if let centerIcon { centerIcon(color) }
+                    Text(title)
+                        .font(.system(size: active ? fontSize : max(optionFontSizeFor == nil ? 12 : 10, fontSize - 2), weight: optionFontWeight ?? (active ? .semibold : .regular)))
+                        .lineLimit(optionMaxLines)
+                        .fixedSize(horizontal: false, vertical: optionMaxLines > 1)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(color)
+                        .background {
+                            if active, let contentAnchorSpace {
+                                GeometryReader { geometry in
+                                    Color.clear
+                                        .allowsHitTesting(false)
+                                        .preference(
+                                            key: DetentWheelContentAnchorPreferenceKey.self,
+                                            value: geometry.frame(in: .named(contentAnchorSpace))
+                                        )
+                                }
                             }
                         }
-                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: rowHeight)
+                // ZStack already centers each row. Only move neighboring rows by
+                // their detent delta; adding a second center offset puts the value
+                // at the bottom of the wheel.
+                .offset(y: (CGFloat(index) - displayPosition) * rowHeight)
             }
-            .frame(maxWidth: .infinity).frame(height: rowHeight)
-            // ZStack already centers each row. Only move neighboring rows by
-            // their detent delta; adding a second center offset puts the value
-            // at the bottom of the wheel.
-            .offset(y: (CGFloat(index) - displayPosition) * rowHeight)
         }
     }
 

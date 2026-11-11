@@ -21,6 +21,7 @@ struct PhotoLUTChooser: View {
             return labels[identifier] ?? selectedName ?? off
         }
         PhotoEffectsCard(accent: accent) {
+            VStack(spacing: 0) {
             PhotoEffectControlRow(primaryWeight: 3, secondaryWeight: 2) {
                 DetentWheel(label: "LUT", options: options,
                     selected: editor.request.pendingIdentifier ?? editor.currentIdentifier,
@@ -43,7 +44,7 @@ struct PhotoLUTChooser: View {
                     enabled: store.hasSelection, readOnly: editor.loading, accentColor: accent,
                     emphasized: editor.settingsExpanded, showDragHint: false,
                     onActivated: {
-                        ZTransferHaptics.shared.play(.navigation)
+                        playPhotoEffectDisclosureFeedback()
                         withAnimation(ZTransferMotion.inlineExpansion) { editor.settingsExpanded.toggle() }
                     })
                 PhotoEffectFavoriteButton(
@@ -54,23 +55,25 @@ struct PhotoLUTChooser: View {
                     if let identifier = store.selectedIdentifier { store.toggleFavorite(identifier) }
                 }.allowsHitTesting(!editor.loading)
             }
-            if editor.settingsExpanded && store.hasSelection, let selection = draft.selectedFilter,
-               selection.preset.id.hasPrefix("cube:") {
-                PhotoColorAdjustmentControls(selection: selection, intensityLabel: "photo_lut_concentration",
-                    accent: accent, enabled: store.hasSelection, readOnly: editor.loading) { intensity, adjustments in
-                    guard editor.active, editor.settingsExpanded, let current = draft.selectedFilter,
-                          PhotoColorControlIdentity(current) == PhotoColorControlIdentity(selection) else { return }
-                    if store.intensityPercent != intensity { store.setIntensity(intensity) }
-                    if store.adjustments != adjustments { store.setAdjustments(adjustments) }
-                    var changed = current
-                    changed.intensityPercent = store.intensityPercent
-                    changed.lutAdjustments = store.adjustments
-                    draft.selectedFilter = changed
+            PhotoEffectInlineDisclosure(expanded: editor.settingsExpanded && store.hasSelection
+                && draft.selectedFilter?.preset.id.hasPrefix("cube:") == true) {
+                if let selection = draft.selectedFilter, selection.preset.id.hasPrefix("cube:") {
+                    PhotoColorAdjustmentControls(selection: selection, intensityLabel: "photo_lut_concentration",
+                        accent: accent, enabled: store.hasSelection, readOnly: editor.loading) { intensity, adjustments in
+                        guard editor.active, editor.settingsExpanded, let current = draft.selectedFilter,
+                              PhotoColorControlIdentity(current) == PhotoColorControlIdentity(selection) else { return }
+                        if store.intensityPercent != intensity { store.setIntensity(intensity) }
+                        if store.adjustments != adjustments { store.setAdjustments(adjustments) }
+                        var changed = current
+                        changed.intensityPercent = store.intensityPercent
+                        changed.lutAdjustments = store.adjustments
+                        draft.selectedFilter = changed
+                    }
+                    .padding(.top, 8)
                 }
-                .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
+            }
             }
         }
-        .animation(ZTransferMotion.inlineExpansion, value: editor.settingsExpanded && store.hasSelection)
         .onChange(of: store.hasSelection) { _ in editor.settingsExpanded = false }
         .fileImporter(isPresented: $editor.showingFolder, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
             editor.folderPickerCompleted(result, onDisable: disable)

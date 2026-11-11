@@ -32,6 +32,7 @@ private struct PhotoNP3Card: View {
         let off = AppLocalized.resource(empty ? editor.emptyLabelKey : "photo_filter_off_option")
         let label: (String?) -> String = { $0.flatMap { labels[$0] } ?? off }
         PhotoEffectsCard(accent: ZTransferColors.accentBlue) {
+            VStack(spacing: 0) {
             PhotoEffectControlRow(primaryWeight: 3, secondaryWeight: 2) {
                 DetentWheel(label: AppLocalized.resource("photo_filter"), options: catalog.selectionOptions,
                     selected: catalog.pendingKey(source: editor.pendingSource) ?? catalog.currentKey(enabled: enabled),
@@ -54,7 +55,7 @@ private struct PhotoNP3Card: View {
                     optionLabel: { _ in AppLocalized.resource("photo_filter_settings") }, onCommit: { _ in },
                     enabled: controlsEnabled, readOnly: editor.loading, emphasized: session.settingsExpanded && enabled,
                     showDragHint: false, onActivated: {
-                        ZTransferHaptics.shared.play(.navigation)
+                        playPhotoEffectDisclosureFeedback()
                         withAnimation(ZTransferMotion.inlineExpansion) { session.settingsExpanded.toggle() }
                     }).accessibilityIdentifier("photo-np3-adjust")
                 PhotoEffectFavoriteButton(favorite: enabled && selection.map {
@@ -64,24 +65,26 @@ private struct PhotoNP3Card: View {
                     onFavorite(selection)
                 }.allowsHitTesting(!editor.loading)
             }
-            if session.settingsExpanded && enabled, let selection {
-                PhotoColorAdjustmentControls(selection: selection, intensityLabel: "photo_filter_intensity",
-                    accent: ZTransferColors.accentBlue, enabled: controlsEnabled, readOnly: editor.loading) { intensity, adjustments in
-                    guard session.active, !editor.loading, session.settingsExpanded, enabled,
-                          let current = draft.selectedFilter,
-                          PhotoColorControlIdentity(current) == PhotoColorControlIdentity(selection) else { return }
-                    var value = draft
-                    var changed = current
-                    changed.intensityPercent = intensity; changed.lutAdjustments = adjustments
-                    value.selectedFilter = changed
-                    let key = PhotoEffectsSettings.filterKey(current.preset.id)
-                    value.filterIntensities[key] = intensity; value.filterAdjustments[key] = adjustments
-                    draft = value
+            PhotoEffectInlineDisclosure(expanded: session.settingsExpanded && enabled && selection != nil) {
+                if let selection {
+                    PhotoColorAdjustmentControls(selection: selection, intensityLabel: "photo_filter_intensity",
+                        accent: ZTransferColors.accentBlue, enabled: controlsEnabled, readOnly: editor.loading) { intensity, adjustments in
+                        guard session.active, !editor.loading, session.settingsExpanded, enabled,
+                              let current = draft.selectedFilter,
+                              PhotoColorControlIdentity(current) == PhotoColorControlIdentity(selection) else { return }
+                        var value = draft
+                        var changed = current
+                        changed.intensityPercent = intensity; changed.lutAdjustments = adjustments
+                        value.selectedFilter = changed
+                        let key = PhotoEffectsSettings.filterKey(current.preset.id)
+                        value.filterIntensities[key] = intensity; value.filterAdjustments[key] = adjustments
+                        draft = value
+                    }
+                    .padding(.top, 8)
                 }
-                .transition(.opacity.animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.2)))
+            }
             }
         }
-        .animation(ZTransferMotion.inlineExpansion, value: session.settingsExpanded && enabled)
         .onChange(of: enabled) { _ in session.draftChanged(draft) }
     }
 }
@@ -122,6 +125,7 @@ struct PhotoColorAdjustmentControls: View {
                     selected: selection.normalizedIntensityPercent, optionLabel: { "\($0)%" },
                     onCommit: { onChange($0, selection.lutAdjustments) }, sizing: sizing,
                     enabled: enabled, readOnly: readOnly, accentColor: accent, gestureIdentity: identity)
+                    .frame(maxWidth: .infinity)
                 DetentWheel(label: "", options: [0], selected: 0, optionLabel: { _ in "" }, onCommit: { _ in },
                     sizing: sizing, enabled: enabled, readOnly: readOnly, accentColor: accent,
                     showDragHint: false, onActivated: {
@@ -129,7 +133,8 @@ struct PhotoColorAdjustmentControls: View {
                     }, centerIcon: { color in
                         AnyView(RemoteToolMark(tool: .rotate).environment(\.remoteToolTint, color).scaleEffect(x: -1, y: 1))
                     }, gestureIdentity: identity)
-                    .frame(width: 38).accessibilityLabel(AppLocalized.resource("photo_color_reset"))
+                    .frame(width: sizing.height, height: sizing.height)
+                    .accessibilityLabel(AppLocalized.resource("photo_color_reset"))
                     .accessibilityIdentifier("photo-color-reset")
             }
             HStack(spacing: 6) {

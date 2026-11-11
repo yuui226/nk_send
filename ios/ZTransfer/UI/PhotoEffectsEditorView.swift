@@ -283,7 +283,7 @@ struct PhotoEffectsControls: View {
             PhotoEffectsCard(accent: ZTransferColors.accentOrange) {
                 VStack(spacing: 0) {
                     PhotoEffectModuleSection(visible: showFrame, spacing: 0) {
-                        VStack(spacing: 8) { frameControls }
+                        VStack(spacing: 0) { frameControls }
                     }
                     PhotoEffectModuleSection(visible: showWatermark, spacing: 0) {
                         VStack(spacing: 0) {
@@ -335,7 +335,7 @@ struct PhotoEffectsControls: View {
                         accentColor: ZTransferColors.accentOrange,
                         emphasized: metadataExpanded, showDragHint: false,
                         onActivated: {
-                            ZTransferHaptics.shared.play(.navigation)
+                            playPhotoEffectDisclosureFeedback()
                             withAnimation(ZTransferMotion.inlineExpansion) { metadataExpanded.toggle() }
                         })
             .frame(maxWidth: .infinity)
@@ -346,7 +346,7 @@ struct PhotoEffectsControls: View {
                 action: toggleFrameFavorite
             )
         }
-        if frameEnabled && metadataExpanded {
+        PhotoEffectInlineDisclosure(expanded: frameEnabled && metadataExpanded) {
             VStack(spacing: 8) {
                 if draft.photoFramePreset.supportsWidthControl {
                     DetentWheel(label: AppLocalized.resource("photo_frame_width"), options: Array(stride(from: 60, through: 200, by: 5)), selected: activeMetadata.widthPercent,
@@ -402,8 +402,8 @@ struct PhotoEffectsControls: View {
             }
             .padding(8)
             .background(.thinMaterial.opacity(0.58), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.secondaryText.opacity(0.18)))
-            .transition(.opacity)
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(ZTransferColors.secondaryText.opacity(0.18), lineWidth: 1))
+            .padding(.top, 8)
         }
     }
 
@@ -439,12 +439,12 @@ struct PhotoEffectsControls: View {
                             enabled: watermarkEnabled, accentColor: ZTransferColors.accentPurple,
                             emphasized: watermarkExpanded, showDragHint: false,
                             onActivated: {
-                                ZTransferHaptics.shared.play(.navigation)
+                                playPhotoEffectDisclosureFeedback()
                                 withAnimation(ZTransferMotion.inlineExpansion) { watermarkExpanded.toggle() }
                             })
                 .accessibilityIdentifier("photo-watermark-settings")
             }
-            if watermarkExpanded && watermarkEnabled {
+            PhotoEffectInlineDisclosure(expanded: watermarkExpanded && watermarkEnabled) {
                 VStack(spacing: 8) {
                     // Android keeps the content wheel and its editor on
                     // one row: one third for the type and two thirds for
@@ -527,12 +527,11 @@ struct PhotoEffectsControls: View {
                     }
                 }
                 .padding(.top, 10)
-                .transition(.opacity)
             }
         }
         .padding(8)
         .background(ZTransferColors.accentPurple.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ZTransferColors.accentPurple.opacity(0.18)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(ZTransferColors.accentPurple.opacity(0.18), lineWidth: 1))
     }
 
     private func showPremiumHint() {
@@ -1364,6 +1363,59 @@ private enum PhotoEffectsFallbackSource {
     }
 }
 
+/// One tick for 调整效果、边框设置 and the same disclosure buttons.
+/// navigation's soft impact is too light to feel on these taps; use the
+/// same selection tick as the surrounding wheels.
+@MainActor
+func playPhotoEffectDisclosureFeedback() {
+    ZTransferHaptics.shared.play(.selection)
+}
+
+private struct PhotoEffectDisclosureHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
+    }
+}
+
+/// Downward panel for those buttons. The controls keep their real height and
+/// stay mounted; only the visible window and opacity follow `expanded`.
+/// The height is applied directly from that flag so a parent transaction
+/// cannot skip the transition and pop the full panel in.
+struct PhotoEffectInlineDisclosure<Content: View>: View {
+    let expanded: Bool
+    let content: Content
+    @State private var measured: CGFloat = 0
+
+    init(expanded: Bool, @ViewBuilder content: () -> Content) {
+        self.expanded = expanded
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: PhotoEffectDisclosureHeightKey.self, value: proxy.size.height)
+                }
+            }
+            .frame(height: expanded ? measured : 0, alignment: .top)
+            .clipped()
+            .opacity(expanded ? 1 : 0)
+            .allowsHitTesting(expanded)
+            .accessibilityHidden(!expanded)
+            .animation(ZTransferMotion.inlineExpansion, value: expanded)
+            .onPreferenceChange(PhotoEffectDisclosureHeightKey.self) { newValue in
+                guard newValue > 0.5, abs(newValue - measured) > 0.5 else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { measured = newValue }
+            }
+    }
+}
+
 /// Android PhotoLutEditor.PhotoColorEffectGroup: retain outgoing content,
 /// expand/shrink towards the top in 240ms, fade in/out in 200ms. Spacing
 /// belongs to the section so removing the last frame never drops a gap.
@@ -1432,7 +1484,11 @@ private struct PhotoEffectModuleReveal: AnimatableModifier {
     func body(content: Content) -> some View {
         PhotoEffectModuleRevealLayout(progress: progress, retainingHeight: retainingHeight) { content }
             .clipped()
-            .transaction { $0.animation = nil }
+            .transaction { transaction in
+                // Only the section's own expand/collapse may freeze descendants.
+                // An idle open section must keep button-driven disclosure animations.
+                if progress > 0.001 && progress < 0.999 { transaction.animation = nil }
+            }
     }
 }
 
@@ -1470,8 +1526,11 @@ struct PhotoEffectsCard<Content: View>: View {
             .padding(12)
             .background(ZTransferColors.primaryText.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
             .background(accent.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.24), lineWidth: 1)
-                .allowsHitTesting(false))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(accent.opacity(0.24), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
     }
 }
 
